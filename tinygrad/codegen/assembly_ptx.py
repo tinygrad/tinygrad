@@ -6,7 +6,7 @@ from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode
 from tinygrad.helpers import dtypes
 import functools, struct
 
-dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "u16", dtypes.int64: "u64", dtypes.int32: "u32", dtypes.bool: "pred"}
+dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "u16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.bool: "pred"}
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 
 # https://docs.nvidia.com/cuda/parallel-thread-execution/#
@@ -17,7 +17,7 @@ class PTXCodegen(AssemblyCodegen):
     ins = [".version 7.8", ".target sm_86", ".address_size 64",
            f".visible .entry test({', '.join(f'.param .u64 buf{i}' for i in range(len(self.bufs)))}) {{"]
 
-    alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div.rn", BinaryOps.MAX: "max",
+    alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.eq",
            UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
            FusedOps.MULACC: "fma.rn"}
@@ -40,7 +40,7 @@ class PTXCodegen(AssemblyCodegen):
           ins.append(f"mad.lo.s32 {out}, %temp0, %temp1, %temp2; }}")
       elif uop == UOps.ALU:
         otype = vin[0].dtype if arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT] else out.dtype
-        ins.append(f"{alu[arg]}{'.lo' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''}.{dtype_to_nvtype[otype]} {out}, {', '.join(str(x) for x in vin)};")
+        ins.append(f"{alu[arg]}{'.lo' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''}{'.rn' if arg == BinaryOps.DIV and out.dtype == dtypes.float32 else ''}.{dtype_to_nvtype[otype]} {out}, {', '.join(str(x) for x in vin)};")
       elif uop == UOps.LOAD:
         ins.append(f"ld.global.{dtype_to_nvtype[out.dtype]} {out}, [{vin[0]}{f'+{arg}' if arg is not None else ''}];")
       elif uop == UOps.STORE:
@@ -52,10 +52,10 @@ class PTXCodegen(AssemblyCodegen):
           ins.append(f"cvt.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
       elif uop == UOps.CONST:
         ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {'0f'+float_to_hex(arg) if dtypes.is_float(out.dtype) else arg};")
-      elif uop == UOps.LOOP:
-        ins.append(f"$loop_{arg}:")
-      elif uop == UOps.ENDLOOP:
-        ins.append(f"@{vin[0]} bra $loop_{arg};")
+      elif uop == UOps.LABEL:
+        ins.append(f"{arg}:")
+      elif uop == UOps.COND_BRANCH:
+        ins.append(f"@{'!' if not arg[1] else ''}{vin[0]} bra {arg[0]};")
 
     ins += ["ret;", "}"]
     return "test", '\n'.join(ins),

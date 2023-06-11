@@ -62,7 +62,7 @@ class AssemblyCodegen(Linearizer):
                    MulNode: lambda self, ops, ctx: render_alu(BinaryOps.MUL, self.a.render(ops, ctx), self.b),
                    DivNode: lambda self, ops, ctx: render_alu(BinaryOps.DIV, self.a.render(ops, ctx), self.b),
                    ModNode: lambda self, ops, ctx: render_alu(BinaryOps.MOD, self.a.render(ops, ctx), self.b),
-                   LtNode: lambda self, ops, ctx: render_alu(BinaryOps.CMPLT, self.a.render(ops, ctx), self.b),
+                   LtNode: lambda self, ops, ctx: render_alu(BinaryOps.CMPLT, self.a.render(ops, ctx), self.b, dtype=dtypes.bool),
       SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: render_alu(BinaryOps.ADD, a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
       AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: render_alu(BinaryOps.MUL, a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
@@ -81,6 +81,7 @@ class AssemblyCodegen(Linearizer):
     ins = []
     ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.int64), [], f"buf{i}") for i in range(len(self.bufs))]
     global_size, local_size = [], []
+    skipload_branch = 0
     for uop,newvar,vin,args in self.uops:
       if uop == UOps.CONST and newvar is not None:
         ins.append(AssemblyInstruction(UOps.CONST, newreg(newvar), [], args))
@@ -99,13 +100,13 @@ class AssemblyCodegen(Linearizer):
           for var in args[0]:
             if not isinstance(var, NumNode):  # TODO: why is this coming through?
               ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32), [], 0))
-              ins.append(AssemblyInstruction(UOps.LOOP, None, [], var.expr))
+              ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
       elif uop == UOps.ENDLOOP:
         if args[1] not in ["global", "local"]:
           for var in reversed(args[0]):
             pred = render_alu(BinaryOps.CMPLT, tor[var], var.max, dtypes.bool)
             ins.append(AssemblyInstruction(UOps.ALU, tor[var], [tor[var], 1], BinaryOps.ADD))
-            ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [pred], var.expr))
+            ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], ("$loop_"+var.expr, True)))
       elif uop == UOps.ALU and newvar is not None:
         if args == FusedOps.MULACC: vin = [vin[1], vin[2], vin[0]]  # TODO: reorder MULACC everywhere
         # this is the only thing that can violate SSA
@@ -117,7 +118,18 @@ class AssemblyCodegen(Linearizer):
           ins.append(AssemblyInstruction(UOps.ALU, newreg(newvar) if newvar not in tor else tor[newvar], [tor[x] for x in vin], args))
       elif uop == UOps.LOAD and newvar is not None:
         idx, off = addr_w_offset(args)
-        ins.append(AssemblyInstruction(UOps.LOAD, newreg(newvar), [idx], off))
+        reg = newreg(newvar)
+        if args.valid.min == 0:
+          ins.append(AssemblyInstruction(UOps.CONST, reg, [], 0))
+          if args.valid.max == 1:
+            pred = args.valid.render(render_ops)
+            ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
+        if args.valid.max == 1:
+          # NOTE: you can't compute the index in here, because it assumes it's all available later
+          ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx], off))
+        if args.valid.min == 0 and args.valid.max == 1:
+          ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
+          skipload_branch += 1
       elif uop == UOps.STORE:
         idx, off = addr_w_offset(args)
         ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]], off))
