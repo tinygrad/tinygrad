@@ -6,7 +6,7 @@ from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_lazyops, get_buffers, map_buffers
-from tinygrad.runtime.lib import RawConst, RawBuffer, RawBufferMapped
+from tinygrad.runtime.lib import RawConst, RawBuffer, RawBufferMapped, RawBufferCopyInOutTransfer
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 
@@ -128,6 +128,8 @@ class LazyBuffer:
         if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[self.device].buffer, RawBufferMapped):
           self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
           rawbuf.realized.readinto(cast(RawBufferMapped, self.realized)._buffer())
+        elif isinstance(rawbuf.realized, RawBufferCopyInOutTransfer) and issubclass(Device[self.device].buffer, RawBufferCopyInOutTransfer):
+          self.realized = Device[self.device].buffer.transfer(rawbuf.realized, self.shape, self.dtype, **self._device_extra_args())
         else:
           self.realized = Device[self.device].buffer.fromCPU(rawbuf.toCPU(), **self._device_extra_args())
       elif self.optype == LoadOps:
