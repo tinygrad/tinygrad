@@ -49,8 +49,7 @@ class MetalProgram:
     else:
       options = Metal.MTLCompileOptions.alloc().init()
       self.library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
-    if self.library is None:
-      raise RuntimeError(f"No library to compile:\n {prg}")
+
     self.fxn = self.library.newFunctionWithName_(name)
     # hacks to disassemble shader
     if DEBUG >= 5:
