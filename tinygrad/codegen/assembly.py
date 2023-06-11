@@ -97,9 +97,16 @@ class AssemblyCodegen(Linearizer):
           for var in args[0]:
             if not isinstance(var, NumNode):  # TODO: why is this coming through?
               ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32), [], 0))
+              ins.append(AssemblyInstruction(UOps.LOOP, None, [], var.expr))
+      elif uop == UOps.ENDLOOP:
+        if args[1] not in ["global", "local"]:
+          for var in reversed(args[0]):
+            pred = render_alu(BinaryOps.CMPLT, tor[var], var.max, dtypes.bool)
+            ins.append(AssemblyInstruction(UOps.ALU, tor[var], [tor[var], 1], BinaryOps.ADD))
+            ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [pred], var.expr))
       elif uop == UOps.ALU and newvar is not None:
         if args == FusedOps.MULACC: vin = [vin[1], vin[2], vin[0]]  # TODO: reorder MULACC everywhere
-        ins.append(AssemblyInstruction(UOps.ALU, newreg(newvar), [tor[x] for x in vin], args))
+        ins.append(AssemblyInstruction(UOps.ALU, newreg(newvar) if newvar not in tor else tor[newvar], [tor[x] for x in vin], args))
       elif uop == UOps.LOAD and newvar is not None:
         idx, off = addr_w_offset(args)
         ins.append(AssemblyInstruction(UOps.LOAD, newreg(newvar), [idx], off))

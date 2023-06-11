@@ -14,9 +14,11 @@ class PTXCodegen(AssemblyCodegen):
   #supports_constant_folding: bool = True
 
   def specialize(self, asm):
-    ins = [".version 7.8", ".target sm_86", ".address_size 64", f".visible .entry test({', '.join(f'.param .u64 buf{i}' for i in range(len(self.bufs)))}) {{"]
+    ins = [".version 7.8", ".target sm_86", ".address_size 64",
+           f".visible .entry test({', '.join(f'.param .u64 buf{i}' for i in range(len(self.bufs)))}) {{"]
 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div.rn", BinaryOps.MAX: "max",
+           BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.lt",
            UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
            FusedOps.MULACC: "fma.rn"}
 
@@ -29,9 +31,16 @@ class PTXCodegen(AssemblyCodegen):
           # TODO: is this needed?
           #ins.append(f"cvta.to.global.u64 {out}, {out};")
         elif arg.startswith('gid'):
-          ins.append(f"mov.u32 {out}, %ctaid.{'xyz'[int(arg[3:])]};")
+          #ins.append(f"mov.u32 {out}, %ctaid.{'xyz'[int(arg[3:])]};")
+          ins.append("{ .reg .b32 %temp<3>;")
+          l = 'xyz'[int(arg[3:])]
+          ins.append(f"mov.u32 %temp0, %ctaid.{l};")
+          ins.append(f"mov.u32 %temp1, %ntid.{l};")
+          ins.append(f"mov.u32 %temp2, %tid.{l};")
+          ins.append(f"mad.lo.s32 {out}, %temp0, %temp1, %temp2; }}")
       elif uop == UOps.ALU:
-        ins.append(f"{alu[arg]}{'.lo' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''}.{dtype_to_nvtype[out.dtype]} {out}, {', '.join(str(x) for x in vin)};")
+        otype = vin[0].dtype if arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT] else out.dtype
+        ins.append(f"{alu[arg]}{'.lo' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''}.{dtype_to_nvtype[otype]} {out}, {', '.join(str(x) for x in vin)};")
       elif uop == UOps.LOAD:
         ins.append(f"ld.global.{dtype_to_nvtype[out.dtype]} {out}, [{vin[0]}{f'+{arg}' if arg is not None else ''}];")
       elif uop == UOps.STORE:
@@ -39,10 +48,11 @@ class PTXCodegen(AssemblyCodegen):
       elif uop == UOps.CAST:
         ins.append(f"cvt.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
       elif uop == UOps.CONST:
-        if out.dtype == dtypes.float32:
-          ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, 0f{float_to_hex(arg)};")
-        else:
-          ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {arg};")
+        ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {'0f'+float_to_hex(arg) if dtypes.is_float(out.dtype) else arg};")
+      elif uop == UOps.LOOP:
+        ins.append(f"$loop_{arg}:")
+      elif uop == UOps.ENDLOOP:
+        ins.append(f"@{vin[0]} bra $loop_{arg};")
 
     ins += ["ret;", "}"]
     return "test", '\n'.join(ins),
