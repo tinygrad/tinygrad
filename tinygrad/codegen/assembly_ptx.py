@@ -18,7 +18,7 @@ class PTXCodegen(AssemblyCodegen):
            f".visible .entry test({', '.join(f'.param .u64 buf{i}' for i in range(len(self.bufs)))}) {{"]
 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div.rn", BinaryOps.MAX: "max",
-           BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.lt",
+           BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.eq",
            UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
            FusedOps.MULACC: "fma.rn"}
 
@@ -46,7 +46,10 @@ class PTXCodegen(AssemblyCodegen):
       elif uop == UOps.STORE:
         ins.append(f"st.global.{dtype_to_nvtype[vin[1].dtype]} [{vin[0]}{f'+{arg}' if arg is not None else ''}], {vin[1]};")
       elif uop == UOps.CAST:
-        ins.append(f"cvt.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
+        if vin[0].dtype == dtypes.bool:
+          ins.append(f"selp.{dtype_to_nvtype[out.dtype]} {out}, 0f3F800000, 0f00000000, {vin[0]};")
+        else:
+          ins.append(f"cvt.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
       elif uop == UOps.CONST:
         ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {'0f'+float_to_hex(arg) if dtypes.is_float(out.dtype) else arg};")
       elif uop == UOps.LOOP:

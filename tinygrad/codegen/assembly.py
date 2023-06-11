@@ -1,7 +1,7 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, FusedOps, BinaryOps, UnaryOps
-from tinygrad.helpers import DType, dtypes
+from tinygrad.helpers import DType, dtypes, DEBUG
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 import functools
 from collections import defaultdict
@@ -84,6 +84,8 @@ class AssemblyCodegen(Linearizer):
     for uop,newvar,vin,args in self.uops:
       if uop == UOps.CONST and newvar is not None:
         ins.append(AssemblyInstruction(UOps.CONST, newreg(newvar), [], args))
+      elif uop == UOps.DEFINE_LOCAL:
+        raise Exception("not implemented")
       elif uop == UOps.LOOP:
         if args[1] == "global":
           for i,var in enumerate(args[0]):
@@ -106,7 +108,13 @@ class AssemblyCodegen(Linearizer):
             ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [pred], var.expr))
       elif uop == UOps.ALU and newvar is not None:
         if args == FusedOps.MULACC: vin = [vin[1], vin[2], vin[0]]  # TODO: reorder MULACC everywhere
-        ins.append(AssemblyInstruction(UOps.ALU, newreg(newvar) if newvar not in tor else tor[newvar], [tor[x] for x in vin], args))
+        # this is the only thing that can violate SSA
+        if args in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
+          pred_reg = newreg((newvar, 'pred'), dtype=dtypes.bool)
+          ins.append(AssemblyInstruction(UOps.ALU, pred_reg, [tor[x] for x in vin], args))
+          ins.append(AssemblyInstruction(UOps.CAST, newreg(newvar), [pred_reg], args))
+        else:
+          ins.append(AssemblyInstruction(UOps.ALU, newreg(newvar) if newvar not in tor else tor[newvar], [tor[x] for x in vin], args))
       elif uop == UOps.LOAD and newvar is not None:
         idx, off = addr_w_offset(args)
         ins.append(AssemblyInstruction(UOps.LOAD, newreg(newvar), [idx], off))
@@ -117,7 +125,8 @@ class AssemblyCodegen(Linearizer):
     # define registers
     ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter[dtype], c)) for dtype,c in cnts.items()] + ins
 
-    for i in ins: print(i)
+    if DEBUG >= 4:
+      for i in ins: print(i)
     name, asm = self.specialize(ins)
 
     #name, asm, global_size, local_size = self.generate()
