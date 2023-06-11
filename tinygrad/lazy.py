@@ -129,7 +129,7 @@ class LazyBuffer:
           self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
           rawbuf.realized.readinto(cast(RawBufferMapped, self.realized)._buffer())
         elif isinstance(rawbuf.realized, RawBufferTransfer) and issubclass(Device[self.device].buffer, RawBufferTransfer):
-          self.realized = Device[self.device].buffer.transfer(rawbuf.realized, self.shape, self.dtype, **self._device_extra_args())
+          self.realized = cast(RawBufferTransfer, Device[self.device].buffer).transfer(rawbuf.realized, self.shape, self.dtype, **self._device_extra_args())
         else:
           self.realized = Device[self.device].buffer.fromCPU(rawbuf.toCPU(), **self._device_extra_args())
       elif self.optype == LoadOps:
