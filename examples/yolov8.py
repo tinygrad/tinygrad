@@ -81,49 +81,42 @@ def compute_nms(boxes, scores, iou_threshold):
 def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300, nc=0, max_wh=7680):
   if isinstance(prediction, (list, tuple)):
     prediction = prediction[0]
-  
-    bs = prediction.shape[0] 
-    nc = nc or (prediction.shape[1] - 4)  
-    nm = prediction.shape[1] - nc - 4
-    mi = 4 + nc 
-    xc = np.amax(prediction[:, 4:mi], axis=1) > conf_thres    
-    output = [np.zeros((0, 6 + nm))] * bs
     
-    for xi, x in enumerate(prediction):
-      x = x.swapaxes(0, -1)[xc[xi]]
-      if not x.shape[0]:
-        continue
-      box, cls, mask = np.split(x, [4, 4 + nc], axis=1)
-      box = xywh2xyxy(box)  # center_x, center_y, width, height) to (x1, y1, x2, y2)
-      conf = np.max(cls, axis=1, keepdims=True) 
-      j = np.argmax(cls, axis=1, keepdims=True) 
-      x = np.concatenate((box, conf, j.astype(np.float32), mask), axis=1)
-      x = x[conf.ravel() > conf_thres]
-      n = x.shape[0]  
-      if not n:  # no predictions
-        continue    
-      x = x[np.argsort(-x[:, 4])]
-      c = x[:, 5:6] * (0 if agnostic else max_wh) 
-      boxes, scores = x[:, :4] + c, x[:, 4]  
-      i = compute_nms(boxes, scores, iou_thres) #NMS
-      i = i[:max_det]  
-      output[xi] = x[i]
-    return output
+  bs = prediction.shape[0]
+  nc = nc or (prediction.shape[1] - 4)
+  nm = prediction.shape[1] - nc - 4
+  mi = 4 + nc 
+  xc = np.amax(prediction[:, 4:mi], axis=1) > conf_thres    
+  output = [np.zeros((0, 6 + nm))] * bs
+  for xi, x in enumerate(prediction):
+    x = x.swapaxes(0, -1)[xc[xi]]
+    if not x.shape[0]:
+      continue
+    box, cls, mask = np.split(x, [4, 4 + nc], axis=1)
+    box = xywh2xyxy(box) 
+    conf = np.max(cls, axis=1, keepdims=True) 
+    j = np.argmax(cls, axis=1, keepdims=True) 
+    x = np.concatenate((box, conf, j.astype(np.float32), mask), axis=1)
+    x = x[conf.ravel() > conf_thres]
+    n = x.shape[0]  
+    if not n:  # no predictions
+      continue    
+    x = x[np.argsort(-x[:, 4])]
+    c = x[:, 5:6] * (0 if agnostic else max_wh) 
+    boxes, scores = x[:, :4] + c, x[:, 4] 
+    i = compute_nms(boxes, scores, iou_thres)  
+    i = i[:max_det]  
+    output[xi] = x[i]
+  return output
 
-def postprocess(preds, img, orig_imgs):
+def postprocess(preds, img, orig_imgs): #path will be the loaded image path
   preds = preds.detach().cpu().numpy() if isinstance(preds, Tensor) else preds
   preds = non_max_suppression(prediction=preds, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300)
-  if preds == None:
-    print('No objects detected')
-    return None
-  
-  post_preds = []
   for i, pred in enumerate(preds):
     orig_img = orig_imgs[i] if isinstance(orig_imgs, list) else orig_imgs
     if not isinstance(orig_imgs, Tensor):
       pred[:, :4] = scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
-      post_preds.append(pred)
-  return post_preds
+  return pred
   
 
 def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, class_labels, iou_threshold=0.5):
@@ -185,6 +178,7 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
         cv2.putText(orig_img, label, (x1, label_y), font, 0.9, (255, 255, 255), 1, cv2.LINE_AA)
 
   cv2.imwrite(output_img_path, orig_img)
+  print(f'saved detections at {output_img_path}')
 
 # utility functions for forward pass. 
 
@@ -253,7 +247,7 @@ def xywh2xyxy(x):
 #misc
 def parse_arguments():
     parser = argparse.ArgumentParser(description='YOLOv8 Implementation')
-    parser.add_argument('-i', '--image_location', type=str, required=True, help='Image file location or URL (required)')
+    parser.add_argument('-i', '--image_location', type=str, required=True, help='Image file location pr a folder of images (required)')
     parser.add_argument('-v', '--variant', type=str, choices=['n', 's', 'm', 'l', 'x'], required=True, help='YOLOv8 variant (n, s, m, l, x) (required)')
     args = parser.parse_args()
     return args
@@ -373,7 +367,7 @@ class Yolov8NECK:
     head_3 = self.n6(p5.cat(self.n5(head_2), dim=1))
     return [head_1, head_2, head_3]
 
-#task specific head.
+#task specific head. 
 class DetectionHead:
   def __init__(self, nc=80, filters=()):
     self.ch = 16  # DFL channels
@@ -429,6 +423,8 @@ class YOLOv8:
     print(f'successfully loaded all weights for yolov8{yolo_variant}')
   
 if __name__ == '__main__':
+  
+    # currently just takes in a single image as argument. will add folder and url option
     args = parse_arguments()
     img_path = args.image_location
     yolo_variant = args.variant
@@ -448,13 +444,13 @@ if __name__ == '__main__':
 
     predictions = yolo_infer.forward(Tensor(pre_processed_images.astype(np.float32)))
     
-    # fix these to take into account the batches of images. 
+    # fix all of these to take into account the batches of images. 
     post_predictions = postprocess(predictions, pre_processed_images, images)
-    if not post_predictions == None: 
-      #v8 and v3 have same 80 class names for Object Detection
-      class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
-      class_labels = class_labels.decode('utf-8').split('\n')
-      draw_bounding_boxes_and_save(img_path, './output.jpg', post_predictions, class_labels=class_labels)
-
     
+    #v8 and v3 have same 80 class names for Object Detection
+    class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
+    class_labels = class_labels.decode('utf-8').split('\n')
+    draw_bounding_boxes_and_save(img_path, './output.jpg', post_predictions, class_labels=class_labels)
+
+
     
