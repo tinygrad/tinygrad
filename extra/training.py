@@ -13,6 +13,13 @@ def sparse_categorical_crossentropy(out, Y):
   y = Tensor(y)
   return out.mul(y).mean()
 
+def BCELoss(y_pred, y_true):
+  return -(y_true * Tensor.log(y_pred) + (1 - y_true) * Tensor.log(1 - y_pred)).mean()
+
+def BCEWithLogitsLoss(y_pred, y_true):
+    y_pred_sigmoid = Tensor.sigmoid(y_pred)
+    return -(y_true * tensor.log(y_pred_sigmoid) + (1 - y_true) * tensor.log(1 - y_pred_sigmoid)).mean()
+
 def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categorical_crossentropy, 
         transform=lambda x: x, target_transform=lambda x: x, noloss=False):
   Tensor.training = True
