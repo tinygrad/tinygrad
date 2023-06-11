@@ -6,7 +6,7 @@ from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode
 import functools
 from collections import defaultdict
 
-type_to_letter = {dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a'}
+type_to_letter = {dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a', dtypes.uint32: 'I', dtypes.uint64: 'A'}
 
 class Register(NamedTuple):
   nm:str
@@ -21,7 +21,7 @@ class AssemblyInstruction(NamedTuple):
 
 # warp size of 32, s registers are shared across the warp, v are 32-wide vectors
 class AssemblyCodegen(Linearizer):
-  def generate(self) -> Tuple[str, str, List[int], List[int]]:
+  def specialize(self) -> Tuple[str, str]:
     raise NotImplementedError("must be implemented")
 
   # s registers are the addresses and non local indexes
@@ -75,18 +75,19 @@ class AssemblyCodegen(Linearizer):
           idx -= nums[0]
           off = nums[0]
       reg = idx.render(render_ops)
-      reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.int64), tor[f"buf{args.i}"], dtype=dtypes.int64)
+      reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{args.i}"], dtype=dtypes.uint64)
       return reg, off
 
     ins = []
-    ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.int64), [], f"buf{i}") for i in range(len(self.bufs))]
+    ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64), [], f"buf{i}") for i in range(len(self.bufs))]
     global_size, local_size = [], []
     skipload_branch = 0
     for uop,newvar,vin,args in self.uops:
       if uop == UOps.CONST and newvar is not None:
         ins.append(AssemblyInstruction(UOps.CONST, newreg(newvar), [], args))
       elif uop == UOps.DEFINE_LOCAL:
-        raise Exception("not implemented")
+        ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
+        ins.append(AssemblyInstruction(UOps.ALU, newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
       elif uop == UOps.LOOP:
         if args[1] == "global":
           for i,var in enumerate(args[0]):
@@ -95,6 +96,7 @@ class AssemblyCodegen(Linearizer):
         elif args[1] == "local":
           for i,var in enumerate(args[0]):
             local_size.append(var.max+1)
+            global_size[i] *= local_size[i]
             ins.append(AssemblyInstruction(UOps.SPECIAL, newreg(var, dtype=dtypes.int32), [], f"lid{len(args[0])-1-i}"))
         else:
           for var in args[0]:
@@ -104,9 +106,10 @@ class AssemblyCodegen(Linearizer):
       elif uop == UOps.ENDLOOP:
         if args[1] not in ["global", "local"]:
           for var in reversed(args[0]):
-            pred = render_alu(BinaryOps.CMPLT, tor[var], var.max, dtypes.bool)
-            ins.append(AssemblyInstruction(UOps.ALU, tor[var], [tor[var], 1], BinaryOps.ADD))
-            ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], ("$loop_"+var.expr, True)))
+            if not isinstance(var, NumNode):  # TODO: why is this coming through?
+              pred = render_alu(BinaryOps.CMPLT, tor[var], var.max, dtypes.bool)
+              ins.append(AssemblyInstruction(UOps.ALU, tor[var], [tor[var], 1], BinaryOps.ADD))
+              ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], ("$loop_"+var.expr, True)))
       elif uop == UOps.ALU and newvar is not None:
         if args == FusedOps.MULACC: vin = [vin[1], vin[2], vin[0]]  # TODO: reorder MULACC everywhere
         # this is the only thing that can violate SSA
@@ -126,13 +129,13 @@ class AssemblyCodegen(Linearizer):
             ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
         if args.valid.max == 1:
           # NOTE: you can't compute the index in here, because it assumes it's all available later
-          ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx], off))
+          ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx], (off, 'global' if args.i != -1 else 'shared')))
         if args.valid.min == 0 and args.valid.max == 1:
           ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
           skipload_branch += 1
       elif uop == UOps.STORE:
         idx, off = addr_w_offset(args)
-        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]], off))
+        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]], (off, 'global' if args.i != -1 else 'shared')))
 
     # define registers
     ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter[dtype], c)) for dtype,c in cnts.items()] + ins

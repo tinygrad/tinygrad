@@ -73,7 +73,7 @@ class dtypes:
   @staticmethod
   def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32)
   @staticmethod
-  def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8)
+  def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint32, dtypes.uint64)
   @staticmethod
   def from_np(x) -> DType: return asdict(dtypes())[np.dtype(x).name]
   bool: Final[DType] = DType(0, 1, "bool", bool)
@@ -83,6 +83,8 @@ class dtypes:
   int32: Final[DType] = DType(1, 4, "int", np.int32)
   int64: Final[DType] = DType(2, 8, "int64", np.int64)
   uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
+  uint32: Final[DType] = DType(1, 4, "uint", np.uint32)
+  uint64: Final[DType] = DType(2, 8, "uint64", np.uint64)
 
 
 class GlobalCounters:
