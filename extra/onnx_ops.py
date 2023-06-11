@@ -252,3 +252,32 @@ def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, red
   if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
   elif reduction == "sum": return loss.sum()
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
+
+def OneHot(indices, depth, values, axis=-1):
+  print(f"indices: {indices.numpy()}")
+  print(f"depth: {depth.numpy()}")
+  print(f"values: {values.numpy()}")
+  print(f"axis: {axis}")
+  print(f"shape, f{indices.shape}")
+  indices = (indices.cast(dtypes.float32) < 0).where(indices+depth, indices)
+  rank = indices.shape[0]
+  depth_range = Tensor.arange(10)
+  mask = indices[ :,None] == depth_range
+  ret = (mask==1).where(values[1], values[0])
+  return ret 
+
+
+def one_hot(indices, depth, axis=-1, dtype=np.float32):  # type: ignore
+    """Compute one hot from indices at a specific axis"""
+    values = np.asarray(indices)
+    rank = len(values.shape)
+    depth_range = np.arange(depth)
+    if axis < 0:
+        axis += rank + 1
+    ls = values.shape[0:axis]
+    rs = values.shape[axis:rank]
+    targets = np.reshape(
+        depth_range, (1,) * len(ls) + depth_range.shape + (1,) * len(rs)
+    )
+    values = np.reshape(values % depth, (*ls, 1, *rs))
+    return targets == values
