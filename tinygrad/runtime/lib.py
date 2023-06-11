@@ -48,7 +48,7 @@ class RawBufferCopyInOut(RawBufferCopyIn):
     self._copyout(x)
     return x
 
-class RawBufferCopyInOutTransfer(RawBufferCopyInOut):
+class RawBufferTransfer(RawBuffer):
   def _transfer(self, x) -> None: raise NotImplementedError("must be implemented")
 
   @classmethod

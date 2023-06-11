@@ -5,7 +5,7 @@ import pyopencl as cl  # type: ignore
 from typing import Optional, List
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferCopyInOutTransfer
+from tinygrad.runtime.lib import RawBufferCopyInOut, RawBufferTransfer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
 OSX = platform.system() == "Darwin"
@@ -26,12 +26,15 @@ class _CL:
     self.cl_platform = cl.get_platforms()[getenv('CL_PLATFORM', 0)]
     self.cl_ctxs: List[cl.Context] = [cl.Context(devices=[x]) for x in platforms[getenv('CL_PLATFORM', 0)] if x.name not in getenv('CL_EXCLUDE', "").split(",")]
     self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(ctx, device=ctx.devices[0], properties=cl.command_queue_properties.PROFILING_ENABLE) for ctx in self.cl_ctxs]
+    self.events_in_flight = []
   def synchronize(self):
+    for evt in self.events_in_flight: evt.wait()
+    self.events_in_flight.clear()
     for q in self.cl_queue: q.finish()
 CL = _CL()
 
 # TODO: merge CLImage in here
-class CLBuffer(RawBufferCopyInOutTransfer):
+class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device='0'):
     if isinstance(dtype, ImageDType):
       fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
@@ -44,12 +47,14 @@ class CLBuffer(RawBufferCopyInOutTransfer):
     super().__init__(size, dtype, buf)
   def _copyin(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
-    cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False)
+    CL.events_in_flight.append(cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False))
   def _copyout(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
     cl.enqueue_copy(CL.cl_queue[self._buf.device], x, self._buf, is_blocking=True)
   def _transfer(self, x):
-    cl.enqueue_copy_buffer_p2p_amd(CL.cl_platform, CL.cl_queue[x._buf.device], x._buf, self._buf)
+    if (can := "gfx" in CL.cl_ctxs[x._buf.device].devices[0].name): # assuming this is amd
+      cl.enqueue_copy_buffer_p2p_amd(CL.cl_platform, CL.cl_queue[x._buf.device], x._buf, self._buf, x.size * x.dtype.itemsize)
+    return can
 
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
