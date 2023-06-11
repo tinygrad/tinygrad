@@ -24,16 +24,22 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
   return x1y1.cat(x2y2, dim=1) # xyxy bbox
 
 def make_anchors(feats, strides, grid_cell_offset=0.5):
-  anchor_points, stride_tensor = [], []
-  assert feats is not None
-  for i, stride in enumerate(strides):
-    _, _, h, w = feats[i].shape
-    sx = np.arange(w, dtype='float32') + grid_cell_offset  # shift x
-    sy = np.arange(h, dtype='float32') + grid_cell_offset  # shift y
-    sy, sx = np.meshgrid(sx, sy, indexing='ij')
-    anchor_points.append(np.stack((sy, sx), -1).reshape(-1, 2))
-    stride_tensor.append(np.full((h * w, 1), stride.cpu().numpy()))
-  return np.concatenate(anchor_points).reshape(2, -1), np.concatenate(stride_tensor).reshape(1, -1)
+    anchor_points, stride_tensor = [], []
+    assert feats is not None
+    for i, stride in enumerate(strides):
+        _, _, h, w = feats[i].shape
+        sx = Tensor.arange(stop=w) + grid_cell_offset  
+        sy = Tensor.arange(stop=h) + grid_cell_offset 
+        
+        # this is np.meshgrid but in tinygrad 
+        sx = sx.reshape(1, -1).repeat([h, 1]).reshape(-1)
+        sy = sy.reshape(-1, 1).repeat([1, w]).reshape(-1)
+        
+        anchor_points.append(Tensor.stack((sx, sy), -1).reshape(-1, 2))
+        stride_tensor.append(Tensor.full((h * w), stride))
+    anchor_points = anchor_points[0].cat(anchor_points[1], anchor_points[2])
+    stride_tensor = stride_tensor[0].cat(stride_tensor[1], stride_tensor[2]).unsqueeze(1)
+    return anchor_points, stride_tensor
 
 # this function is from the original implementation
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
@@ -322,7 +328,7 @@ class DetectionHead():
     self.nc = nc  # number of classes
     self.nl = len(filters)  # number of detection layers
     self.no = nc + self.ch * 4  # number of outputs per anchor
-    self.stride = Tensor([8, 16, 32])
+    self.stride = [8, 16, 32]
     c1 = max(filters[0], self.nc)
     c2 = max((filters[0] // 4, self.ch * 4))
 
@@ -331,14 +337,14 @@ class DetectionHead():
     self.cv2 = [[Conv_Block(x, c2, 3), Conv_Block(c2, c2, 3), Conv2d(c2, 4 * self.ch, 1)] for x in filters]
   
   def forward(self, x):
+    
     for i in range(self.nl):
-      x[i] = x[i].sequential(self.cv2[i]).cat(x[i].sequential(self.cv3[i]), dim=1)
+      x[i] = (x[i].sequential(self.cv2[i]).cat(x[i].sequential(self.cv3[i]), dim=1))
     self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
-    y = [i.reshape(x[0].shape[0], self.no, -1) for i in x]
+    y = [(i.reshape(x[0].shape[0], self.no, -1)) for i in x]
     x_cat = y[0].cat(y[1], y[2], dim=2)
-    split_sizes = [self.ch * 4, self.nc]
-    box, cls = [x_cat[:, :split_sizes[0], :], x_cat[:, split_sizes[0]:, :]]
-    dbox = dist2bbox(self.dfl(box), Tensor(self.anchors).unsqueeze(0), xywh=True, dim=1) * Tensor(self.strides)
+    box, cls = x_cat[:, :self.ch * 4], x_cat[:, self.ch * 4:]
+    dbox = dist2bbox(self.dfl(box), self.anchors.unsqueeze(0), xywh=True, dim=1) * self.strides
     z = dbox.cat(cls.sigmoid(), dim=1)
     return z
                                  
