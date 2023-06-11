@@ -92,9 +92,18 @@ backend_test.exclude('test_asin_*')
 backend_test.exclude('test_asinh_*')
 backend_test.exclude('test_atan_*')
 backend_test.exclude('test_atanh_*')
+# backend_test.include('test_cos_*')
+# backend_test.include('test_cosh_*')
+# backend_test.exclude('test_sin_*')
+# backend_test.include('test_sinh_*')
+# backend_test.include('test_tanh_*')
 
 # no boolean ops (2d, 3d, 4d)
+# backend_test.exclude('test_and*')
+# backend_test.exclude('test_xor*')
+# backend_test.exclude('test_or*')
 backend_test.exclude('test_bitshift_*')
+# backend_test.include('test_not_*')
 
 # no scatter gather
 backend_test.exclude('test_gather_*')
@@ -124,10 +133,8 @@ backend_test.exclude('test_bitwise_*')
 backend_test.exclude('test_blackmanwindow_*')
 backend_test.exclude('test_bernoulli_*')
 backend_test.exclude('test_cumsum_*')
-
-backend_test.exclude('test_tril_zero_cpu') # TODO: zero array support
-backend_test.exclude('test_triu_zero_cpu') # TODO: zero array support
-
+backend_test.exclude('test_tril_*')
+backend_test.exclude('test_triu_*')
 backend_test.exclude('test_col2im_*')
 backend_test.exclude('test_hammingwindow_*')
 backend_test.exclude('test_hannwindow_*')

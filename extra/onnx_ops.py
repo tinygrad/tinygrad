@@ -75,7 +75,7 @@ def _padding(X, pads=None, auto_pad="NOTSET", axes=None, constant_value=0.):
   return zero_padded + constant_padder
 
 def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
-  assert mode == "constant", f"WARNING: Pad mode {mode} not implemented"
+  assert mode == "constant"
   constant_value = value if constant_value is None else constant_value.numpy()
   seq_pads = list(pads) if isinstance(pads, tuple) else pads.numpy().astype(np.int32).tolist()
   seq_axes = axes.numpy().astype(np.int32).tolist() if axes is not None else None
@@ -92,7 +92,7 @@ def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_p
     return padding_included / div
 
 def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
-  assert ceil_mode == 0 and storage_order == 0, f"WARNING: MaxPool ceil_mode {ceil_mode} and storage_order {storage_order} not implemented"
+  assert ceil_mode == 0 and storage_order == 0
   return _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-2:]).max_pool2d(kernel_shape, stride=strides, dilation=dilations)
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
@@ -110,8 +110,8 @@ def Dropout(data, ratio=0.5, training_mode=False, seed=None):
   mask = Tensor((rng.random(data.shape) >= ratio), requires_grad=False, device=data.device)
   return data * mask * (1/(1.0 - ratio)), mask
 
-def Shape(data, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int64)
-def Size(data): return prod(data if isinstance(data, list) else data.shape)
+def Shape(data, end=None, start=0): return list(data.shape)[start:end]
+def Size(data): return prod(data.shape)
 
 # TODO: this doesn't match Tensor.flatten behavior
 def Flatten(input, axis=1):
@@ -145,7 +145,7 @@ def HardSwish(input): return input * HardSigmoid(input, 1/6, 0.5)
 def Celu(X, alpha=1.0): return X.relu() - (-alpha*(X/alpha).exp()+1).relu()
 def Selu(X, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
 def Softplus(X): return X.softplus()
-def PRelu(X:Tensor, slope:Tensor): return X.clip(0, float("inf")) + X.clip(float("-inf"), 0) * slope
+def PRelu(X, slope): return X.leakyrelu(slope)
 def LeakyRelu(X, alpha=0.01): return X.leakyrelu(alpha)
 def ThresholdedRelu(X, alpha=1.0): return (X-alpha).relu() + (X-alpha).relu().sign() * alpha
 def Softmax_1(input, axis=1): return input.softmax(axis)
@@ -191,8 +191,6 @@ def ReduceLogSumExp(data, axes=None, keepdims=1, noop_with_empty_axes=0): return
 
 def GlobalAveragePool(X): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
-def OptionalHasElement(x: Tensor=None): return Tensor(x is not None and x.numel() > 0, dtype=dtypes.bool)
-def OptionalGetElement(x: Tensor=None): return x if x is not None else Tensor([], dtype=dtypes.float32)
 
 def Tile(input, repeats):
   repeats_ = [int(x) for x in safe_numpy(repeats)]
@@ -202,16 +200,12 @@ def Tile(input, repeats):
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
 def Range(start, limit, delta): return Tensor.arange(safe_numpy(limit)[0], safe_numpy(start)[0], safe_numpy(delta)[0])
-def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
+def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y)
 
 def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
 def Or(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.ones(*x.shape)).cast(dtypes.bool)
 def Xor(x:Tensor, y:Tensor): return Where((x==y), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
 def Not(x:Tensor): return Where((x==1), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
-
-def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1): 
-  k = int(k.numpy().item()) if k is not 0 else 0 # onnx passes k as a tensor int64 with one element, default is 0
-  return x.triu(k) if upper else x.tril(k)
 
 def ConstantOfShape(input, value:Tensor=None):
   if value is None: value=Tensor([0.0])
@@ -234,21 +228,3 @@ def MeanVarianceNormalization(input, axis=(0, 2, 3)):
   data_mean = input.mean(axis=axis, keepdim=True)
   std = ((input**2).mean(axis=axis, keepdim=True) - data_mean**2).sqrt()
   return (input - data_mean) / (std + 1e-9)
-
-def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, reduction="mean"):
-  N, C, i_shape = input.shape[0], input.shape[1], input.shape
-  t_shape = target.shape
-  if len(input.shape) != 3:
-    input = input.reshape((N, C, -1))
-    target = target.reshape((N, -1))
-  if weight is not None:
-    mask = target.unsqueeze(-1) == Tensor.arange(C,dtype=dtypes.int64).repeat((N, 1, 1)) 
-    weight = (mask * weight).sum(axis=-1)
-  if ignore_index is not None:
-    cond = (target == ignore_index)
-    weight = cond.where(0, weight) if weight is not None else cond.where(Tensor.zeros(*target.shape), 1) 
-  mask = target[:, None, :] ==  Tensor.arange(C).reshape([1, C] + [1]*(len(input.shape) -2)) 
-  loss = (-mask * input).sum(axis=1) * (1 if weight is None else weight)  
-  if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
-  elif reduction == "sum": return loss.sum()
-  return loss.reshape(t_shape) if len(i_shape) != 3 else loss

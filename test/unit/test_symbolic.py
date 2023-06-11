@@ -11,8 +11,8 @@ class TestSymbolic(unittest.TestCase):
   def test_ge(self):
     self.helper_test_variable(Variable("a", 3, 8)>=77, 0, 0, "0")
     self.helper_test_variable(Variable("a", 3, 8)>=9, 0, 0, "0")
-    self.helper_test_variable(Variable("a", 3, 8)>=8, 0, 1, "((a*-1)<-7)")
-    self.helper_test_variable(Variable("a", 3, 8)>=4, 0, 1, "((a*-1)<-3)")
+    self.helper_test_variable(Variable("a", 3, 8)>=8, 0, 1, "(a>=8)")
+    self.helper_test_variable(Variable("a", 3, 8)>=4, 0, 1, "(a>=4)")
     self.helper_test_variable(Variable("a", 3, 8)>=3, 1, 1, "1")
     self.helper_test_variable(Variable("a", 3, 8)>=2, 1, 1, "1")
 

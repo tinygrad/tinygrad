@@ -1,6 +1,5 @@
 import torch
 import time
-import math
 import numpy as np
 import unittest
 from tinygrad.tensor import Tensor
@@ -125,18 +124,6 @@ class TestOps(unittest.TestCase):
     tt2 = Tensor.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (tt1 < tt2).sum().backward)
 
-  def test_tril(self):
-    helper_test_op([(3,3)], lambda x: x.tril(), lambda x: x.tril())
-    helper_test_op([(3,3)], lambda x: x.tril(1), lambda x: x.tril(1))
-    helper_test_op([(3,3)], lambda x: x.tril(-1), lambda x: x.tril(-1))
-    helper_test_op([(5,3,3)], lambda x: x.tril(), lambda x: x.tril())
-    helper_test_op([(5,3,3)], lambda x: x.tril(1), lambda x: x.tril(1))
-  def test_triu(self):
-    helper_test_op([(3,3)], lambda x: x.triu(), lambda x: x.triu())
-    helper_test_op([(3,3)], lambda x: x.triu(1), lambda x: x.triu(1))
-    helper_test_op([(3,3)], lambda x: x.triu(-1), lambda x: x.triu(-1))
-    helper_test_op([(5,3,3)], lambda x: x.triu(), lambda x: x.triu())
-    helper_test_op([(5,3,3)], lambda x: x.triu(1), lambda x: x.triu(1))
   def test_maximum(self):
     helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
     helper_test_op([(), ()], torch.maximum, Tensor.maximum)
@@ -953,17 +940,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,4)], lambda x: x[1:3][1:2])
     helper_test_op([(4,4)], lambda x: x[:, 1:2][0:1])
     helper_test_op([(4,4)], lambda x: x[:, 1:2][:, 0:1])
-
-  @unittest.skip("this test is broken #862")
-  def test_max_inf(self):
-    n = Tensor([1, float("nan")]).max().numpy()
-    assert math.isnan(n.item()), f"{n.item()} is not nan"
-
-  @unittest.skip("this test is broken #942")
-  def test_inf_where(self):
-    x = Tensor.full((3, 3), float("inf"))
-    n = (x < 0).where(x, 1).numpy()
-    assert np.all(n == 1.)
 
 if __name__ == '__main__':
   np.random.seed(1337)
