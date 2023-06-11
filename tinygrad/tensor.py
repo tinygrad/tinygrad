@@ -112,7 +112,13 @@ class Tensor:
     ret = Tensor(self.lazydata, device)
     if self.grad: ret.grad = self.grad.to(device)
     return ret
-
+  
+  def disk(self, path:str):
+    return self.to(f"disk:{path}")
+  
+  def gpu(self, idx:int):
+    return self.to(f"gpu:{idx}")
+  
   # ***** creation llop entrypoint *****
 
   @staticmethod
