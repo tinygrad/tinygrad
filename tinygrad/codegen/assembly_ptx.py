@@ -18,7 +18,7 @@ class PTXCodegen(AssemblyCodegen):
            f".visible .entry test({', '.join(f'.param .u64 buf{i}' for i in range(len(self.bufs)))}) {{"]
 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
-           BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.eq",
+           BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.eq",
            UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
            FusedOps.MULACC: "fma.rn"}
 
@@ -39,8 +39,11 @@ class PTXCodegen(AssemblyCodegen):
           ins.append(f"mov.u32 %temp2, %tid.{l};")
           ins.append(f"mad.lo.s32 {out}, %temp0, %temp1, %temp2; }}")
       elif uop == UOps.ALU:
-        otype = vin[0].dtype if arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT] else out.dtype
-        ins.append(f"{alu[arg]}{'.lo' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''}{'.rn' if arg == BinaryOps.DIV and out.dtype == dtypes.float32 else ''}.{dtype_to_nvtype[otype]} {out}, {', '.join(str(x) for x in vin)};")
+        if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
+          ins.append(f"and.pred {out}, {', '.join(str(x) for x in vin)};")
+        else:
+          otype = vin[0].dtype if arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT] else out.dtype
+          ins.append(f"{alu[arg]}{'.lo' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''}{'.rn' if arg == BinaryOps.DIV and out.dtype == dtypes.float32 else ''}.{dtype_to_nvtype[otype]} {out}, {', '.join(str(x) for x in vin)};")
       elif uop == UOps.LOAD:
         ins.append(f"ld.global.{dtype_to_nvtype[out.dtype]} {out}, [{vin[0]}{f'+{arg}' if arg is not None else ''}];")
       elif uop == UOps.STORE:
