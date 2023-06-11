@@ -4,7 +4,7 @@ import importlib
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
-from typing import List
+from typing import List,Dict
 from onnx.onnx_pb import AttributeProto, ModelProto, TensorProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
@@ -15,7 +15,7 @@ except ImportError:
 
 # global numpy cache for parameters
 numpy_cache = {}
-def safe_numpy(t):
+def safe_numpy(t) -> np.ndarray:
   if not isinstance(t, Tensor): return t
   global numpy_cache
   if t not in numpy_cache:
@@ -56,7 +56,7 @@ def get_run_onnx(onnx_model: ModelProto):
     else: raise Exception(f"can't parse {a.type} {a}")
   def attribute_to_dict(a: RepeatedCompositeFieldContainer[AttributeProto]): return {x.name:attribute_parse(x) for x in a}
 
-  tensors = {}
+  tensors: Dict[str, Tensor] = {}
 
   # get weights and biases
   for inp in onnx_model.graph.initializer:
@@ -83,14 +83,15 @@ def get_run_onnx(onnx_model: ModelProto):
 
   def run_onnx(inputs={}, debug=False):
     if getenv("DEBUGONNX"): debug = True
-    input_tensors = {}
-    intermediate_tensors = {}
+    input_tensors: Dict[str,Tensor] = {}
+    intermediate_tensors: Dict[str,Tensor] = {}
     output_tensor_names = [x.name for x in onnx_model.graph.output]
 
     # get inputs
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
-      shape = shape_to_tuple(inp.type.tensor_type.shape)
+      tmp=inp.type.optional_type.elem_type.tensor_type if inp.type.HasField("optional_type") else (inp.type.sequence_type.elem_type.tensor_type if inp.type.HasField("sequence_type") else inp.type.tensor_type)
+      shape = shape_to_tuple(tmp.shape)
       if len(shape) >= 1 and shape[0] == 0: shape = tuple([1]+list(shape[1:]))   # 1 batch size
       if inp.name in inputs:
         if isinstance(inputs[inp.name], Tensor):
@@ -182,7 +183,7 @@ def get_run_onnx(onnx_model: ModelProto):
         steps = safe_numpy(inp[4])[0] if len(inp) > 4 else 1
         starts, ends = safe_numpy(starts.cast(dtypes.int32)).tolist(), safe_numpy(ends.cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
         for i,axis in enumerate(axes.tolist()):
-          arg[axis] = (starts[i], ends[i])
+          arg[axis] = (starts[i] if starts[i] >= 0 else inp[0].shape[axis]+starts[i], ends[i] if ends[i] >= 0 else inp[0].shape[axis]+ends[i])
         ret = inp[0].slice(arg=arg)
       elif n.op_type == "Shrink":
         bias = opt['bias'] if 'bias' in opt else 0
