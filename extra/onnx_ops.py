@@ -254,9 +254,9 @@ def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, red
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
 
 def OneHot(indices, depth, values, axis=-1):
+  depth = int(safe_numpy(depth).item())
   indices, rank = (indices.cast(dtypes.float32) < 0).where(indices+depth, indices), len(indices.shape)
-  C = int(depth.lazydata.realize().realized._buf)
   if axis < 0: axis += rank + 1
   ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
-  cond = indices[:,None] == Tensor.arange(C).reshape((1,) * len(ls) + (C,) + (1,) * len(rs))
+  cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
   return cond.where(values[1], values[0]).cast(values.dtype) 
