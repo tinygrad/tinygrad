@@ -143,7 +143,7 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
 
   @staticmethod
-  def arange(stop, start=0, step=1, **kwargs): return Tensor.full(((stop-start)//step,), step).cumsum() + (start - step)
+  def arange(stop, start=0, step=1, **kwargs): return Tensor.full(((stop-start)//step,), step, **kwargs).cumsum() + (start - step)
 
   @staticmethod
   def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
@@ -493,7 +493,7 @@ class Tensor:
 
   def cumsum(self, axis=0):
     x = self.permute(*(i for i in range(self.ndim) if i != axis), axis)
-    return x.reshape(1, 1, -1, self.shape[axis]).conv2d(Tensor.ones(1, 1, 1, self.shape[axis]), padding=(self.shape[axis]-1, 0, 0, 0)).reshape(*x.shape).permute(*range(axis), self.ndim - 1, *range(axis, self.ndim-1))
+    return x.reshape(1, 1, -1, self.shape[axis]).conv2d(Tensor.ones(1, 1, 1, self.shape[axis], dtype=self.dtype, device=self.device), padding=(self.shape[axis]-1, 0, 0, 0)).reshape(*x.shape).permute(*range(axis), self.ndim - 1, *range(axis, self.ndim-1))
   
   # ***** mlops (unary) *****
 
@@ -505,6 +505,12 @@ class Tensor:
   def sin(self): return mlops.Sin.apply(self)
   def cos(self): return ((math.pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
+  
+  @staticmethod
+  def _tri(r:int, c:int, k:int=0) -> Tensor: return Tensor.arange(r).unsqueeze(1).expand(r,c) <= Tensor.arange(c-k, start=-k).unsqueeze(0).expand(r,c)
+  def triu(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k).where(self, Tensor.zeros_like(self))
+  def tril(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1).where(Tensor.zeros_like(self), self)
+  
   # ***** math functions (unary) *****
 
   def __neg__(self): return 0.0-self
