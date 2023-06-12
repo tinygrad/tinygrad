@@ -5,7 +5,7 @@ from functools import partialmethod, reduce
 from itertools import accumulate, filterfalse
 import operator
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
 from math import ceil, pi, prod, sqrt
 from tinygrad.lazy import Device, LazyBuffer
@@ -14,7 +14,13 @@ from tinygrad.ops import LoadOps
 # An instantiation of the Function is the Context
 class Function:
   __slots__ = "device", "parents", "needs_input_grad", "requires_grad"
+  device: str
+  parents: Tuple[Tensor, ...]
+  needs_input_grad: Tuple[Optional[bool], ...]
+  requires_grad: Optional[bool]
 
+  @classmethod
+  def apply(fxn:Type[Function], *args, **kwargs) -> Tensor: raise NotImplementedError(f"apply not implemented for {type(fxn)}")
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
   def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
 
@@ -25,7 +31,7 @@ class UnaryFunction(Function):
     self.requires_grad = a.requires_grad
 
   @classmethod
-  def apply(fxn:Type[Function], a:Tensor, **kwargs) -> Tensor:
+  def apply(fxn:Type[UnaryFunction], a:Tensor, **kwargs) -> Tensor:
     ctx = fxn(a.device, a)
     ret = Tensor(ctx.forward(a.lazydata, **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
     if ctx.requires_grad and not Tensor.no_grad: ret._ctx = ctx    # used by autograd engine
@@ -41,7 +47,7 @@ class BinaryFunction(Function):
     self.requires_grad = True if any(self.needs_input_grad) else (None if any([x is None for x in self.needs_input_grad]) else False)
 
   @classmethod
-  def apply(fxn:Type[Function], a:Tensor, b:Tensor, **kwargs) -> Tensor:
+  def apply(fxn:Type[BinaryFunction], a:Tensor, b:Tensor, **kwargs) -> Tensor:
     ctx = fxn(a.device, a, b)
     ret = Tensor(ctx.forward(a.lazydata, b.lazydata, **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
     if ctx.requires_grad and not Tensor.no_grad: ret._ctx = ctx    # used by autograd engine
@@ -73,7 +79,8 @@ class Tensor:
 
     # internal variables used for autograd graph construction
     self._ctx: Optional[Function] = None
-    if data.__class__ == LazyBuffer:
+    if data.__class__ is LazyBuffer:
+      data = cast(LazyBuffer, data) # NOTE: this is a noop, it makes mypy happy
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
@@ -82,10 +89,11 @@ class Tensor:
       self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
       return
 
-    if data.__class__ == list:
+    if data.__class__ is list:
       data = np.array(data, dtype=(dtype or Tensor.default_type).np)
 
-    if data.__class__ == np.ndarray:
+    if data.__class__ is np.ndarray:
+      data = cast(np.ndarray, data)
       data = LazyBuffer.fromCPU(data)
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
@@ -116,10 +124,10 @@ class Tensor:
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK
     if self.device.startswith("DISK"):
-      if not x.__class__ == Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
+      if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
       self.lazydata.realize().realized._copyin(x.numpy())  # type: ignore
       return self
-    if not x.__class__ == Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
+    if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
@@ -386,7 +394,7 @@ class Tensor:
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False):
-    axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if axis.__class__ == int else list(axis))
+    axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if axis.__class__ is int else list(axis)) # type: ignore
     axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
     shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis_]
     ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else self.shape[i] for i in range(len(self.shape))]))
@@ -545,7 +553,8 @@ class Tensor:
   # ***** broadcasted binary mlops *****
 
   def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
-    x, y = self, Tensor(other, device=self.device, requires_grad=False) if not other.__class__ == Tensor else other
+    x: Tensor = self
+    y: Tensor = Tensor(cast(float, other), device=self.device, requires_grad=False) if other.__class__ is not Tensor else cast(Tensor, other)
     if reverse: x, y = y, x
     if x.shape == y.shape: return fxn.apply(x, y)
 
@@ -556,17 +565,17 @@ class Tensor:
     if len_x_shape != max_shape: x = x.reshape((1,) * (max_shape - len_x_shape) + x_shape)
     if len_y_shape != max_shape: y = y.reshape((1,) * (max_shape - len_y_shape) + y_shape)
 
-    shape_ret = tuple(map(max, zip(x.shape, y.shape)))
+    shape_ret = tuple([max(x, y) for x, y in zip(x.shape, y.shape)])
     if x.shape != shape_ret: x = x.expand(shape_ret)
     if y.shape != shape_ret: y = y.expand(shape_ret)
 
     return fxn.apply(x, y)
 
-  def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ == Tensor or x else self
-  def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if x.__class__ == Tensor or x or reverse else self
-  def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse) if x.__class__ == Tensor or x != 1.0 else self
-  def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Pow, x, reverse) if x.__class__ == Tensor or x != 1.0 or reverse else self
-  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ == Tensor or reverse or not x else self.mul(1/x)
+  def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ is Tensor or x else self
+  def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if x.__class__ is Tensor or x or reverse else self
+  def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse) if x.__class__ is Tensor or x != 1.0 else self
+  def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Pow, x, reverse) if x.__class__ is Tensor or x != 1.0 or reverse else self
+  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ is Tensor or reverse or not x else self.mul(1/x)
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)
