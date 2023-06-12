@@ -9,10 +9,11 @@ import cv2
 from PIL import Image
 from collections import defaultdict
 import argparse
-
+import time
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 #The upsampling class has been taken from this pull request https://github.com/geohot/tinygrad/pull/784 by dc-dc-dc. Now 2(?) models use upsampling. (retinet and this)
 
+#Pre processing image functions.
 def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, scaleup=True, stride=32):
   shape = image.shape[:2]  # current shape [height, width]
   new_shape = (new_shape, new_shape) if isinstance(new_shape, int) else new_shape
@@ -92,17 +93,17 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, agnostic=Fa
     output[xi] = x[i] 
   return output
 
-
 def postprocess(preds, img, orig_imgs): #path will be the loaded image path
   preds = preds.detach().cpu().numpy() if isinstance(preds, Tensor) else preds
   preds = non_max_suppression(prediction=preds, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300)
+  
   for i, pred in enumerate(preds):
     orig_img = orig_imgs[i] if isinstance(orig_imgs, list) else orig_imgs
     if not isinstance(orig_imgs, Tensor):
       pred[:, :4] = scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
+      
   return pred
   
-
 def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, class_labels, iou_threshold=0.5):
   predictions = np.array(predictions)
   orig_img = cv2.imread(orig_img_path)
@@ -140,6 +141,7 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
   cv2.imwrite(output_img_path, orig_img)
   print(f'saved detections at {output_img_path}')
 
+
 # utility functions for forward pass. 
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
   lt, rb = distance.chunk(2, dim)
@@ -148,8 +150,8 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
   if xywh:
     c_xy = (x1y1 + x2y2) / 2
     wh = x2y2 - x1y1
-    return c_xy.cat(wh, dim=1)  # xywh bbox
-  return x1y1.cat(x2y2, dim=1) # xyxy bbox
+    return c_xy.cat(wh, dim=1) 
+  return x1y1.cat(x2y2, dim=1)
 
 def make_anchors(feats, strides, grid_cell_offset=0.5):
   anchor_points, stride_tensor = [], []
@@ -171,7 +173,6 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
 
 # this function is from the original implementation
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
-  # print(k, p, d)
   if d > 1:
     k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]  # actual kernel-size
   if p is None:
@@ -205,16 +206,15 @@ def xywh2xyxy(x):
 
 #misc
 def parse_arguments():
-    parser = argparse.ArgumentParser(description='YOLOv8 Implementation')
-    parser.add_argument('-i', '--image_location', type=str, required=True, help='Image file location pr a folder of images (required)')
-    parser.add_argument('-v', '--variant', type=str, choices=['n', 's', 'm', 'l', 'x'], required=True, help='YOLOv8 variant (n, s, m, l, x) (required)')
-    args = parser.parse_args()
-    return args
+  parser = argparse.ArgumentParser(description='YOLOv8 Implementation')
+  parser.add_argument('-i', '--image_location', type=str, required=True, help='Image file location pr a folder of images (required)')
+  parser.add_argument('-v', '--variant', type=str, choices=['n', 's', 'm', 'l', 'x'], required=True, help='YOLOv8 variant (n, s, m, l, x) (required)')
+  args = parser.parse_args()
+  return args
 
 def get_variant_multiples(variant):
-    return {'n':(0.33, 0.25, 2.0), 's':(0.33, 0.50, 2.0), 'm':(0.67, 0.75, 1.5), 'l':(1.0, 1.0, 1.0), 'x':(1, 1.25, 1.0) }.get(variant, None)
+  return {'n':(0.33, 0.25, 2.0), 's':(0.33, 0.50, 2.0), 'm':(0.67, 0.75, 1.5), 'l':(1.0, 1.0, 1.0), 'x':(1, 1.25, 1.0) }.get(variant, None)
 
-  
 #this is taken from https://github.com/geohot/tinygrad/pull/784/files by dc-dc-dc (Now 2 models use upsampling)
 class Upsample:
   def __init__(self, scale_factor:int, mode: str = "nearest") -> None:
@@ -228,14 +228,14 @@ class Upsample:
     tmp = x.reshape([b, c, -1] + [1] * _lens) * Tensor.ones(*[1, 1, 1] + [self.scale_factor] * _lens)
     return tmp.reshape(list(x.shape) + [self.scale_factor] * _lens).permute([0, 1] + list(chain.from_iterable([[y+2, y+2+_lens] for y in range(_lens)]))).reshape([b, c] + [x * self.scale_factor for x in x.shape[2:]])
   
-class Conv_Block:
+class Conv_Block():
   def __init__(self, c1, c2, kernel_size=1, stride=1, groups=1, dilation=1, padding=None):
-    self.conv = Conv2d(c1,c2, kernel_size, stride, padding= autopad(kernel_size, padding, dilation), bias=False, groups=groups, dilation=dilation)
-    self.bn = BatchNorm2d(c2, momentum=0.03, eps=0.001)
-
+    self.conv = Conv2d(c1,c2, kernel_size, stride, padding=autopad(kernel_size, padding, dilation), bias=False, groups=groups, dilation=dilation)
+    self.bn = BatchNorm2d(c2, eps=0.001)
+  
   def __call__(self, x):
     return self.bn(self.conv(x)).silu()
-
+  
 class Bottleneck:
   def __init__(self, c1, c2 , shortcut: bool, g=1, kernels: list = (3,3), channel_factor=0.5):
     c_ = int(c2 * channel_factor)
@@ -245,12 +245,12 @@ class Bottleneck:
     
   def __call__(self, x):
     return x + self.cv2(self.cv1(x)) if self.residual else self.cv2(self.cv1(x))
-                 
+
 class C2f:
-  def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
-    self.c = int(c2 * e)  # hidden channels
+  def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5): 
+    self.c = int(c2 * e) 
     self.cv1 = Conv_Block(c1, 2 * self.c, 1,)
-    self.cv2 = Conv_Block((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
+    self.cv2 = Conv_Block((2 + n) * self.c, c2, 1)
     self.bottleneck = [Bottleneck(self.c, self.c, shortcut, g, kernels=[(3, 3), (3, 3)], channel_factor=1.0) for _ in range(n)]
    
   def __call__(self, x):
@@ -259,13 +259,13 @@ class C2f:
     z = y[0]
     for i in y[1:]: z = z.cat(i, dim=1)
     return self.cv2(z)
-  
+
 class SPPF:
   def __init__(self, c1, c2, k=5):
-      c_ = c1 // 2  # hidden channels
-      self.cv1 = Conv_Block(c1, c_, 1, 1, padding=None)
-      self.cv2 = Conv_Block(c_ * 4, c2, 1, 1, padding=None)
-      self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=k, stride=1)
+    c_ = c1 // 2  # hidden channels
+    self.cv1 = Conv_Block(c1, c_, 1, 1, padding=None)
+    self.cv2 = Conv_Block(c_ * 4, c2, 1, 1, padding=None)
+    self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=k, stride=1)
         
   def __call__(self, x):
     x = self.cv1(x)
@@ -287,12 +287,12 @@ class DFL:
   
 #backbone                               
 class Darknet:
-  def __init__(self, w, r, d): #width_multiple, ratio_multiple, depth_multiple
+  def __init__(self, w, r, d): 
     self.b1 = [Conv_Block(c1=3, c2= int(64*w), kernel_size=3, stride=2, padding=1), Conv_Block(int(64*w), int(128*w), kernel_size=3, stride=2, padding=1)]
     self.b2 = [C2f(c1=int(128*w), c2=int(128*w), n=round(3*d), shortcut=True), Conv_Block(int(128*w), int(256*w), 3, 2, 1), C2f(int(256*w), int(256*w), round(6*d), True)]
     self.b3 = [Conv_Block(int(256*w), int(512*w), kernel_size=3, stride=2, padding=1), C2f(int(512*w), int(512*w), round(6*d), True)]
     self.b4 = [Conv_Block(int(512*w), int(512*w*r), kernel_size=3, stride=2, padding=1), C2f(int(512*w*r), int(512*w*r), round(3*d), True)]
-    self.b5 = [SPPF(int(512*w*r), int(512*w*r), 1)]
+    self.b5 = [SPPF(int(512*w*r), int(512*w*r), 5)]
     
   def return_modules(self):
     return [*self.b1, *self.b2, *self.b3, *self.b4, *self.b5]
@@ -302,7 +302,7 @@ class Darknet:
     x2 = x1.sequential(self.b2)
     x3 = x2.sequential(self.b3)
     x4 = x3.sequential(self.b4)
-    x5 = self.b5[0](x4)
+    x5 = x4.sequential(self.b5)
     return (x2, x3, x5)
 
 #yolo fpn (neck)
@@ -320,19 +320,19 @@ class Yolov8NECK:
     return [self.n1, self.n2, self.n3, self.n4, self.n5, self.n6]
   
   def forward(self, p3, p4, p5):
-    x =  self.n1(p4.cat(self.up(p5), dim=1))
-    head_1 = self.n2(p3.cat(self.up(x), dim=1))
-    head_2 = self.n4(x.cat(self.n3(head_1), dim=1))
-    head_3 = self.n6(p5.cat(self.n5(head_2), dim=1))
+    x = self.n1(self.up(p5).cat(p4, dim=1))
+    head_1 = self.n2(self.up(x).cat(p3, dim=1))
+    head_2 = self.n4(self.n3(head_1).cat(x, dim=1))
+    head_3 = self.n6(self.n5(head_2).cat(p5, dim=1))
     return [head_1, head_2, head_3]
 
 #task specific head. 
 class DetectionHead:
   def __init__(self, nc=80, filters=()):
-    self.ch = 16  # DFL channels
+    self.ch = 16 
     self.nc = nc  # number of classes
-    self.nl = len(filters)  # number of detection layers
-    self.no = nc + self.ch * 4  # number of outputs per anchor
+    self.nl = len(filters)  
+    self.no = nc + self.ch * 4  #
     self.stride = [8, 16, 32]
     c1 = max(filters[0], self.nc)
     c2 = max((filters[0] // 4, self.ch * 4))
@@ -352,7 +352,6 @@ class DetectionHead:
     return z
    
 class YOLOv8:
-  # confirm filters. 
   def __init__(self, w, r,  d, num_classes): #width_multiple, ratio_multiple, depth_multiple
     self.net = Darknet(w, r, d)
     self.fpn = Yolov8NECK(w, r, d)
@@ -380,37 +379,34 @@ class YOLOv8:
           assert obj.shape == weight.shape, (k, obj.shape, weight.shape)
           obj.assign(weight)
     print(f'successfully loaded all weights for yolov8{yolo_variant}')
-  
+
 if __name__ == '__main__':
   
-    # currently just takes in a single image as argument. will add folder and url option
-    args = parse_arguments()
-    img_path = args.image_location
-    yolo_variant = args.variant
-    images = [np.array(Image.open(img_path))]
-    pre_processed_images = preprocess(images)
+  # currently just takes in a single image as argument. will add folder and url option
+  args = parse_arguments()
+  img_path = args.image_location
+  yolo_variant = args.variant
+  
+  images = [np.array(Image.open(img_path))]
+  pre_processed_images = preprocess(images)
 
-    # Tensor.training = False gives a runtime overflow warning when coverting Tensor to numpy for post processing. why? (training = True does not) 
-    Tensor.training = False
+  # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/v8/yolov8.yaml
+  depth, width, ratio = get_variant_multiples(yolo_variant) 
+  yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)  
+  
+  weights_location = Path(__file__).parent.parent / "weights" / f'yolov8{yolo_variant}.pt'
+  download_file(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{yolo_variant}.pt', weights_location)
+  yolo_infer.load_weights(weights_location, yolo_variant)
 
-    # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/v8/yolov8.yaml
-    depth, width, ratio = get_variant_multiples(yolo_variant) 
-    yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)  
-    
-    weights_location = Path(__file__).parent.parent / "weights" / f'yolov8{yolo_variant}.pt'
-    download_file(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{yolo_variant}.pt', weights_location)
-    yolo_infer.load_weights(weights_location, yolo_variant)
-
-    predictions = yolo_infer.forward(Tensor(pre_processed_images.astype(np.float32)))
-    
-    # fix all of these to take into account the batches of images. 
-    post_predictions = postprocess(predictions, pre_processed_images, images)
-    
-    #v8 and v3 have same 80 class names for Object Detection
-    class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
-    class_labels = class_labels.decode('utf-8').split('\n')
-    
-    draw_bounding_boxes_and_save(img_path, './output.jpg', post_predictions, class_labels=class_labels)
-
-
-    
+  st = time.time()
+  predictions = yolo_infer.forward(Tensor(pre_processed_images.astype(np.float32)))
+  print(f'did inference in {(time.time() - st):2f}s')
+  
+  # fix all of these to take into account the batches of images. 
+  post_predictions = postprocess(predictions, pre_processed_images, images)
+  
+  #v8 and v3 have same 80 class names for Object Detection
+  class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
+  class_labels = class_labels.decode('utf-8').split('\n')
+  
+  draw_bounding_boxes_and_save(img_path, './output.jpg', post_predictions, class_labels=class_labels)
