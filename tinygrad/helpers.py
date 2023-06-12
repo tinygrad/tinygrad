@@ -1,10 +1,12 @@
 from __future__ import annotations
+import platform
 from dataclasses import dataclass, asdict
 import os, math, functools, time
 import numpy as np
 from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
+OSX = platform.system() == "Darwin"
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x:Union[List[int], Tuple[int, ...]]) -> int: return math.prod(x)
@@ -78,7 +80,7 @@ class dtypes:
   bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   float32: Final[DType] = DType(4, 4, "float", np.float32)
-  float64: Final[DType] = DType(5, 8, "double", np.float64, ("METAL"))
+  float64: Final[DType] = DType(5, 8, "double", np.float64, ("METAL", "GPU" if OSX else ""))
   int8: Final[DType] = DType(0, 1, "char", np.int8)
   int32: Final[DType] = DType(1, 4, "int", np.int32)
   int64: Final[DType] = DType(2, 8, "int64", np.int64)

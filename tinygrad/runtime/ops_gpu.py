@@ -1,14 +1,13 @@
 from __future__ import annotations
-import platform, pathlib
+import pathlib
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
-from tinygrad.helpers import DEBUG, getenv, prod, ImageDType
+from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
-OSX = platform.system() == "Darwin"
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 FLOAT16 = getenv("FLOAT16", 0)
 
