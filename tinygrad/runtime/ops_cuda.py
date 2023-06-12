@@ -8,24 +8,21 @@ from tinygrad.helpers import DEBUG
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
-import os.path
 
 class RawCUDABuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype): super().__init__(size, dtype, cuda.mem_alloc(size * dtype.itemsize))
   def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x, stream)
   def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf)
 
-cuda_inc = os.path.dirname(os.path.realpath(__file__)) + "/../../extra/"
-
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
     try:
       if DEBUG >= 6:
         with open("/tmp/cubin", "wb") as f:
-          f.write(cuda_compile(prg, target="cubin", no_extern_c=True, options=[f"-I{cuda_inc}"]))
+          f.write(cuda_compile(prg, target="cubin", no_extern_c=True))
         sass = subprocess.check_output(['nvdisasm', '/tmp/cubin']).decode('utf-8')
         print(sass)
-      if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=[f"-I{cuda_inc}"]).decode('utf-8')
+      if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True).decode('utf-8')
     except cuda.CompileError as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
@@ -50,12 +47,21 @@ class CUDAProgram:
 class CUDACodegen(CStyleCodegen):
   lang = CStyleLanguage(
     kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
-    half_prekernel = "#include \"fp16.cuh\"",
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
-    header = """
-    typedef unsigned char uchar;
-    typedef long long int64;
+    half_prekernel = """
+      #include <cuda_fp16.h>
+      struct __align__(8) half4 {
+        half2 x, y;
+        __device__ explicit operator float4() const;
+      };
+      __device__ half4::operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
+      __device__ half4 operator+(half4 a, half4 b) { return half4{a.x+b.x, a.y+b.y}; }
+      __device__ half4 operator-(half4 a, half4 b) { return half4{a.x-b.x, a.y-b.y}; }
+      __device__ half4 operator*(half4 a, half4 b) { return half4{a.x*b.x, a.y*b.y}; }
+      __device__ half4 operator/(half4 a, half4 b) { return half4{a.x/b.x, a.y/b.y}; }
+      typedef unsigned char uchar;
+      typedef long long int64;
     """)
   supports_float4_alu = False
 CUDABuffer = Compiled(RawCUDABuffer, CUDACodegen, CUDAProgram, cuda.Context.synchronize)

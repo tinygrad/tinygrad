@@ -24,7 +24,6 @@ class CStyleLanguage(NamedTuple):
   float4: Optional[str] = None
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
-  header: Optional[str] = None
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
@@ -142,12 +141,10 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
       if args.valid.min == 1: kk(f"{newvar.render(True)} = {val};")
       else:
-        if newvar.ltype == LocalTypes.float4:
-          kk(f"{newvar.render(True)} = ({args.valid.render(render_cl)}) ? ({val}) : {lang.float4}(0.0f, 0.0f, 0.0f, 0.0f);")
-        elif newvar.ltype == LocalTypes.half:
-          kk(f"{newvar.render(True)} = ({args.valid.render(render_cl)}) ? (half)({val}) : (half)(0.0f);")
-        else:
-          kk(f"{newvar.render(True)} = ({args.valid.render(render_cl)}) ? (float)({val}) : 0.0f;")
+        if   newvar.ltype == LocalTypes.float4: expr = f"({val}) : {lang.float4}(0.0f, 0.0f, 0.0f, 0.0f);"
+        elif newvar.ltype == LocalTypes.half:   expr = f"(half)({val}) : (half)(0.0f);"
+        else:                                   expr = f"(float)({val}) : 0.0f;"
+        kk(f"{newvar.render(True)} = ({args.valid.render(render_cl)}) ? {expr}")
     elif uop == UOps.STORE and (vin[0].ltype == LocalTypes.float or (vin[0].ltype == LocalTypes.float4 and vin[0].offset is not None)):
       assert not isinstance(bufs[args.i].dtype, ImageDType), "image store must be float4"
       assert args.valid.min == 1, "store must be valid"
@@ -176,8 +173,6 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
     [', '.join([f'{t} {bufnames[i]}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
-  if lang.header:
-    prg =''.join([f"{lang.header}", "\n", prg])
   if lang.half_prekernel:
     prg =''.join([f"{lang.half_prekernel}", "\n", prg])
   return prg, global_size, local_size
