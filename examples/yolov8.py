@@ -66,8 +66,7 @@ def box_iou(box1, box2):
   return iou
 
 def compute_nms(boxes, scores, iou_threshold):
-  order = scores.argsort()[::-1]
-  keep = []
+  order, keep = scores.argsort()[::-1], []
   while order.size > 0:
     i = order[0]
     keep.append(i)
@@ -78,36 +77,28 @@ def compute_nms(boxes, scores, iou_threshold):
     order = order[inds + 1]
   return np.array(keep)
     
-def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300, nc=0, max_wh=7680):
-  if isinstance(prediction, (list, tuple)):
-    prediction = prediction[0]
-    
-  bs = prediction.shape[0]
-  nc = nc or (prediction.shape[1] - 4)
+def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, agnostic=False, max_det=300, nc=0, max_wh=7680):
+  prediction = prediction[0] if isinstance(prediction, (list, tuple)) else prediction
+  bs, nc = prediction.shape[0], nc or (prediction.shape[1] - 4)
+  xc = np.amax(prediction[:, 4:4 + nc], axis=1) > conf_thres
   nm = prediction.shape[1] - nc - 4
-  mi = 4 + nc 
-  xc = np.amax(prediction[:, 4:mi], axis=1) > conf_thres    
   output = [np.zeros((0, 6 + nm))] * bs
+
   for xi, x in enumerate(prediction):
     x = x.swapaxes(0, -1)[xc[xi]]
-    if not x.shape[0]:
-      continue
+    if not x.shape[0]: continue
     box, cls, mask = np.split(x, [4, 4 + nc], axis=1)
-    box = xywh2xyxy(box) 
-    conf = np.max(cls, axis=1, keepdims=True) 
-    j = np.argmax(cls, axis=1, keepdims=True) 
-    x = np.concatenate((box, conf, j.astype(np.float32), mask), axis=1)
+    conf, j = np.max(cls, axis=1, keepdims=True), np.argmax(cls, axis=1, keepdims=True)
+    x = np.concatenate((xywh2xyxy(box), conf, j.astype(np.float32), mask), axis=1)
     x = x[conf.ravel() > conf_thres]
-    n = x.shape[0]  
-    if not n:  # no predictions
-      continue    
+    if not x.shape[0]: continue
     x = x[np.argsort(-x[:, 4])]
-    c = x[:, 5:6] * (0 if agnostic else max_wh) 
-    boxes, scores = x[:, :4] + c, x[:, 4] 
-    i = compute_nms(boxes, scores, iou_thres)  
-    i = i[:max_det]  
-    output[xi] = x[i]
+    c = x[:, 5:6] * (0 if agnostic else max_wh)
+    boxes, scores = x[:, :4] + c, x[:, 4]
+    i = compute_nms(boxes, scores, iou_thres)[:max_det]
+    output[xi] = x[i] 
   return output
+
 
 def postprocess(preds, img, orig_imgs): #path will be the loaded image path
   preds = preds.detach().cpu().numpy() if isinstance(preds, Tensor) else preds
@@ -157,7 +148,6 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
   print(f'saved detections at {output_img_path}')
 
 # utility functions for forward pass. 
-
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
   lt, rb = distance.chunk(2, dim)
   x1y1 = anchor_points - lt
@@ -169,22 +159,22 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
   return x1y1.cat(x2y2, dim=1) # xyxy bbox
 
 def make_anchors(feats, strides, grid_cell_offset=0.5):
-    anchor_points, stride_tensor = [], []
-    assert feats is not None
-    for i, stride in enumerate(strides):
-        _, _, h, w = feats[i].shape
-        sx = Tensor.arange(stop=w) + grid_cell_offset  
-        sy = Tensor.arange(stop=h) + grid_cell_offset 
-        
-        # this is np.meshgrid but in tinygrad 
-        sx = sx.reshape(1, -1).repeat([h, 1]).reshape(-1)
-        sy = sy.reshape(-1, 1).repeat([1, w]).reshape(-1)
-        
-        anchor_points.append(Tensor.stack((sx, sy), -1).reshape(-1, 2))
-        stride_tensor.append(Tensor.full((h * w), stride))
-    anchor_points = anchor_points[0].cat(anchor_points[1], anchor_points[2])
-    stride_tensor = stride_tensor[0].cat(stride_tensor[1], stride_tensor[2]).unsqueeze(1)
-    return anchor_points, stride_tensor
+  anchor_points, stride_tensor = [], []
+  assert feats is not None
+  for i, stride in enumerate(strides):
+    _, _, h, w = feats[i].shape
+    sx = Tensor.arange(stop=w) + grid_cell_offset  
+    sy = Tensor.arange(stop=h) + grid_cell_offset 
+    
+    # this is np.meshgrid but in tinygrad 
+    sx = sx.reshape(1, -1).repeat([h, 1]).reshape(-1)
+    sy = sy.reshape(-1, 1).repeat([1, w]).reshape(-1)
+    
+    anchor_points.append(Tensor.stack((sx, sy), -1).reshape(-1, 2))
+    stride_tensor.append(Tensor.full((h * w), stride))
+  anchor_points = anchor_points[0].cat(anchor_points[1], anchor_points[2])
+  stride_tensor = stride_tensor[0].cat(stride_tensor[1], stride_tensor[2]).unsqueeze(1)
+  return anchor_points, stride_tensor
 
 # this function is from the original implementation
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
@@ -426,7 +416,7 @@ if __name__ == '__main__':
     #v8 and v3 have same 80 class names for Object Detection
     class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
     class_labels = class_labels.decode('utf-8').split('\n')
-
+ 
     draw_bounding_boxes_and_save(img_path, './output.jpg', post_predictions, class_labels=class_labels)
 
 
