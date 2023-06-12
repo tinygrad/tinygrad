@@ -32,9 +32,9 @@ def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
 
 from tinygrad.ops import ASTRunner, LazyOp, LoadOps, BinaryOps, UnaryOps
 from tinygrad.lazy import LazyBuffer
-from tinygrad.tensor import Function
+from tinygrad.tensor import BinaryFunction
 
-class ATan2(Function):
+class ATan2(BinaryFunction):
   def forward(self, a:LazyBuffer, b:LazyBuffer) -> LazyBuffer:
     assert prod(a.shape) == prod(b.shape) and a.device == b.device, "shape or device mismatch"
     self.a, self.b = a, b
