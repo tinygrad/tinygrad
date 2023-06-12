@@ -315,7 +315,7 @@ class _Device:
     self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, self._default_device())
   def canonicalize(self, device:str) -> str: 
     dev, args = device.split(":")
-    args = f":{args}".replace(":0", "")
+    args = f":{args}".replace(":0", "") if args else ""
     return f"{dev.upper()}{args}"
   def __getitem__(self, x:str) -> Union[Interpreted, Compiled]: return self._get_device(x.split(":")[0].upper())
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
