@@ -12,6 +12,7 @@ def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 # https://docs.nvidia.com/cuda/parallel-thread-execution/#
 class PTXCodegen(AssemblyCodegen):
   #supports_constant_folding: bool = True
+  supports_load3: bool = False
 
   def specialize(self, asm):
     ins = [".version 7.8", ".target sm_86", ".address_size 64",

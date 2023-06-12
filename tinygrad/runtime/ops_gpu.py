@@ -95,4 +95,6 @@ class CLCodegen(CStyleCodegen):
     gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True)
   supports_float4_alu = True
   supports_float4 = True
-GPUBuffer = Compiled(CLBuffer, CLCodegen, CLProgram, CL.synchronize)
+
+from tinygrad.codegen.assembly_rdna import RDNACodegen
+GPUBuffer = Compiled(CLBuffer, RDNACodegen if getenv("RDNA") else CLCodegen, CLProgram, CL.synchronize)
