@@ -314,7 +314,8 @@ class _Device:
     self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
     self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, self._default_device())
   def canonicalize(self, device:str) -> str: 
-    dev, args = device.split(":0")
+    dev, args = device.split(":")
+    args = f":{args}".replace(":0", "")
     return f"{dev.upper()}{args}
   def __getitem__(self, x:str) -> Union[Interpreted, Compiled]: return self._get_device(x.split(":")[0].upper())
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
