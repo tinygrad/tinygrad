@@ -12,8 +12,8 @@ class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PA
 
 def check_no_mul(test, var):
   if test == var: return True
-  if test.__class__ == SumNode: return any(check_no_mul(x, var) for x in test.nodes) # in a sum is okay
-  if test.__class__ == ModNode and test.b%4 == 0: return check_no_mul(test.a, var)   # removing a mod is okay
+  if test.__class__ is SumNode: return any(check_no_mul(x, var) for x in test.nodes) # in a sum is okay
+  if test.__class__ is ModNode and test.b%4 == 0: return check_no_mul(test.a, var)   # removing a mod is okay
   return False
 
 @functools.lru_cache(maxsize=None)
@@ -99,7 +99,7 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if vm2.mask: return None  # this isn't supported yet
   new_strides, new_offset = [], vm2.expr_node(Variable.num(vm1.offset))
-  assert new_offset.__class__ == NumNode, "new_offset wasn't a number?!?"
+  assert isinstance(new_offset, NumNode), "new_offset wasn't a number?!?"
   for s,st in zip(vm1.shape, vm1.strides):
     this_dim = View(vm2.shape, vm2.strides).expr_node(Variable('idx', 0, s-1)*st)
     if s == 1:
@@ -148,7 +148,7 @@ def get_pad_args(shape, arg: Tuple[Tuple[int, int], ...]):
 
 @functools.lru_cache(maxsize=None)
 def get_unsafe_resize_offset(strides, arg):
-  return sum(map(operator.mul, strides, map(operator.itemgetter(0), arg)))
+  return sum([s * x[0] for s, x in zip(strides,arg)])
 
 class ShapeTracker:
   __slots__ = "views"
