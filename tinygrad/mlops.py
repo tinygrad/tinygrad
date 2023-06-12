@@ -50,22 +50,6 @@ class Exp(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.binary_op(BinaryOps.MUL, grad_output)
 
-class Log2(Function):
-  def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.x = x
-    return x.unary_op(UnaryOps.LOG2)
-
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.binary_op(BinaryOps.DIV, self.x.binary_op(BinaryOps.MUL, grad_output.const_like(math.log(2))))
-
-class Exp2(Function):
-  def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.unary_op(UnaryOps.EXP2)
-    return self.ret
-
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.ret.binary_op(BinaryOps.MUL, grad_output).binary_op(BinaryOps.MUL, grad_output.const_like(math.log(2)))
-
 # ************* reduce ops *************
 
 class Sum(Function):

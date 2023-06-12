@@ -477,8 +477,6 @@ class Tensor:
   def contiguous(self): return mlops.Contiguous.apply(self)
   def log(self): return mlops.Log.apply(self)
   def exp(self): return mlops.Exp.apply(self)
-  def log2(self): return mlops.Log2.apply(self)
-  def exp2(self): return mlops.Exp2.apply(self)
   def relu(self): return mlops.Relu.apply(self)
   def sin(self): return mlops.Sin.apply(self)
   def cos(self): return ((math.pi/2)-self).sin()
@@ -497,8 +495,8 @@ class Tensor:
   # ***** math functions (binary) *****
 
   def pow(self,x,reverse=False):
-    if reverse and type(x) is not Tensor: return self.mul( math.log2(max(abs(x),1e-10)) ).exp2().mul( self.mul( (math.pi-math.copysign(math.pi,x))/2 ).cos() )
-    else: return x.pow(self) if reverse else self.abs().maximum(1e-10).log2().mul(x).exp2().mul( (1-self.sign()).div(2).mul(x).mul(math.pi).cos())
+    if reverse and type(x) is not Tensor: return self.mul( math.log(max(abs(x),1e-10)) ).exp().mul( self.mul( (math.pi-math.copysign(math.pi,x))/2 ).cos() )
+    else: return x.pow(self) if reverse else self.abs().maximum(1e-10).log().mul(x).exp().mul( (1-self.sign()).div(2).mul(x).mul(math.pi).cos())
 
   # ***** activation functions (unary) *****
 
