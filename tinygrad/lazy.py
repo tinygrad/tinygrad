@@ -316,7 +316,7 @@ class _Device:
   def canonicalize(self, device:str) -> str: 
     dev, args = device.split(":")
     args = f":{args}".replace(":0", "")
-    return f"{dev.upper()}{args}
+    return f"{dev.upper()}{args}"
   def __getitem__(self, x:str) -> Union[Interpreted, Compiled]: return self._get_device(x.split(":")[0].upper())
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _get_device(self, x:str) -> Union[Interpreted, Compiled]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
