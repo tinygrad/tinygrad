@@ -18,7 +18,7 @@ def BCELoss(y_pred, y_true):
   return -(Tensor.log(y_pred_clamp ) * y_true +  Tensor.log(1 - y_pred_clamp )* (1 - y_true)).mean()
 
 def BCELossEPS(y_pred, y_true):
-  EPS = 1e-12
+  EPS = 1e-7
   return -(Tensor.log(y_pred + EPS) * y_true +  Tensor.log(1 - y_pred + EPS)* (1 - y_true)).mean()
 
 def BCEWithLogitsLoss(y_pred, y_true):
