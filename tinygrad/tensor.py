@@ -36,6 +36,7 @@ class Tensor:
 
   def __init__(self, data:Union[int, float, list, tuple, LazyBuffer, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
+    assert dtype is None or device not in dtype.excluded, f"device {device} not supported for dtype {dtype}"
     device = Device.canonicalize(device)
     if isinstance(data, (list, tuple)):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
