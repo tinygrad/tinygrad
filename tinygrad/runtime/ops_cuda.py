@@ -53,13 +53,8 @@ class CUDACodegen(CStyleCodegen):
       #include <cuda_fp16.h>
       struct __align__(8) half4 {
         half2 x, y;
-        __device__ explicit operator float4() const;
+        __device__ __forceinline__ explicit operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
       };
-      __device__ __forceinline__ half4::operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
-      __device__ __forceinline__ half4 operator+(half4 a, half4 b) { return half4{a.x+b.x, a.y+b.y}; }
-      __device__ __forceinline__ half4 operator-(half4 a, half4 b) { return half4{a.x-b.x, a.y-b.y}; }
-      __device__ __forceinline__ half4 operator*(half4 a, half4 b) { return half4{a.x*b.x, a.y*b.y}; }
-      __device__ __forceinline__ half4 operator/(half4 a, half4 b) { return half4{a.x/b.x, a.y/b.y}; }
       typedef unsigned char uchar;
       typedef long long int64;
     """)
