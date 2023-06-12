@@ -29,6 +29,7 @@ class RDNACodegen(AssemblyCodegen):
   supports_float4: bool = False
   supports_float4_alu: bool = False
   supports_load3: bool = True
+  sin_is_sin2pi: bool = True
 
   def specialize(self, asm) -> Tuple[str, str]:
     args = []
@@ -39,7 +40,8 @@ class RDNACodegen(AssemblyCodegen):
     s_cnt = 3  # s[0:1] is the address, s[2] is global_x
 
     dtype_to_rdnatype = {dtypes.float32: "f32", dtypes.int64: "i64", dtypes.int32: "i32", dtypes.uint64: "u64"}
-    alu = {BinaryOps.ADD: "v_add", BinaryOps.SUB: "v_sub", BinaryOps.MUL: "v_mul", UnaryOps.LOG2: "v_log", UnaryOps.EXP2: "v_exp"}
+    alu = {BinaryOps.ADD: "v_add", BinaryOps.SUB: "v_sub", BinaryOps.MUL: "v_mul",
+           UnaryOps.NOOP: "v_mov", UnaryOps.SIN: "v_sin", UnaryOps.LOG2: "v_log", UnaryOps.EXP2: "v_exp"}
 
     rtor = {}
     for uop, out, vin, arg in asm:
