@@ -120,18 +120,24 @@ def postprocess(preds, img, orig_imgs): #path will be the loaded image path
   
 
 def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, class_labels, iou_threshold=0.5):
+  predictions = np.array(predictions)
   orig_img = cv2.imread(orig_img_path)
-
-  def generate_color():
-    return np.random.randint(0, 200, size=3, dtype='uint8')
-
-  colors = [generate_color() for _ in range(len(class_labels))]
+  colors = [np.random.randint(0, 200, size=3, dtype='uint8') for _ in range(len(class_labels))]
   font = cv2.FONT_HERSHEY_SIMPLEX
-
   grouped_preds = defaultdict(list)
+
   for pred_np in predictions:
-    class_id = int(pred_np[-1])
-    grouped_preds[class_id].append(pred_np)
+    grouped_preds[int(pred_np[-1])].append(pred_np)
+
+  def draw_box_and_label(pred, color):
+    x1, y1, x2, y2, conf, _ = pred
+    x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
+    cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, 3)
+    label = f"{class_labels[class_id]} {conf:.2f}"
+    text_size, _ = cv2.getTextSize(label, font, 0.9, 1)
+    label_y, bg_y = (y1 - 4, y1 - text_size[1] - 4) if y1 - text_size[1] - 4 > 0 else (y1 + text_size[1], y1)
+    cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
+    cv2.putText(orig_img, label, (x1, label_y), font, 0.9, (255, 255, 255), 1, cv2.LINE_AA)
 
   for class_id, pred_list in grouped_preds.items():
     pred_list = np.array(pred_list)
@@ -139,43 +145,13 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
       max_conf_idx = np.argmax(pred_list[:, 4])
       max_conf_pred = pred_list[max_conf_idx]
       pred_list = np.delete(pred_list, max_conf_idx, axis=0)
-
-      x1, y1, x2, y2, conf, _ = max_conf_pred
-      x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-      color = tuple(map(int, colors[class_id]))
-      cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, 3)
-
-      label = f"{class_labels[class_id]} {conf:.2f}"
-      text_size, _ = cv2.getTextSize(label, font, 0.9, 1)
-
-      if y1 - text_size[1] - 4 > 0:
-        label_y = y1 - 4
-        bg_y = y1 - text_size[1] - 4
-      else:
-        label_y = y1 + text_size[1]
-        bg_y = y1
-      cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
-      cv2.putText(orig_img, label, (x1, label_y), font, 0.9, (255, 255, 255), 1, cv2.LINE_AA)
+      draw_box_and_label(max_conf_pred, tuple(map(int, colors[class_id])))
       iou_scores = box_iou(np.array([max_conf_pred[:4]]), pred_list[:, :4])
       low_iou_indices = np.where(iou_scores[0] < iou_threshold)[0]
       pred_list = pred_list[low_iou_indices]
-      
-      # Draw the remaining bounding boxes with lower confidence
-      for low_conf_pred in pred_list:
-        x1, y1, x2, y2, conf, _ = low_conf_pred
-        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-        cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, 3)
-        label = f"{class_labels[class_id]} {conf:.2f}"
-        text_size, _ = cv2.getTextSize(label, font, 0.9, 1)
 
-        if y1 - text_size[1] - 4 > 0:
-          label_y = y1 - 4
-          bg_y = y1 - text_size[1] - 4
-        else:
-          label_y = y1 + text_size[1]
-          bg_y = y1
-        cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
-        cv2.putText(orig_img, label, (x1, label_y), font, 0.9, (255, 255, 255), 1, cv2.LINE_AA)
+      for low_conf_pred in pred_list:
+        draw_box_and_label(low_conf_pred, tuple(map(int, colors[class_id])))
 
   cv2.imwrite(output_img_path, orig_img)
   print(f'saved detections at {output_img_path}')
@@ -450,6 +426,7 @@ if __name__ == '__main__':
     #v8 and v3 have same 80 class names for Object Detection
     class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
     class_labels = class_labels.decode('utf-8').split('\n')
+
     draw_bounding_boxes_and_save(img_path, './output.jpg', post_predictions, class_labels=class_labels)
 
 
