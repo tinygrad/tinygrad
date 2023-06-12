@@ -110,6 +110,7 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
   colors = [np.random.randint(0, 200, size=3, dtype='uint8') for _ in range(len(class_labels))]
   font = cv2.FONT_HERSHEY_SIMPLEX
   grouped_preds = defaultdict(list)
+  object_count = defaultdict(int)
 
   for pred_np in predictions:
     grouped_preds[int(pred_np[-1])].append(pred_np)
@@ -131,13 +132,18 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
       max_conf_pred = pred_list[max_conf_idx]
       pred_list = np.delete(pred_list, max_conf_idx, axis=0)
       draw_box_and_label(max_conf_pred, tuple(map(int, colors[class_id])))
+      object_count[class_labels[class_id]] += 1
       iou_scores = box_iou(np.array([max_conf_pred[:4]]), pred_list[:, :4])
       low_iou_indices = np.where(iou_scores[0] < iou_threshold)[0]
       pred_list = pred_list[low_iou_indices]
 
       for low_conf_pred in pred_list:
         draw_box_and_label(low_conf_pred, tuple(map(int, colors[class_id])))
-
+              
+  print("Objects detected:")
+  for obj, count in object_count.items():
+    print(f"- {obj}: {count}")
+      
   cv2.imwrite(output_img_path, orig_img)
   print(f'saved detections at {output_img_path}')
 
@@ -205,6 +211,7 @@ def xywh2xyxy(x):
   return Tensor(result) if isinstance(x, Tensor) else result
 
 #misc
+# usage: python3 ./examples/yolov8.py -i "./football_match.webp" -v "n"  (where after - i comes the original image location AND after -v comes the yolov8 variant)
 def parse_arguments():
   parser = argparse.ArgumentParser(description='YOLOv8 Implementation')
   parser.add_argument('-i', '--image_location', type=str, required=True, help='Image file location pr a folder of images (required)')
