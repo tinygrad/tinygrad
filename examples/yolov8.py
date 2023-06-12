@@ -13,25 +13,18 @@ import argparse
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 #The upsampling class has been taken from this pull request https://github.com/geohot/tinygrad/pull/784 by dc-dc-dc. Now 2(?) models use upsampling. (retinet and this)
 
-#Pre processing image functions.
 def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, scaleup=True, stride=32):
   shape = image.shape[:2]  # current shape [height, width]
-  if isinstance(new_shape, int):
-    new_shape = (new_shape, new_shape)
+  new_shape = (new_shape, new_shape) if isinstance(new_shape, int) else new_shape
   r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
-  if not scaleup: 
-    r = min(r, 1.0)
-  new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
-  dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1] 
-  if auto:  
-    dw, dh = np.mod(dw, stride), np.mod(dh, stride)
-  elif scaleFill: 
-    dw, dh = 0.0, 0.0
-    new_unpad = (new_shape[1], new_shape[0])
-  dw /= 2 
+  r = min(r, 1.0) if not scaleup else r
+  new_unpad = (int(round(shape[1] * r)), int(round(shape[0] * r)))
+  dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]
+  dw, dh = (np.mod(dw, stride), np.mod(dh, stride)) if auto else (0.0, 0.0)
+  new_unpad = (new_shape[1], new_shape[0]) if scaleFill else new_unpad
+  dw /= 2
   dh /= 2
-  if shape[::-1] != new_unpad:  # resize
-    image = cv2.resize(image, new_unpad, interpolation=cv2.INTER_LINEAR)
+  image = cv2.resize(image, new_unpad, interpolation=cv2.INTER_LINEAR) if shape[::-1] != new_unpad else image
   top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
   left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
   image = cv2.copyMakeBorder(image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
@@ -416,7 +409,7 @@ if __name__ == '__main__':
     #v8 and v3 have same 80 class names for Object Detection
     class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
     class_labels = class_labels.decode('utf-8').split('\n')
- 
+    
     draw_bounding_boxes_and_save(img_path, './output.jpg', post_predictions, class_labels=class_labels)
 
 
