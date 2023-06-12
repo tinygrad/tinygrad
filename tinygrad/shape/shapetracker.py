@@ -2,7 +2,6 @@
 from __future__ import annotations
 from enum import Enum, auto
 import functools
-import operator
 from typing import Dict, Tuple, Union, List, Optional, Callable, cast
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, ModNode
