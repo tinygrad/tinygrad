@@ -39,7 +39,7 @@ class RDNACodegen(AssemblyCodegen):
     s_cnt = 3  # s[0:1] is the address, s[2] is global_x
 
     dtype_to_rdnatype = {dtypes.float32: "f32", dtypes.int64: "i64", dtypes.int32: "i32", dtypes.uint64: "u64"}
-    alu = {BinaryOps.ADD: "v_add", BinaryOps.MUL: "v_mul"}
+    alu = {BinaryOps.ADD: "v_add", BinaryOps.SUB: "v_sub", BinaryOps.MUL: "v_mul", UnaryOps.LOG2: "v_log", UnaryOps.EXP2: "v_exp"}
 
     rtor = {}
     for uop, out, vin, arg in asm:
@@ -63,15 +63,17 @@ class RDNACodegen(AssemblyCodegen):
         elif arg.startswith('gid'):
           ins.append(f'v_mov_b32 {rtor[out]}, s2')
           #ins.append(f'v_mov_b32 {rtor[out]}, v0')
+      elif uop == UOps.CONST:
+        ins.append(f'v_mov_b32 {rtor[out]}, {arg}')
       elif uop == UOps.ALU:
         ins.append(f"{alu[arg]}_{dtype_to_rdnatype[out.dtype]}{'_i24' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''} {rtor[out]}, {', '.join(rtor[x] if x.__class__ is Register else str(x) for x in vin)}")
       elif uop == UOps.LOAD:
         #ins.append(f'global_load_b32 {rtor[out]}, {rtor[vin[0]]}, {rtor[arg[0][0]]}, {str(arg[0][1])}')  # type: ignore
         ins.append('s_waitcnt lgkmcnt(0)')
-        ins.append(f'global_load_b32 {rtor[out]}, {rtor[arg[0][0]]}, {rtor[vin[0]]}')
+        ins.append(f'global_load_b32 {rtor[out]}, {rtor[arg[0]]}, {rtor[vin[0]]}')
         ins.append('s_waitcnt vmcnt(0)')
       elif uop == UOps.STORE:
-        ins.append(f'global_store_b32 {rtor[arg[0][0]]}, {rtor[vin[1]]}, {rtor[vin[0]]}')
+        ins.append(f'global_store_b32 {rtor[arg[0]]}, {rtor[vin[1]]}, {rtor[vin[0]]}')
 
     ins += ['s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', 's_endpgm', 's_code_end']
     return 'code', self.assemble(args, ins, v_cnt, s_cnt)
@@ -116,6 +118,7 @@ class RDNACodegen(AssemblyCodegen):
     asm = early_exec(([ROCM_LLVM_PATH / "ld.lld", "/dev/stdin", "-o", "/dev/stdout", "--pie"], obj))
     return asm
 
+  # **** delete below this line ****
 
   def generate(self):
     args = []

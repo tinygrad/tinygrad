@@ -69,14 +69,14 @@ class AssemblyCodegen(Linearizer):
     def addr_w_offset(args):
       idx = args.idx*self.bufs[args.i].dtype.itemsize
       off = 0  # TODO: should this be None?
-      if isinstance(idx, SumNode):
+      if isinstance(idx, SumNode) and not self.supports_load3:
         nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
         if len(nums) > 0:
           idx -= nums[0]
           off = nums[0]
       reg = idx.render(render_ops)
       if self.supports_load3:
-        return tor[f"buf{args.i}"], (reg, off)
+        return tor[f"buf{args.i}"], reg
       else:
         reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{args.i}"], dtype=dtypes.uint64)
         return reg, off
