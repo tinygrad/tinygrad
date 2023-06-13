@@ -128,7 +128,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[metal,testing]'
     - name: Run Pytest
-      run: GPU=1 python -m pytest -s -v test/
+      run: CL_DEVICE=-1 GPU=1 python -m pytest -s -v test/
 
   testgpu:
     name: GPU Tests
