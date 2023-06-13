@@ -484,8 +484,8 @@ class Tensor:
   # ***** math functions (unary) *****
 
   def __neg__(self): return 0.0-self
-  def sqrt(self): return self.pow(0.5).add(self.div(self.pow(0.5))).div(2) #newtons method refinement of pow (which has a few bits lost to exp2(log2(
-  def rsqrt(self): return self.pow(-0.5).add(self.mul(self.pow(0.5)).reciprocal()).div(2)
+  def sqrt(self): return self.rsqrt().reciprocal() #slightly more accurate than self.log().div(2).exp() in important ranges
+  def rsqrt(self): return self.log().div(-2).exp()
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
   def abs(self): return self.relu() + (-self).relu()
@@ -495,8 +495,10 @@ class Tensor:
   # ***** math functions (binary) *****
 
   def pow(self,x,reverse=False):
-    if reverse and type(x) is not Tensor: return self.mul( math.log(max(abs(x),1e-10)) ).exp().mul( self.mul( (math.pi-math.copysign(math.pi,x))/2 ).cos() )
-    else: return x.pow(self) if reverse else self.abs().maximum(1e-10).log().mul(x).exp().mul( (1-self.sign()).div(2).mul(x).mul(math.pi).cos())
+    if reverse and type(x) is not Tensor: return self.mul( math.log(max(abs(x),1e-10)) ).exp() \
+      .mul( self.mul( (math.pi-math.copysign(math.pi,x))/2 ).cos())
+    else: return x.pow(self) if reverse else self.abs().maximum(1e-10).log().mul(x).exp() \
+      .mul( (1-self.sign()).div(2).mul(x).mul(math.pi).cos())
 
   # ***** activation functions (unary) *****
 
