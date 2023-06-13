@@ -33,6 +33,7 @@ class _CL:
     self.events_in_flight.clear()
     for q in self.cl_queue: q.finish()
 CL = _CL()
+CL.post_init() if not os.environ.get("DELAYED_RUNTIME_INIT", False) else None
 
 # TODO: merge CLImage in here
 class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
@@ -102,7 +103,3 @@ class CLCodegen(CStyleCodegen):
   supports_float4_alu = True
   supports_float4 = True
 GPUBuffer = Compiled(CLBuffer, CLCodegen, CLProgram, CL.synchronize)
-
-def init(device=None):
-  CL.post_init(device)
-_ = init() if not os.environ.get("DELAYED_RUNTIME_INIT", False) else None
