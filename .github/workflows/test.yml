@@ -220,6 +220,8 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot
         cp $GITHUB_WORKSPACE/extra/cudacpu/cudacpu.cpp ./ocelot
+        mkdir ./ocelot/include/cudacpu
+        cp $GITHUB_WORKSPACE/extra/cudacpu/fp16.h ./ocelot/include/cudacpu
         cp $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot.patch .
         git apply gpuocelot.patch
     - name: Compile gpuocelot and libcudacpu
