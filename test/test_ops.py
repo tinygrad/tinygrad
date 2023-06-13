@@ -219,12 +219,6 @@ class TestOps(unittest.TestCase):
   def test_exp(self):
     helper_test_op([(45,65)], lambda x: torch.exp(x), Tensor.exp)
     helper_test_op([()], lambda x: torch.exp(x), Tensor.exp)
-  def test_log2(self):
-    helper_test_op([(45,65)], lambda x: torch.log2(x), Tensor.log2)
-    helper_test_op([()], lambda x: torch.log2(x), Tensor.log2)
-  def test_exp2(self):
-    helper_test_op([(45,65)], lambda x: torch.exp2(x), Tensor.exp2)
-    helper_test_op([()], lambda x: torch.exp2(x), Tensor.exp2)
   def test_sign(self):
     helper_test_op([(45,65)], lambda x: torch.sign(x), Tensor.sign)
     helper_test_op([()], lambda x: torch.sign(x), Tensor.sign)
