@@ -3,32 +3,24 @@ from enum import Enum
 from tinygrad.helpers import getenv
 import cffi
 
-__all__ = ["run_ptx", "PTX_ERR", "DEBUGCUDACPU"]
-
 ffi = cffi.FFI()
 ffi.cdef("""
-int run_ptx(const char* source, int n_args, void* args[],
-    int blck_x, int blck_y, int blck_z,
-    int grid_x, int grid_y, int grid_z,
-    int debug_lvl);
+void* ptx_kernel_create(const char* source);
+void ptx_kernel_destroy(void* kernel);
+void ptx_call(void* kernel, int n_args, void* args[],
+             int blck_x, int blck_y, int blck_z,
+             int grid_x, int grid_y, int grid_z);
 """)
 lib = ffi.dlopen("./extra/cudacpu/libcudacpu.so")
 
 DEBUGCUDACPU = getenv("DEBUGCUDACPU", 0)
 
-class PTX_ERR(Enum):
-	SUCCESS = 0
-	LOAD_FAILED = 1
-	KERNEL_NOT_FOUND = 2
-	ARGS_MISMATCH = 3
+def ptx_kernel_create(source:bytes):
+    kernel = lib.ptx_kernel_create(source)
+    return ffi.gc(kernel, lib.ptx_kernel_destroy)
 
-def run_ptx(source:str, args:Tuple[Any,...], block:Tuple[int, ...], grid:Tuple[int, ...]) -> PTX_ERR:
-    # print(args)
-    return PTX_ERR(lib.run_ptx(source.encode(),
-        len(args),
-        [ffi.cast("void*", ffi.from_buffer(x._buffer())) for x in args],
-        *block, *grid, DEBUGCUDACPU
-    ))
+def ptx_call(kernel, args:Tuple[Any,...], block:Tuple[int, ...], grid:Tuple[int, ...]):
+    lib.ptx_call(kernel, len(args), [ffi.cast("void*", ffi.from_buffer(x._buffer())) for x in args], *block, *grid)
 
 
 # kernel = r"""
