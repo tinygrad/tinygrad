@@ -1,8 +1,5 @@
 import os, atexit, itertools
-try:
-  import networkx as nx  # type: ignore
-except ImportError:
-  nx = None # graph won't work
+import networkx as nx
 from collections import defaultdict
 from typing import Dict, List, Optional
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps, Op, OpType, LazyOp, get_buffers, get_lazyops
