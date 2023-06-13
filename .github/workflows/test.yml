@@ -242,9 +242,9 @@ jobs:
     - name: Run test_ops
       run: FORWARD_ONLY=1 JIT=0 OPT=4 JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_ops.py
     - name: Run test_randomness
-      run: JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_randomness.py
+      run: FORWARD_ONLY=1 JIT=0 OPT=4 JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_randomness.py
     - name: Run test_specific_conv
-      run: JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_specific_conv.py
+      run: FORWARD_ONLY=1 JIT=0 OPT=4 JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_specific_conv.py
     # - name: Run test_nn
     #   run: JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_nn.py
     - name: Run Pytest (default)

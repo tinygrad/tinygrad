@@ -1,5 +1,5 @@
 diff --git a/ocelot/CMakeLists.txt b/ocelot/CMakeLists.txt
-index fef7ee9b..9f85902d 100644
+index fef7ee9b..a005e4e5 100644
 --- a/ocelot/CMakeLists.txt
 +++ b/ocelot/CMakeLists.txt
 @@ -8,11 +8,13 @@ if ("x${CMAKE_BUILD_TYPE}" STREQUAL "x")
@@ -85,7 +85,7 @@ index fef7ee9b..9f85902d 100644
  res_embed(TARGET ${PROJECT_NAME}_executive_TestEmulator NAME "TestEmulator_ptx"
  	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/executive/test/TestEmulator.ptx KEYWORD)
  
-@@ -581,256 +585,3 @@ res_embed(TARGET ${PROJECT_NAME}_executive_TestKernels NAME "TestKernels_ptx"
+@@ -581,15 +585,6 @@ res_embed(TARGET ${PROJECT_NAME}_executive_TestKernels NAME "TestKernels_ptx"
  	
  res_embed(TARGET ${PROJECT_NAME}_executive_TestLLVMKernels NAME "TestLLVMKernels_ptx"
  	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/executive/test/TestLLVMKernels.ptx KEYWORD)
@@ -98,252 +98,79 @@ index fef7ee9b..9f85902d 100644
 -
 -res_embed(TARGET ${PROJECT_NAME}_cuda_TestIndirectFunctionCallOcelot NAME "IndirectCallDriver_ptx"
 -	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/test/TestIndirectFunctionCallDriver.ptx KEYWORD)
--
--#++ -o .release_build/ocelot/TestCudaGenericMemory
--#++ -o .release_build/ocelot/TestCudaGlobals
--#++ -o .release_build/ocelot/TestCudaMalloc
--#++ -o .release_build/ocelot/TestCudaSequence
--#++ -o .release_build/ocelot/TestCudaTexture2D
--#++ -o .release_build/ocelot/TestCudaTexture3D
--#++ -o .release_build/ocelot/TestCudaTextureArray
--#++ -o .release_build/ocelot/TestCudaTextureCube
--#++ -o .release_build/ocelot/TestDataflowGraph
--#++ -o .release_build/ocelot/TestDeviceSwitching
--#++ -o .release_build/ocelot/TestDriverAPISequence
--#++ -o .release_build/ocelot/TestEmulator
--#++ -o .release_build/ocelot/TestExternalFunctions
--#++ -o .release_build/ocelot/TestFunctionCall
--#++ -o .release_build/ocelot/TestIndirectFunctionCall
--#++ -o .release_build/ocelot/TestIndirectFunctionCallOcelot
--#++ -o .release_build/ocelot/TestInstructions
--#++ -o .release_build/ocelot/TestKernels
--#++ -o .release_build/ocelot/TestLLVMInstructions
--#++ -o .release_build/ocelot/TestLLVMKernels
--#++ -o .release_build/ocelot/TestLexer
--#++ -o .release_build/ocelot/TestOptimizations
--#++ -o .release_build/ocelot/TestPTXAssembly
--#++ -o .release_build/ocelot/TestPTXToLLVMTranslator
--#++ -o .release_build/ocelot/TestParser
--#++ -o .release_build/ocelot/libocelot.so
--#++ -o .release_build/tests/cuda2.2/AlignedTypes
--#++ -o .release_build/tests/cuda2.2/AsyncAPI
--#++ -o .release_build/tests/cuda2.2/BandwidthTest
--#++ -o .release_build/tests/cuda2.2/BicubicTexture
--#++ -o .release_build/tests/cuda2.2/BinomialOptions
--#++ -o .release_build/tests/cuda2.2/Bitonic
--#++ -o .release_build/tests/cuda2.2/BlackScholes
--#++ -o .release_build/tests/cuda2.2/BoxFilter
--#++ -o .release_build/tests/cuda2.2/Clock
--#++ -o .release_build/tests/cuda2.2/ConvolutionFFT2D
--#++ -o .release_build/tests/cuda2.2/ConvolutionSeparable
--#++ -o .release_build/tests/cuda2.2/ConvolutionTexture
--#++ -o .release_build/tests/cuda2.2/CppIntegration
--#++ -o .release_build/tests/cuda2.2/Dct8x8
--#++ -o .release_build/tests/cuda2.2/DeviceQuery
--#++ -o .release_build/tests/cuda2.2/DwtHaar1D
--#++ -o .release_build/tests/cuda2.2/Dxtc
--#++ -o .release_build/tests/cuda2.2/Eigenvalues
--#++ -o .release_build/tests/cuda2.2/FastWalshTransform
--#++ -o .release_build/tests/cuda2.2/FluidsGL
--#++ -o .release_build/tests/cuda2.2/Histogram256
--#++ -o .release_build/tests/cuda2.2/Histogram64
--#++ -o .release_build/tests/cuda2.2/ImageDenoising
--#++ -o .release_build/tests/cuda2.2/Mandelbrot
--#++ -o .release_build/tests/cuda2.2/MatrixMul
--#++ -o .release_build/tests/cuda2.2/MersenneTwister
--#++ -o .release_build/tests/cuda2.2/MonteCarlo
--#++ -o .release_build/tests/cuda2.2/Nbody
--#++ -o .release_build/tests/cuda2.2/OceanFFT
--#++ -o .release_build/tests/cuda2.2/Particles
--#++ -o .release_build/tests/cuda2.2/PostProcessGL
--#++ -o .release_build/tests/cuda2.2/QuasirandomGenerator
--#++ -o .release_build/tests/cuda2.2/RecursiveGaussian
--#++ -o .release_build/tests/cuda2.2/Reduction
--#++ -o .release_build/tests/cuda2.2/ScalarProd
--#++ -o .release_build/tests/cuda2.2/Scan
--#++ -o .release_build/tests/cuda2.2/ScanLargeArray
--#++ -o .release_build/tests/cuda2.2/SimpleAtomicIntrinsics
--#++ -o .release_build/tests/cuda2.2/SimpleCUFFT
--#++ -o .release_build/tests/cuda2.2/SimpleGL
--#++ -o .release_build/tests/cuda2.2/SimpleMultiGPU
--#++ -o .release_build/tests/cuda2.2/SimpleStreams
--#++ -o .release_build/tests/cuda2.2/SimpleTemplates
--#++ -o .release_build/tests/cuda2.2/SimpleTexture
--#++ -o .release_build/tests/cuda2.2/SimpleTexture3D
--#++ -o .release_build/tests/cuda2.2/SimpleVoteIntrinsics
--#++ -o .release_build/tests/cuda2.2/SimpleZeroCopy
--#++ -o .release_build/tests/cuda2.2/SobolQRNG
--#++ -o .release_build/tests/cuda2.2/Template
--#++ -o .release_build/tests/cuda2.2/ThreadFenceReduction
--#++ -o .release_build/tests/cuda2.2/Transpose
--#++ -o .release_build/tests/cuda2.2/TransposeNew
--#++ -o .release_build/tests/cuda2.2/UnstructuredMandelbrot
--#++ -o .release_build/tests/cuda2.2/VolumeRender
--#++ -o .release_build/tests/cuda2.3/3DFD
--#++ -o .release_build/tests/cuda2.3/AtomicPerformance
--#++ -o .release_build/tests/cuda2.3/SortingNetwork
--#++ -o .release_build/tests/cuda2.3/TestBarriers
--#++ -o .release_build/tests/cuda2.3/TestCallLatency
--#++ -o .release_build/tests/cuda2.3/TestInstructionThroughput
--#++ -o .release_build/tests/cuda2.3/TestMemoryAccesses
--#++ -o .release_build/tests/cuda2.3/TestSpecialFunctions
--#++ -o .release_build/tests/cuda2.3/TestThrustAOSSorting
--#++ -o .release_build/tests/cuda2.3/TestThrustArbitraryTransform
--#++ -o .release_build/tests/cuda2.3/TestThrustBasicVector
--#++ -o .release_build/tests/cuda2.3/TestThrustBoundingBox
--#++ -o .release_build/tests/cuda2.3/TestThrustBucketSort2D
--#++ -o .release_build/tests/cuda2.3/TestThrustConstantIterator
--#++ -o .release_build/tests/cuda2.3/TestThrustCountingIterator
--#++ -o .release_build/tests/cuda2.3/TestThrustFillCopy
--#++ -o .release_build/tests/cuda2.3/TestThrustHistogram
--#++ -o .release_build/tests/cuda2.3/TestThrustMaxAbsDiff
--#++ -o .release_build/tests/cuda2.3/TestThrustMinMax
--#++ -o .release_build/tests/cuda2.3/TestThrustMode
--#++ -o .release_build/tests/cuda2.3/TestThrustNorm
--#++ -o .release_build/tests/cuda2.3/TestThrustPaddedGridReduction
--#++ -o .release_build/tests/cuda2.3/TestThrustSaxpy
--#++ -o .release_build/tests/cuda2.3/TestThrustSort
--#++ -o .release_build/tests/cuda2.3/TestThrustStreamCompact
--#++ -o .release_build/tests/cuda2.3/TestThrustSum
--#++ -o .release_build/tests/cuda2.3/TestThrustTransformIterator
--#++ -o .release_build/tests/cuda2.3/TestThrustUnwrapPointer
--#++ -o .release_build/tests/cuda2.3/TestThrustWrapPointer
--#++ -o .release_build/tests/cuda2.3/TestThrustZipDot
--#++ -o .release_build/tests/cuda2.3/vectorAdd
--#++ -o .release_build/tests/cuda2.3/worleyTestExternalSharedMemory
--#++ -o .release_build/tests/cuda3.2/AlignedTypes
--#++ -o .release_build/tests/cuda3.2/AsyncAPI
--#++ -o .release_build/tests/cuda3.2/BandwidthTest
--#++ -o .release_build/tests/cuda3.2/BicubicTexture
--#++ -o .release_build/tests/cuda3.2/BinomialOptions
--#++ -o .release_build/tests/cuda3.2/BlackScholes
--#++ -o .release_build/tests/cuda3.2/BoxFilter
--#++ -o .release_build/tests/cuda3.2/Clock
--#++ -o .release_build/tests/cuda3.2/ConvolutionFFT2D
--#++ -o .release_build/tests/cuda3.2/ConvolutionSeparable
--#++ -o .release_build/tests/cuda3.2/ConvolutionTexture
--#++ -o .release_build/tests/cuda3.2/CppIntegration
--#++ -o .release_build/tests/cuda3.2/Dct8x8
--#++ -o .release_build/tests/cuda3.2/DeviceQuery
--#++ -o .release_build/tests/cuda3.2/DwtHaar1D
--#++ -o .release_build/tests/cuda3.2/Dxtc
--#++ -o .release_build/tests/cuda3.2/Eigenvalues
--#++ -o .release_build/tests/cuda3.2/FastWalshTransform
--#++ -o .release_build/tests/cuda3.2/FluidsGL
--#++ -o .release_build/tests/cuda3.2/Histogram256
--#++ -o .release_build/tests/cuda3.2/ImageDenoising
--#++ -o .release_build/tests/cuda3.2/Mandelbrot
--#++ -o .release_build/tests/cuda3.2/MatrixMul
--#++ -o .release_build/tests/cuda3.2/MersenneTwister
--#++ -o .release_build/tests/cuda3.2/MonteCarlo
--#++ -o .release_build/tests/cuda3.2/Nbody
--#++ -o .release_build/tests/cuda3.2/OceanFFT
--#++ -o .release_build/tests/cuda3.2/PostProcessGL
--#++ -o .release_build/tests/cuda3.2/QuasirandomGenerator
--#++ -o .release_build/tests/cuda3.2/RecursiveGaussian
--#++ -o .release_build/tests/cuda3.2/Reduction
--#++ -o .release_build/tests/cuda3.2/ScalarProd
--#++ -o .release_build/tests/cuda3.2/Scan
--#++ -o .release_build/tests/cuda3.2/SimpleAtomicIntrinsics
--#++ -o .release_build/tests/cuda3.2/SimpleCUFFT
--#++ -o .release_build/tests/cuda3.2/SimpleGL
--#++ -o .release_build/tests/cuda3.2/SimpleMultiGPU
--#++ -o .release_build/tests/cuda3.2/SimpleStreams
--#++ -o .release_build/tests/cuda3.2/SimpleTemplates
--#++ -o .release_build/tests/cuda3.2/SimpleTexture
--#++ -o .release_build/tests/cuda3.2/SimpleTexture3D
--#++ -o .release_build/tests/cuda3.2/SimpleVoteIntrinsics
--#++ -o .release_build/tests/cuda3.2/SimpleZeroCopy
--#++ -o .release_build/tests/cuda3.2/SobelFilter
--#++ -o .release_build/tests/cuda3.2/SobolQRNG
--#++ -o .release_build/tests/cuda3.2/Template
--#++ -o .release_build/tests/cuda3.2/ThreadFenceReduction
--#++ -o .release_build/tests/cuda3.2/Transpose
--#++ -o .release_build/tests/cuda3.2/VolumeRender
--#++ -o .release_build/tests/cuda4.1sdk/AlignedTypes
--#++ -o .release_build/tests/cuda4.1sdk/AsyncAPI
--#++ -o .release_build/tests/cuda4.1sdk/BandwidthTest
--#++ -o .release_build/tests/cuda4.1sdk/BilateralFilter
--#++ -o .release_build/tests/cuda4.1sdk/BinomialOptions
--#++ -o .release_build/tests/cuda4.1sdk/BlackScholes
--#++ -o .release_build/tests/cuda4.1sdk/BoxFilter
--#++ -o .release_build/tests/cuda4.1sdk/Clock
--#++ -o .release_build/tests/cuda4.1sdk/ConvolutionSeparable
--#++ -o .release_build/tests/cuda4.1sdk/ConvolutionTexture
--#++ -o .release_build/tests/cuda4.1sdk/CppIntegration
--#++ -o .release_build/tests/cuda4.1sdk/DwtHaar1D
--#++ -o .release_build/tests/cuda4.1sdk/Eigenvalues
--#++ -o .release_build/tests/cuda4.1sdk/FDTD3d
--#++ -o .release_build/tests/cuda4.1sdk/FastWalshTransform
--#++ -o .release_build/tests/cuda4.1sdk/Histogram
--#++ -o .release_build/tests/cuda4.1sdk/ImageDenoising
--#++ -o .release_build/tests/cuda4.1sdk/InlinePTX
--#++ -o .release_build/tests/cuda4.1sdk/MergeSort
--#++ -o .release_build/tests/cuda4.1sdk/MersenneTwister
--#++ -o .release_build/tests/cuda4.1sdk/MonteCarlo
--#++ -o .release_build/tests/cuda4.1sdk/Nbody
--#++ -o .release_build/tests/cuda4.1sdk/QuasirandomGenerator
--#++ -o .release_build/tests/cuda4.1sdk/ScalarProd
--#++ -o .release_build/tests/cuda4.1sdk/SimpleAtomicIntrinsics
--#++ -o .release_build/tests/cuda4.1sdk/SimpleGL
--#++ -o .release_build/tests/cuda4.1sdk/SimpleLayeredTexture
--#++ -o .release_build/tests/cuda4.1sdk/SimpleMultiCopy
--#++ -o .release_build/tests/cuda4.1sdk/SimpleMultiGPU
--#++ -o .release_build/tests/cuda4.1sdk/SimplePitchLinearTexture
--#++ -o .release_build/tests/cuda4.1sdk/SimplePrintf
--#++ -o .release_build/tests/cuda4.1sdk/SimpleStreams
--#++ -o .release_build/tests/cuda4.1sdk/SimpleTemplates
--#++ -o .release_build/tests/cuda4.1sdk/SimpleTexture
--#++ -o .release_build/tests/cuda4.1sdk/SimpleTexture3D
--#++ -o .release_build/tests/cuda4.1sdk/SimpleZeroCopy
--#++ -o .release_build/tests/cuda4.1sdk/SobelFilter
--#++ -o .release_build/tests/cuda4.1sdk/SobolQRNG
--#++ -o .release_build/tests/cuda4.1sdk/SortingNetworks
--#++ -o .release_build/tests/cuda4.1sdk/Template
--#++ -o .release_build/tests/cuda4.1sdk/Transpose
--#++ -o .release_build/tests/cuda4.1sdk/VectorAdd
--#++ -o .release_build/tests/cuda4.1sdk/VolumeRender
--#++ -o .release_build/tests/parboil/bfs
--#++ -o .release_build/tests/parboil/cutcp
--#++ -o .release_build/tests/parboil/fft
--#++ -o .release_build/tests/parboil/histo
--#++ -o .release_build/tests/parboil/lbm
--#++ -o .release_build/tests/parboil/mm
--#++ -o .release_build/tests/parboil/mri-q
--#++ -o .release_build/tests/parboil/sad
--#++ -o .release_build/tests/parboil/spmv
--#++ -o .release_build/tests/parboil/stencil
--#++ -o .release_build/tests/parboil/tpacf
--#++ -o libocelotTrace.so
--
--
--#c++  -c -O2 -Wall -std=c++11 ocelot/tools/LoadPtx.cpp
--
--#flex -t src/parser/ptx.ll > .release_build/ocelot/ptx.cpp
--#c++  -c -O2 -Wall -std=c++11 -pthread -DOCELOT_CXXFLAGS="\"-O2 -Wall -std=c++11 -pthread\"" -DPACKAGE="\"ocelot\"" -DVERSION="\"2.1.0\"" -DOCELOT_PREFIX_PATH="\"/usr/local\"" -DOCELOT_LDFLAGS="\"-locelot\"" -L"\"/usr/local/lib\"" -DOCELOT_INCLUDE_PATH="\"/usr/local/include\"" -DOCELOT_LIB_PATH="\"/usr/local/lib\"" -DOCELOT_BIN_PATH="\"/usr/local/bin\"" -Iocelot/hydrazine/include -Iocelot -I/usr/include -I/usr/include -I.release_build/ocelot -Iocelot tools/OcelotConfig.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/tools/KernelTestHarness.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/tools/OcelotLinker.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/tools/OcelotServer.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/tools/PTXOptimizer.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/cuda/test/memory/generic.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/analysis/test/TestDataflowGraph.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/api/test/TestDeviceSwitching.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/cuda/test/driver/sequence.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/executive/test/TestEmulator.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/api/test/TestExternalFunctions.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/cuda/test/functions/indirectCallOcelot.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/executive/test/TestInstructions.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/executive/test/TestKernels.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/ir/test/TestLLVMInstructions.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/executive/test/TestLLVMKernels.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/parser/test/TestLexer.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/transforms/test/TestOptimizations.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/ir/test/TestPTXAssembly.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/translator/test/TestPTXToLLVMTranslator.cpp
--#c++  -c -O2 -Wall -std=c++11 ocelot/parser/test/TestParser.cpp
--
+ 
+ #++ -o .release_build/ocelot/TestCudaGenericMemory
+ #++ -o .release_build/ocelot/TestCudaGlobals
+diff --git a/ocelot/include/ocelot/executive/CooperativeThreadArray.h b/ocelot/include/ocelot/executive/CooperativeThreadArray.h
+index 6d2f9ab9..b9c96139 100644
+--- a/ocelot/include/ocelot/executive/CooperativeThreadArray.h
++++ b/ocelot/include/ocelot/executive/CooperativeThreadArray.h
+@@ -219,6 +219,14 @@ namespace executive {
+ 		*/
+ 		ir::PTXS64 getRegAsS64(int threadID, ir::PTXOperand::RegisterType reg);
+ 
++		/*!
++			Gets a register value 
++
++			\param threadID ID of the active thread
++			\reg register index
++		*/
++		ir::PTXF16 getRegAsF16(int threadID, ir::PTXOperand::RegisterType reg);
++
+ 		/*!
+ 			Gets a register value 
+ 
+@@ -357,7 +365,16 @@ namespace executive {
+ 		*/
+ 		void setRegAsF32(int threadID, ir::PTXOperand::RegisterType reg, 
+ 			ir::PTXF32 value);
+-		
++
++		/*!
++			Sets a register value 
++
++			\param threadID ID of the active thread
++			\reg register index
++		*/
++		void setRegAsF16(int threadID, ir::PTXOperand::RegisterType reg, 
++			ir::PTXF16 value);
++
+ 		/*!
+ 			Sets a register value 
+ 
+@@ -424,6 +441,7 @@ namespace executive {
+ 		ir::PTXS32 operandAsS32(int, const ir::PTXOperand &);
+ 		ir::PTXS64 operandAsS64(int, const ir::PTXOperand &);
+ 
++		ir::PTXF16 operandAsF16(int, const ir::PTXOperand &);
+ 		ir::PTXF32 operandAsF32(int, const ir::PTXOperand &);
+ 		ir::PTXF64 operandAsF64(int, const ir::PTXOperand &);
+ 
+diff --git a/ocelot/include/ocelot/ir/PTXOperand.h b/ocelot/include/ocelot/ir/PTXOperand.h
+index 853b719c..d2558cf8 100644
+--- a/ocelot/include/ocelot/ir/PTXOperand.h
++++ b/ocelot/include/ocelot/ir/PTXOperand.h
+@@ -11,7 +11,9 @@
+ #include <string>
+ #include <vector>
+ #include <functional>
++#include <float.h>
+ #include <ocelot/ir/Instruction.h>
++#include <cudacpu/fp16.h>
+ 
+ namespace ir {
+ 
+@@ -25,6 +27,8 @@ namespace ir {
+ 	typedef int32_t PTXS32;
+ 	typedef int64_t PTXS64;
+ 	
++	// https://gcc.gnu.org/onlinedocs/gcc/Half-Precision.html
++	typedef float16 PTXF16;
+ 	typedef float PTXF32;
+ 	typedef double PTXF64;
+ 	
 diff --git a/ocelot/src/executive/CooperativeThreadArray.cpp b/ocelot/src/executive/CooperativeThreadArray.cpp
-index e957204c..05158803 100644
+index e957204c..d6c93ece 100644
 --- a/ocelot/src/executive/CooperativeThreadArray.cpp
 +++ b/ocelot/src/executive/CooperativeThreadArray.cpp
 @@ -32,6 +32,7 @@
@@ -354,7 +181,139 @@ index e957204c..05158803 100644
  
  // Preprocessor Macros
  #ifdef REPORT_BASE
-@@ -3021,7 +3022,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -851,6 +852,32 @@ ir::PTXS64 executive::CooperativeThreadArray::getRegAsS64(int threadID,
+ 	return r;
+ }
+ 
++/*!
++	Gets a register value
++
++	\param threadID ID of the active thread
++	\reg register index
++*/
++ir::PTXF16 executive::CooperativeThreadArray::getRegAsF16(int threadID,
++	ir::PTXOperand::RegisterType reg) {
++	ir::PTXF16 r = *( (ir::PTXF16*)(
++		&functionCallStack.registerFilePointer(threadID)[reg]));
++	#if REPORT_NTH_THREAD_ONLY == 1
++	if (threadID == NTH_THREAD) {
++		reportE(REPORT_REGISTER_READS, "   thread " << threadID
++			<< " reg " << reg << " <= " << r
++			<< " (0x" << std::hex << (hydrazine::bit_cast<ir::PTXU32>(r))
++			<< std::dec << ")");
++	}
++	#else
++	reportE(REPORT_REGISTER_READS, "   thread " << threadID
++		<< " reg " << reg << " <= " << r
++			<< " (0x" << std::hex << (hydrazine::bit_cast<ir::PTXU64>(r))
++			<< std::dec << ")");
++	#endif
++	return r;
++}
++
+ /*!
+ 	Gets a register value
+ 
+@@ -1191,6 +1218,32 @@ void  executive::CooperativeThreadArray::setRegAsS64(int threadID,
+ 	*r = value;
+ }
+ 
++/*!
++	Sets a register value
++
++	\param threadID ID of the active thread
++	\reg register index
++*/
++void  executive::CooperativeThreadArray::setRegAsF16(int threadID,
++	ir::PTXOperand::RegisterType reg, ir::PTXF16 value) {
++	ir::PTXF16* r = (ir::PTXF16*)(
++		&functionCallStack.registerFilePointer(threadID)[reg]);
++	#if REPORT_NTH_THREAD_ONLY == 1
++	if (threadID == NTH_THREAD) {
++		reportE(REPORT_REGISTER_WRITES, "   thread " << threadID
++			<< " reg " << reg << " value " << " => " << value
++			<< " (0x" << std::hex << (hydrazine::bit_cast<ir::PTXU32>(value))
++			<< std::dec << ")");
++	}
++	#else
++	reportE(REPORT_REGISTER_WRITES, "   thread " << threadID
++		<< " reg " << reg << " value " << " => " << value
++			<< " (0x" << std::hex << (hydrazine::bit_cast<ir::PTXU32>(value))
++			<< std::dec << ")");
++	#endif
++	*r = value;
++}
++
+ /*!
+ 	Sets a register value
+ 
+@@ -1494,6 +1547,19 @@ ir::PTXS64 executive::CooperativeThreadArray::operandAsS64(int threadID,
+ 	return 0;
+ }
+ 
++ir::PTXF16 executive::CooperativeThreadArray::operandAsF16(int threadID,
++	const ir::PTXOperand &op) {
++	switch (op.addressMode) {
++		case ir::PTXOperand::Register:
++			return getRegAsF16(threadID, op.reg);
++		case ir::PTXOperand::Immediate:
++			return (ir::PTXF16)(op.imm_single);
++		default:
++			assert(0 == "invalid address mode of operand");
++	}
++	return 0.0f;
++}
++
+ ir::PTXF32 executive::CooperativeThreadArray::operandAsF32(int threadID,
+ 	const ir::PTXOperand &op) {
+ 	switch (op.addressMode) {
+@@ -2960,6 +3026,27 @@ static Float roundToInt(Float a, int modifier, executive::CTAContext &context,
+ 	return fd;
+ }
+ 
++
++const char* datatype_s[] = {
++	"TypeSpecifier_invalid",
++	"s8",
++	"s16",
++	"s32",
++	"s64",
++	"u8",
++	"u16",
++	"u32",
++	"u64",
++	"f16",
++	"f32",
++	"f64",
++	"b8",
++	"b16",
++	"b32",
++	"b64",
++	"pred",
++};
++
+ /*!
+ 
+ */
+@@ -2975,6 +3062,9 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 			sourceType = instr.a.relaxedType;
+ 		}
+ 
++		// fprintf(stderr, "++++++ [CUDACPU] - CASTING %s %s\n", datatype_s[sourceType], datatype_s[instr.type]);
++		// fflush(stderr);
++
+ 		switch (sourceType) {
+ 			case ir::PTXOperand::b8: // fall through
+ 			case ir::PTXOperand::u8:
+@@ -2998,6 +3088,7 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 						break;
+ 					case ir::PTXOperand::s8:
+ 						{
++							printf("casting2\n");
+ 							ir::PTXU8 a = operandAsU8(threadID, instr.a);
+ 							if(instr.modifier & ir::PTXInstruction::sat) {
+ 								a = min(a, CHAR_MAX);
+@@ -3021,7 +3112,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  						}
  						break;
  					default:
@@ -364,7 +323,15 @@ index e957204c..05158803 100644
  							context.PC, instr);
  						break;
  				}
-@@ -3071,7 +3073,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -3053,6 +3145,7 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 							if (instr.modifier & ir::PTXInstruction::sat) {
+ 								a = max(a, 0);
+ 							}
++							// printf("casting!!!\n");
+ 							setRegAsU64(threadID, instr.d.reg, a);
+ 						}
+ 						break;
+@@ -3071,7 +3164,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  						}
  						break;
  					default:
@@ -374,7 +341,7 @@ index e957204c..05158803 100644
  							context.PC, instr);
  						break;
  				}
-@@ -3138,7 +3141,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -3138,7 +3232,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  						}
  						break;
  					default:
@@ -384,7 +351,7 @@ index e957204c..05158803 100644
  							context.PC, instr);
  						break;
  				}
-@@ -3204,7 +3208,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -3204,7 +3299,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  						}
  						break;
  					default:
@@ -394,7 +361,7 @@ index e957204c..05158803 100644
  							context.PC, instr);
  						break;
  				}
-@@ -3286,7 +3291,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -3286,7 +3382,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  						}
  						break;
  					default:
@@ -404,7 +371,7 @@ index e957204c..05158803 100644
  							context.PC, instr);
  						break;
  				}
-@@ -3366,7 +3372,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -3366,7 +3463,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  						}
  						break;
  					default:
@@ -414,7 +381,7 @@ index e957204c..05158803 100644
  							context.PC, instr);
  						break;
  				}
-@@ -3461,7 +3468,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -3461,7 +3559,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  						}
  						break;
  					default:
@@ -424,27 +391,101 @@ index e957204c..05158803 100644
  							context.PC, instr);
  						break;
  				}
-@@ -3558,7 +3566,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -3558,7 +3657,55 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  						}
  						break;
  					default:
 -						throw RuntimeException("conversion not implemented",
 +						trace();
 +						throw RuntimeException("conversion not implemented 8",
++							context.PC, instr);
++						break;
++				}
++			}
++			break;
++			case ir::PTXOperand::f16:
++			{
++				switch (instr.type) {
++					// case ir::PTXOperand::pred: // fall through
++					// case ir::PTXOperand::b8: // fall through
++					// case ir::PTXOperand::u8:
++					// case ir::PTXOperand::b16: // fall through
++					// case ir::PTXOperand::u16:
++					// case ir::PTXOperand::b32: // fall through
++					// case ir::PTXOperand::u32:
++					// case ir::PTXOperand::b64: // fall through
++					// case ir::PTXOperand::u64:
++					// case ir::PTXOperand::s8:
++					// case ir::PTXOperand::s16:
++					// case ir::PTXOperand::s32:
++					// case ir::PTXOperand::s64:
++
++					case ir::PTXOperand::f16: 
++						{
++							ir::PTXF16 a = operandAsF16(threadID, instr.a);
++							setRegAsF16(threadID, instr.d.reg, a);
++						}
++						break;
++					case ir::PTXOperand::f32:
++						{
++							ir::PTXF16 a = operandAsF16(threadID, instr.a);
++							ir::PTXF32 d = a;
++							setRegAsF32(threadID, instr.d.reg, d);
++						}
++						break;
++					case ir::PTXOperand::f64:
++						{
++							ir::PTXF16 a = operandAsF16(threadID, instr.a);
++							ir::PTXF64 d = a;
++							setRegAsF64(threadID, instr.d.reg, d);
++						}
++						break;
++					default:
++						trace();
++						printf("f32 -> %d\n", instr.type);
++						fflush(stdout);
++						throw RuntimeException("conversion not implemented 13",
  							context.PC, instr);
  						break;
  				}
-@@ -3743,7 +3752,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -3724,15 +3871,20 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 							setRegAsS64(threadID, instr.d.reg, d);
+ 						}
+ 						break;
++					case ir::PTXOperand::f16:
++						{
++							ir::PTXF32 a = operandAsF32(threadID, instr.a);
++							ir::PTXF16 d = a;
++							setRegAsF16(threadID, instr.d.reg, d);
++						}
++						break;
+ 					case ir::PTXOperand::f32:
+ 						{
+ 							ir::PTXF32 a = operandAsF32(threadID, instr.a);
+-
+-							a = roundToInt(a, instr.modifier, context,
+-								instr);
+-
+ 							setRegAsF32(threadID, instr.d.reg,
+ 								sat(instr.modifier, a));
++							// a = roundToInt(a, instr.modifier, context,
++							// 	instr);
+ 						}
+ 						break;
+ 					case ir::PTXOperand::f64:
+@@ -3743,7 +3895,10 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  						}
  						break;
  					default:
 -						throw RuntimeException("conversion not implemented",
 +						trace();
++						printf("f32 -> %d\n", instr.type);
++						fflush(stdout);
 +						throw RuntimeException("conversion not implemented 9",
  							context.PC, instr);
  						break;
  				}
-@@ -3932,14 +3942,16 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -3932,15 +4087,20 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  						}
  						break;
  					default:
@@ -458,12 +499,17 @@ index e957204c..05158803 100644
  			break;
  			default:
 -				throw RuntimeException("conversion not implemented",
-+				trace();
-+				throw RuntimeException("conversion not implemented 11",
- 					context.PC, instr);
+-					context.PC, instr);
++				fprintf(stderr, "[CUDACPU] CONVERSION NOT IMPLEMENTED 11 %d\n", sourceType);
++				fflush(stderr);
++				abort();
++				// trace();
++				// throw RuntimeException("conversion not implemented 11",
++				// 	context.PC, instr);
  				break;
  		}
-@@ -5088,7 +5100,7 @@ void executive::CooperativeThreadArray::eval_Lg2(CTAContext &context,
+ 
+@@ -5088,7 +5248,7 @@ void executive::CooperativeThreadArray::eval_Lg2(CTAContext &context,
  void executive::CooperativeThreadArray::eval_Mad24(CTAContext &context,
  	const ir::PTXInstruction &instr) {
  	trace();
@@ -472,7 +518,7 @@ index e957204c..05158803 100644
  }
  
  /*!
-@@ -6500,7 +6512,7 @@ void executive::CooperativeThreadArray::eval_Rcp(CTAContext &context,
+@@ -6500,7 +6660,7 @@ void executive::CooperativeThreadArray::eval_Rcp(CTAContext &context,
  */
  void executive::CooperativeThreadArray::eval_Red(CTAContext &context, const ir::PTXInstruction &instr) {
  	trace();
@@ -481,23 +527,21 @@ index e957204c..05158803 100644
  }
  
  /*!
-diff --git a/ocelot/src/parser/PTXParser.cpp b/ocelot/src/parser/PTXParser.cpp
-index b392e8c7..690e8ddd 100644
---- a/ocelot/src/parser/PTXParser.cpp
-+++ b/ocelot/src/parser/PTXParser.cpp
-@@ -1284,13 +1284,13 @@ namespace parser
- 	
- 		std::string message = statements.back().instruction.valid();
- 	
--		if( message != "" )
-+		/*if( message != "" )
- 		{
- 			throw_exception( toString( location, *this ) 
- 				<< "Parsed invalid instruction " 
- 				<< statements.back().instruction.toString() 
- 				<< " : " << message, InvalidInstruction );
--		}
-+		}*/
- 	
- 		operandVector.clear();
- 	}
+diff --git a/ocelot/src/ir/PTXInstruction.cpp b/ocelot/src/ir/PTXInstruction.cpp
+index 6a9d2dc8..91978e67 100644
+--- a/ocelot/src/ir/PTXInstruction.cpp
++++ b/ocelot/src/ir/PTXInstruction.cpp
+@@ -1038,9 +1038,11 @@ std::string ir::PTXInstruction::valid() const {
+ 				}
+ 			}
+ 			if( a.type != b.type ) {
+-				return "type of operand A " + PTXOperand::toString( a.type ) 
++				return "";
++				// worst case it'll trap
++				/*return "type of operand A " + PTXOperand::toString( a.type ) 
+ 					+ " does not equal type of operand B " 
+-					+ PTXOperand::toString( b.type );
++					+ PTXOperand::toString( b.type );*/
+ 			}
+ 			if( !( c.bytes() == d.bytes() ) ) {
+ 				std::stringstream stream;
