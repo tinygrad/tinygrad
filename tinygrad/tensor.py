@@ -36,8 +36,8 @@ class Tensor:
 
   def __init__(self, data:Union[int, float, list, tuple, LazyBuffer, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
-    assert dtype is None or device not in dtype.excluded, f"dtype: {dtype} not supported on device: {device}"
     device = Device.canonicalize(device)
+    assert dtype is None or device.split(":", 1)[0] not in dtype.excluded, f"dtype: {dtype} not supported on device: {device}"
     if isinstance(data, (list, tuple)):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
     if isinstance(data, np.ndarray):
@@ -592,7 +592,9 @@ class Tensor:
 
   # ***** cast ops *****
 
-  def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
+  def cast(self, dtype:DType) -> Tensor: 
+    assert self.device.split(":", 1)[0] not in dtype.excluded, f"dtype: {dtype} not supported on device: {self.device}"
+    return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
   def float(self) -> Tensor: return self.cast(dtypes.float32)
   def half(self) -> Tensor: return self.cast(dtypes.float16)
 
