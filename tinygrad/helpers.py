@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-import os, math, functools, time
+import os, math, functools, time, re
 import numpy as np
 from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 ShapeType = Tuple[int, ...]
@@ -12,6 +12,7 @@ def argfix(*x): return tuple() if len(x) == 0 else tuple(x[0]) if isinstance(x[0
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def all_same(items): return all(x == items[0] for x in items) if len(items) > 0 else True
 def colored(st, color, background=False, bright=False): return f"\u001b[{10*background+60*bright+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color)}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
+def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
 def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if not fxn(x)]
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterator): return [item for sublist in l for item in sublist]
@@ -34,6 +35,7 @@ class ContextVar:
   def __bool__(self): return self.value != 0
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
+  def __lt__(self, x): return self.value < x
   @property
   def value(self): return ContextVar.ctx_stack[-1][self.key] if self.key in ContextVar.ctx_stack[-1] else self.initial_value
 
@@ -71,7 +73,7 @@ class dtypes:
   @staticmethod
   def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32)
   @staticmethod
-  def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8)
+  def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint32, dtypes.uint64)
   @staticmethod
   def from_np(x) -> DType: return asdict(dtypes())[np.dtype(x).name]
   bool: Final[DType] = DType(0, 1, "bool", bool)
@@ -81,6 +83,8 @@ class dtypes:
   int32: Final[DType] = DType(1, 4, "int", np.int32)
   int64: Final[DType] = DType(2, 8, "int64", np.int64)
   uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
+  uint32: Final[DType] = DType(1, 4, "uint", np.uint32)
+  uint64: Final[DType] = DType(2, 8, "uint64", np.uint64)
 
 
 class GlobalCounters:
