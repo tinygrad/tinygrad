@@ -10,9 +10,10 @@ import time
 # process control commands
 class Command: ...
 class ZeroGradCommand(Command): ...
-class ForwardBackwardCommand(Command):
+class ForwardCommand(Command):
   def __init__(self, x, y):
     self.x, self.y = x, y
+class BackwardCommand(Command): ...
 class AllReduceCommand(Command): ...
 class StepCommand(Command): ...
 
@@ -42,6 +43,26 @@ class DDP:
       exit(1)
     signal.signal(signal.SIGINT, shutdown)
 
+  def forward(self, X, Y):
+    for q, x, y in zip(self.cmd_queues, X, Y): q.put(ForwardCommand(x, y))
+    self.wait_barrier.wait()
+    losses = [self.out_queue.get() for _ in self.devices]
+    return sum(losses) / len(losses)
+
+  def backward(self):
+    for q in self.cmd_queues: q.put(BackwardCommand())
+    self.wait_barrier.wait()
+    for q in self.cmd_queues: q.put(AllReduceCommand())
+    self.wait_barrier.wait()
+
+  def zero_grad(self):
+    for q in self.cmd_queues: q.put(ZeroGradCommand())
+    self.wait_barrier.wait()
+
+  def step(self):
+    for q in self.cmd_queues: q.put(StepCommand())
+    self.wait_barrier.wait()
+
 class DDPProcess(mp.Process):
   def __init__(self, rank, device, device_count, model_fn, optim_fn, loss_fn, cmd_queue, out_queue, wait_barrier, our_ring_queue, next_ring_queue, shm_cache):
     super(DDPProcess, self).__init__()
@@ -53,8 +74,8 @@ class DDPProcess(mp.Process):
   def run(self):
     # this is now running in the process
     if "GPU" in self.device:
-      from tinygrad.runtime.ops_gpu import init
-      init(self.device_num)
+      from tinygrad.runtime.ops_gpu import CL
+      CL.post_init(self.device_num)
     print(f"DDPProcess {self.rank} initialized runtime for device {self.device}")
 
     from tinygrad.nn.optim import get_parameters, get_state_dict
@@ -67,16 +88,17 @@ class DDPProcess(mp.Process):
       cmd = self.cmd_queue.get()
       if cmd.__class__ is ZeroGradCommand:
         self.optim.zero_grad()
-      elif cmd.__class__ is ForwardBackwardCommand:
+      elif cmd.__class__ is ForwardCommand:
         x = Tensor(cmd.x, requires_grad=False)
         out = self.model(x)
-        loss = self.loss_fn(out, cmd.y)
-        loss.backward()
+        self.loss = self.loss_fn(out, cmd.y)
+        self.out_queue.put(self.loss.numpy().item())
+      elif cmd.__class__ is BackwardCommand:
+        self.loss.backward()
         # realize grads
         for p in get_parameters(self.model):
           if p.grad is not None:
             p.grad.realize()
-        self.out_queue.put(loss.numpy().item())
       elif cmd.__class__ is AllReduceCommand:
         state_dict = get_state_dict(self.model)
 
