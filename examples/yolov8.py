@@ -394,7 +394,7 @@ if __name__ == '__main__':
   img_path = args.image_location
   yolo_variant = args.variant
   
-  images = [np.array(Image.open(img_path))]
+  images = [cv2.imread(img_path)]
   pre_processed_images = preprocess(images)
 
   # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/v8/yolov8.yaml
