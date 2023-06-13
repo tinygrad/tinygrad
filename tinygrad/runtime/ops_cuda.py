@@ -47,8 +47,16 @@ class CUDAProgram:
 class CUDACodegen(CStyleCodegen):
   lang = CStyleLanguage(
     kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
-    half_prekernel = "#include <cuda_fp16.h>",
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
-    lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
+    lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
+    half_prekernel = """
+      #include <cuda_fp16.h>
+      struct __align__(8) half4 {
+        half2 x, y;
+        __device__ __forceinline__ explicit operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
+      };
+      typedef unsigned char uchar;
+      typedef long long int64;
+    """)
   supports_float4_alu = False
 CUDABuffer = Compiled(RawCUDABuffer, CUDACodegen, CUDAProgram, cuda.Context.synchronize)

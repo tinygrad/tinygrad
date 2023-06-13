@@ -2,7 +2,7 @@ from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, 
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer, LocalTypes
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
-from tinygrad.helpers import getenv, partition, ImageDType, DEBUG, dtypes, colored, prod
+from tinygrad.helpers import partition, ImageDType, DEBUG, dtypes, colored, prod
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
 from tinygrad.lazy import LazyBuffer
@@ -11,8 +11,6 @@ from tinygrad.lazy import LazyBuffer
 render_cl = render_python.copy()
 render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops, ctx)}/{self.b})"
 render_cl[AndNode] = lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
-
-NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
 
 class CStyleLanguage(NamedTuple):
   kernel_prefix: str = ""
@@ -48,8 +46,8 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
   return idx, idy
 
 code_for_op: Final[Dict[Op, Callable]] = {
-  UnaryOps.EXP: lambda x: f"native_exp({x})" if NATIVE_EXPLOG else f"exp({x})",
-  UnaryOps.LOG: lambda x: f"native_log({x})" if NATIVE_EXPLOG else f"log({x})",
+  UnaryOps.EXP2: lambda x: f"exp2({x})",
+  UnaryOps.LOG2: lambda x: f"log2({x})",
   UnaryOps.SIN: lambda x: f"sin({x})",
   BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
   BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
@@ -120,8 +118,10 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       # TODO: merge with CONST?
       if bufs[args.i] is not None and isinstance(bufs[args.i].realized, RawConst):
         assert newvar.ltype == LocalTypes.float, "const can't be float4"
-        # nan? inf?
-        val = f"{bufs[args.i].realized._buf}" + ("f" if not dtypes.is_int(bufs[args.i].dtype) else "")
+        x = bufs[args.i].realized._buf
+        if math.isnan(x): val = "NAN"
+        elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
+        else: val = f"{x}" +  ("f" if not dtypes.is_int(bufs[args.i].dtype) else "")
       elif isinstance(bufs[args.i].dtype, ImageDType):
         assert newvar.ltype == LocalTypes.float4, "image must be float4"
         prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
@@ -141,8 +141,8 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
       if args.valid.min == 1: kk(f"{newvar.render(True)} = {val};")
       else:
-        zero = f"{lang.float4}(0.0f, 0.0f, 0.0f, 0.0f);" if newvar.ltype == LocalTypes.float4 else "0.0f"
-        kk(f"{newvar.render(True)} = ({args.valid.render(render_cl)}) ? ({val}) : {zero};")
+        casts = {LocalTypes.float4: ("", f"{lang.float4}(0.0f, 0.0f, 0.0f, 0.0f)"), LocalTypes.half: ("(half)", "(half)(0.0f)"), LocalTypes.float: ("(float)", "0.0f")}[newvar.ltype]
+        kk(f"{newvar.render(True)} = ({args.valid.render(render_cl)}) ? {casts[0]}({val}) : {casts[1]};")
     elif uop == UOps.STORE and (vin[0].ltype == LocalTypes.float or (vin[0].ltype == LocalTypes.float4 and vin[0].offset is not None)):
       assert not isinstance(bufs[args.i].dtype, ImageDType), "image store must be float4"
       assert args.valid.min == 1, "store must be valid"
