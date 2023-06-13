@@ -339,6 +339,29 @@ class Tensor:
     for i,k in enumerate(range(0, self.shape[dim], self.shape[dim]//num)):
       slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
     return [self.slice(p) for p in slice_params]
+  
+  @staticmethod
+  def interpolate(x, scale_factor, mode='nearest'):
+    assert mode == 'nearest', 'Only nearest interpolate available'
+    bs, c, py, px = x.shape
+    return x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, scale_factor, px, scale_factor).reshape(bs, c, py * scale_factor, px * scale_factor)
+
+  @staticmethod
+  def sort(input, axis=-1, reverse=True):
+    np_input = input.numpy()
+    sorted_np_idx = np.argsort(np_input, axis=axis)
+    if reverse:
+      sorted_np_idx = np.flip(sorted_np_idx, axis=axis).copy(order='C').astype(np.int32)
+    sorted_np = np.take_along_axis(np_input, sorted_np_idx, axis=axis)
+    return Tensor(sorted_np), sorted_np_idx
+
+  def topk(self, k, dim=-1, largest=True, sorted=True):
+    # TODO: This is Slow!!
+    if dim < 0:
+      dim = len(self.shape) + dim
+    slice_list = [(0, n) if d != dim else (0, k) for d, n in enumerate(self.shape)]
+    sort_, sort_idx = Tensor.sort(self, reverse=largest, axis=dim)
+    return sort_.slice(slice_list), Tensor(sort_idx).slice(slice_list).numpy()
 
   def unsqueeze(self, dim):
     if dim < 0: dim = len(self.shape) + dim + 1
@@ -476,6 +499,7 @@ class Tensor:
 
   def contiguous(self): return mlops.Contiguous.apply(self)
   def log(self): return mlops.Log.apply(self)
+  def log2(self): return mlops.Log.apply(self)/0.69314718056  # math.log(2)
   def exp(self): return mlops.Exp.apply(self)
   def relu(self): return mlops.Relu.apply(self)
   def sin(self): return mlops.Sin.apply(self)
@@ -497,6 +521,8 @@ class Tensor:
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
   def reciprocal(self): return 1.0/self
+  def floor(self): i = self.cast(dtypes.int32); return (self>0).where(i, i-1)
+  def ceil(self): return -1 * (-1 * self).floor()
 
   # ***** activation functions (unary) *****
 
