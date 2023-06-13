@@ -55,7 +55,7 @@ class DType(NamedTuple):
   itemsize: int
   name: str
   np: type  # TODO: someday this will be removed with the "remove numpy" project
-  excluded: Tuple[str] = ()
+  excluded: Tuple[str,...] = ()
   def __repr__(self): return f"dtypes.{self.name}"
 
 # dependent typing?
