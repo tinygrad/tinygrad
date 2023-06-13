@@ -25,8 +25,9 @@ class TestSpecific(unittest.TestCase):
     #   0 buffer<4096, dtypes.float>                      [View((1024, 1, 1, 4), (4, 0, 0, 1), 0, None)]
     #   1 buffer<4096, dtypes.float>                      [View((1024, 1024, 4, 4), (0, 4, 1, 0), 0, None)]
     #   2 buffer<16777216, dtypes.half>                   [View((1024, 1024, 4, 4), (16384, 4, 1, 4096), 0, None)]
-    x = Tensor.randn(4096).realize()
-    w = Tensor.randn(4096, 4096, device='cpu').cast(dtypes.float16).to(Device.DEFAULT).realize()
+    # shrinked down to 512 to be 64x faster
+    x = Tensor.randn(512).realize()
+    w = Tensor.randn(512, 512, device='cpu').cast(dtypes.float16).to(Device.DEFAULT).realize()
     (x @ w.T).realize()
 
   # from https://dl.acm.org/doi/pdf/10.1145/3495243.3517020
