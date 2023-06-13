@@ -2,6 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.jit import TinyJit
+from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import BatchNorm2d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm
 import torch
@@ -73,6 +74,7 @@ class TestNN(unittest.TestCase):
     _test_linear(Tensor.randn(BS, in_dim))
     _test_linear(Tensor.randn(BS, T, in_dim)) # test with more dims
 
+  @unittest.skipIf(getenv("CUDACPU",0) == 1, "Too slow for emulation")
   def test_conv2d(self):
     BS, C1, H, W = 4, 16, 224, 224
     C2, K, S, P = 64, 7, 2, 1
