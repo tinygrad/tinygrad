@@ -41,6 +41,14 @@ class Log(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.binary_op(BinaryOps.DIV, self.x)
+  
+class Log2(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.x = x
+    return x.unary_op(UnaryOps.LOG2)
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return grad_output.binary_op(BinaryOps.DIV, self.x * math.log(2))
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:

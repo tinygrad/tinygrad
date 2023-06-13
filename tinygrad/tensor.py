@@ -499,7 +499,7 @@ class Tensor:
 
   def contiguous(self): return mlops.Contiguous.apply(self)
   def log(self): return mlops.Log.apply(self)
-  def log2(self): return mlops.Log.apply(self)/0.69314718056  # math.log(2)
+  def log2(self): return mlops.Log2.apply(self)
   def exp(self): return mlops.Exp.apply(self)
   def relu(self): return mlops.Relu.apply(self)
   def sin(self): return mlops.Sin.apply(self)
