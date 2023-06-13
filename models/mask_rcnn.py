@@ -33,11 +33,14 @@ def npgather(array,indices):
 def get_strides(shape):
     prod = [1]
     for idx in range(len(shape)-1, -1, -1): prod.append(prod[-1] * shape[idx])
-    return Tensor(prod[::-1][1:]).unsqueeze(0).realize()
+    return Tensor(prod[::-1][1:], dtype=dtypes.int32).unsqueeze(0).cpu()
 
 # with keys as integer array for all axes
 def tensor_getitem(tensor, *keys):
-    flat_keys = Tensor.stack([key.expand((sum(keys)).shape).reshape(-1).float() for key in keys], dim=1)
+    # something about ints is broken with gpu, cuda
+    for key in keys:
+      key = key.cpu().cast(dtypes.int32)
+    flat_keys = Tensor.stack([key.expand((sum(keys)).shape).reshape(-1).float() for key in keys], dim=1).cpu().cast(dtypes.int32)
     strides = get_strides(tensor.shape)
     idxs = (flat_keys * strides).sum(1)
     return npgather(tensor.reshape(-1), idxs).reshape(sum(keys).shape)
