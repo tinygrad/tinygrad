@@ -123,6 +123,13 @@ class AssemblyCodegen(Linearizer):
           pred_reg = newreg((newvar, 'pred'), dtype=dtypes.bool)
           ins.append(AssemblyInstruction(UOps.ALU, pred_reg, [tor[x] for x in vin], args))
           ins.append(AssemblyInstruction(UOps.CAST, newreg(newvar), [pred_reg], args))
+        elif args == BinaryOps.POW:
+          # TODO: add UnaryOps.SQRT
+          tmp = newreg((newvar, "exp_a"))
+          tmp2 = newreg((newvar, "exp_a_times_b"))
+          ins.append(AssemblyInstruction(UOps.ALU, tmp, [tor[vin[0]]], UnaryOps.LOG2))
+          ins.append(AssemblyInstruction(UOps.ALU, tmp2, [tmp, tor[vin[1]]], BinaryOps.MUL))
+          ins.append(AssemblyInstruction(UOps.ALU, newreg(newvar), [tmp2], UnaryOps.EXP2))
         elif args == UnaryOps.SIN and hasattr(self, 'sin_is_sin2pi'):
           tmp = newreg((newvar, "2pi"))
           ins.append(AssemblyInstruction(UOps.ALU, tmp, [tor[vin[0]], 1/(math.pi*2)], BinaryOps.MUL))
