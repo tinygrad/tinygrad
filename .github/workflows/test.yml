@@ -242,4 +242,4 @@ jobs:
     - name: Install tinygrad dependencies
       run: pip install -e '.[testing, cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: FORWARD_ONLY=1 JIT=1 OPT=4 OPTLOCAL=1 JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/
