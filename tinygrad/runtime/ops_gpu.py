@@ -1,5 +1,5 @@
 from __future__ import annotations
-import platform, pathlib
+import platform, pathlib, os
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
@@ -21,12 +21,13 @@ if DEBUG >= 5:
 
 class _CL:
   def __init__(self):
+    self.events_in_flight = []
+  def post_init(self, device=None):
     platforms: List[List[cl.Device]] = [y for y in ([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()] + [x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()]) if len(y)]
     if DEBUG >= 1: print(f"using {platforms[getenv('CL_PLATFORM', 0)]}")
     self.cl_platform = cl.get_platforms()[getenv('CL_PLATFORM', 0)]
-    self.cl_ctxs: List[cl.Context] = [cl.Context(devices=[x]) for x in platforms[getenv('CL_PLATFORM', 0)] if x.name not in getenv('CL_EXCLUDE', "").split(",")]
+    self.cl_ctxs: List[cl.Context] = [cl.Context(devices=[x]) for x in platforms[getenv('CL_PLATFORM', 0)] if x.name not in getenv('CL_EXCLUDE', "").split(",")] if device is None else [cl.Context(devices=[platforms[getenv('CL_PLATFORM', 0)][device]])]
     self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(ctx, device=ctx.devices[0], properties=cl.command_queue_properties.PROFILING_ENABLE) for ctx in self.cl_ctxs]
-    self.events_in_flight = []
   def synchronize(self):
     for evt in self.events_in_flight: evt.wait()
     self.events_in_flight.clear()
@@ -101,3 +102,7 @@ class CLCodegen(CStyleCodegen):
   supports_float4_alu = True
   supports_float4 = True
 GPUBuffer = Compiled(CLBuffer, CLCodegen, CLProgram, CL.synchronize)
+
+def init(device=None):
+  CL.post_init(device)
+_ = init() if not os.environ.get("DELAYED_RUNTIME_INIT", False) else None
