@@ -208,7 +208,7 @@ jobs:
         sudo apt-get update -y
     - name: Install packages
       run: |
-        sudo apt-get install -y git g++ cmake ninja-build llvm-14-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+        sudo apt-get install -y git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
     - name: Clone gpuocelot repo
       uses: actions/checkout@v3
       with:
@@ -240,12 +240,12 @@ jobs:
     - name: Install tinygrad dependencies
       run: pip install -e '.[testing, cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run test_ops
-      run: JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_ops.py
+      run: FORWARD_ONLY=1 JIT=0 OPT=4 JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_ops.py
     - name: Run test_randomness
       run: JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_randomness.py
-    - name: Run test_nn
-      run: JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_nn.py
     - name: Run test_specific_conv
       run: JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_specific_conv.py
+    # - name: Run test_nn
+    #   run: JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_nn.py
     - name: Run Pytest (default)
       run: JIT=1 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/
