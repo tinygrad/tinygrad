@@ -147,7 +147,7 @@ index 6d2f9ab9..b9c96139 100644
  		ir::PTXF64 operandAsF64(int, const ir::PTXOperand &);
  
 diff --git a/ocelot/include/ocelot/ir/PTXOperand.h b/ocelot/include/ocelot/ir/PTXOperand.h
-index 853b719c..d2558cf8 100644
+index 853b719c..3113338e 100644
 --- a/ocelot/include/ocelot/ir/PTXOperand.h
 +++ b/ocelot/include/ocelot/ir/PTXOperand.h
 @@ -11,7 +11,9 @@
@@ -169,8 +169,17 @@ index 853b719c..d2558cf8 100644
  	typedef float PTXF32;
  	typedef double PTXF64;
  	
+@@ -217,6 +221,8 @@ namespace ir {
+ 			long long int imm_int;
+ 			double imm_float;
+ 			float  imm_single;
++			uint16_t imm_half;
++			// float16 imm_half;
+ 			PredicateCondition condition;
+ 			SpecialRegister special;
+ 			unsigned int localMemorySize;
 diff --git a/ocelot/src/executive/CooperativeThreadArray.cpp b/ocelot/src/executive/CooperativeThreadArray.cpp
-index e957204c..d6c93ece 100644
+index e957204c..956b63be 100644
 --- a/ocelot/src/executive/CooperativeThreadArray.cpp
 +++ b/ocelot/src/executive/CooperativeThreadArray.cpp
 @@ -32,6 +32,7 @@
@@ -309,7 +318,7 @@ index e957204c..d6c93ece 100644
  						break;
  					case ir::PTXOperand::s8:
  						{
-+							printf("casting2\n");
++							// printf("casting2\n");
  							ir::PTXU8 a = operandAsU8(threadID, instr.a);
  							if(instr.modifier & ir::PTXInstruction::sat) {
  								a = min(a, CHAR_MAX);
@@ -448,13 +457,15 @@ index e957204c..d6c93ece 100644
  							context.PC, instr);
  						break;
  				}
-@@ -3724,15 +3871,20 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -3724,13 +3871,20 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  							setRegAsS64(threadID, instr.d.reg, d);
  						}
  						break;
 +					case ir::PTXOperand::f16:
 +						{
 +							ir::PTXF32 a = operandAsF32(threadID, instr.a);
++							a = roundToInt(a, instr.modifier, context,
++								instr);
 +							ir::PTXF16 d = a;
 +							setRegAsF16(threadID, instr.d.reg, d);
 +						}
@@ -463,17 +474,13 @@ index e957204c..d6c93ece 100644
  						{
  							ir::PTXF32 a = operandAsF32(threadID, instr.a);
 -
--							a = roundToInt(a, instr.modifier, context,
--								instr);
+ 							a = roundToInt(a, instr.modifier, context,
+ 								instr);
 -
  							setRegAsF32(threadID, instr.d.reg,
  								sat(instr.modifier, a));
-+							// a = roundToInt(a, instr.modifier, context,
-+							// 	instr);
  						}
- 						break;
- 					case ir::PTXOperand::f64:
-@@ -3743,7 +3895,10 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -3743,7 +3897,10 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  						}
  						break;
  					default:
@@ -485,7 +492,7 @@ index e957204c..d6c93ece 100644
  							context.PC, instr);
  						break;
  				}
-@@ -3932,15 +4087,20 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -3932,15 +4089,20 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  						}
  						break;
  					default:
@@ -509,7 +516,7 @@ index e957204c..d6c93ece 100644
  				break;
  		}
  
-@@ -5088,7 +5248,7 @@ void executive::CooperativeThreadArray::eval_Lg2(CTAContext &context,
+@@ -5088,7 +5250,7 @@ void executive::CooperativeThreadArray::eval_Lg2(CTAContext &context,
  void executive::CooperativeThreadArray::eval_Mad24(CTAContext &context,
  	const ir::PTXInstruction &instr) {
  	trace();
@@ -518,7 +525,7 @@ index e957204c..d6c93ece 100644
  }
  
  /*!
-@@ -6500,7 +6660,7 @@ void executive::CooperativeThreadArray::eval_Rcp(CTAContext &context,
+@@ -6500,7 +6662,7 @@ void executive::CooperativeThreadArray::eval_Rcp(CTAContext &context,
  */
  void executive::CooperativeThreadArray::eval_Red(CTAContext &context, const ir::PTXInstruction &instr) {
  	trace();
