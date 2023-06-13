@@ -26,7 +26,6 @@ def _gather(array, indices):
 
 # TODO: replace npgather with a faster gather using tinygrad only
 def npgather(array,indices):
-  print("gathering ", indices.shape, " from ", array.shape)
   array = array.numpy()
   indices = indices.numpy()
   return Tensor(array[indices.astype(int)])
@@ -826,7 +825,6 @@ def _bilinear_interpolate(
 def _roi_align(input, rois, spatial_scale, pooled_height, pooled_width, sampling_ratio, aligned):
   orig_dtype = input.dtype
   _, _, height, width = input.shape
-
   ph = Tensor.arange(pooled_height, device=input.device)  
   pw = Tensor.arange(pooled_width, device=input.device) 
 
