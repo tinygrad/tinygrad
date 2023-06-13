@@ -1,6 +1,5 @@
 import yaml
 from typing import DefaultDict, Tuple
-from tinygrad.ops import Compiled
 from tinygrad.helpers import dtypes
 from tinygrad.codegen.assembly import AssemblyCodegen, Register
 from tinygrad.codegen.linearizer import UOps, LocalTypes
@@ -22,6 +21,21 @@ early_exec = enable_early_exec()
 # amdhsa_user_sgpr_kernarg_segment_ptr
 # amdhsa_system_sgpr_workgroup_id_x
 # enable_sgpr_grid_workgroup_count_X
+
+boilerplate_start = """
+.global _start
+_start:
+.rodata
+.align 0x10
+.global code.kd
+.type code.kd,STT_OBJECT
+.amdhsa_kernel code"""
+
+code_start = """.end_amdhsa_kernel
+.text
+code:
+"""
+
 
 # https://github.com/ROCm-Developer-Tools/ROCm-ComputeABI-Doc/blob/master/AMDGPU-ABI.md#initial-kernel-register-state
 # RDNA3 is actually a SIMD machine!
@@ -82,20 +96,6 @@ class RDNACodegen(AssemblyCodegen):
 
 
   def assemble(self, args, ins, v_cnt, s_cnt):
-    boilerplate_start = """
-    .global _start
-    _start:
-    .rodata
-    .align 0x10
-    .global code.kd
-    .type code.kd,STT_OBJECT
-    .amdhsa_kernel code"""
-
-    code_start = """.end_amdhsa_kernel
-    .text
-    code:
-    """
-
     kernel_desc = {'.amdhsa_group_segment_fixed_size': 0, '.amdhsa_private_segment_fixed_size': 0, '.amdhsa_kernarg_size': 0,
                    '.amdhsa_next_free_vgpr': v_cnt,   # this matters!
                    '.amdhsa_reserve_vcc': 0, '.amdhsa_reserve_xnack_mask': 0,

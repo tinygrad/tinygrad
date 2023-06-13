@@ -1,10 +1,8 @@
-from typing import Dict
+import struct
 from tinygrad.codegen.assembly import AssemblyCodegen
 from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
-from tinygrad.codegen.linearizer import UOps, Token
-from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
+from tinygrad.codegen.linearizer import UOps
 from tinygrad.helpers import dtypes
-import functools, struct
 
 dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "u16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32"}
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
@@ -12,7 +10,6 @@ def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 # https://docs.nvidia.com/cuda/parallel-thread-execution/#
 class PTXCodegen(AssemblyCodegen):
   #supports_constant_folding: bool = True
-  supports_load3: bool = False
 
   def specialize(self, asm):
     ins = [".version 7.8", ".target sm_86", ".address_size 64",

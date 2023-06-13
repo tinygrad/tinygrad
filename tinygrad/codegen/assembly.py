@@ -1,4 +1,4 @@
-from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union
+from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, FusedOps, BinaryOps, UnaryOps
 from tinygrad.helpers import DType, dtypes, DEBUG
@@ -17,12 +17,14 @@ class Register(NamedTuple):
 class AssemblyInstruction(NamedTuple):
   op: UOps
   out: Optional[Register]
-  vin: List[Register]
+  vin: List[Union[Register, int, float]]
   arg: Any = None
 
 # warp size of 32, s registers are shared across the warp, v are 32-wide vectors
 class AssemblyCodegen(Linearizer):
-  def specialize(self) -> Tuple[str, str]:
+  supports_load3: bool = False
+
+  def specialize(self, asm:List[AssemblyInstruction]) -> Tuple[str, str]:
     raise NotImplementedError("must be implemented")
 
   # s registers are the addresses and non local indexes
@@ -32,7 +34,7 @@ class AssemblyCodegen(Linearizer):
     self.limit_global_dims(3)  # all GPU asms have 3 (for now)
     self.linearize()
 
-    cnts = defaultdict(int)
+    cnts:DefaultDict[DType, int] = defaultdict(int)
     tor: Dict[Any, Register] = {}
     def newreg(tok, dtype=dtypes.float32):
       nonlocal cnts, tor
@@ -149,11 +151,8 @@ class AssemblyCodegen(Linearizer):
     ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter[dtype], c)) for dtype,c in cnts.items()] + ins
 
     if DEBUG >= 4:
-      for i in ins: print(i)
+      for tins in ins: print(tins)
     name, asm = self.specialize(ins)
-
-    local_size = [1]
-    #name, asm, global_size, local_size = self.generate()
 
     return ASTRunner(name, asm,
       global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,
