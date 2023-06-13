@@ -772,17 +772,18 @@ def _bilinear_interpolate(
   xmask,  # [K, IX]
 ):
   _, channels, height, width = input.shape
-  y = y.maximum(0.0)
-  x = x.maximum(0.0)
+  y = y.clip(min_=0.0, max_=float(height-1))
+  x = x.clip(min_=0.0, max_=float(width-1))
+
+  # Tensor.where doesnt work well with int32 data so cast to float32
   y_low = y.cast(dtypes.int32).realize().float().realize()
   x_low = x.cast(dtypes.int32).realize().float().realize()
-  y_high = Tensor.where(y_low >= height - 1, height - 1, y_low + 1)
-  y_low = Tensor.where(y_low >= height - 1, height - 1, y_low)
-  y = Tensor.where(y_low >= height - 1, y.cast(input.dtype).realize(), y)
 
-  x_high = Tensor.where(x_low >= width - 1, width - 1, x_low + 1)
-  x_low = Tensor.where(x_low >= width - 1, width - 1, x_low)
-  x = Tensor.where(x_low >= width - 1, x.cast(input.dtype).realize(), x)
+  y_high = Tensor.where(y_low >= height - 1, float(height - 1), y_low + 1)
+  y_low = Tensor.where(y_low >= height - 1, float(height - 1), y_low)
+
+  x_high = Tensor.where(x_low >= width - 1, float(width - 1), x_low + 1)
+  x_low = Tensor.where(x_low >= width - 1, float(width - 1), x_low)
 
   ly = y - y_low
   lx = x - x_low
@@ -797,7 +798,6 @@ def _bilinear_interpolate(
       assert xmask is not None
       y = Tensor.where(ymask[:, None, :], y, 0)
       x = Tensor.where(xmask[:, None, :], x, 0)
-
     key1 = roi_batch_ind[:, None, None, None, None, None]
     key2 = Tensor.arange(channels, device=input.device)[None, :, None, None, None, None]
     key3 = y[:, None, :, None, :, None]
