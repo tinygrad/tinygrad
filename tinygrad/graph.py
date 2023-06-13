@@ -14,7 +14,7 @@ GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), gete
 
 # **** debugging and graphing ****
 
-G = nx.DiGraph() if nx is not None else None
+G = nx.DiGraph()
 cnts: Dict[OpType, int] = defaultdict(int)
 if DEBUG >= 2:
   def print_globalcounters():
