@@ -8,8 +8,6 @@ from tinygrad.helpers import dtypes
 from extra.utils import get_child, download_file
 from tinygrad.state import torch_load
 from models.resnet import ResNet
-import torch
-from tinygrad.jit import TinyJit
 from models.retinanet import nms as _box_nms
 
 
@@ -18,7 +16,7 @@ def meshgrid(x, y):
     grid_y = Tensor.cat(*[y.unsqueeze(0)]*x.shape[0])
     return grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)
 
-
+# This is very slow for large arrays, or indices
 def _gather(array, indices):
   reshape_arg = [1]*array.ndim + [array.shape[-1]]
   return Tensor.where(
@@ -26,7 +24,27 @@ def _gather(array, indices):
     array, 0,
   ).sum(indices.ndim)
 
+# TODO: replace npgather with a faster gather using tinygrad only
+def npgather(array,indices):
+  print("gathering ", indices.shape, " from ", array.shape)
+  array = array.numpy()
+  indices = indices.numpy()
+  return Tensor(array[indices.astype(int)])
 
+def get_strides(shape):
+    prod = [1]
+    for idx in range(len(shape)-1, -1, -1): prod.append(prod[-1] * shape[idx])
+    return Tensor(prod[::-1][1:]).unsqueeze(0).realize()
+
+# with keys as integer array for all axes
+def tensor_getitem(tensor, *keys):
+    flat_keys = Tensor.stack([key.expand((sum(keys)).shape).reshape(-1).float() for key in keys], dim=1)
+    strides = get_strides(tensor.shape)
+    idxs = (flat_keys * strides).sum(1)
+    return npgather(tensor.reshape(-1), idxs).reshape(sum(keys).shape)
+
+
+# for gather with indicies only on axis=0
 def tensor_gather(tensor, indices):
   if not isinstance(indices, Tensor):
       indices = Tensor(indices, requires_grad=False)
@@ -217,6 +235,8 @@ class BoxList:
     return self
 
   def __getitem__(self, item):
+    if len(item) == 0:
+      return []
     if sum(item) == len(item) and isinstance(item[0], bool):
       return self
     bbox = BoxList(tensor_gather(self.bbox, item), self.size, self.mode)
@@ -745,63 +765,62 @@ class FPN2MLPFeatureExtractor:
 
 
 def _bilinear_interpolate(
-    input,  # [N, C, H, W]
-    roi_batch_ind,  # [K]
-    y,  # [K, PH, IY]
-    x,  # [K, PW, IX]
-    ymask,  # [K, IY]
-    xmask,  # [K, IX]
+  input,  # [N, C, H, W]
+  roi_batch_ind,  # [K]
+  y,  # [K, PH, IY]
+  x,  # [K, PW, IX]
+  ymask,  # [K, IY]
+  xmask,  # [K, IX]
 ):
-    _, channels, height, width = input.size()
+  _, channels, height, width = input.shape
+  y = y.maximum(0.0)
+  x = x.maximum(0.0)
+  y_low = y.cast(dtypes.int32).realize().float().realize()
+  x_low = x.cast(dtypes.int32).realize().float().realize()
+  y_high = Tensor.where(y_low >= height - 1, height - 1, y_low + 1)
+  y_low = Tensor.where(y_low >= height - 1, height - 1, y_low)
+  y = Tensor.where(y_low >= height - 1, y.cast(input.dtype).realize(), y)
 
-    y = y.clamp(min=0)
-    x = x.clamp(min=0)
-    y_low = y.int()
-    x_low = x.int()
-    y_high = torch.where(y_low >= height - 1, height - 1, y_low + 1)
-    y_low = torch.where(y_low >= height - 1, height - 1, y_low)
-    y = torch.where(y_low >= height - 1, y.to(input.dtype), y)
+  x_high = Tensor.where(x_low >= width - 1, width - 1, x_low + 1)
+  x_low = Tensor.where(x_low >= width - 1, width - 1, x_low)
+  x = Tensor.where(x_low >= width - 1, x.cast(input.dtype).realize(), x)
 
-    x_high = torch.where(x_low >= width - 1, width - 1, x_low + 1)
-    x_low = torch.where(x_low >= width - 1, width - 1, x_low)
-    x = torch.where(x_low >= width - 1, x.to(input.dtype), x)
+  ly = y - y_low
+  lx = x - x_low
+  hy = 1.0 - ly
+  hx = 1.0 - lx
 
-    ly = y - y_low
-    lx = x - x_low
-    hy = 1.0 - ly
-    hx = 1.0 - lx
+  def masked_index(
+      y,  # [K, PH, IY]
+      x,  # [K, PW, IX]
+  ):
+    if ymask is not None:
+      assert xmask is not None
+      y = Tensor.where(ymask[:, None, :], y, 0)
+      x = Tensor.where(xmask[:, None, :], x, 0)
 
-    def masked_index(
-        y,  # [K, PH, IY]
-        x,  # [K, PW, IX]
-    ):
-        if ymask is not None:
-            assert xmask is not None
-            y = torch.where(ymask[:, None, :], y, 0)
-            x = torch.where(xmask[:, None, :], x, 0)
-        return input[
-            roi_batch_ind[:, None, None, None, None, None],
-            torch.arange(channels, device=input.device)[None, :, None, None, None, None],
-            y[:, None, :, None, :, None],  # prev [K, PH, IY]
-            x[:, None, None, :, None, :],  # prev [K, PW, IX]
-        ]  # [K, C, PH, PW, IY, IX]
+    key1 = roi_batch_ind[:, None, None, None, None, None]
+    key2 = Tensor.arange(channels, device=input.device)[None, :, None, None, None, None]
+    key3 = y[:, None, :, None, :, None]
+    key4 = x[:, None, None, :, None, :]
+    return tensor_getitem(input,key1,key2,key3,key4)  # [K, C, PH, PW, IY, IX]
 
-    v1 = masked_index(y_low, x_low)
-    v2 = masked_index(y_low, x_high)
-    v3 = masked_index(y_high, x_low)
-    v4 = masked_index(y_high, x_high)
+  v1 = masked_index(y_low, x_low)
+  v2 = masked_index(y_low, x_high)
+  v3 = masked_index(y_high, x_low)
+  v4 = masked_index(y_high, x_high)
 
-    # all ws preemptively [K, C, PH, PW, IY, IX]
-    def outer_prod(y, x):
-        return y[:, None, :, None, :, None] * x[:, None, None, :, None, :]
+  # all ws preemptively [K, C, PH, PW, IY, IX]
+  def outer_prod(y, x):
+      return y[:, None, :, None, :, None] * x[:, None, None, :, None, :]
 
-    w1 = outer_prod(hy, hx)
-    w2 = outer_prod(hy, lx)
-    w3 = outer_prod(ly, hx)
-    w4 = outer_prod(ly, lx)
-
-    val = w1 * v1 + w2 * v2 + w3 * v3 + w4 * v4
-    return val
+  w1 = outer_prod(hy, hx)
+  w2 = outer_prod(hy, lx)
+  w3 = outer_prod(ly, hx)
+  w4 = outer_prod(ly, lx)
+  
+  val = w1*v1 + w2*v2 + w3*v3 + w4*v4
+  return val
 
 #https://pytorch.org/vision/main/_modules/torchvision/ops/roi_align.html#roi_align
 def _roi_align(input, rois, spatial_scale, pooled_height, pooled_width, sampling_ratio, aligned):
@@ -811,7 +830,7 @@ def _roi_align(input, rois, spatial_scale, pooled_height, pooled_width, sampling
   ph = Tensor.arange(pooled_height, device=input.device)  
   pw = Tensor.arange(pooled_width, device=input.device) 
 
-  roi_batch_ind = rois[:, 0].cast(dtypes.int32) 
+  roi_batch_ind = rois[:, 0].cast(dtypes.int32).realize() 
   offset = 0.5 if aligned else 0.0
   roi_start_w = rois[:, 1] * spatial_scale - offset
   roi_start_h = rois[:, 2] * spatial_scale - offset
@@ -858,19 +877,7 @@ def _roi_align(input, rois, spatial_scale, pooled_height, pooled_width, sampling
     + (ix[None, None, :] + 0.5) * from_K(bin_size_w / roi_bin_grid_w)
   )
 
-  # TODO: remove torch
-  input = torch.tensor(input.numpy())
-  roi_batch_ind = torch.tensor(roi_batch_ind.numpy())
-  y = torch.tensor(y.numpy())
-  x = torch.tensor(x.numpy())
-  if ymask is not None:
-    ymask = torch.tensor(ymask.numpy())
-    xmask = torch.tensor(xmask.numpy())
-
   val = _bilinear_interpolate(input, roi_batch_ind, y, x, ymask, xmask)
-
-  val = Tensor(val.numpy())
-
   if not exact_sampling:
     val = ymask[:, None, None, None, :, None].where(val, 0)
     val = xmask[:, None, None, None, None, :].where(val, 0)
@@ -881,7 +888,7 @@ def _roi_align(input, rois, spatial_scale, pooled_height, pooled_width, sampling
   else:
     output /= count
 
-  output = output.cast(orig_dtype).realize()
+  output = output.cast(orig_dtype)
   return output
 
 class ROIAlign:
