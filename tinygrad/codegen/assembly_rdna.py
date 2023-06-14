@@ -1,11 +1,10 @@
 import yaml
-from typing import DefaultDict, Tuple
+from typing import Tuple, Set, Dict
 from tinygrad.helpers import dtypes
 from tinygrad.codegen.assembly import AssemblyCodegen, Register
 from tinygrad.codegen.linearizer import UOps
 from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
 from tinygrad.runtime.ops_gpu import ROCM_LLVM_PATH
-from collections import defaultdict
 
 # ugh, is this really needed?
 from extra.helpers import enable_early_exec
@@ -33,6 +32,7 @@ class RDNACodegen(AssemblyCodegen):
   supports_float4_alu: bool = False
   supports_load3: bool = True
   sin_is_sin2pi: bool = True
+  no_div: bool = True
 
   def specialize(self, asm) -> Tuple[str, str]:
     args = []
@@ -44,12 +44,12 @@ class RDNACodegen(AssemblyCodegen):
 
     dtype_to_rdnatype = {dtypes.float32: "f32", dtypes.int64: "i64", dtypes.int32: "i32", dtypes.uint64: "u64", dtypes.bool: "i32"}
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", FusedOps.MULACC: "fma",
-           BinaryOps.MAX: "max",
+           BinaryOps.MAX: "max", UnaryOps.RECIP: "rcp",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin", UnaryOps.LOG2: "log", UnaryOps.EXP2: "exp",
            BinaryOps.CMPEQ: "cmpk_eq", BinaryOps.CMPLT: "cmpk_lt"}
 
-    pend_regs = set()
-    rtor = {}
+    pend_regs:Set[Register] = set()
+    rtor:Dict[Register, str] = {}
     def reg_in(x):
       nonlocal pend_regs
       #print("reg_in", x, rtor[x], pend_regs)
@@ -78,7 +78,7 @@ class RDNACodegen(AssemblyCodegen):
               v_cnt += 1
         elif arg[0][0] == dtypes.bool and arg[0][1]:
           for i in range(arg[2]):
-            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"scc"
+            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = "scc"
         else:
           raise NotImplementedError(arg)
       elif uop == UOps.SPECIAL:

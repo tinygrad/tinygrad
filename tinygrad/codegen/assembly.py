@@ -25,6 +25,8 @@ class AssemblyInstruction(NamedTuple):
 # warp size of 32, s registers are shared across the warp, v are 32-wide vectors
 class AssemblyCodegen(Linearizer):
   supports_load3: bool = False
+  sin_is_sin2pi: bool = False
+  no_div: bool = False
 
   def specialize(self, asm:List[AssemblyInstruction]) -> Tuple[str, str]:
     raise NotImplementedError("must be implemented")
@@ -132,7 +134,11 @@ class AssemblyCodegen(Linearizer):
           ins.append(AssemblyInstruction(UOps.ALU, tmp, [tor[vin[0]]], UnaryOps.LOG2))
           ins.append(AssemblyInstruction(UOps.ALU, tmp2, [tmp, tor[vin[1]]], BinaryOps.MUL))
           ins.append(AssemblyInstruction(UOps.ALU, newreg(newvar), [tmp2], UnaryOps.EXP2))
-        elif args == UnaryOps.SIN and hasattr(self, 'sin_is_sin2pi'):
+        elif args == BinaryOps.DIV and self.no_div:
+          tmp = newreg((newvar, "rcp"))
+          ins.append(AssemblyInstruction(UOps.ALU, tmp, [tor[vin[1]]], UnaryOps.RECIP))
+          ins.append(AssemblyInstruction(UOps.ALU, newreg(newvar) if newvar not in tor else tor[newvar], [tor[vin[0]], tmp], BinaryOps.MUL))
+        elif args == UnaryOps.SIN and self.sin_is_sin2pi:
           tmp = newreg((newvar, "2pi"))
           ins.append(AssemblyInstruction(UOps.ALU, tmp, [tor[vin[0]], 1/(math.pi*2)], BinaryOps.MUL))
           ins.append(AssemblyInstruction(UOps.ALU, newreg(newvar) if newvar not in tor else tor[newvar], [tmp], args))
