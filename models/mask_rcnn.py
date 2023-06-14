@@ -70,8 +70,6 @@ def tensor_getitem(tensor, *keys):
 
 # for gather with indicies only on axis=0
 def tensor_gather(tensor, indices):
-  if USE_NP_GATHER:
-    return npgather(tensor, indices)
   if not isinstance(indices, Tensor):
     indices = Tensor(indices, requires_grad=False)
   if len(tensor.shape) > 2:
