@@ -66,7 +66,6 @@ class TestYOLOv8(unittest.TestCase):
       model = ultralytics.YOLO(model=weights_location, task='Detect')  
       model.export(format="onnx",imgsz=[640, 480]) 
 
-    weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.pt'
     depth, width, ratio = get_variant_multiples(variant) 
     TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80) 
     TinyYolov8.load_weights(weights_location, variant)

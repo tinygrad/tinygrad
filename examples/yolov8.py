@@ -286,7 +286,8 @@ class SPPF:
     c_ = c1 // 2  # hidden channels
     self.cv1 = Conv_Block(c1, c_, 1, 1, padding=None)
     self.cv2 = Conv_Block(c_ * 4, c2, 1, 1, padding=None)
-    # TODO: this pads with 0s, whereas torch function pads with -infinity. This results in a < 2% in prediction which does not make a difference visually. 
+    
+    # TODO: this pads with 0s, whereas torch function pads with -infinity. This results in a < 2% difference in prediction which does not make a difference visually. 
     self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=k, stride=1)
         
   def __call__(self, x):
