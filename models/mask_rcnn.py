@@ -799,8 +799,8 @@ def _bilinear_interpolate(
   x = x.clip(min_=0.0, max_=float(width-1))
 
   # Tensor.where doesnt work well with int32 data so cast to float32
-  y_low = y.cast(dtypes.int32).realize().float().realize()
-  x_low = x.cast(dtypes.int32).realize().float().realize()
+  y_low = y.cast(dtypes.int32).contiguous().float().contiguous()
+  x_low = x.cast(dtypes.int32).contiguous().float().contiguous()
 
   y_high = Tensor.where(y_low >= height - 1, float(height - 1), y_low + 1)
   y_low = Tensor.where(y_low >= height - 1, float(height - 1), y_low)
@@ -851,7 +851,7 @@ def _roi_align(input, rois, spatial_scale, pooled_height, pooled_width, sampling
   ph = Tensor.arange(pooled_height, device=input.device)  
   pw = Tensor.arange(pooled_width, device=input.device) 
 
-  roi_batch_ind = rois[:, 0].cast(dtypes.int32).realize() 
+  roi_batch_ind = rois[:, 0].cast(dtypes.int32).contiguous() 
   offset = 0.5 if aligned else 0.0
   roi_start_w = rois[:, 1] * spatial_scale - offset
   roi_start_h = rois[:, 2] * spatial_scale - offset
