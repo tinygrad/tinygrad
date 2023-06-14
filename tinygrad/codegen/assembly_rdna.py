@@ -44,6 +44,7 @@ class RDNACodegen(AssemblyCodegen):
 
     dtype_to_rdnatype = {dtypes.float32: "f32", dtypes.int64: "i64", dtypes.int32: "i32", dtypes.uint64: "u64", dtypes.bool: "i32"}
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", FusedOps.MULACC: "fma",
+           BinaryOps.MAX: "max",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin", UnaryOps.LOG2: "log", UnaryOps.EXP2: "exp",
            BinaryOps.CMPEQ: "cmpk_eq", BinaryOps.CMPLT: "cmpk_lt"}
 
@@ -88,7 +89,12 @@ class RDNACodegen(AssemblyCodegen):
         elif arg.startswith('gid'):
           ins.append(f'v_mov_b32 {reg_out(out)}, s{2+int(arg[3])}')
       elif uop == UOps.CONST:
-        ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, {arg}")
+        if arg == float('inf'):
+          ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, 0x7f800000")
+        elif arg == float('-inf'):
+          ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, 0xff800000")
+        else:
+          ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, {arg}")
       elif uop == UOps.ALU:
         if arg == BinaryOps.CMPLT:
           ins.append(f"{'s_' if out.scalar else 'v_'}{alu[arg]}_{dtype_to_rdnatype[out.dtype]} {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")

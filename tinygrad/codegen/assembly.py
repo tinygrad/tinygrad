@@ -76,7 +76,7 @@ class AssemblyCodegen(Linearizer):
       off = 0  # TODO: should this be None?
       if isinstance(idx, SumNode):
         nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
-        if len(nums) > 0:
+        if len(nums) > 0 and nums[0] < 4096:  # TODO: different for each GPU?
           idx -= nums[0]
           off = nums[0]
       reg = idx.render(render_ops)
