@@ -110,6 +110,10 @@ def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictio
   for img_idx, (orig_img_path, output_img_path, predictions) in enumerate(zip(orig_img_paths, output_img_paths, all_predictions)):
     predictions = np.array(predictions)
     orig_img = cv2.imread(orig_img_path)
+    height, width, _ = orig_img.shape
+    box_thickness = int((height + width) / 400)
+    font_scale = (height + width) / 2000
+
     grouped_preds = defaultdict(list)
     object_count = defaultdict(int)
 
@@ -119,12 +123,12 @@ def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictio
     def draw_box_and_label(pred, color):
       x1, y1, x2, y2, conf, _ = pred
       x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
-      cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, 3)
+      cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, box_thickness)
       label = f"{class_labels[class_id]} {conf:.2f}"
-      text_size, _ = cv2.getTextSize(label, font, 0.9, 1)
+      text_size, _ = cv2.getTextSize(label, font, font_scale, 1)
       label_y, bg_y = (y1 - 4, y1 - text_size[1] - 4) if y1 - text_size[1] - 4 > 0 else (y1 + text_size[1], y1)
       cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
-      cv2.putText(orig_img, label, (x1, label_y), font, 0.9, (255, 255, 255), 1, cv2.LINE_AA)
+      cv2.putText(orig_img, label, (x1, label_y), font, font_scale, (255, 255, 255), 1, cv2.LINE_AA)
 
     for class_id, pred_list in grouped_preds.items():
       pred_list = np.array(pred_list)
@@ -143,11 +147,20 @@ def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictio
     print(f"Image {img_idx + 1}:")
     print("Objects detected:")
     for obj, count in object_count.items():
-        print(f"- {obj}: {count}")
+      print(f"- {obj}: {count}")
 
     cv2.imwrite(output_img_path, orig_img)
     print(f'saved detections at {output_img_path}')
 
+def get_detected_classes_with_frequency(all_predictions):
+  class_index_count = defaultdict(int)
+  for predictions in all_predictions:
+    predictions = np.array(predictions)
+    for pred_np in predictions:
+      class_id = int(pred_np[-1])
+      class_index_count[class_id] += 1
+
+  return dict(class_index_count)
 
 # utility functions for forward pass. 
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
@@ -407,16 +420,15 @@ if __name__ == '__main__':
   download_file(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{yolo_variant}.pt', weights_location)
   yolo_infer.load_weights(weights_location, yolo_variant)
   
-  
   st = time.time()
   predictions = yolo_infer.forward(Tensor(pre_processed_images.astype(np.float32)))
   print(f'did inference in {(time.time() - st):2f}s')
-  
   
   post_predictions = postprocess(preds=predictions, img=pre_processed_images, orig_imgs=images)
   
   #v8 and v3 have same 80 class names for Object Detection
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   class_labels = class_labels.decode('utf-8').split('\n')
-  
+
   draw_bounding_boxes_and_save(orig_img_paths=img_paths, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)
+  freq = get_detected_classes_with_frequency(all_predictions = post_predictions)
