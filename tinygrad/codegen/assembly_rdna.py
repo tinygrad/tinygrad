@@ -50,8 +50,8 @@ class RDNACodegen(AssemblyCodegen):
     for i,b in enumerate(self.bufs): args.append({'.address_space': 'global', '.name': f'buf_{i}', '.offset': i*8, '.size': 8, '.type_name': b.dtype.name+"*", '.value_kind': 'global_buffer'})
     ins = []
 
-    v_cnt = 1  # v[0] is local_x
-    s_cnt = 3  # s[0:1] is the address, s[2] is global_x
+    v_cnt = 3  # v[0:2] is local_xyz
+    s_cnt = 5  # s[0:1] is the address, s[2:4] is global_xyz
 
     dtype_to_rdnatype = {dtypes.float32: "f32", dtypes.int64: "i64", dtypes.int32: "i32", dtypes.uint64: "u64", dtypes.bool: "i32"}
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", FusedOps.MULACC: "fma",
@@ -97,8 +97,7 @@ class RDNACodegen(AssemblyCodegen):
           ins.append(f's_load_b64 {reg_out(out)}, s[0:1], {i*8}')
           pend_regs.add(out)
         elif arg.startswith('gid'):
-          ins.append(f'v_mov_b32 {reg_out(out)}, s2')
-          #ins.append(f'v_mov_b32 {rtor[out]}, v0')
+          ins.append(f'v_mov_b32 {reg_out(out)}, s{2+int(arg[3])}')
       elif uop == UOps.CONST:
         ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, {arg}")
       elif uop == UOps.ALU:
@@ -132,7 +131,7 @@ class RDNACodegen(AssemblyCodegen):
                    '.amdhsa_next_free_sgpr': s_cnt,
                    '.amdhsa_float_round_mode_32': 0, '.amdhsa_float_round_mode_16_64': 0, '.amdhsa_float_denorm_mode_32': 3, '.amdhsa_float_denorm_mode_16_64': 3, '.amdhsa_dx10_clamp': 1, '.amdhsa_ieee_mode': 1,
                    '.amdhsa_fp16_overflow': 0, '.amdhsa_workgroup_processor_mode': 1, '.amdhsa_memory_ordered': 1, '.amdhsa_forward_progress': 0, '.amdhsa_enable_private_segment': 0,
-                   '.amdhsa_system_sgpr_workgroup_id_x': 1, '.amdhsa_system_sgpr_workgroup_id_y': 0, '.amdhsa_system_sgpr_workgroup_id_z': 0, '.amdhsa_system_sgpr_workgroup_info': 0, '.amdhsa_system_vgpr_workitem_id': 0,
+                   '.amdhsa_system_sgpr_workgroup_id_x': 1, '.amdhsa_system_sgpr_workgroup_id_y': 1, '.amdhsa_system_sgpr_workgroup_id_z': 1, '.amdhsa_system_sgpr_workgroup_info': 0, '.amdhsa_system_vgpr_workitem_id': 0,
                    '.amdhsa_exception_fp_ieee_invalid_op': 0, '.amdhsa_exception_fp_denorm_src': 0, '.amdhsa_exception_fp_ieee_div_zero': 0, '.amdhsa_exception_fp_ieee_overflow': 0, '.amdhsa_exception_fp_ieee_underflow': 0,
                    '.amdhsa_exception_fp_ieee_inexact': 0, '.amdhsa_exception_int_div_zero': 0, '.amdhsa_user_sgpr_dispatch_ptr': 0, '.amdhsa_user_sgpr_queue_ptr': 0, '.amdhsa_user_sgpr_kernarg_segment_ptr': 1,
                    '.amdhsa_user_sgpr_dispatch_id': 0, '.amdhsa_user_sgpr_private_segment_size': 0, '.amdhsa_wavefront_size32': 1, '.amdhsa_uses_dynamic_stack': 0}

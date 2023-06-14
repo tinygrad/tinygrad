@@ -32,7 +32,7 @@ class AssemblyCodegen(Linearizer):
   # s registers are the addresses and non local indexes
   def codegen(self):
     self.process()
-    #self.hand_coded_optimizations()
+    self.hand_coded_optimizations()
     self.limit_global_dims(3)  # all GPU asms have 3 (for now)
     self.linearize()
 
@@ -163,7 +163,7 @@ class AssemblyCodegen(Linearizer):
       for tins in ins: print(tins)
     name, asm = self.specialize(ins)
 
-    local_size = [1]
+    local_size = [1]*len(global_size)
 
     return ASTRunner(name, asm,
       global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,
