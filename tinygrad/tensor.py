@@ -346,23 +346,6 @@ class Tensor:
     bs, c, py, px = x.shape
     return x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, scale_factor, px, scale_factor).reshape(bs, c, py * scale_factor, px * scale_factor)
 
-  @staticmethod
-  def sort(input, axis=-1, reverse=True):
-    np_input = input.numpy()
-    sorted_np_idx = np.argsort(np_input, axis=axis)
-    if reverse:
-      sorted_np_idx = np.flip(sorted_np_idx, axis=axis).copy(order='C').astype(np.int32)
-    sorted_np = np.take_along_axis(np_input, sorted_np_idx, axis=axis)
-    return Tensor(sorted_np), sorted_np_idx
-
-  def topk(self, k, dim=-1, largest=True, sorted=True):
-    # TODO: This is Slow!!
-    if dim < 0:
-      dim = len(self.shape) + dim
-    slice_list = [(0, n) if d != dim else (0, k) for d, n in enumerate(self.shape)]
-    sort_, sort_idx = Tensor.sort(self, reverse=largest, axis=dim)
-    return sort_.slice(slice_list), Tensor(sort_idx).slice(slice_list).numpy()
-
   def unsqueeze(self, dim):
     if dim < 0: dim = len(self.shape) + dim + 1
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])

@@ -19,6 +19,22 @@ def meshgrid(x, y):
   grid_y = Tensor.cat(*[y.unsqueeze(0)]*x.shape[0])
   return grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)
 
+def sort(input_, axis=-1, reverse=True):
+  np_input = input_.numpy()
+  sorted_np_idx = np.argsort(np_input, axis=axis)
+  if reverse:
+    sorted_np_idx = np.flip(sorted_np_idx, axis=axis).copy(order='C').astype(np.int32)
+  sorted_np = np.take_along_axis(np_input, sorted_np_idx, axis=axis)
+  return Tensor(sorted_np), sorted_np_idx
+
+def topk(input_, k, dim=-1, largest=True, sorted=True):
+  # TODO: This is Slow becuase it uses full sort!
+  if dim < 0:
+    dim = len(input_.shape) + dim
+  slice_list = [(0, n) if d != dim else (0, k) for d, n in enumerate(input_.shape)]
+  sort_, sort_idx = sort(input_, reverse=largest, axis=dim)
+  return sort_.slice(slice_list), Tensor(sort_idx).slice(slice_list).numpy()
+
 # This is very slow for large arrays, or indices
 def _gather(array, indices):
   indices = indices.float().to(array.device)
@@ -595,7 +611,7 @@ class RPNPostProcessor:
     num_anchors = A * H * W
 
     pre_nms_top_n = min(self.pre_nms_top_n, num_anchors)
-    objectness, topk_idx = objectness.topk(pre_nms_top_n, dim=1, sorted=True)
+    objectness, topk_idx = topk(objectness, pre_nms_top_n, dim=1, sorted=True)
     concat_anchors = Tensor.cat(*[a.bbox for a in anchors], dim=0).reshape(N, -1, 4)
     image_shapes = [box.size for box in anchors]
 
@@ -650,7 +666,7 @@ class RPNPostProcessor:
     for i in range(num_images):
       objectness = boxlists[i].get_field("objectness")
       post_nms_top_n = min(self.fpn_post_nms_top_n, objectness.shape[0])
-      _, inds_sorted = objectness.topk(
+      _, inds_sorted = topk(objectness,
         post_nms_top_n, dim=0, sorted=True
       )
       boxlists[i] = boxlists[i][inds_sorted]
@@ -1076,7 +1092,7 @@ class PostProcessor:
 
     if number_of_detections > self.detections_per_img > 0:
       cls_scores = result.get_field("scores")
-      image_thresh, _ = cls_scores.topk(k=self.detections_per_img)
+      image_thresh, _ = topk(cls_scores, k=self.detections_per_img)
       image_thresh = image_thresh.numpy()[-1]
       keep = [idx for idx, score in enumerate(cls_scores.numpy()) if score >= image_thresh]
       result = result[keep]
