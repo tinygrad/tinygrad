@@ -503,7 +503,9 @@ class Tensor:
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
   def reciprocal(self): return 1.0/self
-  def floor(self): i = self.cast(dtypes.int32).contiguous(); return (i > self).where(i-1, i).cast(dtypes.int32)
+  def floor(self):
+    integer = self.cast(dtypes.int32).contiguous()
+    return (integer > self).where(integer-1, integer).cast(dtypes.int32)
   def ceil(self): return (-1 * (-1 * self).floor()).cast(dtypes.int32)
 
   # ***** activation functions (unary) *****
