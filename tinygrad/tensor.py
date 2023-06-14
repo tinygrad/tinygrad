@@ -507,6 +507,9 @@ class Tensor:
     integer = self.cast(dtypes.int32).contiguous()
     return (integer > self).where(integer-1, integer).cast(dtypes.int32)
   def ceil(self): return (-1 * (-1 * self).floor()).cast(dtypes.int32)
+  def rint(self):
+    x = (self*2).cast(dtypes.int32).contiguous().cast(dtypes.float32)/2
+    return (x<0).where(x.floor(), x.ceil())
 
   # ***** activation functions (unary) *****
 

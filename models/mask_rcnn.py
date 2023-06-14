@@ -19,21 +19,21 @@ def meshgrid(x, y):
   grid_y = Tensor.cat(*[y.unsqueeze(0)]*x.shape[0])
   return grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)
 
-def sort(input_, axis=-1, reverse=True):
-  np_input = input_.numpy()
-  sorted_np_idx = np.argsort(np_input, axis=axis)
-  if reverse:
-    sorted_np_idx = np.flip(sorted_np_idx, axis=axis).copy(order='C').astype(np.int32)
-  sorted_np = np.take_along_axis(np_input, sorted_np_idx, axis=axis)
-  return Tensor(sorted_np), sorted_np_idx
-
-def topk(input_, k, dim=-1, largest=True, sorted=True):
-  # TODO: This is Slow becuase it uses full sort!
-  if dim < 0:
-    dim = len(input_.shape) + dim
-  slice_list = [(0, n) if d != dim else (0, k) for d, n in enumerate(input_.shape)]
-  sort_, sort_idx = sort(input_, reverse=largest, axis=dim)
-  return sort_.slice(slice_list), Tensor(sort_idx).slice(slice_list).numpy()
+def topk(input_, k, dim=-1, largest=True, sorted=False):
+  k = min(k, input_.shape[dim]-1)
+  input_ = input_.numpy()
+  if largest: input_ *= -1
+  ind = np.argpartition(input_, k, axis=dim)
+  if largest: input_ *= -1
+  ind = np.take(ind, np.arange(k), axis=dim) # k non-sorted indices
+  input_ = np.take_along_axis(input_, ind, axis=dim) # k non-sorted values
+  if not sorted: return Tensor(input_), ind
+  if largest: input_ *= -1
+  ind_part = np.argsort(input_, axis=dim)
+  ind = np.take_along_axis(ind, ind_part, axis=dim)
+  if largest: input_ *= -1
+  val = np.take_along_axis(input_, ind_part, axis=dim) 
+  return Tensor(val), ind
 
 # This is very slow for large arrays, or indices
 def _gather(array, indices):
@@ -47,8 +47,9 @@ def _gather(array, indices):
 # TODO: replace npgather with a faster gather using tinygrad only
 # NOTE: this blocks the gradient 
 def npgather(array,indices):
-  array = array.numpy()
-  indices = indices.numpy()
+  if isinstance(array, Tensor): array = array.numpy()
+  if isinstance(indices, Tensor): indices = indices.numpy()
+  if isinstance(indices, list): indices = np.asarray(indices)
   return Tensor(array[indices.astype(int)])
 
 def get_strides(shape):
@@ -69,6 +70,8 @@ def tensor_getitem(tensor, *keys):
 
 # for gather with indicies only on axis=0
 def tensor_gather(tensor, indices):
+  if USE_NP_GATHER:
+    return npgather(tensor, indices)
   if not isinstance(indices, Tensor):
     indices = Tensor(indices, requires_grad=False)
   if len(tensor.shape) > 2:
@@ -366,7 +369,7 @@ class AnchorGenerator:
         for anchor_stride, size in zip(anchor_strides, sizes)
       ]
     self.strides = anchor_strides
-    self.cell_anchors = [Tensor(a) for a in cell_anchors]
+    self.cell_anchors = cell_anchors
     self.straddle_thresh = straddle_thresh
 
   def num_anchors_per_location(self):
@@ -415,7 +418,7 @@ class AnchorGenerator:
     grid_sizes = [feature_map.shape[-2:] for feature_map in feature_maps]
     anchors_over_all_feature_maps = self.grid_anchors(grid_sizes)
     anchors = []
-    for i, (image_height, image_width) in enumerate(image_list.image_sizes):
+    for (image_height, image_width) in image_list.image_sizes:
       anchors_in_image = []
       for anchors_per_feature_map in anchors_over_all_feature_maps:
         boxlist = BoxList(
@@ -430,14 +433,14 @@ class AnchorGenerator:
 def generate_anchors(
     stride=16, sizes=(32, 64, 128, 256, 512), aspect_ratios=(0.5, 1, 2)
 ):
-  return _generate_anchors(stride, np.array(sizes, dtype=np.float32) / stride, np.array(aspect_ratios, dtype=np.float32))
+  return _generate_anchors(stride, Tensor(sizes) / stride, Tensor(aspect_ratios))
 
 
 def _generate_anchors(base_size, scales, aspect_ratios):
-  anchor = np.array([1, 1, base_size, base_size], dtype=np.float32) - 1
+  anchor = Tensor([1, 1, base_size, base_size]) - 1
   anchors = _ratio_enum(anchor, aspect_ratios)
-  anchors = np.vstack(
-    [_scale_enum(anchors[i, :], scales) for i in range(anchors.shape[0])]
+  anchors = Tensor.cat(
+    *[_scale_enum(anchors[i, :], scales).reshape(-1, 4) for i in range(anchors.shape[0])]
   )
   return anchors
 
@@ -451,14 +454,14 @@ def _whctrs(anchor):
 
 
 def _mkanchors(ws, hs, x_ctr, y_ctr):
-  ws = ws[:, np.newaxis]
-  hs = hs[:, np.newaxis]
-  anchors = np.hstack((
+  ws = ws[:, None]
+  hs = hs[:, None]
+  anchors = Tensor.cat(*(
     x_ctr - 0.5 * (ws - 1),
     y_ctr - 0.5 * (hs - 1),
     x_ctr + 0.5 * (ws - 1),
     y_ctr + 0.5 * (hs - 1),
-  ))
+  ), dim=1)
   return anchors
 
 
@@ -466,8 +469,8 @@ def _ratio_enum(anchor, ratios):
   w, h, x_ctr, y_ctr = _whctrs(anchor)
   size = w * h
   size_ratios = size / ratios
-  ws = np.round(np.sqrt(size_ratios))
-  hs = np.round(ws * ratios)
+  ws = Tensor.rint(Tensor.sqrt(size_ratios))
+  hs = Tensor.rint(ws * ratios)
   anchors = _mkanchors(ws, hs, x_ctr, y_ctr)
   return anchors
 
@@ -577,7 +580,7 @@ def remove_small_boxes(boxlist, min_size):
   if keep.sum().numpy() == len(boxlist):
     return boxlist
   else:
-    keep = [idx for idx, val in enumerate(keep.numpy()) if val != 0]
+    keep = keep.numpy().nonzero()[0]
   return boxlist[keep]
 
 
@@ -616,7 +619,7 @@ class RPNPostProcessor:
     num_anchors = A * H * W
 
     pre_nms_top_n = min(self.pre_nms_top_n, num_anchors)
-    objectness, topk_idx = topk(objectness, pre_nms_top_n, dim=1, sorted=True)
+    objectness, topk_idx = topk(objectness, pre_nms_top_n, dim=1, sorted=False)
     concat_anchors = Tensor.cat(*[a.bbox for a in anchors], dim=0).reshape(N, -1, 4)
     image_shapes = [box.size for box in anchors]
 
@@ -671,7 +674,7 @@ class RPNPostProcessor:
       objectness = boxlists[i].get_field("objectness")
       post_nms_top_n = min(self.fpn_post_nms_top_n, objectness.shape[0])
       _, inds_sorted = topk(objectness,
-        post_nms_top_n, dim=0, sorted=True
+        post_nms_top_n, dim=0, sorted=False
       )
       boxlists[i] = boxlists[i][inds_sorted]
     return boxlists
@@ -988,7 +991,7 @@ class Pooler:
       all_idxs = []
       for level, (per_level_feature, pooler) in enumerate(zip(x, self.poolers)):
         # this is fine because no grad will flow through index
-        idx_in_level = [idx for idx, x in enumerate((levels.numpy() == level)) if x != 0]
+        idx_in_level = (levels.numpy() == level).nonzero()[0]
         if len(idx_in_level) > 0:
           rois_per_level = tensor_gather(rois, idx_in_level)
           pooler_output = pooler(per_level_feature, rois_per_level)
@@ -1072,8 +1075,8 @@ class PostProcessor:
     result = []
     inds_all = scores > self.score_thresh
     for j in range(1, num_classes):
-      inds = [idx for idx, x in enumerate(inds_all[:, j].numpy()) if x != 0]
-      if inds:
+      inds = inds_all[:, j].numpy().nonzero()[0]
+      if len(inds):
         scores_j = tensor_gather(scores[:, j], inds)
         boxes_j = tensor_gather(boxes[:, j * 4: (j + 1) * 4], inds)
         boxlist_for_class = BoxList(boxes_j, boxlist.size, mode="xyxy")
@@ -1094,7 +1097,7 @@ class PostProcessor:
       cls_scores = result.get_field("scores")
       image_thresh, _ = topk(cls_scores, k=self.detections_per_img)
       image_thresh = image_thresh.numpy()[-1]
-      keep = [idx for idx, score in enumerate(cls_scores.numpy()) if score >= image_thresh]
+      keep = (cls_scores.numpy() > image_thresh).nonzero()[0]
       result = result[keep]
     return result
 
