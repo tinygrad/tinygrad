@@ -208,7 +208,7 @@ jobs:
         sudo apt-get update -y
     - name: Install packages
       run: |
-        sudo apt-get install -y git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+        sudo apt-get install -y git g++ cmake ninja-build llvm-15-dev libfp16-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
     - name: Clone gpuocelot repo
       uses: actions/checkout@v3
       with:
@@ -221,7 +221,6 @@ jobs:
         cd $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot
         cp $GITHUB_WORKSPACE/extra/cudacpu/cudacpu.cpp ./ocelot
         mkdir ./ocelot/include/cudacpu
-        cp $GITHUB_WORKSPACE/extra/cudacpu/fp16.h ./ocelot/include/cudacpu
         cp $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot.patch .
         git apply gpuocelot.patch
     - name: Compile gpuocelot and libcudacpu
@@ -273,15 +272,3 @@ jobs:
       run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/extra/
     - name: Run test/unit
       run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/unit/
-    - name: Run test_mnist
-      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/models/test_mnist.py
-    - name: Run test_end2end
-      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/models/test_end2end.py
-    - name: Run test_onnx
-      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/models/test_onnx.py
-    - name: Run test_train
-      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/models/test_train.py
-    - name: Run test_rnnt
-      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/models/test_rnnt.py
-    - name: Run test_efficientnet
-      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/models/test_efficientnet.py

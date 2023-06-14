@@ -1,14 +1,13 @@
 diff --git a/ocelot/CMakeLists.txt b/ocelot/CMakeLists.txt
-index fef7ee9b..a005e4e5 100644
+index fef7ee9b..b9793eaf 100644
 --- a/ocelot/CMakeLists.txt
 +++ b/ocelot/CMakeLists.txt
-@@ -8,11 +8,13 @@ if ("x${CMAKE_BUILD_TYPE}" STREQUAL "x")
+@@ -8,11 +8,12 @@ if ("x${CMAKE_BUILD_TYPE}" STREQUAL "x")
  set(CMAKE_BUILD_TYPE "Release")
  endif()
  
 -list(APPEND CMAKE_CXX_FLAGS -fexceptions)
 +list(APPEND CMAKE_CXX_FLAGS "-fexceptions -Wno-return-type -Wno-terminate")
-+
  
  # in order to retain the PTX code in the text executables,
  # the target GPU architecture has to be virtual.
@@ -17,7 +16,7 @@ index fef7ee9b..a005e4e5 100644
  
  set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
  
-@@ -21,6 +23,8 @@ find_package(FLEX 2.5 REQUIRED)
+@@ -21,6 +22,8 @@ find_package(FLEX 2.5 REQUIRED)
  find_package(BISON 2.5 REQUIRED)
  find_package(GLEW REQUIRED)
  find_package(ZLIB REQUIRED)
@@ -26,38 +25,7 @@ index fef7ee9b..a005e4e5 100644
  
  if ("x${BUILD_LLVM}" STREQUAL "xOFF")
  find_package(LLVM REQUIRED CONFIG)
-@@ -538,30 +542,9 @@ target_link_libraries(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_LINK_LIBRARIES})
- target_link_libraries(${PROJECT_NAME} PRIVATE -Wl,--gc-sections -Wl,--start-group ${LLVM_LIBRARIES} -Wl,--end-group)
- target_link_directories(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_LIBRARY_DIRS})
- 
--add_executable(LoadPtx src/tools/LoadPtx.cpp)
--set_property(TARGET LoadPtx PROPERTY CXX_STANDARD 14)
--target_link_libraries(LoadPtx ${PROJECT_NAME} hydrazine)
--
--add_executable(OcelotKernelTestHarness src/tools/KernelTestHarness.cpp)
--set_property(TARGET OcelotKernelTestHarness PROPERTY CXX_STANDARD 14)
--target_link_libraries(OcelotKernelTestHarness ${PROJECT_NAME} hydrazine)
--
--add_executable(OcelotLinker src/tools/OcelotLinker.cpp)
--set_property(TARGET OcelotLinker PROPERTY CXX_STANDARD 14)
--target_link_libraries(OcelotLinker ${PROJECT_NAME} hydrazine)
--
--add_executable(OcelotServer src/tools/OcelotServer.cpp)
--set_property(TARGET OcelotServer PROPERTY CXX_STANDARD 14)
--target_link_libraries(OcelotServer ${PROJECT_NAME} hydrazine)
--
--add_executable(PTXOptimizer src/tools/PTXOptimizer.cpp)
--set_property(TARGET PTXOptimizer PROPERTY CXX_STANDARD 14)
--target_link_libraries(PTXOptimizer ${PROJECT_NAME} hydrazine)
--
- ocelot_add_tests(analysis)
- ocelot_add_tests(api)
- ocelot_add_tests(cal)
--ocelot_add_tests(cuda)
- ocelot_add_tests(executive)
- ocelot_add_tests(ir)
- ocelot_add_tests(parser)
-@@ -570,6 +553,27 @@ ocelot_add_tests(transforms)
+@@ -570,6 +573,27 @@ ocelot_add_tests(transforms)
  ocelot_add_tests(translator)
  ocelot_add_tests(util)
  
@@ -85,58 +53,40 @@ index fef7ee9b..a005e4e5 100644
  res_embed(TARGET ${PROJECT_NAME}_executive_TestEmulator NAME "TestEmulator_ptx"
  	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/executive/test/TestEmulator.ptx KEYWORD)
  
-@@ -581,15 +585,6 @@ res_embed(TARGET ${PROJECT_NAME}_executive_TestKernels NAME "TestKernels_ptx"
- 	
- res_embed(TARGET ${PROJECT_NAME}_executive_TestLLVMKernels NAME "TestLLVMKernels_ptx"
- 	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/executive/test/TestLLVMKernels.ptx KEYWORD)
--	
--res_embed(TARGET ${PROJECT_NAME}_cuda_TestCudaGenericMemory NAME "generic_ptx"
--	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/test/TestCudaGenericMemory.ptx KEYWORD)
--
--res_embed(TARGET ${PROJECT_NAME}_cuda_TestIndirectFunctionCallDriver NAME "IndirectCallDriver_ptx"
--	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/test/TestIndirectFunctionCallDriver.ptx KEYWORD)
--
--res_embed(TARGET ${PROJECT_NAME}_cuda_TestIndirectFunctionCallOcelot NAME "IndirectCallDriver_ptx"
--	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/test/TestIndirectFunctionCallDriver.ptx KEYWORD)
- 
- #++ -o .release_build/ocelot/TestCudaGenericMemory
- #++ -o .release_build/ocelot/TestCudaGlobals
 diff --git a/ocelot/include/ocelot/executive/CooperativeThreadArray.h b/ocelot/include/ocelot/executive/CooperativeThreadArray.h
-index 6d2f9ab9..b9c96139 100644
+index 6d2f9ab9..f465de5a 100644
 --- a/ocelot/include/ocelot/executive/CooperativeThreadArray.h
 +++ b/ocelot/include/ocelot/executive/CooperativeThreadArray.h
-@@ -219,6 +219,14 @@ namespace executive {
+@@ -225,6 +225,14 @@ namespace executive {
+ 			\param threadID ID of the active thread
+ 			\reg register index
  		*/
- 		ir::PTXS64 getRegAsS64(int threadID, ir::PTXOperand::RegisterType reg);
- 
-+		/*!
-+			Gets a register value 
-+
-+			\param threadID ID of the active thread
-+			\reg register index
-+		*/
 +		ir::PTXF16 getRegAsF16(int threadID, ir::PTXOperand::RegisterType reg);
 +
- 		/*!
- 			Gets a register value 
- 
-@@ -357,7 +365,16 @@ namespace executive {
- 		*/
- 		void setRegAsF32(int threadID, ir::PTXOperand::RegisterType reg, 
- 			ir::PTXF32 value);
--		
-+
 +		/*!
-+			Sets a register value 
++			Gets a register value
 +
 +			\param threadID ID of the active thread
 +			\reg register index
 +		*/
-+		void setRegAsF16(int threadID, ir::PTXOperand::RegisterType reg, 
+ 		ir::PTXF32 getRegAsF32(int threadID, ir::PTXOperand::RegisterType reg);
+ 		
+ 		/*!
+@@ -364,6 +372,15 @@ namespace executive {
+ 			\param threadID ID of the active thread
+ 			\reg register index
+ 		*/
++		void setRegAsF16(int threadID, ir::PTXOperand::RegisterType reg,
 +			ir::PTXF16 value);
 +
- 		/*!
- 			Sets a register value 
++		/*!
++			Sets a register value
++
++			\param threadID ID of the active thread
++			\reg register index
++		*/
+ 		void setRegAsF64(int threadID, ir::PTXOperand::RegisterType reg, 
+ 			ir::PTXF64 value);
  
 @@ -424,6 +441,7 @@ namespace executive {
  		ir::PTXS32 operandAsS32(int, const ir::PTXOperand &);
@@ -146,117 +96,72 @@ index 6d2f9ab9..b9c96139 100644
  		ir::PTXF32 operandAsF32(int, const ir::PTXOperand &);
  		ir::PTXF64 operandAsF64(int, const ir::PTXOperand &);
  
-diff --git a/ocelot/include/ocelot/ir/PTXOperand.h b/ocelot/include/ocelot/ir/PTXOperand.h
-index 853b719c..3113338e 100644
---- a/ocelot/include/ocelot/ir/PTXOperand.h
-+++ b/ocelot/include/ocelot/ir/PTXOperand.h
-@@ -11,7 +11,9 @@
- #include <string>
- #include <vector>
- #include <functional>
-+#include <float.h>
+diff --git a/ocelot/include/ocelot/ir/PTXInstruction.h b/ocelot/include/ocelot/ir/PTXInstruction.h
+index b8569c0f..d83d3e5c 100644
+--- a/ocelot/include/ocelot/ir/PTXInstruction.h
++++ b/ocelot/include/ocelot/ir/PTXInstruction.h
+@@ -9,6 +9,7 @@
+ 
  #include <ocelot/ir/Instruction.h>
-+#include <cudacpu/fp16.h>
+ #include <ocelot/ir/PTXOperand.h>
++#include <fp16/fp16.h>
  
  namespace ir {
  
-@@ -25,6 +27,8 @@ namespace ir {
+diff --git a/ocelot/include/ocelot/ir/PTXOperand.h b/ocelot/include/ocelot/ir/PTXOperand.h
+index 853b719c..9ce7e81d 100644
+--- a/ocelot/include/ocelot/ir/PTXOperand.h
++++ b/ocelot/include/ocelot/ir/PTXOperand.h
+@@ -25,6 +25,7 @@ namespace ir {
  	typedef int32_t PTXS32;
  	typedef int64_t PTXS64;
  	
-+	// https://gcc.gnu.org/onlinedocs/gcc/Half-Precision.html
-+	typedef float16 PTXF16;
++	typedef uint16_t PTXF16;
  	typedef float PTXF32;
  	typedef double PTXF64;
  	
-@@ -217,6 +221,8 @@ namespace ir {
+@@ -217,6 +218,7 @@ namespace ir {
  			long long int imm_int;
  			double imm_float;
  			float  imm_single;
 +			uint16_t imm_half;
-+			// float16 imm_half;
  			PredicateCondition condition;
  			SpecialRegister special;
  			unsigned int localMemorySize;
 diff --git a/ocelot/src/executive/CooperativeThreadArray.cpp b/ocelot/src/executive/CooperativeThreadArray.cpp
-index e957204c..956b63be 100644
+index e957204c..3466113c 100644
 --- a/ocelot/src/executive/CooperativeThreadArray.cpp
 +++ b/ocelot/src/executive/CooperativeThreadArray.cpp
-@@ -32,6 +32,7 @@
- #include <climits>
- #include <algorithm>
- #include <sstream>
-+#include <cstdio>
- 
- // Preprocessor Macros
- #ifdef REPORT_BASE
-@@ -851,6 +852,32 @@ ir::PTXS64 executive::CooperativeThreadArray::getRegAsS64(int threadID,
+@@ -851,6 +851,14 @@ ir::PTXS64 executive::CooperativeThreadArray::getRegAsS64(int threadID,
  	return r;
  }
  
-+/*!
-+	Gets a register value
 +
-+	\param threadID ID of the active thread
-+	\reg register index
-+*/
 +ir::PTXF16 executive::CooperativeThreadArray::getRegAsF16(int threadID,
 +	ir::PTXOperand::RegisterType reg) {
 +	ir::PTXF16 r = *( (ir::PTXF16*)(
 +		&functionCallStack.registerFilePointer(threadID)[reg]));
-+	#if REPORT_NTH_THREAD_ONLY == 1
-+	if (threadID == NTH_THREAD) {
-+		reportE(REPORT_REGISTER_READS, "   thread " << threadID
-+			<< " reg " << reg << " <= " << r
-+			<< " (0x" << std::hex << (hydrazine::bit_cast<ir::PTXU32>(r))
-+			<< std::dec << ")");
-+	}
-+	#else
-+	reportE(REPORT_REGISTER_READS, "   thread " << threadID
-+		<< " reg " << reg << " <= " << r
-+			<< " (0x" << std::hex << (hydrazine::bit_cast<ir::PTXU64>(r))
-+			<< std::dec << ")");
-+	#endif
 +	return r;
 +}
 +
  /*!
  	Gets a register value
  
-@@ -1191,6 +1218,32 @@ void  executive::CooperativeThreadArray::setRegAsS64(int threadID,
+@@ -1191,6 +1199,13 @@ void  executive::CooperativeThreadArray::setRegAsS64(int threadID,
  	*r = value;
  }
  
-+/*!
-+	Sets a register value
-+
-+	\param threadID ID of the active thread
-+	\reg register index
-+*/
 +void  executive::CooperativeThreadArray::setRegAsF16(int threadID,
 +	ir::PTXOperand::RegisterType reg, ir::PTXF16 value) {
 +	ir::PTXF16* r = (ir::PTXF16*)(
 +		&functionCallStack.registerFilePointer(threadID)[reg]);
-+	#if REPORT_NTH_THREAD_ONLY == 1
-+	if (threadID == NTH_THREAD) {
-+		reportE(REPORT_REGISTER_WRITES, "   thread " << threadID
-+			<< " reg " << reg << " value " << " => " << value
-+			<< " (0x" << std::hex << (hydrazine::bit_cast<ir::PTXU32>(value))
-+			<< std::dec << ")");
-+	}
-+	#else
-+	reportE(REPORT_REGISTER_WRITES, "   thread " << threadID
-+		<< " reg " << reg << " value " << " => " << value
-+			<< " (0x" << std::hex << (hydrazine::bit_cast<ir::PTXU32>(value))
-+			<< std::dec << ")");
-+	#endif
 +	*r = value;
 +}
 +
  /*!
  	Sets a register value
  
-@@ -1494,6 +1547,19 @@ ir::PTXS64 executive::CooperativeThreadArray::operandAsS64(int threadID,
+@@ -1494,6 +1509,19 @@ ir::PTXS64 executive::CooperativeThreadArray::operandAsS64(int threadID,
  	return 0;
  }
  
@@ -266,170 +171,24 @@ index e957204c..956b63be 100644
 +		case ir::PTXOperand::Register:
 +			return getRegAsF16(threadID, op.reg);
 +		case ir::PTXOperand::Immediate:
-+			return (ir::PTXF16)(op.imm_single);
++			return fp16_ieee_from_fp32_value(op.imm_single);
 +		default:
 +			assert(0 == "invalid address mode of operand");
 +	}
-+	return 0.0f;
++	return fp16_ieee_from_fp32_value(0.0f);
 +}
 +
  ir::PTXF32 executive::CooperativeThreadArray::operandAsF32(int threadID,
  	const ir::PTXOperand &op) {
  	switch (op.addressMode) {
-@@ -2960,6 +3026,27 @@ static Float roundToInt(Float a, int modifier, executive::CTAContext &context,
- 	return fd;
- }
- 
-+
-+const char* datatype_s[] = {
-+	"TypeSpecifier_invalid",
-+	"s8",
-+	"s16",
-+	"s32",
-+	"s64",
-+	"u8",
-+	"u16",
-+	"u32",
-+	"u64",
-+	"f16",
-+	"f32",
-+	"f64",
-+	"b8",
-+	"b16",
-+	"b32",
-+	"b64",
-+	"pred",
-+};
-+
- /*!
- 
- */
-@@ -2975,6 +3062,9 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
- 			sourceType = instr.a.relaxedType;
- 		}
- 
-+		// fprintf(stderr, "++++++ [CUDACPU] - CASTING %s %s\n", datatype_s[sourceType], datatype_s[instr.type]);
-+		// fflush(stderr);
-+
- 		switch (sourceType) {
- 			case ir::PTXOperand::b8: // fall through
- 			case ir::PTXOperand::u8:
-@@ -2998,6 +3088,7 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
- 						break;
- 					case ir::PTXOperand::s8:
- 						{
-+							// printf("casting2\n");
- 							ir::PTXU8 a = operandAsU8(threadID, instr.a);
- 							if(instr.modifier & ir::PTXInstruction::sat) {
- 								a = min(a, CHAR_MAX);
-@@ -3021,7 +3112,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
- 						}
- 						break;
- 					default:
--						throw RuntimeException("conversion not implemented",
-+						trace();
-+						throw RuntimeException("conversion not implemented 1",
- 							context.PC, instr);
- 						break;
+@@ -3564,6 +3592,34 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  				}
-@@ -3053,6 +3145,7 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
- 							if (instr.modifier & ir::PTXInstruction::sat) {
- 								a = max(a, 0);
- 							}
-+							// printf("casting!!!\n");
- 							setRegAsU64(threadID, instr.d.reg, a);
- 						}
- 						break;
-@@ -3071,7 +3164,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
- 						}
- 						break;
- 					default:
--						throw RuntimeException("conversion not implemented",
-+						trace();
-+						throw RuntimeException("conversion not implemented 2",
- 							context.PC, instr);
- 						break;
- 				}
-@@ -3138,7 +3232,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
- 						}
- 						break;
- 					default:
--						throw RuntimeException("conversion not implemented",
-+						trace();
-+						throw RuntimeException("conversion not implemented 3",
- 							context.PC, instr);
- 						break;
- 				}
-@@ -3204,7 +3299,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
- 						}
- 						break;
- 					default:
--						throw RuntimeException("conversion not implemented",
-+						trace();
-+						throw RuntimeException("conversion not implemented 4",
- 							context.PC, instr);
- 						break;
- 				}
-@@ -3286,7 +3382,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
- 						}
- 						break;
- 					default:
--						throw RuntimeException("conversion not implemented",
-+						trace();
-+						throw RuntimeException("conversion not implemented 5",
- 							context.PC, instr);
- 						break;
- 				}
-@@ -3366,7 +3463,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
- 						}
- 						break;
- 					default:
--						throw RuntimeException("conversion not implemented",
-+						trace();
-+						throw RuntimeException("conversion not implemented 6",
- 							context.PC, instr);
- 						break;
- 				}
-@@ -3461,7 +3559,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
- 						}
- 						break;
- 					default:
--						throw RuntimeException("conversion not implemented",
-+						trace();
-+						throw RuntimeException("conversion not implemented 7",
- 							context.PC, instr);
- 						break;
- 				}
-@@ -3558,7 +3657,55 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
- 						}
- 						break;
- 					default:
--						throw RuntimeException("conversion not implemented",
-+						trace();
-+						throw RuntimeException("conversion not implemented 8",
-+							context.PC, instr);
-+						break;
-+				}
-+			}
-+			break;
+ 			}
+ 			break;
 +			case ir::PTXOperand::f16:
 +			{
 +				switch (instr.type) {
-+					// case ir::PTXOperand::pred: // fall through
-+					// case ir::PTXOperand::b8: // fall through
-+					// case ir::PTXOperand::u8:
-+					// case ir::PTXOperand::b16: // fall through
-+					// case ir::PTXOperand::u16:
-+					// case ir::PTXOperand::b32: // fall through
-+					// case ir::PTXOperand::u32:
-+					// case ir::PTXOperand::b64: // fall through
-+					// case ir::PTXOperand::u64:
-+					// case ir::PTXOperand::s8:
-+					// case ir::PTXOperand::s16:
-+					// case ir::PTXOperand::s32:
-+					// case ir::PTXOperand::s64:
-+
-+					case ir::PTXOperand::f16: 
++					case ir::PTXOperand::f16:
 +						{
 +							ir::PTXF16 a = operandAsF16(threadID, instr.a);
 +							setRegAsF16(threadID, instr.d.reg, a);
@@ -438,26 +197,26 @@ index e957204c..956b63be 100644
 +					case ir::PTXOperand::f32:
 +						{
 +							ir::PTXF16 a = operandAsF16(threadID, instr.a);
-+							ir::PTXF32 d = a;
-+							setRegAsF32(threadID, instr.d.reg, d);
++							setRegAsF32(threadID, instr.d.reg, fp16_ieee_to_fp32_value(a));
 +						}
 +						break;
 +					case ir::PTXOperand::f64:
 +						{
 +							ir::PTXF16 a = operandAsF16(threadID, instr.a);
-+							ir::PTXF64 d = a;
-+							setRegAsF64(threadID, instr.d.reg, d);
++							setRegAsF64(threadID, instr.d.reg, fp16_ieee_to_fp32_value(a));
 +						}
 +						break;
 +					default:
-+						trace();
-+						printf("f32 -> %d\n", instr.type);
-+						fflush(stdout);
-+						throw RuntimeException("conversion not implemented 13",
- 							context.PC, instr);
- 						break;
- 				}
-@@ -3724,13 +3871,20 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
++						throw RuntimeException("conversion not implemented fp16",
++							context.PC, instr);
++						break;
++				}
++			}
++			break;
+ 			case ir::PTXOperand::f32:
+ 			{
+ 				switch (instr.type) {
+@@ -3724,6 +3780,15 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  							setRegAsS64(threadID, instr.d.reg, d);
  						}
  						break;
@@ -473,82 +232,42 @@ index e957204c..956b63be 100644
  					case ir::PTXOperand::f32:
  						{
  							ir::PTXF32 a = operandAsF32(threadID, instr.a);
--
- 							a = roundToInt(a, instr.modifier, context,
- 								instr);
--
- 							setRegAsF32(threadID, instr.d.reg,
- 								sat(instr.modifier, a));
- 						}
-@@ -3743,7 +3897,10 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
- 						}
- 						break;
- 					default:
--						throw RuntimeException("conversion not implemented",
-+						trace();
-+						printf("f32 -> %d\n", instr.type);
-+						fflush(stdout);
-+						throw RuntimeException("conversion not implemented 9",
- 							context.PC, instr);
- 						break;
- 				}
-@@ -3932,15 +4089,20 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
- 						}
- 						break;
- 					default:
--						throw RuntimeException("conversion not implemented",
-+						trace();
-+						throw RuntimeException("conversion not implemented 10",
- 							context.PC, instr);
- 						break;
- 				}
- 			}
- 			break;
- 			default:
--				throw RuntimeException("conversion not implemented",
--					context.PC, instr);
-+				fprintf(stderr, "[CUDACPU] CONVERSION NOT IMPLEMENTED 11 %d\n", sourceType);
-+				fflush(stderr);
-+				abort();
-+				// trace();
-+				// throw RuntimeException("conversion not implemented 11",
-+				// 	context.PC, instr);
- 				break;
- 		}
- 
-@@ -5088,7 +5250,7 @@ void executive::CooperativeThreadArray::eval_Lg2(CTAContext &context,
- void executive::CooperativeThreadArray::eval_Mad24(CTAContext &context,
- 	const ir::PTXInstruction &instr) {
- 	trace();
--	throw RuntimeException("instruction not implemented", context.PC, instr);
-+	throw RuntimeException("instruction not implemented 12", context.PC, instr);
- }
- 
- /*!
-@@ -6500,7 +6662,7 @@ void executive::CooperativeThreadArray::eval_Rcp(CTAContext &context,
- */
- void executive::CooperativeThreadArray::eval_Red(CTAContext &context, const ir::PTXInstruction &instr) {
- 	trace();
--	throw RuntimeException("instruction not implemented", context.PC, instr);
-+	throw RuntimeException("instruction not implemented 13", context.PC, instr);
- }
- 
- /*!
 diff --git a/ocelot/src/ir/PTXInstruction.cpp b/ocelot/src/ir/PTXInstruction.cpp
-index 6a9d2dc8..91978e67 100644
+index 6a9d2dc8..5b2979a7 100644
 --- a/ocelot/src/ir/PTXInstruction.cpp
 +++ b/ocelot/src/ir/PTXInstruction.cpp
-@@ -1038,9 +1038,11 @@ std::string ir::PTXInstruction::valid() const {
+@@ -1038,9 +1038,12 @@ std::string ir::PTXInstruction::valid() const {
  				}
  			}
  			if( a.type != b.type ) {
 -				return "type of operand A " + PTXOperand::toString( a.type ) 
+-					+ " does not equal type of operand B " 
 +				return "";
-+				// worst case it'll trap
-+				/*return "type of operand A " + PTXOperand::toString( a.type ) 
- 					+ " does not equal type of operand B " 
--					+ PTXOperand::toString( b.type );
-+					+ PTXOperand::toString( b.type );*/
++				/*
++				return "type of operand A " + PTXOperand::toString( a.type )
++					+ " does not equal type of operand B "
+ 					+ PTXOperand::toString( b.type );
++				*/
  			}
  			if( !( c.bytes() == d.bytes() ) ) {
  				std::stringstream stream;
+diff --git a/ocelot/src/parser/PTXParser.cpp b/ocelot/src/parser/PTXParser.cpp
+index b392e8c7..23bc5a00 100644
+--- a/ocelot/src/parser/PTXParser.cpp
++++ b/ocelot/src/parser/PTXParser.cpp
+@@ -1284,6 +1284,7 @@ namespace parser
+ 	
+ 		std::string message = statements.back().instruction.valid();
+ 	
++		/*
+ 		if( message != "" )
+ 		{
+ 			throw_exception( toString( location, *this ) 
+@@ -1291,6 +1292,7 @@ namespace parser
+ 				<< statements.back().instruction.toString() 
+ 				<< " : " << message, InvalidInstruction );
+ 		}
++		*/
+ 	
+ 		operandVector.clear();
+ 	}
