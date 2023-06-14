@@ -33,10 +33,9 @@ class Bottleneck:
   def __init__(self, in_planes, planes, stride=1, stride_in_1x1=False, groups=1, base_width=64):
     width = int(planes * (base_width / 64.0)) * groups
     # NOTE: the original implementation places stride at the first convolution (self.conv1), control with stride_in_1x1
-    stride1x1, stride3x3 = (stride, 1) if stride_in_1x1 else (1, stride)
-    self.conv1 = nn.Conv2d(in_planes, width, kernel_size=1, stride=stride1x1, bias=False)
+    self.conv1 = nn.Conv2d(in_planes, width, kernel_size=1, stride=stride if stride_in_1x1 else 1, bias=False)
     self.bn1 = nn.BatchNorm2d(width)
-    self.conv2 = nn.Conv2d(width, width, kernel_size=3, padding=1, stride=stride3x3, groups=groups, bias=False)
+    self.conv2 = nn.Conv2d(width, width, kernel_size=3, padding=1, stride=1 if stride_in_1x1 else stride, groups=groups, bias=False)
     self.bn2 = nn.BatchNorm2d(width)
     self.conv3 = nn.Conv2d(width, self.expansion*planes, kernel_size=1, bias=False)
     self.bn3 = nn.BatchNorm2d(self.expansion*planes)
