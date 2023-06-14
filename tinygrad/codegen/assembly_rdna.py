@@ -108,12 +108,12 @@ class RDNACodegen(AssemblyCodegen):
       elif uop == UOps.LOAD:
         if out.scalar:
           # swap arg order
-          ins.append(f's_load_b32 {reg_out(out)}, {reg_in(vin[0])}, {reg_in(arg[0])}')
+          ins.append(f's_load_b32 {reg_out(out)}, {reg_in(vin[0])}, {reg_in(arg[2])} offset:{arg[0]}')
         else:
-          ins.append(f'global_load_b32 {reg_out(out)}, {reg_in(arg[0])}, {reg_in(vin[0])}')
+          ins.append(f'global_load_b32 {reg_out(out)}, {reg_in(arg[2])}, {reg_in(vin[0])} offset:{arg[0]}')
         pend_regs.add(out)
       elif uop == UOps.STORE:
-        ins.append(f'global_store_b32 {reg_in(arg[0])}, {reg_in(vin[1])}, {reg_in(vin[0])}')
+        ins.append(f'global_store_b32 {reg_in(arg[2])}, {reg_in(vin[1])}, {reg_in(vin[0])} offset:{arg[0]}')
       elif uop == UOps.LABEL:
         ins.append(f"{arg}:")
       elif uop == UOps.COND_BRANCH:

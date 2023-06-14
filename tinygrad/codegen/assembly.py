@@ -74,17 +74,17 @@ class AssemblyCodegen(Linearizer):
     def addr_w_offset(args):
       idx = args.idx*self.bufs[args.i].dtype.itemsize
       off = 0  # TODO: should this be None?
-      if isinstance(idx, SumNode) and not self.supports_load3:
+      if isinstance(idx, SumNode):
         nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
         if len(nums) > 0:
           idx -= nums[0]
           off = nums[0]
       reg = idx.render(render_ops)
       if self.supports_load3:
-        return tor[f"buf{args.i}"], reg
+        return tor[f"buf{args.i}"], reg, off
       else:
         reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{args.i}"], dtype=dtypes.uint64)
-        return reg, off
+        return reg, None, off
 
     ins = []
     ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64, scalar=True), [], f"buf{i}") for i in range(len(self.bufs))]
@@ -139,8 +139,8 @@ class AssemblyCodegen(Linearizer):
         else:
           ins.append(AssemblyInstruction(UOps.ALU, newreg(newvar) if newvar not in tor else tor[newvar], [tor[x] for x in vin], args))
       elif uop == UOps.LOAD and newvar is not None:
-        idx, off = addr_w_offset(args)
-        reg = newreg(newvar, scalar=idx.scalar and (not isinstance(off, Register) or off.scalar))
+        idx, treg, off = addr_w_offset(args)
+        reg = newreg(newvar, scalar=idx.scalar and (not isinstance(treg, Register) or treg.scalar))
         if args.valid.min == 0:
           ins.append(AssemblyInstruction(UOps.CONST, reg, [], 0))
           if args.valid.max == 1:
@@ -148,13 +148,13 @@ class AssemblyCodegen(Linearizer):
             ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
         if args.valid.max == 1:
           # NOTE: you can't compute the index in here, because it assumes it's all available later
-          ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx], (off, 'global' if args.i != -1 else 'shared')))
+          ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx], (off, 'global' if args.i != -1 else 'shared', treg)))
         if args.valid.min == 0 and args.valid.max == 1:
           ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
           skipload_branch += 1
       elif uop == UOps.STORE:
-        idx, off = addr_w_offset(args)
-        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]], (off, 'global' if args.i != -1 else 'shared')))
+        idx, treg, off = addr_w_offset(args)
+        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]], (off, 'global' if args.i != -1 else 'shared', treg)))
 
     # define registers
     ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)) for dtype,c in cnts.items()] + ins
