@@ -9,7 +9,8 @@ import cv2
 from collections import defaultdict
 import argparse
 import os
-import time
+import time, io, sys
+
 
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 #The upsampling class has been taken from this pull request https://github.com/geohot/tinygrad/pull/784 by dc-dc-dc. Now 2(?) models use upsampling. (retinet and this)
@@ -111,7 +112,7 @@ def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictio
 
   for img_idx, (orig_img_path, output_img_path, predictions) in enumerate(zip(orig_img_paths, output_img_paths, all_predictions)):
     predictions = np.array(predictions)
-    orig_img = cv2.imread(orig_img_path)
+    orig_img = cv2.imread(orig_img_path) if not isinstance(orig_img_path, np.ndarray) else cv2.imdecode(orig_img_path, 1)
     height, width, _ = orig_img.shape
     box_thickness = int((height + width) / 400)
     font_scale = (height + width) / 2000
@@ -406,19 +407,27 @@ class YOLOv8:
 
 if __name__ == '__main__':
   
-  # currently just takes in a single image as argument. will add folder and url option
-  args = parse_arguments()
-  img_path = args.image_location
-  yolo_variant = args.variant
+  if len(sys.argv) < 2:
+    print("Error: Image URL or path not provided.")
+    sys.exit(1)
+
+  img_path = sys.argv[1]
+  yolo_variant = sys.argv[2] if len(sys.argv) >= 3 else (print("No variant given, so choosing 'n' as the default. Yolov8 has different variants, you can choose from ['n', 's', 'm', 'l', 'x']") or 'n')
+  print(f'running inference for YOLO version {yolo_variant}')
+  
+  output_folder_path = './outputs_yolov8'
+  if not os.path.exists(output_folder_path):
+    os.makedirs(output_folder_path)
+  if img_path.startswith('http'):
+    image_location = [np.frombuffer(io.BytesIO(fetch(img_path)).read(), np.uint8)]
+    image = [cv2.imdecode(image_location[0], 1)]
+    out_paths = [os.path.join(output_folder_path, img_path.split("/")[-1].split('.')[0] + "_output" + '.' + img_path.split("/")[-1].split('.')[1])]
+  else:
+    image = [cv2.imread(img_path)]
+    out_paths = [os.path.join(output_folder_path, os.path.basename(img_path).replace(".", "_output."))]
+    image_location = [img_path]
     
-  folder_path = './outputs_yolov8'
-  if not os.path.exists(folder_path):
-    os.makedirs(folder_path)
-    
-  img_paths = [img_path]
-  out_paths = [os.path.join(folder_path, os.path.basename(img_path).replace(".", "_output."))]
-  images = [cv2.imread(img_path)]
-  pre_processed_images = preprocess(images)
+  pre_processed_image = preprocess(image)
   
   # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/v8/yolov8.yaml
   depth, width, ratio = get_variant_multiples(yolo_variant) 
@@ -429,13 +438,13 @@ if __name__ == '__main__':
   yolo_infer.load_weights(weights_location, yolo_variant)
   
   st = time.time()
-  predictions = yolo_infer.forward(Tensor(pre_processed_images.astype(np.float32)))
+  predictions = yolo_infer.forward(Tensor(pre_processed_image.astype(np.float32)))
   print(f'did inference in {(time.time() - st):2f}s')
   
-  post_predictions = postprocess(preds=predictions, img=pre_processed_images, orig_imgs=images)
+  post_predictions = postprocess(preds=predictions, img=pre_processed_image, orig_imgs=image)
   
   #v8 and v3 have same 80 class names for Object Detection
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   class_labels = class_labels.decode('utf-8').split('\n')
   
-  draw_bounding_boxes_and_save(orig_img_paths=img_paths, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)
+  draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)
