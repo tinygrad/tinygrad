@@ -72,7 +72,7 @@ class CLProgram:
   def binary(self): return self.clprogram.get_info(cl.program_info.BINARIES)[0]
 
   @staticmethod
-  def max_work_group_size(): return CL.cl_ctx.devices[0].max_work_group_size if getenv("CI", "") == "" or not OSX else 256
+  def max_work_group_size(): return CL.cl_ctx.devices[0].max_work_group_size
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
     cl_bufs = [x._buf if isinstance(x, CLBuffer) else x for x in bufs]
