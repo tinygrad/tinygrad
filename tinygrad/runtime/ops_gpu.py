@@ -51,6 +51,7 @@ class CLBuffer(RawBufferCopyInOut):
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
     self.name, self.argdtypes, self.clprogram = name, argdtypes, cl.Program(CL.cl_ctx, CL.cl_ctx.devices, [prg]*len(CL.cl_ctx.devices)) if binary else cl.Program(CL.cl_ctx, prg)  # type: ignore
+    print("DEVICE WORK GROUP SIZE", [device.max_work_group_size for device in CL.cl_ctx.devices])
     try:
       self._clprg = self.clprogram.build(options=options)
     except cl.RuntimeError as e:
@@ -72,7 +73,7 @@ class CLProgram:
   def binary(self): return self.clprogram.get_info(cl.program_info.BINARIES)[0]
 
   @staticmethod
-  def max_work_group_size(): return max(device.max_work_group_size for device in CL.cl_ctx.devices)
+  def max_work_group_size(): return CL.cl_ctx.devices[0].max_work_group_size
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
     cl_bufs = [x._buf if isinstance(x, CLBuffer) else x for x in bufs]
