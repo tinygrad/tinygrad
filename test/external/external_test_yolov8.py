@@ -13,7 +13,6 @@ import os
 import ultralytics
 
 class TestYOLOv8(unittest.TestCase):
-
   def test_all_load_weights(self):
     for variant in ['n', 's', 'm', 'l', 'x']:
       weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.pt'
@@ -58,12 +57,15 @@ class TestYOLOv8(unittest.TestCase):
       assert labels == {5: 1, 0: 4, 11: 1} if i == 0 else labels == {0: 13, 29: 1, 32: 1}
       
   def test_forward_pass_torch_onnx(self):
+    variant = 'n'
+    weights_location_onnx = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.onnx' 
+    weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.pt' 
+    
     # the ultralytics export prints a lot of unneccesary things
-    if not os.path.isfile("yolov8n.onnx"):
-      model = ultralytics.YOLO(model='yolov8n.pt', task='Detect')  
+    if not os.path.isfile(weights_location_onnx):
+      model = ultralytics.YOLO(model=weights_location, task='Detect')  
       model.export(format="onnx",imgsz=[640, 480]) 
 
-    variant = 'n'
     weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.pt'
     depth, width, ratio = get_variant_multiples(variant) 
     TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80) 
@@ -74,7 +76,7 @@ class TestYOLOv8(unittest.TestCase):
     
     input_image = preprocess(orig_image)
     
-    onnx_session = ort.InferenceSession("./weights/yolov8n.onnx")
+    onnx_session = ort.InferenceSession(weights_location_onnx)
     onnx_input_name = onnx_session.get_inputs()[0].name
     onnx_output_name = onnx_session.get_outputs()[0].name
     onnx_output = onnx_session.run([onnx_output_name], {onnx_input_name: input_image})
@@ -82,7 +84,7 @@ class TestYOLOv8(unittest.TestCase):
     tiny_output = TinyYolov8.forward(Tensor(input_image))
     
     # currently rtol is so big because there is a 1-2% difference in our predictions 
-    # because of the zero padding in SPPF maxpooling layers rather than the -infinity in torch. 
+    # because of the zero padding in SPPF module (line 280) maxpooling layers rather than the -infinity in torch. 
     # This difference does not make a difference "visually". 
     np.testing.assert_allclose(onnx_output[0], tiny_output.cpu().numpy(), atol=5e-4, rtol=0.025)
     
