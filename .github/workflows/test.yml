@@ -121,12 +121,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Set up Python 3.9
+    - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
-        python-version: 3.9
+        python-version: 3.11
     - name: Install Dependencies
-      run: pip install -e '.[metal,testing]'
+      run: pip install -e '.[torch,testing]'
     - name: Run Pytest
       run: GPU=1 python -m pytest -s -v -n=auto test/
 
