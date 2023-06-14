@@ -129,7 +129,7 @@ index 853b719c..9ce7e81d 100644
  			SpecialRegister special;
  			unsigned int localMemorySize;
 diff --git a/ocelot/src/executive/CooperativeThreadArray.cpp b/ocelot/src/executive/CooperativeThreadArray.cpp
-index e957204c..3466113c 100644
+index e957204c..7a818074 100644
 --- a/ocelot/src/executive/CooperativeThreadArray.cpp
 +++ b/ocelot/src/executive/CooperativeThreadArray.cpp
 @@ -851,6 +851,14 @@ ir::PTXS64 executive::CooperativeThreadArray::getRegAsS64(int threadID,
@@ -216,7 +216,7 @@ index e957204c..3466113c 100644
  			case ir::PTXOperand::f32:
  			{
  				switch (instr.type) {
-@@ -3724,6 +3780,15 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+@@ -3724,6 +3780,14 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
  							setRegAsS64(threadID, instr.d.reg, d);
  						}
  						break;
@@ -225,8 +225,7 @@ index e957204c..3466113c 100644
 +							ir::PTXF32 a = operandAsF32(threadID, instr.a);
 +							a = roundToInt(a, instr.modifier, context,
 +								instr);
-+							ir::PTXF16 d = a;
-+							setRegAsF16(threadID, instr.d.reg, d);
++							setRegAsF16(threadID, instr.d.reg, fp16_ieee_from_fp32_value(a));
 +						}
 +						break;
  					case ir::PTXOperand::f32:
