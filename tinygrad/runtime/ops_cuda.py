@@ -18,7 +18,7 @@ if ISCUDA:
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x, stream)
     def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf)
 else:
-  from extra.cudacpu import ptx_kernel_create, ptx_call
+  from extra.cudacpu import PTXKernel
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
@@ -39,7 +39,7 @@ class CUDAProgram:
     if ISCUDA:
       self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
     else:
-      self.prg = ptx_kernel_create(prg.encode('utf-8'))
+      self.prg = PTXKernel(prg.encode('utf-8'))
 
   def __call__(self, global_size:List[int], local_size:List[int], *args, wait=False):
     block_size: Tuple[int,...]  = tuple(local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)
@@ -57,7 +57,7 @@ class CUDAProgram:
         end.synchronize()
         return start.time_till(end)*1e-3
     else:
-        ptx_call(self.prg, args, block_size, grid_size)
+        self.prg(args, block_size, grid_size)
 
 class CUDACodegen(CStyleCodegen):
   lang = CStyleLanguage(

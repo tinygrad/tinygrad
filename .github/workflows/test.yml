@@ -241,5 +241,27 @@ jobs:
         python-version: 3.8
     - name: Install tinygrad dependencies
       run: pip install -e '.[testing, cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Run Pytest
-      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/
+    - name: Run test_assign
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_assign.py
+    - name: Run test_conv.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_conv.py
+    - name: Run test_conv_shapetracker.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_conv_shapetracker.py
+    - name: Run test_custom_function.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_custom_function.py
+    - name: Run test_dtype.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_dtype.py
+    - name: Run test_gc.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_gc.py
+    - name: Run test_jit.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_jit.py
+    - name: Run test_nn.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_nn.py
+    - name: Run test_ops.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_ops.py
+    - name: Run test_optim.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_optim.py
+    - name: Run test_randomness.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_randomness.py
+    - name: Run test_tensor.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_tensor.py

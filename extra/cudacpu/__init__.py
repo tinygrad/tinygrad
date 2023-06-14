@@ -15,12 +15,29 @@ lib = ffi.dlopen("./extra/cudacpu/libcudacpu.so")
 
 DEBUGCUDACPU = getenv("DEBUGCUDACPU", 0)
 
-def ptx_kernel_create(source:bytes):
-    kernel = lib.ptx_kernel_create(source)
-    return ffi.gc(kernel, lib.ptx_kernel_destroy)
+class PTXKernel:
+    def __init__(self, source:bytes):
+        self.kernel = lib.ptx_kernel_create(source)
 
-def ptx_call(kernel, args:Tuple[Any,...], block:Tuple[int, ...], grid:Tuple[int, ...]):
-    lib.ptx_call(kernel, len(args), [ffi.cast("void*", ffi.from_buffer(x._buffer())) for x in args], *block, *grid)
+    def __call__(self, args:Tuple[Any,...], block:Tuple[int, ...], grid:Tuple[int, ...]):
+        # print(self.kernel, args)
+        lib.ptx_call(self.kernel, len(args), [ffi.cast("void*", ffi.from_buffer(x._buffer())) for x in args], *block, *grid)
+        # print(self.kernel, args)
+
+    def __del__(self):
+        lib.ptx_kernel_destroy(self.kernel)
+
+# def create_kernel(source):
+#     kernel_ptr = lib.ptx_kernel_create(source)
+#     kernel_obj = PTXKernel(kernel_ptr)
+#     return kernel_obj
+
+# def ptx_kernel_create(source:bytes):
+#     kernel = lib.ptx_kernel_create(source)
+#     return kernel
+
+# def ptx_call(kernel, args:Tuple[Any,...], block:Tuple[int, ...], grid:Tuple[int, ...]):
+#     lib.ptx_call(kernel, len(args), [ffi.cast("void*", ffi.from_buffer(x._buffer())) for x in args], *block, *grid)
 
 
 # kernel = r"""
