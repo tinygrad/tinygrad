@@ -57,8 +57,6 @@ class Bottleneck:
 class ResNet:
   def __init__(self, num, num_classes=None, groups=1, width_per_group=64, stride_in_1x1=False):
     self.num = num
-    self.num_classes = num_classes
-    self.stride_in_1x1 = stride_in_1x1
     self.block = {
       18: BasicBlock,
       34: BasicBlock,
@@ -81,17 +79,17 @@ class ResNet:
     self.base_width = width_per_group
     self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, bias=False, padding=3)
     self.bn1 = nn.BatchNorm2d(64)
-    self.layer1 = self._make_layer(self.block, 64, self.num_blocks[0], stride=1)
-    self.layer2 = self._make_layer(self.block, 128, self.num_blocks[1], stride=2)
-    self.layer3 = self._make_layer(self.block, 256, self.num_blocks[2], stride=2)
-    self.layer4 = self._make_layer(self.block, 512, self.num_blocks[3], stride=2)
+    self.layer1 = self._make_layer(self.block, 64, self.num_blocks[0], stride=1, stride_in_1x1=stride_in_1x1)
+    self.layer2 = self._make_layer(self.block, 128, self.num_blocks[1], stride=2, stride_in_1x1=stride_in_1x1)
+    self.layer3 = self._make_layer(self.block, 256, self.num_blocks[2], stride=2, stride_in_1x1=stride_in_1x1)
+    self.layer4 = self._make_layer(self.block, 512, self.num_blocks[3], stride=2, stride_in_1x1=stride_in_1x1)
     self.fc = nn.Linear(512 * self.block.expansion, num_classes) if num_classes is not None else None
 
-  def _make_layer(self, block, planes, num_blocks, stride):
+  def _make_layer(self, block, planes, num_blocks, stride, stride_in_1x1):
     strides = [stride] + [1] * (num_blocks-1)
     layers = []
     for stride in strides:
-      layers.append(block(self.in_planes, planes, stride, self.stride_in_1x1, self.groups, self.base_width))
+      layers.append(block(self.in_planes, planes, stride, stride_in_1x1, self.groups, self.base_width))
       self.in_planes = planes * block.expansion
     return layers
 
