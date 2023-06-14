@@ -3,7 +3,7 @@ from typing import DefaultDict, Tuple
 from tinygrad.helpers import dtypes
 from tinygrad.codegen.assembly import AssemblyCodegen, Register
 from tinygrad.codegen.linearizer import UOps, LocalTypes
-from tinygrad.ops import BinaryOps, UnaryOps
+from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
 from tinygrad.runtime.ops_gpu import ROCM_LLVM_PATH
 from collections import defaultdict
 
@@ -53,47 +53,59 @@ class RDNACodegen(AssemblyCodegen):
     v_cnt = 1  # v[0] is local_x
     s_cnt = 3  # s[0:1] is the address, s[2] is global_x
 
-    dtype_to_rdnatype = {dtypes.float32: "f32", dtypes.int64: "i64", dtypes.int32: "i32", dtypes.uint64: "u64"}
-    alu = {BinaryOps.ADD: "v_add", BinaryOps.SUB: "v_sub", BinaryOps.MUL: "v_mul",
-           UnaryOps.NOOP: "v_mov", UnaryOps.SIN: "v_sin", UnaryOps.LOG2: "v_log", UnaryOps.EXP2: "v_exp"}
+    dtype_to_rdnatype = {dtypes.float32: "f32", dtypes.int64: "i64", dtypes.int32: "i32", dtypes.uint64: "u64", dtypes.bool: "i32"}
+    alu = {BinaryOps.ADD: "v_add", BinaryOps.SUB: "v_sub", BinaryOps.MUL: "v_mul", FusedOps.MULACC: "v_fma",
+           UnaryOps.NOOP: "v_mov", UnaryOps.SIN: "v_sin", UnaryOps.LOG2: "v_log", UnaryOps.EXP2: "v_exp",
+           BinaryOps.CMPEQ: "v_cmp_eq", BinaryOps.CMPLT: "v_cmp_lt"}
 
+    pend_regs = set()
     rtor = {}
+    def reg_in(x):
+      nonlocal pend_regs
+      if x in pend_regs:
+        ins.append('s_waitcnt lgkmcnt(0), vmcnt(0)')
+        pend_regs.clear()
+      return rtor[x]
+    def reg_out(x, pend=False):
+      nonlocal pend_regs
+      if pend: pend_regs.add(x)
+      return rtor[x]
     for uop, out, vin, arg in asm:
       if uop == UOps.DEFINE_REGISTER:
-        if arg[0] == dtypes.uint64:
+        if arg[0][0] == dtypes.uint64 and arg[0][1]:
           # assuming these are scalar
           s_cnt += s_cnt%2  # aligned(2)
           for i in range(arg[2]):
-            rtor[Register(f"%{arg[1]}{i}", arg[0])] = f"s[{s_cnt}:{s_cnt+1}]"
+            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"s[{s_cnt}:{s_cnt+1}]"
             s_cnt += 2
-        elif arg[0] in [dtypes.int32, dtypes.float32]:
+        elif arg[0][0] in [dtypes.int32, dtypes.float32] and not arg[0][1]:
           for i in range(arg[2]):
-            rtor[Register(f"%{arg[1]}{i}", arg[0])] = f"v{v_cnt}"
+            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"v{v_cnt}"
             v_cnt += 1
+        elif arg[0][0] == dtypes.bool and arg[0][1]:
+          for i in range(arg[2]):
+            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"scc"
         else:
           raise NotImplementedError
       elif uop == UOps.SPECIAL:
         if arg.startswith('buf'):
           i = int(arg[3:])
-          ins.append(f's_load_b64 {rtor[out]}, s[0:1], {i*8}')
+          ins.append(f's_load_b64 {reg_out(out, True)}, s[0:1], {i*8}')
         elif arg.startswith('gid'):
-          ins.append(f'v_mov_b32 {rtor[out]}, s2')
+          ins.append(f'v_mov_b32 {reg_out(out)}, s2')
           #ins.append(f'v_mov_b32 {rtor[out]}, v0')
       elif uop == UOps.CONST:
-        ins.append(f'v_mov_b32 {rtor[out]}, {arg}')
+        ins.append(f'v_mov_b32 {reg_out(out)}, {arg}')
       elif uop == UOps.ALU:
-        ins.append(f"{alu[arg]}_{dtype_to_rdnatype[out.dtype]}{'_i24' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''} {rtor[out]}, {', '.join(rtor[x] if x.__class__ is Register else str(x) for x in vin)}")
+        ins.append(f"{alu[arg]}_{dtype_to_rdnatype[out.dtype]}{'_i24' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''} {reg_out(out)}, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
       elif uop == UOps.LOAD:
         #ins.append(f'global_load_b32 {rtor[out]}, {rtor[vin[0]]}, {rtor[arg[0][0]]}, {str(arg[0][1])}')  # type: ignore
-        ins.append('s_waitcnt lgkmcnt(0)')
-        ins.append(f'global_load_b32 {rtor[out]}, {rtor[arg[0]]}, {rtor[vin[0]]}')
-        ins.append('s_waitcnt vmcnt(0)')
+        ins.append(f'global_load_b32 {reg_out(out, True)}, {reg_in(arg[0])}, {reg_in(vin[0])}')
       elif uop == UOps.STORE:
-        ins.append(f'global_store_b32 {rtor[arg[0]]}, {rtor[vin[1]]}, {rtor[vin[0]]}')
+        ins.append(f'global_store_b32 {reg_in(arg[0])}, {reg_in(vin[1])}, {reg_in(vin[0])}')
 
     ins += ['s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', 's_endpgm', 's_code_end']
     return 'code', self.assemble(args, ins, v_cnt, s_cnt)
-
 
   def assemble(self, args, ins, v_cnt, s_cnt):
     kernel_desc = {'.amdhsa_group_segment_fixed_size': 0, '.amdhsa_private_segment_fixed_size': 0, '.amdhsa_kernarg_size': 0,

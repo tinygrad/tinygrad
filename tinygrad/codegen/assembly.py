@@ -7,11 +7,13 @@ import functools
 import math
 from collections import defaultdict
 
-type_to_letter = {dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a', dtypes.uint32: 'I', dtypes.uint64: 'A'}
+_type_to_letter = {dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a', dtypes.uint32: 'u', dtypes.uint64: 'b'}
+def type_to_letter(x): return _type_to_letter[x[0]].upper() if x[1] else _type_to_letter[x[0]]
 
 class Register(NamedTuple):
   nm:str
   dtype:DType
+  scalar:bool
   def __repr__(self): return self.nm
 
 class AssemblyInstruction(NamedTuple):
@@ -34,12 +36,12 @@ class AssemblyCodegen(Linearizer):
     self.limit_global_dims(3)  # all GPU asms have 3 (for now)
     self.linearize()
 
-    cnts:DefaultDict[DType, int] = defaultdict(int)
+    cnts:DefaultDict[Tuple[DType, bool], int] = defaultdict(int)
     tor: Dict[Any, Register] = {}
-    def newreg(tok, dtype=dtypes.float32):
+    def newreg(tok, dtype=dtypes.float32, scalar=False):
       nonlocal cnts, tor
-      tor[tok] = ret = Register(f"%{type_to_letter[dtype]}{cnts[dtype]}", dtype)
-      cnts[dtype] += 1
+      tor[tok] = ret = Register(f"%{type_to_letter((dtype, scalar))}{cnts[(dtype, scalar)]}", dtype, scalar)
+      cnts[(dtype, scalar)] += 1
       return ret
 
     def render_numnode(b):
@@ -51,7 +53,7 @@ class AssemblyCodegen(Linearizer):
       key = (op, a, b)
       if key not in tor:
         #if not isinstance(b, Register): b = render_numnode(b)
-        ins.append(AssemblyInstruction(UOps.ALU, newreg(key, dtype=dtype), [a, b], op))
+        ins.append(AssemblyInstruction(UOps.ALU, newreg(key, dtype=dtype, scalar=a.scalar and (not isinstance(b, Register) or b.scalar)), [a, b], op))
       return tor[key]
 
     def render_cast(a:Register, new_dtype:DType) -> Register:
@@ -85,7 +87,7 @@ class AssemblyCodegen(Linearizer):
         return reg, off
 
     ins = []
-    ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64), [], f"buf{i}") for i in range(len(self.bufs))]
+    ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64, scalar=True), [], f"buf{i}") for i in range(len(self.bufs))]
     global_size, local_size = [], []
     skipload_branch = 0
     for uop,newvar,vin,args in self.uops:
@@ -107,7 +109,7 @@ class AssemblyCodegen(Linearizer):
         else:
           for var in args[0]:
             if not isinstance(var, NumNode):  # TODO: why is this coming through?
-              ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32), [], 0))
+              ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32, scalar=True), [], 0))
               ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
       elif uop == UOps.ENDLOOP:
         if args[1] not in ["global", "local"]:
@@ -155,11 +157,13 @@ class AssemblyCodegen(Linearizer):
         ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]], (off, 'global' if args.i != -1 else 'shared')))
 
     # define registers
-    ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter[dtype], c)) for dtype,c in cnts.items()] + ins
+    ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)) for dtype,c in cnts.items()] + ins
 
     if DEBUG >= 4:
       for tins in ins: print(tins)
     name, asm = self.specialize(ins)
+
+    local_size = [1]
 
     return ASTRunner(name, asm,
       global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,
