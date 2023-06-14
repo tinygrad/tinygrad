@@ -94,7 +94,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, agnostic=Fa
   return output
 
 def postprocess(preds, img, orig_imgs):
-  print('copying to CPU now for post processing, this is slow')
+  print('copying to CPU now for post processing, this is slow (sorry)')
   #if you are on CPU, this causes an overflow runtime error. doesn't "seem" to make any difference in the predictions though.
   # TODO: make non_max_suppression in tinygrad - to make this faster
   preds = preds.cpu().numpy() if isinstance(preds, Tensor) else preds
@@ -450,3 +450,9 @@ if __name__ == '__main__':
   class_labels = class_labels.decode('utf-8').split('\n')
 
   draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)
+
+# TODO for later: 
+#  1. Fix SPPF minor difference due to maxpool 
+#  2. AST exp overflow warning while on cpu 
+#  3. Make NMS faster 
+#  4. Add video inference and webcam support
