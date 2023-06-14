@@ -209,6 +209,10 @@ def Or(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.ones(*x.shape)).cast(
 def Xor(x:Tensor, y:Tensor): return Where((x==y), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
 def Not(x:Tensor): return Where((x==1), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
 
+def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1): 
+  k = int(k.numpy().item()) if k is not 0 else 0 # onnx passes k as a tensor int64 with one element, default is 0
+  return x.triu(k) if upper else x.tril(k)
+
 def ConstantOfShape(input, value:Tensor=None):
   if value is None: value=Tensor([0.0])
   shape = [int(x) for x in safe_numpy(input)]
@@ -248,3 +252,11 @@ def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, red
   if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
   elif reduction == "sum": return loss.sum()
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
+
+def OneHot(indices, depth, values, axis=-1):
+  depth = int(safe_numpy(depth).item())
+  indices, rank = (indices.cast(dtypes.float32) < 0).where(indices+depth, indices), len(indices.shape)
+  if axis < 0: axis += rank + 1
+  ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
+  cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
+  return cond.where(values[1], values[0]).cast(values.dtype) 

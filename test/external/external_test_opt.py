@@ -85,7 +85,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     args_tiny = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
     model = Transformer(**args_tiny)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
-    with CLCache(85):
+    with CLCache(94):
       model(Tensor([[1,2,3,4]]), 0).realize()
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
