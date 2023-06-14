@@ -1,5 +1,6 @@
 import re
 import math
+import os
 import numpy as np
 from pathlib import Path
 from tinygrad import nn
@@ -11,13 +12,16 @@ from models.resnet import ResNet
 from models.retinanet import nms as _box_nms
 
 
+USE_NP_GATHER = os.getenv('FULL_TINYGRAD', '0') == '0'
+
 def meshgrid(x, y):
-    grid_x = Tensor.cat(*[x[idx:idx+1].expand(y.shape).unsqueeze(0) for idx in range(x.shape[0])])
-    grid_y = Tensor.cat(*[y.unsqueeze(0)]*x.shape[0])
-    return grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)
+  grid_x = Tensor.cat(*[x[idx:idx+1].expand(y.shape).unsqueeze(0) for idx in range(x.shape[0])])
+  grid_y = Tensor.cat(*[y.unsqueeze(0)]*x.shape[0])
+  return grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)
 
 # This is very slow for large arrays, or indices
 def _gather(array, indices):
+  indices = indices.float().to(array.device)
   reshape_arg = [1]*array.ndim + [array.shape[-1]]
   return Tensor.where(
     indices.unsqueeze(indices.ndim).expand(*indices.shape, array.shape[-1]) == Tensor.arange(array.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, array.shape[-1]), 
@@ -25,30 +29,32 @@ def _gather(array, indices):
   ).sum(indices.ndim)
 
 # TODO: replace npgather with a faster gather using tinygrad only
+# NOTE: this blocks the gradient 
 def npgather(array,indices):
   array = array.numpy()
   indices = indices.numpy()
   return Tensor(array[indices.astype(int)])
 
 def get_strides(shape):
-    prod = [1]
-    for idx in range(len(shape)-1, -1, -1): prod.append(prod[-1] * shape[idx])
-    # something about ints is broken with gpu, cuda
-    return Tensor(prod[::-1][1:], dtype=dtypes.int32).unsqueeze(0).cpu()
+  prod = [1]
+  for idx in range(len(shape)-1, -1, -1): prod.append(prod[-1] * shape[idx])
+  # something about ints is broken with gpu, cuda
+  return Tensor(prod[::-1][1:], dtype=dtypes.int32).unsqueeze(0).cpu()
 
 # with keys as integer array for all axes
 def tensor_getitem(tensor, *keys):
-    # something about ints is broken with gpu, cuda
-    flat_keys = Tensor.stack([key.expand((sum(keys)).shape).reshape(-1) for key in keys], dim=1).cpu().cast(dtypes.int32)
-    strides = get_strides(tensor.shape)
-    idxs = (flat_keys * strides).sum(1)
-    return npgather(tensor.reshape(-1), idxs).reshape(sum(keys).shape)
+  # something about ints is broken with gpu, cuda
+  flat_keys = Tensor.stack([key.expand((sum(keys)).shape).reshape(-1) for key in keys], dim=1).cpu().cast(dtypes.int32)
+  strides = get_strides(tensor.shape)
+  idxs = (flat_keys * strides).sum(1)
+  gatherer = npgather if USE_NP_GATHER else _gather
+  return gatherer(tensor.reshape(-1), idxs).reshape(sum(keys).shape)
 
 
 # for gather with indicies only on axis=0
 def tensor_gather(tensor, indices):
   if not isinstance(indices, Tensor):
-      indices = Tensor(indices, requires_grad=False)
+    indices = Tensor(indices, requires_grad=False)
   if len(tensor.shape) > 2:
     rem_shape = list(tensor.shape)[1:]
     tensor = tensor.reshape(tensor.shape[0], -1)
@@ -56,7 +62,6 @@ def tensor_gather(tensor, indices):
     rem_shape = None
   if len(tensor.shape) > 1:
     tensor = tensor.T
-    indices = indices.float() 
     repeat_arg = [1]*(tensor.ndim-1) + [tensor.shape[-2]]
     indices = indices.unsqueeze(indices.ndim).repeat(repeat_arg)
     ret = _gather(tensor, indices)

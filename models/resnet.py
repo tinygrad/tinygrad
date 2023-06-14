@@ -86,8 +86,7 @@ class ResNet:
     self.layer2 = self._make_layer(self.block, 128, self.num_blocks[1], stride=2)
     self.layer3 = self._make_layer(self.block, 256, self.num_blocks[2], stride=2)
     self.layer4 = self._make_layer(self.block, 512, self.num_blocks[3], stride=2)
-    if num_classes is not None:
-      self.fc = nn.Linear(512 * self.block.expansion, num_classes)
+    self.fc = nn.Linear(512 * self.block.expansion, num_classes) if num_classes is not None else None
 
   def _make_layer(self, block, planes, num_blocks, stride):
     strides = [stride] + [1] * (num_blocks-1)
@@ -104,7 +103,7 @@ class ResNet:
     out2 = out1.sequential(self.layer2)
     out3 = out2.sequential(self.layer3)
     out4 = out3.sequential(self.layer4)
-    if self.num_classes is not None:
+    if self.fc:
       out = out4.mean([2,3])
       out = self.fc(out).log_softmax()
       return out
