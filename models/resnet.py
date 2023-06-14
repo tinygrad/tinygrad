@@ -94,18 +94,19 @@ class ResNet:
     return layers
 
   def forward(self, x):
-    if not self.fc: features = []
+    is_feature_only = self.fc is None
+    if is_feature_only: features = []
     out = self.bn1(self.conv1(x)).relu()
     out = out.pad2d([1,1,1,1]).max_pool2d((3,3), 2)
     out = out.sequential(self.layer1)
-    features.append(out)
+    if is_feature_only: features.append(out)
     out = out.sequential(self.layer2)
-    features.append(out)
+    if is_feature_only: features.append(out)
     out = out.sequential(self.layer3)
-    features.append(out)
+    if is_feature_only: features.append(out)
     out = out.sequential(self.layer4)
-    features.append(out)
-    if self.fc:
+    if is_feature_only: features.append(out)
+    if not is_feature_only:
       out = out.mean([2,3])
       out = self.fc(out).log_softmax()
       return out
