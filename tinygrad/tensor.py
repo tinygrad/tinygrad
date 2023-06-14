@@ -340,11 +340,10 @@ class Tensor:
       slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
     return [self.slice(p) for p in slice_params]
   
-  @staticmethod
-  def interpolate(x, scale_factor, mode='nearest'):
+  def interpolate(self, scale_factor, mode='nearest'):
     assert mode == 'nearest', 'Only nearest interpolate available'
-    bs, c, py, px = x.shape
-    return x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, scale_factor, px, scale_factor).reshape(bs, c, py * scale_factor, px * scale_factor)
+    bs, c, py, px = self.shape
+    return self.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, scale_factor, px, scale_factor).reshape(bs, c, py * scale_factor, px * scale_factor)
 
   def unsqueeze(self, dim):
     if dim < 0: dim = len(self.shape) + dim + 1

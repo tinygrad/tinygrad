@@ -310,7 +310,7 @@ class FPN:
     ):
       if not inner_block:
         continue
-      inner_top_down = Tensor.interpolate(last_inner, scale_factor=2, mode="nearest")
+      inner_top_down = last_inner.interpolate(scale_factor=2, mode="nearest")
       inner_lateral = inner_block(feature)
       last_inner = inner_lateral + inner_top_down
       layer_result = layer_block(last_inner)
