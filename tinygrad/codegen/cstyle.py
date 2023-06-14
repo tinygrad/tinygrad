@@ -2,7 +2,7 @@ from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, 
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer, LocalTypes
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
-from tinygrad.helpers import partition, ImageDType, DEBUG, dtypes, colored, prod
+from tinygrad.helpers import partition, ImageDType, DEBUG, dtypes, colored
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
 from tinygrad.lazy import LazyBuffer
@@ -23,6 +23,7 @@ class CStyleLanguage(NamedTuple):
   extra_args: List[str] = []
   float4: Optional[str] = None
   half_prekernel: Optional[str] = None
+  double_prekernel: Optional[str] = None
   uses_vload: bool = False
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
@@ -171,8 +172,9 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
     [', '.join([f'{t} {bufnames[i]}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
-  if lang.half_prekernel:
-    prg =''.join([f"{lang.half_prekernel}", "\n", prg])
+  
+  if lang.half_prekernel: prg =''.join([f"{lang.half_prekernel}", "\n", prg])
+  if lang.double_prekernel: prg = ''.join([f"{lang.double_prekernel}", "\n", prg])
   return prg, global_size, local_size
 
 class CStyleCodegen(Linearizer):
@@ -188,15 +190,7 @@ class CStyleCodegen(Linearizer):
   def codegen(self):
     self.process()
     self.hand_coded_optimizations()
-
-    # sometimes, there's more dimensions than len(self.lang.gid).
-    # compact all the dimensions into the first
-    # NOTE: this might make multiview shapetrackers
-    if len(self.lang.gid) and self.first_reduce > len(self.lang.gid):
-      num_to_merge = (self.first_reduce - len(self.lang.gid))+1
-      self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
-      if DEBUG >= 4: print("reshaped to", self.full_shape, "due to too many global dimensions")
-
+    self.limit_global_dims(len(self.lang.gid))
     self.linearize()
 
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.bufs, self.lang)

@@ -19,6 +19,7 @@ class Node:
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
   def __repr__(self): return "<"+self.key+">"
+  def __hash__(self): return hash(self.__repr__())
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
