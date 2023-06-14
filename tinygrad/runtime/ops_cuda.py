@@ -42,16 +42,16 @@ class CUDAProgram:
     else:
       self.prg = PTXKernel(prg.encode('utf-8'))
 
-  def __call__(self, global_size:List[int], local_size:List[int], *args, wait=False):
-    block_size: Tuple[int,...]  = tuple(local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)
-    grid_size: Tuple[int,...] = tuple(global_size + [1] * (3 - len(global_size)))
-    assert all(x%y == 0 for x,y in zip(grid_size, block_size)), f"local:{block_size} must divide global:{grid_size}"
-    grid_size = tuple([x//y for x,y in zip(grid_size, block_size)])
+  def __call__(self, global_size, local_size, *args, wait=False):
+    local_size = (local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)
+    global_size = global_size + [1] * (3 - len(global_size))
+    assert all(x%y == 0 for x,y in zip(global_size, local_size)), f"local:{local_size} must divide global:{global_size}"
+    global_size = [x//y for x,y in zip(global_size, local_size)]
 
     if wait and ISCUDA:
       start, end = cuda.Event(), cuda.Event()
       start.record()
-    self.prg(*[x._buf for x in args], block=block_size, grid=grid_size)
+    self.prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size))
     if wait and ISCUDA:
       end.record()
       end.synchronize()
