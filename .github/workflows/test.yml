@@ -116,7 +116,7 @@ jobs:
 
   testmetal:
     name: Metal Tests
-    runs-on: macos-latest
+    runs-on: macos-13
 
     steps:
     - name: Checkout Code
