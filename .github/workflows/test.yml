@@ -132,13 +132,13 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[metal,testing]'
     - name: Run Pytest (test_mnist)
-      run: METAL=1 python -m pytest -s -v test/modeels/test_mnist.py
+      run: METAL=1 python -m pytest -s -v test/models/test_mnist.py
     - name: Run Pytest (test_onnx)
-      run: METAL=1 python -m pytest -s -v test/modeels/test_onnx.py
+      run: METAL=1 python -m pytest -s -v test/models/test_onnx.py
     - name: Run Pytest (test_rnnt)
-      run: METAL=1 python -m pytest -s -v test/modeels/test_rnnt.py
+      run: METAL=1 python -m pytest -s -v test/models/test_rnnt.py
     - name: Run Pytest (test_train)
-      run: METAL=1 python -m pytest -s -v test/modeels/test_train.py
+      run: METAL=1 python -m pytest -s -v test/models/test_train.py
     - name: Run Pytest (test_disk_tensor)
       run: METAL=1 python -m pytest -s -v test/unit/test_disk_tensor.py
     - name: Run Pytest (test_disk_tensor)
