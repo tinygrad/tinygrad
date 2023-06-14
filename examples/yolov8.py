@@ -7,7 +7,6 @@ from pathlib import Path
 import torch
 import cv2
 from collections import defaultdict
-import argparse
 import os
 import time, io, sys
 
@@ -95,8 +94,9 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, agnostic=Fa
   return output
 
 def postprocess(preds, img, orig_imgs):
-  print('copying to CPU now for post processing, sorry this is slow')
+  print('copying to CPU now for post processing, this is slow')
   #if you are on CPU, this causes an overflow runtime error. doesn't "seem" to make any difference in the predictions though.
+  # TODO: make non_max_suppression in tinygrad - to make this faster
   preds = preds.cpu().numpy() if isinstance(preds, Tensor) else preds
   preds = non_max_suppression(prediction=preds, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300)
   all_preds = []
@@ -108,15 +108,20 @@ def postprocess(preds, img, orig_imgs):
   return all_preds
   
 def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictions, class_labels, iou_threshold=0.5):
-  colors = [np.random.randint(0, 200, size=3, dtype='uint8') for _ in range(len(class_labels))]
+  color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
   font = cv2.FONT_HERSHEY_SIMPLEX
+
+  def is_bright_color(color):
+    r, g, b = color
+    brightness = (r * 299 + g * 587 + b * 114) / 1000
+    return brightness > 127
 
   for img_idx, (orig_img_path, output_img_path, predictions) in enumerate(zip(orig_img_paths, output_img_paths, all_predictions)):
     predictions = np.array(predictions)
     orig_img = cv2.imread(orig_img_path) if not isinstance(orig_img_path, np.ndarray) else cv2.imdecode(orig_img_path, 1)
     height, width, _ = orig_img.shape
     box_thickness = int((height + width) / 400)
-    font_scale = (height + width) / 2000
+    font_scale = (height + width) / 2500
 
     grouped_preds = defaultdict(list)
     object_count = defaultdict(int)
@@ -132,7 +137,8 @@ def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictio
       text_size, _ = cv2.getTextSize(label, font, font_scale, 1)
       label_y, bg_y = (y1 - 4, y1 - text_size[1] - 4) if y1 - text_size[1] - 4 > 0 else (y1 + text_size[1], y1)
       cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
-      cv2.putText(orig_img, label, (x1, label_y), font, font_scale, (255, 255, 255), 1, cv2.LINE_AA)
+      font_color = (0, 0, 0) if is_bright_color(color) else (255, 255, 255)
+      cv2.putText(orig_img, label, (x1, label_y), font, font_scale, font_color, 1, cv2.LINE_AA)
 
     for class_id, pred_list in grouped_preds.items():
       pred_list = np.array(pred_list)
@@ -140,13 +146,14 @@ def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictio
         max_conf_idx = np.argmax(pred_list[:, 4])
         max_conf_pred = pred_list[max_conf_idx]
         pred_list = np.delete(pred_list, max_conf_idx, axis=0)
-        draw_box_and_label(max_conf_pred, tuple(map(int, colors[class_id])))
+        color = color_dict[class_labels[class_id]]
+        draw_box_and_label(max_conf_pred, color)
         object_count[class_labels[class_id]] += 1
         iou_scores = box_iou(np.array([max_conf_pred[:4]]), pred_list[:, :4])
         low_iou_indices = np.where(iou_scores[0] < iou_threshold)[0]
         pred_list = pred_list[low_iou_indices]
         for low_conf_pred in pred_list:
-          draw_box_and_label(low_conf_pred, tuple(map(int, colors[class_id])))
+          draw_box_and_label(low_conf_pred, color)
 
     print(f"Image {img_idx + 1}:")
     print("Objects detected:")
@@ -279,6 +286,7 @@ class SPPF:
     c_ = c1 // 2  # hidden channels
     self.cv1 = Conv_Block(c1, c_, 1, 1, padding=None)
     self.cv2 = Conv_Block(c_ * 4, c2, 1, 1, padding=None)
+    # TODO: this pads with 0s, whereas torch function pads with -infinity. This results in a < 2% in prediction which does not make a difference visually. 
     self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=k, stride=1)
         
   def __call__(self, x):
@@ -439,5 +447,5 @@ if __name__ == '__main__':
   #v8 and v3 have same 80 class names for Object Detection
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   class_labels = class_labels.decode('utf-8').split('\n')
-  
+
   draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)
