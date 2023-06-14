@@ -48,17 +48,14 @@ class CUDAProgram:
     assert all(x%y == 0 for x,y in zip(grid_size, block_size)), f"local:{block_size} must divide global:{grid_size}"
     grid_size = tuple([x//y for x,y in zip(grid_size, block_size)])
 
-    if ISCUDA:
-      if wait:
-          start, end = cuda.Event(), cuda.Event()
-          start.record()
-      self.prg(*[x._buf for x in args], block=block_size, grid=grid_size)
-      if wait:
-        end.record()
-        end.synchronize()
-        return start.time_till(end)*1e-3
-    else:
-        self.prg(args, block_size, grid_size)
+    if wait and ISCUDA:
+      start, end = cuda.Event(), cuda.Event()
+      start.record()
+    self.prg(*[x._buf for x in args], block=block_size, grid=grid_size)
+    if wait and ISCUDA:
+      end.record()
+      end.synchronize()
+      return start.time_till(end)*1e-3
 
 class CUDACodegen(CStyleCodegen):
   lang = CStyleLanguage(
