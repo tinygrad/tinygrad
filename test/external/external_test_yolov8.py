@@ -1,6 +1,6 @@
 import numpy as np
 from extra.utils import fetch, download_file, get_child
-from examples.yolov8 import YOLOv8, get_variant_multiples, preprocess, postprocess, draw_bounding_boxes_and_save
+from examples.yolov8 import YOLOv8, get_variant_multiples, preprocess, postprocess, label_predictions
 from pathlib import Path
 import torch
 import unittest
@@ -12,7 +12,6 @@ import cv2
 class TestYOLOv8(unittest.TestCase):
   
   def setUp(self):
-    self.onnx_model_path = 'path/to/original_yolov8.onnx'
     self.yolo_variants = ['n', 's', 'm', 'l', 'x']
 
   def test_all_load_weights(self):
@@ -46,18 +45,15 @@ class TestYOLOv8(unittest.TestCase):
     TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80) 
     TinyYolov8.load_weights(weights_location, variant)
     
-    for url in test_image_urls:
-      img_stream = io.BytesIO(fetch(url))
+    for i in range(len(test_image_urls)):
+      img_stream = io.BytesIO(fetch(test_image_urls[i]))
       img = cv2.imdecode(np.frombuffer(img_stream.read(), np.uint8), 1)
       test_image = preprocess([img])
       predictions = TinyYolov8.forward(Tensor(test_image.astype(np.float32)))
       post_predictions = postprocess(preds=predictions, img=test_image, orig_imgs=[img])
-      
-      class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
-      class_labels = class_labels.decode('utf-8').split('\n')
-      
-      #fix this
-      # draw_bounding_boxes_and_save(['./'], ['./test_output_fetch.jpg'], post_predictions, class_labels)
+      labels = label_predictions(post_predictions)
+      assert labels == {5: 1, 0: 4, 11: 1} if i == 0 else labels == {0: 13, 29: 1, 32: 1}
+
 
 if __name__ == '__main__':
     unittest.main()
