@@ -257,10 +257,11 @@ class BoxList:
     return self
 
   def __getitem__(self, item):
-    if len(item) == 0:
-      return []
-    if sum(item) == len(item) and isinstance(item[0], bool):
-      return self
+    if isinstance(item, list):
+      if len(item) == 0:
+        return []
+      if sum(item) == len(item) and isinstance(item[0], bool):
+        return self
     bbox = BoxList(tensor_gather(self.bbox, item), self.size, self.mode)
     for k, v in self.extra_fields.items():
       bbox.add_field(k, tensor_gather(v, item))
@@ -489,9 +490,9 @@ class RPNHead:
     logits = []
     bbox_reg = []
     for feature in x:
-        t = Tensor.relu(self.conv(feature))
-        logits.append(self.cls_logits(t))
-        bbox_reg.append(self.bbox_pred(t))
+      t = Tensor.relu(self.conv(feature))
+      logits.append(self.cls_logits(t))
+      bbox_reg.append(self.bbox_pred(t))
     return logits, bbox_reg
 
 
@@ -572,7 +573,11 @@ def remove_small_boxes(boxlist, min_size):
   _, _, ws, hs = xywh_boxes.chunk(4, dim=1)
   keep = ((
           (ws >= min_size) * (hs >= min_size)
-  ) > 0).reshape(-1).numpy().astype(bool).tolist()
+  ) > 0).reshape(-1)
+  if keep.sum().numpy() == len(boxlist):
+    return boxlist
+  else:
+    keep = [idx for idx, val in enumerate(keep.numpy()) if val != 0]
   return boxlist[keep]
 
 
@@ -617,7 +622,6 @@ class RPNPostProcessor:
 
     box_regression_list = []
     concat_anchors_list = []
-
     for batch_idx in range(N):
       box_regression_list.append(tensor_gather(box_regression[batch_idx], topk_idx[batch_idx]))
       concat_anchors_list.append(tensor_gather(concat_anchors[batch_idx], topk_idx[batch_idx]))
@@ -742,11 +746,11 @@ class MaskRCNNFPNFeatureExtractor:
     self.blocks = [self.mask_fcn1, self.mask_fcn2, self.mask_fcn3, self.mask_fcn4]
 
   def __call__(self, x, proposals):
-      x = self.pooler(x, proposals)
-      for layer in self.blocks:
-          if x is not None:
-            x = Tensor.relu(layer(x))
-      return x
+    x = self.pooler(x, proposals)
+    for layer in self.blocks:
+      if x is not None:
+        x = Tensor.relu(layer(x))
+    return x
 
 
 class MaskRCNNC4Predictor:
@@ -814,8 +818,8 @@ def _bilinear_interpolate(
   hx = 1.0 - lx
 
   def masked_index(
-      y,  # [K, PH, IY]
-      x,  # [K, PW, IX]
+    y,  # [K, PH, IY]
+    x,  # [K, PW, IX]
   ):
     if ymask is not None:
       assert xmask is not None
@@ -834,7 +838,7 @@ def _bilinear_interpolate(
 
   # all ws preemptively [K, C, PH, PW, IY, IX]
   def outer_prod(y, x):
-      return y[:, None, :, None, :, None] * x[:, None, None, :, None, :]
+    return y[:, None, :, None, :, None] * x[:, None, None, :, None, :]
 
   w1 = outer_prod(hy, hx)
   w2 = outer_prod(hy, lx)
@@ -1066,26 +1070,22 @@ class PostProcessor:
 
     device = scores.device
     result = []
-    scores = scores.numpy()
-    boxes = boxes.numpy()
     inds_all = scores > self.score_thresh
     for j in range(1, num_classes):
-      inds = [idx for idx, x in enumerate(inds_all[:, j]) if x != 0]
-      scores_j = scores[inds, j]
-      boxes_j = boxes[inds, j * 4: (j + 1) * 4]
-      boxes_j = Tensor(boxes_j)
-      scores_j = Tensor(scores_j)
-      boxlist_for_class = BoxList(boxes_j, boxlist.size, mode="xyxy")
-      boxlist_for_class.add_field("scores", scores_j)
-      if len(boxlist_for_class):
+      inds = [idx for idx, x in enumerate(inds_all[:, j].numpy()) if x != 0]
+      if inds:
+        scores_j = tensor_gather(scores[:, j], inds)
+        boxes_j = tensor_gather(boxes[:, j * 4: (j + 1) * 4], inds)
+        boxlist_for_class = BoxList(boxes_j, boxlist.size, mode="xyxy")
+        boxlist_for_class.add_field("scores", scores_j)
         boxlist_for_class = boxlist_nms(
-          boxlist_for_class, self.nms
+            boxlist_for_class, self.nms
+          )
+        num_labels = len(boxlist_for_class)
+        boxlist_for_class.add_field(
+          "labels", Tensor.full((num_labels,), j, device=device)
         )
-      num_labels = len(boxlist_for_class)
-      boxlist_for_class.add_field(
-        "labels", Tensor.full((num_labels,), j, device=device)
-      )
-      result.append(boxlist_for_class)
+        result.append(boxlist_for_class)
 
     result = cat_boxlist(result)
     number_of_detections = len(result)
