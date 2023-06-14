@@ -33,14 +33,14 @@ def check_gc():
 class TestTrain(unittest.TestCase):
   def test_convnext(self):
     model = ConvNeXt(depths=[1], dims=[16])
-    X = np.zeros((BS,3,224,224), dtype=np.float16)
+    X = np.zeros((BS,3,224,224), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)
     train_one_step(model,X,Y)
     check_gc()
 
   def test_efficientnet(self):
     model = EfficientNet(0)
-    X = np.zeros((BS,3,224,224), dtype=np.float16)
+    X = np.zeros((BS,3,224,224), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)
     train_one_step(model,X,Y)
     check_gc()
@@ -48,7 +48,7 @@ class TestTrain(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "METAL", "METAL fails on this")
   def test_vit(self):
     model = ViT()
-    X = np.zeros((BS,3,224,224), dtype=np.float16)
+    X = np.zeros((BS,3,224,224), dtype=np.float32)
     Y = np.zeros((BS,), dtype=np.int32)
     train_one_step(model,X,Y)
     check_gc()
@@ -57,13 +57,13 @@ class TestTrain(unittest.TestCase):
     # this should be small GPT-2, but the param count is wrong
     # (real ff_dim is 768*4)
     model = Transformer(syms=10, maxlen=6, layers=12, embed_dim=768, num_heads=12, ff_dim=768//4)
-    X = np.zeros((BS,6), dtype=np.float16)
+    X = np.zeros((BS,6), dtype=np.float32)
     Y = np.zeros((BS,6), dtype=np.int32)
     train_one_step(model,X,Y)
     check_gc()
 
   def test_resnet(self):
-    X = np.zeros((BS, 3, 224, 224), dtype=np.float16)
+    X = np.zeros((BS, 3, 224, 224), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)
     for resnet_v in [ResNet18]:
       model = resnet_v()

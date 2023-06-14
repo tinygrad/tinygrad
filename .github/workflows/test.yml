@@ -134,7 +134,7 @@ jobs:
     - name: Show GPU
       run: GPU=1 DEBUG=1 python3 -c "from tinygrad.runtime.ops_gpu import CL"
     - name: Run Pytest
-      run: METAL=1 python -m pytest -s -v test/
+      run: METAL=1 python -m pytest -s -v --tb=no test/
 
   testgpu:
     name: GPU Tests
