@@ -2,7 +2,7 @@ import os, subprocess, pathlib
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any, Union, Optional
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType
+from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferMapped
 
@@ -21,6 +21,7 @@ METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):
   def __init__(self, size:int, dtype:DType) -> None:
+    assert dtype != dtypes.float64, "metal doesn't support float64"
     super().__init__(size, dtype, METAL.device.newBufferWithBytesNoCopy_length_options_deallocator_(None, size * dtype.itemsize, Metal.MTLResourceStorageModeShared, None))
   def __del__(self) -> None:
     self.release()
