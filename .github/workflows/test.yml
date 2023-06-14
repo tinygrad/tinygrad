@@ -130,11 +130,11 @@ jobs:
       with:
         python-version: 3.11
     - name: Install Dependencies
-      run: pip install -e '.[torch,testing]'
+      run: pip install -e '.[metal,testing]'
     - name: Show GPU
       run: GPU=1 DEBUG=1 python3 -c "from tinygrad.runtime.ops_gpu import CL"
     - name: Run Pytest
-      run: PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 TORCH=1 MPS=1 python -m pytest -s -v -n=1 test/
+      run: METAL=1 python -m pytest -s -v test/
 
   testgpu:
     name: GPU Tests
