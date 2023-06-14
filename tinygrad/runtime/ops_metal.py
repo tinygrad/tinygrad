@@ -26,7 +26,7 @@ class RawMetalBuffer(RawBufferMapped):
     super().__init__(size, dtype, METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared))
     assert self._buf is not None, "NO BUFFER"
   def __del__(self):
-    self._buf.release()
+    if self._buf: self._buf.release()
     super().__del__()
   def _buffer(self):
     METAL.synchronize()

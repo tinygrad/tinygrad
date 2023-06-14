@@ -53,14 +53,22 @@ class TestHalfDtype(unittest.TestCase):
   def test_int8_matmul_upcast_half(self): _test_matmul_upcast(Tensor([[1,2],[3,4]], dtype=dtypes.int8), Tensor.eye(2, dtype=dtypes.float16), dtypes.float16, [[1,2],[3,4]])
 
 class TestFloatDtype(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT == "METAL", "metal doesn't support float64")
   def test_float64_to_np(self): _test_to_np(Tensor([1,2,3,4], dtype=dtypes.float64), np.float64, [1,2,3,4])
+  @unittest.skipIf(Device.DEFAULT == "METAL", "metal doesn't support float64")
   def test_float64_add(self): _test_add(Tensor([1,2,3,4], dtype=dtypes.float64), Tensor([1,2,3,4], dtype=dtypes.float64), dtypes.float64, [2,4,6,8])
+  @unittest.skipIf(Device.DEFAULT == "METAL", "metal doesn't support float64")
   def test_float64_mul(self): _test_mul(Tensor([1,2,3,4], dtype=dtypes.float64), Tensor([1,2,3,4], dtype=dtypes.float64), dtypes.float64, [1,4,9,16])
+  @unittest.skipIf(Device.DEFAULT == "METAL", "metal doesn't support float64")
   def test_float64_matmul(self): _test_matmul(Tensor([[1,2],[3,4]], dtype=dtypes.float64), Tensor.eye(2, dtype=dtypes.float64), dtypes.float64, [[1,2],[3,4]])
+  @unittest.skipIf(Device.DEFAULT == "METAL", "metal doesn't support float64")
   def test_float64_cast_float(self): _test_cast(Tensor([1,2]), dtypes.float64, [1,2])
 
+  @unittest.skipIf(Device.DEFAULT == "METAL", "metal doesn't support float64")
   def test_float_add_upcast_float64(self): _test_add_upcast(Tensor([1,2,3,4], dtype=dtypes.float32), Tensor([1,2,3,4], dtype=dtypes.float64), dtypes.float64, [2,4,6,8])
+  @unittest.skipIf(Device.DEFAULT == "METAL", "metal doesn't support float64")
   def test_float_mul_upcast_float64(self): _test_mul_upcast(Tensor([1,2,3,4], dtype=dtypes.float32), Tensor([1,2,3,4], dtype=dtypes.float64), dtypes.float64, [1,4,9,16])
+  @unittest.skipIf(Device.DEFAULT == "METAL", "metal doesn't support float64")
   def test_float_matmul_upcast_float64(self): _test_matmul_upcast(Tensor([[1,2],[3,4]], dtype=dtypes.float32), Tensor.eye(2, dtype=dtypes.float64), dtypes.float64, [[1,2],[3,4]])
 
 class TestInt8Dtype(unittest.TestCase):
