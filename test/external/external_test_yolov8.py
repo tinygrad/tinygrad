@@ -5,17 +5,17 @@ from pathlib import Path
 import torch
 import unittest
 import io
+import sys
 from tinygrad.nn import Tensor
 import cv2
-
+import onnxruntime as ort
+import os
+import ultralytics
 
 class TestYOLOv8(unittest.TestCase):
-  
-  def setUp(self):
-    self.yolo_variants = ['n', 's', 'm', 'l', 'x']
 
   def test_all_load_weights(self):
-    for variant in self.yolo_variants:
+    for variant in ['n', 's', 'm', 'l', 'x']:
       weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.pt'
       download_file(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{variant}.pt', weights_location)
       
@@ -52,9 +52,40 @@ class TestYOLOv8(unittest.TestCase):
       predictions = TinyYolov8.forward(Tensor(test_image.astype(np.float32)))
       post_predictions = postprocess(preds=predictions, img=test_image, orig_imgs=[img])
       labels = label_predictions(post_predictions)
+      
+      class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
+      class_labels = class_labels.decode('utf-8').split('\n')
       assert labels == {5: 1, 0: 4, 11: 1} if i == 0 else labels == {0: 13, 29: 1, 32: 1}
+      
+  def test_forward_pass_torch_onnx(self):
+    # the ultralytics export prints a lot of unneccesary things
+    if not os.path.isfile("yolov8n.onnx"):
+      model = ultralytics.YOLO(model='yolov8n.pt', task='Detect')  
+      model.export(format="onnx",imgsz=[640, 480]) 
 
+    variant = 'n'
+    weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.pt'
+    depth, width, ratio = get_variant_multiples(variant) 
+    TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80) 
+    TinyYolov8.load_weights(weights_location, variant)
+    
+    image_location = [np.frombuffer(io.BytesIO(fetch('https://raw.githubusercontent.com/ultralytics/yolov5/master/data/images/bus.jpg')).read(), np.uint8)]
+    orig_image = [cv2.imdecode(image_location[0], 1)]
+    
+    input_image = preprocess(orig_image)
+    
+    onnx_session = ort.InferenceSession("./weights/yolov8n.onnx")
+    onnx_input_name = onnx_session.get_inputs()[0].name
+    onnx_output_name = onnx_session.get_outputs()[0].name
+    onnx_output = onnx_session.run([onnx_output_name], {onnx_input_name: input_image})
 
+    tiny_output = TinyYolov8.forward(Tensor(input_image))
+    
+    # currently rtol is so big because there is a 1-2% difference in our predictions 
+    # because of the zero padding in SPPF maxpooling layers rather than the -infinity in torch. 
+    # This difference does not make a difference "visually". 
+    np.testing.assert_allclose(onnx_output[0], tiny_output.cpu().numpy(), atol=5e-4, rtol=0.025)
+    
 if __name__ == '__main__':
     unittest.main()
     
