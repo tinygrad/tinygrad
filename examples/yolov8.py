@@ -8,7 +8,9 @@ import torch
 import cv2
 from collections import defaultdict
 import argparse
+import os
 import time
+
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 #The upsampling class has been taken from this pull request https://github.com/geohot/tinygrad/pull/784 by dc-dc-dc. Now 2(?) models use upsampling. (retinet and this)
 
@@ -152,7 +154,7 @@ def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictio
     cv2.imwrite(output_img_path, orig_img)
     print(f'saved detections at {output_img_path}')
 
-def get_detected_classes_with_frequency(all_predictions):
+def label_predictions(all_predictions):
   class_index_count = defaultdict(int)
   for predictions in all_predictions:
     predictions = np.array(predictions)
@@ -381,13 +383,16 @@ class YOLOv8:
     x = self.fpn.forward(*x)
     return self.head.forward(x)
 
-  def load_weights(self, weights_path, yolo_variant):
-    state_dict = torch.load(weights_path)
-    weights = state_dict['model'].state_dict().items()
+  def return_all_trainable_modules(self):
     backbone_modules = [*range(10)]
     yolov8neck_modules = [12, 15, 16, 18, 19, 21]
     yolov8_head_weights = [(22, self.head)]
-    all_trainable_weights = [*zip(backbone_modules, self.net.return_modules()), *zip(yolov8neck_modules, self.fpn.return_modules()), *yolov8_head_weights]
+    return [*zip(backbone_modules, self.net.return_modules()), *zip(yolov8neck_modules, self.fpn.return_modules()), *yolov8_head_weights]
+  
+  def load_weights(self, weights_path, yolo_variant):
+    state_dict = torch.load(weights_path)
+    weights = state_dict['model'].state_dict().items()
+    all_trainable_weights = self.return_all_trainable_modules()
     for k, v in weights:
       k = k.split('.')
       for i in all_trainable_weights:
@@ -405,11 +410,14 @@ if __name__ == '__main__':
   args = parse_arguments()
   img_path = args.image_location
   yolo_variant = args.variant
-  
-  images = [cv2.imread(img_path)]
+    
+  folder_path = './outputs_yolov8'
+  if not os.path.exists(folder_path):
+    os.makedirs(folder_path)
+    
   img_paths = [img_path]
-  out_paths = ['./output_1.jpg']
-   
+  out_paths = [os.path.join(folder_path, os.path.basename(img_path).replace(".", "_output."))]
+  images = [cv2.imread(img_path)]
   pre_processed_images = preprocess(images)
   
   # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/v8/yolov8.yaml
@@ -429,6 +437,5 @@ if __name__ == '__main__':
   #v8 and v3 have same 80 class names for Object Detection
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   class_labels = class_labels.decode('utf-8').split('\n')
-
+  
   draw_bounding_boxes_and_save(orig_img_paths=img_paths, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)
-  freq = get_detected_classes_with_frequency(all_predictions = post_predictions)
