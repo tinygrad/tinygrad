@@ -1,5 +1,6 @@
 import torch
 import time
+import math
 import numpy as np
 import unittest
 from tinygrad.tensor import Tensor
@@ -124,6 +125,18 @@ class TestOps(unittest.TestCase):
     tt2 = Tensor.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (tt1 < tt2).sum().backward)
 
+  def test_tril(self):
+    helper_test_op([(3,3)], lambda x: x.tril(), lambda x: x.tril())
+    helper_test_op([(3,3)], lambda x: x.tril(1), lambda x: x.tril(1))
+    helper_test_op([(3,3)], lambda x: x.tril(-1), lambda x: x.tril(-1))
+    helper_test_op([(5,3,3)], lambda x: x.tril(), lambda x: x.tril())
+    helper_test_op([(5,3,3)], lambda x: x.tril(1), lambda x: x.tril(1))
+  def test_triu(self):
+    helper_test_op([(3,3)], lambda x: x.triu(), lambda x: x.triu())
+    helper_test_op([(3,3)], lambda x: x.triu(1), lambda x: x.triu(1))
+    helper_test_op([(3,3)], lambda x: x.triu(-1), lambda x: x.triu(-1))
+    helper_test_op([(5,3,3)], lambda x: x.triu(), lambda x: x.triu())
+    helper_test_op([(5,3,3)], lambda x: x.triu(1), lambda x: x.triu(1))
   def test_maximum(self):
     helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
     helper_test_op([(), ()], torch.maximum, Tensor.maximum)
@@ -133,7 +146,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(), ()], torch.minimum, Tensor.minimum)
   def test_add(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add)
+  def test_add_number(self):
     helper_test_op([(), ()], lambda x,y: x+y, Tensor.add)
+  def test_add3(self):
+    helper_test_op([(45,65), (45,65), (45,65)], lambda x,y,z: x+y+z)
   def test_add_simple(self):
     helper_test_op([(256), (256)], lambda x,y: x+y, Tensor.add, forward_only=True)
   def test_broadcasted_add(self):
@@ -172,6 +188,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x/2, lambda x: x/2)
     helper_test_op([()], lambda x: 2/x, lambda x: 2/x)
   def test_pow(self):
+    # TODO: why is a=0 for these tests?
     helper_test_op([(45,65)], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
     helper_test_op([(45,65)], lambda x: x**3, lambda x: Tensor.pow(x,3), a=0)
     helper_test_op([(45,65)], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
@@ -180,6 +197,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
   def test_pow_const(self):
     helper_test_op([(45,65)], lambda x: x**1.0, lambda x: x**1.0)
+    helper_test_op([(45,65)], lambda x: x**-1.0, lambda x: x**-1.0)
     helper_test_op([(45,65)], lambda x: 1.0**x, lambda x: 1.0**x)
     helper_test_op([(45,65)], lambda x: x**2.0, lambda x: x**2.0)
     helper_test_op([(45,65)], lambda x: 2.0**x, lambda x: 2.0**x)
@@ -290,6 +308,8 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.sum(), Tensor.sum, vals=[[1.,1.]])
   def test_sum_full(self):
     helper_test_op([(16384)], lambda x: x.sum(), lambda x: x.sum())
+  def test_sum_small_full(self):
+    helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum)
   def test_sum_relu(self):
     helper_test_op([(3,4,5)], lambda x: x.relu().sum().relu(), lambda x: x.relu().sum().relu())
   def test_sum(self):
@@ -940,6 +960,17 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,4)], lambda x: x[1:3][1:2])
     helper_test_op([(4,4)], lambda x: x[:, 1:2][0:1])
     helper_test_op([(4,4)], lambda x: x[:, 1:2][:, 0:1])
+
+  @unittest.skip("this test is broken #862")
+  def test_max_inf(self):
+    n = Tensor([1, float("nan")]).max().numpy()
+    assert math.isnan(n.item()), f"{n.item()} is not nan"
+
+  @unittest.skip("this test is broken #942")
+  def test_inf_where(self):
+    x = Tensor.full((3, 3), float("inf"))
+    n = (x < 0).where(x, 1).numpy()
+    assert np.all(n == 1.)
 
 if __name__ == '__main__':
   np.random.seed(1337)

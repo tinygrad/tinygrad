@@ -6,14 +6,13 @@ from tinygrad.helpers import dtypes
 from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, FusedOps
 from tinygrad.lazy import LazyBuffer
 
-from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
+from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 def int_const(x): return ir.Constant(ir.IntType(64), x)
 render_llvm = {
   NumNode: lambda self,ops,ctx: int_const(self.b),
   MulNode: lambda self,ops,ctx: ctx.mul(self.a.render(ops,ctx), int_const(self.b)),
   DivNode: lambda self,ops,ctx: ctx.sdiv(self.a.render(ops,ctx), int_const(self.b)),
   ModNode: lambda self,ops,ctx: ctx.srem(self.a.render(ops,ctx), int_const(self.b)),
-  GeNode: lambda self,ops,ctx: ctx.icmp_signed(">=", self.a.render(ops,ctx), int_const(self.b)),
   LtNode: lambda self,ops,ctx: ctx.icmp_signed("<", self.a.render(ops,ctx), int_const(self.b)),
   SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.add(a,b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.and_(a,b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx))
@@ -38,7 +37,7 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
   module = ir.Module(name=__file__)
 
   # create llvm function
-  func_dtypes = [{dtypes.float16:ir.HalfType(), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64)}[buf.dtype] for buf in bufs]
+  func_dtypes = [{dtypes.float16:ir.HalfType(), dtypes.float32:ir.FloatType(), dtypes.float64:ir.DoubleType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64)}[buf.dtype] for buf in bufs]
   func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in func_dtypes]), name='exec')
 
   # force llvmlite to allow us to add function attribute then add the attribute
@@ -91,6 +90,8 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
       if func_dtypes[args.i] != ir.FloatType():
         if dtypes.is_int(bufs[args.i].dtype):
           val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(bufs[args.i].dtype) else bb[-1].sitofp(val, ir.FloatType())
+        elif bufs[args.i].dtype == dtypes.float64:
+          val = bb[-1].fptrunc(val, ir.FloatType())
         else:
           val = bb[-1].fpext(val, ir.FloatType())
       lvars[newvar] = val
@@ -101,6 +102,8 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
       if func_dtypes[0] != ir.FloatType():
         if dtypes.is_int(bufs[args.i].dtype):
           element = bb[-1].fptoui(element, func_dtypes[0]) if dtypes.is_unsigned(bufs[args.i].dtype) else bb[-1].fptosi(element, func_dtypes[0])
+        elif bufs[args.i].dtype == dtypes.float64:
+          element = bb[-1].fpext(element, func_dtypes[0])
         else:
           element = bb[-1].fptrunc(element, func_dtypes[0])
       bb[-1].store(element, bb[-1].gep(func.args[args.i], [idx], inbounds=True))
