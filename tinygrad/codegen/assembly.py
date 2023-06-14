@@ -32,7 +32,7 @@ class AssemblyCodegen(Linearizer):
   # s registers are the addresses and non local indexes
   def codegen(self):
     self.process()
-    self.hand_coded_optimizations()
+    #self.hand_coded_optimizations()
     self.limit_global_dims(3)  # all GPU asms have 3 (for now)
     self.linearize()
 
@@ -115,8 +115,8 @@ class AssemblyCodegen(Linearizer):
         if args[1] not in ["global", "local"]:
           for var in reversed(args[0]):
             if not isinstance(var, NumNode):  # TODO: why is this coming through?
-              pred = render_alu(BinaryOps.CMPLT, tor[var], var.max, dtypes.bool)
               ins.append(AssemblyInstruction(UOps.ALU, tor[var], [tor[var], 1], BinaryOps.ADD))
+              pred = render_alu(BinaryOps.CMPLT, tor[var], var.max+1, dtypes.bool)
               ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], ("$loop_"+var.expr, True)))
       elif uop == UOps.ALU and newvar is not None:
         if args == FusedOps.MULACC: vin = [vin[1], vin[2], vin[0]]  # TODO: reorder MULACC everywhere
@@ -140,7 +140,7 @@ class AssemblyCodegen(Linearizer):
           ins.append(AssemblyInstruction(UOps.ALU, newreg(newvar) if newvar not in tor else tor[newvar], [tor[x] for x in vin], args))
       elif uop == UOps.LOAD and newvar is not None:
         idx, off = addr_w_offset(args)
-        reg = newreg(newvar)
+        reg = newreg(newvar, scalar=idx.scalar and (not isinstance(off, Register) or off.scalar))
         if args.valid.min == 0:
           ins.append(AssemblyInstruction(UOps.CONST, reg, [], 0))
           if args.valid.max == 1:

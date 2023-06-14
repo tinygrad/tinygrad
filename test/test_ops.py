@@ -309,7 +309,7 @@ class TestOps(unittest.TestCase):
   def test_sum_full(self):
     helper_test_op([(16384)], lambda x: x.sum(), lambda x: x.sum())
   def test_sum_small_full(self):
-    helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum)
+    helper_test_op([(45,5)], lambda x: x.sum(), Tensor.sum)
   def test_sum_relu(self):
     helper_test_op([(3,4,5)], lambda x: x.relu().sum().relu(), lambda x: x.relu().sum().relu())
   def test_sum(self):
