@@ -6,7 +6,6 @@ from extra.utils import get_child, fetch, download_file
 from pathlib import Path
 import torch
 import cv2
-from PIL import Image
 from collections import defaultdict
 import argparse
 import time
@@ -32,7 +31,6 @@ def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, 
   return image
 
 def pre_transform(im, imgsz=640, model_stride=32, model_pt=True):
-  im = im.cpu().numpy() if isinstance(im, Tensor) else im
   same_shapes = all(x.shape == im[0].shape for x in im)
   auto = same_shapes and model_pt
   return [compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im]
@@ -93,59 +91,62 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, agnostic=Fa
     output[xi] = x[i] 
   return output
 
-def postprocess(preds, img, orig_imgs): #path will be the loaded image path
+def postprocess(preds, img, orig_imgs):
+  print('copying to CPU now for post processing, sorry this is slow for non CPU backends')
   preds = preds.detach().cpu().numpy() if isinstance(preds, Tensor) else preds
   preds = non_max_suppression(prediction=preds, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300)
-  
+  all_preds = []
   for i, pred in enumerate(preds):
     orig_img = orig_imgs[i] if isinstance(orig_imgs, list) else orig_imgs
     if not isinstance(orig_imgs, Tensor):
       pred[:, :4] = scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
-      
-  return pred
+      all_preds.append(pred)
+  return all_preds
   
-def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, class_labels, iou_threshold=0.5):
-  predictions = np.array(predictions)
-  orig_img = cv2.imread(orig_img_path)
+def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictions, class_labels, iou_threshold=0.5):
   colors = [np.random.randint(0, 200, size=3, dtype='uint8') for _ in range(len(class_labels))]
   font = cv2.FONT_HERSHEY_SIMPLEX
-  grouped_preds = defaultdict(list)
-  object_count = defaultdict(int)
 
-  for pred_np in predictions:
-    grouped_preds[int(pred_np[-1])].append(pred_np)
+  for img_idx, (orig_img_path, output_img_path, predictions) in enumerate(zip(orig_img_paths, output_img_paths, all_predictions)):
+    predictions = np.array(predictions)
+    orig_img = cv2.imread(orig_img_path)
+    grouped_preds = defaultdict(list)
+    object_count = defaultdict(int)
 
-  def draw_box_and_label(pred, color):
-    x1, y1, x2, y2, conf, _ = pred
-    x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
-    cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, 3)
-    label = f"{class_labels[class_id]} {conf:.2f}"
-    text_size, _ = cv2.getTextSize(label, font, 0.9, 1)
-    label_y, bg_y = (y1 - 4, y1 - text_size[1] - 4) if y1 - text_size[1] - 4 > 0 else (y1 + text_size[1], y1)
-    cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
-    cv2.putText(orig_img, label, (x1, label_y), font, 0.9, (255, 255, 255), 1, cv2.LINE_AA)
+    for pred_np in predictions:
+      grouped_preds[int(pred_np[-1])].append(pred_np)
 
-  for class_id, pred_list in grouped_preds.items():
-    pred_list = np.array(pred_list)
-    while len(pred_list) > 0:
-      max_conf_idx = np.argmax(pred_list[:, 4])
-      max_conf_pred = pred_list[max_conf_idx]
-      pred_list = np.delete(pred_list, max_conf_idx, axis=0)
-      draw_box_and_label(max_conf_pred, tuple(map(int, colors[class_id])))
-      object_count[class_labels[class_id]] += 1
-      iou_scores = box_iou(np.array([max_conf_pred[:4]]), pred_list[:, :4])
-      low_iou_indices = np.where(iou_scores[0] < iou_threshold)[0]
-      pred_list = pred_list[low_iou_indices]
+    def draw_box_and_label(pred, color):
+      x1, y1, x2, y2, conf, _ = pred
+      x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
+      cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, 3)
+      label = f"{class_labels[class_id]} {conf:.2f}"
+      text_size, _ = cv2.getTextSize(label, font, 0.9, 1)
+      label_y, bg_y = (y1 - 4, y1 - text_size[1] - 4) if y1 - text_size[1] - 4 > 0 else (y1 + text_size[1], y1)
+      cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
+      cv2.putText(orig_img, label, (x1, label_y), font, 0.9, (255, 255, 255), 1, cv2.LINE_AA)
 
-      for low_conf_pred in pred_list:
-        draw_box_and_label(low_conf_pred, tuple(map(int, colors[class_id])))
-              
-  print("Objects detected:")
-  for obj, count in object_count.items():
-    print(f"- {obj}: {count}")
-      
-  cv2.imwrite(output_img_path, orig_img)
-  print(f'saved detections at {output_img_path}')
+    for class_id, pred_list in grouped_preds.items():
+      pred_list = np.array(pred_list)
+      while len(pred_list) > 0:
+        max_conf_idx = np.argmax(pred_list[:, 4])
+        max_conf_pred = pred_list[max_conf_idx]
+        pred_list = np.delete(pred_list, max_conf_idx, axis=0)
+        draw_box_and_label(max_conf_pred, tuple(map(int, colors[class_id])))
+        object_count[class_labels[class_id]] += 1
+        iou_scores = box_iou(np.array([max_conf_pred[:4]]), pred_list[:, :4])
+        low_iou_indices = np.where(iou_scores[0] < iou_threshold)[0]
+        pred_list = pred_list[low_iou_indices]
+        for low_conf_pred in pred_list:
+          draw_box_and_label(low_conf_pred, tuple(map(int, colors[class_id])))
+
+    print(f"Image {img_idx + 1}:")
+    print("Objects detected:")
+    for obj, count in object_count.items():
+        print(f"- {obj}: {count}")
+
+    cv2.imwrite(output_img_path, orig_img)
+    print(f'saved detections at {output_img_path}')
 
 
 # utility functions for forward pass. 
@@ -186,10 +187,9 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
   return p
 
 def clip_boxes(boxes, shape):
-  boxes_np = boxes.numpy() if isinstance(boxes, Tensor) else boxes
-  boxes_np[..., [0, 2]] = np.clip(boxes_np[..., [0, 2]], 0, shape[1])  # x1, x2
-  boxes_np[..., [1, 3]] = np.clip(boxes_np[..., [1, 3]], 0, shape[0])  # y1, y2
-  return boxes_np
+  boxes[..., [0, 2]] = np.clip(boxes[..., [0, 2]], 0, shape[1])  # x1, x2
+  boxes[..., [1, 3]] = np.clip(boxes[..., [1, 3]], 0, shape[0])  # y1, y2
+  return boxes
 
 def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
   gain = ratio_pad if ratio_pad else min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])
@@ -202,9 +202,8 @@ def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
   return boxes_np
 
 def xywh2xyxy(x):
-  x_np = x.numpy() if isinstance(x, Tensor) else x
-  xy = x_np[..., :2]  # center x, y
-  wh = x_np[..., 2:4]  # width, height
+  xy = x[..., :2]  # center x, y
+  wh = x[..., 2:4]  # width, height
   xy1 = xy - wh / 2  # top left x, y
   xy2 = xy + wh / 2  # bottom right x, y
   result = np.concatenate((xy1, xy2), axis=-1)
@@ -395,8 +394,11 @@ if __name__ == '__main__':
   yolo_variant = args.variant
   
   images = [cv2.imread(img_path)]
+  img_paths = [img_path]
+  out_paths = ['./output_1.jpg']
+   
   pre_processed_images = preprocess(images)
-
+  
   # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/v8/yolov8.yaml
   depth, width, ratio = get_variant_multiples(yolo_variant) 
   yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)  
@@ -404,16 +406,17 @@ if __name__ == '__main__':
   weights_location = Path(__file__).parent.parent / "weights" / f'yolov8{yolo_variant}.pt'
   download_file(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{yolo_variant}.pt', weights_location)
   yolo_infer.load_weights(weights_location, yolo_variant)
-
+  
+  
   st = time.time()
   predictions = yolo_infer.forward(Tensor(pre_processed_images.astype(np.float32)))
   print(f'did inference in {(time.time() - st):2f}s')
   
-  # fix all of these to take into account the batches of images. 
-  post_predictions = postprocess(predictions, pre_processed_images, images)
+  
+  post_predictions = postprocess(preds=predictions, img=pre_processed_images, orig_imgs=images)
   
   #v8 and v3 have same 80 class names for Object Detection
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   class_labels = class_labels.decode('utf-8').split('\n')
   
-  draw_bounding_boxes_and_save(img_path, './output.jpg', post_predictions, class_labels=class_labels)
+  draw_bounding_boxes_and_save(orig_img_paths=img_paths, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)
