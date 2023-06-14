@@ -95,8 +95,9 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, agnostic=Fa
   return output
 
 def postprocess(preds, img, orig_imgs):
-  print('copying to CPU now for post processing, sorry this is slow for non CPU backends')
-  preds = preds.detach().cpu().numpy() if isinstance(preds, Tensor) else preds
+  print('copying to CPU now for post processing, sorry this is slow')
+  #if you are on CPU, this causes an overflow runtime error. doesn't "seem" to make any difference in the predictions though.
+  preds = preds.cpu().numpy() if isinstance(preds, Tensor) else preds
   preds = non_max_suppression(prediction=preds, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300)
   all_preds = []
   for i, pred in enumerate(preds):
@@ -154,16 +155,6 @@ def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictio
 
     cv2.imwrite(output_img_path, orig_img)
     print(f'saved detections at {output_img_path}')
-
-def label_predictions(all_predictions):
-  class_index_count = defaultdict(int)
-  for predictions in all_predictions:
-    predictions = np.array(predictions)
-    for pred_np in predictions:
-      class_id = int(pred_np[-1])
-      class_index_count[class_id] += 1
-
-  return dict(class_index_count)
 
 # utility functions for forward pass. 
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
@@ -225,17 +216,18 @@ def xywh2xyxy(x):
   result = np.concatenate((xy1, xy2), axis=-1)
   return Tensor(result) if isinstance(x, Tensor) else result
 
-#misc
-# usage: python3 ./examples/yolov8.py -i "./football_match.webp" -v "n"  (where after - i comes the original image location AND after -v comes the yolov8 variant)
-def parse_arguments():
-  parser = argparse.ArgumentParser(description='YOLOv8 Implementation')
-  parser.add_argument('-i', '--image_location', type=str, required=True, help='Image file location pr a folder of images (required)')
-  parser.add_argument('-v', '--variant', type=str, choices=['n', 's', 'm', 'l', 'x'], required=True, help='YOLOv8 variant (n, s, m, l, x) (required)')
-  args = parser.parse_args()
-  return args
-
 def get_variant_multiples(variant):
   return {'n':(0.33, 0.25, 2.0), 's':(0.33, 0.50, 2.0), 'm':(0.67, 0.75, 1.5), 'l':(1.0, 1.0, 1.0), 'x':(1, 1.25, 1.0) }.get(variant, None)
+
+def label_predictions(all_predictions):
+  class_index_count = defaultdict(int)
+  for predictions in all_predictions:
+    predictions = np.array(predictions)
+    for pred_np in predictions:
+      class_id = int(pred_np[-1])
+      class_index_count[class_id] += 1
+
+  return dict(class_index_count)
 
 #this is taken from https://github.com/geohot/tinygrad/pull/784/files by dc-dc-dc (Now 2 models use upsampling)
 class Upsample:
@@ -407,7 +399,8 @@ class YOLOv8:
 
 if __name__ == '__main__':
   
-  if len(sys.argv) < 2:
+  # usage : python3 yolov8.py "image_URL OR image_path" "v8 variant" (optional, n is default)
+  if len(sys.argv) < 2 and len(sys[1]) > 1:
     print("Error: Image URL or path not provided.")
     sys.exit(1)
 
