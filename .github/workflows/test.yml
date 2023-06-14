@@ -265,3 +265,25 @@ jobs:
       run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_randomness.py
     - name: Run test_tensor.py
       run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_tensor.py
+    - name: Run test_tensor.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_tensor.py
+    - name: Run test_specific_conf.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_specific_conf.py
+    - name: Run test_specific_conf.py
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/test_specific_conf.py
+    - name: Run test/extra
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/extra/
+    - name: Run test/unit
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/unit/
+    - name: Run test_mnist
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/models/test_mnist.py
+    - name: Run test_end2end
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/models/test_end2end.py
+    - name: Run test_onnx
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/models/test_onnx.py
+    - name: Run test_train
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/models/test_train.py
+    - name: Run test_rnnt
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/models/test_rnnt.py
+    - name: Run test_efficientnet
+      run: FORWARD_ONLY=1 JIT=1 OPT=4 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/models/test_efficientnet.py
