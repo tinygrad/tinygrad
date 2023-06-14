@@ -1,8 +1,6 @@
-from tinygrad.helpers import getenv
 from ctypes import CDLL, c_char_p, c_void_p, c_int, POINTER, cast
 
 lib = CDLL("./extra/cudacpu/libcudacpu.so")
-DEBUGCUDACPU = getenv("DEBUGCUDACPU", 0)
 
 lib.ptx_kernel_create.argtypes = [c_char_p]
 lib.ptx_kernel_create.restype = c_void_p
