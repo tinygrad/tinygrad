@@ -89,6 +89,7 @@ class dtypes:
   uint32: Final[DType] = DType(1, 4, "uint", np.uint32)
   uint64: Final[DType] = DType(2, 8, "uint64", np.uint64)
 
+
 class GlobalCounters:
   global_ops: ClassVar[int] = 0
   global_mem: ClassVar[int] = 0
