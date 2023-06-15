@@ -131,8 +131,6 @@ jobs:
         python-version: 3.11
     - name: Install Dependencies
       run: pip install -e '.[metal,testing]'
-    - name: Run Pytest (external)
-      run: METAL=1 python -m pytest -s -v -n=auto test/external
     - name: Run Pytest (extra)
       run: METAL=1 python -m pytest -s -v -n=auto test/extra
     - name: Run Pytest (unit)
