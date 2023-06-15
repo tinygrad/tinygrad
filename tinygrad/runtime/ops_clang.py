@@ -3,25 +3,32 @@ from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
-class Config:
-  program = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n'
-  platform = {
-    'Windows': {'cflags':'', 'ext':'dll', 'export':'__declspec(dllexport)'},
-    'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'export':'__attribute__((visibility("default")))'},
-    'Darwin': {'cflags':'', 'ext':'dylib', 'export':''}
-  }[platform.system()]
-  command = 'clang -shared -O2 -Wall -Werror -x c '+platform['cflags']+' - -o '
-  extension = platform['ext']
-  export = platform['export']
+class DynLib:
+  def __init__(self, sys:str):
+    self.defs = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n'
+    self.args = {
+      'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
+      'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'exp':''},
+      'Darwin': {'cflags':'', 'ext':'dylib', 'exp':''}
+    }[sys]
+    self.ext = self.args['ext']
+    self.exp = self.args['exp']
+
+  def cc(self, fn:str):
+    return ('clang -shared -O2 -Wall -Werror -x c '+self.args['cflags']+' - -o '+fn).split()
+
+  def src(self, prg:str):
+    return (self.defs + prg).encode('utf-8')
+
+ClangDll = DynLib(platform.system())
 
 class ClangProgram:
   def __init__(self, name:str, prg:str):
-    prg = Config.program + prg
     # TODO: is there a way to not write this to disk?
-    fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{Config.extension}"
+    fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(ClangDll.src(prg)).hexdigest()}.{ClangDll.ext}"
     if not os.path.exists(fn):
-      subprocess.check_output((Config.command + fn+'.tmp').split(), input=prg.encode('utf-8'))
-      os.rename(fn+".tmp", fn)
+      subprocess.check_output(args=ClangDll.cc(fn+'.tmp'), input=ClangDll.src(prg))
+      os.rename(fn+'.tmp', fn)
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
 
@@ -31,7 +38,7 @@ class ClangProgram:
     if wait: return time.monotonic()-st
 
 class ClangCodegen(CStyleCodegen):
-  lang = CStyleLanguage(kernel_prefix=Config.export, buffer_suffix=" restrict")
+  lang = CStyleLanguage(kernel_prefix=ClangDll.exp, buffer_suffix=" restrict")
   supports_float4: bool = False
 
 ClangBuffer = Compiled(RawMallocBuffer, ClangCodegen, ClangProgram)
