@@ -14,6 +14,8 @@ class RawBuffer:  # pylint: disable=abstract-method
   def __del__(self):  # NOTE: if it fails on init (bad dtype), it won't have a _memsz
     if hasattr(self, '_memsz'): GlobalCounters.mem_used -= self._memsz
   def __repr__(self): return f"buffer<{self.size}, {self.dtype}>"
+  @property
+  def key(self): return (self.size, self.dtype.key)
 
   # NOTE: this interface allows for 0 copy
   @classmethod
@@ -50,3 +52,5 @@ class RawBufferCopyInOut(RawBufferCopyIn):
 
 class RawConst(RawBuffer): # pylint: disable=abstract-method
   def __repr__(self): return f"const<{self._buf}, {self.dtype}>"
+  @property
+  def key(self): return (str(self._buf), self.dtype.key)
