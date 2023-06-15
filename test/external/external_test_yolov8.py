@@ -54,11 +54,13 @@ class TestYOLOv8(unittest.TestCase):
   def test_forward_pass_torch_onnx(self):
     variant = 'n'
     weights_location_onnx = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.onnx' 
+    weights_location_pt = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.pt' 
     weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.npz' 
-    
+
+    download_file(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{variant}.pt', weights_location_pt)
     # the ultralytics export prints a lot of unneccesary things
     if not os.path.isfile(weights_location_onnx):
-      model = ultralytics.YOLO(model=weights_location, task='Detect')  
+      model = ultralytics.YOLO(model=weights_location_pt, task='Detect')  
       model.export(format="onnx",imgsz=[640, 480]) 
 
     depth, width, ratio = get_variant_multiples(variant) 
