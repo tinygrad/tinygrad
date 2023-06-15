@@ -318,7 +318,7 @@ class Darknet:
   def return_modules(self):
     return [*self.b1, *self.b2, *self.b3, *self.b4, *self.b5]
   
-  def forward(self, x):
+  def __call__(self, x):
     x1 = x.sequential(self.b1)
     x2 = x1.sequential(self.b2)
     x3 = x2.sequential(self.b3)
@@ -340,7 +340,7 @@ class Yolov8NECK:
   def return_modules(self):
     return [self.n1, self.n2, self.n3, self.n4, self.n5, self.n6]
   
-  def forward(self, p3, p4, p5):
+  def __call__(self, p3, p4, p5):
     x = self.n1(self.up(p5).cat(p4, dim=1))
     head_1 = self.n2(self.up(x).cat(p3, dim=1))
     head_2 = self.n4(self.n3(head_1).cat(x, dim=1))
@@ -361,7 +361,7 @@ class DetectionHead:
     self.cv3 = [[Conv_Block(x, c1, 3), Conv_Block(c1, c1, 3), Conv2d(c1, self.nc, 1)] for x in filters]
     self.cv2 = [[Conv_Block(x, c2, 3), Conv_Block(c2, c2, 3), Conv2d(c2, 4 * self.ch, 1)] for x in filters]
   
-  def forward(self, x):
+  def __call__(self, x):
     for i in range(self.nl):
       x[i] = (x[i].sequential(self.cv2[i]).cat(x[i].sequential(self.cv3[i]), dim=1))
     self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
@@ -378,10 +378,10 @@ class YOLOv8:
     self.fpn = Yolov8NECK(w, r, d)
     self.head = DetectionHead(num_classes, filters=(int(256*w), int(512*w), int(512*w*r)))
 
-  def forward(self, x):
-    x = self.net.forward(x)
-    x = self.fpn.forward(*x)
-    return self.head.forward(x)
+  def __call__(self, x):
+    x = self.net(x)
+    x = self.fpn(*x)
+    return self.head(x)
 
   def return_all_trainable_modules(self):
     backbone_modules = [*range(10)]
@@ -418,15 +418,13 @@ if __name__ == '__main__':
   output_folder_path = './outputs_yolov8'
   if not os.path.exists(output_folder_path):
     os.makedirs(output_folder_path)
-  if img_path.startswith('http'):
-    image_location = [np.frombuffer(io.BytesIO(fetch(img_path)).read(), np.uint8)]
-    image = [cv2.imdecode(image_location[0], 1)]
-    out_paths = [os.path.join(output_folder_path, img_path.split("/")[-1].split('.')[0] + "_output" + '.' + img_path.split("/")[-1].split('.')[1])]
-  else:
-    image = [cv2.imread(img_path)]
-    out_paths = [os.path.join(output_folder_path, os.path.basename(img_path).replace(".", "_output."))]
-    image_location = [img_path]
-    
+  #absolute image path or URL
+  image_location = [np.frombuffer(io.BytesIO(fetch(img_path)).read(), np.uint8)]
+  image = [cv2.imdecode(image_location[0], 1)]
+  out_paths = [os.path.join(output_folder_path, img_path.split("/")[-1].split('.')[0] + "_output" + '.' + img_path.split("/")[-1].split('.')[1])]
+  if not isinstance(image[0], np.ndarray):
+    print('Error in image loading. Check your image file.')
+    sys.exit(1)
   pre_processed_image = preprocess(image)
   
   # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/v8/yolov8.yaml
@@ -438,9 +436,9 @@ if __name__ == '__main__':
   yolo_infer.load_weights(weights_location, yolo_variant)
   
   st = time.time()
-  predictions = yolo_infer.forward(Tensor(pre_processed_image.astype(np.float32)))
-  print(f'did inference in {(time.time() - st):2f}s')
-  
+  predictions = yolo_infer(Tensor(pre_processed_image.astype(np.float32)))
+  print(f'did inference in {int(round(((time.time() - st) * 1000)))}ms')
+
   post_predictions = postprocess(preds=predictions, img=pre_processed_image, orig_imgs=image)
   
   #v8 and v3 have same 80 class names for Object Detection
