@@ -5,10 +5,10 @@ from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
 cfg = {
   # NOTE: --rtlib=compiler-rt fixes float16 on Linux, it defines __gnu_h2f_ieee and __gnu_f2h_ieee
-  'base'   : ['clang', '-shared', '-O2', '-Wall', '-Werror', '--rtlib=compiler-rt', '-x', 'c'],
+  'base': ['clang', '-shared', '-O2', '-Wall', '-Werror', '--rtlib=compiler-rt', '-x', 'c'],
   'Windows': {'cflags':[''], 'ext':'dll', 'export':'__declspec(dllexport)'},
-  'Linux'  : {'cflags':['-lm', '-fPIC'], 'ext':'so', 'export':'__attribute__((visibility("default")))'},
-  'Darwin' : {'cflags':[''], 'ext':'dylib', 'export':''}
+  'Linux': {'cflags':['-lm', '-fPIC'], 'ext':'so', 'export':'__attribute__((visibility("default")))'},
+  'Darwin': {'cflags':[''], 'ext':'dylib', 'export':''}
 }
 plat_cfg = cfg[platform.system()]
 
