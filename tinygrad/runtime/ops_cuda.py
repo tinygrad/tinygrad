@@ -12,7 +12,6 @@ EMULATING = (getenv("CUDACPU", 0) == 1)
 from pycuda.compiler import compile as cuda_compile # type: ignore
 
 if EMULATING:
-  RawCUDABuffer = RawMallocBuffer
   from ctypes import CDLL, c_char_p, c_void_p, c_int, POINTER, cast
   from ctypes.util import find_library
 
@@ -86,4 +85,7 @@ class CUDACodegen(CStyleCodegen):
     """)
   supports_float4_alu = False
 
-CUDABuffer = Compiled(RawCUDABuffer, PTXCodegen if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)
+if EMULATING:
+  CUDABuffer = Compiled(RawMallocBuffer, CUDACodegen, CUDAProgram)
+else:
+  CUDABuffer = Compiled(RawCUDABuffer, PTXCodegen if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)
