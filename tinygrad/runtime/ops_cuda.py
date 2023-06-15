@@ -36,8 +36,7 @@ class CUDAProgram:
           f.write(cuda_compile(prg, target="cubin", no_extern_c=True))
         sass = subprocess.check_output(['nvdisasm', '/tmp/cubin']).decode('utf-8')
         print(sass)
-      if not binary or EMULATING:
-        prg = cuda_compile(prg, target="ptx", no_extern_c=True, arch=("sm_35" if EMULATING else None), options=["-Wno-deprecated-gpu-targets"]).decode('utf-8')
+      if not binary or EMULATING: prg = cuda_compile(prg, target="ptx", no_extern_c=True, arch=("sm_35" if EMULATING else None), options=["-Wno-deprecated-gpu-targets"]).decode('utf-8')
     except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
