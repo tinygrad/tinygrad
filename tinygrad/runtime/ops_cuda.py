@@ -6,24 +6,19 @@ from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 from tinygrad.codegen.assembly_ptx import PTXCodegen
-
-EMULATING = (getenv("CUDACPU", 0) == 1)
-
 from pycuda.compiler import compile as cuda_compile # type: ignore
 
+EMULATING = (getenv("CUDACPU", 0) == 1)
 if EMULATING:
-  from ctypes import CDLL, c_char_p, c_void_p, c_int, POINTER, cast
-  from ctypes.util import find_library
-
-  lib = CDLL(find_library("cudacpu"))
-  lib.ptx_kernel_create.argtypes = [c_char_p]
-  lib.ptx_kernel_create.restype = c_void_p
-  lib.ptx_kernel_destroy.argtypes = [c_void_p]
-  lib.ptx_call.argtypes = [c_void_p,  c_int, POINTER(c_void_p), c_int, c_int, c_int, c_int, c_int, c_int]
-
+  import ctypes, ctypes.util
+  lib = ctypes.CDLL(ctypes.util.find_library("cudacpu"))
+  lib.ptx_kernel_create.argtypes = [ctypes.c_char_p]
+  lib.ptx_kernel_create.restype = ctypes.c_void_p
+  lib.ptx_kernel_destroy.argtypes = [ctypes.c_void_p]
+  lib.ptx_call.argtypes = [ctypes.c_void_p,  ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
   class PTXKernel:
-      def __init__(self, source: bytes): self.kernel = lib.ptx_kernel_create(c_char_p(source))
-      def __call__(self, *args, block, grid): lib.ptx_call(self.kernel, len(args), (c_void_p * len(args))(*[cast(x, c_void_p) for x in args]), *block, *grid)
+      def __init__(self, source: bytes): self.kernel = lib.ptx_kernel_create(ctypes.c_char_p(source))
+      def __call__(self, *args, block, grid): lib.ptx_call(self.kernel, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), *block, *grid)
       def __del__(self): lib.ptx_kernel_destroy(self.kernel)
 else:
   import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
@@ -47,12 +42,8 @@ class CUDAProgram:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
     if DEBUG >= 5: print(prg)
-    self.src = prg
     # TODO: name is wrong, so we get it from the ptx using hacks
-    if EMULATING:
-      self.prg = PTXKernel(prg.encode('utf-8'))
-    else:
-      self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
+    self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]) if not EMULATING else PTXKernel(prg.encode('utf-8'))
 
   def __call__(self, global_size, local_size, *args, wait=False):
     local_size = (local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)
@@ -85,7 +76,4 @@ class CUDACodegen(CStyleCodegen):
     """)
   supports_float4_alu = False
 
-if EMULATING:
-  CUDABuffer = Compiled(RawMallocBuffer, CUDACodegen, CUDAProgram)
-else:
-  CUDABuffer = Compiled(RawCUDABuffer, PTXCodegen if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)
+CUDABuffer = Compiled(RawMallocBuffer, CUDACodegen, CUDAProgram) if EMULATING else Compiled(RawCUDABuffer, PTXCodegen if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)
