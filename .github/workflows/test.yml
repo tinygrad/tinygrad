@@ -140,7 +140,7 @@ jobs:
     - name: Run Pytest (models excluding mnist)
       run: METAL=1 python -m pytest -s -v test/models --ignore=test/models/test_mnist.py
     - name: Run Pytest (ops only)
-      run: METAL=1 python -m pytest -s -v test test/test_ops.py
+      run: METAL=1 python -m pytest -s -v test/test_ops.py
     - name: Run Pytest (base excluding ops)
       run: MPS=1 METAL=1 python -m pytest -s -v test --ignore=test/external --ignore=test/extra --ignore=test/unit --ignore=test/models --ignore=test/test_ops.py
 
