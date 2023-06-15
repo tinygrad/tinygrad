@@ -141,12 +141,6 @@ jobs:
       run: METAL=1 python -m pytest -s -v test/models --ignore=test/models/test_mnist.py
     - name: Run Pytest (ops only)
       run: FORWARD_ONLY=1 METAL=1 python -m pytest -s -v test/test_ops.py
-    - name: Run Pytest (test_speed_v_torch excluding test_pow and test_gemm)
-      run: METAL=1 python -m pytest -s -v test/test_speed_v_torch.py -k "not test_pow and not test_gemm"
-    - name: Run Pytest (test_pow)
-      run: METAL=1 python -m pytest -s -v -k test_pow
-    - name: Run Pytest (test_gemm)
-      run: METAL=1 python -m pytest -s -v -k test_gemm
     - name: Run Pytest (base excluding ops and test_speed_v_torch)
       run: METAL=1 python -m pytest -s -v test --ignore=test/external --ignore=test/extra --ignore=test/unit --ignore=test/models --ignore=test/test_ops.py --ignore=test/test_speed_v_torch.py
 
