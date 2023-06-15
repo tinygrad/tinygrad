@@ -7,19 +7,32 @@ from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 from tinygrad.codegen.assembly_ptx import PTXCodegen
 
-ISCUDA = (getenv("CUDACPU", 0) == 0)
+EMULATING = (getenv("CUDACPU", 0) == 1)
 
 from pycuda.compiler import compile as cuda_compile # type: ignore
 
-if ISCUDA:
+if EMULATING:
+  RawCUDABuffer = RawMallocBuffer
+  from ctypes import CDLL, c_char_p, c_void_p, c_int, POINTER, cast
+  from ctypes.util import find_library
+
+  lib = CDLL(find_library("cudacpu"))
+  lib.ptx_kernel_create.argtypes = [c_char_p]
+  lib.ptx_kernel_create.restype = c_void_p
+  lib.ptx_kernel_destroy.argtypes = [c_void_p]
+  lib.ptx_call.argtypes = [c_void_p,  c_int, POINTER(c_void_p), c_int, c_int, c_int, c_int, c_int, c_int]
+
+  class PTXKernel:
+      def __init__(self, source: bytes): self.kernel = lib.ptx_kernel_create(c_char_p(source))
+      def __call__(self, *args, block, grid): lib.ptx_call(self.kernel, len(args), (c_void_p * len(args))(*[cast(x, c_void_p) for x in args]), *block, *grid)
+      def __del__(self): lib.ptx_kernel_destroy(self.kernel)
+else:
   import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
   import pycuda.driver as cuda # type: ignore
   class RawCUDABuffer(RawBufferCopyInOut):
     def __init__(self, size, dtype): super().__init__(size, dtype, cuda.mem_alloc(size * dtype.itemsize))
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x, stream)
     def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf)
-else:
-  from extra.cudacpu import PTXKernel
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
@@ -29,18 +42,18 @@ class CUDAProgram:
           f.write(cuda_compile(prg, target="cubin", no_extern_c=True))
         sass = subprocess.check_output(['nvdisasm', '/tmp/cubin']).decode('utf-8')
         print(sass)
-      if not binary or not ISCUDA:
-        prg = cuda_compile(prg, target="ptx", no_extern_c=True, arch=(None if ISCUDA else "sm_35"), options=["-Wno-deprecated-gpu-targets"]).decode('utf-8')
+      if not binary or EMULATING:
+        prg = cuda_compile(prg, target="ptx", no_extern_c=True, arch=("sm_35-virtual" if EMULATING else None), options=["-Wno-deprecated-gpu-targets"]).decode('utf-8')
     except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
     if DEBUG >= 5: print(prg)
     self.src = prg
     # TODO: name is wrong, so we get it from the ptx using hacks
-    if ISCUDA:
-      self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
-    else:
+    if EMULATING:
       self.prg = PTXKernel(prg.encode('utf-8'))
+    else:
+      self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
 
   def __call__(self, global_size, local_size, *args, wait=False):
     local_size = (local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)
@@ -48,11 +61,11 @@ class CUDAProgram:
     assert all(x%y == 0 for x,y in zip(global_size, local_size)), f"local:{local_size} must divide global:{global_size}"
     global_size = [x//y for x,y in zip(global_size, local_size)]
 
-    if wait and ISCUDA:
+    if wait and not EMULATING:
       start, end = cuda.Event(), cuda.Event()
       start.record()
     self.prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size))
-    if wait and ISCUDA:
+    if wait and not EMULATING:
       end.record()
       end.synchronize()
       return start.time_till(end)*1e-3
@@ -72,7 +85,5 @@ class CUDACodegen(CStyleCodegen):
       typedef long long int64;
     """)
   supports_float4_alu = False
-if ISCUDA:
-  CUDABuffer = Compiled(RawCUDABuffer, PTXCodegen if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)
-else:
-  CUDABuffer = Compiled(RawMallocBuffer, CUDACodegen, CUDAProgram)
+
+CUDABuffer = Compiled(RawCUDABuffer, PTXCodegen if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)
