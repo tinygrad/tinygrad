@@ -89,7 +89,6 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
   with torch.no_grad():
     val_torch, et_torch = helper_test_speed(f1, *f1_args)
   val_tinygrad, et_tinygrad = helper_test_speed(f2, *f2_args)
-  print(val_tinygrad, val_torch, sep="\n") # TEST
   desc = "faster" if et_torch > et_tinygrad else "slower"
   flops = save_ops*1e-6
   mem = save_mem*1e-6
@@ -109,7 +108,7 @@ class TestSpeed(unittest.TestCase):
 
   def test_pow(self):
     def f(a, b): return a.pow(b)
-    helper_test_generic_square('pow', 1024, f, f)
+    helper_test_generic_square('pow', 2048, f, f)
 
   def test_sum(self):
     def f(a, b): return a.sum()

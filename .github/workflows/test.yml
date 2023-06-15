@@ -131,8 +131,6 @@ jobs:
         python-version: 3.9
     - name: Install Dependencies
       run: pip install -e '.[metal,testing]'
-    - name: Quick sanity check
-      run: METAL=1 python -m pytest -s -k test_pow
     - name: Run Pytest (extra)
       run: METAL=1 python -m pytest -s -v -n=auto test/extra
     - name: Run Pytest (unit)
@@ -143,8 +141,12 @@ jobs:
       run: METAL=1 python -m pytest -s -v test/models --ignore=test/models/test_mnist.py
     - name: Run Pytest (ops only)
       run: FORWARD_ONLY=1 METAL=1 python -m pytest -s -v test/test_ops.py
+    - name: Run Pytest (test_pow only)
+      run: METAL=1 python -m pytest -s -v -k test_pow
+    - name: Run Pytest (test_gemm only)
+      run: METAL=1 python -m pytest -s -v -k test_gemm
     - name: Run Pytest (base excluding ops)
-      run: METAL=1 python -m pytest -s -v test --ignore=test/external --ignore=test/extra --ignore=test/unit --ignore=test/models --ignore=test/test_ops.py
+      run: METAL=1 python -m pytest -s -v test -k "not test_pow and not test_gemm" --ignore=test/external --ignore=test/extra --ignore=test/unit --ignore=test/models --ignore=test/test_ops.py
 
   testgpu:
     name: GPU Tests
