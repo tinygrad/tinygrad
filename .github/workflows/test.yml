@@ -131,6 +131,8 @@ jobs:
         python-version: 3.9
     - name: Install Dependencies
       run: pip install -e '.[metal,testing]'
+    - name: Sanity check
+      run: python3 -c "import torch; print(torch.rand(2,2).permute(1,0))"
     - name: Run Pytest (extra)
       run: METAL=1 python -m pytest -s -v -n=auto test/extra
     - name: Run Pytest (unit)
