@@ -97,7 +97,6 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
   prefix = " "
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
 
-@unittest.skipIf(getenv("CUDACPU",0) == 1, "We don't care about speed here")
 class TestSpeed(unittest.TestCase):
   def setUp(self):
     global prefix
