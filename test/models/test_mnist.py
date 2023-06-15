@@ -3,19 +3,20 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim, BatchNorm2d
+from tinygrad.helpers import dtypes
 from extra.training import train, evaluate
 from datasets import fetch_mnist
 
 # load the mnist dataset
 X_train, Y_train, X_test, Y_test = fetch_mnist()
-X_train = X.train.astype(np.float16)
-X_test = X.test.astype(np.float16)
+X_train = X_train.astype(np.float16)
+X_test = X_test.astype(np.float16)
 
 # create a model
 class TinyBobNet:
   def __init__(self):
-    self.l1 = Tensor.scaled_uniform(784, 128)
-    self.l2 = Tensor.scaled_uniform(128, 10)
+    self.l1 = Tensor.scaled_uniform(784, 128).half()
+    self.l2 = Tensor.scaled_uniform(128, 10).half()
 
   def parameters(self):
     return optim.get_parameters(self)
