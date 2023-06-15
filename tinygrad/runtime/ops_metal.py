@@ -24,7 +24,6 @@ class RawMetalBuffer(RawBufferMapped):
   def __init__(self, size:int, dtype:DType):
     assert dtype != dtypes.float64, "metal doesn't support float64"
     super().__init__(size, dtype, METAL.device.newBufferWithBytesNoCopy_length_options_deallocator_(None, size * dtype.itemsize, Metal.MTLResourceStorageModeShared, None))
-    assert self._buf is not None, "failed to allocate buffer"
   def __del__(self):
     if self._buf: self._buf.release()
     super().__del__()
