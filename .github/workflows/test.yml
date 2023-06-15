@@ -246,6 +246,8 @@ jobs:
     - name: install libcudacpu.so
       run: |
         sudo ln -s ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build/libcudacpu.so /usr/local/lib/
+        chmod a+rx /usr/local/lib/libcudacpu.so
+        sudo ldconfig
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
