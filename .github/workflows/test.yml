@@ -131,8 +131,6 @@ jobs:
         python-version: 3.11
     - name: Install Dependencies
       run: pip install -e '.[metal,testing]'
-    - name: Run Pytest (test_mnist)
-      run: METAL=1 python -m pytest -s -v test/models/test_mnist.py
     - name: Run Pytest (test_onnx)
       run: METAL=1 python -m pytest -s -v test/models/test_onnx.py
     - name: Run Pytest (test_rnnt)
@@ -145,6 +143,8 @@ jobs:
       run: METAL=1 python -m pytest -s -v test/unit/test_disk_tensor.py
     - name: Run Pytest (test_example)
       run: METAL=1 python -m pytest -s -v test/unit/test_example.py
+    - name: Run Pytest (test_mnist)
+      run: METAL=1 python -m pytest -s -v test/models/test_mnist.py
 
   testgpu:
     name: GPU Tests

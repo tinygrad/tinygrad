@@ -3,7 +3,7 @@ import os, subprocess, pathlib
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
+from tinygrad.helpers import getenv, DEBUG, DType, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferMapped
 
@@ -65,7 +65,6 @@ class MetalProgram:
     if local_size is None: local_size = [32]
     local_size += [1] * (3-len(local_size))
 
-    #assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
     command_buffer = METAL.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
