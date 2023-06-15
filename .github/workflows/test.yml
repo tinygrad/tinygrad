@@ -243,9 +243,9 @@ jobs:
         cd build
         cmake .. -Wno-dev -G Ninja
         ninja
-    - name: copy libcudacpu.so
+    - name: Register libcudacpu.so
       run: |
-        cp ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build/libcudacpu.so ${{ github.workspace }}/extra/cudacpu
+        export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build/
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
