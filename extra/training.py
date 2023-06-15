@@ -19,10 +19,11 @@ def BCELoss(y_pred, y_true):
 
 def BCELossEPS(y_pred, y_true):
   EPS = 1e-7
-  return -(Tensor.log(y_pred + EPS) * y_true +  Tensor.log(1 - y_pred + EPS)* (1 - y_true)).mean()
+  return -(Tensor.log(y_pred + EPS) * y_true + Tensor.log(1. - y_pred + EPS)* (1. - y_true)).mean()
 
 def BCEWithLogitsLoss(y_pred, y_true):
-  EPS = 1e-12
+  EPS = 1e-7
+  y_true = y_true.reshape(-1,1)
   y_pred_sigmoid = Tensor.sigmoid(y_pred)
   return -(y_true * Tensor.log(y_pred_sigmoid) + (1 - y_true) * Tensor.log(1 - y_pred_sigmoid)).mean()
 
