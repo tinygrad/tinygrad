@@ -50,7 +50,6 @@ class CUDAProgram:
     global_size = global_size + [1] * (3 - len(global_size))
     assert all(x%y == 0 for x,y in zip(global_size, local_size)), f"local:{local_size} must divide global:{global_size}"
     global_size = [x//y for x,y in zip(global_size, local_size)]
-
     if wait and not EMULATING:
       start, end = cuda.Event(), cuda.Event()
       start.record()
@@ -75,5 +74,4 @@ class CUDACodegen(CStyleCodegen):
       typedef long long int64;
     """)
   supports_float4_alu = False
-
 CUDABuffer = Compiled(RawMallocBuffer, CUDACodegen, CUDAProgram) if EMULATING else Compiled(RawCUDABuffer, PTXCodegen if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)
