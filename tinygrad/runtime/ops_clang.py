@@ -9,7 +9,7 @@ class DynLib:
     self.args = {
       'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
       'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'exp':''},
-      'Darwin': {'cflags':'', 'ext':'dylib', 'exp':''}
+      'Darwin': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'dylib', 'exp':''}
     }[sys]
     self.ext = self.args['ext']
     self.exp = self.args['exp']
