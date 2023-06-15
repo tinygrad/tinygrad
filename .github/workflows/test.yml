@@ -129,9 +129,11 @@ jobs:
       run: pip install -e '.[metal,testing]'
     # Run separately to avoid OOM
     - name: Run Pytest (general)
-      run: METAL=1 python -m pytest -s -v -n=auto test -k "not (test_mul_const or test_div_const)" --ignore=test/test_speed_v_torch.py
+      run: METAL=1 python -m pytest -s -v -n=auto test -k "not (test_mul_const or test_div_const or test_conv_with_bn or test_sgd)" --ignore=test/test_speed_v_torch.py
     - name: Run Pytest (test_mul_const and test_div_const)
       run: OPT=0 METAL=1 python -m pytest -s -v test/test_ops.py -k "test_mul_const or test_div_const"
+    - name: Run Pytest (test_conv_with_bn or test_sgd)
+      run: METAL=1 python -m pytest -s -v test/models/test_mnist.py -k "test_conv_with_bn or test_sgd"
 
   testgpu:
     name: GPU Tests
