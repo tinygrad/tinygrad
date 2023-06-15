@@ -53,9 +53,9 @@ class MetalProgram:
     self.fxn = self.library.newFunctionWithName_(name)
     # hacks to disassemble shader
     if DEBUG >= 5:
-      arc = unwrap(METAL.device.newBinaryArchiveWithDescriptor_error_(Metal.MTLBinaryArchiveDescriptor.alloc().init(), None))
       desc = Metal.MTLComputePipelineDescriptor.alloc().init()
       desc.setComputeFunction_(self.fxn)
+      arc = unwrap(METAL.device.newBinaryArchiveWithDescriptor_error_(Metal.MTLBinaryArchiveDescriptor.alloc().init(), None))
       unwrap(arc.addComputePipelineFunctionsWithDescriptor_error_(desc, None))
       unwrap(arc.serializeToURL_error_(Cocoa.NSURL.URLWithString_("file:///tmp/shader.bin"), None))
       # clone https://github.com/dougallj/applegpu.git in tinygrad/disassemblers
