@@ -13,12 +13,20 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
   torch.manual_seed(0)
   np.random.seed(0)
+  """
   if shps is None:
     ts = [torch.tensor(x, requires_grad=True) for x in vals]
   else:
     ts = [torch.tensor((np.random.random(size=x)+a)*b, requires_grad=True, dtype=torch.float32) for x in shps]
 
   tst = [Tensor(x.detach().numpy(), requires_grad=not FORWARD_ONLY) for x in ts]
+  """
+  if shps is None:
+    tst = [Tensor(x, requires_grad=not FORWARD_ONLY) for x in vals]
+  else:
+    tst = [Tensor((np.random.random(size=x).astype(np.float32)+a)*b, requires_grad=not FORWARD_ONLY) for x in shps]
+
+  ts = [torch.tensor(x.numpy(), requires_grad=not FORWARD_ONLY, dtype=torch.float32) for x in tst]
 
   st = time.monotonic()
   out = torch_fxn(*ts)
