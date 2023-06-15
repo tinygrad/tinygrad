@@ -218,7 +218,7 @@ jobs:
         ref: 98333b95cd9512514e947a4f9fd0caa7e1326dfc
         submodules: true
     - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
-     name: Patch gpuocelot
+      name: Patch gpuocelot
       run: |
         cd $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot
         cp $GITHUB_WORKSPACE/extra/cudacpu/cudacpu.cpp ./ocelot
@@ -233,6 +233,9 @@ jobs:
         cd build
         cmake .. -Wno-dev -G Ninja
         ninja
+    - name: Make gpuocelot dirs
+      run: |
+        mkdir -p $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot/ocelot/build
     - name: Cache gpuocelot and libcudacpu
       id: cache-build
       uses: actions/cache@v3
@@ -241,8 +244,6 @@ jobs:
       with:
         path: $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot/ocelot/build
         key: ubuntu22.04-gpuocelot-${{ hashFiles('$GITHUB_WORKSPACE/extra/cudacpu/*') }}
-        restore-keys: |
-          ubuntu22.04-gpuocelot-
     - name: copy libcudacpu.so
       run: |
         cp $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot/ocelot/build/libcudacpu.so $GITHUB_WORKSPACE/extra/cudacpu
