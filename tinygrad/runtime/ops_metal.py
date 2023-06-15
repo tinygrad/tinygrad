@@ -12,7 +12,7 @@ class _METAL:
   def __init__(self) -> None:
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
-    self.mtl_queue = self.device.newCommandQueue()
+    self.mtl_queue = self.device.newCommandQueue() # newCommandQueue has a capacity of (64 uncompleted command buffers)
   # TODO: is there a better way to do this?
   def synchronize(self) -> None:
     for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
