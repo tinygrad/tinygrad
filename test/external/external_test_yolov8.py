@@ -50,7 +50,7 @@ class TestYOLOv8(unittest.TestCase):
       img_stream = io.BytesIO(fetch(test_image_urls[i]))
       img = cv2.imdecode(np.frombuffer(img_stream.read(), np.uint8), 1)
       test_image = preprocess([img])
-      predictions = TinyYolov8(Tensor(test_image.astype(np.float32)))
+      predictions = TinyYolov8(test_image)
       post_predictions = postprocess(preds=predictions, img=test_image, orig_imgs=[img])
       labels = label_predictions(post_predictions)
       
@@ -80,9 +80,9 @@ class TestYOLOv8(unittest.TestCase):
     onnx_session = ort.InferenceSession(weights_location_onnx)
     onnx_input_name = onnx_session.get_inputs()[0].name
     onnx_output_name = onnx_session.get_outputs()[0].name
-    onnx_output = onnx_session.run([onnx_output_name], {onnx_input_name: input_image})
+    onnx_output = onnx_session.run([onnx_output_name], {onnx_input_name: input_image.cpu().numpy()})
 
-    tiny_output = TinyYolov8(Tensor(input_image))
+    tiny_output = TinyYolov8(input_image)
     
     # currently rtol is big because there is a 1-2% difference in our predictions 
     # because of the zero padding in SPPF module (line 280) maxpooling layers rather than the -infinity in torch. 

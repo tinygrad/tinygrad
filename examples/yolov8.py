@@ -30,18 +30,14 @@ def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, 
   image = cv2.copyMakeBorder(image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
   return image
 
-def pre_transform(im, imgsz=640, model_stride=32, model_pt=True):
+def preprocess(im, imgsz=640, model_stride=32, model_pt=True):
   same_shapes = all(x.shape == im[0].shape for x in im)
   auto = same_shapes and model_pt
-  return np.array([compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im])
-
-def preprocess(im):
-  im = np.stack(pre_transform(im))
-  im = im[..., ::-1].transpose((0, 3, 1, 2))  # BGR to RGB, BHWC to BCHW, (n, 3, h, w)
-  im = np.ascontiguousarray(im)  
-  img = im.astype(np.float32)  
-  img /= 255  # 0 - 255 to 0.0 - 1.0
-  return img
+  im = Tensor([compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im])
+  im = Tensor.stack(im) if im.shape[0] > 1 else im
+  im = im[..., ::-1].permute(0, 3, 1, 2)  # BGR to RGB, BHWC to BCHW, (n, 3, h, w)
+  im /= 255  # 0 - 255 to 0.0 - 1.0
+  return im
 
 # Post Processing functions
 def box_area(box):
@@ -92,7 +88,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, agnostic=Fa
   return output
 
 def postprocess(preds, img, orig_imgs):
-  print('copying to CPU now for post processing, this is slow (sorry)')
+  print('copying to CPU now for post processing')
   #if you are on CPU, this causes an overflow runtime error. doesn't "seem" to make any difference in the predictions though.
   # TODO: make non_max_suppression in tinygrad - to make this faster
   preds = preds.cpu().numpy() if isinstance(preds, Tensor) else preds
@@ -436,7 +432,7 @@ if __name__ == '__main__':
   yolo_infer.load_weights(weights_location, yolo_variant)
   
   st = time.time()
-  predictions = yolo_infer(Tensor(pre_processed_image.astype(np.float32)))
+  predictions = yolo_infer(pre_processed_image)
   print(f'did inference in {int(round(((time.time() - st) * 1000)))}ms')
 
   post_predictions = postprocess(preds=predictions, img=pre_processed_image, orig_imgs=image)
