@@ -56,7 +56,8 @@ class DType(NamedTuple):
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
-  np: type  # TODO: someday this will be removed with the "remove numpy" project
+  np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
+  sz: int = 1
   def __repr__(self): return f"dtypes.{self.name}"
 
 # dependent typing?
@@ -80,7 +81,9 @@ class dtypes:
   def from_np(x) -> DType: return asdict(dtypes())[np.dtype(x).name]
   bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(0, 2, "half", np.float16)
+  half = float16
   float32: Final[DType] = DType(4, 4, "float", np.float32)
+  float = float32
   float64: Final[DType] = DType(5, 8, "double", np.float64)
   int8: Final[DType] = DType(0, 1, "char", np.int8)
   int32: Final[DType] = DType(1, 4, "int", np.int32)
@@ -89,6 +92,9 @@ class dtypes:
   uint32: Final[DType] = DType(1, 4, "uint", np.uint32)
   uint64: Final[DType] = DType(2, 8, "uint64", np.uint64)
 
+  # NOTE: these are internal dtypes, should probably check for that
+  _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
+  _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0

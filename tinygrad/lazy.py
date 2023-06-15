@@ -136,6 +136,7 @@ class LazyBuffer:
           self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
         elif self.op.op == LoadOps.RAND:
           rng = np.random.default_rng(self.op.arg)
+          assert self.dtype.np is not None, "internal dtypes don't work with LoadOps.RAND"
           self.realized = Device[self.device].buffer.fromCPU(rng.random(size=self.shape, dtype=self.dtype.np), **self._device_extra_args())
         elif self.op.op == LoadOps.CONST:
           if hasattr(Device[self.device].codegen, 'supports_constant_folding'):
