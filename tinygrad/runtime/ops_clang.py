@@ -3,31 +3,19 @@ from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
-class DynLib:
-  def __init__(self, sys:str):
-    self.defs = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n'
-    self.args = {
-      'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
-      'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'exp':''},
-      'Darwin': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'dylib', 'exp':''}
-    }[sys]
-    self.ext = self.args['ext']
-    self.exp = self.args['exp']
-
-  def cc(self, fn:str):
-    return ('clang -shared -O2 -Wall -Werror -x c '+self.args['cflags']+' - -o '+fn).split()
-
-  def src(self, prg:str):
-    return (self.defs + prg).encode('utf-8')
-
-ClangDll = DynLib(platform.system())
+args = {
+  'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
+  'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'exp':''},
+  'Darwin': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'dylib', 'exp':''}
+}[platform.system()]
 
 class ClangProgram:
   def __init__(self, name:str, prg:str):
+    prg = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n' + prg;
     # TODO: is there a way to not write this to disk?
-    fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(ClangDll.src(prg)).hexdigest()}.{ClangDll.ext}"
+    fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
     if not os.path.exists(fn):
-      subprocess.check_output(args=ClangDll.cc(fn+'.tmp'), input=ClangDll.src(prg))
+      subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+fn+'.tmp').split(), input=prg.encode('utf-8'))
       os.rename(fn+'.tmp', fn)
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
@@ -38,7 +26,7 @@ class ClangProgram:
     if wait: return time.monotonic()-st
 
 class ClangCodegen(CStyleCodegen):
-  lang = CStyleLanguage(kernel_prefix=ClangDll.exp, buffer_suffix=" restrict")
+  lang = CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict")
   supports_float4: bool = False
 
 ClangBuffer = Compiled(RawMallocBuffer, ClangCodegen, ClangProgram)
