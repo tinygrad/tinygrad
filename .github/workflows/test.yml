@@ -136,7 +136,7 @@ jobs:
     - name: Run Pytest (unit)
       run: METAL=1 python -m pytest -s -v -n=auto test/unit
     - name: Run Pytest (models)
-      run: METAL=1 python -m pytest -s -v -n=auto test/models
+      run: OPT=1 METAL=1 python -m pytest -s -v test/models
     - name: Run Pytest (base)
       run: METAL=1 python -m pytest -s -v test --ignore=test/external --ignore=test/extra --ignore=test/unit --ignore=test/models
 

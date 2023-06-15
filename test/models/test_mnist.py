@@ -3,7 +3,6 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim, BatchNorm2d
-from tinygrad.helpers import dtypes
 from extra.training import train, evaluate
 from datasets import fetch_mnist
 
