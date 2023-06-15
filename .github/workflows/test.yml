@@ -243,7 +243,7 @@ jobs:
         cache-name: cache-gpuocelot-build
       with:
         path: ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build
-        key: ubuntu22.04-gpuocelot-${{ hashFiles('${{ github.workspace }}/extra/cudacpu/*') }}
+        key: ubuntu22.04-gpuocelot-${{ hashFiles('${{ github.workspace }}/extra/cudacpu/cudacpu.cpp', '${{ github.workspace }}/extra/cudacpu/gpuocelot.patch') }}
         restore-keys: |
            ubuntu22.04-gpuocelot-
     - name: copy libcudacpu.so
