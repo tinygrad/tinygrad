@@ -131,20 +131,16 @@ jobs:
         python-version: 3.11
     - name: Install Dependencies
       run: pip install -e '.[metal,testing]'
-    - name: Run Pytest (test_onnx)
-      run: METAL=1 python -m pytest -s -v test/models/test_onnx.py
-    - name: Run Pytest (test_rnnt)
-      run: METAL=1 python -m pytest -s -v test/models/test_rnnt.py
-    - name: Run Pytest (test_train)
-      run: METAL=1 python -m pytest -s -v test/models/test_train.py
-    - name: Run Pytest (test_disk_tensor)
-      run: METAL=1 python -m pytest -s -v test/unit/test_disk_tensor.py
-    - name: Run Pytest (test_disk_tensor)
-      run: METAL=1 python -m pytest -s -v test/unit/test_disk_tensor.py
-    - name: Run Pytest (test_example)
-      run: METAL=1 python -m pytest -s -v test/unit/test_example.py
-    - name: Run Pytest (test_mnist)
-      run: METAL=1 python -m pytest -s -v test/models/test_mnist.py
+    - name: Run Pytest (base)
+      run: METAL=1 python -m pytest -s -v test --ignore=test/external --ignore=test/extra --ignore=test/unit --ignore=test/models
+    - name: Run Pytest (external)
+      run: METAL=1 python -m pytest -s -v test/external
+    - name: Run Pytest (extra)
+      run: METAL=1 python -m pytest -s -v test/extra
+    - name: Run Pytest (unit)
+      run: METAL=1 python -m pytest -s -v test/unit
+    - name: Run Pytest (models)
+      run: METAL=1 python -m pytest -s -v test/models
 
   testgpu:
     name: GPU Tests
