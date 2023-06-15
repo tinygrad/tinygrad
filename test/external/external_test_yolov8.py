@@ -46,9 +46,6 @@ class TestYOLOv8(unittest.TestCase):
       predictions = TinyYolov8(test_image)
       post_predictions = postprocess(preds=predictions, img=test_image, orig_imgs=[img])
       labels = label_predictions(post_predictions)
-      
-      class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
-      class_labels = class_labels.decode('utf-8').split('\n')
       assert labels == {5: 1, 0: 4, 11: 1} if i == 0 else labels == {0: 13, 29: 1, 32: 1}
       
   def test_forward_pass_torch_onnx(self):
