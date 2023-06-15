@@ -17,9 +17,9 @@ python3 examples/efficientnet.py webcam
 
 ### YOLOv3
 
-Take a look at [yolov3.py](/examples/yolov3.py).
+Take a look at [yolov8.py](/examples/yolov8.py).
 
-![yolo by tinygrad](/docs/showcase/yolo_by_tinygrad.jpg)
+![yolov8 by tinygrad](/docs/showcase/yolov8_showcase_image.png)
 
 ## Audio
 
