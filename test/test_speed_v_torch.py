@@ -78,8 +78,8 @@ def helper_test_generic_square(name, N, f1, f2, onearg=False):
   torch_a = (torch.rand(N, N) - 0.5).to(torch_device)
   torch_b = (torch.rand(N, N) - 0.5).to(torch_device) if not onearg else None
 
-  tiny_a = Tensor(torch_a.cpu().numpy())
-  tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
+  tiny_a = Tensor(torch_a.numpy())
+  tiny_b = Tensor(torch_b.numpy()) if not onearg else None
 
   helper_test_generic(f"{name:30s} {N:4d}x{N:4d}", f1, (torch_a, torch_b), TinyJit(lambda a,b:f2(a,b).realize()), (tiny_a, tiny_b))
 

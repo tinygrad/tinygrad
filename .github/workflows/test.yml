@@ -131,16 +131,16 @@ jobs:
         python-version: 3.11
     - name: Install Dependencies
       run: pip install -e '.[metal,testing]'
-    - name: Run Pytest (base)
-      run: METAL=1 python -m pytest -s -v test --ignore=test/external --ignore=test/extra --ignore=test/unit --ignore=test/models
     - name: Run Pytest (external)
-      run: METAL=1 python -m pytest -s -v test/external
+      run: METAL=1 python -m pytest -s -v -n=auto test/external
     - name: Run Pytest (extra)
-      run: METAL=1 python -m pytest -s -v test/extra
+      run: METAL=1 python -m pytest -s -v -n=auto test/extra
     - name: Run Pytest (unit)
-      run: METAL=1 python -m pytest -s -v test/unit
+      run: METAL=1 python -m pytest -s -v -n=auto test/unit
     - name: Run Pytest (models)
-      run: METAL=1 python -m pytest -s -v test/models
+      run: METAL=1 python -m pytest -s -v -n=auto test/models
+    - name: Run Pytest (base)
+      run: METAL=1 python -m pytest -s -v -n=auto test --ignore=test/external --ignore=test/extra --ignore=test/unit --ignore=test/models
 
   testgpu:
     name: GPU Tests
