@@ -243,9 +243,6 @@ jobs:
         cd build
         cmake .. -Wno-dev -G Ninja
         ninja
-    - name: Make gpuocelot dirs
-      run: |
-        mkdir -p ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build
     - name: copy libcudacpu.so
       run: |
         cp ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build/libcudacpu.so ${{ github.workspace }}/extra/cudacpu
@@ -253,7 +250,6 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
-        cache: 'pip'
     - name: Install tinygrad dependencies
       run: pip install -e '.[testing, cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run pytest
