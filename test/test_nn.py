@@ -2,7 +2,6 @@
 import unittest
 import numpy as np
 from tinygrad.jit import TinyJit
-from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import BatchNorm2d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm
 import torch
@@ -74,7 +73,6 @@ class TestNN(unittest.TestCase):
     _test_linear(Tensor.randn(BS, in_dim))
     _test_linear(Tensor.randn(BS, T, in_dim)) # test with more dims
 
-  @unittest.skipIf(getenv("CUDACPU",0) == 1, "Too slow for emulation")
   def test_conv2d(self):
     BS, C1, H, W = 4, 16, 224, 224
     C2, K, S, P = 64, 7, 2, 1
@@ -95,7 +93,6 @@ class TestNN(unittest.TestCase):
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
-  @unittest.skipIf(getenv("CUDACPU",0) == 1, "Too slow for emulation")
   def test_conv_transpose2d(self):
     BS, C1, H, W = 4, 16, 224, 224
     C2, K, S, P = 64, 7, 2, 1
@@ -192,7 +189,6 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
-  @unittest.skipIf(getenv("CUDACPU",0) == 1, "Too slow for emulation")
   def test_instancenorm_3d(self):
     N, C, D, H, W = 20, 5, 3, 10, 10
 
