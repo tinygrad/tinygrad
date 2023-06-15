@@ -137,22 +137,22 @@ jobs:
       run: METAL=1 python -m pytest -s -v -n=auto test/extra
     - name: Run Pytest (unit)
       run: METAL=1 python -m pytest -s -v -n=auto test/unit
-    - name: Run Pytest (mnist models exluding test_sgd and test_conv_with_bn)
-      run: METAL=1 python -m pytest -s -v test/models/test_mnist.py -k "not test_sgd and not test_conv_with_bn"
-    - name: Run Pytest (models excluding test_mnist)
-      run: METAL=1 python -m pytest -s -v test/models --ignore=test/models/test_mnist.py
-    - name: Run Pytest (ops excluding test_mul_const and test_div_const)
-      run: METAL=1 python -m pytest -s -v test/test_ops.py -k "not test_mul_const and not test_div_const"
     - name: Run Pytest (base excluding ops and test_speed_v_torch)
       run: METAL=1 python -m pytest -s -v test --ignore=test/external --ignore=test/extra --ignore=test/unit --ignore=test/models --ignore=test/test_ops.py --ignore=test/test_speed_v_torch.py
+
+    - name: Run Pytest (ops excluding test_mul_const and test_div_const)
+      run: METAL=1 python -m pytest -s -v test/test_ops.py -k "not test_mul_const and not test_div_const"
     - name: Run Pytest (test_mul_const only)
       run: OPT=0 METAL=1 python -m pytest -s -v -k test_mul_const
     - name: Run Pytest (test_div_const only)
       run: OPT=0 METAL=1 python -m pytest -s -v -k test_div_const
+
+    - name: Run Pytest (mnist models exluding test_sgd and test_conv_with_bn)
+      run: METAL=1 python -m pytest -s -v test/models/test_mnist.py -k "not test_sgd and not test_conv_with_bn"
     - name: Run Pytest (test_sgd only)
       run: METAL=1 python -m pytest -s -v -k test_sgd
     - name: Run Pytest (test_conv_with_bn only)
-      run: LAZY=0 METAL=1 python -m pytest -s -v -k test_conv_with_bn
+      run: OPTLOCAL=2 METAL=1 python -m pytest -s -v -k test_conv_with_bn
 
   testgpu:
     name: GPU Tests
