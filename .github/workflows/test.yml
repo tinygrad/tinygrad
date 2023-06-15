@@ -214,39 +214,39 @@ jobs:
       uses: actions/checkout@v3
       with:
         repository: gpuocelot/gpuocelot
-        path: $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot
+        path: ${{ github.workspace }}/extra/cudacpu/gpuocelot
         ref: 98333b95cd9512514e947a4f9fd0caa7e1326dfc
         submodules: true
     - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
       name: Patch gpuocelot
       run: |
-        cd $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot
-        cp $GITHUB_WORKSPACE/extra/cudacpu/cudacpu.cpp ./ocelot
+        cd ${{ github.workspace }}/extra/cudacpu/gpuocelot
+        cp ${{ github.workspace }}/extra/cudacpu/cudacpu.cpp ./ocelot
         mkdir ./ocelot/include/cudacpu
-        cp $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot.patch .
+        cp ${{ github.workspace }}/extra/cudacpu/gpuocelot.patch .
         git apply gpuocelot.patch
     - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
       name: Compile gpuocelot and libcudacpu
       run: |
-        cd $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot/ocelot
+        cd ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot
         mkdir build
         cd build
         cmake .. -Wno-dev -G Ninja
         ninja
     - name: Make gpuocelot dirs
       run: |
-        mkdir -p $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot/ocelot/build
+        mkdir -p ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build
     - name: Cache gpuocelot and libcudacpu
       id: cache-build
       uses: actions/cache@v3
       env:
         cache-name: cache-gpuocelot-build
       with:
-        path: $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot/ocelot/build
-        key: ubuntu22.04-gpuocelot-${{ hashFiles('$GITHUB_WORKSPACE/extra/cudacpu/*') }}
+        path: ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build
+        key: ubuntu22.04-gpuocelot-${{ hashFiles('${{ github.workspace }}/extra/cudacpu/*') }}
     - name: copy libcudacpu.so
       run: |
-        cp $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot/ocelot/build/libcudacpu.so $GITHUB_WORKSPACE/extra/cudacpu
+        cp ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build/libcudacpu.so ${{ github.workspace }}/extra/cudacpu
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
