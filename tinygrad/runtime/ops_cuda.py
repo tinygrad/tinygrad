@@ -17,9 +17,9 @@ if EMULATING:
   lib.ptx_kernel_destroy.argtypes = [ctypes.c_void_p]
   lib.ptx_call.argtypes = [ctypes.c_void_p,  ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
   class PTXKernel:
-      def __init__(self, source: bytes): self.kernel = lib.ptx_kernel_create(ctypes.c_char_p(source))
-      def __call__(self, *args, block, grid): lib.ptx_call(self.kernel, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), *block, *grid)
-      def __del__(self): lib.ptx_kernel_destroy(self.kernel)
+    def __init__(self, source: bytes): self.kernel = lib.ptx_kernel_create(ctypes.c_char_p(source))
+    def __call__(self, *args, block, grid): lib.ptx_call(self.kernel, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), *block, *grid)
+    def __del__(self): lib.ptx_kernel_destroy(self.kernel)
 else:
   import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
   import pycuda.driver as cuda # type: ignore
