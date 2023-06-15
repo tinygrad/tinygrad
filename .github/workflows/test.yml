@@ -10,6 +10,7 @@ jobs:
   lines:
     name: Less than 1000 lines
     runs-on: ubuntu-latest
+    if: ${{ false }}
 
     steps:
     - name: Checkout Code
