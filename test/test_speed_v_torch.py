@@ -74,12 +74,12 @@ def helper_test_speed(f1, *args):
   return ret.cpu().numpy(), np.min(ets)
 
 def helper_test_generic_square(name, N, f1, f2, onearg=False):
-  Tensor.manual_seed(0)
-  tiny_a = Tensor.rand(N, N) - 0.5
-  tiny_b = Tensor.rand(N, N) - 0.5 if not onearg else None
+  torch.manual_seed(0)
+  torch_a = (torch.rand(N, N) - 0.5).to(torch_device)
+  torch_b = (torch.rand(N, N) - 0.5).to(torch_device) if not onearg else None
 
-  torch_a = torch.from_numpy(tiny_a.numpy()).to(torch_device)
-  torch_b = torch.from_numpy(tiny_b.numpy()).to(torch_device) if not onearg else None
+  tiny_a = Tensor(torch_a.cpu().numpy())
+  tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
 
   helper_test_generic(f"{name:30s} {N:4d}x{N:4d}", f1, (torch_a, torch_b), TinyJit(lambda a,b:f2(a,b).realize()), (tiny_a, tiny_b))
 
@@ -89,6 +89,7 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
   with torch.no_grad():
     val_torch, et_torch = helper_test_speed(f1, *f1_args)
   val_tinygrad, et_tinygrad = helper_test_speed(f2, *f2_args)
+
   desc = "faster" if et_torch > et_tinygrad else "slower"
   flops = save_ops*1e-6
   mem = save_mem*1e-6
