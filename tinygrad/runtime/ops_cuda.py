@@ -1,5 +1,5 @@
 import subprocess
-from typing import Optional, Tuple, List
+from typing import Optional
 import numpy as np
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.ops import Compiled
