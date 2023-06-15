@@ -45,7 +45,6 @@ jobs:
   testcpu:
     name: CPU Tests
     runs-on: ubuntu-latest
-    if: ${{ false }}
 
     steps:
     - name: Checkout Code
@@ -64,7 +63,6 @@ jobs:
   testimagenet:
     name: ImageNet to C Compile Test
     runs-on: ubuntu-latest
-    if: ${{ false }}
 
     steps:
     - name: Checkout Code
@@ -85,7 +83,6 @@ jobs:
   testllvm:
     name: LLVM Tests (w method cache)
     runs-on: ubuntu-latest
-    if: ${{ false }}
 
     steps:
     - name: Checkout Code
@@ -102,7 +99,6 @@ jobs:
   testtorch:
     name: Torch Tests
     runs-on: ubuntu-latest
-    if: ${{ false }}
 
     steps:
     - name: Checkout Code
@@ -148,7 +144,6 @@ jobs:
   testgpu:
     name: GPU Tests
     runs-on: ubuntu-20.04
-    if: ${{ false }}
 
     steps:
     - name: Checkout Code
@@ -177,7 +172,6 @@ jobs:
   testopencl:
     name: openpilot (OpenCL) Test
     runs-on: ubuntu-20.04
-    if: ${{ false }}
 
     steps:
     - name: Checkout Code
