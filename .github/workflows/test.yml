@@ -146,13 +146,13 @@ jobs:
     - name: Run Pytest (base excluding ops and test_speed_v_torch)
       run: METAL=1 python -m pytest -s -v test --ignore=test/external --ignore=test/extra --ignore=test/unit --ignore=test/models --ignore=test/test_ops.py --ignore=test/test_speed_v_torch.py
     - name: Run Pytest (test_mul_const only)
-      run: METAL=1 python -m pytest -s -v -k test_mul_const
+      run: OPT=0 METAL=1 python -m pytest -s -v -k test_mul_const
     - name: Run Pytest (test_div_const only)
-      run: METAL=1 python -m pytest -s -v -k test_div_const
+      run: OPT=0 METAL=1 python -m pytest -s -v -k test_div_const
     - name: Run Pytest (test_sgd only)
       run: METAL=1 python -m pytest -s -v -k test_sgd
     - name: Run Pytest (test_conv_with_bn only)
-      run: METAL=1 python -m pytest -s -v -k test_conv_with_bn
+      run: OPT=4 METAL=1 python -m pytest -s -v -k test_conv_with_bn
 
   testgpu:
     name: GPU Tests
