@@ -15,7 +15,7 @@ Or, if you have a camera and OpenCV installed, you can detect what is in front o
 python3 examples/efficientnet.py webcam
 ```
 
-### YOLOv3
+### YOLOv8
 
 Take a look at [yolov8.py](/examples/yolov8.py).
 
