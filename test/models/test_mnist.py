@@ -8,8 +8,6 @@ from datasets import fetch_mnist
 
 # load the mnist dataset
 X_train, Y_train, X_test, Y_test = fetch_mnist()
-X_train = X_train.astype(np.float16)
-X_test = X_test.astype(np.float16)
 
 # create a model
 class TinyBobNet:
