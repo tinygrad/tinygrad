@@ -4,12 +4,10 @@ import numpy as np
 from itertools import chain
 from extra.utils import get_child, fetch, download_file
 from pathlib import Path
-import torch
 import cv2
 from collections import defaultdict
 import os
 import time, io, sys
-
 
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 #The upsampling class has been taken from this pull request https://github.com/geohot/tinygrad/pull/784 by dc-dc-dc. Now 2(?) models use upsampling. (retinet and this)
@@ -35,7 +33,7 @@ def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, 
 def pre_transform(im, imgsz=640, model_stride=32, model_pt=True):
   same_shapes = all(x.shape == im[0].shape for x in im)
   auto = same_shapes and model_pt
-  return [compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im]
+  return np.array([compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im])
 
 def preprocess(im):
   im = np.stack(pre_transform(im))
@@ -392,16 +390,16 @@ class YOLOv8:
     return [*zip(backbone_modules, self.net.return_modules()), *zip(yolov8neck_modules, self.fpn.return_modules()), *yolov8_head_weights]
   
   def load_weights(self, weights_path, yolo_variant):
-    state_dict = torch.load(weights_path)
-    weights = state_dict['model'].state_dict().items()
+    loaded_npz = np.load(weights_path)
     all_trainable_weights = self.return_all_trainable_modules()
-    for k, v in weights:
+    for k in loaded_npz.files:
+      v = loaded_npz[k]
       k = k.split('.')
       for i in all_trainable_weights:
         if int(k[1]) in i and k[-1] != "num_batches_tracked":
           child_key = '.'.join(k[2:]) if k[2] != 'm' else 'bottleneck.' + '.'.join(k[3:])
           obj = get_child(i[1], child_key)
-          weight = v.numpy().astype(np.float32)
+          weight = v.astype(np.float32)
           assert obj.shape == weight.shape, (k, obj.shape, weight.shape)
           obj.assign(weight)
     print(f'successfully loaded all weights for yolov8{yolo_variant}')
@@ -435,8 +433,8 @@ if __name__ == '__main__':
   depth, width, ratio = get_variant_multiples(yolo_variant) 
   yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)  
   
-  weights_location = Path(__file__).parent.parent / "weights" / f'yolov8{yolo_variant}.pt'
-  download_file(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{yolo_variant}.pt', weights_location)
+  weights_location = Path(__file__).parent.parent / "weights" / f'yolov8{yolo_variant}.npz'
+  download_file(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.npz', weights_location)
   yolo_infer.load_weights(weights_location, yolo_variant)
   
   st = time.time()
