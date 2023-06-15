@@ -244,6 +244,8 @@ jobs:
       with:
         path: ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build
         key: ubuntu22.04-gpuocelot-${{ hashFiles('${{ github.workspace }}/extra/cudacpu/*') }}
+        restore-keys: |
+           ubuntu22.04-gpuocelot-
     - name: copy libcudacpu.so
       run: |
         cp ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build/libcudacpu.so ${{ github.workspace }}/extra/cudacpu
