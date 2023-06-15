@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad.helpers import getenv, DType, DEBUG
+from tinygrad.helpers import getenv, DType, DEBUG, OSX
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor, dtypes
 
@@ -52,7 +52,7 @@ class TestHalfDtype(unittest.TestCase):
   def test_half_matmul_upcast_float(self): _test_matmul_upcast(Tensor([[1,2],[3,4]], dtype=dtypes.float16), Tensor.eye(2, dtype=dtypes.float32), dtypes.float32, [[1,2],[3,4]])
   def test_int8_matmul_upcast_half(self): _test_matmul_upcast(Tensor([[1,2],[3,4]], dtype=dtypes.int8), Tensor.eye(2, dtype=dtypes.float16), dtypes.float16, [[1,2],[3,4]])
 
-@unittest.skipIf(Device.DEFAULT == "METAL", "metal doesn't support float64")
+@unittest.skipIf(OSX, "OSX doesn't support float64")
 class TestFloatDtype(unittest.TestCase):
   def test_float64_to_np(self): _test_to_np(Tensor([1,2,3,4], dtype=dtypes.float64), np.float64, [1,2,3,4])
   def test_float64_add(self): _test_add(Tensor([1,2,3,4], dtype=dtypes.float64), Tensor([1,2,3,4], dtype=dtypes.float64), dtypes.float64, [2,4,6,8])
