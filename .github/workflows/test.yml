@@ -152,7 +152,7 @@ jobs:
     - name: Run Pytest (test_sgd only)
       run: METAL=1 python -m pytest -s -v -k test_sgd
     - name: Run Pytest (test_conv_with_bn only)
-      run: OPT=4 METAL=1 python -m pytest -s -v -k test_conv_with_bn
+      run: LAZY=0 METAL=1 python -m pytest -s -v -k test_conv_with_bn
 
   testgpu:
     name: GPU Tests

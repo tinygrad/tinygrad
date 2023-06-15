@@ -97,7 +97,7 @@ class TestMNIST(unittest.TestCase):
   def test_conv_with_bn(self):
     np.random.seed(1337)
     model = TinyConvNet(has_batchnorm=True)
-    optimizer = optim.SGD(model.parameters(), lr=0.007)
+    optimizer = optim.AdamW(model.parameters(), lr=0.003)
     train(model, X_train, Y_train, optimizer, steps=200)
     assert evaluate(model, X_test, Y_test) > 0.94
 
