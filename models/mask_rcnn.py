@@ -1071,22 +1071,27 @@ class PostProcessor:
 
     device = scores.device
     result = []
+    scores = scores.numpy()
+    boxes = boxes.numpy()
     inds_all = scores > self.score_thresh
     for j in range(1, num_classes):
-      inds = inds_all[:, j].numpy().nonzero()[0]
-      if len(inds):
-        scores_j = tensor_gather(scores[:, j], inds)
-        boxes_j = tensor_gather(boxes[:, j * 4: (j + 1) * 4], inds)
-        boxlist_for_class = BoxList(boxes_j, boxlist.size, mode="xyxy")
-        boxlist_for_class.add_field("scores", scores_j)
+      inds = inds_all[:, j].nonzero()[0]
+      # This needs to be done in numpy because it can create empty arrays
+      scores_j = scores[inds, j]
+      boxes_j = boxes[inds, j * 4: (j + 1) * 4]
+      boxes_j = Tensor(boxes_j)
+      scores_j = Tensor(scores_j)
+      boxlist_for_class = BoxList(boxes_j, boxlist.size, mode="xyxy")
+      boxlist_for_class.add_field("scores", scores_j)
+      if len(boxlist_for_class):
         boxlist_for_class = boxlist_nms(
-            boxlist_for_class, self.nms
-          )
-        num_labels = len(boxlist_for_class)
-        boxlist_for_class.add_field(
-          "labels", Tensor.full((num_labels,), j, device=device)
+          boxlist_for_class, self.nms
         )
-        result.append(boxlist_for_class)
+      num_labels = len(boxlist_for_class)
+      boxlist_for_class.add_field(
+        "labels", Tensor.full((num_labels,), j, device=device)
+      )
+      result.append(boxlist_for_class)
 
     result = cat_boxlist(result)
     number_of_detections = len(result)
@@ -1095,7 +1100,7 @@ class PostProcessor:
       cls_scores = result.get_field("scores")
       image_thresh, _ = topk(cls_scores, k=self.detections_per_img)
       image_thresh = image_thresh.numpy()[-1]
-      keep = (cls_scores.numpy() > image_thresh).nonzero()[0]
+      keep = (cls_scores.numpy() >= image_thresh).nonzero()[0]
       result = result[keep]
     return result
 
