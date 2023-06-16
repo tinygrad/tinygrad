@@ -46,7 +46,7 @@ class RDNACodegen(AssemblyCodegen):
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", FusedOps.MULACC: "fma",
            BinaryOps.MAX: "max", UnaryOps.RECIP: "rcp",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin", UnaryOps.LOG2: "log", UnaryOps.EXP2: "exp",
-           BinaryOps.CMPEQ: "cmpk_eq", BinaryOps.CMPLT: "cmpk_lt"}
+           BinaryOps.CMPEQ: "cmp_eq", BinaryOps.CMPLT: "cmp_lt"}
 
     pend_regs:Set[Register] = set()
     rtor:Dict[Register, str] = {}
@@ -82,7 +82,7 @@ class RDNACodegen(AssemblyCodegen):
             else:
               rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"v{v_cnt}"
               v_cnt += 1
-        elif arg[0][0] == dtypes.bool:
+        elif arg[0][0] == dtypes.bool and arg[0][1]:
           for i in range(arg[2]):
             rtor[Register(f"%{arg[1]}{i}", *arg[0])] = "scc" if arg[0][1] else "vcc"
         else:

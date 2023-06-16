@@ -62,6 +62,7 @@ class AssemblyCodegen(Linearizer):
     def render_alu(op, a:Register, b:Union[Register, int, float], dtype=dtypes.int32) -> Register:
       key = (op, a, b)
       if key not in tor:
+        if not isinstance(b, Register): b = render_numnode(b)
         ins.append(AssemblyInstruction(UOps.ALU, newreg(key, dtype=dtype, scalar=a.scalar and (not isinstance(b, Register) or b.scalar)), [a, b], op))
       return tor[key]
 
@@ -90,6 +91,10 @@ class AssemblyCodegen(Linearizer):
           off = nums[0]
       reg = idx.render(render_ops)
       if self.supports_load3:
+        if reg.scalar:
+          new_reg = newreg((reg.nm, 'vec'), dtype=reg.dtype)
+          ins.append(AssemblyInstruction(UOps.ALU, new_reg, [reg], UnaryOps.NOOP))
+          reg = new_reg
         return tor[f"buf{args.i}"], reg, off
       else:
         reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{args.i}"], dtype=dtypes.uint64)
@@ -173,16 +178,7 @@ class AssemblyCodegen(Linearizer):
           skipload_branch += 1
       elif uop == UOps.STORE:
         idx, treg, off = addr_w_offset(args)
-        save_reg = tor[vin[0]]
-        if save_reg.scalar:
-          new_reg = newreg((save_reg.nm, 'vec'), dtype=save_reg.dtype)
-          ins.append(AssemblyInstruction(UOps.ALU, new_reg, [save_reg], UnaryOps.NOOP))
-          save_reg = new_reg
-        if treg is not None and not save_reg.scalar and treg.scalar:
-          new_reg = newreg((treg.nm, 'vec'), dtype=treg.dtype)
-          ins.append(AssemblyInstruction(UOps.ALU, new_reg, [treg], UnaryOps.NOOP))
-          treg = new_reg
-        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, save_reg] + ([treg] if treg is not None else []), (off, 'global' if args.i != -1 else 'shared')))
+        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if args.i != -1 else 'shared')))
 
     # define registers
     ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)) for dtype,c in cnts.items()] + ins
