@@ -29,7 +29,7 @@ class TestYOLOv8(unittest.TestCase):
             obj = get_child(i[1], child_key)
             weight = v.numpy()
             assert obj.shape == weight.shape, (k, obj.shape, weight.shape)
-            np.testing.assert_allclose(v, obj.cpu().numpy(), atol=5e-4, rtol=1e-5)
+            np.testing.assert_allclose(weight, obj.cpu().numpy(), atol=5e-4, rtol=1e-5)
               
   def test_predictions(self):
     test_image_urls = ['https://raw.githubusercontent.com/ultralytics/yolov5/master/data/images/bus.jpg', 'https://www.aljazeera.com/wp-content/uploads/2022/10/2022-04-28T192650Z_1186456067_UP1EI4S1I0P14_RTRMADP_3_SOCCER-ENGLAND-MUN-CHE-REPORT.jpg']
@@ -76,7 +76,7 @@ class TestYOLOv8(unittest.TestCase):
 
     tiny_output = TinyYolov8(input_image)
     
-    # currently rtol is big because there is a 1-2% difference in our predictions 
+    # currently rtol is 0.025 because there is a 1-2% difference in our predictions 
     # because of the zero padding in SPPF module (line 280) maxpooling layers rather than the -infinity in torch. 
     # This difference does not make a difference "visually". 
     np.testing.assert_allclose(onnx_output[0], tiny_output.cpu().numpy(), atol=5e-4, rtol=0.025)
