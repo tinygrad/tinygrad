@@ -15,6 +15,7 @@ from tinygrad.runtime.lib import RawMallocBuffer
 
 class ARMProgram:
   def __init__(self, name:str, prg:str, **args):
+    print(name)
     print(prg)
 #     prg = f"""
 # .arch armv8-a
