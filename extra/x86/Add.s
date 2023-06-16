@@ -7,9 +7,9 @@ _add:
 .L0:
     mov -8(%rsp), %r8
 
-    movl 0(%rsi, %r8, 4), %eax
-    addl 0(%rdx, %r8, 4), %eax
-    movl %eax, 0(%rdi, %r8, 4)
+    movd 0(%rsi, %r8, 4), %xmm0
+    addss 0(%rdx, %r8, 4), %xmm0
+    movd %xmm0, 0(%rdi, %r8, 4)
 
     mov -8(%rsp), %r15
     inc %r15
