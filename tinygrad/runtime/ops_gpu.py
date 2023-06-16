@@ -62,9 +62,6 @@ class CLProgram:
         from disassemblers.adreno import disasm
         disasm(self.binary())
       elif CL.cl_ctx.devices[0].name.startswith('gfx'):
-        # NOTE: this can move, you have to read the ELF
-        #print(','.join([hex(x) for x in struct.unpack("I"*0x10, self.binary()[0x800:0x840])]))
-        #with open("/tmp/a.bin", "wb") as f: f.write(self.binary())
         asm = early_exec(([ROCM_LLVM_PATH / "llvm-objdump", '-d', '-'], self.binary()))
         print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
       else:
