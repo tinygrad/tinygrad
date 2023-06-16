@@ -151,13 +151,12 @@ class RDNACodegen(AssemblyCodegen):
     ins += ['s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', 's_endpgm', 's_code_end']
 
     # dual alu group
-    """
     seen = set()
     new_ins = []
     for i,tins in enumerate(ins):
       if tins in seen: continue
       if tins.startswith("v_fmac_f32"):
-        for gins in reversed(ins[i:]):
+        for gins in reversed(ins[i+1:]):
           if gins in seen: continue
           if gins.startswith("v_fmac_f32"):
             r0 = [int(x[1:].strip(',')) for x in tins.split(" ")[1:]]
@@ -166,12 +165,12 @@ class RDNACodegen(AssemblyCodegen):
             if r0[1]%2 == r1[1]%2: continue
             if r0[2]%2 == r1[2]%2: continue
             new_ins.append(tins.replace("v_", "v_dual_")+" :: " + gins.replace("v_", "v_dual_"))
+            seen.add(tins)
             seen.add(gins)
             break
-      else:
+      if tins not in seen:
         new_ins.append(tins)
     ins = new_ins
-    """
 
     return 'code', self.assemble(args, ins, v_cnt, s_cnt)
 

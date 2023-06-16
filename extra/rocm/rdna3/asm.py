@@ -24,14 +24,15 @@ code = open(pathlib.Path(__file__).parent / "prog.s", "r").read()
 
 gen = []
 FLOPS = 0
-#MAX_REG = 251
-MAX_REG = 32
+MAX_REG = 251
 for j in range(1):
   for i in range(0, MAX_REG, 6):
-    #gen.append(f"v_dual_fmac_f32 v{i+0}, v{i+1}, v{i+2} :: v_dual_fmac_f32 v{i+3}, v{i+4}, v{i+5}")
-    #FLOPS += 4
-    gen.append(f"v_dual_dot2acc_f32_f16 v{i+0}, v{i+1}, v{i+2} :: v_dual_dot2acc_f32_f16 v{i+3}, v{i+4}, v{i+5}")
-    FLOPS += 8
+    #gen.append(f"v_fmac_f32 v{i+0}, v{i+1}, v{i+2}")
+    #gen.append(f"v_fmac_f32 v{i+3}, v{i+4}, v{i+5}")
+    gen.append(f"v_dual_fmac_f32 v{i+0}, v{i+1}, v{i+2} :: v_dual_fmac_f32 v{i+3}, v{i+4}, v{i+5}")
+    FLOPS += 4
+    #gen.append(f"v_dual_dot2acc_f32_f16 v{i+0}, v{i+1}, v{i+2} :: v_dual_dot2acc_f32_f16 v{i+3}, v{i+4}, v{i+5}")
+    #FLOPS += 8
 code = code.replace("// FLOPS", '\n'.join(gen))
 print(code)
 
@@ -50,7 +51,7 @@ print(colored("creating CLProgram", "green"))
 prg = CLProgram("code", asm, binary=True)
 
 print(colored("running program", "green"))
-G = 256
+G = 512
 FLOPS *= 100000*G*G  # loop * global_size
 for i in range(3):
   tm = prg([G, G], [256, 1], buf, wait=True)
