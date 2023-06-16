@@ -82,9 +82,9 @@ class RDNACodegen(AssemblyCodegen):
             else:
               rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"v{v_cnt}"
               v_cnt += 1
-        elif arg[0][0] == dtypes.bool and arg[0][1]:
+        elif arg[0][0] == dtypes.bool:
           for i in range(arg[2]):
-            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = "scc"
+            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = "scc" if arg[0][1] else "vcc"
         else:
           raise NotImplementedError(arg)
       elif uop == UOps.SPECIAL:
@@ -117,7 +117,10 @@ class RDNACodegen(AssemblyCodegen):
           ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, {arg}")
       elif uop == UOps.ALU:
         if arg == BinaryOps.CMPLT:
-          ins.append(f"{'s_' if out.scalar else 'v_'}{alu[arg]}_{dtype_to_rdnatype[out.dtype]} {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
+          if out.scalar:
+            ins.append(f"s_{alu[arg]}_{dtype_to_rdnatype[out.dtype]} {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
+          else:
+            ins.append(f"v_cmp_lt_{dtype_to_rdnatype[out.dtype]} vcc, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
         else:
           alu_arg = alu[arg]
           if arg == FusedOps.MULACC and out == vin[2]:
@@ -134,13 +137,13 @@ class RDNACodegen(AssemblyCodegen):
       elif uop == UOps.LOAD:
         if out.scalar:
           # swap arg order
-          ins.append(f's_load_b32 {reg_out(out)}, {reg_in(vin[0])}, {reg_in(arg[2])} offset:{arg[0]}')
+          ins.append(f's_load_b32 {reg_out(out)}, {reg_in(vin[0])}, {reg_in(vin[1])} offset:{arg[0]}')
         else:
-          ins.append(f'global_load_{"b128" if out.dtype == dtypes._float4 else "b32"} {reg_out(out)}, {reg_in(arg[2])}, {reg_in(vin[0])} offset:{arg[0]}')
+          ins.append(f'global_load_{"b128" if out.dtype == dtypes._float4 else "b32"} {reg_out(out)}, {reg_in(vin[1])}, {reg_in(vin[0])} offset:{arg[0]}')
         pend_regs.add(out)
         for r in out.subregs(): pend_regs.add(r)
       elif uop == UOps.STORE:
-        ins.append(f'global_store_{"b128" if vin[1].dtype == dtypes._float4 else "b32"} {reg_in(arg[2])}, {reg_in(vin[1])}, {reg_in(vin[0])} offset:{arg[0]}')
+        ins.append(f'global_store_{"b128" if vin[1].dtype == dtypes._float4 else "b32"} {reg_in(vin[2])}, {reg_in(vin[1])}, {reg_in(vin[0])} offset:{arg[0]}')
       elif uop == UOps.LABEL:
         ins.append(f"{arg}:")
       elif uop == UOps.COND_BRANCH:
