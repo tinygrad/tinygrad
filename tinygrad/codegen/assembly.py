@@ -159,7 +159,7 @@ class AssemblyCodegen(Linearizer):
           ins.append(AssemblyInstruction(UOps.ALU, newreg(newvar) if newvar not in tor else tor[newvar], [tor[x] for x in vin], args))
       elif uop == UOps.LOAD and newvar is not None:
         idx, treg, off = addr_w_offset(args)
-        reg = newreg(newvar, dtype=newvar.dtype, scalar=idx.scalar and (not isinstance(treg, Register) or treg.scalar))
+        reg = newreg(newvar, dtype=newvar.dtype, scalar=(idx.scalar and (not isinstance(treg, Register) or treg.scalar) and not dtypes.is_float(newvar.dtype)))
         if args.valid.min == 0:
           ins.append(AssemblyInstruction(UOps.CONST, reg, [], 0))
           if args.valid.max == 1:
