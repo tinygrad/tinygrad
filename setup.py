@@ -41,6 +41,7 @@ setup(name='tinygrad',
             "opencv-python",
             "tabulate",
             "safetensors",
+            "types-PyYAML",
         ],
       },
       include_package_data=True)
