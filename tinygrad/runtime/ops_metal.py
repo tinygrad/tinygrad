@@ -23,7 +23,7 @@ METAL = _METAL()
 class RawMetalBuffer(RawBufferMapped):
   def __init__(self, size:int, dtype:DType):
     assert dtype != dtypes.float64, "metal doesn't support float64"
-    super().__init__(size, dtype, METAL.device.newBufferWithBytesNoCopy_length_options_deallocator_(None, size*dtype.itemsize, Metal.MTLResourceStorageModeShared, None))
+    super().__init__(size, dtype, METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared))
   def __del__(self):
     if self._buf: self._buf.release()
     super().__del__()
