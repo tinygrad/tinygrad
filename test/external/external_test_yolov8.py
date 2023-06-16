@@ -6,35 +6,35 @@ import unittest
 import io, cv2, os
 import onnxruntime as ort
 import ultralytics
+from safetensors.torch import load_file
 
 class TestYOLOv8(unittest.TestCase):
   def test_all_load_weights(self):
     for variant in ['n', 's', 'm', 'l', 'x']:
-      weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.npz'
-      download_file(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{variant}.npz', weights_location)
+      weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.safetensors'
+      download_file(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{variant}.safetensors', weights_location)
       
       depth, width, ratio = get_variant_multiples(variant) 
       TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80) 
       TinyYolov8.load_weights(weights_location, variant)
       
-      loaded_npz = np.load(weights_location)
+      loaded_weights = load_file(weights_location)
       all_trainable_weights = TinyYolov8.return_all_trainable_modules()
       
-      for k in loaded_npz.files:
-        v = loaded_npz[k]
+      for k, v in loaded_weights.items():
         k = k.split('.')
         for i in all_trainable_weights:
           if int(k[1]) in i and k[-1] != "num_batches_tracked":
             child_key = '.'.join(k[2:]) if k[2] != 'm' else 'bottleneck.' + '.'.join(k[3:])
             obj = get_child(i[1], child_key)
-            weight = v.astype(np.float32)
+            weight = v.numpy()
             assert obj.shape == weight.shape, (k, obj.shape, weight.shape)
             np.testing.assert_allclose(v, obj.cpu().numpy(), atol=5e-4, rtol=1e-5)
               
   def test_predictions(self):
     test_image_urls = ['https://raw.githubusercontent.com/ultralytics/yolov5/master/data/images/bus.jpg', 'https://www.aljazeera.com/wp-content/uploads/2022/10/2022-04-28T192650Z_1186456067_UP1EI4S1I0P14_RTRMADP_3_SOCCER-ENGLAND-MUN-CHE-REPORT.jpg']
     variant = 'n'
-    weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.npz'
+    weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.safetensors'
     depth, width, ratio = get_variant_multiples(variant) 
     TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80) 
     TinyYolov8.load_weights(weights_location, variant)
@@ -52,7 +52,7 @@ class TestYOLOv8(unittest.TestCase):
     variant = 'n'
     weights_location_onnx = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.onnx' 
     weights_location_pt = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.pt' 
-    weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.npz' 
+    weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.safetensors' 
 
     download_file(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{variant}.pt', weights_location_pt)
     # the ultralytics export prints a lot of unneccesary things
