@@ -28,7 +28,7 @@ code:
 # https://github.com/ROCm-Developer-Tools/ROCm-ComputeABI-Doc/blob/master/AMDGPU-ABI.md#initial-kernel-register-state
 # RDNA3 is actually a SIMD machine!
 class RDNACodegen(AssemblyCodegen):
-  supports_float4: bool = False
+  supports_float4: bool = True
   supports_float4_alu: bool = False
   supports_load3: bool = True
   sin_is_sin2pi: bool = True
@@ -68,6 +68,12 @@ class RDNACodegen(AssemblyCodegen):
           for i in range(arg[2]):
             rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"s[{s_cnt}:{s_cnt+1}]"
             s_cnt += 2
+        elif arg[0][0] == dtypes._float4 and not arg[0][1]:
+          v_cnt += (4-v_cnt%4) if v_cnt%4 != 0 else 0
+          for i in range(arg[2]):
+            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"v[{v_cnt}:{v_cnt+3}]"
+            for off in range(4): rtor[Register(f"%{arg[1]}{i}", dtypes.float, False, off=off)] = f"v{v_cnt+off}"
+            v_cnt += 4
         elif arg[0][0] in [dtypes.int32, dtypes.float32]:
           for i in range(arg[2]):
             if arg[0][1]:
@@ -85,14 +91,15 @@ class RDNACodegen(AssemblyCodegen):
         if arg.startswith('buf'):
           i = int(arg[3:])
           ins.append(f's_load_b64 {reg_out(out)}, s[0:1], {i*8}')
-          pend_regs.add(out)
+          for r in out.subregs(): pend_regs.add(r)
         elif arg.startswith('gid'):
           ins.append(f'v_mov_b32 {reg_out(out)}, s{2+int(arg[3])}')
       elif uop == UOps.CONST:
-        if arg == float('inf'):
-          ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, 0x7f800000")
-        elif arg == float('-inf'):
-          ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, 0xff800000")
+        if arg == float('inf'): arg = "0x7f800000"
+        elif arg == float('-inf'): arg = "0xff800000"
+        if out.dtype == dtypes._float4:
+          for off in range(4):
+            ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(Register(out.nm, dtypes.float, False, off=off))}, {arg}")
         else:
           ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, {arg}")
       elif uop == UOps.ALU:
@@ -107,10 +114,10 @@ class RDNACodegen(AssemblyCodegen):
           # swap arg order
           ins.append(f's_load_b32 {reg_out(out)}, {reg_in(vin[0])}, {reg_in(arg[2])} offset:{arg[0]}')
         else:
-          ins.append(f'global_load_b32 {reg_out(out)}, {reg_in(arg[2])}, {reg_in(vin[0])} offset:{arg[0]}')
-        pend_regs.add(out)
+          ins.append(f'global_load_{"b128" if out.dtype == dtypes._float4 else "b32"} {reg_out(out)}, {reg_in(arg[2])}, {reg_in(vin[0])} offset:{arg[0]}')
+        for r in out.subregs(): pend_regs.add(r)
       elif uop == UOps.STORE:
-        ins.append(f'global_store_b32 {reg_in(arg[2])}, {reg_in(vin[1])}, {reg_in(vin[0])} offset:{arg[0]}')
+        ins.append(f'global_store_{"b128" if vin[1].dtype == dtypes._float4 else "b32"} {reg_in(arg[2])}, {reg_in(vin[1])}, {reg_in(vin[0])} offset:{arg[0]}')
       elif uop == UOps.LABEL:
         ins.append(f"{arg}:")
       elif uop == UOps.COND_BRANCH:

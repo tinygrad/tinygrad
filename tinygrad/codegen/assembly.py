@@ -1,5 +1,5 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
-from tinygrad.codegen.linearizer import Linearizer, UOps
+from tinygrad.codegen.linearizer import Linearizer, UOps, Token
 from tinygrad.ops import ASTRunner, FusedOps, BinaryOps, UnaryOps
 from tinygrad.helpers import DType, dtypes, DEBUG
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
@@ -7,15 +7,19 @@ import functools
 import math
 from collections import defaultdict
 
-_type_to_letter = {dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a', dtypes.uint32: 'u', dtypes.uint64: 'b'}
+_type_to_letter = {dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a', dtypes.uint32: 'u', dtypes.uint64: 'b', dtypes._float4: 'x'}
 def type_to_letter(x): return _type_to_letter[x[0]].upper() if x[1] else _type_to_letter[x[0]]
 
 class Register(NamedTuple):
   nm:str
   dtype:DType
   scalar:bool
-  def __repr__(self): return self.nm
-
+  off:Optional[int] = None
+  def __repr__(self): return self.nm if self.off is None else f"{self.nm}:{self.off}"
+  def subregs(self):
+    if self.dtype == dtypes._float4:
+      return [self] + [Register(self.nm, dtypes.float, False, off=off) for off in range(4)]
+    return [self]
 class AssemblyInstruction(NamedTuple):
   op: UOps
   out: Optional[Register]
@@ -43,6 +47,9 @@ class AssemblyCodegen(Linearizer):
     def newreg(tok, dtype=dtypes.float32, scalar=False):
       nonlocal cnts, tor
       tor[tok] = ret = Register(f"%{type_to_letter((dtype, scalar))}{cnts[(dtype, scalar)]}", dtype, scalar)
+      if dtype == dtypes._float4:
+        for off in range(4):
+          tor[Token(tok.name, tok.dtype, off)] = Register(ret.nm, dtypes.float, ret.scalar, off)
       cnts[(dtype, scalar)] += 1
       return ret
 
@@ -94,7 +101,7 @@ class AssemblyCodegen(Linearizer):
     skipload_branch = 0
     for uop,newvar,vin,args in self.uops:
       if uop == UOps.CONST and newvar is not None:
-        ins.append(AssemblyInstruction(UOps.CONST, newreg(newvar), [], args))
+        ins.append(AssemblyInstruction(UOps.CONST, newreg(newvar, dtype=newvar.dtype), [], args))
       elif uop == UOps.DEFINE_LOCAL:
         ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
         ins.append(AssemblyInstruction(UOps.ALU, newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
@@ -146,7 +153,7 @@ class AssemblyCodegen(Linearizer):
           ins.append(AssemblyInstruction(UOps.ALU, newreg(newvar) if newvar not in tor else tor[newvar], [tor[x] for x in vin], args))
       elif uop == UOps.LOAD and newvar is not None:
         idx, treg, off = addr_w_offset(args)
-        reg = newreg(newvar, scalar=idx.scalar and (not isinstance(treg, Register) or treg.scalar))
+        reg = newreg(newvar, dtype=newvar.dtype, scalar=idx.scalar and (not isinstance(treg, Register) or treg.scalar))
         if args.valid.min == 0:
           ins.append(AssemblyInstruction(UOps.CONST, reg, [], 0))
           if args.valid.max == 1:
