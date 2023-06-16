@@ -6,7 +6,7 @@ import unittest
 import io, cv2, os
 import onnxruntime as ort
 import ultralytics
-from safetensors.torch import load_file
+from tinygrad.state import safe_load
 
 class TestYOLOv8(unittest.TestCase):
   def test_all_load_weights(self):
@@ -18,7 +18,7 @@ class TestYOLOv8(unittest.TestCase):
       TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80) 
       TinyYolov8.load_weights(weights_location, variant)
       
-      loaded_weights = load_file(weights_location)
+      loaded_weights = safe_load(weights_location)
       all_trainable_weights = TinyYolov8.return_all_trainable_modules()
       
       for k, v in loaded_weights.items():

@@ -8,6 +8,8 @@ import cv2
 from collections import defaultdict
 import os
 import time, io, sys
+from tinygrad.state import safe_load
+
 
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 #The upsampling class has been taken from this pull request https://github.com/geohot/tinygrad/pull/784 by dc-dc-dc. Now 2(?) models use upsampling. (retinet and this)
@@ -386,8 +388,7 @@ class YOLOv8:
     return [*zip(backbone_modules, self.net.return_modules()), *zip(yolov8neck_modules, self.fpn.return_modules()), *yolov8_head_weights]
   
   def load_weights(self, weights_path, yolo_variant):
-    from safetensors.torch import load_file
-    loaded_weights = load_file(weights_path)
+    loaded_weights = safe_load(weights_path)
     all_trainable_weights = self.return_all_trainable_modules()
     for k, v in loaded_weights.items():
       k = k.split('.')
