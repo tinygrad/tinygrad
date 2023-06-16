@@ -64,6 +64,7 @@ class CLProgram:
       elif CL.cl_ctx.devices[0].name.startswith('gfx'):
         # NOTE: this can move, you have to read the ELF
         #print(','.join([hex(x) for x in struct.unpack("I"*0x10, self.binary()[0x800:0x840])]))
+        #with open("/tmp/a.bin", "wb") as f: f.write(self.binary())
         asm = early_exec(([ROCM_LLVM_PATH / "llvm-objdump", '-d', '-'], self.binary()))
         print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
       else:
@@ -89,7 +90,7 @@ class CLProgram:
 
 class CLCodegen(CStyleCodegen):
   lang = CStyleLanguage(
-    kernel_prefix = "#define int64 long\n__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
+    kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
     double_prekernel="#ifdef cl_khr_fp64\n#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n#elif defined(cl_amd_fp64)\n#pragma OPENCL EXTENSION cl_amd_fp64 : enable\n#endif",
     half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
     barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",

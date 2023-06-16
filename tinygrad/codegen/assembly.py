@@ -18,8 +18,8 @@ class Register(NamedTuple):
   def __repr__(self): return self.nm if self.off is None else f"{self.nm}:{self.off}"
   def subregs(self):
     if self.dtype == dtypes._float4:
-      return [self] + [Register(self.nm, dtypes.float, False, off=off) for off in range(4)]
-    return [self]
+      return [Register(self.nm, dtypes.float, False, off=off) for off in range(4)]
+    return []
 class AssemblyInstruction(NamedTuple):
   op: UOps
   out: Optional[Register]
@@ -46,6 +46,7 @@ class AssemblyCodegen(Linearizer):
     tor: Dict[Any, Register] = {}
     def newreg(tok, dtype=dtypes.float32, scalar=False):
       nonlocal cnts, tor
+      if isinstance(tok, Token): dtype = tok.dtype  # this
       tor[tok] = ret = Register(f"%{type_to_letter((dtype, scalar))}{cnts[(dtype, scalar)]}", dtype, scalar)
       if dtype == dtypes._float4:
         for off in range(4):
@@ -175,8 +176,6 @@ class AssemblyCodegen(Linearizer):
     if DEBUG >= 4:
       for tins in ins: print(tins)
     name, asm = self.specialize(ins)
-
-    local_size = [1]*len(global_size)
 
     return ASTRunner(name, asm,
       global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,

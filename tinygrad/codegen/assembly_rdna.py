@@ -91,9 +91,20 @@ class RDNACodegen(AssemblyCodegen):
         if arg.startswith('buf'):
           i = int(arg[3:])
           ins.append(f's_load_b64 {reg_out(out)}, s[0:1], {i*8}')
+          pend_regs.add(out)
           for r in out.subregs(): pend_regs.add(r)
         elif arg.startswith('gid'):
           ins.append(f'v_mov_b32 {reg_out(out)}, s{2+int(arg[3])}')
+          # the docs lied, this is actually y
+          if int(arg[3]) == 1: ins.append("v_bfe_u32 v1, v0, 10, 10")
+          elif int(arg[3]) == 0: ins.append("v_and_b32_e32 v0, 0x3ff, v0")
+          # get local size
+          offset = len(args)*8
+          args.append({".offset": offset, ".value_kind": f"hidden_group_size_{'xyz'[int(arg[3])]}", ".size": 8})
+          ins.append(f's_load_b32 s{2+int(arg[3])}, s[0:1], {offset}')
+          ins.append('s_waitcnt vmcnt(0) lgkmcnt(0)')
+          ins.append(f'v_mul_i32_i24 {reg_out(out)}, {reg_out(out)}, s{2+int(arg[3])}')
+          ins.append(f'v_add_co_u32 {reg_out(out)}, null, v{int(arg[3])}, {reg_out(out)}')
       elif uop == UOps.CONST:
         if arg == float('inf'): arg = "0x7f800000"
         elif arg == float('-inf'): arg = "0xff800000"
@@ -105,16 +116,26 @@ class RDNACodegen(AssemblyCodegen):
       elif uop == UOps.ALU:
         if arg == BinaryOps.CMPLT:
           ins.append(f"{'s_' if out.scalar else 'v_'}{alu[arg]}_{dtype_to_rdnatype[out.dtype]} {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
-        elif arg == FusedOps.MULACC and out == vin[2]:
-          ins.append(f"{'s_' if out.scalar else 'v_'}fmac_{dtype_to_rdnatype[out.dtype]} {reg_out(out)}, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin[0:2])}")
         else:
-          ins.append(f"{'s_' if out.scalar else 'v_'}{alu[arg]}_{dtype_to_rdnatype[out.dtype]}{'_i24' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 and not out.scalar else ''} {reg_out(out)}, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
+          alu_arg = alu[arg]
+          if arg == FusedOps.MULACC and out == vin[2]:
+            alu_arg = "fmac"
+            vin = vin[0:2]
+          if out.dtype == dtypes._float4:
+            tins = []
+            for rr in zip(*[x.subregs() if x.dtype == dtypes._float4 else [x,x,x,x] for x in [out]+vin]):
+              tins.append(f"{'s_' if rr[0].scalar else 'v_'}dual_{alu_arg}_{dtype_to_rdnatype[rr[0].dtype]} {reg_out(rr[0])}, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in rr[1:])}")
+            ins.append(tins[0] + " :: " + tins[1])
+            ins.append(tins[2] + " :: " + tins[3])
+          else:
+            ins.append(f"{'s_' if out.scalar else 'v_'}{alu_arg}_{dtype_to_rdnatype[out.dtype]}{'_i24' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 and not out.scalar else ''} {reg_out(out)}, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
       elif uop == UOps.LOAD:
         if out.scalar:
           # swap arg order
           ins.append(f's_load_b32 {reg_out(out)}, {reg_in(vin[0])}, {reg_in(arg[2])} offset:{arg[0]}')
         else:
           ins.append(f'global_load_{"b128" if out.dtype == dtypes._float4 else "b32"} {reg_out(out)}, {reg_in(arg[2])}, {reg_in(vin[0])} offset:{arg[0]}')
+        pend_regs.add(out)
         for r in out.subregs(): pend_regs.add(r)
       elif uop == UOps.STORE:
         ins.append(f'global_store_{"b128" if vin[1].dtype == dtypes._float4 else "b32"} {reg_in(arg[2])}, {reg_in(vin[1])}, {reg_in(vin[0])} offset:{arg[0]}')
@@ -135,13 +156,14 @@ class RDNACodegen(AssemblyCodegen):
                    '.amdhsa_next_free_sgpr': s_cnt,
                    '.amdhsa_float_round_mode_32': 0, '.amdhsa_float_round_mode_16_64': 0, '.amdhsa_float_denorm_mode_32': 3, '.amdhsa_float_denorm_mode_16_64': 3, '.amdhsa_dx10_clamp': 1, '.amdhsa_ieee_mode': 1,
                    '.amdhsa_fp16_overflow': 0, '.amdhsa_workgroup_processor_mode': 1, '.amdhsa_memory_ordered': 1, '.amdhsa_forward_progress': 0, '.amdhsa_enable_private_segment': 0,
-                   '.amdhsa_system_sgpr_workgroup_id_x': 1, '.amdhsa_system_sgpr_workgroup_id_y': 1, '.amdhsa_system_sgpr_workgroup_id_z': 1, '.amdhsa_system_sgpr_workgroup_info': 0, '.amdhsa_system_vgpr_workitem_id': 0,
+                   '.amdhsa_system_sgpr_workgroup_id_x': 1, '.amdhsa_system_sgpr_workgroup_id_y': 1, '.amdhsa_system_sgpr_workgroup_id_z': 1,
+                   '.amdhsa_system_sgpr_workgroup_info': 0, '.amdhsa_system_vgpr_workitem_id': 2, # is amdhsa_system_vgpr_workitem_id real?
                    '.amdhsa_exception_fp_ieee_invalid_op': 0, '.amdhsa_exception_fp_denorm_src': 0, '.amdhsa_exception_fp_ieee_div_zero': 0, '.amdhsa_exception_fp_ieee_overflow': 0, '.amdhsa_exception_fp_ieee_underflow': 0,
                    '.amdhsa_exception_fp_ieee_inexact': 0, '.amdhsa_exception_int_div_zero': 0, '.amdhsa_user_sgpr_dispatch_ptr': 0, '.amdhsa_user_sgpr_queue_ptr': 0, '.amdhsa_user_sgpr_kernarg_segment_ptr': 1,
                    '.amdhsa_user_sgpr_dispatch_id': 0, '.amdhsa_user_sgpr_private_segment_size': 0, '.amdhsa_wavefront_size32': 1, '.amdhsa_uses_dynamic_stack': 0}
 
     metadata = {'amdhsa.kernels': [{'.args': args,
-                  '.group_segment_fixed_size': 0, '.kernarg_segment_align': 8, '.kernarg_segment_size': len(self.bufs)*8,
+                  '.group_segment_fixed_size': 0, '.kernarg_segment_align': 8, '.kernarg_segment_size': args[-1][".offset"] + args[-1][".size"],
                   '.language': 'OpenCL C', '.language_version': [1, 2], '.max_flat_workgroup_size': 256,
                   '.name': 'code', '.private_segment_fixed_size': 0, '.sgpr_count': s_cnt, '.sgpr_spill_count': 0,
                   '.symbol': 'code.kd', '.uses_dynamic_stack': False, '.vgpr_count': v_cnt, '.vgpr_spill_count': 0,

@@ -87,10 +87,10 @@ class dtypes:
   float64: Final[DType] = DType(5, 8, "double", np.float64)
   int8: Final[DType] = DType(0, 1, "char", np.int8)
   int32: Final[DType] = DType(1, 4, "int", np.int32)
-  int64: Final[DType] = DType(2, 8, "int64", np.int64)
+  int64: Final[DType] = DType(2, 8, "long", np.int64)
   uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
   uint32: Final[DType] = DType(1, 4, "uint", np.uint32)
-  uint64: Final[DType] = DType(2, 8, "uint64", np.uint64)
+  uint64: Final[DType] = DType(2, 8, "ulong", np.uint64)
 
   # NOTE: these are internal dtypes, should probably check for that
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
