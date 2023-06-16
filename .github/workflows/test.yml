@@ -128,9 +128,11 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[metal,testing]'
     - name: Run Pytest (general)
-      run: METAL=1 python -m pytest -s -v -n=auto test --ignore=test/test_speed_v_torch.py --ignore test/models -k "not (test_mul_const or test_div_const)"
+      run: METAL=1 python -m pytest -s -v -n=auto test --ignore=test/test_speed_v_torch.py --ignore=test/test_dtype.py test/models -k "not (test_mul_const or test_div_const)"
     - name: Run Pytest (test_mul_const or test_div_const)
       run: OPT=0 METAL=1 python -m pytest -s -v test/test_ops.py -k "test_mul_const or test_div_const"
+    - name: Run Pytest (test_dtype)
+      run: OPT=0 METAL=1 python -m pytest -s -v -n=auto test/dtype.py
     - name: Run Pytest (models)
       run: METAL=1 python -m pytest -s -v test/models
 
