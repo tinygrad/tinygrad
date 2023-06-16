@@ -96,6 +96,7 @@ class RDNACodegen(AssemblyCodegen):
         elif arg.startswith('gid'):
           ins.append(f'v_mov_b32 {reg_out(out)}, s{2+int(arg[3])}')
           # the docs lied, this is actually y
+          if int(arg[3]) == 2: ins.append("v_bfe_u32 v2, v0, 20, 10")  # untested
           if int(arg[3]) == 1: ins.append("v_bfe_u32 v1, v0, 10, 10")
           elif int(arg[3]) == 0: ins.append("v_and_b32_e32 v0, 0x3ff, v0")
           # get local size
@@ -103,8 +104,9 @@ class RDNACodegen(AssemblyCodegen):
           args.append({".offset": offset, ".value_kind": f"hidden_group_size_{'xyz'[int(arg[3])]}", ".size": 8})
           ins.append(f's_load_b32 s{2+int(arg[3])}, s[0:1], {offset}')
           ins.append('s_waitcnt vmcnt(0) lgkmcnt(0)')
+          pend_regs.clear()
           ins.append(f'v_mul_i32_i24 {reg_out(out)}, {reg_out(out)}, s{2+int(arg[3])}')
-          ins.append(f'v_add_co_u32 {reg_out(out)}, null, v{int(arg[3])}, {reg_out(out)}')
+          ins.append(f'v_add_nc_u32 {reg_out(out)}, v{int(arg[3])}, {reg_out(out)}')
       elif uop == UOps.CONST:
         if arg == float('inf'): arg = "0x7f800000"
         elif arg == float('-inf'): arg = "0xff800000"
