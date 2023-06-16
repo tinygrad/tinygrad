@@ -1,6 +1,6 @@
 import os, subprocess, pathlib
 import Metal, Cocoa, libdispatch # type: ignore
-from typing import List, Any, Optional
+from typing import List, Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
 from tinygrad.ops import Compiled
@@ -9,24 +9,24 @@ from tinygrad.runtime.lib import RawBufferMapped
 METAL_XCODE = getenv("METAL_XCODE")
 
 class _METAL:
-  def __init__(self) -> None:
+  def __init__(self):
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueue() # newCommandQueue has a capacity of (64 uncompleted command buffers)
   # TODO: is there a better way to do this?
-  def synchronize(self) -> None:
+  def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
     self.mtl_buffers_in_flight.clear()
 METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):
-  def __init__(self, size:int, dtype:DType) -> None:
+  def __init__(self, size:int, dtype:DType):
     assert dtype != dtypes.float64, "metal doesn't support float64"
     super().__init__(size, dtype, METAL.device.newBufferWithBytesNoCopy_length_options_deallocator_(None, size*dtype.itemsize, Metal.MTLResourceStorageModeShared, None))
   def __del__(self):
     self.release()
     super().__del__()
-  def release(self) -> None:
+  def release(self):
     if self._buf:
       self._buf.setPurgeableState_(Metal.MTLPurgeableStateEmpty)
       self._buf.release()
@@ -34,13 +34,13 @@ class RawMetalBuffer(RawBufferMapped):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
 
-def unwrap(x) -> Any:
+def unwrap(x):
   ret, err = x
   assert err is None, str(err)
   return ret
 
 class MetalProgram:
-  def __init__(self, name:str, prg:str) -> None:
+  def __init__(self, name:str, prg:str):
     if METAL_XCODE:
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
@@ -62,7 +62,7 @@ class MetalProgram:
       os.system(f"cd {pathlib.Path(__file__).parent.parent.parent}/disassemblers/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
     self.pipeline_state = unwrap(METAL.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
 
-  def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[Any]:
+  def __call__(self, global_size, local_size, *bufs, wait=False):
     global_size += [1] * (3-len(global_size))
     if local_size is None: local_size = [32]
     local_size += [1] * (3-len(local_size))
