@@ -6,7 +6,7 @@ import unittest
 import io, cv2, os
 import onnxruntime as ort
 import ultralytics
-from tinygrad.state import safe_load
+from tinygrad.state import safe_load, load_state_dict
 
 class TestYOLOv8(unittest.TestCase):
   def test_all_load_weights(self):
@@ -15,29 +15,19 @@ class TestYOLOv8(unittest.TestCase):
       download_file(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{variant}.safetensors', weights_location)
       
       depth, width, ratio = get_variant_multiples(variant) 
-      TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80) 
-      TinyYolov8.load_weights(weights_location, variant)
-      
-      loaded_weights = safe_load(weights_location)
-      all_trainable_weights = TinyYolov8.return_all_trainable_modules()
-      
-      for k, v in loaded_weights.items():
-        k = k.split('.')
-        for i in all_trainable_weights:
-          if int(k[1]) in i and k[-1] != "num_batches_tracked":
-            child_key = '.'.join(k[2:]) if k[2] != 'm' else 'bottleneck.' + '.'.join(k[3:])
-            obj = get_child(i[1], child_key)
-            weight = v.numpy()
-            assert obj.shape == weight.shape, (k, obj.shape, weight.shape)
-            np.testing.assert_allclose(weight, obj.cpu().numpy(), atol=5e-4, rtol=1e-5)
-              
+      TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)     
+      state_dict = safe_load(weights_location)
+      load_state_dict(TinyYolov8, state_dict)
+      print(f'successfully loaded weights for yolov{variant}')
+                
   def test_predictions(self):
     test_image_urls = ['https://raw.githubusercontent.com/ultralytics/yolov5/master/data/images/bus.jpg', 'https://www.aljazeera.com/wp-content/uploads/2022/10/2022-04-28T192650Z_1186456067_UP1EI4S1I0P14_RTRMADP_3_SOCCER-ENGLAND-MUN-CHE-REPORT.jpg']
     variant = 'n'
     weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.safetensors'
     depth, width, ratio = get_variant_multiples(variant) 
     TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80) 
-    TinyYolov8.load_weights(weights_location, variant)
+    state_dict = safe_load(weights_location)
+    load_state_dict(TinyYolov8, state_dict)
     
     for i in range(len(test_image_urls)):
       img_stream = io.BytesIO(fetch(test_image_urls[i]))
@@ -62,7 +52,8 @@ class TestYOLOv8(unittest.TestCase):
 
     depth, width, ratio = get_variant_multiples(variant) 
     TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80) 
-    TinyYolov8.load_weights(weights_location, variant)
+    state_dict = safe_load(weights_location)
+    load_state_dict(TinyYolov8, state_dict)
     
     image_location = [np.frombuffer(io.BytesIO(fetch('https://raw.githubusercontent.com/ultralytics/yolov5/master/data/images/bus.jpg')).read(), np.uint8)]
     orig_image = [cv2.imdecode(image_location[0], 1)]
