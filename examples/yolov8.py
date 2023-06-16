@@ -8,7 +8,7 @@ import cv2
 from collections import defaultdict
 import os
 import time, io, sys
-from tinygrad.state import safe_load
+from tinygrad.state import safe_load, load_state_dict
 
 
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
@@ -387,20 +387,6 @@ class YOLOv8:
     yolov8_head_weights = [(22, self.head)]
     return [*zip(backbone_modules, self.net.return_modules()), *zip(yolov8neck_modules, self.fpn.return_modules()), *yolov8_head_weights]
   
-  def load_weights(self, weights_path, yolo_variant):
-    loaded_weights = safe_load(weights_path)
-    all_trainable_weights = self.return_all_trainable_modules()
-    for k, v in loaded_weights.items():
-      k = k.split('.')
-      for i in all_trainable_weights:
-        if int(k[1]) in i and k[-1] != "num_batches_tracked":
-          child_key = '.'.join(k[2:]) if k[2] != 'm' else 'bottleneck.' + '.'.join(k[3:])
-          obj = get_child(i[1], child_key)
-          weight = v.numpy()
-          assert obj.shape == weight.shape, (k, obj.shape, weight.shape)
-          obj.assign(weight)
-    print(f'successfully loaded all weights for yolov8{yolo_variant}')
-
 if __name__ == '__main__':
   
   # usage : python3 yolov8.py "image_URL OR image_path" "v8 variant" (optional, n is default)
@@ -430,8 +416,10 @@ if __name__ == '__main__':
   
   weights_location = Path(__file__).parent.parent / "weights" / f'yolov8{yolo_variant}.safetensors'
   download_file(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location)
-  yolo_infer.load_weights(weights_location, yolo_variant)
   
+  state_dict = safe_load(weights_location)
+  load_state_dict(yolo_infer, state_dict)
+    
   st = time.time()
   predictions = yolo_infer(pre_processed_image)
   print(f'did inference in {int(round(((time.time() - st) * 1000)))}ms')
