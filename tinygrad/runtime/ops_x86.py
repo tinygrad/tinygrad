@@ -1,39 +1,15 @@
 import time, ctypes, hashlib, subprocess, platform
+from tinygrad.codegen.assembly_x86 import X86Codegen
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawMallocBuffer
-from tinygrad.runtime.ops_clang import ClangCodegen
 
 class X86Program:
-  def __init__(self, name:str, prg:str):
-
-    prg = f"""
-.section .text 
-.globl {name}
-{name}:
-  enter $8, $0
-  movq $0, -8(%rsp)
-
-.L0:
-    mov -8(%rsp), %r8
-
-    movd 0(%rsi, %r8, 4), %xmm0
-    addss 0(%rdx, %r8, 4), %xmm0
-    movd %xmm0, 0(%rdi, %r8, 4)
-
-    mov -8(%rsp), %r15
-    inc %r15
-    mov %r15, -8(%rsp)
-    cmp $5, %r15
-    jle .L0
-
-    mov %rsi, %rax
-    leave
-    ret
-"""
-
+  def __init__(self, name:str, prg:str, binary:bool=False):
     fn = f"/tmp/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{'dylib' if platform.system() == 'Darwin' else 'so'}"
-    print(subprocess.run(["as", "-o", "Add.o"], input=prg.encode('utf-8')))
-    print(subprocess.run(["ld", "-shared", "Add.o", "-o", fn]))
+    print(prg)
+    # with open('kernel.s', 'w+') as f: f.write(prg)
+    print(subprocess.run(["as", "-o", "kernel.o"], input=prg.encode('utf-8')))
+    print(subprocess.run(["ld", "-shared", "kernel.o", "-o", fn]))
 
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
@@ -46,4 +22,4 @@ class X86Program:
     print("out", out)
     if wait: return time.monotonic()-st
 
-X86Buffer = Compiled(RawMallocBuffer, ClangCodegen, X86Program)
+X86Buffer = Compiled(RawMallocBuffer, X86Codegen, X86Program)

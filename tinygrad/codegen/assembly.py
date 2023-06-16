@@ -7,6 +7,7 @@ import functools
 import math
 from collections import defaultdict
 
+def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 type_to_letter = {dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a', dtypes.uint32: 'I', dtypes.uint64: 'A'}
 
 class Register(NamedTuple):
@@ -95,6 +96,8 @@ class AssemblyCodegen(Linearizer):
         ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
         ins.append(AssemblyInstruction(UOps.ALU, newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
       elif uop == UOps.LOOP:
+        # TODO remove global loops only for cpu codegen
+        """
         if args[1] == "global":
           for i,var in enumerate(args[0]):
             global_size.append(var.max+1)
@@ -105,12 +108,13 @@ class AssemblyCodegen(Linearizer):
             global_size[i] *= local_size[i]
             ins.append(AssemblyInstruction(UOps.SPECIAL, newreg(var, dtype=dtypes.int32), [], f"lid{len(args[0])-1-i}"))
         else:
-          for var in args[0]:
-            if not isinstance(var, NumNode):  # TODO: why is this coming through?
-              ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32), [], 0))
-              ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
+        """
+        for var in args[0]:
+          if not isinstance(var, NumNode):  # TODO: why is this coming through?
+            ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32), [], 0))
+            ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
       elif uop == UOps.ENDLOOP:
-        if args[1] not in ["global", "local"]:
+      #  if args[1] not in ["global", "local"]:
           for var in reversed(args[0]):
             if not isinstance(var, NumNode):  # TODO: why is this coming through?
               pred = render_alu(BinaryOps.CMPLT, tor[var], var.max, dtypes.bool)
