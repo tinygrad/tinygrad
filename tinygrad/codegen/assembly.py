@@ -62,7 +62,7 @@ class AssemblyCodegen(Linearizer):
     def render_alu(op, a:Register, b:Union[Register, int, float], dtype=dtypes.int32) -> Register:
       key = (op, a, b)
       if key not in tor:
-        if not isinstance(b, Register): b = render_numnode(b)
+        #if not isinstance(b, Register): b = render_numnode(b)
         ins.append(AssemblyInstruction(UOps.ALU, newreg(key, dtype=dtype, scalar=a.scalar and (not isinstance(b, Register) or b.scalar)), [a, b], op))
       return tor[key]
 
