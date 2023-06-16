@@ -85,15 +85,17 @@ class CLProgram:
         return None
     return None
 
-class CLCodegen(CStyleCodegen):
-  lang = CStyleLanguage(
-    kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
-    double_prekernel="#ifdef cl_khr_fp64\n#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n#elif defined(cl_amd_fp64)\n#pragma OPENCL EXTENSION cl_amd_fp64 : enable\n#endif",
-    half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
-    barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
-    gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True)
-  supports_float4_alu = True
-  supports_float4 = True
+if getenv("RDNA"):
+  from tinygrad.codegen.assembly_rdna import RDNACodegen as CLCodegen
+else:
+  class CLCodegen(CStyleCodegen):
+    lang = CStyleLanguage(
+      kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
+      double_prekernel="#ifdef cl_khr_fp64\n#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n#elif defined(cl_amd_fp64)\n#pragma OPENCL EXTENSION cl_amd_fp64 : enable\n#endif",
+      half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
+      barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
+      gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True)
+    supports_float4_alu = True
+    supports_float4 = True
 
-from tinygrad.codegen.assembly_rdna import RDNACodegen
-GPUBuffer = Compiled(CLBuffer, RDNACodegen if getenv("RDNA") else CLCodegen, CLProgram, CL.synchronize)
+GPUBuffer = Compiled(CLBuffer, CLCodegen, CLProgram, CL.synchronize)
