@@ -5,7 +5,10 @@ import multiprocessing
 def _early_exec_process(qin, qout):
   while True:
     path, inp = qin.get()
-    qout.put(subprocess.check_output(path, input=inp))
+    try:
+      qout.put(subprocess.check_output(path, input=inp))
+    except subprocess.CalledProcessError as e:
+      qout.put(e)
 
 def enable_early_exec():
   qin: multiprocessing.Queue = multiprocessing.Queue()
@@ -15,7 +18,9 @@ def enable_early_exec():
   p.start()
   def early_exec(x):
     qin.put(x)
-    return qout.get()
+    ret = qout.get()
+    if isinstance(ret, Exception): raise ret
+    else: return ret
   return early_exec
 
 def proc(itermaker, q) -> None:
