@@ -60,7 +60,7 @@ def to_float4(x:List[Token]) -> Optional[Token]:
 def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
   assert all_same([len(x) for x in values]), f"all values are not the same length {values}"
   # these use accumulators, we can only fold if the acc is a float4
-  idxs = get_grouped_float4_idxs(values[0]) if grouping_allowed else None
+  idxs = get_grouped_float4_idxs(values[-1]) if grouping_allowed else None
   if idxs is not None:
     new_idxs = []
     new_values = []
@@ -341,7 +341,7 @@ class Linearizer:
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     # TODO: fold float4 into a single uop when possible.
     if isinstance(x.op, (ReduceOps, FusedOps)):
-      ret = [(idx, self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(acc, *values, grouping_allowed=self.supports_float4_alu)]
+      ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
     else:
       ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])
