@@ -122,8 +122,8 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       else:
         kk(f"{newvar.render(True)} = {code_for_op[args](*[x.render() for x in vin])};")
     elif uop == UOps.LOAD and newvar.dtype == dtypes._float8x8 and newvar is not None:
-      kk(f"{newvar.render(True)};")
-      kk(f"simdgroup_load({newvar.render()}, {bufnames[args.i]}+{args.idx.render(render_cl)}, {args.stride}, ulong2(0, 0));")
+      full_idx = args.idx + Variable(bufnames[args.i], 0, (1<<64)-1)
+      kk(f"{newvar.render(True)}; simdgroup_load({newvar.render()}, {full_idx.render(render_cl)}, {args.stride}, ulong2(0, 0));")
     elif uop == UOps.LOAD and newvar is not None:
       # TODO: merge with CONST?
       if bufs[args.i] is not None and isinstance(bufs[args.i].realized, RawConst):
@@ -170,7 +170,8 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       else:
         kk(f"(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}] = {vin[0].render()};")
     elif uop == UOps.STORE and vin[0].dtype == dtypes._float8x8:
-      kk(f"simdgroup_store({vin[0].render()}, {bufnames[args.i]}+{args.idx.render(render_cl)}, {args.stride}, ulong2(0, 0));")
+      full_idx = args.idx + Variable(bufnames[args.i], 0, (1<<64)-1)
+      kk(f"simdgroup_store({vin[0].render()}, {full_idx.render(render_cl)}, {args.stride}, ulong2(0, 0));")
     elif uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
     else:

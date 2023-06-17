@@ -395,11 +395,13 @@ class Linearizer:
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
 
     # float8x8 support
-    if acc[0].dtype == dtypes._float8x8:
-      assert len(acc) == 8*8*8
+    if len(acc) and acc[0].dtype == dtypes._float8x8:
+      #assert len(acc) == 8*8*8
       assert all([x[0].dtype == dtypes._float8x8 for x in values])
       assert x.op == FusedOps.MULACC
-      self.uop(UOps.ALU, Token(acc[0].name, acc[0].dtype), [Token(x[0].name, x[0].dtype) for x in [acc]+values], x.op)
+      for a in zip(acc, *values):
+        if any([b.offset != 0 for b in a]): continue
+        self.uop(UOps.ALU, Token(a[0].name, a[0].dtype), [Token(b.name, b.dtype) for b in a], x.op)
       return acc
 
     if isinstance(x.op, (ReduceOps, FusedOps)):
@@ -568,12 +570,12 @@ class Linearizer:
 
     # **** below this line need to be optional and benchmarked ****
 
-    BIG_DIM = 8
+    BIG_DIM = 32
 
     # potentially do more upcasts of non reduce axes based on a heuristic
     while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
       xb_choices = []
-      for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4,BIG_DIM]):   # consider all the non reduce axes, and a 3 or 4 reduce
+      for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4] + ([BIG_DIM] if self.supports_float8x8 else [])):   # consider all the non reduce axes, and a 3 or 4 reduce
         # if it mods, and some buffer has stride 0 on axis while having no stride 0 in the buftoken
         # NOTE: this is using views[-1]
         if self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
@@ -592,7 +594,7 @@ class Linearizer:
       if self.full_unupcasted_shape[-1] <= 16:
         self.upcast()
       else:
-        for splits in [BIG_DIM,4]:
+        for splits in [8,4]:
           if self.full_unupcasted_shape[-1]%splits == 0:
             self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
             self.upcast()

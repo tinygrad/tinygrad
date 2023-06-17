@@ -79,7 +79,7 @@ class MetalProgram:
       METAL.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalCodegen(CStyleCodegen):
-  supports_float8x8 = True
+  supports_float8x8 = bool(getenv("TC"))
   lang = CStyleLanguage(
     kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel", buffer_prefix = "device ", smem_prefix = "threadgroup ",
     barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);", float4 = "float4",
