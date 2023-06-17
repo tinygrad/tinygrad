@@ -13,7 +13,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
   torch.manual_seed(0)
   np.random.seed(0)
-  if shps is None:
+  if shps is None and vals is not None:
     ts = [torch.tensor(x, requires_grad=True) for x in vals]
   else:
     ts = [torch.tensor((np.random.random(size=x)+a)*b, requires_grad=True, dtype=torch.float32) for x in shps]
