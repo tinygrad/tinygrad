@@ -1,6 +1,6 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
 from tinygrad.codegen.linearizer import Linearizer, UOps, Token
-from tinygrad.ops import ASTRunner, FusedOps, BinaryOps, UnaryOps
+from tinygrad.ops import ASTRunner, BinaryOps, UnaryOps
 from tinygrad.helpers import DType, dtypes, DEBUG
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 import functools
@@ -138,7 +138,6 @@ class AssemblyCodegen(Linearizer):
         for i,sr in enumerate(out.subregs()):
           ins.append(AssemblyInstruction(UOps.ALU, sr, [tor[vin[i]]], UnaryOps.NOOP))
       elif uop == UOps.ALU and newvar is not None:
-        if args == FusedOps.MULACC: vin = [vin[1], vin[2], vin[0]]  # TODO: reorder MULACC everywhere
         out = newreg(newvar) if newvar not in tor else tor[newvar]
         # this is the only thing that can violate SSA
         if args in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
