@@ -19,6 +19,7 @@ def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if n
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterator): return [item for sublist in l for item in sublist]
 def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
+def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
@@ -74,7 +75,7 @@ class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   def is_int(x: DType)-> bool: return x in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64)
   @staticmethod
-  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes.float64)
+  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes.float64, dtypes._half4, dtypes._float4)
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint32, dtypes.uint64)
   @staticmethod
@@ -87,10 +88,10 @@ class dtypes:
   float64: Final[DType] = DType(5, 8, "double", np.float64)
   int8: Final[DType] = DType(0, 1, "char", np.int8)
   int32: Final[DType] = DType(1, 4, "int", np.int32)
-  int64: Final[DType] = DType(2, 8, "int64", np.int64)
+  int64: Final[DType] = DType(2, 8, "long", np.int64)
   uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
   uint32: Final[DType] = DType(1, 4, "uint", np.uint32)
-  uint64: Final[DType] = DType(2, 8, "uint64", np.uint64)
+  uint64: Final[DType] = DType(2, 8, "ulong", np.uint64)
 
   # NOTE: these are internal dtypes, should probably check for that
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
