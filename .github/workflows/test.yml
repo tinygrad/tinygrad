@@ -130,7 +130,9 @@ jobs:
     - name: Run Pytest (general)
       run: METAL=1 python -m pytest -s -v -n=auto test --ignore=test/test_speed_v_torch.py --ignore=test/test_dtype.py --ignore=test/models -k "not (test_mul_const or test_div_const)" --cache-clear
     - name: Run Pytest (models)
-      run: METAL=1 python -m pytest -s -v test/models --cache-clear
+      run: METAL=1 python -m pytest -s -v test/models --ignore=test/models/test_mnist.py --cache-clear
+    - name: Show me the passes
+      run: METAL=1 python -m pytest -s -v test/models/test_mnist.py --cache-clear
     - name: Run Pytest (test_mul_const or test_div_const)
       run: METAL=1 python -m pytest -s -v test/test_ops.py -k "test_mul_const or test_div_const" --cache-clear
     - name: Run Pytest (test_dtype)
