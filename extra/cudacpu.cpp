@@ -1,6 +1,6 @@
 #include <ocelot/ir/Module.h>
 #include <ocelot/executive/EmulatedKernel.h>
-extern "C" ptx_run(const char* source, int n_args, void* args[], int blck_x, int blck_y, int blck_z, int grid_x, int grid_y, int grid_z) {
+extern "C" void ptx_run(const char* source, int n_args, void* args[], int blck_x, int blck_y, int blck_z, int grid_x, int grid_y, int grid_z) {
 	std::stringstream ss; ss << source;
 	ir::Module mod((void*)source, ss);
 	ir::PTXKernel* rawk = mod.kernels().begin()->second;
