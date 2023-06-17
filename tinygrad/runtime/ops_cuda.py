@@ -12,14 +12,8 @@ EMULATING = (getenv("CUDACPU", 0) == 1)
 if EMULATING:
   import ctypes, ctypes.util
   lib = ctypes.CDLL(ctypes.util.find_library("cudacpu"))
-  lib.ptx_kernel_create.argtypes = [ctypes.c_char_p]
-  lib.ptx_kernel_create.restype = ctypes.c_void_p
-  lib.ptx_kernel_destroy.argtypes = [ctypes.c_void_p]
-  lib.ptx_call.argtypes = [ctypes.c_void_p,  ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
-  class PTXKernel:
-    def __init__(self, source: bytes): self.kernel = lib.ptx_kernel_create(ctypes.c_char_p(source))
-    def __call__(self, *args, block, grid): lib.ptx_call(self.kernel, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), *block, *grid)
-    def __del__(self): lib.ptx_kernel_destroy(self.kernel)
+  lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+  def ptx_kernel(source): return lambda *args, block, grid: lib.ptx_run(source, len(args), args, *block, *grid)
 else:
   import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
   import pycuda.driver as cuda # type: ignore
@@ -42,7 +36,7 @@ class CUDAProgram:
       raise e
     if DEBUG >= 5: print(prg)
     # TODO: name is wrong, so we get it from the ptx using hacks
-    self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]) if not EMULATING else PTXKernel(prg.encode('utf-8'))
+    self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]) if not EMULATING else ptx_kernel(prg.encode('utf-8'))
 
   def __call__(self, global_size, local_size, *args, wait=False):
     local_size = (local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)

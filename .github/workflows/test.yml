@@ -201,45 +201,34 @@ jobs:
         sudo apt-get update -y
     - name: Install packages
       run: |
-        sudo apt-get install -y git g++ cmake ninja-build llvm-15-dev libfp16-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
-    - name: Cache gpuocelot and libcudacpu
-      id: cache-build
-      uses: actions/cache@v3
-      env:
-        cache-name: cache-gpuocelot-build
-      with:
-        path: ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build
-        key: ubuntu22.04-gpuocelot-${{ hashFiles('${{ github.workspace }}/extra/cudacpu/cudacpu.cpp', '${{ github.workspace }}/extra/cudacpu/gpuocelot.patch') }}
-        restore-keys: |
-          ubuntu22.04-gpuocelot-
-    - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
-      name: Clone gpuocelot repo
+        sudo apt-get install -y git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+    # - name: Cache gpuocelot and libcudacpu
+    #   id: cache-build
+    #   uses: actions/cache@v3
+    #   env:
+    #     cache-name: cache-gpuocelot-build
+    #   with:
+    #     path: ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build
+    #     key: ubuntu22.04-gpuocelot-${{ hashFiles('${{ github.workspace }}/extra/cudacpu/cudacpu.cpp', '${{ github.workspace }}/extra/cudacpu/gpuocelot.patch') }}
+    #     restore-keys: |
+    #       ubuntu22.04-gpuocelot-
+    - name: Clone gpuocelot repo
       uses: actions/checkout@v3
       with:
         repository: gpuocelot/gpuocelot
         path: ${{ github.workspace }}/extra/cudacpu/gpuocelot
-        ref: 98333b95cd9512514e947a4f9fd0caa7e1326dfc
         submodules: true
-    - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
-      name: Patch gpuocelot
-      run: |
-        cd ${{ github.workspace }}/extra/cudacpu/gpuocelot
-        cp ${{ github.workspace }}/extra/cudacpu/cudacpu.cpp ./ocelot
-        mkdir ./ocelot/include/cudacpu
-        cp ${{ github.workspace }}/extra/cudacpu/gpuocelot.patch .
-        git apply gpuocelot.patch
-    - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
-      name: Compile gpuocelot and libcudacpu
+    - name: Compile gpuocelot and libcudacpu
       run: |
         cd ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot
         mkdir build
         cd build
         cmake .. -Wno-dev -G Ninja
         ninja
-    - name: install libcudacpu.so
-      run: |
-        sudo ln -s ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build/libcudacpu.so /usr/local/lib/
-        chmod a+rx /usr/local/lib/libcudacpu.so
+        sudo cp ./libgpuocelot.so /usr/lib
+        sudo ldconfig
+        g++ ${{ github.workspace }}/extra/cudacpu.cpp -I../include/ -I../ThirdParty/hydrazine/include/ -lgpuocelot -o libcudacpu.so -lz -ltinfo -shared -fPIC
+        sudo cp ./libcudacpu.so /usr/lib
         sudo ldconfig
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
