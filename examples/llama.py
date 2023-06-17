@@ -203,6 +203,7 @@ if __name__ == "__main__":
   parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
   parser.add_argument('--large', action='store_true', help="Use the 13B model instead of the 7B one")
   parser.add_argument('--tinyfake', action='store_true', help="Use the fake very small model")
+  parser.add_argument('--quantize', type=bool, default=False, help="Runs the quantised model")
   args = parser.parse_args()
   chatbot = args.prompt == None
 
