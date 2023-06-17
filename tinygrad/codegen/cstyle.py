@@ -68,6 +68,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
   depth = 0
   def kk(s): kernel.append("  "*depth+s)
 
+  uses_tensor_cores = False
   for uop,newvar,vin,args in uops:
     if uop == UOps.LOOP:
       for i,var in enumerate(args[0]):
@@ -113,6 +114,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk(f"{newvar.render(True)} = {args}f;")
     elif uop == UOps.ALU and newvar.dtype == dtypes._float8x8 and newvar is not None:
       kk(f"simdgroup_multiply_accumulate({newvar.render()}, {vin[1].render()}, {vin[2].render()}, {vin[0].render()});")
+      uses_tensor_cores = True
     elif uop == UOps.ALU:
       assert newvar is not None
       if newvar in vin:
@@ -182,9 +184,10 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
   # SIMD
-  local_size = [1]*len(global_size)
-  global_size = [1] + global_size
-  local_size = [32] + local_size
+  if uses_tensor_cores:
+    local_size = [1]*len(global_size)
+    global_size = [1] + global_size
+    local_size = [32] + local_size
 
   if lang.half_prekernel and any(x.dtype == dtypes.float16 for x in bufs): prg = ''.join([f"{lang.half_prekernel}", "\n", prg])
   if lang.double_prekernel and any(x.dtype == dtypes.float64 for x in bufs): prg = ''.join([f"{lang.double_prekernel}", "\n", prg])

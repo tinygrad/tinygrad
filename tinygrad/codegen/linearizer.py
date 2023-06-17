@@ -78,7 +78,7 @@ class MemOp(NamedTuple):
   i: int
   idx: Variable
   valid: Variable
-  stride: int = 1
+  stride: Optional[int] = None
 
 class UOp(NamedTuple):
   uop: UOps
@@ -170,6 +170,30 @@ class Linearizer:
         store_offset_float4[tuple(uidxs2)].append(var)
     return store_offset_float4
 
+  def _group_float8x8(self, i, load_offset):
+    axis_dim_8 = [axis for axis,dim in enumerate(self.sts[i].shape) if dim % 8 == 0 and axis >= self.shape_len-self.upcasted]
+    strides = self.sts[i].real_strides()
+    axis_1, axis_n = None, None
+    for d in axis_dim_8:
+      # NOTE: i copied "(self.upcasted-1) - " from _group_float4
+      if strides[d] == 1 and axis_1 is None: axis_1 = (self.upcasted-1) - d
+      if strides[d] > 1 and axis_n is None:
+        axis_n = (self.upcasted-1) - d
+        stride = strides[d]
+    if axis_1 is not None and axis_n is not None:
+      # NOTE: copy pasted from _group_float4
+      store_offset_float8x8 = {}
+      for uidxs, var in load_offset.items():
+        if uidxs[axis_1]%8 == 0 and uidxs[axis_n]%8 == 0:
+          store_offset_float8x8[uidxs] = [var]
+        else:
+          uidxs2 = list(uidxs)
+          uidxs2[axis_1] -= uidxs2[axis_1]%8
+          uidxs2[axis_n] -= uidxs2[axis_n]%8
+          store_offset_float8x8[tuple(uidxs2)].append(var)
+      return store_offset_float8x8, stride
+    return None, None
+
   def global_load(self, i, idxs:List[Variable], const=None) -> List[Token]:
     load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(dtypes.float,uidxs)+self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
 
@@ -177,27 +201,8 @@ class Linearizer:
     stride = 1
     did_float8x8 = False
     if self.supports_float8x8:
-      axis_dim_8 = [axis for axis,dim in enumerate(self.sts[i].shape) if dim == 8]
-      strides = self.sts[i].real_strides()
-      axis_1, axis_n = None, None
-      for d in axis_dim_8:
-        # NOTE: i copied "(self.upcasted-1) - " from _group_float4
-        if strides[d] == 1 and axis_1 is None: axis_1 = (self.upcasted-1) - d
-        if strides[d] > 1 and axis_n is None:
-          axis_n = (self.upcasted-1) - d
-          stride = strides[d]
-      if axis_1 is not None and axis_n is not None:
-        # NOTE: copy pasted from _group_float4
-        store_offset_float8x8 = {}
-        for uidxs, var in load_offset.items():
-          if uidxs[axis_1]%8 == 0 and uidxs[axis_n]%8 == 0:
-            store_offset_float8x8[uidxs] = [var]
-          else:
-            uidxs2 = list(uidxs)
-            uidxs2[axis_1] -= uidxs2[axis_1]%8
-            uidxs2[axis_n] -= uidxs2[axis_n]%8
-            store_offset_float8x8[tuple(uidxs2)].append(var)
-
+      store_offset_float8x8, stride = self._group_float8x8(i, load_offset)
+      if store_offset_float8x8:
         # NOTE: copy pasted from right below
         load_offset_new = {}
         for k,out_tokens in store_offset_float8x8.items():
@@ -239,14 +244,15 @@ class Linearizer:
   def global_store(self, i, idxs:List[Variable], store:List[Token], ssa) -> None:
     store_offset: Dict[Tuple[int, ...], Token] = dict(zip(self.shape_offsets(i), store))
 
-    # TODO: this is junk
-    stride = 1
+    stride = None
     did_float8x8 = False
     if self.supports_float8x8:
-      k,v = list(store_offset.items())[0]
-      store_offset = {k:Token(v.name, v.dtype)}
-      did_float8x8 = True
-      stride = 256 # ugh
+      store_offset_float8x8, stride = self._group_float8x8(i, store_offset)
+      if store_offset_float8x8:
+        store_offset = {}
+        for k,out_tokens in store_offset_float8x8.items():
+          store_offset[k] = Token(out_tokens[0].name, out_tokens[0].dtype)
+        did_float8x8 = True
 
     # float4 grouping (optional)
     # TODO: why does this not work for float16?
@@ -562,10 +568,12 @@ class Linearizer:
 
     # **** below this line need to be optional and benchmarked ****
 
+    BIG_DIM = 8
+
     # potentially do more upcasts of non reduce axes based on a heuristic
     while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
       xb_choices = []
-      for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4,8]):   # consider all the non reduce axes, and a 3 or 4 reduce
+      for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4,BIG_DIM]):   # consider all the non reduce axes, and a 3 or 4 reduce
         # if it mods, and some buffer has stride 0 on axis while having no stride 0 in the buftoken
         # NOTE: this is using views[-1]
         if self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
@@ -584,7 +592,7 @@ class Linearizer:
       if self.full_unupcasted_shape[-1] <= 16:
         self.upcast()
       else:
-        for splits in [8,4]:
+        for splits in [BIG_DIM,4]:
           if self.full_unupcasted_shape[-1]%splits == 0:
             self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
             self.upcast()
