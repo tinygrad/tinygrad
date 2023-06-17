@@ -93,9 +93,22 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
   desc = "faster" if et_torch > et_tinygrad else "slower"
   flops = save_ops*1e-6
   mem = save_mem*1e-6
-  print(f"{prefix}{name:40s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")
+  print(f"{prefix}{name:42s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")
   prefix = " "
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
+
+def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_x):
+  torch.manual_seed(0)
+  torch_dat = torch.rand(bs, in_chans, img_size_y, img_size_x).to(torch_device)
+  torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None).to(torch_device)
+
+  tiny_dat = Tensor(torch_dat.cpu().numpy())
+  tiny_conv = Conv2d(in_chans, out_chans, kernel_size, bias=None)
+  tiny_conv.weight = Tensor(torch_conv.weight.detach().cpu().numpy())
+
+  def f1(torch_dat): return torch_conv(torch_dat)
+  def f2(tiny_dat): return tiny_conv(tiny_dat).realize()
+  helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
 
 @unittest.skipIf(getenv("BIG") != 1, "no big tests")
 class TestBigSpeed(unittest.TestCase):
@@ -115,6 +128,10 @@ class TestBigSpeed(unittest.TestCase):
   def test_gemm_4096(self):
     def f(a, b): return a @ b
     helper_test_generic_square('gemm', 4096, f, f)
+  def test_large_conv_1x1(self):
+    helper_test_conv(bs=32, in_chans=128, out_chans=128, kernel_size=1, img_size_y=128, img_size_x=128)
+  def test_large_conv_3x3(self):
+    helper_test_conv(bs=32, in_chans=128, out_chans=128, kernel_size=3, img_size_y=130, img_size_x=130)
 
 class TestSpeed(unittest.TestCase):
   def setUp(self):
@@ -240,21 +257,10 @@ class TestSpeed(unittest.TestCase):
     helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
 
   def test_conv2d(self):
-    torch.manual_seed(0)
     for bs in [32]:
       for in_chans in IN_CHANS:
         for out_chans in [32]:
-          img_size = 34
-          torch_dat = torch.rand(bs, in_chans, img_size, img_size).to(torch_device)
-          torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None).to(torch_device)
-
-          tiny_dat = Tensor(torch_dat.cpu().numpy())
-          tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None)
-          tiny_conv.weight = Tensor(torch_conv.weight.detach().cpu().numpy())
-
-          def f1(torch_dat): return torch_conv(torch_dat)
-          def f2(tiny_dat): return tiny_conv(tiny_dat).realize()
-          helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
+          helper_test_conv(bs, in_chans, out_chans, 3, 34, 34)
 
 if __name__ == '__main__':
   unittest.main()

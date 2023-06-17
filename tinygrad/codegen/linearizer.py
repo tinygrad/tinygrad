@@ -594,7 +594,7 @@ class Linearizer:
       if self.full_unupcasted_shape[-1] <= 16:
         self.upcast()
       else:
-        for splits in [16,8,4]:
+        for splits in ([16] if BIG_DIM > 8 else []) + [8,4]:
           if self.full_unupcasted_shape[-1]%splits == 0:
             self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
             self.upcast()
