@@ -33,7 +33,7 @@ def colorize_float(x):
   ret = f"{x:7.2f}x"
   if x < 0.75:
     return colored(ret, 'green')
-  elif x > 1.5:
+  elif x > 1.33:
     return colored(ret, 'red')
   else:
     return colored(ret, 'yellow')
@@ -81,7 +81,7 @@ def helper_test_generic_square(name, N, f1, f2, onearg=False):
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
 
-  helper_test_generic(f"{name:30s} {N:4d}x{N:4d}", f1, (torch_a, torch_b), TinyJit(lambda a,b:f2(a,b).realize()), (tiny_a, tiny_b))
+  helper_test_generic(f"{name:30s} {N:5d}x{N:5d}", f1, (torch_a, torch_b), TinyJit(lambda a,b:f2(a,b).realize()), (tiny_a, tiny_b))
 
 prefix = None
 def helper_test_generic(name, f1, f1_args, f2, f2_args):
@@ -93,9 +93,28 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
   desc = "faster" if et_torch > et_tinygrad else "slower"
   flops = save_ops*1e-6
   mem = save_mem*1e-6
-  print(f"{prefix}{name:40s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:7.2f} MOPS {mem:7.2f} MB")
+  print(f"{prefix}{name:40s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")
   prefix = " "
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
+
+@unittest.skipIf(getenv("BIG") != 1, "no big tests")
+class TestBigSpeed(unittest.TestCase):
+  def setUp(self):
+    global prefix
+    prefix = " " if prefix is None else ""
+    return super().setUp()
+  def test_exp(self):
+    def f(a, b): return a.exp()
+    helper_test_generic_square('exp', 16384, f, f, onearg=True)
+  def test_gemm_1024(self):
+    def f(a, b): return a @ b
+    helper_test_generic_square('gemm', 1024, f, f)
+  def test_gemm_2048(self):
+    def f(a, b): return a @ b
+    helper_test_generic_square('gemm', 2048, f, f)
+  def test_gemm_4096(self):
+    def f(a, b): return a @ b
+    helper_test_generic_square('gemm', 4096, f, f)
 
 class TestSpeed(unittest.TestCase):
   def setUp(self):
