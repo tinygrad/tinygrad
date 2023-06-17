@@ -260,3 +260,6 @@ def OneHot(indices, depth, values, axis=-1):
   ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
   cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
   return cond.where(values[1], values[0]).cast(values.dtype) 
+
+def Floor(x:Tensor): return x.floor()
+def Ceil(x:Tensor): return x.ceil()
