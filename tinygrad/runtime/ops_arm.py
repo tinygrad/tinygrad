@@ -17,18 +17,6 @@ class ARMProgram:
   def __init__(self, name:str, prg:str, **args):
     print(name)
     print(prg)
-#     prg = f"""
-# .arch armv8-a
-# .text
-# .global _{name} 
-# .balign 4
-# _{name}:
-#     ldr s0, [x1]
-#     ldr s1, [x2]
-#     fadd s0, s0, s1
-#     str s0, [x0]
-#     ret
-# """
     fn = f"/tmp/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{'dylib' if platform.system() == 'Darwin' else 'so'}"
     print(subprocess.run(["as","-arch", "arm64", "-o", "{name}.o"], input=prg.encode('utf-8')))
     print(subprocess.run(["clang", "-shared","{name}.o", "-o", fn]))
