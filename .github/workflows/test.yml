@@ -215,12 +215,12 @@ jobs:
     - name: Clone gpuocelot repo
       uses: actions/checkout@v3
       with:
-        repository: gpuocelot/gpuocelot
-        path: ${{ github.workspace }}/extra/cudacpu/gpuocelot
+        repository: cloud11665/gpuocelot
+        path: ${{ github.workspace }}/gpuocelot
         submodules: true
     - name: Compile gpuocelot and libcudacpu
       run: |
-        cd ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot
+        cd ${{ github.workspace }}/gpuocelot/ocelot
         mkdir build
         cd build
         cmake .. -Wno-dev -G Ninja
