@@ -1,7 +1,7 @@
-from tinygrad.codegen.assembly import AssemblyCodegen, float_to_hex
+from tinygrad.codegen.assembly import AssemblyCodegen, AssemblyInstruction, float_to_hex
 from tinygrad.ops import BinaryOps
 from tinygrad.codegen.linearizer import UOps
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import DEBUG, dtypes
 
 class X86Codegen(AssemblyCodegen):
   #supports_constant_folding: bool = True
@@ -9,7 +9,7 @@ class X86Codegen(AssemblyCodegen):
   def specialize(self, asm):
     type_to_op_suffix = {dtypes.float32: 'l', dtypes.bool: 'b', dtypes.int32: 'l', dtypes.int64: 'q', dtypes.uint32: 'l', dtypes.uint64: 'q'}
     def inst(instr, reg, fp=False, simd=False): return f"{instr}{'s' if fp else ''}{'p' if simd else ''}{type_to_op_suffix[reg_type[reg.nm]]}"
-    alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.CMPLT: "cmp"}
+    alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.CMPLT: "cmp",  BinaryOps.CMPEQ: "cmp", BinaryOps.MAX: "max"}
 
     ins = []
     reg_map = {}
@@ -26,6 +26,7 @@ class X86Codegen(AssemblyCodegen):
     print(local_var_size)
 
     for uop, out, vin, arg in asm:
+      if DEBUG >= 5: ins.append(f"# {AssemblyInstruction(uop, out, vin, arg)}")
       if uop == UOps.DEFINE_REGISTER: pass
       elif uop == UOps.DEFINE_LOCAL: pass
       elif uop == UOps.SPECIAL:
@@ -49,26 +50,28 @@ class X86Codegen(AssemblyCodegen):
             ins.append(f"{inst(alu[arg], vin[0])} {acc_reg_b}")
           else:
             ins.append(f"{inst(alu[arg], vin[0])} {acc_reg_b}, {acc_reg_a}")
-            if arg == BinaryOps.CMPLT:
-              ins.append(f"setae %al")
+            if arg in [BinaryOps.CMPLT, BinaryOps.CMPEQ]: 
+              cmp_map = {BinaryOps.CMPLT: "setae", BinaryOps.CMPEQ: "sete"}
+              ins.append(f"{cmp_map[arg]} %al")
           ins.append(f"{inst('mov', vin[0])} {acc_reg_a}, {reg_map[out.nm]}")
       elif uop == UOps.LOAD:
+        # TODO can we use the shortform for indirect memory access?
         acc_reg_a = "%rax" if out.dtype.itemsize == 8 else "%eax"        
-        ins.append(f"movq {reg_map[vin[0].nm]}, %rsi")
-        ins.append(f"{inst('mov', out)} (%rsi), {acc_reg_a}")
+        ins.append(f"movq {reg_map[vin[0].nm]}, %rbx")
+        ins.append(f"{inst('mov', out)} {arg[0]}(%rbx), {acc_reg_a}")
         ins.append(f"{inst('mov', out)} {acc_reg_a}, {reg_map[out.nm]}")
       elif uop == UOps.STORE:
         # TODO is there a better way to save in the address in address
         acc_reg_a = "%rax" if vin[1].dtype.itemsize == 8 else "%eax"        
         ins.append(f"{inst('mov', vin[1])} {reg_map[vin[1].nm]}, {acc_reg_a}")
         ins.append(f"movq {reg_map[vin[0].nm]}, %rbx")
-        ins.append(f"{inst('mov', vin[1])} {acc_reg_a}, (%rbx)")
+        ins.append(f"{inst('mov', vin[1])} {acc_reg_a}, {arg[0]}(%rbx)")
       elif uop == UOps.CAST:     
         # singed extend
         ins.append(f"movslq {reg_map[vin[0].nm]}, %rax")
         ins.append(f"movq %rax, {reg_map[out.nm]}")
       elif uop == UOps.CONST:
-        ins.append(f"{inst('mov', out)} ${float_to_hex(arg) if dtypes.is_float(out.dtype) else arg}, {reg_map[out.nm]}")
+        ins.append(f"{inst('mov', out)} $0x{float_to_hex(arg) if dtypes.is_float(out.dtype) else arg}, {reg_map[out.nm]}")
       elif uop == UOps.LABEL:
         ins.append(f"{arg.replace('$', '.')}:")
       elif uop == UOps.COND_BRANCH:

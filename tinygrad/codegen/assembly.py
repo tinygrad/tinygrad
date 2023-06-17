@@ -1,3 +1,4 @@
+import struct
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, FusedOps, BinaryOps, UnaryOps

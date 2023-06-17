@@ -3,6 +3,7 @@ import subprocess
 import numpy as np
 
 # https://en.wikipedia.org/wiki/X86_calling_conventions
+# https://gitlab.com/x86-psABIs/x86-64-ABI
 # https://pixelclear.github.io/technical/post/2021/01/02/x86-Assembly-tutorial-part1.html
 # https://www.cs.princeton.edu/courses/archive/spr11/cos217/lectures/15AssemblyFunctions.pdf
 # https://stackoverflow.com/questions/71704813/writing-and-linking-shared-libraries-in-assembly-32-bit
