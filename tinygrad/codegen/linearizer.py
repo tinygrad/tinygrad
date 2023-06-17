@@ -78,7 +78,7 @@ class MemOp(NamedTuple):
   i: int
   idx: Variable
   valid: Variable
-  stride: Optional[int] = None
+  stride: Optional[Tuple[int, ...]] = None
 
 class UOp(NamedTuple):
   uop: UOps
@@ -176,13 +176,14 @@ class Linearizer:
     axis_1, axis_n = None, None
     for d in axis_dim_8:
       # NOTE: i copied "(self.upcasted-1) - " from _group_float4
-      if strides[d] == 1 and axis_1 is None: axis_1 = (self.upcasted-1) - d
-      if strides[d] > 1 and axis_n is None:
-        axis_n = (self.upcasted-1) - d
-        stride = strides[d]
+      if strides[d] == 1 and axis_1 is None: axis_1 = d
+      if strides[d] > 1 and axis_n is None: axis_n, stride = d, strides[d]
     if axis_1 is not None and axis_n is not None:
+      if DEBUG >= 3: print(f"grouping float8x8 {self.sts[i].shape} with axis_n:{axis_n} and axis_1:{axis_1}")
       # NOTE: copy pasted from _group_float4
       store_offset_float8x8 = {}
+      axis_1 = (self.shape_len - 1) - axis_1
+      axis_n = (self.shape_len - 1) - axis_n
       for uidxs, var in load_offset.items():
         if uidxs[axis_1]%8 == 0 and uidxs[axis_n]%8 == 0:
           store_offset_float8x8[uidxs] = [var]
@@ -191,14 +192,14 @@ class Linearizer:
           uidxs2[axis_1] -= uidxs2[axis_1]%8
           uidxs2[axis_n] -= uidxs2[axis_n]%8
           store_offset_float8x8[tuple(uidxs2)].append(var)
-      return store_offset_float8x8, stride
+      return store_offset_float8x8, (stride, 1) if axis_n < axis_1 else (1, stride)
     return None, None
 
   def global_load(self, i, idxs:List[Variable], const=None) -> List[Token]:
     load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(dtypes.float,uidxs)+self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
 
     # float8x8 grouping for tensor cores
-    stride = 1
+    stride = None
     did_float8x8 = False
     if self.supports_float8x8:
       store_offset_float8x8, stride = self._group_float8x8(i, load_offset)
@@ -570,7 +571,8 @@ class Linearizer:
 
     # **** below this line need to be optional and benchmarked ****
 
-    BIG_DIM = 32
+    #BIG_DIM = 32
+    BIG_DIM = 8
 
     # potentially do more upcasts of non reduce axes based on a heuristic
     while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:

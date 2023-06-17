@@ -104,6 +104,15 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk("}"*len(args[0]) + f" /* {args[1]} */")
     elif uop == UOps.CONST and newvar.dtype == dtypes._float8x8:
       kk(f"{newvar.render(True)} = simdgroup_float8x8({args}f);")
+    elif uop == UOps.ALU and newvar.dtype == dtypes._float8x8 and newvar is not None:
+      kk(f"simdgroup_multiply_accumulate({newvar.render()}, {vin[1].render()}, {vin[2].render()}, {vin[0].render()});")
+      uses_tensor_cores = True
+    elif uop == UOps.LOAD and newvar.dtype == dtypes._float8x8 and newvar is not None:
+      full_idx = args.idx + Variable(bufnames[args.i], 0, (1<<64)-1)
+      kk(f"{newvar.render(True)}; simdgroup_load({newvar.render()}, {full_idx.render(render_cl)}, {max(args.stride)}, ulong2(0, 0), false);  // {args.stride}")
+    elif uop == UOps.STORE and vin[0].dtype == dtypes._float8x8:
+      full_idx = args.idx + Variable(bufnames[args.i], 0, (1<<64)-1)
+      kk(f"simdgroup_store({vin[0].render()}, {full_idx.render(render_cl)}, {max(args.stride)}, ulong2(0, 0), false);  // {args.stride}")
     elif uop == UOps.CONST:
       assert newvar is not None
       if args == -math.inf:
@@ -112,18 +121,12 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk(f"{newvar.render(True)} = {{ {args}f, {args}f, {args}f, {args}f }};")
       else:
         kk(f"{newvar.render(True)} = {args}f;")
-    elif uop == UOps.ALU and newvar.dtype == dtypes._float8x8 and newvar is not None:
-      kk(f"simdgroup_multiply_accumulate({newvar.render()}, {vin[1].render()}, {vin[2].render()}, {vin[0].render()});")
-      uses_tensor_cores = True
     elif uop == UOps.ALU:
       assert newvar is not None
       if newvar in vin:
         kk(f"{newvar.render()} = {code_for_op[args](*[x.render() for x in vin])};")
       else:
         kk(f"{newvar.render(True)} = {code_for_op[args](*[x.render() for x in vin])};")
-    elif uop == UOps.LOAD and newvar.dtype == dtypes._float8x8 and newvar is not None:
-      full_idx = args.idx + Variable(bufnames[args.i], 0, (1<<64)-1)
-      kk(f"{newvar.render(True)}; simdgroup_load({newvar.render()}, {full_idx.render(render_cl)}, {args.stride}, ulong2(0, 0));")
     elif uop == UOps.LOAD and newvar is not None:
       # TODO: merge with CONST?
       if bufs[args.i] is not None and isinstance(bufs[args.i].realized, RawConst):
@@ -169,9 +172,6 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk(f"write_imagef({bufnames[args.i]}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {vin[0].render()});")
       else:
         kk(f"(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}] = {vin[0].render()};")
-    elif uop == UOps.STORE and vin[0].dtype == dtypes._float8x8:
-      full_idx = args.idx + Variable(bufnames[args.i], 0, (1<<64)-1)
-      kk(f"simdgroup_store({vin[0].render()}, {full_idx.render(render_cl)}, {args.stride}, ulong2(0, 0));")
     elif uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
     else:
@@ -186,9 +186,8 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   # SIMD
   if uses_tensor_cores:
-    local_size = [1]*len(global_size)
-    global_size = [1] + global_size
-    local_size = [32] + local_size
+    local_size = [1]*(len(global_size)-1) + [32]
+    prg = prg.replace("gid.x", "gid.x/32")
 
   if lang.half_prekernel and any(x.dtype == dtypes.float16 for x in bufs): prg = ''.join([f"{lang.half_prekernel}", "\n", prg])
   if lang.double_prekernel and any(x.dtype == dtypes.float64 for x in bufs): prg = ''.join([f"{lang.double_prekernel}", "\n", prg])
