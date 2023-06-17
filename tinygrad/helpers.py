@@ -96,6 +96,7 @@ class dtypes:
   # NOTE: these are internal dtypes, should probably check for that
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
+  _float8x8: Final[DType] = DType(4, 4*8*8, "simdgroup_float8x8", None, 8*8)
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0
