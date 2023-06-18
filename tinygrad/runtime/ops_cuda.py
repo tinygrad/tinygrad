@@ -2,11 +2,11 @@ import subprocess
 from typing import Optional
 from time import perf_counter
 import numpy as np
+from pycuda.compiler import compile as cuda_compile # type: ignore
 from tinygrad.helpers import DEBUG, getenv, fromimport
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
-from pycuda.compiler import compile as cuda_compile # type: ignore
 
 if getenv("CUDACPU", 0) == 1:
   import ctypes, ctypes.util
