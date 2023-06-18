@@ -453,7 +453,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(7,5,10)], lambda x: x[1:5:2, 3, ::4], lambda x: x[1:5:2, 3, ::4])
     helper_test_op([(7,5,10)], lambda x: x[1:5:2, None, None, 3, None, ::4], lambda x: x[1:5:2, None, None, 3, None, ::4])
 
-  @unittest.skipIf(getenv("CUDACPU",0) == 1, "Emulator fails at the last assert")
   def test_slice_negative_strides(self):
     # Torch doesn't support slicing with negative steps
     a = np.random.randn(10, 10, 10).astype(np.float32)
@@ -657,7 +656,6 @@ class TestOps(unittest.TestCase):
         lambda x,w: torch.nn.functional.conv_transpose2d(x,w,dilation=dilation).relu(),
         lambda x,w: Tensor.conv_transpose2d(x,w,dilation=dilation).relu(), atol=1e-4, grad_rtol=1e-5)
 
-  @unittest.skipIf(getenv("CUDACPU",0) == 1, "Emulator fails on the first stride")
   def test_strided_conv_transpose2d(self):
     for stride in [(2,1), (1,2), 1]:
       helper_test_op([(2,4,4,5), (4,4,3,3)],
