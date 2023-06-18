@@ -112,8 +112,10 @@ jobs:
         python-version: 3.8
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Set env
+      run: echo -e "CLANG=1\nENABLE_METHOD_CACHE=1" >> $GITHUB_ENV
     - name: Run Pytest
-      run: ENABLE_METHOD_CACHE=1 CLANG=1 python -m pytest -s -v -n=auto test/
+      run: python -m pytest -s -v -n=auto test/
 
   testtorch:
     name: Torch Tests
