@@ -191,7 +191,6 @@ jobs:
   testcuda:
     name: (emulated) cuda test
     runs-on: ubuntu-22.04
-
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
