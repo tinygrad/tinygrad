@@ -26,7 +26,8 @@ if getenv("CUDACPU", 0) == 1:
     class Context:
       synchronize = lambda:0 # noqa: E731
     CompileError = Exception
-  def _cuda_compile(prg, **kwargs): return cuda_compile(prg, **{**kwargs, 'arch': 'sm_35'}) # noqa: E731
+  __cuda_compile = cuda_compile
+  def _cuda_compile(prg, **kwargs): return __cuda_compile(prg, **{**kwargs, 'arch': 'sm_35'}) # noqa: E731
   cuda_compile = _cuda_compile # noqa: F811
   RawCUDABuffer = RawMallocBuffer
 else:
