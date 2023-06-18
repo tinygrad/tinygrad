@@ -11,7 +11,7 @@ from pycuda.compiler import compile as cuda_compile # type: ignore
 EMULATING = (getenv("CUDACPU", 0) == 1)
 if EMULATING:
   import ctypes, ctypes.util
-  lib = ctypes.CDLL(ctypes.util.find_library("cudacpu"))
+  lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
   lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
   def ptx_kernel(source): return lambda *args, block, grid: lib.ptx_run(source, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), *block, *grid)
 else:

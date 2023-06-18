@@ -225,11 +225,7 @@ jobs:
         cd build
         cmake .. -Wno-dev -G Ninja
         ninja
-        sudo cp ./libgpuocelot.so /usr/lib
-        sudo ldconfig
-        g++ ${{ github.workspace }}/extra/cudacpu.cpp -I../include/ -I../ThirdParty/hydrazine/include/ -lgpuocelot -o libcudacpu.so -lz -ltinfo -shared -fPIC
-        sudo cp ./libcudacpu.so /usr/lib
-        sudo ldconfig
+        sudo ninja install
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
