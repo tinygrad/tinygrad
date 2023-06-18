@@ -470,8 +470,9 @@ class Tensor:
   def dot(self, w:Tensor) -> Tensor:
     if (n1:=len(self.shape))*(n2:=len(w.shape)) == 0: raise RuntimeError(f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D")
     x = self.reshape(*self.shape[0:-1], 1, self.shape[-1])
-    w = w.reshape(*w.shape[0:-2], 1, w.shape[-2], w.shape[-1]).transpose(-1, -2)
+    w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1]) if len(w.shape)>1 else (x.shape[-1],1)).transpose(-1, -2)
     r = (x*w).sum(-1)
+    if r.shape == (1,): return r.reshape(())
     return r.reshape((*r.shape[:-2], r.shape[-1])) if len(self.shape) == 1 else r
 
   def cumsum(self, axis=0):

@@ -274,6 +274,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], _mish_pytorch, Tensor.mish, atol=1e-4)
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+    helper_test_op([(65,), (65,)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
     with self.assertRaises(RuntimeError):
       a = Tensor(3.14)
       a.matmul(a)
