@@ -5,7 +5,6 @@ from tinygrad.helpers import DEBUG, getenv, fromimport
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
-from tinygrad.codegen.assembly_ptx import PTXCodegen
 from pycuda.compiler import compile as cuda_compile # type: ignore
 
 if getenv("CUDACPU", 0) == 1:
@@ -17,25 +16,25 @@ if getenv("CUDACPU", 0) == 1:
       def __init__(self, src): self.src = src
       def get_function(self, _): return self
       def __call__(self, *args, block, grid): lib.ptx_run(self.src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), *block, *grid)
-    module_from_buffer = lambda src: cuda.module(src)
+    module_from_buffer = lambda src: cuda.module(src) # pylint: disable=unnecessary-lambda # noqa: E731
     class Event:
       def __init__(self): pass
       def record(self): pass
       def time_till(self, other): return 0.0
       def synchronize(self): pass
     class Context:
-      synchronize = lambda:0
+      synchronize = lambda:0 # noqa: E731
     CompileError = Exception
-  def _cuda_compile(prg, **kwargs): return cuda_compile(prg, **{**kwargs, 'arch': 'sm_35'})
-  cuda_compile = _cuda_compile
+  def _cuda_compile(prg, **kwargs): return cuda_compile(prg, **{**kwargs, 'arch': 'sm_35'}) # noqa: E731
+  cuda_compile = _cuda_compile # noqa: F811
   RawCUDABuffer = RawMallocBuffer
 else:
   import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
   import pycuda.driver as cuda # type: ignore
-  class RawCUDABuffer(RawBufferCopyInOut):
-    def __init__(self, size, dtype): super().__init__(size, dtype, cuda.mem_alloc(size * dtype.itemsize))
-    def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x, stream)
-    def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf)
+  class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
+    def __init__(self, size, dtype): super().__init__(size, dtype, cuda.mem_alloc(size * dtype.itemsize)) # type: ignore
+    def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x, stream) # type: ignore
+    def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) # type: ignore
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
