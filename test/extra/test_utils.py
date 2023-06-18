@@ -45,7 +45,7 @@ class TestUtils(unittest.TestCase):
       )
       if isfloat16: model = model.half()
 
-      path = temp('/testloadmodel.pth')
+      path = temp('testloadmodel.pth')
       torch.save(model.state_dict(), path)
       model2 = torch_load(path)
 
