@@ -143,11 +143,11 @@ class Linearizer:
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
   def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]
 
-  # TODO: this stride is only on the last view, and may not be real
   def upcasted_axis(self, i):
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
-                    self.sts[i].views[-1].strides[self.shape_len-self.upcasted:],  # WRONG
+                    self.sts[i].real_strides()[self.shape_len-self.upcasted:],
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
+
   # TODO: is there a better way to write this?
   def acc_offsets(self, i):
     if self.upcasted == 0: return [0]

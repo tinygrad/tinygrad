@@ -28,7 +28,6 @@ class _CL:
     for q in self.cl_queue: q.finish()
 CL = _CL()
 
-# TODO: merge CLImage in here
 class CLBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype, device='0'):
     assert not OSX or dtype != dtypes.float64, "OpenCL on Mac doesn't support float64"
