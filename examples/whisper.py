@@ -218,7 +218,8 @@ if __name__ == "__main__":
         out.realize()
         idx = out[0,-1].numpy().argmax()
         lst.append(idx)
-      print("predicted:" + "".join(enc.decode(lst[2:-1])).lower()) # remove special tokens for comparison
+      # TODO: sentence similarty score?
+      print("predicted: " + "".join(enc.decode(lst[2:-1])).lower().replace(",", "")) # remove special tokens for comparison
       print("transcript: " + c["transcript"])
   elif len(sys.argv) > 1:
     # offline
