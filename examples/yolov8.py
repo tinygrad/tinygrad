@@ -390,7 +390,7 @@ class YOLOv8:
 if __name__ == '__main__':
   
   # usage : python3 yolov8.py "image_URL OR image_path" "v8 variant" (optional, n is default)
-  if len(sys.argv) < 2 and len(sys[1]) > 1:
+  if len(sys.argv) < 2 and len(sys.argv[1]) > 1:
     print("Error: Image URL or path not provided.")
     sys.exit(1)
 
