@@ -3,7 +3,7 @@ from tinygrad.helpers import prod, dtypes
 from extra.onnx import safe_numpy
 import numpy as np
 import functools
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional
 import math
 
 def Unsqueeze(data, axes):
@@ -17,7 +17,7 @@ def Unsqueeze(data, axes):
       ptr += 1
   return data.reshape(new_shape)
 
-def Gemm(A, B, C=None, alpha=1.0, beta=1.0, transA=0, transB=0):
+def Gemm(A, B, C=None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=0):
   ret = alpha * ((A.transpose() if transA == 1 else A) @ (B.transpose() if transB == 1 else B))
   if C is not None: ret += beta * C
   return ret
@@ -100,6 +100,8 @@ def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=Non
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=padding)
 
 def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, output_shape=None, output_padding=0, strides=1):
+  if auto_pad == 'SAME_UPPER':
+    pads = (1,1,6,6)
   return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0, output_padding=output_padding)
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
@@ -184,7 +186,7 @@ def ReduceSum(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.
 def ReduceMean(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.mean(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 def ReduceSumSquare(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 def ReduceL1(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.abs().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
-def ReduceL2(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).sqrt()
+def ReduceL2(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).sqrt() if axes.shape != (0,) else data.square().sum(None, keepdim=keepdims).sqrt()
 def ReduceLogSum(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
 def ReduceLogSumExp(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
 
@@ -252,6 +254,83 @@ def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, red
   if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
   elif reduction == "sum": return loss.sum()
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
+
+'''
+def Gather(input, indices, axis):
+  if axis != 0: input, indices = input.transpose(ax1=0, ax2=axis), indices.transpose(ax1=0, ax2=axis)
+  ret = _gather(input, indices)
+  if axis != 0: ret = ret.transpose(ax1=axis, ax2=0)
+  return ret
+
+'''
+def _gather(array: Tensor, indices: Tensor):
+  reshape_arg = [1]*array.ndim + [array.shape[-1]]
+  return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, array.shape[-1]) == Tensor.arange(array.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, array.shape[-1]))*array).sum(indices.ndim)
+
+def Gather(input, indices, axis=0):
+  indices_shape = list(indices.shape)
+  indices = indices.flatten()
+  input = input.transpose(ax1=0, ax2=axis)
+  if input.ndim > 1:
+    rem_shape = list(input.shape)[1:]
+    input = input.reshape(input.shape[0], -1).T
+    repeat_arg = [1]*(input.ndim-1) + [input.shape[-2]]
+    indices = indices.unsqueeze(indices.ndim).repeat(repeat_arg)
+    ret = _gather(input, indices)
+    if rem_shape: ret = ret.reshape(*[indices.shape[0]], rem_shape)
+  else:
+    ret = _gather(input, indices)
+  return ret.transpose(ax1=axis, ax2=0).reshape(*[indices_shape if idx == axis else shape for idx, shape in enumerate(ret.shape)])
+
+def GatherElements(input, indices, axis):
+  indices = indices.transpose(ax1=axis, ax2=0)
+  permute_args = list(range(input.ndim))
+  permute_args[0], permute_args[axis] = permute_args[axis], permute_args[0]
+  permute_args.append(permute_args.pop(0))
+  input = input.permute(*permute_args).slice([(0,x) if i == input.ndim-1 else (0, indices.shape[i+1]) for i,x in enumerate(input.shape)])
+  return _gather(input, indices).transpose(ax1=0, ax2=axis)
+
+def LpPool(inputs, outputs, kernel_shape, strides, p):
+  return 
+
+def Resize(X, roi=None, scales=None, sizes=None, antialias=None, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
+  if mode == "nearest":
+    if antialias: raise NotImplementedError(f"WARNING: antialias mode not supported for mode={mode}")
+    if nearest_mode is not None: NotImplementedError(f"nearest_mode={nearest_mode}")
+    else: pass
+
+def CenterCropPad(input, shape, axes=None):
+  if not axes: axes = list(range(input.ndim))
+  shrink_arg = [(0,i) for i in input.shape]
+  pad_arg = [(0,0) for _ in range(input.ndim)]
+  shape = safe_numpy(shape).tolist()
+  for s, x in zip(shape, axes):
+    if s < input.shape[x]: shrink_arg[x] = (input.shape[x]//2 - s//2, input.shape[x]//2 + s//2) if s%2 == 0 else (input.shape[x]//2 - s//2 - 1, input.shape[x]//2 + s//2)
+    elif s > input.shape[x]: pad_arg[x] = ((s - input.shape[x])//2, (s - input.shape[x])//2)  if (s - input.shape[x])% 2 == 0 else ((s - input.shape[x])//2, (s - input.shape[x])//2 + 1)
+    else: pass
+  return input.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
+
+'''
+    # st, ed = (input.shape[x]//2 - s//2, input.shape[x]//2 + s//2) if s%2 == 0 else (input.shape[x]//2 - s//2 - 1, input.shape[x]//2 + s//2)
+    arg[x] = (st, ed)
+    # arg[x] = (input.shape[x]//2 - s//2, input.shape[x]//2 + s//2) if s%2 == 0 else (input.shape[x]//2 - s//2 - 1, input.shape[x]//2 + s//2)
+    pad_arg = []
+    if st < 0:
+      pad_arg = ((0,0) if  for st, ed in arg)
+    else:
+      pad_arg.append((0,0))
+'''
+
+
+
+def ArrayFeatureExtractor(input, indices):
+  return 
+  repeat_arg = [1]*(input.ndim-1) + [input.shape[-2]]
+  indices = indices.unsqueeze(indices.ndim).repeat(repeat_arg)
+  input = input.transpose(ax1=0, ax2=input.ndim-1) # Could be permute for inputs with larger ndim
+  ret = _gather(input, indices)
+  ret = ret.transpose(0,ret.ndim-1) # Could be permute for inputs with larger ndim
+  return ret
 
 def OneHot(indices, depth, values, axis=-1):
   depth = int(safe_numpy(depth).item())
