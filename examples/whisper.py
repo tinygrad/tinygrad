@@ -213,12 +213,11 @@ if __name__ == "__main__":
       log_spec = prep_audio(waveform, sample_rate)
       lst = [enc._special_tokens["<|startoftranscript|>"]]
       dat = model.encoder(Tensor(log_spec)).realize()
-      while lst[-1] != enc._special_tokens["<|endoftext|>"]:
+      while lst[-1] not in [enc._special_tokens["<|endoftext|>"], 13, 30, 0]: # temp fix: stop at the end of the sentence
         out = model.decoder(Tensor([lst]), dat)
         out.realize()
         idx = out[0,-1].numpy().argmax()
         lst.append(idx)
-        print(enc.decode(lst))
       print("predicted:" + "".join(enc.decode(lst[2:-1])).lower()) # remove special tokens for comparison
       print("transcript: " + c["transcript"])
   elif len(sys.argv) > 1:
@@ -227,7 +226,7 @@ if __name__ == "__main__":
     log_spec = prep_audio(waveform, sample_rate)
     lst = [enc._special_tokens["<|startoftranscript|>"]]
     dat = model.encoder(Tensor(log_spec)).realize()
-    while lst[-1] != enc._special_tokens["<|endoftext|>"]:
+    while lst[-1] not in [enc._special_tokens["<|endoftext|>"], 13, 30, 0]:
       out = model.decoder(Tensor([lst]), dat)
       out.realize()
       idx = out[0,-1].numpy().argmax()
