@@ -57,7 +57,7 @@ class CUDACodegen(CStyleCodegen):
     kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
-    header = "typedef unsigned char uchar; typedef long long int64;"
+    header = "typedef unsigned char uchar; typedef long long int64;",
     half_prekernel = """
       #include <cuda_fp16.h>
       struct __align__(8) half4 {

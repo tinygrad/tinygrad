@@ -215,7 +215,7 @@ jobs:
     - name: Clone gpuocelot repo
       uses: actions/checkout@v3
       with:
-        repository: cloud11665/gpuocelot
+        repository: gpuocelot/gpuocelot
         path: ${{ github.workspace }}/gpuocelot
         submodules: true
     - name: Compile gpuocelot and libcudacpu
