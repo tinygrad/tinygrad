@@ -201,23 +201,14 @@ jobs:
     - name: Install packages
       run: |
         sudo apt-get install -y git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
-    # - name: Cache gpuocelot and libcudacpu
-    #   id: cache-build
-    #   uses: actions/cache@v3
-    #   env:
-    #     cache-name: cache-gpuocelot-build
-    #   with:
-    #     path: ${{ github.workspace }}/extra/cudacpu/gpuocelot/ocelot/build
-    #     key: ubuntu22.04-gpuocelot-${{ hashFiles('${{ github.workspace }}/extra/cudacpu/cudacpu.cpp', '${{ github.workspace }}/extra/cudacpu/gpuocelot.patch') }}
-    #     restore-keys: |
-    #       ubuntu22.04-gpuocelot-
     - name: Clone gpuocelot repo
       uses: actions/checkout@v3
       with:
         repository: gpuocelot/gpuocelot
+        ref: 19626fc00b6ee321638c3111074269c69050e091
         path: ${{ github.workspace }}/gpuocelot
         submodules: true
-    - name: Compile gpuocelot and libcudacpu
+    - name: Compile gpuocelot
       run: |
         cd ${{ github.workspace }}/gpuocelot/ocelot
         mkdir build
