@@ -22,7 +22,7 @@ class TestFetch(unittest.TestCase):
     assert pimg.size == (705, 1024)
 
 class TestUtils(unittest.TestCase):
-  @unittest.skipIf(getenv("CI", "") != "" or WINDOWS, "weird tempfile behavior on windows")
+  @unittest.skipIf(WINDOWS, "weird tempfile behavior on windows")
   def test_fake_torch_load_zipped(self):
     import torch
     import numpy as np
