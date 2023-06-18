@@ -27,7 +27,7 @@ if getenv("CUDACPU", 0) == 1:
       synchronize = lambda:0 # noqa: E731
     CompileError = Exception
   __cuda_compile = cuda_compile
-  def _cuda_compile(prg, **kwargs): return __cuda_compile(prg, **{**kwargs, 'arch': 'sm_35'}) # noqa: E731
+  def _cuda_compile(prg, **kwargs): return __cuda_compile(prg, **{**kwargs, 'arch': 'sm_35', 'options': kwargs.get('options', []) + ['-Wno-deprecated-gpu-targets']}) # noqa: E731
   cuda_compile = _cuda_compile # noqa: F811
   RawCUDABuffer = RawMallocBuffer
 else:
@@ -46,7 +46,7 @@ class CUDAProgram:
           f.write(cuda_compile(prg, target="cubin", no_extern_c=True))
         sass = subprocess.check_output(['nvdisasm', '/tmp/cubin']).decode('utf-8')
         print(sass)
-      if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=["-Wno-deprecated-gpu-targets"]).decode('utf-8')
+      if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True).decode('utf-8')
     except cuda.CompileError as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
@@ -81,4 +81,5 @@ class CUDACodegen(CStyleCodegen):
       };
     """)
   supports_float4_alu = False
+
 CUDABuffer = Compiled(RawCUDABuffer, fromimport("tinygrad.codegen.assembly_ptx", "PTXCodegen") if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)
