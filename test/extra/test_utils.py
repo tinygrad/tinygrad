@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import io
 import unittest
-from tinygrad.helpers import getenv, temp
+from tinygrad.helpers import getenv, WINDOWS
 from extra.utils import fetch
 from tinygrad.state import torch_load
 from PIL import Image
@@ -22,6 +22,7 @@ class TestFetch(unittest.TestCase):
     assert pimg.size == (705, 1024)
 
 class TestUtils(unittest.TestCase):
+  @unittest.skipIf(getenv("CI", "") != "" or WINDOWS, "weird tempfile behavior on windows")
   def test_fake_torch_load_zipped(self):
     import torch
     import numpy as np
@@ -45,9 +46,10 @@ class TestUtils(unittest.TestCase):
       )
       if isfloat16: model = model.half()
 
-      path = temp('testloadmodel.pth')
-      torch.save(model.state_dict(), path)
-      model2 = torch_load(path)
+      with tempfile.TemporaryDirectory() as tmpdirname:
+        path = tmpdirname + '/testloadmodel.pth'
+        torch.save(model.state_dict(), path)
+        model2 = torch_load(path)
 
       for name, a in model.state_dict().items():
         b = model2[name]
