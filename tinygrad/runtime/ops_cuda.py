@@ -1,5 +1,6 @@
 import subprocess
 from typing import Optional
+import time
 import numpy as np
 from tinygrad.helpers import DEBUG, getenv, fromimport
 from tinygrad.ops import Compiled
@@ -19,8 +20,8 @@ if getenv("CUDACPU", 0) == 1:
     module_from_buffer = lambda src: cuda.module(src) # pylint: disable=unnecessary-lambda # noqa: E731
     class Event:
       def __init__(self): pass
-      def record(self): pass
-      def time_till(self, other): return 0.0
+      def record(self): self.start = time.time()
+      def time_till(self, other): return self.start - other.start
       def synchronize(self): pass
     class Context:
       synchronize = lambda:0 # noqa: E731
