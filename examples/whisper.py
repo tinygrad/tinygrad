@@ -209,7 +209,7 @@ if __name__ == "__main__":
     log_spec = prep_audio(waveform, sample_rate)
     lst = [enc._special_tokens["<|startoftranscript|>"]]
     dat = model.encoder(Tensor(log_spec)).realize()
-    for i in range(50):
+    while lst[-1] != enc._special_tokens["<|endoftext|>"]:
       out = model.decoder(Tensor([lst]), dat)
       out.realize()
       idx = out[0,-1].numpy().argmax()
