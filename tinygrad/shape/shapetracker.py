@@ -168,15 +168,19 @@ class ShapeTracker:
   # this is the real size (ish)
   def size(self): return prod([s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])
 
-  def unit_stride_axes(self) -> List[int]:
+  # these are multiview strides, value is None if it's not a simple strided dimension
+  def real_strides(self) -> List[int]:
     ret, acc = [], 1
-    for j,s in reversed(list(enumerate(self.shape))):
-      if s == 1: continue
+    for s in reversed(self.shape):
       var = Variable('idx', 0, s-1)
       this_dim = self.expr_node(var*acc)
       acc *= s
-      if check_no_mul(this_dim[0], var): ret.append(j)
-    return ret
+      if this_dim[0].__class__ is MulNode and this_dim[0].a.__class__ is Variable: ret.append(this_dim[0].b)
+      elif this_dim[0].__class__ is NumNode and this_dim[0].b == 0: ret.append(0)
+      elif check_no_mul(this_dim[0], var): ret.append(1)
+      else: ret.append(None)
+    return ret[::-1]
+  def unit_stride_axes(self) -> List[int]: return [i for i,st in enumerate(self.real_strides()) if st == 1]
 
   def _expr_idx(self, idx, valid):
     for v in reversed(self.views[0:-1]):
