@@ -70,8 +70,6 @@ backend_test.exclude('test_matmulinteger_*')
 
 # we don't support rounding
 backend_test.exclude('test_round_*')
-backend_test.exclude('test_ceil_*')
-backend_test.exclude('test_floor_*')
 
 # we don't support indexes
 backend_test.exclude('test_argmax_*')

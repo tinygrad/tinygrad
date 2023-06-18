@@ -3,7 +3,7 @@ import pathlib
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
-from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, dtypes
+from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, dtypes, fromimport
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
@@ -61,7 +61,7 @@ class CLProgram:
       if 'Adreno' in CL.cl_ctx.devices[0].name:
         from disassemblers.adreno import disasm
         disasm(self.binary())
-      elif 'gfx1100' in CL.cl_ctx.devices[0].name:
+      elif CL.cl_ctx.devices[0].name.startswith('gfx'):
         asm = early_exec(([ROCM_LLVM_PATH / "llvm-objdump", '-d', '-'], self.binary()))
         print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
       else:
@@ -87,11 +87,12 @@ class CLProgram:
 
 class CLCodegen(CStyleCodegen):
   lang = CStyleLanguage(
-    kernel_prefix = "#define int64 long\n__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
+    kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
     double_prekernel="#ifdef cl_khr_fp64\n#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n#elif defined(cl_amd_fp64)\n#pragma OPENCL EXTENSION cl_amd_fp64 : enable\n#endif",
     half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
     barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
     gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True)
   supports_float4_alu = True
   supports_float4 = True
-GPUBuffer = Compiled(CLBuffer, CLCodegen, CLProgram, CL.synchronize)
+
+GPUBuffer = Compiled(CLBuffer, fromimport("tinygrad.codegen.assembly_rdna", "RDNACodegen") if getenv("RDNA") else CLCodegen, CLProgram, CL.synchronize)
