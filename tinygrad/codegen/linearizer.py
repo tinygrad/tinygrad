@@ -234,7 +234,7 @@ class Linearizer:
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid, stride)) if const is None else self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
       if localtype == dtypes._float8x8:
         for j,uidx in enumerate(uidx_list):
-          loaded[uidx] = Token(cache[key].name, dtypes._float8x8, j)
+          loaded[uidx] = Token(cache[key].name, dtypes._float8x8, j if stride[0] > 1 else ((j%8)*8 + j//8))
       elif localtype == dtypes._float4:
         for j,uidx in enumerate(uidx_list):
           loaded[uidx] = Token(cache[key].name, dtypes._float4, j)
@@ -397,12 +397,11 @@ class Linearizer:
 
     # float8x8 support
     if len(acc) and acc[0].dtype == dtypes._float8x8:
-      #assert len(acc) == 8*8*8
       assert all([x[0].dtype == dtypes._float8x8 for x in values])
       assert x.op == FusedOps.MULACC
-      for a in zip(acc, *values):
+      for a in zip(*values, acc):
         if any([b.offset != 0 for b in a]): continue
-        self.uop(UOps.ALU, Token(a[0].name, a[0].dtype), [Token(b.name, b.dtype) for b in a], x.op)
+        self.uop(UOps.ALU, Token(a[-1].name, a[-1].dtype), [Token(b.name, b.dtype) for b in a], x.op)
       return acc
 
     if isinstance(x.op, (ReduceOps, FusedOps)):

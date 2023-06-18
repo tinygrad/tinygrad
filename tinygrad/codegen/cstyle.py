@@ -105,7 +105,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
     elif uop == UOps.CONST and newvar.dtype == dtypes._float8x8:
       kk(f"{newvar.render(True)} = simdgroup_float8x8({args}f);")
     elif uop == UOps.ALU and newvar.dtype == dtypes._float8x8 and newvar is not None:
-      kk(f"simdgroup_multiply_accumulate({newvar.render()}, {vin[1].render()}, {vin[2].render()}, {vin[0].render()});")
+      kk(f"simdgroup_multiply_accumulate({newvar.render()}, {vin[0].render()}, {vin[1].render()}, {vin[2].render()});")
       uses_tensor_cores = True
     elif uop == UOps.LOAD and newvar.dtype == dtypes._float8x8 and newvar is not None:
       full_idx = args.idx + Variable(bufnames[args.i], 0, (1<<64)-1)
