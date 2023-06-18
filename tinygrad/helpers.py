@@ -5,7 +5,7 @@ import numpy as np
 from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
-OSX = platform.system() == "Darwin"
+OSX = platform.system() == "Darwin"; WINDOWS = platform.system() == "Windows"
 
 def temp(x: str) -> str: return os.path.join(tempfile.gettempdir(),x)
 def dedup(x): return list(dict.fromkeys(x))   # retains list order

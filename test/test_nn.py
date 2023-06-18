@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
+from tinygrad.helpers import getenv, WINDOWS
 from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import BatchNorm2d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm
@@ -93,6 +94,7 @@ class TestNN(unittest.TestCase):
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
+  @unittest.skipIf(getenv("CI", "") != "" and WINDOWS, "no internet tests in CI")
   def test_conv_transpose2d(self):
     BS, C1, H, W = 4, 16, 224, 224
     C2, K, S, P = 64, 7, 2, 1
