@@ -25,6 +25,7 @@ if getenv("CUDACPU", 0) == 1:
       def synchronize(self): pass
     class Context:
       synchronize = lambda:0
+    CompileError = Exception
   def _cuda_compile(prg, **kwargs): return cuda_compile(prg, **{**kwargs, 'arch': 'sm_35'})
   cuda_compile = _cuda_compile
   RawCUDABuffer = RawMallocBuffer
@@ -45,7 +46,7 @@ class CUDAProgram:
         sass = subprocess.check_output(['nvdisasm', '/tmp/cubin']).decode('utf-8')
         print(sass)
       if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=["-Wno-deprecated-gpu-targets"]).decode('utf-8')
-    except Exception as e:
+    except cuda.CompileError as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
     if DEBUG >= 5: print(prg)
