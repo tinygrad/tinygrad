@@ -203,7 +203,24 @@ if __name__ == "__main__":
   load_state_dict(model, state['model_state_dict'])
   enc = get_encoding(state['dims']['n_vocab'])
 
-  if len(sys.argv) > 1:
+  # TODO: clean up, clean up, everybody clean up
+  if getenv("TEST"):
+    from datasets.librispeech import ci, BASEDIR
+    for c in ci:
+      fn = BASEDIR / c["files"][0]["fname"]
+      print(fn.stem)
+      waveform, sample_rate = torchaudio.load(fn, normalize=True)
+      log_spec = prep_audio(waveform, sample_rate)
+      lst = [enc._special_tokens["<|startoftranscript|>"]]
+      dat = model.encoder(Tensor(log_spec)).realize()
+      while lst[-1] != enc._special_tokens["<|endoftext|>"]:
+        out = model.decoder(Tensor([lst]), dat)
+        out.realize()
+        idx = out[0,-1].numpy().argmax()
+        lst.append(idx)
+      print("predicted:" + "".join(enc.decode(lst[2:-1])).lower()) # remove special tokens for comparison
+      print("transcript: " + c["transcript"])
+  elif len(sys.argv) > 1:
     # offline
     waveform, sample_rate = torchaudio.load(sys.argv[1], normalize=True)
     log_spec = prep_audio(waveform, sample_rate)
@@ -217,7 +234,6 @@ if __name__ == "__main__":
       print(enc.decode(lst))
   else:
     # online
-
     q = multiprocessing.Queue()
     p = multiprocessing.Process(target=listener, args=(q,))
     p.daemon = True
