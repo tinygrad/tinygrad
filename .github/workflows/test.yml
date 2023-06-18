@@ -223,7 +223,7 @@ jobs:
         cd ${{ github.workspace }}/gpuocelot/ocelot
         mkdir build
         cd build
-        cmake .. -Wno-dev -G Ninja
+        cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
         ninja
         sudo ninja install
     - name: Set up Python 3.8
