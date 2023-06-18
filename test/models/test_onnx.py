@@ -8,6 +8,7 @@ import onnx
 from extra.utils import fetch
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import temp
 
 def run_onnx_torch(onnx_model, inputs):
   import torch
@@ -60,8 +61,8 @@ class TestOnnxModel(unittest.TestCase):
     tinygrad_out = tinygrad_out.numpy()
     pr.disable()
     stats = pstats.Stats(pr)
-    stats.dump_stats("/tmp/net.prof")
-    os.system("flameprof /tmp/net.prof > /tmp/prof.svg")
+    stats.dump_stats(temp("net.prof"))
+    os.system(f"flameprof {temp('net.prof')} > {temp('prof.svg')}")
     ps = stats.sort_stats(pstats.SortKey.TIME)
     ps.print_stats(30)
 
