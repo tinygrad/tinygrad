@@ -479,7 +479,7 @@ class Linearizer:
     if limit and (self.first_reduce-self.local_dims) > limit:
       num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
-      if DEBUG >= 4: print("reshaped to", self.full_shape, "due to too many global dimensions")
+      if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
 
   def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
@@ -562,12 +562,15 @@ class Linearizer:
 
     # **** local groups ****
 
-    for axis in range(0, self.first_reduce - self.local_dims):
+    for axis in range(self.first_reduce - self.local_dims - 1, -1, -1):
       local_size = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
       if self.full_shape[axis] == 1: continue
-      if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))):
-        for sz in [x for x in [16,8,4,3] if self.full_shape[axis] % x == 0 and local_size*x <= 256]:
-          self.shift_to(axis, sz, insert_before=self.first_reduce)
+      last_try = self.local_dims == 0 and axis == 0
+      if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))) or last_try:
+        for sz in [x for x in (([32] if last_try else []) + [16,8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 128]:
+          self.shift_to(axis, sz, insert_before=self.first_reduce-self.local_dims)
           self.local_dims += 1
           break
       if self.local_dims >= 3: break
+    self.simplify_ones()
+
