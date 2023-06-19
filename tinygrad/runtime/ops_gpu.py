@@ -75,7 +75,7 @@ class CLProgram:
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
     cl_bufs = [x._buf if isinstance(x, CLBuffer) else x for x in bufs]
-    e = self.clprg(CL.cl_queue[cl_bufs[0].device], global_size, local_size, *cl_bufs)
+    e = self.clprg(CL.cl_queue[cl_bufs[0].device], [g*l for g,l in zip(global_size, local_size)], local_size, *cl_bufs)
     if wait:
       e.wait()
       try:
@@ -90,7 +90,7 @@ class CLCodegen(CStyleCodegen):
     double_prekernel="#ifdef cl_khr_fp64\n#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n#elif defined(cl_amd_fp64)\n#pragma OPENCL EXTENSION cl_amd_fp64 : enable\n#endif",
     half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
     barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
-    gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True)
+    gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True)
   supports_float4_alu = True
   supports_float4 = True
 

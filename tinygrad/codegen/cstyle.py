@@ -194,8 +194,10 @@ class CStyleCodegen(Linearizer):
 
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.bufs, self.lang)
 
-    # if we have local_sizes, we have to correct the global_size
-    for i,s in enumerate(local_size): global_size[i] *= s
+    work_dim = max(len(global_size), len(local_size), 1)
+    assert work_dim <= 3, f"work dim too large {work_dim}"
+    global_size = [1] * (work_dim - len(global_size)) + global_size
+    local_size = [1] * (work_dim - len(local_size)) + local_size
 
     # painfully name the function something unique
     if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]
@@ -205,5 +207,5 @@ class CStyleCodegen(Linearizer):
       CStyleCodegen.kernel_name_cache[prg] = function_name, display_name = self.function_name+suffix, self.display_name+colored(suffix, 'black', bright=True)
 
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
-      global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,
+      global_size[::-1], local_size[::-1],
       op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=display_name)
