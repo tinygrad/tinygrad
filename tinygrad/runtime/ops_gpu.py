@@ -1,14 +1,13 @@
 from __future__ import annotations
-import platform, pathlib, os
+import pathlib, os
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
-from tinygrad.helpers import DEBUG, getenv, prod, ImageDType
+from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, dtypes, fromimport
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawBufferTransfer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
-OSX = platform.system() == "Darwin"
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 FLOAT16 = getenv("FLOAT16", 0)
 
@@ -38,6 +37,7 @@ CL.post_init() if not os.environ.get("DELAYED_RUNTIME_INIT", False) else None
 # TODO: merge CLImage in here
 class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device='0'):
+    assert not OSX or dtype != dtypes.float64, "OpenCL on Mac doesn't support float64"
     if isinstance(dtype, ImageDType):
       fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
       buf = cl.Image(CL.cl_ctxs[int(device)], cl.mem_flags.READ_WRITE, fmt, shape=(dtype.shape[1], dtype.shape[0]))
@@ -71,7 +71,7 @@ class CLProgram:
       if 'Adreno' in CL.cl_ctxs[0].devices[0].name:
         from disassemblers.adreno import disasm
         disasm(self.binary())
-      elif 'gfx1100' in CL.cl_ctxs[0].devices[0].name:
+      elif CL.cl_ctxs[0].devices[0].name.startswith('gfx'):
         asm = early_exec(([ROCM_LLVM_PATH / "llvm-objdump", '-d', '-'], self.binary()))
         print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
       else:
@@ -97,10 +97,12 @@ class CLProgram:
 
 class CLCodegen(CStyleCodegen):
   lang = CStyleLanguage(
-    kernel_prefix = "#define int64 long\n__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
+    kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
+    double_prekernel="#ifdef cl_khr_fp64\n#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n#elif defined(cl_amd_fp64)\n#pragma OPENCL EXTENSION cl_amd_fp64 : enable\n#endif",
     half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
     barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
     gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True)
   supports_float4_alu = True
   supports_float4 = True
-GPUBuffer = Compiled(CLBuffer, CLCodegen, CLProgram, CL.synchronize)
+
+GPUBuffer = Compiled(CLBuffer, fromimport("tinygrad.codegen.assembly_rdna", "RDNACodegen") if getenv("RDNA") else CLCodegen, CLProgram, CL.synchronize)
