@@ -467,13 +467,13 @@ class Tensor:
     ret = (x * weight.reshape(1, groups, rcout, *[1 for _ in range(len(oyx))], cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
     return ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))
 
-  def dot(self, w:Tensor) -> Tensor:
-    if (n1:=len(self.shape))*(n2:=len(w.shape)) == 0: raise RuntimeError(f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D")
+  def dot(self, n:Tensor) -> Tensor:
+    if (n1:=len(self.shape))*(n2:=len(n.shape)) == 0: raise RuntimeError(f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D")
     x = self.reshape(*self.shape[0:-1], 1, self.shape[-1])
-    w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1]) if len(w.shape)>1 else (x.shape[-1],1)).transpose(-1, -2)
+    w = n.reshape((*n.shape[0:-2], 1, n.shape[-2], n.shape[-1]) if len(n.shape)>1 else (x.shape[-1],1)).transpose(-1, -2)
     r = (x*w).sum(-1)
-    if r.shape == (1,): return r.reshape(())
-    return r.reshape((*r.shape[:-2], r.shape[-1])) if len(self.shape) == 1 else r
+    s = (r.shape[:-2]+tuple(i for i in r.shape[-2:] if i != 1)) if len(self.shape) == 1 or len(n.shape) == 1 else r.shape
+    return r.reshape(*s) if len(s) > 0 else r.reshape(())
 
   def cumsum(self, axis=0):
     x = self.permute(*(i for i in range(self.ndim) if i != axis), axis)
