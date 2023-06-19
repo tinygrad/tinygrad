@@ -1,11 +1,9 @@
 # the imports have to be careful here, since we need to delay the runtime initialization
 # we can't import anything that might setup the runtimes
-import numpy as np
 from multiprocessing import shared_memory as shm
 import multiprocessing as mp
 import os
 import signal
-import time
 
 # process control commands
 class Command: ...
@@ -38,10 +36,13 @@ class DDP:
     _ = [p.start() for p in self.processes]
 
     def shutdown(*_):
-      for p in self.processes: p.terminate()
-      for v in self.shm_cache.values(): shm.SharedMemory(name=v).unlink()
+      self.terminate()
       exit(1)
     signal.signal(signal.SIGINT, shutdown)
+
+  def terminate(self):
+    for p in self.processes: p.terminate()
+    for v in self.shm_cache.values(): shm.SharedMemory(name=v).unlink()
 
   def forward(self, X, Y):
     for q, x, y in zip(self.cmd_queues, X, Y): q.put(ForwardCommand(x, y))
@@ -80,7 +81,22 @@ class DDPProcess(mp.Process):
 
     from tinygrad.nn.optim import get_parameters, get_state_dict
     self.model = self.model_fn()
+    state_dict = get_state_dict(self.model)
     self.optim = self.optim_fn(get_parameters(self.model))
+
+    # pre-compute our allreduce bucket
+    bucket = {}
+    for i, (k, v) in enumerate(state_dict.items()):
+      if i % self.device_count == self.rank:
+        if v.grad is not None:
+          # we move the grad here to shared memory
+          if k not in self.shm_cache:
+            print(f"DDPProcess {self.rank} creating shared memory for {k}")
+            s = shm.SharedMemory(create=True, size=v.grad.nbytes())
+            self.shm_cache[k] = s.name
+            s.close()
+          v.grad.to(f"shm:{self.shm_cache[k]}").realize()
+          bucket[k] = (v.grad.shape, v.grad.dtype, self.shm_cache[k])
 
     from tinygrad.tensor import Tensor
     # we can now start the main loop
@@ -97,75 +113,45 @@ class DDPProcess(mp.Process):
         self.loss.backward()
         # realize grads
         for p in get_parameters(self.model):
-          if p.grad is not None:
-            p.grad.realize()
+          if p.grad is not None: p.grad.realize()
       elif cmd.__class__ is AllReduceCommand:
-        state_dict = get_state_dict(self.model)
-
-        # this is our first step so we just send our grads to the next device
-        st = time.perf_counter()
-        bucket = {}
-        for i, (k, v) in enumerate(state_dict.items()):
-          if i % self.device_count == self.rank:
-            if v.grad is not None:
-              # we move the grad here to shared memory
-              if k not in self.shm_cache:
-                s = shm.SharedMemory(create=True, size=v.grad.nbytes())
-                self.shm_cache[k] = s.name
-              else:
-                s = shm.SharedMemory(name=self.shm_cache[k])
-              t = np.ndarray(v.grad.shape, dtype=v.grad.dtype.np, buffer=s.buf)
-              t[:] = v.grad.numpy()
-              bucket[k] = (v.grad.shape, v.grad.dtype, s.name)
-              s.close()
+        # this is our first step so we just send our bucket to the next device
         if self.device_count > 1:
           # send to next device
           self.next_ring_queue.put(bucket)
 
         for i in range(self.device_count - 1):
-          recv_bucket = self.our_ring_queue.get()
-          for k, (shape, dtype, name) in recv_bucket.items():
+          bucket = self.our_ring_queue.get()
+          for k, (shape, dtype, name) in bucket.items():
             # rebuild tensor from shared memory
-            s = shm.SharedMemory(name=name)
-            sn = np.ndarray(shape, dtype=dtype.np, buffer=s.buf)
-            n = np.ndarray(shape, dtype=dtype.np)
-            n[:] = sn[:]
-            t = Tensor(n, requires_grad=False)
+            t = Tensor.empty(*shape, dtype=dtype, device=f"shm:{name}").to(self.device.split(":")[0]).realize()
 
             # reduce with our grad
             t = t + state_dict[k].grad
 
             # move back to shared memory
-            sn[:] = t.numpy()
+            t.to(f"shm:{name}").realize()
 
             # update bucket
-            recv_bucket[k] = (shape, dtype, name)
+            bucket[k] = (shape, dtype, name)
 
             # if we are the last device we can set our grad
             if i == self.device_count - 2:
-              state_dict[k].grad.assign(t)
-
-            s.close()
-          self.next_ring_queue.put(recv_bucket)
+              state_dict[k].grad.assign(t / self.device_count).realize()
+          self.next_ring_queue.put(bucket)
 
         # gather
         for i in range(self.device_count - 1):
-          recv_bucket = self.our_ring_queue.get()
-          for k, (shape, dtype, name) in recv_bucket.items():
+          bucket = self.our_ring_queue.get()
+          for k, (shape, dtype, name) in bucket.items():
             # rebuild tensor from shared memory
-            s = shm.SharedMemory(name=name)
-            sn = np.ndarray(shape, dtype=dtype.np, buffer=s.buf)
-            n = np.ndarray(shape, dtype=dtype.np)
-            n[:] = sn[:]
-            t = Tensor(n, requires_grad=False)
+            t = Tensor.empty(*shape, dtype=dtype, device=f"shm:{name}").to(self.device.split(":")[0]).realize()
 
             # set our grad
-            state_dict[k].grad.assign(t)
-
-            s.close()
+            state_dict[k].grad.assign(t / self.device_count).realize()
           # send back to next device
           if i != self.device_count - 2:
-            self.next_ring_queue.put(recv_bucket)
+            self.next_ring_queue.put(bucket)
       elif cmd.__class__ == StepCommand:
         self.optim.step()
       self.wait_barrier.wait()
