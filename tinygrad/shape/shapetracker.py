@@ -4,16 +4,10 @@ from enum import Enum, auto
 import functools
 from typing import Dict, Tuple, Union, List, Optional, Callable, cast
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, ModNode
+from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node
 
 # these ops live here
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
-
-def check_no_mul(test, var):
-  if test == var: return True
-  if test.__class__ is SumNode: return any(check_no_mul(x, var) for x in test.nodes) # in a sum is okay
-  if test.__class__ is ModNode and test.b%4 == 0: return check_no_mul(test.a, var)   # removing a mod is okay
-  return False
 
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tuple[int, int]]:
@@ -97,22 +91,10 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if vm2.mask: return None  # this isn't supported yet
-  new_strides, new_offset = [], vm2.expr_node(Variable.num(vm1.offset))
-  assert isinstance(new_offset, NumNode), "new_offset wasn't a number?!?"
-  for s,st in zip(vm1.shape, vm1.strides):
-    this_dim = View(vm2.shape, vm2.strides).expr_node(Variable('idx', 0, s-1)*st)
-    if s == 1:
-      new_strides.append(0)   # all shape 1 can have stride 0
-    elif this_dim.__class__ is NumNode and this_dim.b == 0:
-      new_strides.append(0)
-    elif this_dim.__class__ is Variable:
-      new_strides.append(1)
-    elif this_dim.__class__ is MulNode and cast(MulNode, this_dim).a.__class__ is Variable:
-      new_strides.append(this_dim.b)
-    else:
-      if DEBUG >= 4: print("can't simplify", s, this_dim.render())
-      break
-  return View(vm1.shape, tuple(new_strides), new_offset.b, vm1.mask) if len(new_strides) == len(vm1.strides) else None
+  mst = ShapeTracker(vm1.shape, [vm2, vm1])
+  strides = mst.real_strides()
+  if None in strides: return None
+  return View(vm1.shape, cast(Tuple[int, ...], strides), mst.real_offset(), vm1.mask)
 
 @functools.lru_cache(maxsize=None)
 def _reshape(view: View, new_shape: Tuple[int, ...]) -> Tuple[View, bool]:
@@ -187,10 +169,11 @@ class ShapeTracker:
       this_dim, _ = self.expr_node(var*acc)
       this_dim -= real_offset
       acc *= s
-      if this_dim.__class__ is MulNode and this_dim.a.__class__ is Variable: ret.append(this_dim.b)
+      # TODO: sometimes a mod here is okay if you are say, reading a float4, since you only care %4
+      # if test.__class__ is ModNode and test.b%4 == 0: return check_no_mul(test.a, var)   # removing a mod is okay
+      if this_dim.__class__ is MulNode and cast(MulNode, this_dim).a.__class__ is Variable: ret.append(this_dim.b)
       elif this_dim.__class__ is NumNode and this_dim.b == 0: ret.append(0)
       elif this_dim.__class__ is Variable: ret.append(1)
-      #elif check_no_mul(this_dim, var): ret.append(1)  # err, this is wrong, though we might want to tolerate it sometime
       else: ret.append(None)
     return tuple(ret[::-1])
   def unit_stride_axes(self) -> List[int]: return [i for i,st in enumerate(self.real_strides()) if st == 1]
