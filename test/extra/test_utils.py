@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-import io
-import unittest
+import io, tempfile, unittest
+import torch
+import numpy as np
 from tinygrad.helpers import getenv, WINDOWS
 from extra.utils import fetch
 from tinygrad.state import torch_load
@@ -22,11 +23,9 @@ class TestFetch(unittest.TestCase):
     assert pimg.size == (705, 1024)
 
 class TestUtils(unittest.TestCase):
-  @unittest.skipIf(WINDOWS, "weird tempfile behavior on windows")
-  def test_fake_torch_load_zipped(self):
-    import torch
-    import numpy as np
-    import tempfile
+  def test_fake_torch_load_zipped(self): self._test_fake_torch_load_zipped()
+  def test_fake_torch_load_zipped_float16(self): self._test_fake_torch_load_zipped(isfloat16=True)
+  def _test_fake_torch_load_zipped(self, isfloat16=False):
     class LayerWithOffset(torch.nn.Module):
       def __init__(self):
         super(LayerWithOffset, self).__init__()
@@ -38,25 +37,24 @@ class TestUtils(unittest.TestCase):
           d.as_strided([2, 2], [1, 2], storage_offset=4)
         )
 
-    for isfloat16 in [True, False]:
-      model = torch.nn.Sequential(
-        torch.nn.Linear(4, 8),
-        torch.nn.Linear(8, 3),
-        LayerWithOffset()
-      )
-      if isfloat16: model = model.half()
+    model = torch.nn.Sequential(
+      torch.nn.Linear(4, 8),
+      torch.nn.Linear(8, 3),
+      LayerWithOffset()
+    )
+    if isfloat16: model = model.half()
 
-      with tempfile.TemporaryDirectory() as tmpdirname:
-        path = tmpdirname + '/testloadmodel.pth'
-        torch.save(model.state_dict(), path)
-        model2 = torch_load(path)
+    with tempfile.TemporaryDirectory() as tmpdirname:
+      path = tmpdirname + '/testloadmodel.pth'
+      torch.save(model.state_dict(), path)
+      model2 = torch_load(path)
 
-      for name, a in model.state_dict().items():
-        b = model2[name]
-        a, b = a.numpy(), b.numpy()
-        assert a.shape == b.shape
-        assert a.dtype == b.dtype
-        assert np.array_equal(a, b)
+    for name, a in model.state_dict().items():
+      b = model2[name]
+      a, b = a.numpy(), b.numpy()
+      assert a.shape == b.shape
+      assert a.dtype == b.dtype
+      assert np.array_equal(a, b)
 
 if __name__ == '__main__':
   unittest.main()
