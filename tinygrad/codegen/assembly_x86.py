@@ -1,5 +1,5 @@
 from tinygrad.codegen.assembly import AssemblyCodegen, AssemblyInstruction, float_to_hex
-from tinygrad.ops import BinaryOps
+from tinygrad.ops import BinaryOps, UnaryOps
 from tinygrad.codegen.linearizer import UOps
 from tinygrad.helpers import DEBUG, dtypes
 
@@ -9,7 +9,8 @@ class X86Codegen(AssemblyCodegen):
   def specialize(self, asm):
     type_to_op_suffix = {dtypes.float32: 'l', dtypes.bool: 'b', dtypes.int32: 'l', dtypes.int64: 'q', dtypes.uint32: 'l', dtypes.uint64: 'q'}
     def inst(instr, reg, fp=False, simd=False): return f"{instr}{'s' if fp else ''}{'p' if simd else ''}{type_to_op_suffix[reg_type[reg.nm]]}"
-    alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.CMPLT: "cmp",  BinaryOps.CMPEQ: "cmp", BinaryOps.MAX: "max"}
+    alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.CMPLT: "cmp",  BinaryOps.CMPEQ: "cmp", BinaryOps.MAX: "max",
+         UnaryOps.NOOP: "mov", UnaryOps.SIN: "call sinf@PLT", UnaryOps.LOG2: "call log2f@PLT", UnaryOps.EXP2: "call exp2f@PLT"}
 
     ins = []
     reg_map = {}
