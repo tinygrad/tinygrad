@@ -163,6 +163,7 @@ class AssemblyCodegen(Linearizer):
           ins.append(AssemblyInstruction(UOps.ALU, tmp, [tor[vin[0]], 1/(math.pi*2)], BinaryOps.MUL))
           ins.append(AssemblyInstruction(UOps.ALU, out, [tmp], args))
         else:
+          print(f"HELLO {args}")
           ins.append(AssemblyInstruction(UOps.ALU, out, [tor[x] for x in vin], args))
       elif uop == UOps.LOAD and newvar is not None:
         idx, treg, off = addr_w_offset(args)
