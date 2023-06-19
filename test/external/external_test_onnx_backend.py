@@ -147,6 +147,14 @@ backend_test.exclude('test_tfidfvectorizer_*')
 backend_test.exclude('test_stft_*')
 backend_test.exclude('test_melweightmatrix_*')
 
+# more strange ops
+backend_test.exclude('test_center_crop_pad_crop_*')
+backend_test.exclude('test_basic_deform_conv_*')
+backend_test.exclude('test_deform_conv_*')
+backend_test.exclude('test_lppool_*')
+backend_test.exclude('test_depthtospace_*')
+backend_test.exclude('test_ai_onnx_ml_array_feature_extractor_*')
+
 # disable model tests for now since they are slow
 if True:
   for x in backend_test.test_suite:
