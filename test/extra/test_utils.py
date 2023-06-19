@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-import io, tempfile, unittest
+import io, os, unittest
 import torch
 import numpy as np
-from tinygrad.helpers import getenv, WINDOWS
+from tinygrad.helpers import getenv, temp 
 from extra.utils import fetch
 from tinygrad.state import torch_load
 from PIL import Image
@@ -44,10 +44,9 @@ class TestUtils(unittest.TestCase):
     )
     if isfloat16: model = model.half()
 
-    with tempfile.TemporaryDirectory() as tmpdirname:
-      path = tmpdirname + '/testloadmodel.pth'
-      torch.save(model.state_dict(), path)
-      model2 = torch_load(path)
+    path = temp(f"test_load_{isfloat16}.pt") 
+    torch.save(model.state_dict(), path)
+    model2 = torch_load(path)
 
     for name, a in model.state_dict().items():
       b = model2[name]
@@ -55,6 +54,5 @@ class TestUtils(unittest.TestCase):
       assert a.shape == b.shape
       assert a.dtype == b.dtype
       assert np.array_equal(a, b)
-
 if __name__ == '__main__':
   unittest.main()
