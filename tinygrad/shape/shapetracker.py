@@ -169,17 +169,30 @@ class ShapeTracker:
   def size(self): return prod([s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])
 
   # these are multiview strides, value is None if it's not a simple strided dimension
-  def real_strides(self) -> List[int]:
-    ret, acc = [], 1
+  # TODO: this can be shared code between simplify and merge_views
+  def real_offset(self) -> int:
+    real_offset, mask = self.expr_node(Variable('zero', 0, 0))
+    assert real_offset.__class__ is NumNode, f"how is the offset not a number? {real_offset} {mask}"
+    return real_offset.b
+
+  def real_strides(self) -> Tuple[Optional[int], ...]:
+    if len(self.views) == 1: return self.views[-1].strides
+    ret: List[Optional[int]] = []
+    acc, real_offset = 1, self.real_offset()
     for s in reversed(self.shape):
+      if s == 1:  # fast path, all shape 1 have stride 0
+        ret.append(0)
+        continue
       var = Variable('idx', 0, s-1)
-      this_dim = self.expr_node(var*acc)
+      this_dim, _ = self.expr_node(var*acc)
+      this_dim -= real_offset
       acc *= s
-      if this_dim[0].__class__ is MulNode and this_dim[0].a.__class__ is Variable: ret.append(this_dim[0].b)
-      elif this_dim[0].__class__ is NumNode and this_dim[0].b == 0: ret.append(0)
-      elif check_no_mul(this_dim[0], var): ret.append(1)
+      if this_dim.__class__ is MulNode and this_dim.a.__class__ is Variable: ret.append(this_dim.b)
+      elif this_dim.__class__ is NumNode and this_dim.b == 0: ret.append(0)
+      elif this_dim.__class__ is Variable: ret.append(1)
+      #elif check_no_mul(this_dim, var): ret.append(1)  # err, this is wrong, though we might want to tolerate it sometime
       else: ret.append(None)
-    return ret[::-1]
+    return tuple(ret[::-1])
   def unit_stride_axes(self) -> List[int]: return [i for i,st in enumerate(self.real_strides()) if st == 1]
 
   def _expr_idx(self, idx, valid):

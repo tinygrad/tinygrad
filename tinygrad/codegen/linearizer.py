@@ -151,8 +151,9 @@ class Linearizer:
   # TODO: is there a better way to write this?
   def acc_offsets(self, i):
     if self.upcasted == 0: return [0]
-    acc_strides = [x*(1-self.upcasted_axis(i)[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in self.upcasted_axis(i)[::-1])))]
-    return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(self.upcasted_axis(i)[::-1])])]
+    upcasted_i = self.upcasted_axis(i)
+    acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
+    return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
   def _group_float4(self, i, store_offset):
     store_offset_float4 = {}
@@ -506,12 +507,12 @@ class Linearizer:
     # **** below this line need to be optional and benchmarked ****
 
     # potentially do more upcasts of non reduce axes based on a heuristic
+    upcasted_axis = set()
     while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
-        # if it mods, and some buffer has stride 0 on axis while having no stride 0 in the buftoken
-        # NOTE: this is using views[-1]
-        if self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
+        # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
+        if axis not in upcasted_axis and self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
           xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in self.sts), sum(st.views[-1].strides[axis] for st in self.sts), axis, upcast_amount))
       if len(xb_choices):
         xb_choices = sorted(xb_choices)
@@ -519,6 +520,7 @@ class Linearizer:
         self.shift_to(xb_choices[0][2], amount=xb_choices[0][3])
         self.upcast()
         self.simplify_ones()
+        upcasted_axis.add(xb_choices[0][2])
       else:
         break
 
