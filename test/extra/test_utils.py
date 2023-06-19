@@ -2,8 +2,8 @@
 import io, os, unittest
 import torch
 import numpy as np
-from tinygrad.helpers import getenv, temp 
-from extra.utils import fetch
+from tinygrad.helpers import getenv 
+from extra.utils import fetch, temp
 from tinygrad.state import torch_load
 from PIL import Image
 

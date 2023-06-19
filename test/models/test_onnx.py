@@ -5,10 +5,9 @@ import io
 import unittest
 import numpy as np
 import onnx
-from extra.utils import fetch
+from extra.utils import fetch, temp
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import temp
 
 def run_onnx_torch(onnx_model, inputs):
   import torch

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-import platform, tempfile, os, math, functools, time, re
+import platform, os, math, functools, time, re
 import numpy as np
 from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 ShapeType = Tuple[int, ...]
@@ -8,7 +8,6 @@ ShapeType = Tuple[int, ...]
 OSX = platform.system() == "Darwin" 
 WINDOWS = platform.system() == "Windows"
 
-def temp(x:str) -> str: return os.path.join(tempfile.gettempdir(), x)
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x:Union[List[int], Tuple[int, ...]]) -> int: return math.prod(x)
 def argfix(*x): return tuple() if len(x) == 0 else tuple(x[0]) if isinstance(x[0], (tuple, list)) else tuple(x)
