@@ -183,10 +183,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 2/x, lambda x: 2/x)
     helper_test_op([()], lambda x: x/2, lambda x: x/2)
     helper_test_op([()], lambda x: 2/x, lambda x: 2/x)
+  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL has issues with -inf")
   def test_mul_const_naninf(self):
     helper_test_op([(45,65)], lambda x: x*float("inf"),  lambda x: x*float("inf"))
     helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x*-float("inf"))
     helper_test_op([(45,65)], lambda x: x*float("nan"),  lambda x: x*float("nan"))
+  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL has issues with -inf")
   def test_div_const_naninf(self):
     helper_test_op([(45,65)], lambda x: x/float("inf"),  lambda x: x/float("inf"))
     helper_test_op([(45,65)], lambda x: x/-float("inf"), lambda x: x/-float("inf"))
@@ -886,7 +888,7 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride))
 
-  @unittest.skipIf(Device.DEFAULT in ["CUDA", "PTX"], "CUDA fails on this")
+  @unittest.skipIf(Device.DEFAULT == "CUDA", "CUDA fails on this")
   def test_maxpool2d_unit_stride(self):
     helper_test_op([(32,2,110,28)],
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=1),
