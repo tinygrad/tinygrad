@@ -6,7 +6,6 @@ from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Op
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin" 
-WINDOWS = platform.system() == "Windows"
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x:Union[List[int], Tuple[int, ...]]) -> int: return math.prod(x)

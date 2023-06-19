@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import io, os, unittest
+import io, unittest
 import torch
 import numpy as np
 from tinygrad.helpers import getenv 

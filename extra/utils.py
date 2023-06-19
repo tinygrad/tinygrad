@@ -9,6 +9,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.lazy import Device
 from tinygrad.shape.shapetracker import strides_for_shape
 OSX = platform.system() == "Darwin"
+WINDOWS = platform.system() == "Windows"
 
 def temp(x:str) -> str: return os.path.join(tempfile.gettempdir(), x)
 
