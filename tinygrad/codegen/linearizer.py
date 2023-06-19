@@ -562,7 +562,12 @@ class Linearizer:
 
     # **** local groups ****
 
-    self.shift_to(0, 8, insert_before=self.first_reduce)
-    self.local_dims += 1
-    self.shift_to(1, 8, insert_before=self.first_reduce)
-    self.local_dims += 1
+    for axis in range(0, self.first_reduce - self.local_dims):
+      local_size = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
+      if self.full_shape[axis] == 1: continue
+      if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))):
+        for sz in [x for x in [16,8,4,3] if self.full_shape[axis] % x == 0 and local_size*x <= 256]:
+          self.shift_to(axis, sz, insert_before=self.first_reduce)
+          self.local_dims += 1
+          break
+      if self.local_dims >= 3: break
