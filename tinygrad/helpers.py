@@ -1,11 +1,12 @@
 from __future__ import annotations
+import platform
 from dataclasses import dataclass, asdict
-import platform, os, math, functools, time, re
+import os, math, functools, time, re
 import numpy as np
 from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
-OSX = platform.system() == "Darwin" 
+OSX = platform.system() == "Darwin"
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x:Union[List[int], Tuple[int, ...]]) -> int: return math.prod(x)
