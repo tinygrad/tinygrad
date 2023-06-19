@@ -375,6 +375,15 @@ class Linearizer:
   @property
   def upcast_in_mid_reduce_axes(self) -> List[int]: return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)) if self.full_shape[j] == self.sts[0].shape[j]]
 
+  # there's six chunks of the shape
+  # blue   -- global dims
+  # cyan   -- local dims
+  #  *** self.first_reduce
+  # green  -- reduce-local dims
+  # red    -- reduce loops
+  #  *** self.upcasted
+  # purple -- reduce upcasted
+  # yellow -- normal upcasted dimensions
   def colors(self) -> List[str]:
     # up to first_reduce, they are all global (blue)
     colors = ["blue"] * (self.first_reduce-self.local_dims)
