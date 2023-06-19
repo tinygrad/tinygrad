@@ -6,7 +6,7 @@ There is almost no boilerplate code anywhere in this library, and you should hel
 
 There is a linter, but it's not complete. Spend a little time reading and getting a feel for the style.
 
-I love PRs where I look at them and can just say, yes, this will improve the codebase and click merge. If you have an incomplete PR, feel free to post is as a draft.
+I love PRs where I look at them and can just say, yes, this will improve the codebase and click merge. If you have an incomplete PR, feel free to post it as a draft.
 
 As my operating systems professor taught me, code is written to be read by humans. We value readability over performance and line count, but low line count is often a good proxy for readability. However, any PRs that look like code golf will immediately be closed.
 
