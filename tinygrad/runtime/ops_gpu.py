@@ -18,9 +18,9 @@ if DEBUG >= 5:
 
 class _CL:
   def __init__(self):
-    platform: List[cl.Device] = [y for y in ([x.get_devices(device_type=cl.device_type.GPU | cl.device_type.CPU) for x in cl.get_platforms()]) if len(y)][getenv('CL_PLATFORM', 0)]
-    if DEBUG >= 1: print(f"using devices: {[d.hashable_model_and_version_identifier for d in platform if d.name not in getenv('CL_EXCLUDE', '').split(',')]}")
-    self.cl_ctx: cl.Context = cl.Context(devices=[x for x in platform if x.name not in getenv('CL_EXCLUDE', '').split(',')])
+    platforms: List[List[cl.Device]] = [y for y in ([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()] + [x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()]) if len(y)]
+    if DEBUG >= 1: print(f"using devices: {[d.hashable_model_and_version_identifier for d in platforms[getenv('CL_PLATFORM', 0)] if d.name not in getenv('CL_EXCLUDE', '').split(',')]}")
+    self.cl_ctx: cl.Context = cl.Context(devices=[x for x in platforms[getenv('CL_PLATFORM', 0)] if x.name not in getenv('CL_EXCLUDE', '').split(',')])
     self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(self.cl_ctx, device=device, properties=cl.command_queue_properties.PROFILING_ENABLE) for device in self.cl_ctx.devices]
 
   def synchronize(self):
