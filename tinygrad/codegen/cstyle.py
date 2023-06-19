@@ -194,11 +194,6 @@ class CStyleCodegen(Linearizer):
 
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.bufs, self.lang)
 
-    work_dim = max(len(global_size), len(local_size), 3)  # NOTE: we just make the workdim three
-    assert work_dim <= 3, f"work dim too large {work_dim}"
-    global_size = [1] * (work_dim - len(global_size)) + global_size
-    local_size = [1] * (work_dim - len(local_size)) + local_size
-
     # painfully name the function something unique
     if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]
     else:
