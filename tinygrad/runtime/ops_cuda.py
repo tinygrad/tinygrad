@@ -31,10 +31,6 @@ class CUDAProgram:
     self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
 
   def __call__(self, global_size, local_size, *args, wait=False):
-    local_size = (local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)
-    global_size = global_size + [1] * (3 - len(global_size))
-    assert all(x%y == 0 for x,y in zip(global_size, local_size)), f"local:{local_size} must divide global:{global_size}"
-    global_size = [x//y for x,y in zip(global_size, local_size)]
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
@@ -47,7 +43,7 @@ class CUDAProgram:
 class CUDACodegen(CStyleCodegen):
   lang = CStyleLanguage(
     kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
-    gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
+    gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
     half_prekernel = """
       #include <cuda_fp16.h>
