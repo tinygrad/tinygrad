@@ -132,6 +132,7 @@ class Linearizer:
     # parameters
     self.group_for_reduce: List[int] = []
     self.upcasted: int = 0
+    self.local_dims: int = 0
 
     # group simplifies
     self.simplify_ones()
@@ -233,7 +234,7 @@ class Linearizer:
 
     # kernel name (before late upcast)
     self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) for x in self.full_shape])
-    self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'black', bright=True).join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
+    self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
     # parse AST
     loaded_buffers = {}
@@ -246,10 +247,15 @@ class Linearizer:
       return Token(f"{name}{_ssa[name]-1}", ltype)
 
     # global loop
-    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1 if i < self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
+    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
     self.uop(UOps.LOOP, None, [], (global_idxs, "global"))
 
     # local loop
+    local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce-self.local_dims, self.first_reduce+len(self.group_for_reduce))]
+    self.uop(UOps.LOOP, None, [], (local_idxs, "local"))
+    global_idxs = gl_idxs = global_idxs + local_idxs
+
+    """
     if self.group_for_reduce:
       # NOTE: this is assuming the global size = the local size in these dims. in general, this doesn't have to be true
       local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
@@ -258,6 +264,7 @@ class Linearizer:
     else:
       # without local idxs, it's just the global idxs
       gl_idxs = global_idxs
+    """
 
     # reduce op
     fake_reduce_idxs = []
@@ -370,9 +377,11 @@ class Linearizer:
 
   def colors(self) -> List[str]:
     # up to first_reduce, they are all global (blue)
-    colors = ["blue"] * self.first_reduce
+    colors = ["blue"] * (self.first_reduce-self.local_dims)
+    # except the local_dims, these are non-reduce locals (cyan)
+    colors += ["cyan"] * (self.local_dims)
     # between first_reduce and first_reduce + group_for_reduce, they are either local (cyan), or late upcasted (green)
-    colors += ["green" if i in self.upcast_in_mid_reduce_axes else "cyan" for i in range(self.first_reduce, self.first_reduce + len(self.group_for_reduce))]
+    colors += ["GREEN" if i in self.upcast_in_mid_reduce_axes else "green" for i in range(self.first_reduce, self.first_reduce + len(self.group_for_reduce))]
     # between first_reduce + group_for_reduce and upcasted, they are reduce (red)
     colors += ["red"] * ((self.shape_len-self.upcasted) - (self.first_reduce + len(self.group_for_reduce)))
     # upcasted dimensions are reduce (magenta) or normal (yellow)
@@ -458,8 +467,8 @@ class Linearizer:
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
     # NOTE: this might make multiview shapetrackers
-    if limit and self.first_reduce > limit:
-      num_to_merge = (self.first_reduce - limit)+1
+    if limit and (self.first_reduce-self.local_dims) > limit:
+      num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
       if DEBUG >= 4: print("reshaped to", self.full_shape, "due to too many global dimensions")
 
@@ -467,7 +476,7 @@ class Linearizer:
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     self.required_optimizations(early_only=True)
 
-    # simplify (sets first_reduce)
+    # simplify
     self.simplify_ones()
 
     # are we grouping? (requires local shape support)
@@ -541,3 +550,10 @@ class Linearizer:
       if self.upcasted == 0 and len(self.full_unupcasted_shape) > 0 and self.full_unupcasted_shape[-1] % splits == 0:
         self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
         self.upcast()
+
+    # **** local groups ****
+
+    self.shift_to(0, 8, insert_before=self.first_reduce)
+    self.local_dims += 1
+    self.shift_to(1, 8, insert_before=self.first_reduce)
+    self.local_dims += 1
