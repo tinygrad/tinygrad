@@ -19,7 +19,8 @@ class X86Codegen(AssemblyCodegen):
     for uop, out, vin, arg in filter(lambda op: op.op == UOps.DEFINE_REGISTER, asm):
       for i in range(arg[2]):
         local_var_size += arg[0].itemsize
-        reg_map[f"%{arg[1]}{i}"] = f"-{local_var_size}(%rsp)"
+        # TODO use float registers
+        reg_map[f"%{arg[1]}{i}"] = f"-{local_var_size}(%rbp)"
         reg_type[f"%{arg[1]}{i}"] = arg[0]
 
     print(reg_map)
@@ -39,9 +40,12 @@ class X86Codegen(AssemblyCodegen):
           # TODO pop remaining args from stack
       elif uop == UOps.ALU:
         if dtypes.is_float(out.dtype):
-          ins.append(f"movsd {reg_map[vin[0].nm]}, %xmm0")
-          ins.append(f"{alu[arg]}ss {reg_map[vin[1].nm]}, %xmm0")
-          ins.append(f"movsd %xmm0, {reg_map[out.nm]}")
+          ins.append(f"movd {reg_map[vin[0].nm]}, %xmm0")
+          if arg not in [UnaryOps.SIN, UnaryOps.LOG2, UnaryOps.EXP2]: 
+            ins.append(f"{alu[arg]}ss {reg_map[vin[1].nm]}, %xmm0")
+          else:
+            ins.append(f"{alu[arg]}")
+          ins.append(f"movd %xmm0, {reg_map[out.nm]}")
         # TODO non fp add stuff
         else:
           acc_reg_a, acc_reg_b = "%rax" if out.dtype.itemsize == 8 else "%eax", "%rbx" if out.dtype.itemsize == 8 else "%ebx"
@@ -82,4 +86,4 @@ class X86Codegen(AssemblyCodegen):
         ins.append(f"test %al, %al")
         ins.append(f"{'je' if arg[1] else 'jne'} {arg[0].replace('$', '.')}")
 
-    return "_kernel", '\n'.join([".section .text", ".globl _kernel", "_kernel:", f"enter ${local_var_size}, $0"] + ins + ["leave", "ret", ""])
+    return "_kernel", '\n'.join([".section .text", ".globl _kernel", "_kernel:", "pushq	%rbp", "movq	%rsp, %rbp", f"subq	${local_var_size}, %rsp"] + ins + ["leave", "ret", ""])
