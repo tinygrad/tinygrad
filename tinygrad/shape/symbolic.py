@@ -158,8 +158,8 @@ class SumNode(RedNode):
   def __mul__(self, b: int): return Variable.sum([x*b for x in self.nodes]) # distribute mul into sum
   def __floordiv__(self, b: int, factoring_allowed=True):
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
-    factors, tmp_nofactor = partition(self.nodes, lambda x: x.__class__ in (MulNode, NumNode) and x.b%b == 0)
-    nofactor = []
+    factors, tmp_nofactor, nofactor = [], [], []
+    for x in self.nodes: factors.append(x) if x.__class__ in (MulNode, NumNode) and x.b%b == 0 else nofactor.append(x)
     # ugh, i doubt this is universally right
     for x in tmp_nofactor:
       if x.__class__ is NumNode:
