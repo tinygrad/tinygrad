@@ -62,31 +62,24 @@ class RDNACodegen(AssemblyCodegen):
       return rtor[x]
     for uop, out, vin, arg in asm:
       if uop == UOps.DEFINE_REGISTER:
-        if arg[0][0] in [dtypes.uint64, dtypes.int64]:
-          if arg[0][1]:
-            s_cnt += s_cnt%2  # aligned(2)
-          else:
-            v_cnt += v_cnt%2  # aligned(2)
+        if arg[0][0] in [dtypes.uint32, dtypes.uint64, dtypes.int64, dtypes.int32, dtypes.float32, dtypes.float64, dtypes._float4]:
           for i in range(arg[2]):
-            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"{'s' if arg[0][1] else 'v'}[{s_cnt}:{s_cnt+1}]"
+            # TODO: Re-use gaps created by this to avoid wasting registers
+            align = int(arg[0][0].itemsize / 4)
             if arg[0][1]:
-              s_cnt += 2
+              s_cnt += s_cnt % align
+              reg_name = f"s[{s_cnt}:{s_cnt + align - 1}]" if align > 1 else f"s{s_cnt}"
+              s_cnt += align
             else:
-              v_cnt += 2
-        elif arg[0][0] == dtypes._float4 and not arg[0][1]:
-          v_cnt += (4-v_cnt%4) if v_cnt%4 != 0 else 0
-          for i in range(arg[2]):
-            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"v[{v_cnt}:{v_cnt+3}]"
-            for off in range(4): rtor[Register(f"%{arg[1]}{i}", dtypes.float, False, off=off)] = f"v{v_cnt+off}"
-            v_cnt += 4
-        elif arg[0][0] in [dtypes.int32, dtypes.float32]:
-          for i in range(arg[2]):
-            if arg[0][1]:
-              rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"s{s_cnt}"
-              s_cnt += 1
-            else:
-              rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"v{v_cnt}"
-              v_cnt += 1
+              v_cnt += v_cnt % align
+              reg_name = f"v[{v_cnt}:{v_cnt + align - 1}]" if align > 1 else f"v{v_cnt}"
+              v_cnt += align
+            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = reg_name
+
+            if arg[0][0] == dtypes._float4:
+              for off in range(4):
+                reg_name = f"s{s_cnt-align+off}" if arg[0][1] else f"v{v_cnt-align+off}"
+                rtor[Register(f"%{arg[1]}{i}", dtypes.float, False, off=off)] = reg_name
         elif arg[0][0] == dtypes.bool:
           for i in range(arg[2]):
             reg_name = "scc" if arg[0][1] else "vcc_lo" # `_lo` suffix since we're running wavefront_size=32
