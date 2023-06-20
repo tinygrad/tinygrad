@@ -65,7 +65,7 @@ class MetalProgram:
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
     for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
-    encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(global_size), Metal.MTLSize(local_size))
+    encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.commit()
     if wait:
