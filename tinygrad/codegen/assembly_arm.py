@@ -6,7 +6,7 @@ from tinygrad.codegen.linearizer import UOps
 from tinygrad.helpers import dtypes
 
 class ARMCodegen(AssemblyCodegen):
-  # NOTE: But why?
+  # NOTE: I don't need this, however it build to better assembly when i do.  why?
   supports_load3 = False
   def specialize(self, asm):
     # TODO: fix global name to use real name
@@ -24,49 +24,69 @@ class ARMCodegen(AssemblyCodegen):
     regs = {}
     parse_reg = lambda reg: regs[reg] 
     pend_reg = [] 
-    #parse_reg = lambda reg: f"{'x' if reg[1].lower() in ['b', 'i'] else 's'}{reg[2:]}"
+    print("-"*5)
+    reg_map = {}
+    reg_type = {}
+    local_var_size = 0
+    for uop, out, vin, arg in filter(lambda op: op.op == UOps.DEFINE_REGISTER, asm):
+      for i in range(arg[2]):
+        local_var_size += arg[0][0].itemsize
+        reg_map[f"%{arg[1]}{i}"] = f"[FP, #-{local_var_size}]"
+        reg_type[f"%{arg[1]}{i}"] = arg[0]
+
+    print(reg_map)
+    print(reg_type)
+    print(local_var_size)
+    print("-"*5)
+    #ins.append("stp x29, x30, [SP, #-16]!   ")
     for i, (uop, out, vin, arg) in enumerate(asm):
-      print(asm[i])
-      if uop == UOps.DEFINE_REGISTER:
-        # TODO: Look at how new_reg handles counts and regs names 
-        for x in range(arg[2]):
-          if arg[0][0] == dtypes.float: 
-            regs['%' + arg[1] + str(x)] = 's' + str(countf)
-            countf +=1
-          else:
-            regs['%' + arg[1] + str(x)] = 'x' + str(counti)
-            counti+=1 
+      if uop == UOps.SPECIAL:
+        unix_call_conv = {'buf0': 'x0', 'buf1': 'x1', 'buf2': 'x2' }
+        if arg.startswith('buf'):
+          ins.append(f"str {unix_call_conv[arg]}, {reg_map[out.nm]}")
+          # TODO pop remaining args from stack
       elif uop == UOps.CONST:
-        ins.append(f"mov {parse_reg(out[0])}, {arg}")
+        ins.append(f"mov x1, #{arg}")
+        ins.append(f"str x1, {reg_map[out[0]]}")
       elif uop == UOps.CAST:
         # TODO: this is not how casting should be
-        if out[1] != dtypes.float:
-          ins.append(f"mov {parse_reg(out[0])}, {parse_reg(vin[0][0])}")
+        ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
+        ins.append(f"sxtw x2, x1")
+        ins.append(f"str x2, {reg_map[out.nm]}")
       elif uop == UOps.ALU:
-        if arg != UnaryOps.NOOP:
-          # TODO: better way to check for mul by a const 
+        if dtypes.is_float(out.dtype):
+          ins.append(f"ldr s0, {reg_map[vin[0].nm]}")
+          ins.append(f"ldr s1, {reg_map[vin[1].nm]}")
+          ins.append(f"f{alu[arg]} s0, s0, s1")
+          ins.append(f"str s0, {reg_map[out.nm]}")
+        else:
+          ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
           if arg == BinaryOps.MUL and len(vin) == 2 and isinstance(vin[1], int):
-            # NOTE arm64 can't mul by a const, so we need to add instead
-            # NOTE Mul by 4 i0 is to select index of address 
-            pre_global.append(f"mul4:")
-            pre_global.append(f"mov x4, xzr")
-            post_global.append(f"add x4, x4, #8")
-            post_global.append(f"cmp x4, #8")
-            post_global.append(f"b.ne _test")
-          elif arg == BinaryOps.CMPEQ:
-            # NOTE: vin is set to scalar rn.
-            ins.append(f"{alu[arg]} {parse_reg(out[0])}, #{vin[0]}")
+        #   # NOTE arm64 can't mul by a const, so we need to add instead
+            ins.append(f"mov x2, #{vin[1]}")
+            ins.append(f"mul x1, x1, x2")
           else:
-            ins.append(f"{'f' if out[1] == dtypes.float else ''}{alu[arg]} {parse_reg(out[0])}, {', '.join(str(x) if x.__class__ is int else str(parse_reg(x[0])) for x in vin)};")
+            ins.append(f"ldr x2, {reg_map[vin[1].nm]}")
+            ins.append(f"{alu[arg]} x1, x1, x2")
+          ins.append(f"str x1, {reg_map[out.nm]}") 
           
-      elif uop == UOps.CONST:
-        pass
       elif uop == UOps.LOAD:
-        ins.append(f"ldr {parse_reg(out[0])},[{','.join(str(parse_reg(x[0])) for x in vin)}]")
-      elif uop == UOps.CAST:
-        pass
+        # acc_reg_a = "%rax" if out.dtype.itemsize == 8 else "%eax"        
+        # ins.append(f"movq {reg_map[vin[0].nm]}, %rbx")
+        # ins.append(f"{inst('mov', out)} {arg[0]}(%rbx), {acc_reg_a}")
+        # ins.append(f"{inst('mov', out)} {acc_reg_a}, {reg_map[out.nm]}")
+        ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
+        ins.append(f"ldr s0, [x1]")
+        ins.append(f"str s0, {reg_map[out[0]]}")
+#        ins.append(f"ldr {parse_reg(out[0])},[{','.join(str(parse_reg(x[0])) for x in vin)}, {arg[0]}]")
       elif uop == UOps.STORE:
-        ins.append(f"str {parse_reg(vin[1][0])}, [{','.join(str(parse_reg(x[0])) for x in vin if vin[1] != x)}] ")
+#        ins.append(f"str {parse_reg(vin[1][0])}, [{','.join(str(parse_reg(x[0])) for x in vin if vin[1] != x)}] ")
+        print(f"l {vin[1][1]}")
+        print(f"l {vin[0][1]}")
+        ins.append(f"ldr s0, {reg_map[vin[1].nm]}")
+        ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
+        ins.append(f"str s0, [x0]")
       elif uop == UOps.COND_BRANCH:
         ins.append(f"b.ne {arg[0]}")
+#    ins.append("ldp x29, x30, [SP], #16")
     return "test", "\n".join([".arch armv8-a",".text", ".global _test",".balign 4"] + pre_global + ["_test:"] + ins + post_global + ["ret;"])
