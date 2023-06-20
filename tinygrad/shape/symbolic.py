@@ -3,7 +3,7 @@ from abc import abstractmethod
 from collections import defaultdict
 import math, functools
 from typing import List, Dict, Callable, Tuple, Type, Union
-from tinygrad.helpers import partition, all_same
+from tinygrad.helpers import all_same
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
@@ -60,7 +60,7 @@ class Node:
   @staticmethod
   def sum(nodes:List[Node]) -> Node:
     new_nodes, num_nodes, mul_nodes, sum_nodes = [],[],[],[]
-    lists = {NumNode : num_nodes, MulNode : mul_nodes, SumNode : sum_nodes}
+    lists = {NumNode: num_nodes, MulNode: mul_nodes, SumNode: sum_nodes}
     for node in nodes:
       lists.get(node.__class__, new_nodes).append(node)
 
@@ -82,7 +82,7 @@ class Node:
       key = node.a.render()
       mul_groups[key] = (node.a, mul_groups[key][1] + [node])
     mul_nodes = [k * sum(x.b for x in g) for k, g in mul_groups.values()]
-    new_nodes = [x if not x.__class__ is MulNode or x.b != 1 else x.a for x in mul_nodes]
+    new_nodes = [x if x.__class__ is not MulNode or x.b != 1 else x.a for x in mul_nodes]
 
     # filter 0s
     new_nodes = [x for x in new_nodes if x.min != 0 or x.max != 0]
