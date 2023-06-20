@@ -62,31 +62,30 @@ class RDNACodegen(AssemblyCodegen):
       return rtor[x]
     for uop, out, vin, arg in asm:
       if uop == UOps.DEFINE_REGISTER:
-        if arg[0][0] == dtypes.uint64 and arg[0][1]:
-          # assuming these are scalar
-          s_cnt += s_cnt%2  # aligned(2)
+        if arg[0][0] in [dtypes.uint32, dtypes.uint64, dtypes.int64, dtypes.int32, dtypes.float32, dtypes.float64, dtypes._float4]:
           for i in range(arg[2]):
-            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"s[{s_cnt}:{s_cnt+1}]"
-            s_cnt += 2
-        elif arg[0][0] == dtypes._float4 and not arg[0][1]:
-          v_cnt += (4-v_cnt%4) if v_cnt%4 != 0 else 0
-          for i in range(arg[2]):
-            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"v[{v_cnt}:{v_cnt+3}]"
-            for off in range(4): rtor[Register(f"%{arg[1]}{i}", dtypes.float, False, off=off)] = f"v{v_cnt+off}"
-            v_cnt += 4
-        elif arg[0][0] in [dtypes.int32, dtypes.float32]:
-          for i in range(arg[2]):
+            # TODO: Re-use gaps created by this to avoid wasting registers
+            align = int(arg[0][0].itemsize / 4)
             if arg[0][1]:
-              rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"s{s_cnt}"
-              s_cnt += 1
+              s_cnt += s_cnt % align
+              reg_name = f"s[{s_cnt}:{s_cnt + align - 1}]" if align > 1 else f"s{s_cnt}"
+              s_cnt += align
             else:
-              rtor[Register(f"%{arg[1]}{i}", *arg[0])] = f"v{v_cnt}"
-              v_cnt += 1
-        elif arg[0][0] == dtypes.bool and arg[0][1]:
+              v_cnt += v_cnt % align
+              reg_name = f"v[{v_cnt}:{v_cnt + align - 1}]" if align > 1 else f"v{v_cnt}"
+              v_cnt += align
+            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = reg_name
+
+            if arg[0][0] == dtypes._float4:
+              for off in range(4):
+                reg_name = f"s{s_cnt-align+off}" if arg[0][1] else f"v{v_cnt-align+off}"
+                rtor[Register(f"%{arg[1]}{i}", dtypes.float, False, off=off)] = reg_name
+        elif arg[0][0] == dtypes.bool:
           for i in range(arg[2]):
-            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = "scc" if arg[0][1] else "vcc"
+            reg_name = "scc" if arg[0][1] else "vcc_lo" # `_lo` suffix since we're running wavefront_size=32
+            rtor[Register(f"%{arg[1]}{i}", *arg[0])] = reg_name
         else:
-          raise NotImplementedError(arg)
+          raise NotImplementedError("DEFINE_REGISTER not implemented for arg: ", arg)
       elif uop == UOps.SPECIAL:
         if arg.startswith('buf'):
           i = int(arg[3:])
@@ -116,11 +115,8 @@ class RDNACodegen(AssemblyCodegen):
         else:
           ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, {arg}")
       elif uop == UOps.ALU:
-        if arg == BinaryOps.CMPLT:
-          if out.scalar:
-            ins.append(f"s_{alu[arg]}_{dtype_to_rdnatype[out.dtype]} {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
-          else:
-            ins.append(f"v_cmp_lt_{dtype_to_rdnatype[out.dtype]} vcc, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
+        if arg in [BinaryOps.CMPLT, BinaryOps.CMPEQ]:
+          ins.append(f"{'s' if out.scalar else 'v'}_{alu[arg]}_{dtype_to_rdnatype[out.dtype]} {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
         else:
           alu_arg = alu[arg]
           if arg == FusedOps.MULACC and out == vin[2]:
@@ -145,6 +141,12 @@ class RDNACodegen(AssemblyCodegen):
         ins.append(f"{arg}:")
       elif uop == UOps.COND_BRANCH:
         ins.append(f"s_cbranch_scc{'1' if arg[1] else '0'} {arg[0]}")
+      elif uop == UOps.CAST:
+        if vin[0].dtype == dtypes.bool:
+          if out.dtype == dtypes.float32:
+            ins.append(f"v_cndmask_b32 {reg_out(out)}, 0.0, 1.0, {reg_in(vin[0])}")
+        else:
+          raise NotImplementedError(f"cast {vin[0].dtype} -> {out.dtype}")
       else:
         raise NotImplementedError(uop)
 
