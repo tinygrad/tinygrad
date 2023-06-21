@@ -89,7 +89,10 @@ class ResNet:
     strides = [stride] + [1] * (num_blocks-1)
     layers = []
     for stride in strides:
-      layers.append(block(self.in_planes, planes, stride, stride_in_1x1, self.groups, self.base_width))
+      if block == Bottleneck:
+        layers.append(block(self.in_planes, planes, stride, stride_in_1x1, self.groups, self.base_width))
+      else:
+        layers.append(block(self.in_planes, planes, stride, self.groups, self.base_width))
       self.in_planes = planes * block.expansion
     return layers
 
