@@ -25,7 +25,7 @@ class RawMetalBuffer(RawBufferMapped):
     assert dtype != dtypes.float64, "metal doesn't support float64"
     super().__init__(size, dtype, METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared))
   def __del__(self):
-    self._buf.release()
+    #self._buf.release()
     super().__del__()
   def _buffer(self):
     METAL.synchronize()
