@@ -25,7 +25,7 @@ class RawMetalBuffer(RawBufferMapped):
     assert dtype != dtypes.float64, "metal doesn't support float64"
     super().__init__(size, dtype, METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared))
   def __del__(self):
-    #self._buf.release()
+    self._buf.release()
     super().__del__()
   def _buffer(self):
     METAL.synchronize()
@@ -80,7 +80,5 @@ class MetalCodegen(CStyleCodegen):
     barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);", float4 = "float4",
     gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
     extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
-  supports_float4 = not getenv("DISABLE_METAL_FLOAT4")
-  supports_float4_alu = not getenv("DISABLE_METAL_FLOAT4")
 
 MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram, METAL.synchronize)

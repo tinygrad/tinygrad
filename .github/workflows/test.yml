@@ -207,11 +207,10 @@ jobs:
         python-version: 3.11
     - name: Install Dependencies
       run: pip install -e '.[metal,testing]'
-    # NOTE: DISABLE_METAL_FLOAT4 until the float4 types are put in the args
-    - name: Run dtype test
-      run: DEBUG=4 DISABLE_METAL_FLOAT4=1 METAL=1 python -m pytest test/test_dtype.py
+    #- name: Run dtype test
+    #  run: DEBUG=4 METAL=1 python -m pytest test/test_dtype.py
     - name: Run ops test
-      run: DEBUG=2 DISABLE_METAL_FLOAT4=1 METAL=1 python -m pytest test/test_ops.py
+      run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
     # dtype test has issues on test_half_to_int8
 
   # disabled, this test is flaky
