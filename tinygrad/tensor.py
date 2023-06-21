@@ -620,7 +620,7 @@ class Tensor:
   # note: the way onehot is implemented, if value is out of range, all 0s are returned
   def onehot(self, num_classes) -> Tensor: return self.reshape(list(self.shape)+[1]).repeat([1]*len(self.shape)+[num_classes]).eq(Tensor.arange(num_classes)).cast(dtypes.int32) # might not be ideal type, could be bool or int64 (convenience when type is passed further)
   
-  def negative_log_likelihood(self, target:Tensor, ignore_index=-100, weight:Tensor = None, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor: 
+  def negative_log_likelihood(self, target:Tensor, weight:Optional[Tensor] = None, ignore_index=-100, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor: 
     assert target.shape == self.shape[:-1], f"Y dimensions {target.shape} must match all except last self dimension {self.shape}"
     assert weight is None or (len(weight.shape) == 1 and weight.shape[0] == self.shape[-1]), f"weight dimensions {weight.shape} must match last self dimension {self.shape[-1]}"
     # label_valid = (Y >= 0).mul(Y < self.shape[-1]).add(Y == ignore_index).minimum(1).min().cast(dtypes.bool)
@@ -636,8 +636,8 @@ class Tensor:
     elif reduction == 'sum': return ret.sum()
     else: raise ValueError(f"Invalid reduction type: {reduction}")
 
-  def cross_entropy(self, target:Tensor, ignore_index=-100, weight:Tensor = None, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor:
-    return self.log_softmax().negative_log_likelihood(target, ignore_index=ignore_index, weight=weight, reduction=reduction)
+  def cross_entropy(self, target:Tensor, weight:Optional[Tensor] = None, ignore_index=-100, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor:
+    return self.log_softmax().negative_log_likelihood(target, weight=weight, ignore_index=ignore_index, reduction=reduction)
   
   # ***** cast ops *****
 
