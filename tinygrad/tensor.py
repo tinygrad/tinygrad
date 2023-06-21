@@ -623,20 +623,21 @@ class Tensor:
   def negative_log_likelihood(self, Y:Tensor, ignore_index=-100, weight:Tensor = None, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor: 
     assert Y.shape == self.shape[:-1], f"Y dimensions {Y.shape} must match all except last self dimension {self.shape}"
     assert weight is None or (len(weight.shape) == 1 and weight.shape[0] == self.shape[-1]), f"weight dimensions {weight.shape} must match last self dimension {self.shape[-1]}"
-    
     # label_valid = (Y >= 0).mul(Y < self.shape[-1]).add(Y == ignore_index).minimum(1).min().cast(dtypes.bool)
-    # assert label_valid == True, "Cross entropy label out of range or not 'ignore_index' value" # cant check without realizing tensor
-    C = self.shape[-1]
-    y = Y.onehot(C)
+    # assert label_valid == True, "Cross entropy label out of range or not 'ignore_index' value" # cant check without realizing tensor :(  
+    num_classes = self.shape[-1]
+    y = Y.onehot(num_classes)
     if weight is not None:
-      W = Tensor.eye(C) * weight
+      W = Tensor.eye(num_classes) * weight
       y = y.matmul(W)
-    reduction_fn = (lambda x: x.sum(-1)) if reduction == 'none' else (lambda x: x.sum() / y.sum()) if reduction == 'mean' else (lambda x: x.sum())
-    return -1*reduction_fn(self.mul(y))
+    ret = -1*self.mul(y)
+    if reduction == 'none': return ret.sum(-1)
+    elif reduction == 'mean': return ret.sum() / y.sum()
+    elif reduction == 'sum': return ret.sum()
+    else: raise ValueError(f"Invalid reduction type: {reduction}")
 
   def cross_entropy(self, Y:Tensor, ignore_index=-100, weight:Tensor = None, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor:
-    x = self.log_softmax()
-    return x.negative_log_likelihood(Y, ignore_index=ignore_index, weight=weight, reduction=reduction)
+    return self.log_softmax().negative_log_likelihood(Y, ignore_index=ignore_index, weight=weight, reduction=reduction)
   
   # ***** cast ops *****
 
