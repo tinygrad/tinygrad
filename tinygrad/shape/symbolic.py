@@ -58,11 +58,13 @@ class Node:
 
 
   @staticmethod
-  def flatten_sum_nodes(nodes):
-    new_nodes = []
-    for x in nodes: 
-      if x.__class__ is SumNode: new_nodes += Node.flatten_sum_nodes(x.nodes)
-      else: new_nodes.append(x)
+  def factor(nodes):
+    # combine any MulNodes that factorize (big hack sticking the MulNode(x, 1) on things)
+    mul_nodes: List[MulNode] = [x if isinstance(x, MulNode) else MulNode(x, 1) for x in nodes]
+    mul_groups: Dict[Node, int] = {}
+    for node in mul_nodes: mul_groups[node.a] = (mul_groups[node.a] + node.b) if node.a in mul_groups else node.b
+    mul_nodes = [k * g for k, g in mul_groups.items()]
+    new_nodes = [x.a if x.__class__ is MulNode and x.b == 1 else x for x in mul_nodes]
     return new_nodes
     
   @staticmethod
@@ -71,27 +73,26 @@ class Node:
     if len(nodes) == 1: return nodes[0]
 
     new_nodes: List[Node] = []
-    num_node_sum = 0 
+    a_nodes: List[Node] = []
+    num_node_sum = 0
 
     for node in nodes:
-      if node.__class__ is NumNode: num_node_sum += node.b # combine any numbers into a single number
-      elif isinstance(node, SumNode): # recursively expand sums. Mypy wants isinstance
-        for n in Node.flatten_sum_nodes(tuple(node.nodes)):  
-          if node.__class__ is NumNode: num_node_sum += n.b 
-          else: new_nodes.append(n)
-      else: new_nodes.append(node)
-
+      if isinstance(node, SumNode):
+        flat = node.flat_components_grouped_num  # last component is always numnode
+        nodes += flat[:-1]
+        num_node_sum += flat[-1].b
+      elif node.__class__ is NumNode: 
+        num_node_sum += node.b
+      else: 
+        new_nodes.append(node)
+        if isinstance(node, MulNode): a_nodes.append(node.a)
 
     if not num_node_sum:
       if not new_nodes: return NumNode(0)
       if len(new_nodes) == 1: return new_nodes[0]
-
-    # combine any MulNodes that factorize (big hack sticking the MulNode(x, 1) on things)
-    mul_nodes: List[MulNode] = [x if isinstance(x, MulNode) else MulNode(x, 1) for x in new_nodes]  # Mypy wants isintance
-    mul_groups: Dict[Node, List[MulNode]] = {}
-    for node in mul_nodes: mul_groups[node.a] = mul_groups[node.a] + [node] if node.a in mul_groups else [node]
-    mul_nodes = [k * sum([x.b for x in g]) for k, g in mul_groups.items()]
-    new_nodes = [x.a if x.__class__ is MulNode and x.b == 1 else x for x in mul_nodes]
+    if not new_nodes: return NumNode(num_node_sum)
+    
+    if len(set(a_nodes)) < len(nodes): new_nodes = Node.factor(tuple(new_nodes)) # only factor if duplicate a-nodes exist
 
     if num_node_sum: new_nodes.append(NumNode(num_node_sum))  
 
@@ -164,7 +165,7 @@ class RedNode(Node):
   def __init__(self, nodes:List[Node]): self.nodes = nodes
 
 class SumNode(RedNode):
-  def __mul__(self, b: int): return Variable.sum([x*b for x in self.nodes]) # distribute mul into sum
+  def __mul__(self, b: int): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
   def __floordiv__(self, b: int, factoring_allowed=True):
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
     factors: List[Node] = []
@@ -183,7 +184,7 @@ class SumNode(RedNode):
     if len(factors) > 0:
       # these don't have to be the same, just having a common factor
       if len(gcd) > 0 and all_same(gcd) and gcd[0] is not None and gcd[0] > 1:
-        nofactor_term = Variable.sum([(x.a * (x.b//gcd[0])) if isinstance(x, MulNode)else Variable.num(x.b//gcd[0]) for x in nofactor])//(b//gcd[0])
+        nofactor_term = Variable.sum([(x.a * (x.b//gcd[0])) if isinstance(x, MulNode) else Variable.num(x.b//gcd[0]) for x in nofactor])//(b//gcd[0])
       else:
         nofactor_term = Variable.sum(nofactor)//b
       return Variable.sum([(x.a * (x.b//b)) if isinstance(x, MulNode) else Variable.num(x.b//b) for x in factors] + [nofactor_term])
@@ -199,7 +200,23 @@ class SumNode(RedNode):
       if x.__class__ is NumNode: new_nodes.append(Variable.num(x.b%b))
       elif isinstance(x, MulNode): new_nodes.append(x.a * (x.b%b))
       else: new_nodes.append(x)
-    return Node.__mod__(Variable.sum(new_nodes), b)
+    return Node.__mod__(Node.sum(new_nodes), b)
+  
+  @property
+  def flat_components(self): # recursively expand sumnode components
+    new_nodes = []
+    for x in self.nodes: new_nodes += (x.flat_components if isinstance(x, SumNode) else [x])
+    return new_nodes
+    
+  @property
+  def flat_components_grouped_num(self):
+    nodes = []
+    num_node_sum = 0
+    for node in self.flat_components:
+       if node.__class__ is NumNode: num_node_sum += node.b
+       else: nodes.append(node)
+    nodes.append(NumNode(num_node_sum))
+    return nodes
 
 class AndNode(RedNode):
   def __mul__(self, b: int): Variable.ands([x*b for x in self.nodes])
