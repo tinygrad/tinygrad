@@ -7,7 +7,7 @@ import operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
-from math import ceil, pi, prod, sqrt
+from math import ceil, pi, prod, sqrt, log
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
 
@@ -345,11 +345,6 @@ class Tensor:
     for i,k in enumerate(range(0, self.shape[dim], self.shape[dim]//num)):
       slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
     return [self.slice(p) for p in slice_params]
-  
-  def interpolate(self, scale_factor, mode='nearest'):
-    assert mode == 'nearest', 'Only nearest interpolate available'
-    bs, c, py, px = self.shape
-    return self.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, scale_factor, px, scale_factor).reshape(bs, c, py * scale_factor, px * scale_factor)
 
   def unsqueeze(self, dim):
     if dim < 0: dim = len(self.shape) + dim + 1
@@ -487,7 +482,7 @@ class Tensor:
 
   def contiguous(self): return mlops.Contiguous.apply(self)
   def log(self): return mlops.Log.apply(self)
-  def log2(self): return mlops.Log.apply(self)/math.log(2)
+  def log2(self): return mlops.Log.apply(self)/log(2)
   def exp(self): return mlops.Exp.apply(self)
   def relu(self): return mlops.Relu.apply(self)
   def sin(self): return mlops.Sin.apply(self)
@@ -513,13 +508,6 @@ class Tensor:
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
   def reciprocal(self): return 1.0/self
-  def floor(self):
-    integer = self.cast(dtypes.int32).contiguous()
-    return (integer > self).where(integer-1, integer).cast(dtypes.int32)
-  def ceil(self): return (-1 * (-1 * self).floor()).cast(dtypes.int32)
-  def rint(self):
-    x = (self*2).cast(dtypes.int32).contiguous().cast(dtypes.float32)/2
-    return (x<0).where(x.floor(), x.ceil())
 
   # ***** activation functions (unary) *****
 

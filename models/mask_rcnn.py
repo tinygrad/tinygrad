@@ -14,6 +14,14 @@ from models.retinanet import nms as _box_nms
 
 USE_NP_GATHER = os.getenv('FULL_TINYGRAD', '0') == '0'
 
+def rint(tensor):
+  x = (tensor*2).cast(dtypes.int32).contiguous().cast(dtypes.float32)/2
+  return (x<0).where(x.floor(), x.ceil())
+
+def nearest_interpolate(tensor, scale_factor):
+  bs, c, py, px = tensor.shape
+  return tensor.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, scale_factor, px, scale_factor).reshape(bs, c, py * scale_factor, px * scale_factor)
+
 def meshgrid(x, y):
   grid_x = Tensor.cat(*[x[idx:idx+1].expand(y.shape).unsqueeze(0) for idx in range(x.shape[0])])
   grid_y = Tensor.cat(*[y.unsqueeze(0)]*x.shape[0])
@@ -312,7 +320,7 @@ class FPN:
     ):
       if not inner_block:
         continue
-      inner_top_down = last_inner.interpolate(scale_factor=2, mode="nearest")
+      inner_top_down = nearest_interpolate(last_inner, scale_factor=2)
       inner_lateral = inner_block(feature)
       last_inner = inner_lateral + inner_top_down
       layer_result = layer_block(last_inner)
@@ -431,7 +439,7 @@ class AnchorGenerator:
 def generate_anchors(
     stride=16, sizes=(32, 64, 128, 256, 512), aspect_ratios=(0.5, 1, 2)
 ):
-  return _generate_anchors(stride, Tensor(sizes) / stride, Tensor(aspect_ratios))
+  return _generate_anchors(stride, Tensor(list(sizes)) / stride, Tensor(list(aspect_ratios)))
 
 
 def _generate_anchors(base_size, scales, aspect_ratios):
@@ -467,8 +475,8 @@ def _ratio_enum(anchor, ratios):
   w, h, x_ctr, y_ctr = _whctrs(anchor)
   size = w * h
   size_ratios = size / ratios
-  ws = Tensor.rint(Tensor.sqrt(size_ratios))
-  hs = Tensor.rint(ws * ratios)
+  ws = rint(Tensor.sqrt(size_ratios))
+  hs = rint(ws * ratios)
   anchors = _mkanchors(ws, hs, x_ctr, y_ctr)
   return anchors
 
