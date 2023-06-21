@@ -105,6 +105,11 @@ class TestTinygrad(unittest.TestCase):
     expected = n * (1 - rate)
     np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
 
+  def test_onehot(self):
+    x = Tensor([0, 1, 2, 3, 4])
+    y = x.onehot(5)
+    np.testing.assert_allclose(y.cpu().numpy(), np.eye(5))
+
   #@unittest.skipUnless(Device.DEFAULT == Device.CPU, "float64 not supported on GPU")
   @unittest.skip("float64 support broken")
   def test_jacobian(self):
