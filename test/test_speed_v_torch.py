@@ -68,7 +68,7 @@ def helper_test_speed(f1, *args):
     if isinstance(ret, Tensor): Device[ret.device].synchronize()
     else: sync()
     et = (time.perf_counter() - st) * 1000
-    if i >= 1: ets.append(et)   # not the first run / one used for OPTLOCAL
+    if i >= 1: ets.append(et)
     if GlobalCounters.global_ops:
       save_ops, save_mem = GlobalCounters.global_ops, GlobalCounters.global_mem
   return ret.cpu().numpy(), np.min(ets)
@@ -131,6 +131,7 @@ class TestBigSpeed(unittest.TestCase):
   def test_large_conv_1x1(self): helper_test_conv(bs=32, in_chans=128, out_chans=128, kernel_size=1, img_size_y=128, img_size_x=128)
   def test_large_conv_3x3(self): helper_test_conv(bs=32, in_chans=128, out_chans=128, kernel_size=3, img_size_y=130, img_size_x=130)
 
+@unittest.skipIf(getenv("BIG") == 1, "only big tests")
 class TestSpeed(unittest.TestCase):
   def setUp(self):
     global prefix

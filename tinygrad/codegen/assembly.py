@@ -118,7 +118,6 @@ class AssemblyCodegen(Linearizer):
         elif args[1] == "local":
           for i,var in enumerate(args[0]):
             local_size.append(var.max+1)
-            global_size[i] *= local_size[i]
             ins.append(AssemblyInstruction(UOps.SPECIAL, newreg(var, dtype=dtypes.int32), [], f"lid{len(args[0])-1-i}"))
         else:
           for var in args[0]:
@@ -187,5 +186,5 @@ class AssemblyCodegen(Linearizer):
     name, asm = self.specialize(ins)
 
     return ASTRunner(name, asm,
-      global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,
+      global_size[::-1], local_size[::-1],
       op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name, runtime_args={"binary": True})
