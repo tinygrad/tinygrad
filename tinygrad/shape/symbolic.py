@@ -213,8 +213,8 @@ class SumNode(RedNode):
     nodes = []
     num_node_sum = 0
     for node in self.flat_components:
-       if node.__class__ is NumNode: num_node_sum += node.b
-       else: nodes.append(node)
+      if node.__class__ is NumNode: num_node_sum += node.b
+      else: nodes.append(node)
     nodes.append(NumNode(num_node_sum))
     return nodes
 
