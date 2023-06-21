@@ -1138,6 +1138,7 @@ class MaskPostProcessor:
     for box in boxes:
       cumsum += len(box)
       boxes_per_image.append(cumsum)
+    # using numpy here as Tensor.chunk doesnt have custom chunk sizes
     mask_prob = np.split(mask_prob, boxes_per_image, axis=0)
     results = []
     for prob, box in zip(mask_prob, boxes):
