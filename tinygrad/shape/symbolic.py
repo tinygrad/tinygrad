@@ -1,6 +1,5 @@
 from __future__ import annotations
 from abc import abstractmethod
-from collections import defaultdict
 import math, functools
 from typing import List, Dict, Callable, Tuple, Type, Union
 from tinygrad.helpers import all_same
@@ -57,36 +56,46 @@ class Node:
   @staticmethod
   def num(num:int) -> Node: return NumNode(num)
 
+
+  @staticmethod
+  def flatten_sum_nodes(nodes):
+    new_nodes = []
+    for x in nodes: 
+      if x.__class__ is SumNode: new_nodes += Node.flatten_sum_nodes(x.nodes)
+      else: new_nodes.append(x)
+    return new_nodes
+    
   @staticmethod
   def sum(nodes:List[Node]) -> Node:
-    new_nodes, num_nodes, mul_nodes, sum_nodes = [],[],[],[]
-    lists = {NumNode: num_nodes, MulNode: mul_nodes, SumNode: sum_nodes}
+    if not nodes: return NumNode(0)
+    if len(nodes) == 1: return nodes[0]
+
+    new_nodes: List[Node] = []
+    num_node_sum = 0 
+
     for node in nodes:
-      lists.get(node.__class__, new_nodes).append(node)
+      if node.__class__ is NumNode: num_node_sum += node.b # combine any numbers into a single number
+      elif isinstance(node, SumNode): # recursively expand sums. Mypy wants isintance
+        for n in Node.flatten_sum_nodes(tuple(node.nodes)):  
+          if node.__class__ is NumNode: num_node_sum += n.b 
+          else: new_nodes.append(n)
+      else: new_nodes.append(node)
 
-    # expand any sums inside one sum
-    if sum_nodes:
-      new_nodes.extend(num_nodes)
-      new_nodes.extend(mul_nodes)
-      for x in sum_nodes: new_nodes += x.nodes
-      return Variable.sum(new_nodes)
 
-    # combine any numbers inside a sum
-    if num_nodes:
-      new_nodes.append(NumNode(sum([x.b for x in num_nodes])))
+    if not num_node_sum:
+      if not new_nodes: return NumNode(0)
+      if len(new_nodes) == 1: return new_nodes[0]
 
     # combine any MulNodes that factorize (big hack sticking the MulNode(x, 1) on things)
-    mul_nodes += [MulNode(x, 1) for x in new_nodes]
-    mul_groups: Dict[str, Tuple[Node, List[MulNode]]] = defaultdict(lambda: (Node(), []))
-    for node in mul_nodes: #NOTE can we somehow avoid rendering here?
-      key = node.a.render()
-      mul_groups[key] = (node.a, mul_groups[key][1] + [node])
-    mul_nodes = [k * sum(x.b for x in g) for k, g in mul_groups.values()]
-    new_nodes = [x if x.__class__ is not MulNode or x.b != 1 else x.a for x in mul_nodes]
+    mul_nodes: List[MulNode] = [x if isinstance(x, MulNode) else MulNode(x, 1) for x in new_nodes]  # Mypy wants isintance
+    mul_groups: Dict[Node, List[MulNode]] = {}
+    for node in mul_nodes: mul_groups[node.a] = mul_groups[node.a] + [node] if node.a in mul_groups else [node]
+    mul_nodes = [k * sum([x.b for x in g]) for k, g in mul_groups.items()]
+    new_nodes = [x.a if x.__class__ is MulNode and x.b == 1 else x for x in mul_nodes]
 
-    # filter 0s
-    new_nodes = [x for x in new_nodes if x.min != 0 or x.max != 0]
-    return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else (new_nodes[0] if len(new_nodes) == 1 else NumNode(0))
+    if num_node_sum: new_nodes.append(NumNode(num_node_sum))  
+
+    return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
 
   @staticmethod
   def ands(nodes:List[Node]) -> Node:
@@ -158,7 +167,9 @@ class SumNode(RedNode):
   def __mul__(self, b: int): return Variable.sum([x*b for x in self.nodes]) # distribute mul into sum
   def __floordiv__(self, b: int, factoring_allowed=True):
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
-    factors, tmp_nofactor, nofactor = [], [], []
+    factors: List[Node] = []
+    tmp_nofactor: List[Node] = []
+    nofactor: List[Node] = []
     for x in self.nodes: factors.append(x) if x.__class__ in (MulNode, NumNode) and x.b%b == 0 else nofactor.append(x)
     # ugh, i doubt this is universally right
     for x in tmp_nofactor:
@@ -172,10 +183,10 @@ class SumNode(RedNode):
     if len(factors) > 0:
       # these don't have to be the same, just having a common factor
       if len(gcd) > 0 and all_same(gcd) and gcd[0] is not None and gcd[0] > 1:
-        nofactor_term = Variable.sum([(x.a * (x.b//gcd[0])) if x.__class__ is MulNode else Variable.num(x.b//gcd[0]) for x in nofactor])//(b//gcd[0])
+        nofactor_term = Variable.sum([(x.a * (x.b//gcd[0])) if isinstance(x, MulNode)else Variable.num(x.b//gcd[0]) for x in nofactor])//(b//gcd[0])
       else:
         nofactor_term = Variable.sum(nofactor)//b
-      return Variable.sum([(x.a * (x.b//b)) if x.__class__ is MulNode else Variable.num(x.b//b) for x in factors] + [nofactor_term])
+      return Variable.sum([(x.a * (x.b//b)) if isinstance(x, MulNode) else Variable.num(x.b//b) for x in factors] + [nofactor_term])
     else:
       muls = [x.b for x in nofactor if x.__class__ is MulNode]
       for m in muls:
@@ -186,7 +197,7 @@ class SumNode(RedNode):
     new_nodes = []
     for x in self.nodes:
       if x.__class__ is NumNode: new_nodes.append(Variable.num(x.b%b))
-      elif x.__class__ is MulNode: new_nodes.append(x.a * (x.b%b))
+      elif isinstance(x, MulNode): new_nodes.append(x.a * (x.b%b))
       else: new_nodes.append(x)
     return Node.__mod__(Variable.sum(new_nodes), b)
 
