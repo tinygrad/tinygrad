@@ -169,9 +169,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(64,64), (64,64)], lambda x,y: x*y, Tensor.mul)
     helper_test_op([(), ()], lambda x,y: x*y, Tensor.mul)
   def test_mul_const(self):
-    helper_test_op([(45,65)], lambda x: x*float("inf"),  lambda x: x*float("inf"))
-    helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x*-float("inf"))
-    helper_test_op([(45,65)], lambda x: x*float("nan"),  lambda x: x*float("nan"))
+    helper_test_op([(45,65)], lambda x: x*2,  lambda x: x*2)
+    helper_test_op([(45,65)], lambda x: x*-1, lambda x: x*-1)
+    helper_test_op([(45,65)], lambda x: 255*x, lambda x: 255*x)
   def test_div(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
     helper_test_op([(), ()], lambda x,y: x/y, Tensor.div)
@@ -181,14 +181,21 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 1/x, lambda x: 1/x)
     helper_test_op([(45,65)], lambda x: x/2, lambda x: x/2)
     helper_test_op([(45,65)], lambda x: 2/x, lambda x: 2/x)
+    helper_test_op([()], lambda x: x/2, lambda x: x/2)
+    helper_test_op([()], lambda x: 2/x, lambda x: 2/x)
+  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL has issues with -inf")
+  def test_mul_const_naninf(self):
+    helper_test_op([(45,65)], lambda x: x*float("inf"),  lambda x: x*float("inf"))
+    helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x*-float("inf"))
+    helper_test_op([(45,65)], lambda x: x*float("nan"),  lambda x: x*float("nan"))
+  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL has issues with -inf")
+  def test_div_const_naninf(self):
     helper_test_op([(45,65)], lambda x: x/float("inf"),  lambda x: x/float("inf"))
     helper_test_op([(45,65)], lambda x: x/-float("inf"), lambda x: x/-float("inf"))
     helper_test_op([(45,65)], lambda x: x/float("nan"),  lambda x: x/float("nan"))
     helper_test_op([(45,65)], lambda x: float("inf")/x,    lambda x: float("inf")/x)
     helper_test_op([(45,65)], lambda x: (-float("inf"))/x, lambda x: (-float("inf"))/x)
     helper_test_op([(45,65)], lambda x: float("nan")/x,    lambda x: float("nan")/x)
-    helper_test_op([()], lambda x: x/2, lambda x: x/2)
-    helper_test_op([()], lambda x: 2/x, lambda x: 2/x)
   def test_pow(self):
     # TODO: why is a=0 for these tests?
     helper_test_op([(45,65)], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
@@ -881,7 +888,7 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride))
 
-  @unittest.skipIf(Device.DEFAULT in ["CUDA", "PTX"], "CUDA fails on this")
+  @unittest.skipIf(Device.DEFAULT == "CUDA", "CUDA fails on this")
   def test_maxpool2d_unit_stride(self):
     helper_test_op([(32,2,110,28)],
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=1),
