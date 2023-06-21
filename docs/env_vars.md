@@ -27,7 +27,6 @@ LLVM                | [1]        | enable LLVM backend
 LLVMOPT             | [1]        | enable slightly more expensive LLVM optimizations
 LAZY                | [1]        | enable lazy operations (this is the default)
 OPT                 | [1-4]      | optimization level
-OPTLOCAL            | [1-2]      | enable local optimization
 GRAPH               | [1]        | create a graph of all operations (requires graphviz)
 GRAPHPATH           | [/path/to] | where to put the generated graph
 PRUNEGRAPH          | [1]        | prune MovementOps and LoadOps from the graph
@@ -37,7 +36,6 @@ FLOAT16             | [1]        | use float16 for images instead of float32
 ENABLE_METHOD_CACHE | [1]        | enable method cache (this is the default)
 EARLY_STOPPING      | [# > 0]  | stop after this many kernels
 DISALLOW_ASSIGN     | [1]        | disallow assignment of tensors
-NATIVE_EXPLOG       | [1]        | enable using native exp and log
 
 ## File Specific Variables
 

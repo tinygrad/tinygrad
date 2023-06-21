@@ -68,7 +68,7 @@ def helper_test_speed(f1, *args):
     if isinstance(ret, Tensor): Device[ret.device].synchronize()
     else: sync()
     et = (time.perf_counter() - st) * 1000
-    if i >= 1: ets.append(et)   # not the first run / one used for OPTLOCAL
+    if i >= 1: ets.append(et)
     if GlobalCounters.global_ops:
       save_ops, save_mem = GlobalCounters.global_ops, GlobalCounters.global_mem
   return ret.cpu().numpy(), np.min(ets)
