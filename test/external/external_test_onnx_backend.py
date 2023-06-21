@@ -115,7 +115,7 @@ backend_test.exclude('test_lstm_*')
 backend_test.exclude('test_simple_rnn_*')
 
 # no control flow
-backend_test.exclude('test_if_*')
+backend_test.exclude('test_if_(seq|opt)_*')
 backend_test.exclude('test_loop*')
 
 # unsupported (strange) ops
