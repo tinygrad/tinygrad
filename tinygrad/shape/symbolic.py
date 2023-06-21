@@ -75,7 +75,7 @@ class Node:
 
     for node in nodes:
       if node.__class__ is NumNode: num_node_sum += node.b # combine any numbers into a single number
-      elif isinstance(node, SumNode): # recursively expand sums. Mypy wants isintance
+      elif isinstance(node, SumNode): # recursively expand sums. Mypy wants isinstance
         for n in Node.flatten_sum_nodes(tuple(node.nodes)):  
           if node.__class__ is NumNode: num_node_sum += n.b 
           else: new_nodes.append(n)
