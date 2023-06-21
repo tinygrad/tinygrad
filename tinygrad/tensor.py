@@ -619,7 +619,7 @@ class Tensor:
 
   def onehot(self, num_classes) -> Tensor: return self.reshape(list(self.shape)+[1]).repeat([1]*len(self.shape)+[num_classes]).eq(Tensor.arange(num_classes))
 
-  def categorical_cross_entropy(self, Y:Tensor) -> Tensor: return self.mul(Y.mul(-1.0*self.shape[-1])).mean()
+  def categorical_cross_entropy(self, Y:Tensor) -> Tensor: return -self.shape[-1]*self.mul(Y).mean()
   
   # ***** cast ops *****
 
