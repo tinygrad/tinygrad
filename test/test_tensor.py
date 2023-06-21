@@ -7,8 +7,6 @@ from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
-np.random.seed(1337)
-
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)
 V_init = np.random.randn(3,3).astype(np.float32)
@@ -108,6 +106,7 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
 
   def test_onehot(self):
+    np.random.seed(1337)
     n, classes = 100, 20
     x = np.random.randint(0, classes, n)
     y = Tensor(x).onehot(classes)
@@ -115,22 +114,24 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_allclose(y.cpu().numpy(), y_torch.cpu().numpy())
 
   def test_cross_entropy(self):
+    np.random.seed(1337)
     n, classes = 100, 10
     label = np.random.randint(0, classes, n, dtype=np.int32)
     label_mask = np.random.choice((0, 1), size=n, p=(0.3, 0.7))
     weights = np.random.choice((0, 1, 2, 3, 4), size=classes, p=(0.9, 0.05, 0.025, 0.015, 0.01))
     x = np.random.uniform(0, 10, (n, classes)).astype(np.float32)
     
+    # test cases
     ignore_index = -100
     reduction_choices = ['mean', 'sum', 'none']
     mask_labels_choices = [False, True]
     apply_weights_choices = [False, True]
     
     for reduction_choice, mask_label_choice, apply_weight_choice in itertools.product(reduction_choices, mask_labels_choices, apply_weights_choices):
-      l = label.copy()
+      l = label.copy() if mask_label_choice else label
       if mask_label_choice:
-        label[label_mask == 0] = ignore_index
-        
+        l[label_mask == 0] = ignore_index
+
       # tinygrad
       X = Tensor(x, dtype=dtypes.float32)
       out = X.cross_entropy(
