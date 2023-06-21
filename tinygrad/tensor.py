@@ -602,11 +602,11 @@ class Tensor:
 
   def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return reduce(lambda x,f: f(x), ll, self)
 
-  def norm(self, weight:Optional[Tensor]=None, bias:Optional[Tensor]=None, mean:Tensor=None, invstd:Tensor=None, axis=-1, eps:float=1e-5) -> Tensor:
+  def norm(self, weight:Optional[Tensor]=None, bias:Optional[Tensor]=None, mean:Optional[Tensor]=None, invstd:Optional[Tensor]=None, axis=-1, eps:float=1e-5) -> Tensor:
     if invstd is None:
       y = (self - self.mean(axis, keepdim=True))
       return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
-    x = (self - mean.reshape(shape=[1, -1, 1, 1]))
+    x = (self - mean.reshape(shape=[1, -1, 1, 1])) if mean is not None else self
     if weight: x = x * weight.reshape(shape=[1, -1, 1, 1])
     ret = x.mul(invstd.reshape(shape=[1, -1, 1, 1]) if len(invstd.shape) == 1 else invstd)
     return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
