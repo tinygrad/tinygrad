@@ -108,7 +108,7 @@ class TestTinygrad(unittest.TestCase):
   def test_onehot(self):
     np.random.seed(1337)
     n, classes = 100, 20
-    x = np.random.randint(0, classes, n)
+    x = np.random.randint(0, classes, n).astype(np.int64)
     y = Tensor(x).onehot(classes)
     y_torch = torch.nn.functional.one_hot(torch.tensor(x), num_classes=classes)
     np.testing.assert_allclose(y.cpu().numpy(), y_torch.cpu().numpy())
@@ -133,19 +133,19 @@ class TestTinygrad(unittest.TestCase):
         l[label_mask == 0] = ignore_index
 
       # tinygrad
-      X = Tensor(x, dtype=dtypes.float32)
+      X = Tensor(x)
       out = X.cross_entropy(
-        Tensor(l, dtype=dtypes.int64), 
-        weight=Tensor(weights, dtype=dtypes.float32) if apply_weight_choice else None, 
+        Tensor(l), 
+        weight=Tensor(weights) if apply_weight_choice else None, 
         reduction=reduction_choice,
       )
       
       # torch
-      X_torch = torch.tensor(x, dtype=torch.float32)
+      X_torch = torch.tensor(x)
       X_torch = torch.nn.functional.cross_entropy(
         X_torch, 
-        torch.tensor(l, dtype=torch.int64),
-        weight=torch.tensor(weights, dtype=torch.float32) if apply_weight_choice else None,
+        torch.tensor(l),
+        weight=torch.tensor(weights) if apply_weight_choice else None,
         reduction=reduction_choice,
       )
 
