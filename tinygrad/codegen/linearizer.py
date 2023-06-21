@@ -255,17 +255,6 @@ class Linearizer:
     self.uop(UOps.LOOP, None, [], (local_idxs, "local"))
     gl_idxs = global_idxs + local_idxs
 
-    """
-    if self.group_for_reduce:
-      # NOTE: this is assuming the global size = the local size in these dims. in general, this doesn't have to be true
-      local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
-      self.uop(UOps.LOOP, None, [], (local_idxs, "local"))
-      gl_idxs = [x*(y.max+1)+y for x,y in zip(global_idxs, local_idxs)]
-    else:
-      # without local idxs, it's just the global idxs
-      gl_idxs = global_idxs
-    """
-
     # reduce op
     fake_reduce_idxs = []
     if self.reduceop is not None:
@@ -382,12 +371,12 @@ class Linearizer:
   @property
   def upcast_in_mid_reduce_axes(self) -> List[int]: return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)) if self.full_shape[j] == self.sts[0].shape[j]]
 
-  # there's six chunks of the shape
+  # there's seven chunks of the shape
   # blue   -- global dims
   # cyan   -- local dims
   #  *** self.first_reduce
   # green  -- reduce-local dims
-  # white  -- reduce-late upcasted dim
+  # white  -- reduce-late upcasted dim (self.upcast_in_mid_reduce_axes)
   # red    -- reduce loops
   #  *** self.upcasted
   # purple -- reduce upcasted
