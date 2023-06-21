@@ -40,13 +40,13 @@ class TransformerBlock:
 
   def __call__(self, x):
     if self.prenorm:
-      x = x + self.attn(x.layernorm().linear(*self.ln1)).dropout(self.dropout)
-      x = x + self.act(x.layernorm().linear(*self.ln2).linear(*self.ff1)).linear(*self.ff2).dropout(self.dropout)
+      x = x + self.attn(x.norm().linear(*self.ln1)).dropout(self.dropout)
+      x = x + self.act(x.norm().linear(*self.ln2).linear(*self.ff1)).linear(*self.ff2).dropout(self.dropout)
     else:
       x = x + self.attn(x).dropout(self.dropout)
-      x = x.layernorm().linear(*self.ln1)
+      x = x.norm().linear(*self.ln1)
       x = x + self.act(x.linear(*self.ff1)).linear(*self.ff2).dropout(self.dropout)
-      x = x.layernorm().linear(*self.ln2)
+      x = x.norm().linear(*self.ln2)
     return x
 
 class Transformer:

@@ -35,10 +35,10 @@ def BatchNormalization(X, scale, B, input_mean, input_var, epsilon=1e-05, moment
     running_mean = input_mean * momentum + current_mean * (1 - momentum)
     running_var = input_var * momentum + current_var * (1 - momentum)
 
-    return X.batchnorm(scale, B, current_mean, current_invstd), running_mean, running_var
+    return X.norm(scale, B, current_mean, current_invstd), running_mean, running_var
   else:
     invstd = (input_var + epsilon)**-0.5
-    return X.batchnorm(scale, B, input_mean, invstd)
+    return X.norm(scale, B, input_mean, invstd)
 
 def InstanceNormalization(x: Tensor, scale: Tensor, bias: Tensor, epsilon=1e-05):
   axis = tuple(range(2, len(x.shape)))
@@ -50,10 +50,10 @@ def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_typ
   assert stash_type == 1, "only float32 is supported"
   axis = tuple(i for i in range(axis if axis >= 0 else len(x.shape) + axis, len(x.shape)))
   mean = x.mean(axis=axis, keepdim=True)
-  return x.layernorm(axis, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).pow(2).mean(axis=axis, keepdim=True).add(epsilon).sqrt().reciprocal()
+  return x.norm(axis, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).pow(2).mean(axis=axis, keepdim=True).add(epsilon).sqrt().reciprocal()
 
 def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
-  return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
+  return x.reshape(x.shape[0], num_groups, -1).norm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
 
 # onnx: [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
 # numpy.pad: ((x1_begin, x1_end), (x2_begin, x2_end), ...)

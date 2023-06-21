@@ -25,7 +25,7 @@ class ViT:
     pe = self.patch_embed(x)
     x = ce.cat(pe, dim=1)
     x = x.add(self.pos_embedding).sequential(self.tbs)
-    x = x.layernorm().linear(*self.encoder_norm)
+    x = x.norm().linear(*self.encoder_norm)
     return x[:, 0].linear(*self.head)
 
   def load_from_pretrained(m):

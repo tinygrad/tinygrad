@@ -33,7 +33,7 @@ class BatchNorm2d:
       # NOTE: this can be precomputed for static inference. we expand it here so it fuses
       batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
 
-    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
+    return x.norm(self.weight, self.bias, batch_mean, batch_invstd)
 
 # TODO: these Conv lines are terrible
 def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
@@ -77,9 +77,9 @@ class GroupNorm:
     self.bias: Optional[Tensor] = Tensor.zeros(num_channels) if affine else None
 
   def __call__(self, x:Tensor):
-    # reshape for layernorm to work as group norm
+    # reshape for norm to work as group norm
     # subtract mean and divide stddev
-    x = x.reshape(x.shape[0], self.num_groups, -1).layernorm(eps=self.eps).reshape(x.shape)
+    x = x.reshape(x.shape[0], self.num_groups, -1).norm(eps=self.eps).reshape(x.shape)
 
     if self.weight is None or self.bias is None: return x
     # elementwise_affine on channels
@@ -92,7 +92,7 @@ class InstanceNorm:
     self.bias: Optional[Tensor] = Tensor.zeros(num_features) if affine else None
 
   def __call__(self, x:Tensor):
-    x = x.reshape(x.shape[0], self.num_features, -1).layernorm(eps=self.eps).reshape(x.shape)
+    x = x.reshape(x.shape[0], self.num_features, -1).norm(eps=self.eps).reshape(x.shape)
     if self.weight is None or self.bias is None: return x
     return x * self.weight.reshape(1, -1, *[1 for _ in range(len(x.shape)-2)]) + self.bias.reshape(1, -1, *[1 for _ in range(len(x.shape)-2)])
 
@@ -104,7 +104,7 @@ class LayerNorm:
 
   def __call__(self, x:Tensor):
     assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"last dimensions of {x.shape} must match {self.normalized_shape}"
-    x = x.layernorm(eps=self.eps, axis=self.axis)
+    x = x.norm(eps=self.eps, axis=self.axis)
     if not self.elementwise_affine: return x
     return x * self.weight + self.bias
 
