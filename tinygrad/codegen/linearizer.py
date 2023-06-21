@@ -253,7 +253,7 @@ class Linearizer:
     # local loop
     local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce-self.local_dims, self.first_reduce+len(self.group_for_reduce))]
     self.uop(UOps.LOOP, None, [], (local_idxs, "local"))
-    global_idxs = gl_idxs = global_idxs + local_idxs
+    gl_idxs = global_idxs + local_idxs
 
     """
     if self.group_for_reduce:
@@ -268,7 +268,6 @@ class Linearizer:
 
     # reduce op
     fake_reduce_idxs = []
-    removed = len(global_idxs)
     if self.reduceop is not None:
       # define indexes
       reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
@@ -291,20 +290,24 @@ class Linearizer:
 
       # end the local loop, do the local reduce
       if self.group_for_reduce:
-        self.global_store(-1, local_idxs+fake_reduce_idxs, acc, ssa)  # store accumulators
+        fake_global_idxs = [x*0 for x in global_idxs]
+        self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs, acc, ssa)  # store accumulators
         self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))   # this is a barrier on GPUs
+
+        # local indexs are over, 0 them out
+        local_idxs = [x*0 for x in local_idxs]
 
         # if any group_for_reduce items aren't reduces, upcast them here
         for j in self.upcast_in_mid_reduce_axes:
           self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
           self.upcast()
           self.group_for_reduce.pop()
-          removed -= 1
+          local_idxs = local_idxs[:-1]
 
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.global_load(-1, local_idxs[:removed]+fake_reduce_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
 
         # late reduce loop
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
@@ -320,13 +323,17 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    loaded_buffers.update({b:self.global_load(i, global_idxs[:removed]+fake_reduce_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
+    loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
 
     # run late AST
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
 
     # store
-    self.global_store(0, global_idxs[:removed]+fake_reduce_idxs, val, ssa)
+    self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs, val, ssa)
+
+    if not self.group_for_reduce:
+      # end the local loop
+      self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
 
     # end the global loop
     self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
@@ -380,6 +387,7 @@ class Linearizer:
   # cyan   -- local dims
   #  *** self.first_reduce
   # green  -- reduce-local dims
+  # white  -- reduce-late upcasted dim
   # red    -- reduce loops
   #  *** self.upcasted
   # purple -- reduce upcasted
@@ -390,7 +398,7 @@ class Linearizer:
     # except the local_dims, these are non-reduce locals (cyan)
     colors += ["cyan"] * (self.local_dims)
     # between first_reduce and first_reduce + group_for_reduce, they are either local (cyan), or late upcasted (green)
-    colors += ["GREEN" if i in self.upcast_in_mid_reduce_axes else "green" for i in range(self.first_reduce, self.first_reduce + len(self.group_for_reduce))]
+    colors += ["white" if i in self.upcast_in_mid_reduce_axes else "green" for i in range(self.first_reduce, self.first_reduce + len(self.group_for_reduce))]
     # between first_reduce + group_for_reduce and upcasted, they are reduce (red)
     colors += ["red"] * ((self.shape_len-self.upcasted) - (self.first_reduce + len(self.group_for_reduce)))
     # upcasted dimensions are reduce (magenta) or normal (yellow)
