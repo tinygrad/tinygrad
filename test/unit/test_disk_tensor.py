@@ -6,12 +6,13 @@ from tinygrad.state import safe_load, safe_save, get_state_dict
 from tinygrad.helpers import dtypes
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from extra.helpers import Timing
-from extra.utils import fetch_as_file, temp
+from extra.utils import download_file, temp
 from tinygrad.state import torch_load, get_state_dict
 
-def compare_weights_both(url):
+def compare_weights_both(url, fn):
+  fn = pathlib.Path(__file__).parent.parent.parent / "weights" / fn
   import torch
-  fn = fetch_as_file(url)
+  download_file(url, fn)
   tg_weights = get_state_dict(torch_load(fn))
   torch_weights = get_state_dict(torch.load(fn), tensor_type=torch.Tensor)
   assert list(tg_weights.keys()) == list(torch_weights.keys())
@@ -21,13 +22,13 @@ def compare_weights_both(url):
 
 class TestTorchLoad(unittest.TestCase):
   # pytorch pkl format
-  def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
+  def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth", "efficientnet-b0-355c32eb.pth")
   # pytorch zip format
-  def test_load_enet_alt(self): compare_weights_both("https://download.pytorch.org/models/efficientnet_b0_rwightman-3dd342df.pth")
+  def test_load_enet_alt(self): compare_weights_both("https://download.pytorch.org/models/efficientnet_b0_rwightman-3dd342df.pth", "efficientnet_b0_rwightman-3dd342df.pth")
   # pytorch zip format
-  def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth')
+  def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth', "convnext_tiny_1k_224_ema.pth")
   # TODO: support pytorch tar format with minimal lines
-  #def test_load_resnet(self): compare_weights_both('https://download.pytorch.org/models/resnet50-19c8e357.pth')
+  #def test_load_resnet(self): compare_weights_both('https://download.pytorch.org/models/resnet50-19c8e357.pth', "resnet50-19c8e357.pth")
 
 test_fn = pathlib.Path(__file__).parent.parent.parent / "weights/LLaMA/7B/consolidated.00.pth"
 #test_size = test_fn.stat().st_size
