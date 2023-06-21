@@ -5,7 +5,7 @@ from functools import partialmethod, reduce
 from itertools import accumulate, filterfalse
 import operator
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Literal, cast
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
 from math import ceil, pi, prod, sqrt
 from tinygrad.lazy import Device, LazyBuffer
@@ -617,9 +617,26 @@ class Tensor:
     mask = (Tensor.rand(*self.shape, requires_grad=False) >= p).cast(dtypes.bool)
     return self * mask * (1/(1.0 - p))
 
-  def onehot(self, num_classes) -> Tensor: return self.reshape(list(self.shape)+[1]).repeat([1]*len(self.shape)+[num_classes]).eq(Tensor.arange(num_classes))
+  # note: the way onehot is implemented, if value is out of range, all 0s are returned
+  def onehot(self, num_classes) -> Tensor: return self.reshape(list(self.shape)+[1]).repeat([1]*len(self.shape)+[num_classes]).eq(Tensor.arange(num_classes)).cast(dtypes.int32) # might not be ideal type, could be bool or int64 (convenience when type is passed further)
+  
+  def negative_log_likelihood(self, Y:Tensor, ignore_index=-100, weight:Tensor = None, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor: 
+    assert Y.shape == self.shape[:-1], f"Y dimensions {Y.shape} must match all except last self dimension {self.shape}"
+    assert weight is None or (len(weight.shape) == 1 and weight.shape[0] == self.shape[-1]), f"weight dimensions {weight.shape} must match last self dimension {self.shape[-1]}"
+    
+    # label_valid = (Y >= 0).mul(Y < self.shape[-1]).add(Y == ignore_index).minimum(1).min().cast(dtypes.bool)
+    # assert label_valid == True, "Cross entropy label out of range or not 'ignore_index' value" # cant check without realizing tensor
+    C = self.shape[-1]
+    y = Y.onehot(C)
+    if weight is not None:
+      W = Tensor.eye(C) * weight
+      y = y.matmul(W)
+    reduction_fn = (lambda x: x.sum(-1)) if reduction == 'none' else (lambda x: x.sum() / y.sum()) if reduction == 'mean' else (lambda x: x.sum())
+    return -1*reduction_fn(self.mul(y))
 
-  def categorical_cross_entropy(self, Y:Tensor) -> Tensor: return -self.shape[-1]*self.mul(Y).mean()
+  def cross_entropy(self, Y:Tensor, ignore_index=-100, weight:Tensor = None, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor:
+    x = self.log_softmax()
+    return x.negative_log_likelihood(Y, ignore_index=ignore_index, weight=weight, reduction=reduction)
   
   # ***** cast ops *****
 
