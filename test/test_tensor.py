@@ -7,6 +7,8 @@ from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
+np.random.seed(1337)
+
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)
 V_init = np.random.randn(3,3).astype(np.float32)
@@ -106,9 +108,48 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
 
   def test_onehot(self):
-    x = Tensor([0, 1, 2, 3, 4])
-    y = x.onehot(5)
-    np.testing.assert_allclose(y.cpu().numpy(), np.eye(5))
+    n, classes = 100, 20
+    x = np.random.randint(0, classes, n)
+    y = Tensor(x).onehot(classes)
+    y_torch = torch.nn.functional.one_hot(torch.tensor(x), num_classes=classes)
+    np.testing.assert_allclose(y.cpu().numpy(), y_torch.cpu().numpy())
+
+  def test_cross_entropy(self):
+    n, classes = 100, 10
+    label = np.random.randint(0, classes, n, dtype=np.int32)
+    label_mask = np.random.choice((0, 1), size=n, p=(0.3, 0.7))
+    weights = np.random.choice((0, 1, 2, 3, 4), size=classes, p=(0.9, 0.05, 0.025, 0.015, 0.01))
+    x = np.random.uniform(0, 10, (n, classes)).astype(np.float32)
+    
+    ignore_index = -100
+    reduction_choices = ['mean', 'sum', 'none']
+    mask_labels_choices = [False, True]
+    apply_weights_choices = [False, True]
+    
+    for reduction_choice, mask_label_choice, apply_weight_choice in itertools.product(reduction_choices, mask_labels_choices, apply_weights_choices):
+      l = label.copy()
+      if mask_label_choice:
+        label[label_mask == 0] = ignore_index
+        
+      # tinygrad
+      X = Tensor(x, dtype=dtypes.float32)
+      out = X.cross_entropy(
+        Tensor(l, dtype=dtypes.int64), 
+        weight=Tensor(weights, dtype=dtypes.float32) if apply_weight_choice else None, 
+        reduction=reduction_choice,
+      )
+      
+      # torch
+      X_torch = torch.tensor(x, dtype=torch.float32)
+      X_torch = torch.nn.functional.cross_entropy(
+        X_torch, 
+        torch.tensor(l, dtype=torch.int64),
+        weight=torch.tensor(weights, dtype=torch.float32) if apply_weight_choice else None,
+        reduction=reduction_choice,
+      )
+
+      # cmp
+      np.testing.assert_allclose(out.cpu().numpy(), X_torch.cpu().numpy(), atol=1e-6, rtol=1e-6)
 
   #@unittest.skipUnless(Device.DEFAULT == Device.CPU, "float64 not supported on GPU")
   @unittest.skip("float64 support broken")
