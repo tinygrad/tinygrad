@@ -617,13 +617,9 @@ class Tensor:
     mask = (Tensor.rand(*self.shape, requires_grad=False) >= p).cast(dtypes.bool)
     return self * mask * (1/(1.0 - p))
 
-  def onehot(self, num_classes) -> Tensor:
-    step = Tensor.arange(num_classes)
-    return self.reshape(list(self.shape)+[1]).repeat([1]*len(self.shape)+[num_classes]).eq(step)
+  def onehot(self, num_classes) -> Tensor: return self.reshape(list(self.shape)+[1]).repeat([1]*len(self.shape)+[num_classes]).eq(Tensor.arange(num_classes))
 
-  def categorical_cross_entropy(self, Y:Tensor) -> Tensor:
-    assert self.shape == Y.shape, "Y must be one-hot encoded"
-    return self.mul(Y.mul(-1.0*self.shape[-1])).mean()
+  def categorical_cross_entropy(self, Y:Tensor) -> Tensor: return self.mul(Y.mul(-1.0*self.shape[-1])).mean()
   
   # ***** cast ops *****
 
