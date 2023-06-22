@@ -58,43 +58,49 @@ class Node:
 
 
   @staticmethod
-  def factor(nodes):
-    # combine any MulNodes that factorize (big hack sticking the MulNode(x, 1) on things)
-    mul_nodes: List[MulNode] = [x if isinstance(x, MulNode) else MulNode(x, 1) for x in nodes]
+  def factorize(nodes: List[Node]):
     mul_groups: Dict[Node, int] = {}
-    for node in mul_nodes: mul_groups[node.a] = (mul_groups[node.a] + node.b) if node.a in mul_groups else node.b
-    mul_nodes = [k * g for k, g in mul_groups.items()]
-    new_nodes = [x.a if x.__class__ is MulNode and x.b == 1 else x for x in mul_nodes]
-    return new_nodes
-    
+    for x in nodes:
+      a,b = (x.a,x.b) if isinstance(x, MulNode) else (x,1)
+      mul_groups[a] = mul_groups.get(a, 0) + b
+    return [a * b_sum if b_sum != 1 else a for a, b_sum in mul_groups.items() if b_sum != 0]
+
+  @staticmethod
+  @functools.cache
+  def is_factorizable(nodes: Tuple[Node]): 
+    n = len(nodes)
+    return n > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in nodes])) < n
+
   @staticmethod
   def sum(nodes:List[Node]) -> Node:
     if not nodes: return NumNode(0)
     if len(nodes) == 1: return nodes[0]
 
     new_nodes: List[Node] = []
-    a_nodes: List[Node] = []
     num_node_sum = 0
 
+    # flatten all sumnodes and gather numnodes
     for node in nodes:
       if isinstance(node, SumNode):
         flat = node.flat_components_grouped_num  # last component is always numnode
-        nodes += flat[:-1]
+        new_nodes += flat[:-1]
         num_node_sum += flat[-1].b
       elif node.__class__ is NumNode: 
         num_node_sum += node.b
       else: 
         new_nodes.append(node)
-        if isinstance(node, MulNode): a_nodes.append(node.a)
 
-    if not num_node_sum:
-      if not new_nodes: return NumNode(0)
-      if len(new_nodes) == 1: return new_nodes[0]
     if not new_nodes: return NumNode(num_node_sum)
-    
-    if len(set(a_nodes)) < len(nodes): new_nodes = Node.factor(tuple(new_nodes)) # only factor if duplicate a-nodes exist
+    # factorize nodes, but only if duplicate a-nodes exist. Check before adding the NumNode
+    if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes): 
 
-    if num_node_sum: new_nodes.append(NumNode(num_node_sum))  
+      if num_node_sum: new_nodes.append(NumNode(num_node_sum))
+      mul_groups: Dict[Node, int] = {}
+      for x in new_nodes:
+        a,b = (x.a,x.b) if isinstance(x, MulNode) else (x,1)
+        mul_groups[a] = mul_groups.get(a, 0) + b
+      new_nodes =  [a * b_sum if b_sum != 1 else a for a, b_sum in mul_groups.items() if b_sum != 0]
+    elif num_node_sum: new_nodes.append(NumNode(num_node_sum))
 
     return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
 
