@@ -123,6 +123,10 @@ backend_test.exclude('test_bitwise_*')
 backend_test.exclude('test_blackmanwindow_*')
 backend_test.exclude('test_bernoulli_*')
 backend_test.exclude('test_cumsum_*')
+
+backend_test.exclude('test_tril_zero_cpu') # TODO: zero array support
+backend_test.exclude('test_triu_zero_cpu') # TODO: zero array support
+
 backend_test.exclude('test_col2im_*')
 backend_test.exclude('test_hammingwindow_*')
 backend_test.exclude('test_hannwindow_*')
