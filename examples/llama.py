@@ -236,7 +236,7 @@ def sample(logits, temperature):
     return int(np.random.choice(len(probs), p=probs))
 
 def absmaxdequantize(x:Tensor, xmax:Tensor):
-    return (x.cast(xmax.dtype).T * xmax / 127.).T
+  return (x.cast(xmax.dtype).T * xmax / 127.).T
 
 # **** main code ****
 
