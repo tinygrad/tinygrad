@@ -1,8 +1,8 @@
 from __future__ import annotations
 from abc import abstractmethod
-import math, functools
+import functools
+from math import gcd
 from typing import List, Dict, Callable, Tuple, Type, Union
-from tinygrad.helpers import all_same
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
@@ -35,7 +35,7 @@ class Node:
   # *** complex ops ***
 
   def __floordiv__(self, b:int, factoring_allowed=True):
-    assert b != 0
+
     if b < 0: return (self//-b)*-1
     if b == 1: return self
 
@@ -66,12 +66,6 @@ class Node:
     return [a * b_sum if b_sum != 1 else a for a, b_sum in mul_groups.items() if b_sum != 0]
 
   @staticmethod
-  @functools.cache
-  def is_factorizable(nodes: Tuple[Node]): 
-    n = len(nodes)
-    return n > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in nodes])) < n
-
-  @staticmethod
   def sum(nodes:List[Node]) -> Node:
     if not nodes: return NumNode(0)
     if len(nodes) == 1: return nodes[0]
@@ -95,18 +89,16 @@ class Node:
     if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes): 
 
       if num_node_sum: new_nodes.append(NumNode(num_node_sum))
-      mul_groups: Dict[Node, int] = {}
-      for x in new_nodes:
-        a,b = (x.a,x.b) if isinstance(x, MulNode) else (x,1)
-        mul_groups[a] = mul_groups.get(a, 0) + b
-      new_nodes =  [a * b_sum if b_sum != 1 else a for a, b_sum in mul_groups.items() if b_sum != 0]
+      new_nodes = Node.factorize(new_nodes)
     elif num_node_sum: new_nodes.append(NumNode(num_node_sum))
 
     return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
 
   @staticmethod
   def ands(nodes:List[Node]) -> Node:
-    if any((x.min == 0 and x.max == 0) for x in nodes): return NumNode(0)
+    if not nodes: return NumNode(1)
+    if len(nodes) == 1: return nodes[0]
+    if any([x.min == x.max == 0 for x in nodes]): return NumNode(0)
 
     # filter 1s
     nodes = [x for x in nodes if x.min != x.max]
@@ -172,28 +164,33 @@ class RedNode(Node):
 
 class SumNode(RedNode):
   def __mul__(self, b: int): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
-  def __floordiv__(self, b: int, factoring_allowed=True):
+  def __floordiv__(self, b: int, factoring_allowed=True): 
+    if b == 1: return self
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
     factors: List[Node] = []
     tmp_nofactor: List[Node] = []
     nofactor: List[Node] = []
-    for x in self.nodes: factors.append(x) if x.__class__ in (MulNode, NumNode) and x.b%b == 0 else nofactor.append(x)
-    # ugh, i doubt this is universally right
-    for x in tmp_nofactor:
-      if x.__class__ is NumNode:
-        if (x.b%b) != x.b:
-          factors.append(Variable.num(x.b - (x.b%b)))  # python does floor division
-        nofactor.append(Variable.num(x.b%b))
-      else:
-        nofactor.append(x)
-    gcd = [math.gcd(x.b, b) if  x.__class__ in (MulNode, NumNode) else None for x in nofactor]
+    for x in self.flat_components: factors.append(x) if x.__class__ in (MulNode, NumNode) and x.b%b == 0 else nofactor.append(x)
     if len(factors) > 0:
-      # these don't have to be the same, just having a common factor
-      if len(gcd) > 0 and all_same(gcd) and gcd[0] is not None and gcd[0] > 1:
-        nofactor_term = Variable.sum([(x.a * (x.b//gcd[0])) if isinstance(x, MulNode) else Variable.num(x.b//gcd[0]) for x in nofactor])//(b//gcd[0])
+      factor_term = []
+      for x in factors:
+        if x.__class__ is MulNode: factor_term.append(x.a if x.b//b == 1 else MulNode(x.a, x.b//b))
+        elif x.__class__ is NumNode: factor_term.append(NumNode(x.b//b))
+
+      mul, other = [],[]
+      print("\n", factors, nofactor,b, "\n")
+      for x in nofactor: mul.append(x) if x.__class__ is MulNode else other.append(x)
+      if mul:
+        gcds = [gcd(x.b, b) if  x.__class__ is MulNode else None for x in mul]
+        t = min(gcds) if gcds and None not in gcds else 1
+        # these don't have to be the same, just having a common factor
+        if t > 1 and all([x%t == 0 for x in gcds]):
+          nofactor_term = Node.sum([Node.sum([(x.a * (x.b//t)) for x in mul])//(b//t)] + Node.sum(other)//b if other else [])
+        else:
+          nofactor_term = Node.sum(nofactor)//b
       else:
-        nofactor_term = Variable.sum(nofactor)//b
-      return Variable.sum([(x.a * (x.b//b)) if isinstance(x, MulNode) else Variable.num(x.b//b) for x in factors] + [nofactor_term])
+        nofactor_term = Node.sum(nofactor)//b
+      return Node.sum(factor_term + [nofactor_term])
     else:
       muls = [x.b for x in nofactor if x.__class__ is MulNode]
       for m in muls:
