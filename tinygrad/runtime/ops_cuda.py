@@ -69,7 +69,10 @@ class CUDAProgram:
 
 class CUDACodegen(CStyleCodegen):
   lang = CStyleLanguage(
-    kernel_prefix = "typedef unsigned char uchar;\ntypedef unsigned int uint;\ntypedef unsigned long ulong;\n__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
+    # TODO(b7r6): `typedef char uchar` is a rather ugly hack to deal with (IIUC) saturation semantics
+    # on CUDA, roughly writing negative `float`s into `unsigned char*` seems to yield zero,
+    # and a more elegant fix probably requires a bit of refactoring...
+    kernel_prefix = "typedef char uchar;\ntypedef unsigned int uint;\ntypedef unsigned long ulong;\n__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
     half_prekernel = """
