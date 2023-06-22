@@ -30,3 +30,4 @@ datasets/open-images-v6-mlperf
 datasets/kits/
 datasets/audio*
 venv
+result
