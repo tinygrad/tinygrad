@@ -618,7 +618,9 @@ class Tensor:
     return self * mask * (1/(1.0 - p))
 
   # note: the way onehot is implemented, if value is out of range, all 0s are returned
-  def onehot(self, num_classes) -> Tensor: return self.reshape(list(self.shape)+[1]).repeat([1]*len(self.shape)+[num_classes]).eq(Tensor.arange(num_classes)).cast(dtypes.int32) # might not be ideal type, could be bool or int64 (convenience when type is passed further)
+  def onehot(self, num_classes) -> Tensor: 
+    assert dtypes.is_int(self.dtype), f"onehot only supported for ints, got {self.dtype}"
+    return self.reshape(list(self.shape)+[1]).repeat([1]*len(self.shape)+[num_classes]).eq(Tensor.arange(num_classes, dtype=dtypes.int32)) # might not be ideal type, could be bool or int64 (convenience when type is passed further)
   
   def negative_log_likelihood(self, target:Tensor, weight:Optional[Tensor] = None, ignore_index=-100, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor: 
     assert target.shape == self.shape[:-1], f"Y dimensions {target.shape} must match all except last self dimension {self.shape}"
@@ -628,7 +630,7 @@ class Tensor:
     num_classes = self.shape[-1]
     y = target.onehot(num_classes)
     if weight is not None:
-      W = Tensor.eye(num_classes) * weight
+      W = Tensor.eye(num_classes, dtype=weight.dtype) * weight
       y = y.matmul(W)
     ret = -1*self.mul(y)
     if reduction == 'none': return ret.sum(-1)

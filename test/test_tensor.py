@@ -116,9 +116,9 @@ class TestTinygrad(unittest.TestCase):
   def test_cross_entropy(self):
     np.random.seed(1337)
     n, classes = 100, 10
-    label = np.random.randint(0, classes, n)
+    label = np.random.randint(0, classes, n) # torch requires int64
     label_mask = np.random.choice((0, 1), size=n, p=(0.3, 0.7))
-    weights = np.random.choice((0, 1, 2, 3, 4), size=classes, p=(0.9, 0.05, 0.025, 0.015, 0.01)).astype(np.float32)
+    weights = np.random.choice((0, 1, 2, 3, 4), size=classes, p=(0.9, 0.05, 0.025, 0.015, 0.01)).astype(np.float32) # torch requires float
     x = np.random.uniform(0, 10, (n, classes)).astype(np.float32)
     
     # test cases
@@ -134,8 +134,8 @@ class TestTinygrad(unittest.TestCase):
 
       # tinygrad
       X = Tensor(x)
-      out = X.cross_entropy(
-        Tensor(l), 
+      X = X.cross_entropy(
+        Tensor(l),
         weight=Tensor(weights) if apply_weight_choice else None, 
         reduction=reduction_choice,
       )
@@ -150,7 +150,7 @@ class TestTinygrad(unittest.TestCase):
       )
 
       # cmp
-      np.testing.assert_allclose(out.cpu().numpy(), X_torch.cpu().numpy(), atol=1e-6, rtol=1e-6)
+      np.testing.assert_allclose(X.cpu().numpy(), X_torch.cpu().numpy(), atol=1e-6, rtol=1e-6)
 
   #@unittest.skipUnless(Device.DEFAULT == Device.CPU, "float64 not supported on GPU")
   @unittest.skip("float64 support broken")
