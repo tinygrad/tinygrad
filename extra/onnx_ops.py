@@ -322,7 +322,7 @@ def Gather(input, indices, axis=0):
     if rem_shape: ret = ret.reshape(*[indices.shape[0]], *rem_shape)
   else:
     ret = _gather(input, indices)
-  return ret.transpose(ax1=axis, ax2=0).reshape(*[indices_shape if idx == axis else shape for idx, shape in enumerate(ret.shape)])
+  return ret.transpose(ax1=axis, ax2=0).reshape(*[i_shape if idx == axis else shape for idx, shape in enumerate(ret.shape) for i_shape in indices_shape])
 
 def GatherElements(input, indices, axis):
   indices = indices.transpose(ax1=axis, ax2=0)
