@@ -632,7 +632,7 @@ class Tensor:
       y = y.matmul(W)
     ret = -1*self.mul(y)
     if reduction == 'none': return ret.sum(-1)
-    elif reduction == 'mean': return ret.sum() / y.sum()
+    elif reduction == 'mean': return ret.sum() / y.sum() # if entire batch is ignored, this will return nan
     elif reduction == 'sum': return ret.sum()
     else: raise ValueError(f"Invalid reduction type: {reduction}")
 

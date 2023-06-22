@@ -116,8 +116,8 @@ class TestTinygrad(unittest.TestCase):
   def test_cross_entropy(self):
     np.random.seed(1337)
     n, classes = 100, 10
-    label = np.random.randint(0, classes, n, dtype=np.int64)
-    label_mask = np.random.choice((0, 1), size=n, p=(0.3, 0.7)).astype(np.int32)
+    label = np.random.randint(0, classes, n)
+    label_mask = np.random.choice((0, 1), size=n, p=(0.3, 0.7))
     weights = np.random.choice((0, 1, 2, 3, 4), size=classes, p=(0.9, 0.05, 0.025, 0.015, 0.01)).astype(np.float32)
     x = np.random.uniform(0, 10, (n, classes)).astype(np.float32)
     
