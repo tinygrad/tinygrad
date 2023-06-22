@@ -34,9 +34,13 @@ def get_run_onnx(onnx_model: ModelProto):
   def type_parse(type_proto: TypeProto, inp):
     while True:
       attr = type_proto.WhichOneof('value')
-      if attr == 'sequence_type': return (len(inp),  *inp[0].shape)
-      if attr != 'tensor_type': type_proto = getattr(type_proto, attr).elem_type
-      else: return tuple(x.dim_value for x in getattr(type_proto, attr).shape.dim)
+      if attr == 'tensor_type': return tuple(x.dim_value for x in getattr(type_proto, attr).shape.dim)
+      elif attr == 'sequence_type': raise NotImplementedError(f"sequence_type is not implemented: {type_proto}")
+      elif attr == 'map_type': raise NotImplementedError(f"map_type is not implemented: {type_proto}")
+      elif attr == 'opaque_type': raise NotImplementedError(f"opaque_type is not implemented: {type_proto}")
+      elif attr == 'sparse_tensor_type': raise NotImplementedError(f"sparse_tensor_type is not implemented: {type_proto}")
+      elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
+      else: raise Exception(f"unknown attr: {attr}, {type_proto}")
         
   def buffer_parse(inp: TensorProto) -> Tensor:
     if inp.data_type in (1,10,6,7):
@@ -137,7 +141,10 @@ def get_run_onnx(onnx_model: ModelProto):
       elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt.get('alpha', 1.0))
       elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt.get('perm', list(range(len(inp[0].shape))[::-1])))
-      elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])  if 'axes' in opt else inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in safe_numpy(inp[1])]) #HACK inp[1] is axes for some tests
+      elif n.op_type == "Squeeze": 
+        axes = opt['axes'] if 'axes' in opt else safe_numpy(inp[1])
+        axes = [x if x >= 0 else x+inp[0].ndim for x in axes]
+        ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in axes])
       elif n.op_type == "Div":
         # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
         ret = inp[0].div(inp[1])
@@ -149,13 +156,6 @@ def get_run_onnx(onnx_model: ModelProto):
         elif 'value_ints' in opt: ret = Tensor(np.array(opt['value_ints'], dtype=np.int64), requires_grad=False)
         else: raise NotImplementedError(f'Constant not implemented for {opt}')
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
-      elif n.op_type == "Resize":
-        # TODO: this is handcoded for YOLOv8
-        scales = safe_numpy(inp[2])
-        assert all([int(x) == x and x >= 1 for x in scales])
-        ret = inp[0].reshape([val for pair in zip(inp[0].shape, [1] * len(scales)) for val in pair])
-        ret = ret.expand([val for pair in zip(inp[0].shape, [int(x) for x in scales]) for val in pair])
-        ret = ret.reshape([x*y for x,y in zip(inp[0].shape, [int(x) for x in scales])])
       elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
         if all([isinstance(x, Tensor) for x in inp]) and (len(inp[0].shape) != len(inp[1].shape)) and (prod(inp[0].shape) == prod(inp[1].shape)):
           inp[1] = inp[1].reshape(inp[0].shape)
@@ -181,24 +181,33 @@ def get_run_onnx(onnx_model: ModelProto):
         continue
       elif n.op_type == "Slice":
         assert onnx_model_version >= 10, f'only onnx version >= 10 supported for slice'
-        arg = [(0,x) for x in inp[0].shape]
+        arg = [(0,x,1) for x in inp[0].shape]
+        shrink_args = [(0,x) for x in inp[0].shape]
         starts, ends = inp[1:3]
         axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3])
-        steps = safe_numpy(inp[4])[0] if len(inp) > 4 else 1
+        steps = safe_numpy(inp[4]) if len(inp) > 4 else [1]*inp[0].ndim
         starts, ends = safe_numpy(starts.cast(dtypes.int32)).tolist(), safe_numpy(ends.cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
-        if steps not in [1, -1]: raise NotImplementedError(f"steps={steps}")
+        shrink = False # VERY HACKY BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise Tensor.reshape() has to allow 0 in newshape 
         for i,axis in enumerate(axes.tolist()):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
           starts[i] = starts[i] + inp[0].shape[axis] if starts[i] < 0 else starts[i]
           ends[i] = ends[i] + inp[0].shape[axis] if ends[i] < 0 else ends[i]
           starts[i] = max(0, min(starts[i], inp[0].shape[axis]))
           ends[i] = max(0, min(ends[i], inp[0].shape[axis]))
-          # if starts[i] == 0 and ends[i] == inp[0].shape[axis]: ends[i] += 1
-          arg[axis] = (starts[i] if starts[i] >= 0 else inp[0].shape[axis]+starts[i], ends[i] if ends[i] >= 0 else inp[0].shape[axis]+ends[i])
+          if starts[i] == ends[i]: 
+            shrink_args[axis] = (starts[i], ends[i])
+            shrink = True
+          elif starts[i] > ends[i] and steps[i] >= 0:
+            steps[i] = -steps[i]
+            arg[axis] = (starts[i], ends[i], steps[i])
+          else: 
+            arg[axis] = (starts[i], ends[i], steps[i])
         print(starts, ends, axes, steps)
         print(arg)
         print('lol')
-        ret = inp[0].slice(arg=arg) if steps == 1 else inp[0].slice(arg=arg)[::-1]
+        print(shrink_args)
+        print(tuple([slice(st,ed,step) for st,ed,step in arg]))
+        ret = inp[0].shrink(tuple(shrink_args)) if shrink else inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
       elif n.op_type == "Shrink":
         bias = opt['bias'] if 'bias' in opt else 0
         ret = (inp[0] < -opt['lambd'])*(inp[0]+bias) + (inp[0] > opt['lambd'])*(inp[0]-bias)
