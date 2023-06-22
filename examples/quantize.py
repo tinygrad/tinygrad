@@ -69,10 +69,10 @@ LLAMA_STANDARD_CONFIGS = {
 }
 
 def absmax_quantize(x:Tensor):
-    x = x.numpy()
-    xmax = np.max(np.abs(x),1)
-    qm = np.round(x.T/xmax*127.)
-    return Tensor(qm).T.cast(dtypes.int8), Tensor(xmax).cast(dtypes.float16)
+  x = x.numpy()
+  xmax = np.max(np.abs(x),1)
+  qm = np.round(x.T/xmax*127.)
+  return Tensor(qm).T.cast(dtypes.int8), Tensor(xmax).cast(dtypes.float16)
 
 if __name__ == "__main__":
   Tensor.no_grad = True
