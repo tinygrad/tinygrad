@@ -11,7 +11,7 @@ from tinygrad.tensor import Tensor, Device
 from tinygrad import nn
 from tinygrad.helpers import getenv
 from tinygrad.nn import optim
-from tinygrad.ops import GlobalCounters
+from tinygrad.ops import GlobalCounters, MovementOps, ReduceOps
 from tinygrad.lazy import PUSH_PERMUTES
 
 class CLCache():
@@ -77,7 +77,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     img = Tensor.randn(1, 3, 224, 224)
     with CLCache(223): # NOTE: this is way too high
       out = model.forward(img)
-      assert len(GlobalCounters.cache) == 0, "ViT prerealized?"
+      assert len(GlobalCounters.cache) == 0, f"ViT prerealized?"
       out.realize()
 
   def test_llama(self):
@@ -143,6 +143,7 @@ class TestOptWChild(unittest.TestCase):
     with CLCache():
       c = (a*b).sum()
       d = c+1
+      e = c+2
       d.realize()
       assert len(GlobalCounters.cache) == 2, "don't fuse if you have children"
 
@@ -239,9 +240,9 @@ class TestOpt(unittest.TestCase):
     c1 = nn.Conv2d(3,32,3)
     bn = nn.BatchNorm2d(32, track_running_stats=False)
     # precache the bn
-    bn(c1(img)).relu().realize()
+    img_conv = bn(c1(img)).relu().realize()
     with CLCache():
-      bn(c1(img)).relu().realize()
+      img_conv = bn(c1(img)).relu().realize()
       assert len(GlobalCounters.cache) == 1, f"optimizer didn't fold conv-batchnorm at test time, got {len(GlobalCounters.cache)}"
 
   def test_fold_conv_batchnorm(self):
