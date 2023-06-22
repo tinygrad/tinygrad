@@ -100,7 +100,7 @@ The current recommended way to install tinygrad is from source.
 ```sh
 git clone https://github.com/geohot/tinygrad.git
 cd tinygrad
-python3 -m pip install -e . # or `py3 -m pip install -e .` if you are on windows
+python3 -m pip install -e . # or `python3 -m pip install -e .` if you are on windows
 ```
 Don't forget the `.` at the end!
 
