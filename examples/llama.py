@@ -4,19 +4,29 @@
 #typeguard.importhook.install_import_hook('tinygrad')
 
 from pathlib import Path
-import sys, argparse, math, platform
+import sys, argparse, math
 import numpy as np
-from tqdm import tqdm
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple
 
-from tinygrad.helpers import dtypes, getenv, DEBUG
+from tinygrad.helpers import getenv, DEBUG
 from tinygrad.lazy import Device
 from extra.helpers import Timing
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
 from tinygrad.ops import GlobalCounters
 from tinygrad.jit import TinyJit
+
+#TODO: actually do multiply in 8 bit
+class AQLinear:
+  weight: Tensor
+  scale: Tensor
+  def __init__(self, in_features:int, out_features:int):
+    self.weight = Tensor.ones(out_features, in_features)
+    self.scale = Tensor.ones(out_features)
+
+  def __call__(self, x:Tensor) -> Tensor:
+    return x.dot(absmaxdequantize(self.weight, self.scale).transpose())
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
@@ -51,8 +61,8 @@ class RMSNorm:
     return (x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()) * self.weight
 
 class Attention:
-  def __init__(self, dim, n_heads):
-    self.wq, self.wk, self.wv, self.wo = [Linear(dim, dim, bias=False) for _ in range(4)]
+  def __init__(self, dim, n_heads, linear):
+    self.wq, self.wk, self.wv, self.wo = [linear(dim, dim) for _ in range(4)]
     self.n_heads = n_heads
     self.head_dim = dim // n_heads
 
@@ -92,21 +102,18 @@ class Attention:
     return self.wo(output)
 
 class FeedForward:
-  def __init__(self, dim, hidden_dim, multiple_of):
-    # TODO: what is this?
-    hidden_dim = int(2 * hidden_dim / 3)
-    hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
-    self.w1 = Linear(dim, hidden_dim, bias=False)
-    self.w2 = Linear(hidden_dim, dim, bias=False)
-    self.w3 = Linear(dim, hidden_dim, bias=False)
+  def __init__(self, dim, interm_size, linear):
+    self.w1 = linear(dim, interm_size)
+    self.w2 = linear(interm_size, dim)
+    self.w3 = linear(dim, interm_size)
 
   def __call__(self, x:Tensor) -> Tensor:
     return self.w2(self.w1(x).silu() * self.w3(x))
 
 class TransformerBlock:
-  def __init__(self, dim, multiple_of, n_heads, norm_eps):
-    self.attention = Attention(dim, n_heads)
-    self.feed_forward = FeedForward(dim, 4*dim, multiple_of)
+  def __init__(self, dim, interm_size, n_heads, norm_eps, linear):
+    self.attention = Attention(dim, n_heads, linear)
+    self.feed_forward = FeedForward(dim, interm_size, linear)
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
     if getenv("JIT"):
@@ -130,11 +137,11 @@ class TransformerBlock:
     return self._post(x, output)
 
 class Transformer:
-  def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, max_batch_size=32, max_seq_len=1024):
-    self.layers = [TransformerBlock(dim, multiple_of, n_heads, norm_eps) for _ in range(n_layers)]
+  def __init__(self, dim, interm_size, n_heads, n_layers, norm_eps, vocab_size, max_batch_size=32, max_seq_len=1024, linear = Linear):
+    self.layers = [TransformerBlock(dim, interm_size, n_heads, norm_eps, linear) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = Embedding(vocab_size, dim)
-    self.output = Linear(dim, vocab_size, bias=False)
+    self.output = linear(dim, vocab_size)
     self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2))
 
   def __call__(self, tokens:Tensor, start_pos:int):
@@ -162,17 +169,63 @@ WEIGHTS_DIR = Path(__file__).parent.parent / "weights/LLaMA/"
 TOKENIZER_FILENAME = WEIGHTS_DIR / "tokenizer.model"
 VOCAB_SIZE = 32000
 
-args_small = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE}
+LLAMA_STANDARD_CONFIGS = {
+    '3B': {
+        'vocab_size': VOCAB_SIZE,
+        'dim': 3200,
+        'interm_size': 8640,
+        'n_layers': 26,
+        'n_heads': 32,
+        'max_seq_len': 2048,
+        'norm_eps': 1e-6,
+    },
+    '7B': {
+        'vocab_size': VOCAB_SIZE,
+        'dim': 4096,
+        'interm_size': 11008,
+        'n_layers': 32,
+        'n_heads': 32,
+        'max_seq_len': 2048,
+        'norm_eps': 1e-6,
+    },
+    '13B': {
+        'vocab_size': VOCAB_SIZE,
+        'dim': 5120,
+        'interm_size': 13824,
+        'n_layers': 40,
+        'n_heads': 40,
+        'max_seq_len': 2048,
+        'norm_eps': 1e-6,
+    },
+    '30B': {
+        'vocab_size': VOCAB_SIZE,
+        'dim': 6656,
+        'interm_size': 17920,
+        'n_layers': 60,
+        'n_heads': 52,
+        'max_seq_len': 2048,
+        'norm_eps': 1e-6,
+    },
+    '65B': {
+        'vocab_size': VOCAB_SIZE,
+        'dim': 8192,
+        'interm_size': 22016,
+        'n_layers': 80,
+        'n_heads': 64,
+        'max_seq_len': 2048,
+        'norm_eps': 1e-5,
+    },
+    'fake': {
+        'vocab_size': VOCAB_SIZE,
+        'dim': 128,
+        'interm_size': 256,
+        'n_layers': 8,
+        'n_heads': 8,
+        'max_seq_len': 2048,
+        'norm_eps': 1e-6,
+    },
+}
 
-args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_7B_FILENAME = WEIGHTS_DIR / "7B/consolidated.00.pth"
-
-# TODO: make this model work
-args_13B = {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_13B_0_FILENAME = WEIGHTS_DIR / "13B/consolidated.00.pth"
-WEIGHTS_13B_1_FILENAME = WEIGHTS_DIR / "13B/consolidated.01.pth"
-
-# **** helper functions ****
 def sample(logits, temperature):
   if temperature < 1e-6:
     # so close to 0 we use argmax
@@ -181,6 +234,9 @@ def sample(logits, temperature):
     probs = (logits / temperature).softmax()
     probs = probs.numpy().flatten()
     return int(np.random.choice(len(probs), p=probs))
+
+def absmaxdequantize(x:Tensor, xmax:Tensor):
+    return (x.cast(xmax.dtype).T * xmax / 127.).T
 
 # **** main code ****
 
@@ -203,8 +259,9 @@ if __name__ == "__main__":
   parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
   parser.add_argument('--large', action='store_true', help="Use the 13B model instead of the 7B one")
   parser.add_argument('--tinyfake', action='store_true', help="Use the fake very small model")
+  parser.add_argument('--quantized', action='store_true', help="Use the quantized model")
   args = parser.parse_args()
-  chatbot = args.prompt == None
+  chatbot = args.prompt is None
 
   """
   # load model (you have to find the weights yourself)
@@ -265,14 +322,21 @@ if __name__ == "__main__":
   """
 
   # disktensor loader isn't fast yet
-  model = Transformer(**args_7B)
-  from tinygrad.state import torch_load, load_state_dict
-  load_state_dict(model, torch_load(WEIGHTS_7B_FILENAME), strict=False)
+  from tinygrad.state import load_state_dict
+  if args.quantized:
+    model = Transformer(**LLAMA_STANDARD_CONFIGS["7B"], linear=AQLinear)
+    from tinygrad.state import safe_load
+    state_dict = safe_load(WEIGHTS_DIR / "7B/llama_7B_q8a.safetensors")
+  else:
+    from tinygrad.state import torch_load
+    model = Transformer(**LLAMA_STANDARD_CONFIGS["7B"])
+    state_dict = torch_load(WEIGHTS_DIR / "7B/consolidated.00.pth")
+  load_state_dict(model, state_dict, strict=False)
 
   # *** prompt engineers work here ****
 
   if args.personality.lower() == "stacy":
-    pre_prompt = f"""Consider that the following is conversation between an AI assistant named Stacy and User
+    pre_prompt = """Consider that the following is conversation between an AI assistant named Stacy and User
 You are Stacy!
 You have been a rapper your whole life who struggled with bipolar disorder. You called yourself lil stacy.
 You love to answer questions and you are very good at it. Sometimes you answer in rap form.
@@ -293,7 +357,7 @@ After you are done speaking, output [EOS]. You are not the User.
     pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
   elif args.personality.lower() == "george":
     print("WARNING: AI George Hotz is terrible and is completely disowned by the real George Hotz. Stacy is much smarter.")
-    pre_prompt = f"""Consider that the following is conversation between an AI assistant named George and User
+    pre_prompt = """Consider that the following is conversation between an AI assistant named George and User
 You are an AI version of George Hotz. You act as much as you can like George.
 You are one of the greatest computer experts in the world.
 You have singlehandedly won programming and hacking competitions.
@@ -316,7 +380,7 @@ After you are done speaking, output [EOS]. You are not the User.
     end_delim = " [EOS]\n"
     pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
   elif args.personality.lower() == "gary":
-    pre_prompt = f"""Consider that the following is conversation between an AI assistant named Gary and User
+    pre_prompt = """Consider that the following is conversation between an AI assistant named Gary and User
 You are Gary!
 You have sold used cars your entire life. You are defensive about this fact, because your family belittles you.
 You try to answer questions well, but you always manage to shill for buying cars, Fords, Hyundais, and Toyotas
@@ -335,7 +399,7 @@ After you are done speaking, output [EOS]. You are not the User.
     end_delim = " [EOS]\n"
     pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
   elif args.personality.lower() == "lexie":
-    pre_prompt = f"""Consider that the following is conversation between an attractive young girl named Lexie and a handsome man named Chad
+    pre_prompt = """Consider that the following is conversation between an attractive young girl named Lexie and a handsome man named Chad
 You are Lexie!
 You grew up in Ohio, but moved out to LA after college to try to become an actress.
 Making it as an actress was hard, so you started doing onlyfans instead. It's much easier, and you enjoy it a lot.
