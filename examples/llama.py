@@ -217,9 +217,9 @@ LLAMA_STANDARD_CONFIGS = {
     },
     'fake': {
         'vocab_size': VOCAB_SIZE,
-        'dim': 128,
-        'interm_size': 256,
-        'n_layers': 8,
+        'dim': 512,
+        'interm_size': 768,
+        'n_layers': 4,
         'n_heads': 8,
         'max_seq_len': 2048,
         'norm_eps': 1e-6,
