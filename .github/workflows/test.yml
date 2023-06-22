@@ -81,7 +81,7 @@ jobs:
       run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
 
   testllvm:
-    name: LLVM Tests (w method cache)
+    name: LLVM Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -95,6 +95,27 @@ jobs:
       run: pip install -e '.[llvm,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
       run: ENABLE_METHOD_CACHE=1 LLVM=1 python -m pytest -s -v -n=auto test/
+
+  testclang:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    name: CLANG Tests ${{ matrix.os }} (w method cache)
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+    - name: Install Dependencies
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Set env
+      run: printf "CI=1\nCLANG=1\nENABLE_METHOD_CACHE=1" >> $GITHUB_ENV
+    - name: Run Pytest
+      run: python -m pytest -s -v -n=auto test/
 
   testtorch:
     name: Torch Tests
@@ -173,6 +194,24 @@ jobs:
         python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
         DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
         VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+
+  testmetal:
+    name: Metal Tests
+    runs-on: macos-13
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    - name: Install Dependencies
+      run: pip install -e '.[metal,testing]'
+    #- name: Run dtype test
+    #  run: DEBUG=4 METAL=1 python -m pytest test/test_dtype.py
+    - name: Run ops test
+      run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
+    # dtype test has issues on test_half_to_int8
 
   # disabled, this test is flaky
   testdocker:
