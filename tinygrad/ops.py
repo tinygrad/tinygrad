@@ -1,7 +1,7 @@
 from __future__ import annotations
-import functools, itertools, operator, random, time
+import functools, operator, time
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Callable, ClassVar
+from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Callable
 from tinygrad.helpers import prod, DEBUG, getenv, GlobalCounters, DType, colored, ansilen
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer, RawConst
@@ -95,8 +95,9 @@ class ASTRunner:
     return self(rawbufs)
 
   def __call__(self, rawbufs:List[RawBuffer], jit=False, force_wait=False) -> Optional[float]:
-    if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs, allow_cache=(getenv("OPTLOCAL") >= 2))
-    if et := self.clprg(self.global_size, self.local_size, *rawbufs, wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
+    if et := self.clprg((self.global_size + [1]*(3-len(self.global_size))) if self.global_size is not None else None,
+                        (self.local_size + [1]*(3-len(self.local_size))) if self.local_size is not None else None,
+                        *rawbufs, wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
     if DEBUG >= 2:
       print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(29-ansilen(self.display_name))) if self.display_name is not None else self.name:26s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {int(self.op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/(et*1e9):8.2f} GFLOPS, {self.mem_estimate/(et*1e9):7.2f} GB/s)"))
@@ -105,26 +106,6 @@ class ASTRunner:
     GlobalCounters.global_mem += self.mem_estimate
     if getenv("EARLY_STOPPING") and GlobalCounters.kernel_count == getenv("EARLY_STOPPING"): exit(0)
     return et
-
-  def timeit(self, rawbufs:List[RawBuffer], local_override=None) -> float:
-    try: return self.clprg(self.global_size, local_override if local_override is not None else self.local_size, *rawbufs, wait=True)
-    except Exception: return float('inf')
-
-  optlocal_cache: ClassVar[Any] = None
-  def optimize_local_size(self, rawbufs:List[RawBuffer], preserve_output=False, allow_cache=False) -> List[int]:
-    assert self.global_size is not None, "needs a global size to optimize local size"
-    if allow_cache:
-      import dbm, pickle
-      if ASTRunner.optlocal_cache is None: ASTRunner.optlocal_cache = dbm.open('/tmp/optlocal.db', 'c')
-      if self.prg not in ASTRunner.optlocal_cache: ASTRunner.optlocal_cache[self.prg] = pickle.dumps(self.optimize_local_size(rawbufs, preserve_output, allow_cache=False)) # pylint: disable=unsupported-membership-test,unsupported-assignment-operation
-      return pickle.loads(ASTRunner.optlocal_cache[self.prg])
-    if preserve_output or any(x == rawbufs[0] for x in rawbufs[1:]):  # this is an assignment, replace the output buffer
-      output_replacement = type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype)
-      rawbufs = [output_replacement if x == rawbufs[0] else x for x in rawbufs]
-    MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
-    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in self.global_size]
-    local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
-    return min([(self.timeit(rawbufs, local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
 
 class Compiled:
   def __init__(self, buffer: Type[RawBuffer], codegen, runtime, synchronize=lambda: None):

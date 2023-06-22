@@ -1,7 +1,7 @@
 import pickle
 import numpy as np
 from tqdm import tqdm
-import tempfile, platform
+import tempfile, platform, os
 from collections import defaultdict
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
 from tinygrad.ops import GlobalCounters
@@ -9,13 +9,16 @@ from tinygrad.tensor import Tensor
 from tinygrad.lazy import Device
 from tinygrad.shape.shapetracker import strides_for_shape
 OSX = platform.system() == "Darwin"
+WINDOWS = platform.system() == "Windows"
+
+def temp(x:str) -> str: return os.path.join(tempfile.gettempdir(), x)
 
 def fetch(url):
   if url.startswith("/"):
     with open(url, "rb") as f:
       return f.read()
-  import os, hashlib, tempfile
-  fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())
+  import hashlib
+  fp = temp(hashlib.md5(url.encode('utf-8')).hexdigest())
   download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
   with open(fp, "rb") as f:
     return f.read()
@@ -24,8 +27,8 @@ def fetch_as_file(url):
   if url.startswith("/"):
     with open(url, "rb") as f:
       return f.read()
-  import os, hashlib, tempfile
-  fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())
+  import hashlib
+  fp = temp(hashlib.md5(url.encode('utf-8')).hexdigest())
   download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
   return fp
 
