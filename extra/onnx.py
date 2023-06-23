@@ -65,6 +65,7 @@ def get_run_onnx(onnx_model: ModelProto):
     elif a.type == AttributeProto.TENSOR: return buffer_parse(a.t) # TENSOR
     elif a.type == AttributeProto.FLOATS: return tuple(float(x) for x in a.floats)
     elif a.type == AttributeProto.INTS: return tuple(int(x) for x in a.ints)
+    elif a.type == AttributeProto.GRAPH: raise NotImplementedError(f"attribute graph not implemented {a}")
     else: raise Exception(f"can't parse {a.type} {a}")
   def attribute_to_dict(a: RepeatedCompositeFieldContainer[AttributeProto]): return {x.name:attribute_parse(x) for x in a}
 
@@ -142,8 +143,9 @@ def get_run_onnx(onnx_model: ModelProto):
       elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt.get('perm', list(range(len(inp[0].shape))[::-1])))
       elif n.op_type == "Squeeze": 
+        print(inp[0].numpy())
         axes = opt['axes'] if 'axes' in opt else safe_numpy(inp[1])
-        axes = [x if x >= 0 else x+inp[0].ndim for x in axes]
+        axes = [int(x) if x >= 0 else int(x+inp[0].ndim) for x in axes]
         ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in axes])
       elif n.op_type == "Div":
         # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel

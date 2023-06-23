@@ -305,7 +305,7 @@ def Gather(input, indices, axis):
   return ret
 
 '''
-def _gather(array: Tensor, indices: Tensor):
+def _gather(array: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY
   reshape_arg = [1]*array.ndim + [array.shape[-1]]
   return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, array.shape[-1]) == Tensor.arange(array.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, array.shape[-1]))*array).sum(indices.ndim)
 
@@ -323,19 +323,20 @@ def Gather(input, indices, axis=0):
   else:
     ret = _gather(input, indices)
   reshape_arg = []
+  ret = ret.transpose(ax1=axis, ax2=0)
   for idx, shape in enumerate(ret.shape):
     if idx == axis:
       reshape_arg.extend(indices_shape)
     else:
       reshape_arg.append(shape)
-  return ret.transpose(ax1=axis, ax2=0).reshape(*reshape_arg)
+  return ret.reshape(*reshape_arg)
 
 def GatherElements(input, indices, axis):
   indices = indices.transpose(ax1=axis, ax2=0)
   permute_args = list(range(input.ndim))
   permute_args[0], permute_args[axis] = permute_args[axis], permute_args[0]
   permute_args.append(permute_args.pop(0))
-  input = input.permute(*permute_args).slice([(0,x) if i == input.ndim-1 else (0, indices.shape[i+1]) for i,x in enumerate(input.shape)])
+  input = input.permute(*permute_args)
   return _gather(input, indices).transpose(ax1=0, ax2=axis)
 
 def ArrayFeatureExtractor(input, indices):
