@@ -86,7 +86,6 @@ def get_run_onnx(onnx_model: ModelProto):
   def run_onnx(inputs={}, debug=False):
     if getenv("DEBUGONNX"): debug = True
     input_tensors: Dict[str,Tensor] = {}
-    intermediate_tensors: Dict[str,Tensor] = {}
 
     # get inputs
     for inp in onnx_model.graph.input:
@@ -106,13 +105,15 @@ def get_run_onnx(onnx_model: ModelProto):
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
 
-    def fetch_tensor(x: str):
-      if x in tensors: return tensors[x]
-      if x in intermediate_tensors: return intermediate_tensors[x]
-      if x != str(): return input_tensors[x]
-      return None
-
     def run_onnx_graph(graph, attribute_dict, output_tensor_names):
+      intermediate_tensors: Dict[str,Tensor] = {}
+
+      def fetch_tensor(x: str):
+        if x in tensors: return tensors[x]
+        if x in intermediate_tensors: return intermediate_tensors[x]
+        if x != str(): return input_tensors[x]
+        return None
+
       for num,n in enumerate(graph.node):
         inp: List[Tensor] = []
         if debug: print("inputs:")
