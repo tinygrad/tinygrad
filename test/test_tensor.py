@@ -116,41 +116,27 @@ class TestTinygrad(unittest.TestCase):
   def test_cross_entropy(self):
     np.random.seed(1337)
     n, classes = 100, 10
-    label = np.random.randint(0, classes, n) # torch requires int64
-    label_mask = np.random.choice((0, 1), size=n, p=(0.3, 0.7))
-    weights = np.random.choice((0, 1, 2, 3, 4), size=classes, p=(0.9, 0.05, 0.025, 0.015, 0.01)).astype(np.float32) # torch requires float
     x = np.random.uniform(0, 10, (n, classes)).astype(np.float32)
+    label_mask = np.random.choice((0, 1), size=n, p=(0.3, 0.7))
+    labels = (label := np.random.randint(0, classes, n), np.where(label_mask == 0, -100, label))
+    weights = np.random.choice((0, 1, 2, 3, 4), size=classes, p=(0.9, 0.05, 0.025, 0.015, 0.01)).astype(np.float32), None # torch requires float
+    reductiuons = ['mean', 'sum', 'none']
     
-    # test cases
-    ignore_index = -100
-    reduction_choices = ['mean', 'sum', 'none']
-    mask_labels_choices = [False, True]
-    apply_weights_choices = [False, True]
-    
-    for reduction_choice, mask_label_choice, apply_weight_choice in itertools.product(reduction_choices, mask_labels_choices, apply_weights_choices):
-      l = label.copy() if mask_label_choice else label
-      if mask_label_choice:
-        l[label_mask == 0] = ignore_index
-
+    for label, w, reduction in itertools.product(labels, weights, reductiuons):
       # tinygrad
-      X = Tensor(x)
-      X = X.cross_entropy(
-        Tensor(l),
-        weight=Tensor(weights) if apply_weight_choice else None, 
-        reduction=reduction_choice,
+      X = Tensor(x).cross_entropy(
+        Tensor(label),
+        weight=Tensor(w) if w is not None else None, 
+        reduction=reduction,
       )
-      
       # torch
-      X_torch = torch.tensor(x)
-      X_torch = torch.nn.functional.cross_entropy(
-        X_torch, 
-        torch.tensor(l),
-        weight=torch.tensor(weights) if apply_weight_choice else None,
-        reduction=reduction_choice,
+      Xt = torch.nn.functional.cross_entropy(
+        torch.tensor(x), 
+        torch.tensor(label),
+        weight=torch.tensor(w) if w is not None else None,
+        reduction=reduction,
       )
-
-      # cmp
-      np.testing.assert_allclose(X.cpu().numpy(), X_torch.cpu().numpy(), atol=1e-6, rtol=1e-6)
+      np.testing.assert_allclose(X.cpu().numpy(), Xt.cpu().numpy(), atol=1e-6, rtol=1e-6)
 
   #@unittest.skipUnless(Device.DEFAULT == Device.CPU, "float64 not supported on GPU")
   @unittest.skip("float64 support broken")
