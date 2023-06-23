@@ -1,7 +1,9 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
 import sys
+import string
 import pathlib
+import difflib
 import base64
 import multiprocessing
 import numpy as np
@@ -11,6 +13,7 @@ from tinygrad.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
+from datasets.librispeech import ci, BASEDIR
 
 # TODO: you have written this fifteen times
 class MultiHeadAttention:
@@ -205,10 +208,11 @@ if __name__ == "__main__":
 
   # TODO: clean up, clean up, everybody clean up
   if getenv("TEST"):
-    from datasets.librispeech import ci, BASEDIR
+    diff = difflib.Differ()
     for c in ci:
       fn = BASEDIR / c["files"][0]["fname"]
-      print(fn.stem)
+      print("-" * 128)
+      print(f"{fn.stem}\n")
       waveform, sample_rate = torchaudio.load(fn, normalize=True)
       log_spec = prep_audio(waveform, sample_rate)
       lst = [enc._special_tokens["<|startoftranscript|>"]]
@@ -218,9 +222,10 @@ if __name__ == "__main__":
         out.realize()
         idx = out[0,-1].numpy().argmax()
         lst.append(idx)
-      # TODO: sentence similarty score?
-      print("predicted: " + "".join(enc.decode(lst[2:-1])).lower().replace(",", "")) # remove special tokens for comparison
-      print("transcript: " + c["transcript"])
+      predicted = "".join(enc.decode(lst[2:-1])).lower().translate(str.maketrans("", "", string.punctuation))
+      transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
+      sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
+      print(f"\nsimilarity score: {difflib.SequenceMatcher(None, predicted, transcript).ratio():.2f}")
   elif len(sys.argv) > 1:
     # offline
     waveform, sample_rate = torchaudio.load(sys.argv[1], normalize=True)
