@@ -620,11 +620,13 @@ class Tensor:
   # note: the way onehot is implemented, if value is out of range, all 0s are returned
   def onehot(self, num_classes) -> Tensor: 
     assert dtypes.is_int(self.dtype), f"onehot only supported for ints, got {self.dtype}"
-    return self.reshape(list(self.shape)+[1]).repeat([1]*len(self.shape)+[num_classes]).eq(Tensor.arange(num_classes, dtype=dtypes.int32)) # might not be ideal type, could be bool or int64 (convenience when type is passed further)
+    return self.reshape(list(self.shape)+[1]).repeat([1]*len(self.shape)+[num_classes]).eq(Tensor.arange(num_classes, dtype=self.dtype)) # could cast to smaller type, currently just same as self
   
   def negative_log_likelihood(self, target:Tensor, weight:Optional[Tensor] = None, ignore_index=-100, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor: 
-    assert target.shape == self.shape[:-1], f"Y dimensions {target.shape} must match all except last self dimension {self.shape}"
-    assert weight is None or (len(weight.shape) == 1 and weight.shape[0] == self.shape[-1]), f"weight dimensions {weight.shape} must match last self dimension {self.shape[-1]}"
+    assert self.dtype in (dtypes.float32, dtypes.float64), f"applying negative_log_likelihood only supported for dtype float32 and float64, got {self.dtype}" # float16 multiplications with int32 and int64 results in int dtype, not float
+    assert target.shape == self.shape[:-1], f"target shape must match all except last self dimension {self.shape}, got {target.shape}"
+    assert weight is None or weight.dtype in (dtypes.float32, dtypes.float64) or dtypes.is_int(weight.dtype), f"weight only supported for dtype float32 and float64 or ints, got {self.dtype}"
+    assert weight is None or (len(weight.shape) == 1 and weight.shape[0] == self.shape[-1]), f"weight shape must match last self dimension {self.shape[-1]}, got {weight.shape}"
     # label_valid = (Y >= 0).mul(Y < self.shape[-1]).add(Y == ignore_index).minimum(1).min().cast(dtypes.bool)
     # assert label_valid == True, "Cross entropy label out of range or not 'ignore_index' value" # cant check without realizing tensor :(  
     num_classes = self.shape[-1]

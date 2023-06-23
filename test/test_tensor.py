@@ -116,12 +116,12 @@ class TestTinygrad(unittest.TestCase):
   def test_cross_entropy(self):
     np.random.seed(1337)
     n, classes = 100, 10
-    x = np.random.random_sample((n, classes)).astype(np.float16)
-    y = np.random.randint(0, classes, n, dtype=np.int32)
+    x = np.random.random_sample((n, classes)).astype(np.float32)
+    y = np.random.randint(0, classes, n, dtype=np.int64)
     label_mask = np.random.randint(2, size=n)
     y[label_mask == 0] = -100 # ignore these
     
-    weight_options = None, np.random.randint(0, 10, size=classes).astype(np.float32)
+    weight_options = None, np.random.random_sample(classes).astype(np.float32) * 10
     reduction_options = ['mean', 'sum', 'none']
         
     for w, reduction in itertools.product(weight_options, reduction_options):
@@ -130,11 +130,10 @@ class TestTinygrad(unittest.TestCase):
       W, Wt = (Tensor(w), torch.tensor(w)) if w is not None else (None, None)
       
       Z = X.cross_entropy(Y, weight=W, reduction=reduction)
-      print(Z.numpy())
-      # Zt = torch.nn.functional.cross_entropy(Xt, Yt, weight=Wt, reduction=reduction)
+      Zt = torch.nn.functional.cross_entropy(Xt, Yt, weight=Wt, reduction=reduction)
 
       assert Z.dtype == X.dtype, f"Expected cross_entropy to not change type, got {Z.dtype}, expected {X.dtype}" # cross_entropy should not change the dtype, or should it? 
-      # np.testing.assert_allclose(Z.cpu().numpy(), Zt.cpu().numpy(), atol=1e-6, rtol=1e-6)
+      np.testing.assert_allclose(Z.cpu().numpy(), Zt.cpu().numpy(), atol=1e-6, rtol=1e-6)
 
   #@unittest.skipUnless(Device.DEFAULT == Device.CPU, "float64 not supported on GPU")
   @unittest.skip("float64 support broken")
