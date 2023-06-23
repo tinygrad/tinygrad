@@ -319,10 +319,16 @@ def Gather(input, indices, axis=0):
     repeat_arg = [1]*(input.ndim-1) + [input.shape[-2]]
     indices = indices.unsqueeze(indices.ndim).repeat(repeat_arg)
     ret = _gather(input, indices)
-    if rem_shape: ret = ret.reshape(*[indices.shape[0]], *rem_shape)
+    if rem_shape: ret = ret.reshape(*[indices.shape[0]] + rem_shape)
   else:
     ret = _gather(input, indices)
-  return ret.transpose(ax1=axis, ax2=0).reshape(*[i_shape if idx == axis else shape for idx, shape in enumerate(ret.shape) for i_shape in indices_shape])
+  reshape_arg = []
+  for idx, shape in enumerate(ret.shape):
+    if idx == axis:
+      reshape_arg.extend(indices_shape)
+    else:
+      reshape_arg.append(shape)
+  return ret.transpose(ax1=axis, ax2=0).reshape(*reshape_arg)
 
 def GatherElements(input, indices, axis):
   indices = indices.transpose(ax1=axis, ax2=0)
