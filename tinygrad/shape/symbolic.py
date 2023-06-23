@@ -58,6 +58,7 @@ class Node:
 
 
   @staticmethod
+  @functools.cache
   def factorize(nodes: List[Node]):
     mul_groups: Dict[Node, int] = {}
     for x in nodes:
@@ -79,17 +80,15 @@ class Node:
         flat = node.flat_components_grouped_num  # last component is always numnode
         new_nodes += flat[:-1]
         num_node_sum += flat[-1].b
-      elif node.__class__ is NumNode: 
-        num_node_sum += node.b
-      else: 
-        new_nodes.append(node)
-
+      elif node.__class__ is NumNode: num_node_sum += node.b
+      else: new_nodes.append(node)
     if not new_nodes: return NumNode(num_node_sum)
-    # factorize nodes, but only if duplicate a-nodes exist. Check before adding the NumNode
+
+    # factorize mulnodes, but only if duplicate a-nodes exist
     if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes): 
 
       if num_node_sum: new_nodes.append(NumNode(num_node_sum))
-      new_nodes = Node.factorize(new_nodes)
+      new_nodes = Node.factorize(tuple(new_nodes))
     elif num_node_sum: new_nodes.append(NumNode(num_node_sum))
 
     return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
@@ -168,35 +167,30 @@ class SumNode(RedNode):
     if b == 1: return self
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
     factors: List[Node] = []
-    tmp_nofactor: List[Node] = []
-    nofactor: List[Node] = []
-    for x in self.flat_components: factors.append(x) if x.__class__ in (MulNode, NumNode) and x.b%b == 0 else nofactor.append(x)
-    if len(factors) > 0:
+    nofactor_mul: List[MulNode] = []
+    nofactor_other: List[Node] = []
+
+    for x in self.flat_components: 
+      if isinstance(x,( MulNode, NumNode)) and x.b%b == 0: factors.append(x)
+      else: nofactor_mul.append(x) if isinstance(x, MulNode) else nofactor_other.append(x)
+
+    if factors:
       factor_term = []
       for x in factors:
         if x.__class__ is MulNode: factor_term.append(x.a if x.b//b == 1 else MulNode(x.a, x.b//b))
         elif x.__class__ is NumNode: factor_term.append(NumNode(x.b//b))
 
-      mul, other = [],[]
-      print("\n", factors, nofactor,b, "\n")
-      for x in nofactor: mul.append(x) if x.__class__ is MulNode else other.append(x)
-      if mul:
-        gcds = [gcd(x.b, b) if  x.__class__ is MulNode else None for x in mul]
-        t = min(gcds) if gcds and None not in gcds else 1
-        # these don't have to be the same, just having a common factor
-        if t > 1 and all([x%t == 0 for x in gcds]):
-          nofactor_term = Node.sum([Node.sum([(x.a * (x.b//t)) for x in mul])//(b//t)] + Node.sum(other)//b if other else [])
-        else:
-          nofactor_term = Node.sum(nofactor)//b
-      else:
-        nofactor_term = Node.sum(nofactor)//b
-      return Node.sum(factor_term + [nofactor_term])
+      gcds = [gcd(x.b, b) if x.__class__ is MulNode else 1 for x in nofactor_mul]
+      if gcds and (t := min(gcds)) > 1 and all([x%t == 0 for x in gcds]): 
+        nofactor_term = [Node.sum([Node.sum([(x.a * (x.b//t)) for x in nofactor_mul])//(b//t)] + ([Node.sum(nofactor_other)//b] if nofactor_other else []))]
+      else: nofactor_term = [Node.sum(nofactor_mul + nofactor_other)//b]
+
+      return Node.sum(factor_term + nofactor_term)
     else:
-      muls = [x.b for x in nofactor if x.__class__ is MulNode]
-      for m in muls:
-        if m > 1 and b%m == 0:
-          return (self//m)//(b//m)
+      for m in nofactor_mul:
+        if m.b > 1 and b%m.b == 0: return (self//m.b)//(b//m.b)
       return Node.__floordiv__(self, b, factoring_allowed)
+    
   def __mod__(self, b: int):
     new_nodes = []
     for x in self.nodes:
@@ -218,8 +212,7 @@ class SumNode(RedNode):
     for node in self.flat_components:
       if node.__class__ is NumNode: num_node_sum += node.b
       else: nodes.append(node)
-    nodes.append(NumNode(num_node_sum))
-    return nodes
+    return nodes + [NumNode(num_node_sum)]
 
 class AndNode(RedNode):
   def __mul__(self, b: int): Variable.ands([x*b for x in self.nodes])
