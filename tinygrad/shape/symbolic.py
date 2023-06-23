@@ -166,22 +166,19 @@ class SumNode(RedNode):
   def __floordiv__(self, b: int, factoring_allowed=True): 
     if b == 1: return self
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
-    factors: List[Node] = []
+    factors: List[MulNode] = []
     nofactor_mul: List[MulNode] = []
     nofactor_other: List[Node] = []
 
     for x in self.flat_components: 
-      if isinstance(x,( MulNode, NumNode)) and x.b%b == 0: factors.append(x)
-      else: nofactor_mul.append(x) if isinstance(x, MulNode) else nofactor_other.append(x)
+      if isinstance(x, MulNode): factors.append(x) if  x.b%b == 0 else nofactor_mul.append(x)
+      else: nofactor_other.append(x)
 
     if factors:
-      factor_term = []
-      for x in factors:
-        if x.__class__ is MulNode: factor_term.append(x.a if x.b//b == 1 else MulNode(x.a, x.b//b))
-        elif x.__class__ is NumNode: factor_term.append(NumNode(x.b//b))
+      factor_term = [x.a if x.b//b == 1 else MulNode(x.a, x.b//b) for x in factors]
 
       gcds = [gcd(x.b, b) if x.__class__ is MulNode else 1 for x in nofactor_mul]
-      if gcds and (t := min(gcds)) > 1 and all([x%t == 0 for x in gcds]): 
+      if gcds and (t := min(gcds)) > 1 and all([x.b%t == 0 for x in nofactor_mul]): 
         nofactor_term = [Node.sum([Node.sum([(x.a * (x.b//t)) for x in nofactor_mul])//(b//t)] + ([Node.sum(nofactor_other)//b] if nofactor_other else []))]
       else: nofactor_term = [Node.sum(nofactor_mul + nofactor_other)//b]
 
