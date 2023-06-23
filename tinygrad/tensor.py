@@ -449,22 +449,70 @@ class Tensor:
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
-    if isinstance(padding, (tuple,list)): assert len(padding) == 2*len(HW) or len(padding) == len(HW), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {self.shape}"
-    padding_ = [padding]*2*len(HW) if isinstance(padding, int) else (padding if len(padding) == 2*len(HW) else [p for p in padding for _ in range(2)][::-1])
+    if isinstance(padding, (tuple, list)): assert len(padding) == 2 * len(HW) or len(padding) == len(HW), f"Expected padding of length {2 * len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {self.shape}"
+    padding_ = [padding] * 2 * len(HW) if isinstance(padding, int) else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
+    if not all(x == 3 for x in HW):
 
-    # conv2d is a pooling op (with padding)
-    x = self.pad2d(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
-    rcout, oyx = cout//groups, x.shape[2:-len(HW)]
-    x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW).permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
+      if True:
+        # conv2d is a pooling op (with padding)
+        x = self.pad2d(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
+        rcout, oyx = cout//groups, x.shape[2:-len(HW)]
+        x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW).permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
 
-    # expand the channels with the pool
-    # TODO: this reduces the number of kernels, but it's slower!
-    #x = self.pad2d(padding_)._pool((H,W), stride, dilation, _insert_dims=(cout//groups,))   # (bs, groups*cin, rcout, oy, ox, H, W)
-    #rcout, oy, ox = x.shape[2:5]
-    #x = x.reshape(bs, groups, cin, rcout, oy, ox, H, W).permute(0,1,3,4,5,2,6,7)
+      else:
+        # expand the channels with the pool
+        # TODO: this reduces the number of kernels, but it's slower!
+        x = self.pad2d(padding_)._pool(HW, stride, dilation, _insert_dims=(cout//groups,))   # (bs, groups*cin, rcout, oy, ox, H, W)
+        rcout, *oyx = x.shape[2:-len(HW)]
+        x = x.reshape(bs, groups, cin, rcout, *oyx, *HW).permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
 
-    # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
-    ret = (x * weight.reshape(1, groups, rcout, *[1 for _ in range(len(oyx))], cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
+      # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
+      ret = (x * weight.reshape(1, groups, rcout, *[1 for _ in range(len(oyx))], cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
+    else:
+      # winograd conv
+      # todo: padding edge cases
+      assert(all(x % 2 == 0 and x >= 4 for x in self.shape[-2:]))  # block by 4; ignore odd cases for now
+      HW4 = (4, 4)  # F(2x2,3x3) winograd kernel granularity
+      assert len(HW) == len(HW4)  # only support 2d winograd for now
+      # todo: even pooling
+      x = self.pad2d(padding_)._pool(HW4, stride * 2, dilation)  # double stride for winograd kernel granularity
+      rcout, oyx4 = cout // groups, x.shape[2:-len(HW4)]
+      x = x.reshape(bs, groups, cin, 1, *oyx4, *HW4).expand(bs, groups, cin, rcout, *oyx4, *HW4).permute(0, 1, 3, *[4 + i for i in range(len(oyx4))], 2, *[4 + len(oyx4) + i for i in range(len(HW4))])
+      x = x.permute(*[len(x.shape) - len(HW4) + i for i in range(len(HW4))], *[i for i in range(len(x.shape) - 2)])  # move HW to the front
+      g = weight.reshape(1, groups, rcout, *[1 for _ in range(len(oyx4))], cin, *HW)
+      g = g.permute(*[len(x.shape) - len(HW) + i for i in range(len(HW))], *[i for i in range(len(x.shape) - 2)])  # move HW to the front
+      # make into arrays
+      #x = [[x.shrink([(i, i + 1), (j, j + 1), *[(0, s) for s in x.shape[2:]]]) for j in range(x.shape[1])] for i in range(x.shape[0])]
+      #g = [[g.shrink([(i, i + 1), (j, j + 1), *[(0, s) for s in g.shape[2:]]]) for j in range(g.shape[1])] for i in range(g.shape[0])]
+      # compute 2x2 of g0, g0+g1+g2, g0-g1+g2, g2
+      def compute_g(g_, dim=0):
+        if dim == 2:
+          return g_
+        g0 = compute_g(g_[0], dim=dim+1)
+        ga = compute_g((g_[0] + g_[1] + g_[2]) / 2, dim=dim+1)
+        gb = compute_g((g_[0] - g_[1] + g_[2]) / 2, dim=dim+1)
+        g2 = compute_g(g_[2], dim=dim+1)
+        return Tensor.stack([g0, ga, gb, g2])
+      gfactors = compute_g(g)
+      def _winograd(d, gfactors, dim=0):
+        if dim == 2:
+          # base dot
+          return d * gfactors
+        # winograd dot
+        m1 = _winograd((d[0] - d[2]), gfactors[0], dim=dim+1)
+        m2 = _winograd((d[1] + d[2]), gfactors[1], dim=dim+1)
+        m3 = _winograd((d[2] - d[1]), gfactors[2], dim=dim+1)
+        m4 = _winograd((d[1] - d[3]), gfactors[3], dim=dim+1)
+        r1 = m1 + m2 + m3
+        r2 = m2 - m3 - m4
+        return Tensor.stack([r1, r2])
+      ret = _winograd(x, gfactors)  # outputs 2x2 result from 4x4 block: (H2, W2, bs, groups, rcout, *oyx4, cin)
+      ret = ret.sum(axis=-1)  # sum across cin: (H2, W2, bs, groups, rcout, *oyx4)
+
+      ret = ret.permute([0, *[i for i in range(2, len(ret.shape))], 1])  # move W to end: (H2, bs, groups, rcout, *oyx4, W2)
+      ret = ret.flatten(-2)  # flatten x axis: (H2, bs, groups, rcout, *oyx)
+      ret = ret.permute([*[i for i in range(1, len(ret.shape) - 1)], 0, len(ret.shape)-1])  # interleave H2: (bs, groups, rcout, y, h, x)
+      ret = ret.reshape(bs, cout, *[c * 2 for c in oyx4])
     return ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))
 
   def dot(self, w:Tensor) -> Tensor:
