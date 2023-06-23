@@ -163,30 +163,31 @@ class RedNode(Node):
 
 class SumNode(RedNode):
   def __mul__(self, b: int): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
-  def __floordiv__(self, b: int, factoring_allowed=True): 
+  def __floordiv__(self, b: int, factoring_allowed=True):
     if b == 1: return self
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
-    factors: List[MulNode] = []
-    nofactor_mul: List[MulNode] = []
-    nofactor_other: List[Node] = []
-
+    factors: List[Node] = []
+    nofactor_mul: List[Node] = []
+    nofactor_nonmul: List[Node] = []
     for x in self.flat_components: 
-      if isinstance(x, MulNode): factors.append(x) if  x.b%b == 0 else nofactor_mul.append(x)
-      else: nofactor_other.append(x)
-
-    if factors:
-      factor_term = [x.a if x.b//b == 1 else MulNode(x.a, x.b//b) for x in factors]
-
-      gcds = [gcd(x.b, b) if x.__class__ is MulNode else 1 for x in nofactor_mul]
-      if gcds and (t := min(gcds)) > 1 and all([x.b%t == 0 for x in nofactor_mul]): 
-        nofactor_term = [Node.sum([Node.sum([(x.a * (x.b//t)) for x in nofactor_mul])//(b//t)] + ([Node.sum(nofactor_other)//b] if nofactor_other else []))]
-      else: nofactor_term = [Node.sum(nofactor_mul + nofactor_other)//b]
-
+      if x.__class__ is NumNode and x.b%b == 0: factors.append(x)
+      elif x.__class__ is MulNode: factors.append(x) if x.b%b == 0 else  nofactor_mul.append(x) 
+      else: nofactor_nonmul.append(x)
+      
+    if factors:  # factor out largest possible gcd
+      factor_term = [x.a * x.b//b if isinstance(x, MulNode) else NumNode(x.b//b) for x in factors]
+      if nofactor_mul and not nofactor_nonmul:
+        gcds = [gcd(x.b, b) for x in nofactor_mul]
+        if (t := min(gcds)) > 1 and all([x.b%t == 0 for x in nofactor_mul]): 
+          nofactor_term = [Node.sum([x.a * x.b//t for x in nofactor_mul if isinstance(x, MulNode)])//(b//t)]  # mypy wants the isinstance
+        else:
+          nofactor_term = [Node.sum(nofactor_mul)//b] if nofactor_mul else []
+      else: 
+        nofactor_term = [Node.sum(nofactor_mul+nofactor_nonmul)//b] if nofactor_mul + nofactor_nonmul else []
       return Node.sum(factor_term + nofactor_term)
-    else:
-      for m in nofactor_mul:
-        if m.b > 1 and b%m.b == 0: return (self//m.b)//(b//m.b)
-      return Node.__floordiv__(self, b, factoring_allowed)
+    for m in nofactor_mul:
+      if m.b > 1 and b%m.b == 0: return (self//m.b)//(b//m.b)
+    return Node.__floordiv__(self, b, factoring_allowed)
     
   def __mod__(self, b: int):
     new_nodes = []
