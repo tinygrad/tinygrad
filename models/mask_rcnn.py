@@ -969,8 +969,6 @@ class Pooler:
     self.output_size = output_size
     lvl_min = -math.log2(scales[0])
     lvl_max = -math.log2(scales[-1])
-    # lvl_min = float(-Tensor.log2(Tensor([scales[0]], dtype=dtypes.float32)).numpy()[0])
-    # lvl_max = float(-Tensor.log2(Tensor([scales[-1]], dtype=dtypes.float32)).numpy()[0])
     self.map_levels = LevelMapper(lvl_min, lvl_max)
 
   def convert_to_roi_format(self, boxes):
