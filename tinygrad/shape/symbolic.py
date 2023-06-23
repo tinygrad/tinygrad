@@ -58,7 +58,7 @@ class Node:
 
 
   @staticmethod
-  @functools.cache
+  @functools.lru_cache(maxsize=None)
   def factorize(nodes: List[Node]):
     mul_groups: Dict[Node, int] = {}
     for x in nodes:
