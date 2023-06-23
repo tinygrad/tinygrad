@@ -222,7 +222,7 @@ if __name__ == "__main__":
         out.realize()
         idx = out[0,-1].numpy().argmax()
         lst.append(idx)
-      predicted = "".join(enc.decode(lst[2:-1])).lower().translate(str.maketrans("", "", string.punctuation))
+      predicted = "".join(enc.decode(lst[2:-1]))[1:].lower().translate(str.maketrans("", "", string.punctuation))
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
       sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
       print(f"\nsimilarity score: {difflib.SequenceMatcher(None, predicted, transcript).ratio():.2f}")
