@@ -9,7 +9,10 @@ class X86Codegen(AssemblyCodegen):
   def specialize(self, asm):
     type_to_op_suffix = {dtypes.float32: 'l', dtypes.bool: 'b', dtypes.int32: 'l', dtypes.int64: 'q', dtypes.uint32: 'l', dtypes.uint64: 'q'}
     def inst(instr, reg, fp=False, simd=False): return f"{instr}{'s' if fp else ''}{'p' if simd else ''}{type_to_op_suffix[reg_type[reg.nm]]}"
-    alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.CMPLT: "cmp",  BinaryOps.CMPEQ: "cmp", BinaryOps.MAX: "max",
+    def reg(name, reg): return f"%r{name}" if reg.dtype.itemsize == 8 else f"%e{name}"
+
+    alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", 
+           BinaryOps.CMPLT: "cmp",  BinaryOps.CMPEQ: "cmp", BinaryOps.MAX: "max",
          UnaryOps.NOOP: "mov", UnaryOps.SIN: "call sinf@PLT", UnaryOps.LOG2: "call log2f@PLT", UnaryOps.EXP2: "call exp2f@PLT"}
 
     ins = []
@@ -30,13 +33,21 @@ class X86Codegen(AssemblyCodegen):
     for uop, out, vin, arg in asm:
       if DEBUG >= 5: ins.append(f"# {AssemblyInstruction(uop, out, vin, arg)}")
       if uop == UOps.DEFINE_REGISTER: pass
-      elif uop == UOps.DEFINE_LOCAL: pass
+      elif uop == UOps.DEFINE_LOCAL:
+        local_var_size += arg * 4
+        ins.append(f"movq %rbp, %rax")
+        ins.append(f"subq ${local_var_size}, %rax")
+        ins.append(f"movq %rax, {reg_map[out.nm]}")
       elif uop == UOps.SPECIAL:
         # TODO depending on call convention, get the parms from different places (windows stores everything on the stack)
         # https://en.wikipedia.org/wiki/X86_calling_conventions
-        unix_call_conv = {'buf0': '%rdi', 'buf1': '%rsi', 'buf2': '%rdx', 'buf3': '%rcx', 'buf4': '%r8', 'buf5': '%r9'}
+        unix_call_conv = ['%rdi', '%rsi', '%rdx', '%rcx', '%r8', '%r9']
         if arg.startswith('buf'):
-          ins.append(f"{inst('mov', out)} {unix_call_conv[arg]}, {reg_map[out.nm]}")
+          buf_id = int(arg.replace('buf', ''))
+          if buf_id < len(unix_call_conv):
+            ins.append(f"movq {unix_call_conv[buf_id]}, {reg_map[out.nm]}")
+          else:
+            raise Exception()
           # TODO pop remaining args from stack
       elif uop == UOps.ALU:
         if dtypes.is_float(out.dtype):
@@ -53,6 +64,10 @@ class X86Codegen(AssemblyCodegen):
           ins.append(f"{inst('mov', vin[0])} {reg_map[vin[1].nm] if not isinstance(vin[1], int) else f'${vin[1]}'}, {acc_reg_b}")
           if arg == BinaryOps.MUL:
             ins.append(f"{inst(alu[arg], vin[0])} {acc_reg_b}")
+          elif arg == BinaryOps.MOD:
+            ins.append(f"cltd")
+            ins.append(f"{inst('idiv', vin[0])} {acc_reg_b}")
+            ins.append(f"{inst('mov', vin[0])} {reg('dx', out)}, {acc_reg_a}")
           else:
             ins.append(f"{inst(alu[arg], vin[0])} {acc_reg_b}, {acc_reg_a}")
             if arg in [BinaryOps.CMPLT, BinaryOps.CMPEQ]: 
@@ -61,16 +76,14 @@ class X86Codegen(AssemblyCodegen):
           ins.append(f"{inst('mov', vin[0])} {acc_reg_a}, {reg_map[out.nm]}")
       elif uop == UOps.LOAD:
         # TODO can we use the shortform for indirect memory access?
-        acc_reg_a = "%rax" if out.dtype.itemsize == 8 else "%eax"        
         ins.append(f"movq {reg_map[vin[0].nm]}, %rbx")
-        ins.append(f"{inst('mov', out)} {arg[0]}(%rbx), {acc_reg_a}")
-        ins.append(f"{inst('mov', out)} {acc_reg_a}, {reg_map[out.nm]}")
+        ins.append(f"{inst('mov', out)} {arg[0]}(%rbx), {reg('ax', out)}")
+        ins.append(f"{inst('mov', out)} {reg('ax', out)}, {reg_map[out.nm]}")
       elif uop == UOps.STORE:
         # TODO is there a better way to save in the address in address
-        acc_reg_a = "%rax" if vin[1].dtype.itemsize == 8 else "%eax"        
-        ins.append(f"{inst('mov', vin[1])} {reg_map[vin[1].nm]}, {acc_reg_a}")
+        ins.append(f"{inst('mov', vin[1])} {reg_map[vin[1].nm]}, {reg('ax', vin[1])}")
         ins.append(f"movq {reg_map[vin[0].nm]}, %rbx")
-        ins.append(f"{inst('mov', vin[1])} {acc_reg_a}, {arg[0]}(%rbx)")
+        ins.append(f"{inst('mov', vin[1])} {reg('ax', vin[1])}, {arg[0]}(%rbx)")
       elif uop == UOps.CAST:     
         # singed extend
         ins.append(f"movslq {reg_map[vin[0].nm]}, %rax")
@@ -81,7 +94,6 @@ class X86Codegen(AssemblyCodegen):
         ins.append(f"{arg.replace('$', '.')}:")
       elif uop == UOps.COND_BRANCH:
         # TODO arg1 is not?
-        acc_reg_a = "%rax" if vin[0].dtype.itemsize == 8 else "%eax"    
         ins.append(f"movb {reg_map[vin[0].nm]}, %al")
         ins.append(f"test %al, %al")
         ins.append(f"{'je' if arg[1] else 'jne'} {arg[0].replace('$', '.')}")

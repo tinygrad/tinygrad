@@ -94,8 +94,8 @@ class AssemblyCodegen(Linearizer):
       if uop == UOps.CONST and newvar is not None:
         ins.append(AssemblyInstruction(UOps.CONST, newreg(newvar), [], args))
       elif uop == UOps.DEFINE_LOCAL:
-        ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
-        ins.append(AssemblyInstruction(UOps.ALU, newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
+        ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, newreg("buf-1", dtype=dtypes.uint64), [], args[1]))
+        # ins.append(AssemblyInstruction(UOps.ALU, newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
       elif uop == UOps.LOOP:
         # TODO remove global loops only for cpu codegen
         """
