@@ -39,10 +39,6 @@ class HIPProgram:
     self.prg = hip.hipModuleGetFunction(module, name)
 
   def __call__(self, global_size, local_size, *args, wait=False):
-    local_size = (local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)
-    global_size = global_size + [1] * (3 - len(global_size))
-    assert all(x%y == 0 for x,y in zip(global_size, local_size)), f"local:{local_size} must divide global:{global_size}"
-    global_size = [x//y for x,y in zip(global_size, local_size)]
     if wait:
       start, end = hip.hipEventCreate(), hip.hipEventCreate()
       hip.hipEventRecord(start)

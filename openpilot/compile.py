@@ -73,7 +73,9 @@ def compile(dat, output_fn):
     # pass these to thneed
     setattr(prg.clprg, 'op_estimate', prg.op_estimate)
     setattr(prg.clprg, 'prg', prg.prg)
-    cl_cache.append((prg.clprg, [prg.global_size, prg.local_size, *[x._buf for x in args]]))
+    global_size = prg.global_size + [1]*(3-len(prg.global_size))
+    local_size = prg.local_size + [1]*(3-len(prg.local_size))
+    cl_cache.append((prg.clprg, [[g*l for g,l in zip(global_size, local_size)], local_size, *[x._buf for x in args]]))
     used_ops += prg.op_estimate
 
   from extra.thneed import Thneed

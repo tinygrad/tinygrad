@@ -4,6 +4,7 @@ import onnx.backend.test
 import numpy as np
 from tinygrad.tensor import Tensor
 from typing import Any, Tuple
+from tinygrad.helpers import getenv
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
@@ -147,8 +148,19 @@ backend_test.exclude('test_tfidfvectorizer_*')
 backend_test.exclude('test_stft_*')
 backend_test.exclude('test_melweightmatrix_*')
 
+# more strange ops
+backend_test.exclude('test_center_crop_pad_crop_*')
+backend_test.exclude('test_basic_deform_conv_*')
+backend_test.exclude('test_deform_conv_*')
+backend_test.exclude('test_lppool_*')
+backend_test.exclude('test_depthtospace_*')
+backend_test.exclude('test_spacetodepth_*')
+backend_test.exclude('test_scan*')
+backend_test.exclude('test_ai_onnx_ml_array_feature_extractor_*')
+backend_test.exclude('test_split_to_sequence_*')
+
 # disable model tests for now since they are slow
-if True:
+if not getenv("MODELTESTS"):
   for x in backend_test.test_suite:
     if 'OnnxBackendRealModelTest' in str(type(x)):
       backend_test.exclude(str(x).split(" ")[0])

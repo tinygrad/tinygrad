@@ -132,6 +132,7 @@ class Linearizer:
     # parameters
     self.group_for_reduce: List[int] = []
     self.upcasted: int = 0
+    self.local_dims: int = 0
 
     # group simplifies
     self.simplify_ones()
@@ -143,16 +144,17 @@ class Linearizer:
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
   def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]
 
-  # TODO: this stride is only on the last view, and may not be real
   def upcasted_axis(self, i):
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
-                    self.sts[i].views[-1].strides[self.shape_len-self.upcasted:],  # WRONG
+                    self.sts[i].real_strides()[self.shape_len-self.upcasted:],
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
+
   # TODO: is there a better way to write this?
   def acc_offsets(self, i):
     if self.upcasted == 0: return [0]
-    acc_strides = [x*(1-self.upcasted_axis(i)[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in self.upcasted_axis(i)[::-1])))]
-    return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(self.upcasted_axis(i)[::-1])])]
+    upcasted_i = self.upcasted_axis(i)
+    acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
+    return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
   def _group_float4(self, i, store_offset):
     store_offset_float4 = {}
@@ -232,7 +234,7 @@ class Linearizer:
 
     # kernel name (before late upcast)
     self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) for x in self.full_shape])
-    self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'black', bright=True).join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
+    self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
     # parse AST
     loaded_buffers = {}
@@ -245,22 +247,16 @@ class Linearizer:
       return Token(f"{name}{_ssa[name]-1}", ltype)
 
     # global loop
-    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1 if i < self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
+    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
     self.uop(UOps.LOOP, None, [], (global_idxs, "global"))
 
     # local loop
-    if self.group_for_reduce:
-      # NOTE: this is assuming the global size = the local size in these dims. in general, this doesn't have to be true
-      local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
-      self.uop(UOps.LOOP, None, [], (local_idxs, "local"))
-      gl_idxs = [x*(y.max+1)+y for x,y in zip(global_idxs, local_idxs)]
-    else:
-      # without local idxs, it's just the global idxs
-      gl_idxs = global_idxs
+    local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce-self.local_dims, self.first_reduce+len(self.group_for_reduce))]
+    self.uop(UOps.LOOP, None, [], (local_idxs, "local"))
+    gl_idxs = global_idxs + local_idxs
 
     # reduce op
     fake_reduce_idxs = []
-    removed = len(global_idxs)
     if self.reduceop is not None:
       # define indexes
       reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
@@ -283,20 +279,24 @@ class Linearizer:
 
       # end the local loop, do the local reduce
       if self.group_for_reduce:
-        self.global_store(-1, local_idxs+fake_reduce_idxs, acc, ssa)  # store accumulators
+        fake_global_idxs = [x*0 for x in global_idxs]
+        self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs, acc, ssa)  # store accumulators
         self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))   # this is a barrier on GPUs
+
+        # local indexs are over, 0 them out
+        local_idxs = [x*0 for x in local_idxs]
 
         # if any group_for_reduce items aren't reduces, upcast them here
         for j in self.upcast_in_mid_reduce_axes:
           self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
           self.upcast()
           self.group_for_reduce.pop()
-          removed -= 1
+          local_idxs = local_idxs[:-1]
 
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.global_load(-1, local_idxs[:removed]+fake_reduce_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
 
         # late reduce loop
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
@@ -312,13 +312,17 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    loaded_buffers.update({b:self.global_load(i, global_idxs[:removed]+fake_reduce_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
+    loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
 
     # run late AST
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
 
     # store
-    self.global_store(0, global_idxs[:removed]+fake_reduce_idxs, val, ssa)
+    self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs, val, ssa)
+
+    if not self.group_for_reduce:
+      # end the local loop
+      self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
 
     # end the global loop
     self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
@@ -367,11 +371,23 @@ class Linearizer:
   @property
   def upcast_in_mid_reduce_axes(self) -> List[int]: return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)) if self.full_shape[j] == self.sts[0].shape[j]]
 
+  # there's seven chunks of the shape
+  # blue   -- global dims
+  # cyan   -- local dims
+  #  *** self.first_reduce
+  # green  -- reduce-local dims
+  # white  -- reduce-late upcasted dim (self.upcast_in_mid_reduce_axes)
+  # red    -- reduce loops
+  #  *** self.upcasted
+  # purple -- reduce upcasted
+  # yellow -- normal upcasted dimensions
   def colors(self) -> List[str]:
     # up to first_reduce, they are all global (blue)
-    colors = ["blue"] * self.first_reduce
+    colors = ["blue"] * (self.first_reduce-self.local_dims)
+    # except the local_dims, these are non-reduce locals (cyan)
+    colors += ["cyan"] * (self.local_dims)
     # between first_reduce and first_reduce + group_for_reduce, they are either local (cyan), or late upcasted (green)
-    colors += ["green" if i in self.upcast_in_mid_reduce_axes else "cyan" for i in range(self.first_reduce, self.first_reduce + len(self.group_for_reduce))]
+    colors += ["white" if i in self.upcast_in_mid_reduce_axes else "green" for i in range(self.first_reduce, self.first_reduce + len(self.group_for_reduce))]
     # between first_reduce + group_for_reduce and upcasted, they are reduce (red)
     colors += ["red"] * ((self.shape_len-self.upcasted) - (self.first_reduce + len(self.group_for_reduce)))
     # upcasted dimensions are reduce (magenta) or normal (yellow)
@@ -457,16 +473,16 @@ class Linearizer:
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
     # NOTE: this might make multiview shapetrackers
-    if limit and self.first_reduce > limit:
-      num_to_merge = (self.first_reduce - limit)+1
+    if limit and (self.first_reduce-self.local_dims) > limit:
+      num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
-      if DEBUG >= 4: print("reshaped to", self.full_shape, "due to too many global dimensions")
+      if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
 
   def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     self.required_optimizations(early_only=True)
 
-    # simplify (sets first_reduce)
+    # simplify
     self.simplify_ones()
 
     # are we grouping? (requires local shape support)
@@ -506,12 +522,12 @@ class Linearizer:
     # **** below this line need to be optional and benchmarked ****
 
     # potentially do more upcasts of non reduce axes based on a heuristic
+    upcasted_axis = set()
     while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
-        # if it mods, and some buffer has stride 0 on axis while having no stride 0 in the buftoken
-        # NOTE: this is using views[-1]
-        if self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
+        # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
+        if axis not in upcasted_axis and self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
           xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in self.sts), sum(st.views[-1].strides[axis] for st in self.sts), axis, upcast_amount))
       if len(xb_choices):
         xb_choices = sorted(xb_choices)
@@ -519,6 +535,7 @@ class Linearizer:
         self.shift_to(xb_choices[0][2], amount=xb_choices[0][3])
         self.upcast()
         self.simplify_ones()
+        upcasted_axis.add(xb_choices[0][2])
       else:
         break
 
@@ -539,3 +556,18 @@ class Linearizer:
       if self.upcasted == 0 and len(self.full_unupcasted_shape) > 0 and self.full_unupcasted_shape[-1] % splits == 0:
         self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
         self.upcast()
+
+    # **** local groups ****
+
+    for axis in range(self.first_reduce - self.local_dims - 1, -1, -1):
+      local_size = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
+      if self.full_shape[axis] == 1: continue
+      last_try = self.local_dims == 0 and axis == 0
+      if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))) or last_try:
+        for sz in [x for x in (([32] if last_try else []) + [16,8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 128]:
+          self.shift_to(axis, sz, insert_before=self.first_reduce-self.local_dims)
+          self.local_dims += 1
+          break
+      if self.local_dims >= 3: break
+    self.simplify_ones()
+
