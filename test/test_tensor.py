@@ -109,7 +109,9 @@ class TestTinygrad(unittest.TestCase):
     np.random.seed(1337)
     n, classes = 100, 20
     x = np.random.randint(0, classes, n).astype(np.int64)
-    y = Tensor(x).onehot(classes)
+    X = Tensor(x)
+    y = X.onehot(classes)
+    assert X.dtype == y.dtype
     y_torch = torch.nn.functional.one_hot(torch.tensor(x), num_classes=classes)
     np.testing.assert_allclose(y.cpu().numpy(), y_torch.cpu().numpy())
 
