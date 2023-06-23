@@ -35,7 +35,7 @@ class Node:
   # *** complex ops ***
 
   def __floordiv__(self, b:int, factoring_allowed=True):
-
+    assert b != 0
     if b < 0: return (self//-b)*-1
     if b == 1: return self
 
