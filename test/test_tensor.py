@@ -116,13 +116,13 @@ class TestTinygrad(unittest.TestCase):
   def test_cross_entropy(self):
     np.random.seed(1337)
     n, classes = 100, 10
-    x = np.random.uniform(0, 10, (n, classes)).astype(np.float32)
-    label_mask = np.random.choice((0, 1), size=n, p=(0.3, 0.7))
-    labels = (label := np.random.randint(0, classes, n), np.where(label_mask == 0, -100, label))
+    x = np.random.random_sample((n, classes)).astype(np.float32)
+    label_mask = np.random.randint(2, size=n)
+    targets = (label := np.random.randint(0, classes, n, dtype=np.int64), np.where(label_mask == 0, -100, label))
     weights = np.random.choice((0, 1, 2, 3, 4), size=classes, p=(0.9, 0.05, 0.025, 0.015, 0.01)).astype(np.float32), None # torch requires float
     reductiuons = ['mean', 'sum', 'none']
-    
-    for label, w, reduction in itertools.product(labels, weights, reductiuons):
+        
+    for label, w, reduction in itertools.product(targets, weights, reductiuons):
       # tinygrad
       X = Tensor(x).cross_entropy(
         Tensor(label),
