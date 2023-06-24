@@ -96,8 +96,8 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
   def test_conv2d_winograd(self):
-    BS, C1, H, W = 1, 1, 8, 8
-    C2, K, S, P = 1, 3, 1, 0
+    BS, C1, H, W = 8, 16, 224, 224
+    C2, K, S, P = 64, 3, 1, 0
 
     # create in tinygrad
     layer = Conv2d(C1, C2, kernel_size=K, stride=S, padding=P)

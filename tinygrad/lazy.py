@@ -106,6 +106,23 @@ class LazyBuffer:
     if GRAPH >= 3: log_op(self, self.op, phantom=True)
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else self.realized} st:{self.st}>"
+
+  @staticmethod
+  def print_ast(lazy: Union[LazyBuffer, LazyOp], depth=None, indent=0):
+    if depth is not None and indent > depth:
+      return
+    if lazy.__class__ == LazyBuffer:
+      print(' ' * indent + f'Buffer {hex(id(lazy))}')
+      if hasattr(lazy, 'op'):
+        LazyBuffer.print_ast(lazy.op, indent=indent+1, depth=depth)
+      return
+    # else, we are LazyOp
+    op = lazy
+    print(' ' * indent + f'{repr(op.op)} {hex(id(op))}')
+    for op in op.src:
+      if op.__class__ in [LazyOp, LazyBuffer]:
+        LazyBuffer.print_ast(op, indent=indent+1, depth=depth)
+
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
 
   def realize(self:LazyBuffer) -> LazyBuffer:
