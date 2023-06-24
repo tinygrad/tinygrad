@@ -125,7 +125,29 @@ class HIPCodegen(CStyleCodegen):
 
 class HIPCodegenCPU(CStyleCodegen):
   lang = CStyleLanguage(
-    kernel_prefix = "#include <math.h>\ntypedef unsigned char uchar;\ntypedef half_float::half half;\n#define max fmax\ninline float4 pow(float4 x, float4 y) {\n  return float4(pow(x.x, y.x), pow(x.y, y.y), pow(x.z, y.z), pow(x.w, y.w));}\nextern \"C\" __global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
+    kernel_prefix = r"""
+#include <math.h>
+typedef unsigned char uchar;
+using half_float::half;
+MAKE_VECTOR_TYPE(half, half)
+//using half4 = hip::detail::Vector_type<half, 4>;
+#define max fmax
+inline float4 pow(float4 x, float4 y) {
+  return float4(pow(x.x, y.x), pow(x.y, y.y), pow(x.z, y.z), pow(x.w, y.w));
+}
+inline float vload_half(size_t offset, const half *p) {
+  return (float)*(p + offset);
+}
+
+inline float4 vload_half4(size_t offset, const half * p) {
+  return make_float4((float)*(p + offset *4), (float)*(p + offset *4 + 1), (float)*(p + offset *4 + 2), (float)*(p + offset *4 +3));
+}
+inline void vstore_half(float data, size_t offset, half *p) {
+  *(p + offset) = (half)data;
+}
+extern "C" __global__
+""",
+    smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4", uses_vload=True,
     half_prekernel = "",
     need_kernel_launcher = True,
     build_kernel_launcher = build_kernel_launcher,
