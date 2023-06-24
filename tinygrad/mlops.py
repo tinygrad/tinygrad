@@ -17,7 +17,10 @@ class Cast(Function):
     return grad_output.cast(self.input_dtype)
 
 # ************* unary ops *************
-
+class Floor(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    return x.unary_op(UnaryOps.FLOOR)
+  
 class Sin(Function):
   def forward(self, x: LazyBuffer) -> LazyBuffer:
     self.x = x

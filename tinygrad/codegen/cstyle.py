@@ -49,7 +49,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
 code_for_op: Final[Dict[Op, Callable]] = {
   UnaryOps.EXP2: lambda x: f"exp2({x})",
   UnaryOps.LOG2: lambda x: f"log2({x})",
-  UnaryOps.SIN: lambda x: f"sin({x})",
+  UnaryOps.SIN: lambda x: f"sin({x})", UnaryOps.FLOOR: lambda x: f"floor({x})",
   BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
   BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
   BinaryOps.POW: lambda a,b: f"pow({a},{b})", BinaryOps.MAX: lambda a,b: f"max({a},{b})",
