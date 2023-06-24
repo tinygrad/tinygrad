@@ -5,11 +5,10 @@ from extra.utils import WINDOWS
 from tinygrad.helpers import getenv
 from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor, Device
-from tinygrad.nn import BatchNorm2d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm
+from tinygrad.nn import BatchNorm2d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm, PixelShuffle, PixelUnshuffle
 import torch
 
 class TestNN(unittest.TestCase):
-
   def test_batchnorm2d(self, training=False):
     szs = [4, 8, 16, 32]
     for sz in szs:
@@ -240,7 +239,27 @@ class TestNN(unittest.TestCase):
       torch_x = torch.tensor(x.cpu().numpy().astype(np.int32))
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
+  def test_pixelshuffle(self):
+    layer = PixelShuffle(3)
+    x = Tensor.randn(1, 9, 4, 4)
+    y = layer(x)
+    np.testing.assert_allclose(y.shape, (1, 1, 12, 12))
 
+    with torch.no_grad():
+      xt = torch.tensor(x.cpu().numpy())
+      yt = torch.nn.functional.pixel_shuffle(xt, 3)
+      np.testing.assert_allclose(y.numpy(), yt.detach().numpy(), rtol=1e-5, atol=1e-6)
+  
+  def test_pixelunshuffle(self):
+    layer = PixelUnshuffle(3)
+    x = Tensor.randn(1, 1, 12, 12)
+    y = layer(x)
+    np.testing.assert_allclose(y.shape, (1, 9, 4, 4))
+
+    with torch.no_grad():
+      xt = torch.tensor(x.cpu().numpy())
+      yt = torch.nn.functional.pixel_unshuffle(xt, 3)
+      np.testing.assert_allclose(y.numpy(), yt.detach().numpy(), rtol=1e-5, atol=1e-6)
 
 if __name__ == '__main__':
   unittest.main()

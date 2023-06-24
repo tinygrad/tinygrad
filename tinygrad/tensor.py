@@ -617,6 +617,22 @@ class Tensor:
     mask = (Tensor.rand(*self.shape, requires_grad=False) >= p).cast(dtypes.bool)
     return self * mask * (1/(1.0 - p))
 
+  def pixelshuffle(self, upscale_factor: int) -> Tensor:
+    y = self
+    B, iC, iH, iW = y.shape
+    oC, oH, oW = iC//(upscale_factor*upscale_factor), iH*upscale_factor, iW*upscale_factor
+    y = y.reshape(B, oC, upscale_factor, upscale_factor, iH, iW)
+    y = y.permute(0, 1, 4, 2, 5, 3)
+    y = y.reshape(B, oC, oH, oW)
+    return y
+  def pixelunshuffle(self, downscale_factor:int) -> Tensor:
+    y = self
+    B, iC, iH, iW = y.shape
+    oC, oH, oW = iC*(downscale_factor*downscale_factor), iH//downscale_factor, iW//downscale_factor
+    y = y.reshape(B, iC, oH, downscale_factor, oW, downscale_factor)
+    y = y.permute(0, 1, 3, 5, 2, 4)
+    y = y.reshape(B, oC, oH, oW)
+    return y
   # ***** cast ops *****
 
   def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
