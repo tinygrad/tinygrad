@@ -86,11 +86,12 @@ def _auto_pad(X, auto_pad, strides, kernel_shape, dilations):
   else: raise NotImplementedError(f"auto_pad={auto_pad} not implemented, yet") # could be "VALUE"?
 
 # pads = [up, left, down, right]
-def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
+def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.): # BUG: OUTPUT HAS WRONG SHAPE BUT CHECK DIDNT PICK UP
   # assert mode == "constant", f"WARNING: Pad mode {mode} not implemented"
-  constant_value = value if constant_value is None else constant_value.numpy()
-  seq_pads = list(pads) if isinstance(pads, tuple) else pads.numpy().astype(np.int32).tolist()
-  seq_axes = axes.numpy().astype(np.int32).tolist() if axes is not None else None
+  constant_value = value if constant_value is None else safe_numpy(constant_value)
+  seq_pads = list(pads) if isinstance(pads, tuple) else safe_numpy(pads)
+  seq_pads = [math.ceil(i) for i in seq_pads]
+  seq_axes = safe_numpy(axes).astype(np.int32).tolist() if axes is not None else None
   base_shape = x.shape
   # pads_ = [(st,ed) for st, ed in zip(seq_pads[:len(seq_pads)//2], seq_pads[len(seq_pads)//2:])]
   pads_ = _format_padding(seq_pads)
@@ -115,6 +116,8 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     '''
     pass
   elif mode == "constant":
+    print(seq_pads)
+    print(seq_axes)
     return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value)
 
 def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
@@ -140,13 +143,12 @@ def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_
   if auto_pad != "NOTSET":
     if not kernel_shape: kernel_shape = W.shape[-len(strides):]
     pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
-
   return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0, output_padding=output_padding)
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
 def Dropout(data, ratio=0.5, training_mode=False, seed=None):
   if isinstance(ratio, Tensor) and not ratio.shape: ratio = safe_numpy(ratio) # ratio and tensor is passed in as Tensor with shape: ()
-  if isinstance(training_mode, Tensor) and not training_mode.shape: training_mode = safe_numpy(training_mode)
+  if isinstance(training_mode, Tensor) and not training_mode.shape: training_mode = safe_numpy(training_mode) #TODO maybe address this in attribute_parse() in onnx.py??
   if not training_mode: return data, Tensor.ones(*data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
   rng = np.random.RandomState(seed)
   ratio = ratio.lazydata.realize().toCPU()[0] if isinstance(ratio, Tensor) else ratio

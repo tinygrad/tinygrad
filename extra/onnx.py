@@ -13,6 +13,7 @@ except ImportError:
   from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
   tensor_dtype_to_np_dtype = lambda x: TENSOR_TYPE_TO_NP_TYPE[x]
 from google.protobuf.descriptor import FieldDescriptor
+import math
 
 # global numpy cache for parameters
 numpy_cache = {}
@@ -32,7 +33,7 @@ ONNXLIMIT = getenv("ONNXLIMIT", -1)
 def get_run_onnx(onnx_model: ModelProto):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
   def type_parse(type_proto: TypeProto, inp):
-    while True:
+    while True: # NEED BETTER PARSER :D
       attr = type_proto.WhichOneof('value')
       if attr == 'tensor_type': return tuple(x.dim_value for x in getattr(type_proto, attr).shape.dim)
       elif attr == 'sequence_type': raise NotImplementedError(f"sequence_type is not implemented: {type_proto}")
@@ -130,6 +131,7 @@ def get_run_onnx(onnx_model: ModelProto):
       for x in n.input:
         t = fetch_tensor(x)
         if debug: print(f"\t{x} - {t}")
+        # if debug: print(f"{t.numpy() if isinstance(t, Tensor) else t}")
         inp.append(t)
       opt = attribute_dict[num]
       if debug: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
@@ -188,8 +190,12 @@ def get_run_onnx(onnx_model: ModelProto):
         starts, ends = inp[1:3]
         axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3])
         steps = safe_numpy(inp[4]) if len(inp) > 4 else [1]*inp[0].ndim
-        starts, ends = safe_numpy(starts.cast(dtypes.int32)).tolist(), safe_numpy(ends.cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
-        shrink = False # VERY HACKY BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise Tensor.reshape() has to allow 0 in newshape 
+        # starts, ends = safe_numpy(starts.cast(dtypes.int32)).tolist(), safe_numpy(ends.cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
+        starts, ends = safe_numpy(starts).tolist(), safe_numpy(ends).tolist() # TODO: when indexing is added use that
+        starts, ends = [math.ceil(i) for i in starts], [math.ceil(i) for i in ends] # TENSOR CEIL NO WORK :(
+        # VERY HACKY BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise Tensor.reshape() has to allow 0 in newshape 
+        # A FIX COULD BE PAD -> RESHAPE -> SHRINK IF s == e ELSE SHRINK
+        shrink = False 
         for i,axis in enumerate(axes.tolist()):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
           starts[i] = starts[i] + inp[0].shape[axis] if starts[i] < 0 else starts[i]
@@ -231,6 +237,7 @@ def get_run_onnx(onnx_model: ModelProto):
       if debug: print("outputs:")
       for i in range(len(n.output)): 
         if debug: print(f"\t{n.output[i]} - {ret[i]}")
+        # if debug: print(f"{ret[i].numpy() if isinstance(ret[i], Tensor) else type(ret[i])}")
         intermediate_tensors[n.output[i]] = ret[i]
       #print(ret[0].numpy().mean())
       if num == ONNXLIMIT:
