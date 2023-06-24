@@ -190,7 +190,9 @@ def HardSwish(input): return input * HardSigmoid(input, 1/6, 0.5)
 def Celu(X, alpha=1.0): return X.relu() - (-alpha*(X/alpha).exp()+1).relu()
 def Selu(X, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
 def Softplus(X): return X.softplus()
-def PRelu(X:Tensor, slope:Tensor): return X.clip(0, float("inf")) + X.clip(float("-inf"), 0) * slope
+def PRelu(X:Tensor, slope:Tensor): 
+  slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope # OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE LOL
+  return X.clip(0, float("inf")) + X.clip(float("-inf"), 0) * slope
 def LeakyRelu(X, alpha=0.01): return X.leakyrelu(alpha)
 def ThresholdedRelu(X, alpha=1.0): return (X-alpha).relu() + (X-alpha).relu().sign() * alpha
 def Softmax_1(input, axis=1): return input.softmax(axis)
