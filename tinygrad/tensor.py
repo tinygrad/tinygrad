@@ -494,7 +494,9 @@ class Tensor:
   def tril(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, dtype=self.dtype).where(Tensor.zeros_like(self), self)
 
   # ***** math functions (unary) *****
-  def ceil(self: Tensor) -> Tensor: return self.floor() + 1
+  def ceil(self: Tensor) -> Tensor: 
+    x = self.floor()
+    return (self == x).where(x, x+1)
   def floor(self: Tensor) -> Tensor: return mlops.Floor.apply(self)
 
   def __neg__(self): return 0.0-self
