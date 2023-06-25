@@ -121,7 +121,7 @@ class Linearizer:
     for st in self.sts: st.views = ShapeTracker.simplify(st.views)
 
     # make the output buffer shape correct in here
-    self.sts[0].reshape(self.info.shape)
+    self.sts[0].movement_op(MovementOps.RESHAPE, self.info.shape)
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
 
     # move all reduce axes to the end
@@ -405,7 +405,7 @@ class Linearizer:
   # apply reshape and permute to all shapetrackers
   def reshape_and_permute(self, new_shape_fxn, axis):
     for st in self.sts:
-      if new_shape_fxn is not None: st.reshape(tuple(new_shape_fxn(st.shape)))
+      if new_shape_fxn is not None: st.movement_op(MovementOps.RESHAPE, tuple(new_shape_fxn(st.shape)))
       if axis is not None: st.permute(tuple(axis))
 
   # drops the final dimension
@@ -456,7 +456,7 @@ class Linearizer:
         else: rets[j].append((shapes[j][i], strides[j][i]))
 
     # do the reshapes
-    for i,x in enumerate(rets): self.sts[i].reshape(tuple(y[0] for y in x))
+    for i,x in enumerate(rets): self.sts[i].movement_op(MovementOps.RESHAPE, tuple(y[0] for y in x))
 
   # ******************** GPU simplifiers ********************
 

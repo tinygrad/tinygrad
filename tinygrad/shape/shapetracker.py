@@ -150,7 +150,6 @@ def get_unsafe_resize_offset(strides, arg):
 
 class ShapeTracker:
   __slots__ = "views"
-  @profile
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[View]]=None):
     self.views: List[View] = views if views is not None else ([*shape.views] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)])
   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
@@ -203,7 +202,6 @@ class ShapeTracker:
   def unit_stride_axes(views, shape) -> List[int]: return [i for i,st in enumerate(ShapeTracker.real_strides(tuple(views), shape)) if st == 1]
 
   @staticmethod
-  @profile
   def expr_idx(front_views, idx, valid):
     for v in reversed(front_views):
       valid = View.expr_node_mask(v.shape, v.mask, idx, valid)
@@ -234,8 +232,8 @@ class ShapeTracker:
     if idx.__class__ is str: idx = Variable(idx, 0, prod(v.shape)-1)
     return ShapeTracker.expr_idx(views[0:-1], View.expr_node(v.shape, v.strides, v.offset, idx), View.expr_node_mask(v.shape, v.mask, idx))
   
-  def needs_valid(self) -> bool:
-    return any([v.mask is not None for v in self.views])
+  @staticmethod
+  def needs_valid(views) -> bool: return any([v.mask is not None for v in views])
 
   # *** under this line are the movement ops ***
 
@@ -260,22 +258,23 @@ class ShapeTracker:
     self.__unsafe_resize(arg)
     return self
 
-  def expand(self, new_shape: Tuple[int, ...]) -> ShapeTracker:
-    assert len(new_shape) == len(self.views[-1].shape)
-    assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.views[-1].shape, new_shape, self.views[-1].strides)), f"can't expand {self.views[-1].shape} into {new_shape}"
+  @staticmethod
+  @functools.lru_cache(None)
+  def expand(view: View, new_shape: Tuple[int, ...]) -> View:
+    assert len(new_shape) == len(view.shape)
+    assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(view.shape, new_shape, view.strides)), f"can't expand {view.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
-    mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.views[-1].shape, new_shape)]) if self.views[-1].mask else None
-    self.views[-1] = View.create(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
-    return self
+    mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(view.mask, view.shape, new_shape)]) if view.mask else None
+    return View.create(new_shape, view.strides, view.offset, mask)
 
-  def reshape(self, new_shape: Tuple[int, ...]):
-    if self.views[-1].shape == new_shape: return self
+
+  @staticmethod
+  @functools.lru_cache(None)
+  def reshape(view, new_shape: Tuple[int, ...]):
+    if view.shape == new_shape: return view, False
     assert all([isinstance(x, int) and x > 0 for x in new_shape]), f"shape must be ints and can't contain 0 or negative numbers {new_shape}"
-    assert prod(self.views[-1].shape) == prod(new_shape), f"can't reshape {self.views[-1].shape} -> {new_shape}"
-    new_view, extra = _reshape(self.views[-1], new_shape)
-    if extra: self.views.append(new_view)
-    else: self.views[-1] = new_view
-    return self
+    assert prod(view.shape) == prod(new_shape), f"can't reshape {view.shape} -> {new_shape}" 
+    return _reshape(view, new_shape)
 
   def permute(self, axis: Tuple[int, ...]):
     assert all(isinstance(x, int) and x >= 0 and x < len(self.views[-1].shape) for x in axis), f"invalid permute {axis} for {self.views[-1].shape}"
@@ -297,7 +296,14 @@ class ShapeTracker:
 
   def movement_op(self, op: MovementOps, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
     assert isinstance(arg, tuple) and (len(arg) == len(self.views[-1].shape) or op == MovementOps.RESHAPE), f"arg {arg} for {op} doesn't match dim of shape {self.views[-1].shape}"
-    dispatch[op](self, arg)
+    if op == MovementOps.EXPAND:
+      self.views[-1] = ShapeTracker.expand(self.views[-1], arg)
+    elif op == MovementOps.RESHAPE:
+      new_view, extra = ShapeTracker.reshape(self.views[-1], arg)
+      if extra: self.views.append(new_view)
+      else: self.views[-1] = new_view
+    else: 
+      dispatch[op](self, arg)
     return self
 
 dispatch: Dict[MovementOps, Callable] = {MovementOps.RESHAPE: ShapeTracker.reshape, MovementOps.EXPAND: ShapeTracker.expand, MovementOps.PAD: ShapeTracker.pad,
