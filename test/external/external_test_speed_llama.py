@@ -35,7 +35,7 @@ class TestLLaMASpeed(unittest.TestCase):
         tms.append(time.perf_counter())
       print(f"{st:15s} runtime in ms:", ', '.join("%.2f"%((tms[i+1]-tms[i])*1000) for i in range(len(tms)-1)))
 
-    run_llama("compile")
+    run_llama("codegen")
     run_llama("methodcache", False)
 
     pr = start_profile()
