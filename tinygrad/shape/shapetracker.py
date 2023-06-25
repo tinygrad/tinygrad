@@ -86,16 +86,15 @@ class View(NamedTuple):
       if not (s==0 or acc > idx.max or (idx.__class__ in (MulNode, NumNode) and (idx.b/acc)%d == 0)):
         ret.append(((idx//acc)%d)*s)
       acc *= d
-    return Node.sum(ret)
+    return Node.num(0) if not ret else ret[0] if len(ret) == 1 else Node.sum(ret)
 
   # generate an expression if you have a variable or expression for each index
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def expr_idxs(shape, strides, offset, idxs):
     assert len(idxs) == len(shape), f"need an idx for all dimensions {idxs} vs {shape}"
-    nodes = [idx*st for idx,sh,st in zip(idxs, shape, strides) if sh != 1 and st != 0]
-    if not offset: return Node.num(0) if not nodes else nodes[0] if len(nodes) == 1 else Node.sum(nodes)
-    return Variable.sum([Variable.num(offset)] + nodes)
+    nodes = [idx*st for idx,sh,st in zip(idxs, shape, strides) if sh != 1 and st != 0] + ([Node.num(offset)] if offset else [])
+    return  Node.sum(nodes) if len(nodes) > 1 else nodes[0] if len(nodes) == 1 else Node.num(0)
   
 @functools.lru_cache(maxsize=None)
 def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
@@ -151,8 +150,9 @@ def get_unsafe_resize_offset(strides, arg):
 
 class ShapeTracker:
   __slots__ = "views"
+  @profile
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[View]]=None):
-    self.views: List[View] = views if views is not None else ([*cast(ShapeTracker, shape).views] if shape.__class__ is ShapeTracker else [view_from_shape(shape)])
+    self.views: List[View] = views if views is not None else ([*shape.views] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)])
   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
   def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
 
@@ -200,9 +200,10 @@ class ShapeTracker:
       else: ret.append(None)
     return tuple(ret[::-1])
   
-  def unit_stride_axes(self) -> List[int]: return [i for i,st in enumerate(ShapeTracker.real_strides(tuple(self.views), self.shape)) if st == 1]
+  def unit_stride_axes(views, shape) -> List[int]: return [i for i,st in enumerate(ShapeTracker.real_strides(tuple(views), shape)) if st == 1]
 
   @staticmethod
+  @profile
   def expr_idx(front_views, idx, valid):
     for v in reversed(front_views):
       valid = View.expr_node_mask(v.shape, v.mask, idx, valid)
@@ -215,15 +216,16 @@ class ShapeTracker:
       new_view = merge_views(views[-2], views[-1])
       if new_view:
         if DEBUG >= 4: print(f"st simplify : {views[-2]} + {views[-1]} = {new_view}")
-        return ShapeTracker.simplify(tuple(list(views)[:-2] + [new_view]))   
-    return list(views)
-
+        return ShapeTracker.simplify(views[:-2] + [new_view])
+    return views
+  
   @staticmethod
   def expr_idxs(views, idxs=None):
     v = views[-1]
     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(v.shape)]
-    idx = View.expr_idxs(v.shape, v.strides, v.offset, tuple(idxs))
-    valid = View.expr_node_mask(v.shape, v.mask, View.idxs_to_idx(v.shape, tuple(idxs)))
+    idxs = tuple(idxs)
+    idx = View.expr_idxs(v.shape, v.strides, v.offset, idxs)
+    valid = View.expr_node_mask(v.shape, v.mask, View.idxs_to_idx(v.shape, idxs))
     return ShapeTracker.expr_idx(views[0:-1], idx, valid)
   
   @staticmethod

@@ -142,7 +142,7 @@ class Linearizer:
     if DEBUG >= 5: self.printbufs("early")
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
-  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]
+  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in ShapeTracker.unit_stride_axes(self.sts[i].views, self.sts[i].shape) if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]
 
   def upcasted_axis(self, i):
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
@@ -462,7 +462,7 @@ class Linearizer:
 
   def required_optimizations(self, early_only=False):
     for buf_index,buf in enumerate(self.bufs):
-      unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes() if self.sts[buf_index].shape[i]%4 == 0]
+      unit_stride_axes_mul_4 = [i for i in ShapeTracker.unit_stride_axes(self.sts[buf_index].views, self.sts[buf_index].shape) if self.sts[buf_index].shape[i]%4 == 0]
       if (not early_only or buf in self.earlybufs) and isinstance(self.bufs[buf_index].dtype, ImageDType):
         assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
         if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
@@ -496,7 +496,7 @@ class Linearizer:
 
     # are we upcasting in mid reduce? (only for images)
     if self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
-      axes = self.sts[0].unit_stride_axes()
+      axes = ShapeTracker.unit_stride_axes(self.sts[0].views, self.sts[0].shape)
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
       if self.sts[0].shape[axes[0]]%4 == 0:
         self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
