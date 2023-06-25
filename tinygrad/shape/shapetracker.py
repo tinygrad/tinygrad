@@ -10,7 +10,7 @@ from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
 
 @functools.lru_cache(maxsize=None)
-def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tuple[int, int]]:
+def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
   assert len(shape) == len(strides)
   ret = [(shape[0], strides[0])] if len(shape) > 0 else []
   for i in range(1, len(shape)):
@@ -38,10 +38,13 @@ def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int,
 class View(NamedTuple):
   shape:Tuple[int, ...]
   strides:Tuple[int, ...]
-  shape_strides:Tuple[int, ...]
-  contiguous: bool
+  shape_strides:Tuple[Tuple[int, int], ...]
+  contiguous:bool
   offset:int=0
   mask:Optional[Tuple[Tuple[int, int]]]=None
+
+  @functools.cached_property
+  def key(self): return (self.shape, self.strides, self.offset, self.mask)
 
   @staticmethod
   @functools.lru_cache(maxsize=None)
@@ -199,6 +202,7 @@ class ShapeTracker:
       else: ret.append(None)
     return tuple(ret[::-1])
   
+  @staticmethod
   def unit_stride_axes(views, shape) -> List[int]: return [i for i,st in enumerate(ShapeTracker.real_strides(tuple(views), shape)) if st == 1]
 
   @staticmethod
@@ -303,7 +307,6 @@ class ShapeTracker:
 
   def movement_op(self, op: MovementOps, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
     assert isinstance(arg, tuple) and (len(arg) == len(self.views[-1].shape) or op == MovementOps.RESHAPE), f"arg {arg} for {op} doesn't match dim of shape {self.views[-1].shape}"
-    
     if op == MovementOps.RESHAPE:
       new_view, extra = ShapeTracker.reshape(self.views[-1], arg)
       if extra: self.views.append(new_view)
