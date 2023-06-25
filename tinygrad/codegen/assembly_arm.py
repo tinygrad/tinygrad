@@ -79,8 +79,6 @@ from tinygrad.codegen.linearizer import UOps
 from tinygrad.helpers import dtypes
 
 class ARMCodegen(AssemblyCodegen):
-  # NOTE: I don't need this, however it build to better assembly when i do.  why?
-  supports_load3 = False
   def specialize(self, asm):
     # TODO: fix global name to use real name
     ins =[] 
@@ -92,8 +90,7 @@ class ARMCodegen(AssemblyCodegen):
            FusedOps.MULACC: "fma.rn"}
 
     # TODO: hack to parse registers
-    countf = 0  
-    counti = 0  
+    countf = countx = countw = 0 
     regs = {}
     parse_reg = lambda reg: regs[reg] 
     pend_reg = [] 
@@ -104,9 +101,12 @@ class ARMCodegen(AssemblyCodegen):
     for uop, out, vin, arg in filter(lambda op: op.op == UOps.DEFINE_REGISTER, asm):
       for i in range(arg[2]):
         local_var_size += arg[0][0].itemsize
-#        reg_map[f"%{arg[1]}{i}"] = f"[FP, #-{local_var_size}]"
-        reg_map[f"%{arg[1]}{i}"] = f"x{i}"
+        reg_map[f"%{arg[1]}{i}"] = f"{'s'+str(countf) if dtypes.is_float(arg[0][0]) else 'x'+str(countx)}"
         reg_type[f"%{arg[1]}{i}"] = arg[0]
+        if dtypes.is_float(arg[0][0]):
+          countf+=1
+        else:
+          countx+=1
 
     print(reg_map)
     print(reg_type)
@@ -125,38 +125,31 @@ class ARMCodegen(AssemblyCodegen):
           # TODO pop remaining args from stack
       elif uop == UOps.CONST:
         ins.append(f"mov {reg_map[out.nm]}, #{arg}")
-        ins.append(f" x3, {reg_map[out.nm]}")
       elif uop == UOps.CAST:
-        # TODO: this is not how casting should be
-        ins.append(f"ldr x3, {reg_map[vin[0].nm]}")
-        ins.append(f"sxtw x4, x3")
-        #ins.append(f"mov x4, x3")
-        ins.append(f"str x4, {reg_map[out.nm]}")
+        ins.append(f"sxtw {reg_map[out.nm]}, {reg_map[vin[0].nm]}")
       elif uop == UOps.ALU:
         if dtypes.is_float(out.dtype):
-          ins.append(f"ldr s0, {reg_map[vin[0].nm]}")
-          ins.append(f"ldr s1, {reg_map[vin[1].nm]}")
-          ins.append(f"f{alu[arg]} s0, s0, s1")
-          ins.append(f"str s0, {reg_map[out.nm]}")
+          ins.append(f"f{alu[arg]} {reg_map[out.nm]}, {reg_map[vin[0].nm]}, {reg_map[vin[1].nm]}")
         else:
-          ins.append(f"ldr x3, {reg_map[vin[0].nm]}")
           if isinstance(vin[1], int):
-            ins.append(f"mov x4, #{vin[1]}")
-          else: ins.append(f"ldr x4, {reg_map[vin[1].nm]}")
-          ins.append(f"{alu[arg]} x4, x4, x3")
-          ins.append(f"str x4, {reg_map[out.nm]}") 
-          
+            ins.append(f"mov x10, #{vin[1]}")
+            if arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
+              ins.append(f"{alu[arg]} {reg_map[vin[0].nm]}, x10")
+            else:
+              ins.append(f"{alu[arg]} {reg_map[out.nm]}, {reg_map[vin[0].nm]}, x10")
+
+          else: 
+            if arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
+              ins.append(f"{alu[arg]} {reg_map[vin[0].nm]}, {reg_map[vin[1].nm]}")
+            else:
+              ins.append(f"{alu[arg]} {reg_map[out.nm]}, {reg_map[vin[0].nm]}, {reg_map[vin[1].nm]}")
       elif uop == UOps.LOAD:
-        acc_reg_a = "w3" if out.dtype.itemsize == 8 else "x3"
-        ins.append(f"ldr {acc_reg_a}, {reg_map[vin[0].nm]}")
-        ins.append(f"ldr s0, [{acc_reg_a}, {arg[0]}]")
-        ins.append(f"str s0, {reg_map[out.nm]}")
+        ins.append(f"ldr {reg_map[out.nm]}, [{reg_map[vin[0].nm]}, {arg[0]}]")
       elif uop == UOps.STORE:
-        acc_reg_a = "w3" if vin[1].dtype.itemsize == 8 else "x3"
-        ins.append(f"ldr {acc_reg_a}, {reg_map[vin[1].nm]}")
-        ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
-        ins.append(f"str {acc_reg_a}, [x0, {arg[0]}]")
+        ins.append(f"str {reg_map[vin[1].nm]}, [{reg_map[vin[0].nm]}, {arg[0]}]")
       elif uop == UOps.COND_BRANCH:
-        ins.append(f"b.ne {arg[0]}")
+        ins.append(f"b.ne {arg[0][1:]}")
+      elif uop == UOps.LABEL:
+        ins.append(f"{arg[1:]}:")
 #    ins.append("ldp x29, x30, [SP], #16")
     return "test", "\n".join([".arch armv8-a",".text", ".global _test",".balign 4"] + pre_global + ["_test:"] + ins + post_global + ["ret;"])
