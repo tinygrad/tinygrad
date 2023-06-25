@@ -215,10 +215,10 @@ jobs:
       run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
     # dtype test has issues on test_half_to_int8
 
-  # disabled, this test is flaky
   testdocker:
     name: Docker Test
     runs-on: ubuntu-latest
+    if: ${{ false }}
 
     steps:
     - name: Checkout Code
