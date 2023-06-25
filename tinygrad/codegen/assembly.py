@@ -113,19 +113,20 @@ class AssemblyCodegen(Linearizer):
         ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
         ins.append(AssemblyInstruction(UOps.ALU, newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
       elif uop == UOps.LOOP:
-        if args[1] == "global":
-          for i,var in enumerate(args[0]):
-            global_size.append(var.max+1)
-            ins.append(AssemblyInstruction(UOps.SPECIAL, newreg(var, dtype=dtypes.int32), [], f"gid{len(args[0])-1-i}"))
-        elif args[1] == "local":
-          for i,var in enumerate(args[0]):
-            local_size.append(var.max+1)
-            ins.append(AssemblyInstruction(UOps.SPECIAL, newreg(var, dtype=dtypes.int32), [], f"lid{len(args[0])-1-i}"))
-        else:
-          for var in args[0]:
-            if not isinstance(var, NumNode):  # TODO: why is this coming through?
-              ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32, scalar=True), [], 0))
-              ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
+        # TODO: check for CPU
+        # if args[1] == "global":
+        #   for i,var in enumerate(args[0]):
+        #     global_size.append(var.max+1)
+        #     ins.append(AssemblyInstruction(UOps.SPECIAL, newreg(var, dtype=dtypes.int32), [], f"gid{len(args[0])-1-i}"))
+        # elif args[1] == "local":
+        #   for i,var in enumerate(args[0]):
+        #     local_size.append(var.max+1)
+        #     ins.append(AssemblyInstruction(UOps.SPECIAL, newreg(var, dtype=dtypes.int32), [], f"lid{len(args[0])-1-i}"))
+        # else:
+        for var in args[0]:
+          if not isinstance(var, NumNode):  # TODO: why is this coming through?
+            ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32, scalar=True), [], 0))
+            ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
       elif uop == UOps.ENDLOOP:
         #if args[1] not in ["global", "local"]:
         for var in reversed(args[0]):
@@ -161,7 +162,6 @@ class AssemblyCodegen(Linearizer):
           ins.append(AssemblyInstruction(UOps.ALU, tmp, [tor[vin[0]], 1/(math.pi*2)], BinaryOps.MUL))
           ins.append(AssemblyInstruction(UOps.ALU, out, [tmp], args))
         else:
-          print(f"HELLO {args}")
           ins.append(AssemblyInstruction(UOps.ALU, out, [tor[x] for x in vin], args))
       elif uop == UOps.LOAD and newvar is not None:
         idx, treg, off = addr_w_offset(args)
