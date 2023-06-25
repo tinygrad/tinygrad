@@ -187,3 +187,26 @@ jobs:
       run: docker build -t tinygrad -f test/Dockerfile .
     - name: Test Docker
       run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
+
+  testhip:
+    name: HIP CPU Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+    - name: Install clang and libstdc++
+      run: sudo apt install build-essential clang libstdc++-12-dev
+    - name: Install HIP-CPU
+      run: |
+        git clone https://github.com/ROCm-Developer-Tools/HIP-CPU.git
+        mkdir HIP-CPU/build && pushd HIP-CPU/build
+        cmake ../ && cmake --build ./ && sudo cmake --build ./ --target install && popd
+    - name: Install Dependencies
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Run Pytest
+      run: HIP=1 HIP_CPU=1 python -m pytest -s -v -n=auto test/
