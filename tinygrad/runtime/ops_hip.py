@@ -131,15 +131,19 @@ class HIPCodegenCPU(CStyleCodegen):
 typedef unsigned char uchar;
 using half_float::half;
 MAKE_VECTOR_TYPE(half, half)
+
 inline float max(float x, float y) {
   return fmax(x, y);
 }
+
 inline float4 max(float4 x, float4 y) {
   return float4(fmax(x.x, y.x), fmax(x.y, y.y), fmax(x.z, y.z), fmax(x.w, y.w));
 }
-inline float4 pow(float4 x, float y) {
-  return float4(pow(x.x, y), pow(x.y, y), pow(x.z, y), pow(x.w, y));
+
+inline float4 pow(float x, float4 y) {
+  return float4(pow(x, y.x), pow(x, y.y), pow(x, y.z), pow(x, y.w));
 }
+
 inline float4 log2(float4 x) {
   return float4(log2(x.x), log2(x.y), log2(x.z), log2(x.w));
 }
