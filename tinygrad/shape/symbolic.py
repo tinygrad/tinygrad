@@ -18,7 +18,7 @@ class Node:
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
   def __repr__(self): return "<"+self.key+">"
-  def __hash__(self): return hash(self.key)
+  def __hash__(self): return hash(self.__repr__())
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
@@ -58,37 +58,36 @@ class Node:
 
 
   @staticmethod
-  @functools.lru_cache(maxsize=None)
-  def factorize(nodes: List[Node]):
+  def factorize(nodes:Tuple[Node, ...]):
     mul_groups: Dict[Node, int] = {}
     for x in nodes:
       a,b = (x.a,x.b) if isinstance(x, MulNode) else (x,1)
       mul_groups[a] = mul_groups.get(a, 0) + b
-    return [a * b_sum if b_sum != 1 else a for a, b_sum in mul_groups.items() if b_sum != 0]
+    return [MulNode(a, b_sum) if b_sum != 1 else a for a, b_sum in mul_groups.items() if b_sum != 0]
 
   @staticmethod
   def sum(nodes:List[Node]) -> Node:
+    nodes = [x for x in nodes if x.max or x.min]
+    if not nodes: return NumNode(0)
     if len(nodes) == 1: return nodes[0]
+    if len(nodes) == 2 and ((nodes[0].__class__ is NumNode) + (nodes[1].__class__ is NumNode)) == 1: return create_rednode(SumNode, nodes)  # very common input
 
-    # flatten all sumnodes and gather numnodes into number
     new_nodes: List[Node] = []
     num_node_sum = 0
+
+    # flatten all sumnodes and gather numnodes
     for node in nodes:
-      if isinstance(node, SumNode):
+      if node.__class__ is NumNode: num_node_sum += node.b
+      elif isinstance(node, SumNode):
         for sub_node in node.flat_components:
           if sub_node.__class__ is NumNode: num_node_sum += sub_node.b
           else: new_nodes.append(sub_node)
-      elif node.__class__ is NumNode: num_node_sum += node.b
       else: new_nodes.append(node)
 
-    if len(nodes) == 1 and not num_node_sum: return nodes[0]
-
-    # factorize nodes, but only if duplicate mulnode a-nodes exist
     if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes): 
       new_nodes = Node.factorize(tuple(new_nodes))
-    
-    if num_node_sum: new_nodes.append(NumNode(num_node_sum))
 
+    if num_node_sum: new_nodes.append(NumNode(num_node_sum))
     return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
 
   @staticmethod
@@ -196,7 +195,7 @@ class SumNode(RedNode):
     return Node.__mod__(Node.sum(new_nodes), b)
   
   @property
-  def flat_components(self) -> List[Node]: # recursively expand sumnode components
+  def flat_components(self): # recursively expand sumnode components
     new_nodes = []
     for x in self.nodes: new_nodes += (x.flat_components if isinstance(x, SumNode) else [x])
     return new_nodes
