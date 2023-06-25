@@ -29,6 +29,7 @@ class RawHIPBufferCPU(RawBufferCopyInOut):
   def __init__(self, size, dtype):
     self.buf_sz = size * dtype.itemsize
     super().__init__(size, dtype, hip.hipMalloc(self.buf_sz))
+  def __del__(self): hip.hipFree(self._buf)
   def _copyin(self, x:np.ndarray): hip.hipMemcpy(self._buf, x.ctypes.data_as(ctypes.c_void_p), self.buf_sz, hip.hipMemcpyHostToDevice)
   def _copyout(self, x:np.ndarray): hip.hipMemcpy(x.ctypes.data_as(ctypes.c_void_p), self._buf, self.buf_sz, hip.hipMemcpyDeviceToHost)
 
@@ -130,11 +131,19 @@ class HIPCodegenCPU(CStyleCodegen):
 typedef unsigned char uchar;
 using half_float::half;
 MAKE_VECTOR_TYPE(half, half)
-//using half4 = hip::detail::Vector_type<half, 4>;
-#define max fmax
-inline float4 pow(float4 x, float4 y) {
-  return float4(pow(x.x, y.x), pow(x.y, y.y), pow(x.z, y.z), pow(x.w, y.w));
+inline float max(float x, float y) {
+  return fmax(x, y);
 }
+inline float4 max(float4 x, float4 y) {
+  return float4(fmax(x.x, y.x), fmax(x.y, y.y), fmax(x.z, y.z), fmax(x.w, y.w));
+}
+inline float4 pow(float4 x, float y) {
+  return float4(pow(x.x, y), pow(x.y, y), pow(x.z, y), pow(x.w, y));
+}
+inline float4 log2(float4 x) {
+  return float4(log2(x.x), log2(x.y), log2(x.z), log2(x.w));
+}
+
 inline float vload_half(size_t offset, const half *p) {
   return (float)*(p + offset);
 }

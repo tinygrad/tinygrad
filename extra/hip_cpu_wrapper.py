@@ -14,6 +14,11 @@ hipError_t my_hipMalloc(void** ptr, std::size_t size) {
   return r;
 }
 
+hipError_t my_hipFree(void* ptr)
+{
+    return hip::detail::deallocate(ptr);
+}
+
 hipError_t my_hipMemcpy(
   void* dst,
   const void* src,
@@ -92,6 +97,15 @@ def hipMalloc(count):
   c_count = ctypes.c_size_t(count)
 
   status = _libhip['my_hipMalloc'](ctypes.byref(ptr), c_count)
+  hipCheckStatus(status)
+  return ptr
+
+_libhip['my_hipFree'].restype = int
+_libhip['my_hipFree'].argtypes = [ctypes.c_void_p]
+
+
+def hipFree(ptr):
+  status = _libhip['my_hipFree'](ptr)
   hipCheckStatus(status)
   return ptr
 
