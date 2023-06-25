@@ -121,7 +121,7 @@ class Linearizer:
     for st in self.sts: st.views = ShapeTracker.simplify(st.views)
 
     # make the output buffer shape correct in here
-    self.sts[0].movement_op(MovementOps.RESHAPE, self.info.shape)
+    self.sts[0] = self.sts[0].movement_op(MovementOps.RESHAPE, self.info.shape)
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
 
     # move all reduce axes to the end
