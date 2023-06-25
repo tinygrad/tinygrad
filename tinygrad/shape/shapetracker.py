@@ -247,12 +247,14 @@ class ShapeTracker:
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     return View.create(tuple([y-x for x,y in arg]), view.strides, view.offset+offset, mask)
 
-  def pad(self, arg: Tuple[Tuple[int, int], ...]):
-    assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == lsn(self.views[-1].shape)
+  @staticmethod
+  @functools.lru_cache(None)
+  def pad(view: View, arg: Tuple[Tuple[int, int], ...]):
+    assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(view.shape)
     if any([b or e for b, e in arg]):
-      zvarg, mask = get_pad_args(self.views[-1].shape, arg)
-      self.views[-1] = ShapeTracker.__unsafe_resize(self.views[-1], zvarg, mask=mask)
-    return self
+      zvarg, mask = get_pad_args(view.shape, arg)
+      return ShapeTracker.__unsafe_resize(view, zvarg, mask=mask)
+    return view
 
   def shrink(self, arg: Tuple[Tuple[int, int], ...]):
     assert all((b>=0 and e<=s) for s,(b,e) in zip(self.views[-1].shape,arg)) and len(arg) == len(self.views[-1].shape)
@@ -299,6 +301,8 @@ class ShapeTracker:
     assert isinstance(arg, tuple) and (len(arg) == len(self.views[-1].shape) or op == MovementOps.RESHAPE), f"arg {arg} for {op} doesn't match dim of shape {self.views[-1].shape}"
     if op == MovementOps.EXPAND:
       self.views[-1] = ShapeTracker.expand(self.views[-1], arg)
+    elif op == MovementOps.PAD:
+      self.views[-1] = ShapeTracker.pad(self.views[-1], arg)
     elif op == MovementOps.RESHAPE:
       new_view, extra = ShapeTracker.reshape(self.views[-1], arg)
       if extra: self.views.append(new_view)
