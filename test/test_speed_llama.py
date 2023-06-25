@@ -31,5 +31,7 @@ class TestLLaMASpeed(unittest.TestCase):
     if pr: stop_profile(pr, sort='time')
     print("runtime in ms:", ', '.join("%.2f"%((tms[i+1]-tms[i])*1000) for i in range(len(tms)-1)))
 
+    Device.DEFAULT = old_default
+
 if __name__ == '__main__':
   unittest.main()
