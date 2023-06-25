@@ -131,7 +131,7 @@ def get_run_onnx(onnx_model: ModelProto):
       for x in n.input:
         t = fetch_tensor(x)
         if debug: print(f"\t{x} - {t}")
-        # if debug: print(f"{t.numpy() if isinstance(t, Tensor) else t}")
+        if debug: print(f"{t.numpy() if isinstance(t, Tensor) else t}")
         inp.append(t)
       opt = attribute_dict[num]
       if debug: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
@@ -151,7 +151,7 @@ def get_run_onnx(onnx_model: ModelProto):
         ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in axes])
       elif n.op_type == "Div":
         # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
-        ret = inp[0].div(inp[1])
+        ret = inp[0].div(inp[1]) if inp[0].dtype == dtypes.float else inp[0].div(inp[1]).floor()
       elif n.op_type == "Constant":
         if 'value' in opt: ret = opt['value'] # tensor
         elif 'value_float' in opt: ret = Tensor(np.array(opt['value_float'], dtype=np.float32), requires_grad=False)
@@ -237,7 +237,7 @@ def get_run_onnx(onnx_model: ModelProto):
       if debug: print("outputs:")
       for i in range(len(n.output)): 
         if debug: print(f"\t{n.output[i]} - {ret[i]}")
-        # if debug: print(f"{ret[i].numpy() if isinstance(ret[i], Tensor) else type(ret[i])}")
+        if debug: print(f"{ret[i].numpy() if isinstance(ret[i], Tensor) else type(ret[i])}")
         intermediate_tensors[n.output[i]] = ret[i]
       #print(ret[0].numpy().mean())
       if num == ONNXLIMIT:

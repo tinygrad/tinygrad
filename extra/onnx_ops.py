@@ -309,9 +309,11 @@ def Gather(input, indices, axis):
   return ret
 
 '''
-def _gather(array: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY
-  reshape_arg = [1]*array.ndim + [array.shape[-1]]
-  return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, array.shape[-1]) == Tensor.arange(array.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, array.shape[-1]))*array).sum(indices.ndim)
+def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY
+  reshape_arg = [1]*input.ndim + [input.shape[-1]]
+  print(indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]).numpy())
+  print(reshape_arg)
+  return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]))*input).sum(indices.ndim)
 
 def Gather(input, indices, axis=0):
   indices_shape = list(indices.shape)
