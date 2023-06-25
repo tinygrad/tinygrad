@@ -56,9 +56,8 @@ class Node:
   @staticmethod
   def num(num:int) -> Node: return NumNode(num)
 
-
   @staticmethod
-  def factorize(nodes:Tuple[Node, ...]):
+  def factorize(nodes:List[Node]):
     mul_groups: Dict[Node, int] = {}
     for x in nodes:
       a,b = (x.a,x.b) if isinstance(x, MulNode) else (x,1)
@@ -76,16 +75,15 @@ class Node:
 
     # flatten all sumnodes and gather numnodes
     for node in nodes:
-      if node.__class__ is NumNode: num_node_sum += node.b
-      elif isinstance(node, SumNode):
+      if node.__class__ not in (NumNode, SumNode): new_nodes.append(node)
+      elif node.__class__ is NumNode: num_node_sum += node.b
+      elif isinstance(node, SumNode):  # mypy wants the isinstance
         for sub_node in node.flat_components:
           if sub_node.__class__ is NumNode: num_node_sum += sub_node.b
           else: new_nodes.append(sub_node)
-      else: new_nodes.append(node)
 
     if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes): 
-      new_nodes = Node.factorize(tuple(new_nodes))
-
+      new_nodes = Node.factorize(new_nodes)
     if num_node_sum: new_nodes.append(NumNode(num_node_sum))
     return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
 
