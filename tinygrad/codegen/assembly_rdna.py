@@ -45,7 +45,7 @@ class RDNACodegen(AssemblyCodegen):
     dtype_to_rdnatype = {dtypes.float32: "f32", dtypes.int64: "i64", dtypes.int32: "i32", dtypes.uint64: "u64", dtypes.bool: "i32"}
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", FusedOps.MULACC: "fma",
            BinaryOps.MAX: "max", UnaryOps.RECIP: "rcp",
-           UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin", UnaryOps.LOG2: "log", UnaryOps.EXP2: "exp",
+           UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin", UnaryOps.LOG2: "log", UnaryOps.EXP2: "exp", UnaryOps.FLOOR: "trunc",
            BinaryOps.CMPEQ: "cmp_eq", BinaryOps.CMPLT: "cmp_lt"}
 
     pend_regs:Set[Register] = set()
