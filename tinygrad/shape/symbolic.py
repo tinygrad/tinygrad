@@ -70,7 +70,6 @@ class Node:
     nodes = [x for x in nodes if x.max or x.min]
     if not nodes: return NumNode(0)
     if len(nodes) == 1: return nodes[0]
-    if len(nodes) == 2 and ((nodes[0].__class__ is NumNode) + (nodes[1].__class__ is NumNode)) == 1: return create_rednode(SumNode, nodes)  # very common input
 
     new_nodes: List[Node] = []
     num_node_sum = 0
