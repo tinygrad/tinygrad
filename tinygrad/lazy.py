@@ -152,7 +152,7 @@ class LazyBuffer:
         for x in get_buffers(self.op): x.realize()
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
-        if self.optype != MovementOps and isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
+        if self.optype != MovementOps and isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in ShapeTracker.unit_stride_axes(self.st.views, self.st.shape))):
           if self.op.op == MovementOps.RESHAPE:
             # put CAST before the final RESHAPE
             self.op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, self.op.src, dtypes.float32),), self.op.arg)
