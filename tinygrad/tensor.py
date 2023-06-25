@@ -39,7 +39,7 @@ class Tensor:
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
-  def __init__(self, data:Union[int, float, list, tuple, LazyBuffer, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+  def __init__(self, data:Union[int, float, list, tuple, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     device = Device.canonicalize(device)
     # tensors have gradients, buffers do not
@@ -124,7 +124,7 @@ class Tensor:
   # ***** creation llop entrypoint *****
 
   @staticmethod
-  def _loadop(op, sz, device=Device.DEFAULT, dtype:Optional[DType]=None, arg=None, **kwargs):
+  def _loadop(op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
     return Tensor(LazyBuffer.loadop(op, [sz], Tensor.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
 
   @staticmethod

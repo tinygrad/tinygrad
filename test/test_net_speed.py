@@ -12,12 +12,12 @@ def start_profile():
   pr.enable()
   return pr
 
-def stop_profile(pr, sort='cumtime'):
+def stop_profile(pr, sort='cumtime', frac=0.2):
   pr.disable()
   ps = pstats.Stats(pr)
   ps.strip_dirs()
   ps.sort_stats(sort)
-  ps.print_stats(0.2)
+  ps.print_stats(frac)
 
 class TestConvSpeed(unittest.TestCase):
 
