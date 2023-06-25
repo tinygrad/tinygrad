@@ -256,10 +256,11 @@ class ShapeTracker:
       return ShapeTracker.__unsafe_resize(view, zvarg, mask=mask)
     return view
 
-  def shrink(self, arg: Tuple[Tuple[int, int], ...]):
-    assert all((b>=0 and e<=s) for s,(b,e) in zip(self.views[-1].shape,arg)) and len(arg) == len(self.views[-1].shape)
-    self.views[-1] = ShapeTracker.__unsafe_resize(self.views[-1], arg)
-    return self
+  @staticmethod
+  @functools.lru_cache(None)
+  def shrink(view: View, arg: Tuple[Tuple[int, int], ...]):
+    assert all((b>=0 and e<=s) for s,(b,e) in zip(view.shape,arg)) and len(arg) == len(view.shape)
+    return ShapeTracker.__unsafe_resize(view, arg)
 
   @staticmethod
   @functools.lru_cache(None)
@@ -270,7 +271,6 @@ class ShapeTracker:
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(view.mask, view.shape, new_shape)]) if view.mask else None
     return View.create(new_shape, view.strides, view.offset, mask)
 
-
   @staticmethod
   @functools.lru_cache(None)
   def reshape(view, new_shape: Tuple[int, ...]):
@@ -278,37 +278,37 @@ class ShapeTracker:
     assert all([isinstance(x, int) and x > 0 for x in new_shape]), f"shape must be ints and can't contain 0 or negative numbers {new_shape}"
     assert prod(view.shape) == prod(new_shape), f"can't reshape {view.shape} -> {new_shape}" 
     return _reshape(view, new_shape)
-
-  def permute(self, axis: Tuple[int, ...]):
-    assert all(isinstance(x, int) and x >= 0 and x < len(self.views[-1].shape) for x in axis), f"invalid permute {axis} for {self.views[-1].shape}"
-    assert len(set(axis)) == len(axis) and len(axis) == len(self.views[-1].shape), f"can't permute {self.views[-1].shape} with {axis}"
-    self.views[-1] = View.create(tuple([self.views[-1].shape[a] for a in axis]), tuple([self.views[-1].strides[a] for a in axis]), self.views[-1].offset, tuple([self.views[-1].mask[a] for a in axis]) if self.views[-1].mask is not None else None)
-    return self
+  
+  @staticmethod
+  @functools.lru_cache(None)
+  def permute(view: View, axis: Tuple[int, ...]):
+    assert all(isinstance(x, int) and x >= 0 and x < len(view.shape) for x in axis), f"invalid permute {axis} for {view.shape}"
+    assert len(set(axis)) == len(axis) and len(axis) == len(view.shape), f"can't permute {view.shape} with {axis}"
+    return View.create(tuple([view.shape[a] for a in axis]), tuple([view.strides[a] for a in axis]), view.offset, tuple([view.mask[a] for a in axis]) if view.mask is not None else None)
 
   # except for the negative case, you can build this from the others. invertible in the negative case
-  def stride(self, mul: Tuple[int, ...]):
-    assert all(isinstance(x, int) and x != 0 for x in mul), f"invalid stride {mul} for {self.views[-1].shape}"
-    strides = tuple([z*m for z,m in zip(self.views[-1].strides, mul)])
-    new_shape = tuple([(s+(abs(m)-1))//abs(m) for s,m in zip(self.views[-1].shape, mul)])
-    offset = sum([(s-1)*z for s,z,m in zip(self.views[-1].shape, self.views[-1].strides, mul) if m < 0])
-    mask = tuple([(((mx if m > 0 else s-my)+(abs(m)-1))//abs(m), ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(self.views[-1].mask, self.views[-1].shape, mul)]) if self.views[-1].mask is not None else None
-    self.views[-1] = View.create(new_shape, strides, self.views[-1].offset + offset, mask)
-    return self
+
+  @staticmethod
+  @functools.lru_cache(None)
+  def stride(view: View, mul: Tuple[int, ...]):
+    assert all(isinstance(x, int) and x != 0 for x in mul), f"invalid stride {mul} for {view.shape}"
+    strides = tuple([z*m for z,m in zip(view.strides, mul)])
+    new_shape = tuple([(s+(abs(m)-1))//abs(m) for s,m in zip(view.shape, mul)])
+    offset = sum([(s-1)*z for s,z,m in zip(view.shape, view.strides, mul) if m < 0])
+    mask = tuple([(((mx if m > 0 else s-my)+(abs(m)-1))//abs(m), ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(view.mask, view.shape, mul)]) if view.mask is not None else None
+    return View.create(new_shape, strides, view.offset + offset, mask)
 
   # *** entry point for external ***
 
   def movement_op(self, op: MovementOps, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
     assert isinstance(arg, tuple) and (len(arg) == len(self.views[-1].shape) or op == MovementOps.RESHAPE), f"arg {arg} for {op} doesn't match dim of shape {self.views[-1].shape}"
-    if op == MovementOps.EXPAND:
-      self.views[-1] = ShapeTracker.expand(self.views[-1], arg)
-    elif op == MovementOps.PAD:
-      self.views[-1] = ShapeTracker.pad(self.views[-1], arg)
-    elif op == MovementOps.RESHAPE:
+    
+    if op == MovementOps.RESHAPE:
       new_view, extra = ShapeTracker.reshape(self.views[-1], arg)
       if extra: self.views.append(new_view)
       else: self.views[-1] = new_view
     else: 
-      dispatch[op](self, arg)
+      self.views[-1] = dispatch[op](self.views[-1], arg)
     return self
 
 dispatch: Dict[MovementOps, Callable] = {MovementOps.RESHAPE: ShapeTracker.reshape, MovementOps.EXPAND: ShapeTracker.expand, MovementOps.PAD: ShapeTracker.pad,

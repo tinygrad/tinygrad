@@ -405,8 +405,8 @@ class Linearizer:
   # apply reshape and permute to all shapetrackers
   def reshape_and_permute(self, new_shape_fxn, axis):
     for st in self.sts:
-      if new_shape_fxn is not None: st.movement_op(MovementOps.RESHAPE, tuple(new_shape_fxn(st.shape)))
-      if axis is not None: st.permute(tuple(axis))
+      if new_shape_fxn is not None: st = st.movement_op(MovementOps.RESHAPE, tuple(new_shape_fxn(st.shape)))
+      if axis is not None: st = st.movement_op(MovementOps.PERMUTE, tuple(axis))
 
   # drops the final dimension
   def upcast(self):
