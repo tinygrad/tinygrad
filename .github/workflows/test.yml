@@ -199,8 +199,8 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
-    - name: Install clang and libstdc++
-      run: sudo apt install build-essential clang libstdc++-12-dev
+    - name: Install Dependencies
+      run: sudo apt install build-essential clang libstdc++-12-dev libtbb-dev
     - name: Install HIP-CPU
       run: |
         git clone https://github.com/ROCm-Developer-Tools/HIP-CPU.git
