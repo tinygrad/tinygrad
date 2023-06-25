@@ -173,8 +173,8 @@ class ShapeTracker:
   # these are multiview strides, value is None if it's not a simple strided dimension
   # TODO: this can be shared code between simplify and merge_views
 
-  @functools.lru_cache(maxsize=None)
   @staticmethod
+  @functools.lru_cache(maxsize=None)
   def real_offset(views) -> int:
     real_offset, mask = ShapeTracker.expr_node(views, Variable('zero', 0, 0))
     assert real_offset.__class__ is NumNode, f"how is the offset not a number? {real_offset} {mask}"
