@@ -74,7 +74,7 @@ class HIPProgramCPU:
     # TODO: is there a way to not write this to disk?
     fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.so"
     if not os.path.exists(fn):
-      subprocess.check_output(args=('clang -g -std=c++20 -shared -O2 -Wall -Werror -x c++ -ltbb -ltbbmalloc -fPIC --rtlib=compiler-rt - -o '+fn+'.tmp').split(), input=prg.encode('utf-8'))
+      subprocess.check_output(args=('clang -g -std=c++20 --stdlib=libstdc++ -shared -O2 -Wall -Werror -x c++ -ltbb -ltbbmalloc -fPIC --rtlib=compiler-rt - -o '+fn+'.tmp').split(), input=prg.encode('utf-8'))
       os.rename(fn+'.tmp', fn)
     self.lib = ctypes.CDLL(fn)
     self.prg = self.lib[f"launch_and_wait_{name}"]
