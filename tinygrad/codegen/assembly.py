@@ -1,6 +1,6 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
 from tinygrad.codegen.linearizer import Linearizer, UOps, Token
-from tinygrad.ops import ASTRunner, FusedOps, BinaryOps, UnaryOps
+from tinygrad.ops import ASTRunner, BinaryOps, UnaryOps
 from tinygrad.helpers import DType, dtypes, DEBUG
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 import functools
@@ -120,7 +120,6 @@ class AssemblyCodegen(Linearizer):
         elif args[1] == "local":
           for i,var in enumerate(args[0]):
             local_size.append(var.max+1)
-            global_size[i] *= local_size[i]
             ins.append(AssemblyInstruction(UOps.SPECIAL, newreg(var, dtype=dtypes.int32), [], f"lid{len(args[0])-1-i}"))
         else:
           for var in args[0]:
@@ -128,19 +127,18 @@ class AssemblyCodegen(Linearizer):
               ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32, scalar=True), [], 0))
               ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
       elif uop == UOps.ENDLOOP:
-        if args[1] not in ["global", "local"]:
-          for var in reversed(args[0]):
-            if not isinstance(var, NumNode):  # TODO: why is this coming through?
-              ins.append(AssemblyInstruction(UOps.ALU, tor[var], [tor[var], 1], BinaryOps.ADD))
-              pred = render_alu(BinaryOps.CMPLT, tor[var], var.max+1, dtypes.bool)
-              ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], ("$loop_"+var.expr, True)))
+        #if args[1] not in ["global", "local"]:
+        for var in reversed(args[0]):
+          if not isinstance(var, NumNode):  # TODO: why is this coming through?
+            ins.append(AssemblyInstruction(UOps.ALU, tor[var], [tor[var], 1], BinaryOps.ADD))
+            pred = render_alu(BinaryOps.CMPLT, tor[var], var.max+1, dtypes.bool)
+            ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], ("$loop_"+var.expr, True)))
       elif uop == UOps.CAST and newvar is not None:
         # TODO: we should reconsider outputting CAST in the linearizer. these are needless copies
         out = newreg(newvar)
         for i,sr in enumerate(out.subregs()):
           ins.append(AssemblyInstruction(UOps.ALU, sr, [tor[vin[i]]], UnaryOps.NOOP))
       elif uop == UOps.ALU and newvar is not None:
-        if args == FusedOps.MULACC: vin = [vin[1], vin[2], vin[0]]  # TODO: reorder MULACC everywhere
         out = newreg(newvar) if newvar not in tor else tor[newvar]
         # this is the only thing that can violate SSA
         if args in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
@@ -191,5 +189,5 @@ class AssemblyCodegen(Linearizer):
     name, asm = self.specialize(ins)
 
     return ASTRunner(name, asm,
-      global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,
+      global_size[::-1], local_size[::-1],
       op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name, runtime_args={"binary": True})

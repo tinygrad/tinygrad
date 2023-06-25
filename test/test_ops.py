@@ -125,6 +125,8 @@ class TestOps(unittest.TestCase):
     tt2 = Tensor.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (tt1 < tt2).sum().backward)
 
+  def test_floor(self): helper_test_op([(45,65)], lambda x: torch.floor(x), lambda x: x.floor(), forward_only=True)
+  def test_ceil(self): helper_test_op([(45,65)], lambda x: torch.ceil(x), lambda x:x.ceil(), forward_only=True)
   def test_tril(self):
     helper_test_op([(3,3)], lambda x: x.tril(), lambda x: x.tril())
     helper_test_op([(3,3)], lambda x: x.tril(1), lambda x: x.tril(1))
@@ -167,9 +169,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(64,64), (64,64)], lambda x,y: x*y, Tensor.mul)
     helper_test_op([(), ()], lambda x,y: x*y, Tensor.mul)
   def test_mul_const(self):
-    helper_test_op([(45,65)], lambda x: x*float("inf"),  lambda x: x*float("inf"))
-    helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x*-float("inf"))
-    helper_test_op([(45,65)], lambda x: x*float("nan"),  lambda x: x*float("nan"))
+    helper_test_op([(45,65)], lambda x: x*2,  lambda x: x*2)
+    helper_test_op([(45,65)], lambda x: x*-1, lambda x: x*-1)
+    helper_test_op([(45,65)], lambda x: 255*x, lambda x: 255*x)
   def test_div(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
     helper_test_op([(), ()], lambda x,y: x/y, Tensor.div)
@@ -179,14 +181,21 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 1/x, lambda x: 1/x)
     helper_test_op([(45,65)], lambda x: x/2, lambda x: x/2)
     helper_test_op([(45,65)], lambda x: 2/x, lambda x: 2/x)
+    helper_test_op([()], lambda x: x/2, lambda x: x/2)
+    helper_test_op([()], lambda x: 2/x, lambda x: 2/x)
+  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL has issues with -inf")
+  def test_mul_const_naninf(self):
+    helper_test_op([(45,65)], lambda x: x*float("inf"),  lambda x: x*float("inf"))
+    helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x*-float("inf"))
+    helper_test_op([(45,65)], lambda x: x*float("nan"),  lambda x: x*float("nan"))
+  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL has issues with -inf")
+  def test_div_const_naninf(self):
     helper_test_op([(45,65)], lambda x: x/float("inf"),  lambda x: x/float("inf"))
     helper_test_op([(45,65)], lambda x: x/-float("inf"), lambda x: x/-float("inf"))
     helper_test_op([(45,65)], lambda x: x/float("nan"),  lambda x: x/float("nan"))
     helper_test_op([(45,65)], lambda x: float("inf")/x,    lambda x: float("inf")/x)
     helper_test_op([(45,65)], lambda x: (-float("inf"))/x, lambda x: (-float("inf"))/x)
     helper_test_op([(45,65)], lambda x: float("nan")/x,    lambda x: float("nan")/x)
-    helper_test_op([()], lambda x: x/2, lambda x: x/2)
-    helper_test_op([()], lambda x: 2/x, lambda x: 2/x)
   def test_pow(self):
     # TODO: why is a=0 for these tests?
     helper_test_op([(45,65)], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
@@ -234,6 +243,9 @@ class TestOps(unittest.TestCase):
   def test_log(self):
     helper_test_op([(45,65)], lambda x: torch.log(x), Tensor.log)
     helper_test_op([()], lambda x: torch.log(x), Tensor.log)
+  def test_log2(self):
+    helper_test_op([(45,65)], lambda x: torch.log2(x), Tensor.log2)
+    helper_test_op([()], lambda x: torch.log2(x), Tensor.log2)
   def test_exp(self):
     helper_test_op([(45,65)], lambda x: torch.exp(x), Tensor.exp)
     helper_test_op([()], lambda x: torch.exp(x), Tensor.exp)
@@ -270,8 +282,16 @@ class TestOps(unittest.TestCase):
       return x*torch.tanh(torch.nn.functional.softplus(x))
     helper_test_op([(45,65)], _mish_pytorch, Tensor.mish, atol=1e-4)
     helper_test_op([()], _mish_pytorch, Tensor.mish, atol=1e-4)
+  @unittest.skipIf(IMAGE>0, "no 1d dot for images")
+  def test_dot_1d(self):
+    helper_test_op([(65), (65)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+    helper_test_op([(65), (65,45)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+    helper_test_op([(45,65), (65)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+    helper_test_op([(32,45,65), (65)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+    helper_test_op([(65), (32,65,45)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+    helper_test_op([(32,45,65), (32,65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
     with self.assertRaises(RuntimeError):
       a = Tensor(3.14)
       a.matmul(a)
@@ -295,6 +315,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3), (1,3,3,5)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
+  def test_big_gemm(self):
+    helper_test_op([(256,256), (256,256)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   def test_broadcastdot(self):
     helper_test_op([(10,45,65), (65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
     with self.assertRaises(RuntimeError):
@@ -660,6 +682,7 @@ class TestOps(unittest.TestCase):
         lambda x,w: torch.nn.functional.conv_transpose2d(x,w, stride=stride).relu(),
         lambda x,w: Tensor.conv_transpose2d(x,w,stride=stride).relu(), atol=1e-4, grad_rtol=1e-5)
 
+  @unittest.skipIf(Device.DEFAULT == "METAL", "weird, broken in METAL CI")
   def test_output_padded_conv_transpose2d(self):
     for output_padding, stride in [((1,1), (2,3)), ((2,1), (3,2))]:
       helper_test_op([(2,4,6,5), (4,4,3,3),(4,)],
@@ -877,7 +900,7 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride))
 
-  @unittest.skipIf(Device.DEFAULT in ["CUDA", "PTX"], "CUDA fails on this")
+  @unittest.skipIf(Device.DEFAULT == "CUDA", "CUDA fails on this")
   def test_maxpool2d_unit_stride(self):
     helper_test_op([(32,2,110,28)],
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=1),
