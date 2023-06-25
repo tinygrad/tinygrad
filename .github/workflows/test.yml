@@ -206,7 +206,7 @@ jobs:
       with:
         python-version: 3.11
     - name: Install Dependencies
-      run: pip install --use-feature=fast-deps -e '.[metal,testing]'
+      run: pip install -e '.[metal,testing]'
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python3 test/external/external_test_speed_llama.py
     #- name: Run dtype test
