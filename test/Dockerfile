@@ -9,4 +9,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install python dependencies
 COPY . ./tinygrad
 WORKDIR tinygrad
-RUN pip install -e ".[testing]"
+RUN pip install -e .
