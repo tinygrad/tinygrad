@@ -217,7 +217,6 @@ jobs:
   testdocker:
     name: Docker Test
     runs-on: ubuntu-latest
-    if: ${{ false }}
 
     steps:
     - name: Checkout Code
