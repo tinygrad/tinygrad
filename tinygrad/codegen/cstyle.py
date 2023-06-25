@@ -87,6 +87,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
             kk(f"{{ int {var.expr} = {lang.lid[len(args[0])-1-i]};  /* {var.max+1} */")
             local_size.append(var.max+1)
           else:
+            #kk("#pragma unroll(1)")   # prevent loop unrolling
             kk(f"for (int {var.expr} = {var.min}; {var.expr} <= {var.max}; ++{var.expr}) {{")
       depth += 1
     elif uop == UOps.ENDLOOP:
@@ -186,8 +187,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   # SIMD
   if uses_tensor_cores:
-    local_size = [1]*(len(global_size)-1) + [32]
-    prg = prg.replace("gid.x", "gid.x/32")
+    local_size += [8,4]  # extra local size
 
   if lang.half_prekernel and any(x.dtype == dtypes.float16 for x in bufs): prg = ''.join([f"{lang.half_prekernel}", "\n", prg])
   if lang.double_prekernel and any(x.dtype == dtypes.float64 for x in bufs): prg = ''.join([f"{lang.double_prekernel}", "\n", prg])

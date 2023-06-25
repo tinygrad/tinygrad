@@ -550,12 +550,17 @@ class Linearizer:
     # simplify
     self.simplify_ones()
 
+    # hack
+    #self.shift_to(0, 4)
+    #self.upcast()
+
     # are we grouping? (requires local shape support)
     if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
-          self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
+          # TODO: top is sometimes a bad choice here
+          self.shift_to(self.first_reduce, sz, top=False, insert_before=self.first_reduce + len(self.group_for_reduce))
           self.group_for_reduce.append(sz)
           break
 
@@ -586,8 +591,8 @@ class Linearizer:
 
     # **** below this line need to be optional and benchmarked ****
 
-    #BIG_DIM = 32
-    BIG_DIM = 8
+    BIG_DIM = 32
+    #BIG_DIM = 8
 
     # potentially do more upcasts of non reduce axes based on a heuristic
     upcasted_axis = set()
@@ -612,7 +617,7 @@ class Linearizer:
       if self.full_unupcasted_shape[-1] <= 16:
         self.upcast()
       else:
-        for splits in ([16] if BIG_DIM > 8 else []) + [8,4]:
+        for splits in [8,4]:
           if self.full_unupcasted_shape[-1]%splits == 0:
             self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
             self.upcast()
@@ -626,6 +631,7 @@ class Linearizer:
         self.upcast()
 
     # **** local groups ****
+    return
 
     for axis in range(self.first_reduce - self.local_dims - 1, -1, -1):
       local_size = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
