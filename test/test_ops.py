@@ -125,8 +125,12 @@ class TestOps(unittest.TestCase):
     tt2 = Tensor.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (tt1 < tt2).sum().backward)
 
-  def test_floor(self): helper_test_op([(45,65)], lambda x: torch.floor(x), lambda x: x.floor(), forward_only=True)
-  def test_ceil(self): helper_test_op([(45,65)], lambda x: torch.ceil(x), lambda x:x.ceil(), forward_only=True)
+  def test_floor(self): 
+    helper_test_op([(45,65)], lambda x: torch.floor(x), lambda x: x.floor(), forward_only=True)
+    helper_test_op(None, lambda x: torch.floor(x), lambda x: x.floor(), forward_only=True, vals=[[1.5, 0.5, 0.2, -3., 4., -2.2]])
+  def test_ceil(self): 
+    helper_test_op([(45,65)], lambda x: torch.ceil(x), lambda x:x.ceil(), forward_only=True)
+    helper_test_op(None, lambda x: torch.ceil(x), lambda x: x.ceil(), forward_only=True, vals=[[1.5, 0.5, 0.2, -3., 4., -2.2]])
   def test_tril(self):
     helper_test_op([(3,3)], lambda x: x.tril(), lambda x: x.tril())
     helper_test_op([(3,3)], lambda x: x.tril(1), lambda x: x.tril(1))
