@@ -118,7 +118,7 @@ class Linearizer:
 
     # create new shapetrackers inside this kernel, we will permute them
     self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]
-    for st in self.sts: st.simplify()
+    for st in self.sts: st.views = ShapeTracker.simplify(st.views)
 
     # make the output buffer shape correct in here
     self.sts[0].reshape(self.info.shape)
@@ -146,7 +146,7 @@ class Linearizer:
 
   def upcasted_axis(self, i):
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
-                    self.sts[i].real_strides()[self.shape_len-self.upcasted:],
+                    ShapeTracker.real_strides(tuple(self.sts[i].views), self.sts[i].shape)[self.shape_len-self.upcasted:],
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
 
   # TODO: is there a better way to write this?
@@ -169,7 +169,7 @@ class Linearizer:
     return store_offset_float4
 
   def global_load(self, i, idxs:List[Variable], const=None) -> List[Token]:
-    load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(dtypes.float,uidxs)+self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
+    load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(dtypes.float,uidxs)+ShapeTracker.expr_idxs(self.sts[i].views, idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
 
     # float4 grouping (optional)
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType)) and len(self.float4_axis(i)) == 1
@@ -216,7 +216,7 @@ class Linearizer:
 
     # do stores
     for uidxs, var in store_offset.items():
-      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])))
+      self.uop(UOps.STORE, None, [var], MemOp(i, *ShapeTracker.expr_idxs(self.sts[i].views, idxs+[Variable.num(x) for x in uidxs[::-1]])))
 
   def linearize(self):
     # uops
