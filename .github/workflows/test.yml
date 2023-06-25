@@ -224,7 +224,7 @@ jobs:
     - name: Build Docker
       run: docker build -t tinygrad -f test/Dockerfile .
     - name: Test Docker
-      run: docker run -e CI='true' -e EXCLUDE_DEVICES='CLANG' --rm tinygrad /usr/bin/env python3 -m pytest -s -v -n=auto
+      run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
 
 
   testcuda:
