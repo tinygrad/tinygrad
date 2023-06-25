@@ -236,26 +236,27 @@ class ShapeTracker:
   def needs_valid(views) -> bool: return any([v.mask is not None for v in views])
 
   # *** under this line are the movement ops ***
-
-  def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...], mask=None):
-    offset = get_unsafe_resize_offset(self.views[-1].strides, arg)
-    if self.views[-1].mask:
+  @staticmethod
+  @functools.lru_cache(None)
+  def __unsafe_resize(view:View, arg: Tuple[Tuple[int, int], ...], mask=None):
+    offset = get_unsafe_resize_offset(view.strides, arg)
+    if view.mask:
       # move the old mask
-      nmask = tuple([(max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.views[-1].mask, arg)])
+      nmask = tuple([(max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(view.mask, arg)])
       # merge the masks if we have two
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
-    self.views[-1] = View.create(tuple([y-x for x,y in arg]), self.views[-1].strides, self.views[-1].offset+offset, mask)
+    return View.create(tuple([y-x for x,y in arg]), view.strides, view.offset+offset, mask)
 
   def pad(self, arg: Tuple[Tuple[int, int], ...]):
-    assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.views[-1].shape)
+    assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == lsn(self.views[-1].shape)
     if any([b or e for b, e in arg]):
       zvarg, mask = get_pad_args(self.views[-1].shape, arg)
-      self.__unsafe_resize(zvarg, mask=mask)
+      self.views[-1] = ShapeTracker.__unsafe_resize(self.views[-1], zvarg, mask=mask)
     return self
 
   def shrink(self, arg: Tuple[Tuple[int, int], ...]):
     assert all((b>=0 and e<=s) for s,(b,e) in zip(self.views[-1].shape,arg)) and len(arg) == len(self.views[-1].shape)
-    self.__unsafe_resize(arg)
+    self.views[-1] = ShapeTracker.__unsafe_resize(self.views[-1], arg)
     return self
 
   @staticmethod
