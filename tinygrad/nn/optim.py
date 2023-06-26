@@ -8,9 +8,9 @@ class Optimizer:
     for x in params:
       if x.requires_grad is None: x.requires_grad = True
 
-    params: Set[Tensor] = set(params)
-    self.params: List[Tensor] = [x for x in params if x.requires_grad]
-    self.buffers: List[Tensor] = [x for x in params if not x.requires_grad]   # buffers are still realized
+    deduped_params: Set[Tensor] = set(params)
+    self.params: List[Tensor] = [x for x in deduped_params if x.requires_grad]
+    self.buffers: List[Tensor] = [x for x in deduped_params if not x.requires_grad]   # buffers are still realized
 
   def zero_grad(self):
     for param in self.params: param.grad = None
