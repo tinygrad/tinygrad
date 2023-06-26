@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, cast
-import sys, weakref, importlib, inspect, functools, pathlib
+import sys, importlib, inspect, functools, pathlib
 import numpy as np
-from weakref import WeakValueDictionary
+from weakref import WeakValueDictionary, ref, WeakSet
 from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_lazyops, get_buffers, map_buffers
@@ -56,8 +56,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   return LazyOp(MovementOps.RESHAPE, (ast, ), self.shape) if intermediate_shape != self.shape else ast
 
 # **** lazy operations ****
-
-def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x) if isinstance(x, LazyOp) else weakref.ref(x) for x in op.src), op.arg)
+def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple([get_weakop(x) if x.__class__ is LazyOp else ref(x) for x in op.src]), op.arg)
 def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(root.op.src[0]) if getattr(root, 'op', None) and len(root.op.src) == 1 else root
 def get_movementroot(root:LazyBuffer, allow_contiguous=False) -> LazyBuffer: return get_movementroot(root.op.src[0], allow_contiguous) if root.realized is None and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and allow_contiguous and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot_contiguous(x.op.src[0]) if x.realized is None and x.op.op == LoadOps.CONTIGUOUS else (get_movementroot(x, True) if x.optype == MovementOps and x.st.contiguous else x)
@@ -94,7 +93,7 @@ class LazyBuffer:
     self.realized: Optional[RawBuffer] = src if isinstance(src, RawBuffer) else None
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
-    self.children: weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
+    self.children: WeakSet[LazyBuffer] = WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
     if isinstance(src, LazyOp):
       self.op: LazyOp = src
