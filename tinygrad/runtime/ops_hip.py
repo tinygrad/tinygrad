@@ -30,6 +30,7 @@ class RawHIPBufferCPU(RawBufferCopyInOut):
     self.buf_sz = size * dtype.itemsize
     super().__init__(size, dtype, hip.hipMalloc(self.buf_sz))
   def __del__(self): hip.hipFree(self._buf)
+  # hipMemcpyAsync_htod/hipMemcpyAsync_dtoh will crash on HIP CPU, so we use synchronized versions of hipMemcpy instead.
   def _copyin(self, x:np.ndarray): hip.hipMemcpy(self._buf, x.ctypes.data_as(ctypes.c_void_p), self.buf_sz, hip.hipMemcpyHostToDevice)
   def _copyout(self, x:np.ndarray): hip.hipMemcpy(x.ctypes.data_as(ctypes.c_void_p), self._buf, self.buf_sz, hip.hipMemcpyDeviceToHost)
 
@@ -95,13 +96,10 @@ class HIPProgramCPU:
                         *[ctypes.c_void_p for _ in args]]
     # Launch the kernel and wait the stream.
     self.prg(global_size[0], global_size[1], global_size[2], local_size[0], local_size[1], local_size[2], 0, ctypes.c_void_p(0), *[data._buf for data in args])
-    # This doesn't work unless put it into the c++ code.
-    # hip.hipStreamSynchronize(ctypes.c_void_p(0))
 
 # Some hacks for HIP CPU.
-#   1) hipLaunchKernelGGL doesn't work unless compiled with the kernel together, so we add a function after the kernel for launching the kernel.
-#   2) hipLaunchKernelGGL is async so we have to wait on the stream by calling hipStreamSynchronize.
-#   3) hipStreamSynchronize doesn't work either unless compiled with the kernel together, so we append a call to hipStreamSynchronize after hipLaunchKernelGG>
+#   1) hipLaunchKernelGGL will crash if it invokes kernels from another shared library, so we append a kernel launcher function after the kernel and compile them into one shared library.
+#   2) hipLaunchKernelGGL is async so we have to wait on the stream by calling hipStreamSynchronize after hipLaunchKernelGGL.
 def build_kernel_launcher(bufnames, buftypes):
   return ['extern "C" void launch_and_wait_KERNEL_NAME_PLACEHOLDER('] + [r"""
   std::uint32_t grid_dim_x,
