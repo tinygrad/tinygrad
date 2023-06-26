@@ -53,7 +53,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
   BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
   BinaryOps.POW: lambda a,b: f"pow({a},{b})", BinaryOps.MAX: lambda a,b: f"max({a},{b})",
-  BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", FusedOps.MULACC: lambda a,b,c: f"(({b}*{c})+{a})"
+  BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", FusedOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})"
 }
 
 def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
@@ -172,8 +172,8 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
     [', '.join([f'{t} {bufnames[i]}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
-  if lang.half_prekernel: prg =''.join([f"{lang.half_prekernel}", "\n", prg])
-  if lang.double_prekernel: prg = ''.join([f"{lang.double_prekernel}", "\n", prg])
+  if lang.half_prekernel and any(x.dtype == dtypes.float16 for x in bufs): prg = ''.join([f"{lang.half_prekernel}", "\n", prg])
+  if lang.double_prekernel and any(x.dtype == dtypes.float64 for x in bufs): prg = ''.join([f"{lang.double_prekernel}", "\n", prg])
   return prg, global_size, local_size
 
 class CStyleCodegen(Linearizer):
@@ -194,16 +194,13 @@ class CStyleCodegen(Linearizer):
 
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.bufs, self.lang)
 
-    # if we have local_sizes, we have to correct the global_size
-    for i,s in enumerate(local_size): global_size[i] *= s
-
     # painfully name the function something unique
     if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]
     else:
       CStyleCodegen.kernel_cnt[self.function_name] += 1
       suffix = f"{'n'+str(CStyleCodegen.kernel_cnt[self.function_name]-1)}" if CStyleCodegen.kernel_cnt[self.function_name] > 1 else ""
-      CStyleCodegen.kernel_name_cache[prg] = function_name, display_name = self.function_name+suffix, self.display_name+colored(suffix, 'black', bright=True)
+      CStyleCodegen.kernel_name_cache[prg] = function_name, display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
 
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
-      global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,
+      global_size[::-1], local_size[::-1],
       op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=display_name)

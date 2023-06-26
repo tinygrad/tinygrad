@@ -1,5 +1,6 @@
 # sorted in order of increasing complexity
 from typing import List
+from tinygrad.helpers import dedup
 from tinygrad.tensor import Tensor
 
 class Optimizer:
@@ -8,8 +9,8 @@ class Optimizer:
     for x in params:
       if x.requires_grad is None: x.requires_grad = True
 
-    self.params: List[Tensor] = [x for x in params if x.requires_grad]
-    self.buffers: List[Tensor] = [x for x in params if not x.requires_grad]   # buffers are still realized
+    self.params: List[Tensor] = dedup([x for x in params if x.requires_grad])
+    self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
 
   def zero_grad(self):
     for param in self.params: param.grad = None
