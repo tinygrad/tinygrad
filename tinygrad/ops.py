@@ -29,15 +29,14 @@ class LazyOp:
   arg: Any
   buffers: Tuple[LazyBuffer, ...]
 
-  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None, buffers: Optional[Tuple[LazyBuffer, ...]] = None):
+  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None):
     self.op = op
     self.src = src
     self.arg = arg
-    if not buffers:
-      buffers = tuple()
-      for s in src:
-        try: buffers += s.get_buffers()
-        except AttributeError: pass
+    buffers: Tuple[LazyBuffer, ...] = tuple()
+    for s in src:
+      try: buffers += s.get_buffers()
+      except AttributeError: pass
     self.buffers = buffers
 
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
@@ -59,7 +58,7 @@ class LazyOp:
     from tinygrad.lazy import elementwise_op
     assert self.op in BinaryOps or self.op in UnaryOps
     return elementwise_op(self.op, *[z.replace_with_movement_ops(ops) for z in self.src], arg=self.arg)   # type: ignore
-  
+
   @property
   def st(self): raise NotImplementedError
   @property
