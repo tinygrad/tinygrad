@@ -7,7 +7,7 @@ from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mn
 from tinygrad.ops import LazyOp, get_lazyops, get_buffers, FlopCounter, get_lazyop_info, map_buffers, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
-from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
+from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
 from tinygrad.shape.symbolic import Variable
 
 # bottom ones are asm only
@@ -15,7 +15,9 @@ class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = aut
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
 
 class LocalBuffer(NamedTuple):
+  name: str
   dtype: DType = dtypes.float32
+  alias: Optional[LazyBuffer] = None
   realized: None = None
 
 class Token(NamedTuple):
@@ -133,6 +135,7 @@ class Linearizer:
     self.group_for_reduce: List[int] = []
     self.upcasted: int = 0
     self.local_dims: int = 0
+    self.local_alias: Dict[int, LocalBuffer] = {}
 
     # group simplifies
     self.simplify_ones()
@@ -224,10 +227,14 @@ class Linearizer:
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
-      self.bufs.append(LocalBuffer())
+      self.bufs.append(LocalBuffer("temp"))
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
+
+    # define local buffers
+    for lb in self.local_alias.values():
+      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size()))
 
     # print
     if DEBUG >= 3: self.printbufs()
@@ -268,8 +275,13 @@ class Linearizer:
       # reduce loop
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
+      # copy in any global buffers
+      for i in self.local_alias:
+        ll = self.global_load(i, gl_idxs+reduce_idxs)
+        self.global_store(self.bufs.index(self.local_alias[i]), gl_idxs+reduce_idxs, ll, ssa)
+
       # load earlybufs
-      loaded_buffers.update({b:self.global_load(i, gl_idxs+reduce_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
+      loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, gl_idxs+reduce_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
 
       # run early AST (with reduce)
       self.ast_parse(self.reduceop, [acc[off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True)
@@ -478,12 +490,48 @@ class Linearizer:
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
       if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
 
+  def alias_buffer(self, i, pattern):
+    self.bufs.append(LocalBuffer(name=f"ldata{i}", alias=self.bufs[i]))
+    self.local_alias[i] = self.bufs[-1]
+    acc = 1
+    # NOTE: these strides can be selected in many different ways
+    shp, stride = [], []
+    for p,s,st in zip(pattern, self.sts[i].shape, self.sts[i].real_strides()):
+      if p:
+        shp.append(s)
+        if st != 0:
+          stride.append(acc)
+          acc *= s
+        else:
+          stride.append(0)
+      else:
+        stride.append(0)
+        shp.append(1)
+    self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
+
   def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     self.required_optimizations(early_only=True)
 
     # simplify
     self.simplify_ones()
+
+    if self.bufs[0].shape != (1024, 1024, 1): return
+
+    self.shift_to(0, 8, insert_before=self.first_reduce)
+    self.shift_to(1, 8, insert_before=self.first_reduce)
+    self.local_dims += 2
+    self.shift_to(self.first_reduce, 8)
+    self.upcast()
+
+    #self.alias_buffer(0, [False, False, True, True, False, True])
+    self.alias_buffer(1, [False, False, True, True, False, True])
+    self.alias_buffer(2, [False, False, True, True, False, True])
+
+    self.shift_to(3, 2)
+    self.upcast()
+
+    return
 
     # are we grouping? (requires local shape support)
     if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:

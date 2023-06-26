@@ -130,7 +130,7 @@ class LazyBuffer:
         else:
           self.realized = Device[self.device].buffer.fromCPU(rawbuf.toCPU(), **self._device_extra_args())
       elif self.optype == LoadOps:
-        if DEBUG >= 4: print(f"{self.op.op} {self.shape} {self.dtype} {self.op.arg}")
+        if DEBUG >= 5: print(f"{self.op.op} {self.shape} {self.dtype} {self.op.arg}")
         if self.op.op == LoadOps.EMPTY:
           self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
         elif self.op.op == LoadOps.RAND:
