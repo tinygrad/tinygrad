@@ -10,10 +10,11 @@ from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
 from tinygrad.shape.symbolic import Variable
 
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); \
+class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); \
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
 
 class LocalBuffer(NamedTuple):
+  name: str
   dtype: DType = dtypes.float32
   realized: None = None
 
@@ -223,7 +224,7 @@ class Linearizer:
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
-      self.bufs.append(LocalBuffer())
+      self.bufs.append(LocalBuffer("temp"))
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
@@ -280,7 +281,8 @@ class Linearizer:
       if self.group_for_reduce:
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs, acc, ssa)  # store accumulators
-        self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))   # this is a barrier on GPUs
+        self.uop(UOps.BARRIER, None, [], ())
+        self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
 
         # local indexs are over, 0 them out
         local_idxs = [x*0 for x in local_idxs]
@@ -320,11 +322,11 @@ class Linearizer:
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs, val, ssa)
 
     if not self.group_for_reduce:
-      # end the local loop
-      self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
-
-    # end the global loop
-    self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
+      # end the global+local loop
+      self.uop(UOps.ENDLOOP, None, [], (global_idxs+local_idxs, "global+local"))
+    else:
+      # end the global loop
+      self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
   _OT = TypeVar("_OT")
   def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None) -> _OT:

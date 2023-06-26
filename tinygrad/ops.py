@@ -33,7 +33,7 @@ class LazyOp:
     self.op = op
     self.src = src
     self.arg = arg
-    # TODO: this hasattr is required because the key function maps the buffers to ints
+    # TODO: this hasattr is required because the linearizer's key function maps the buffers to ints
     self.buffers = functools.reduce(lambda x,s: (x+s.buffers) if hasattr(s, 'buffers') else x, src, tuple())
 
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
