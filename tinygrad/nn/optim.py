@@ -8,6 +8,7 @@ class Optimizer:
     for x in params:
       if x.requires_grad is None: x.requires_grad = True
 
+    params = set(params)
     self.params: List[Tensor] = [x for x in params if x.requires_grad]
     self.buffers: List[Tensor] = [x for x in params if not x.requires_grad]   # buffers are still realized
 
