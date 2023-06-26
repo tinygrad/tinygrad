@@ -34,7 +34,7 @@ class LazyOp:
     self.src = src
     self.arg = arg
     # TODO: this hasattr is required because the key function maps the buffers to ints
-    self.buffers = functools.reduce(lambda x,s: (x+s.get_buffers()) if hasattr(s, 'get_buffers') else x, src, tuple())
+    self.buffers = functools.reduce(lambda x,s: (x+s.buffers) if hasattr(s, 'buffers') else x, src, tuple())
 
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   def __eq__(self, __value: object) -> bool:
@@ -47,8 +47,6 @@ class LazyOp:
 
   # Any == Union[LazyBuffer, DeviceBuffer]
   def map_buffers(self, real_srcs: Dict[Any, Any]): return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
-
-  def get_buffers(self) -> Tuple[LazyBuffer, ...]: return self.buffers
   def get_lazyops(self) -> List['LazyOp']: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self: LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':

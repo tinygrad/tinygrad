@@ -239,8 +239,9 @@ class LazyBuffer:
     if not self.realized and self.op.op == MovementOps.STRIDE: return self.op.src[0].stride_op(tuple(map(operator.mul, arg, self.op.arg)))
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).stride(arg), MovementOps.STRIDE, arg)
 
+  @property
+  def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
   def map_buffers(self, real_srcs: Dict[Any, Any]): return real_srcs.get(self, self)
-  def get_buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
   def get_lazyops(self) -> List[Any]: return []
   def replace_with_movement_ops(self: LazyBuffer, ops:List[Tuple[MovementOps, Any]]) -> LazyBuffer:
     y = self
