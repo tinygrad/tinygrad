@@ -27,7 +27,7 @@ PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = self.op.src[0]
-  if MERGE_ELEMENTWISE_INTO_REDUCE and not src.realized and src.optype == BinaryOps and len(src.children) <= 1:
+  if MERGE_ELEMENTWISE_INTO_REDUCE and not src.realized and src.optype is BinaryOps and len(src.children) <= 1:
     src = src.op # type: ignore
   return LazyOp(self.op.op, (src,), self.op.arg)
 
@@ -65,17 +65,15 @@ def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movement
 
 lazycache: LightWeakValueDictionary = LightWeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType):
-
-  # fromcpu aren't cached
-  if optype == LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}: return LazyBuffer(device, st, optype, op, dtype)
-
   #print("create_lazybuffer", device, shape, optype, op, dtype)
 
-  # NOTE: shape should be deterministic. annoying to cache with the ShapeTracker
-  # get_weakop makes all the LazyBuffers in the op have a weakref
-  wop = (device, dtype, optype, ref(op))
+  # fromcpu aren't cached
+  if optype is LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}: return LazyBuffer(device, st, optype, op, dtype)
 
+  # wop is the deduping key. i feel this used to compare more deeply
+  wop = (device, dtype, optype, ref(op))
   if wop in lazycache: return lazycache[wop]
+
   lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype)
   return ret
 
@@ -83,7 +81,7 @@ class LazyBuffer:
   __slots__ = 'st', 'device', 'shape', 'optype', 'dtype', 'op', 'realized', 'output_buffer', 'children', 'node_id', '__weakref__'
   __deletable__ = ('op',)
   def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, src:Optional[RawBuffer]=None):
-    self.st = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
+    self.st: ShapeTracker = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
     self.device, self.shape, self.optype, self.dtype = device, self.st.shape, optype, dtype
     self.realized: Optional[RawBuffer] = src
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
