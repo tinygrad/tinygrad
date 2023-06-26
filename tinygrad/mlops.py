@@ -63,8 +63,8 @@ class Sum(Function):
     self.input_shape = x.shape
     return x.reduce_op(ReduceOps.SUM, new_shape)
 
-  def backward(self, grad_output):
-    return grad_output.expand_op(self.input_shape)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return grad_output.expand(self.input_shape)
 
 class Max(Function):
   __slots__ = "x", "ret"
@@ -74,13 +74,13 @@ class Max(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # 1s in locations where the max was chosen (can be two locations)
-    max_is_1s = self.x.binary_op(BinaryOps.CMPEQ, self.ret.expand_op(self.x.shape))
+    max_is_1s = self.x.binary_op(BinaryOps.CMPEQ, self.ret.expand(self.x.shape))
 
     # sum of locations, averaged
-    div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape).expand_op(self.x.shape)
+    div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape).expand(self.x.shape)
     max_is_amount = max_is_1s.binary_op(BinaryOps.DIV, div)
 
-    grad_output_expanded = grad_output.expand_op(self.x.shape)
+    grad_output_expanded = grad_output.expand(self.x.shape)
     return max_is_amount.binary_op(BinaryOps.MUL, grad_output_expanded)
 
 # ************* binary ops *************
@@ -96,7 +96,7 @@ class Maximum(Function):
     self.ret = x.binary_op(BinaryOps.MAX, y)
     return self.ret
 
-  def backward(self, grad_output):
+  def backward(self, grad_output:LazyBuffer):
     mask = self.y.binary_op(BinaryOps.CMPEQ, self.ret)
     eq = self.x.binary_op(BinaryOps.CMPEQ, self.y)
     splitter = eq.const_like(2).binary_op(BinaryOps.SUB, eq).binary_op(BinaryOps.DIV, eq.const_like(2))
@@ -113,7 +113,7 @@ class Add(Function):
            grad_output if self.needs_input_grad[1] else None
 
 class Sub(Function):
-  def forward(self, x:LazyBuffer, y:LazyBuffer):
+  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     return x.binary_op(BinaryOps.SUB, y)
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
@@ -122,7 +122,7 @@ class Sub(Function):
 
 class Mul(Function):
   __slots__ = 'x', 'y'
-  def forward(self, x:LazyBuffer, y:LazyBuffer):
+  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     self.x, self.y = x, y
     return x.binary_op(BinaryOps.MUL, y)
 
@@ -132,7 +132,7 @@ class Mul(Function):
 
 class Pow(Function):
   __slots__ = 'x', 'y', 'ret'
-  def forward(self, x:LazyBuffer, y:LazyBuffer):
+  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     self.x, self.y, self.ret = x, y, x.binary_op(BinaryOps.POW, y)
     return self.ret
 
@@ -157,7 +157,7 @@ class Expand(Function):
   __slots__ = 'input_shape'
   def forward(self, x:LazyBuffer, shape:ShapeType) -> LazyBuffer:
     self.input_shape = x.shape
-    return x.expand_op(shape)
+    return x.expand(shape)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.reduce_op(ReduceOps.SUM, self.input_shape)
@@ -166,43 +166,43 @@ class Reshape(Function):
   __slots__ = 'input_shape'
   def forward(self, x:LazyBuffer, shape:ShapeType) -> LazyBuffer:
     self.input_shape = x.shape
-    return x.reshape_op(shape)
+    return x.reshape(shape)
 
-  def backward(self, grad_output):
-    return grad_output.reshape_op(self.input_shape)
+  def backward(self, grad_output:LazyBuffer):
+    return grad_output.reshape(self.input_shape)
 
 class Permute(Function):
   __slots__ = 'input_order'
   def forward(self, x:LazyBuffer, order:Tuple[int, ...]) -> LazyBuffer:
     self.input_order = order
-    return x.permute_op(order)
+    return x.permute(order)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.permute_op(argsort(self.input_order))
+    return grad_output.permute(argsort(self.input_order))
 
 class Pad(Function):
   __slots__ = 'narg'
   def forward(self, x:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
     self.narg = tuple([(p[0], s+p[0]) for s,p in zip(x.shape, arg)])
-    return x.pad_op(arg)
+    return x.pad(arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.shrink_op(self.narg)
+    return grad_output.shrink(self.narg)
 
 class Shrink(Function):
   __slots__ = 'narg'
   def forward(self, x:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
     self.narg = tuple([(p[0], s-p[1]) for s,p in zip(x.shape, arg)])
-    return x.shrink_op(arg)
+    return x.shrink(arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.pad_op(self.narg)
+    return grad_output.pad(self.narg)
 
 class Flip(Function):
   __slots__ = 'arg'
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]):
     self.arg = tuple([-1 if i in set(axis) else 1 for i in range(len(x.shape))])
-    return x.stride_op(self.arg)
+    return x.stride(self.arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.stride_op(self.arg)
+    return grad_output.stride(self.arg)

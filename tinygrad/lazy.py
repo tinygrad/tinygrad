@@ -53,7 +53,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   # reshape all the late ops into the output shape
   # NOTE: these RESHAPEs will return self if they don't change the shape
   for x in real_srcs.keys():
-    if not real_srcs[x]: real_srcs[x] = x.reshape_op(intermediate_shape)
+    if not real_srcs[x]: real_srcs[x] = x.reshape(intermediate_shape)
   ast = self.op.map_buffers(real_srcs)
   return LazyOp(MovementOps.RESHAPE, (ast, ), self.shape) if intermediate_shape != self.shape else ast
 
@@ -154,8 +154,7 @@ class LazyBuffer:
   # create a constant with the shape and dtype of self
   def const_like(self, val) -> LazyBuffer:
     # NOTE: dtypes.from_np(self.dtype.np) to deal with image types
-    return self.loadop(LoadOps.CONST, tuple(), dtypes.from_np(self.dtype.np), self.device, arg=val) \
-      .reshape_op((1,)*len(self.shape)).expand_op(self.shape)
+    return self.loadop(LoadOps.CONST, tuple(), dtypes.from_np(self.dtype.np), self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
@@ -178,7 +177,7 @@ class LazyBuffer:
       # MovementOps aren't stacked any more, they each have one parent, find the root
       root = get_movementroot(self)
       if root.st.contiguous and root != self and prod(ret.st.shape) == prod(root.shape):
-        return root.reshape_op(ret.st.shape)
+        return root.reshape(ret.st.shape)
     return ret
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
@@ -186,27 +185,27 @@ class LazyBuffer:
     srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
     return create_lazybuffer(self.device, ShapeTracker(new_shape), ReduceOps, LazyOp(op, srcs, new_shape), self.dtype)
 
-  def reshape_op(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
+  def reshape(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == arg: return self
     if not self.realized and self.op.op == MovementOps.RESHAPE:
       self.op.src[0].children.discard(self) # NOTE: this is only required in reshape and when pushing permutes, why??
-      return self.op.src[0].reshape_op(arg)
+      return self.op.src[0].reshape(arg)
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).reshape(arg), MovementOps.RESHAPE, arg)
 
-  def pad_op(self:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
+  def pad(self:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
     if all([b == 0 and e == 0 for b,e in arg]): return self
-    if not self.realized and self.op.op == MovementOps.PAD: return self.op.src[0].pad_op(tuple([(b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)]))
+    if not self.realized and self.op.op == MovementOps.PAD: return self.op.src[0].pad(tuple([(b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)]))
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).pad(arg), MovementOps.PAD, arg)
 
-  def expand_op(self: LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
+  def expand(self: LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == arg: return self
     if not self.realized and self.op.op == MovementOps.EXPAND:
-      return self.op.src[0].expand_op(arg)
+      return self.op.src[0].expand(arg)
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).expand(arg), MovementOps.EXPAND, arg)
 
-  def permute_op(self: LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
+  def permute(self: LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
     if arg == tuple(range(len(self.shape))): return self
-    if not self.realized and self.op.op == MovementOps.PERMUTE: return self.op.src[0].permute_op(tuple([self.op.arg[i] for i in arg]))
+    if not self.realized and self.op.op == MovementOps.PERMUTE: return self.op.src[0].permute(tuple([self.op.arg[i] for i in arg]))
     if not self.realized:
       if PUSH_PERMUTES and self.optype == ReduceOps:
         # reduceops have one buffer input, permute it
@@ -214,29 +213,28 @@ class LazyBuffer:
         src, rop = self.op.src[0], self.op.op
         src.children.discard(self)
         del self  # TODO: why doesn't this delete remove it from the children
-        return src.permute_op(arg).reduce_op(cast(ReduceOps, rop), narg)
+        return src.permute(arg).reduce_op(cast(ReduceOps, rop), narg)
 
       # move permutes before expands (always, this is safe)
       if self.op.op == MovementOps.EXPAND:
-        return self.op.src[0].permute_op(arg).expand_op(tuple([self.op.arg[a] for a in arg]))
+        return self.op.src[0].permute(arg).expand(tuple([self.op.arg[a] for a in arg]))
 
       # move permutes before reshapes if we can
       if PUSH_PERMUTES and self.op.op == MovementOps.RESHAPE and self.op.src[0].__class__ is LazyBuffer:
         if shape_idx_groups := get_contraction(self.op.src[0].shape, self.shape):
           self.op.src[0].children.discard(self) # NOTE: this is only required in reshape and when pushing permutes, why??
-          return self.op.src[0].permute_op(tuple(flatten(shape_idx_groups[i] for i in arg))) \
-            .reshape_op(ShapeTracker(self.st).permute(arg).shape)
+          return self.op.src[0].permute(tuple(flatten(shape_idx_groups[i] for i in arg))).reshape(ShapeTracker(self.st).permute(arg).shape)
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).permute(arg), MovementOps.PERMUTE, arg)
 
-  def shrink_op(self:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
+  def shrink(self:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
     if all([b - a == s for s, (a, b) in zip(self.shape, arg)]): return self
-    if not self.realized and self.op.op == MovementOps.SHRINK: return self.op.src[0].shrink_op(tuple([(b1+b2, b1+e2) for (b1,_),(b2,e2) in zip(self.op.arg, arg)]))
+    if not self.realized and self.op.op == MovementOps.SHRINK: return self.op.src[0].shrink(tuple([(b1+b2, b1+e2) for (b1,_),(b2,e2) in zip(self.op.arg, arg)]))
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).shrink(arg), MovementOps.SHRINK, arg)
 
-  def stride_op(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
+  def stride(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
     local_st = ShapeTracker(self.shape).stride(arg)
     if self.shape == local_st.shape and local_st.contiguous: return self
-    if not self.realized and self.op.op == MovementOps.STRIDE: return self.op.src[0].stride_op(tuple(map(operator.mul, arg, self.op.arg)))
+    if not self.realized and self.op.op == MovementOps.STRIDE: return self.op.src[0].stride(tuple(map(operator.mul, arg, self.op.arg)))
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).stride(arg), MovementOps.STRIDE, arg)
 
   @property
@@ -353,10 +351,10 @@ REALIZE_DISPATCHER: Dict[Any, Callable] = {
 }
 
 MOVEMENT_OPS_DISPATCHER: Dict[MovementOps, Callable] = {
-  MovementOps.RESHAPE: LazyBuffer.reshape_op,
-  MovementOps.EXPAND: LazyBuffer.expand_op,
-  MovementOps.SHRINK: LazyBuffer.shrink_op,
-  MovementOps.PERMUTE: LazyBuffer.permute_op,
-  MovementOps.PAD: LazyBuffer.pad_op,
-  MovementOps.STRIDE: LazyBuffer.stride_op,
+  MovementOps.RESHAPE: LazyBuffer.reshape,
+  MovementOps.EXPAND: LazyBuffer.expand,
+  MovementOps.SHRINK: LazyBuffer.shrink,
+  MovementOps.PERMUTE: LazyBuffer.permute,
+  MovementOps.PAD: LazyBuffer.pad,
+  MovementOps.STRIDE: LazyBuffer.stride,
 }

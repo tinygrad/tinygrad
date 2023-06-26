@@ -65,12 +65,14 @@ class LazyOp:
   @property
   def optype(self): raise NotImplementedError
   def realize(self): raise NotImplementedError
-  def reshape_op(self, _): raise NotImplementedError
-  def pad_op(self, _): raise NotImplementedError
-  def expand_op(self, _): raise NotImplementedError
-  def permute_op(self, _): raise NotImplementedError
-  def shrink_op(self, _): raise NotImplementedError
-  def stride_op(self, _): raise NotImplementedError
+
+  # movement ops
+  def reshape(self, _): raise NotImplementedError
+  def pad(self, _): raise NotImplementedError
+  def expand(self, _): raise NotImplementedError
+  def permute(self, _): raise NotImplementedError
+  def shrink(self, _): raise NotImplementedError
+  def stride(self, _): raise NotImplementedError
 
 # **************** for Interpreted Buffers ****************
 
