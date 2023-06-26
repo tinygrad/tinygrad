@@ -322,11 +322,11 @@ class Linearizer:
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs, val, ssa)
 
     if not self.group_for_reduce:
-      # end the local loop
-      self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
-
-    # end the global loop
-    self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
+      # end the global+local loop
+      self.uop(UOps.ENDLOOP, None, [], (global_idxs+local_idxs, "global"))
+    else:
+      # end the global loop
+      self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
   _OT = TypeVar("_OT")
   def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None) -> _OT:
