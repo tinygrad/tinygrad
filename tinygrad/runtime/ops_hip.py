@@ -120,7 +120,14 @@ def build_kernel_launcher(bufnames, buftypes):
 class HIPCodegen(CStyleCodegen):
   lang = CStyleLanguage(
     kernel_prefix = r"""
+#include <hip/hip_common.h>
+#include <hip/hip_math_constants.h>
 #define INFINITY (__builtin_inff())
+#define NAN HIP_NAN_F
+__device__ float4 max(float4 x, float4 y) {
+  return float4(fmax(x.x, y.x), fmax(x.y, y.y), fmax(x.z, y.z), fmax(x.w, y.w));
+}
+
 __device__ float4 pow(float x, float4 y) {
   return float4(pow(x, y.x), pow(x, y.y), pow(x, y.z), pow(x, y.w));
 }
