@@ -311,8 +311,6 @@ def Gather(input, indices, axis):
 '''
 def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY
   reshape_arg = [1]*input.ndim + [input.shape[-1]]
-  print(indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]).numpy())
-  print(reshape_arg)
   return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]))*input).sum(indices.ndim)
 
 def Gather(input, indices, axis=0):
@@ -346,48 +344,61 @@ def GatherElements(input, indices, axis):
   return _gather(input, indices).transpose(ax1=0, ax2=axis)
 
 def ArrayFeatureExtractor(input, indices):
-  input = input.transpose(ax1=0, ax2=input.ndim-1)
-  ret = _gather(input, indices)
-  ret = ret.transpose(0, ret.ndim-1)
+  ret = Gather(input, indices, input.ndim-1)
   return ret
 
 
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
   assert scales or sizes and not (scales and sizes), "only scales or sizes, cmon"
   assert not roi, "roi is not None"
-  bs,c,py,px = X.shape
-  if scales: scales = [int(i) for i in safe_numpy(scales)]
-  if sizes: sizes = [int(i) for i in safe_numpy(sizes)]
-  if axes:
-    if scales:
+  if scales:
+    scales = safe_numpy(scales).tolist()
+    if axes: 
       scales_ = [1]*X.ndim
       for a,s in zip(axes, scales):
         scales_[a] = s
       scales = scales_
-    elif sizes:
+  elif sizes:
+    sizes = [int(i) for i in safe_numpy(sizes)]
+    if axes:
       sizes_ = [1]*X.ndim
       for a,s in zip(axes, sizes):
         sizes_[a] = s
       sizes = sizes_
-  output_dim = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
-  print(f"output_dim: {output_dim}")
-  print(X.numpy())
+  output_shape = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
+  upscale = all([os >= xs for os, xs in zip(output_shape, X.shape)]) 
+  spacial_shape = X.shape[2:]
+  bs,c,py,px = X.shape
+  
+  if upscale:
+    if mode == "nearest":
+      if sizes:
+        if keep_aspect_ratio_policy == "stretch":
+          dividable = [True, True, sizes[2]%X.shape[2] == 0, sizes[3]%X.shape[3] == 0]
+          return X.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, math.ceil(sizes[2]/py), px, math.ceil(sizes[3]/px)).reshape(*[s if d else s+1 for s,d in zip(sizes, dividable)]).shrink(tuple([(0,s) for s in output_shape]))
+    elif mode == "linear":
+      return
+    elif mode == "cubic":
+      return 
+  else:
   if mode == "nearest":
-    if scales:
-      if all([int(x) == x and x >= 1 for x in scales]): # upscale
-        ret = X.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, scales[2], px, scales[3]).reshape(bs, c, py*scales[2], px*scales[3])
-        print(ret.numpy())
-        print('fuck')
-        return ret
-      else: # downscale
-        return
-    elif sizes:
+    if sizes:
       if keep_aspect_ratio_policy == "stretch":
         dividable = [True, True, sizes[2]%X.shape[2] == 0, sizes[3]%X.shape[3] == 0]
-        ret = X.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, math.ceil(sizes[2]/py), px, math.ceil(sizes[3]/px)).reshape(*[s if d else s+1 for s,d in zip(sizes, dividable)]).shrink(tuple([(0,s) for s in sizes]))
-        return ret
-      else:
-        return
+        return X.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, math.ceil(sizes[2]/py), px, math.ceil(sizes[3]/px)).reshape(*[s if d else s+1 for s,d in zip(sizes, dividable)]).shrink(tuple([(0,s) for s in output_shape]))
+    else:
+      if all([int(x) == x and x >= 1 for x in scales]): # upscale
+        scales = [int(i) for i in scales]
+        return X.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, scales[2], px, scales[3]).reshape(bs, c, py*scales[2], px*scales[3])
+      else: # downsample
+        output_shape = [math.floor(sh*sc) for sh, sc in zip(X.shape, scales)]
+        indices = [xs/os for xs, os in zip(X.shape, output_shape)]
+        print(indices)
+        print(output_shape)
+        down_scaleable = [not bool(sh%o) for sh, o in zip(X.shape, output_shape)]
+        slice_arg = []
+        # Tensor.arange(output_shape[-1]).resize(spacial_shape)
+
   elif mode == "linear":
     # upsample
     if scales:
