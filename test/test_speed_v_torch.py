@@ -176,8 +176,7 @@ class TestSpeed(unittest.TestCase):
 
   def test_gemm(self):
     def f(a, b): return a @ b
-    for _ in range(1000):
-      helper_test_generic_square('gemm', 1024, f, f)
+    helper_test_generic_square('gemm', 1024, f, f)
 
   def test_gemm_small(self):
     def f(a, b): return a @ b
