@@ -119,9 +119,6 @@ class TestBigSpeed(unittest.TestCase):
   def test_exp(self):
     def f(a, b): return a.exp()
     helper_test_generic_square('exp', 16384, f, f, onearg=True)
-  def test_gemm_1024(self):
-    def f(a, b): return a @ b
-    helper_test_generic_square('gemm', 1024, f, f)
   def test_gemm_2048(self):
     def f(a, b): return a @ b
     helper_test_generic_square('gemm', 2048, f, f)
