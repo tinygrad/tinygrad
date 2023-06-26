@@ -18,8 +18,9 @@ class ClangProgram:
     else:
       if DEBUG >= 5: print(prg)
       # with open('kernel.s', 'w+') as f: f.write(prg)
-      print(subprocess.run(["as", "-o", "kernel.o"], input=prg.encode('utf-8')))
-      print(subprocess.run(["ld", "-shared", "-lm", "-fPIC", "kernel.o", "-o", fn]))
+      #print(subprocess.run(["as", "-o", "kernel.o"], input=prg.encode('utf-8')))
+      print(subprocess.run(["as","-arch", "arm64", "-o", "kernel.o"], input=prg.encode('utf-8')))
+      print(subprocess.run(["clang", "-shared","kernel.o", "-o", fn]))
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
 
