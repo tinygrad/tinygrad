@@ -121,6 +121,16 @@ class HIPCodegen(CStyleCodegen):
   lang = CStyleLanguage(
     kernel_prefix = r"""
 #define INFINITY (__builtin_inff())
+__device__ float4 pow(float x, float4 y) {
+  return float4(pow(x, y.x), pow(x, y.y), pow(x, y.z), pow(x, y.w));
+}
+
+__device__ float4 pow(float4 x, float4 y) {
+  return float4(pow(x.x, y.x), pow(x.y, y.y), pow(x.z, y.z), pow(x.w, y.w));
+}
+__device__ float4 log2(float4 x) {
+  return float4(log2(x.x), log2(x.y), log2(x.z), log2(x.w));
+}
 extern "C" __global__""",
     smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
     half_prekernel = r"""
