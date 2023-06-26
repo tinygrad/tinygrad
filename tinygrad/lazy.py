@@ -90,9 +90,8 @@ class LazyBuffer:
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: LightWeakSet = LightWeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
-    if op:
-      self.op: LazyOp = op
-      for x in op.buffers: x.children.add(self)
+    self.op: LazyOp = op
+    for x in op.buffers: x.children.add(self)
     if not LAZY: self.realize()
 
     # log phantom ops to the graph
