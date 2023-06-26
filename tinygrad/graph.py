@@ -47,11 +47,11 @@ def str_dtype(dtyp):
   ret = str(dtyp)[7:]
   return "" if ret == 'float' else f"\n{ret}"
 
-def log_op(ret: 'LazyBuffer', ast: LazyOp, show_graph: Optional[bool] = None, phantom=False):
+def log_op(ret: LazyBuffer, ast: LazyOp, show_graph: Optional[bool] = None, phantom=False):
   if show_graph is None: show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
   op: List[Op] = [x.op for x in ast.get_lazyops()]
-  inp: List['LazyBuffer'] = [x for x in ast.buffers if not isinstance(x.realized, RawConst) or GRAPH > 1]
+  inp: List[LazyBuffer] = [x for x in ast.buffers if not isinstance(x.realized, RawConst) or GRAPH > 1]
   oporder = [LoadOps, FusedOps, ReduceOps, BinaryOps, UnaryOps, MovementOps]
   optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1

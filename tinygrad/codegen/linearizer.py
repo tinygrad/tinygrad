@@ -1,4 +1,3 @@
-from operator import attrgetter
 from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict
 import itertools, math
 from collections import defaultdict

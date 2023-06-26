@@ -1,7 +1,7 @@
 from __future__ import annotations
-import functools, itertools, random, time
+import functools, time
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, ClassVar, cast
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer, RawConst
@@ -42,7 +42,7 @@ class LazyOp:
 
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   def __eq__(self, __value: object) -> bool:
-    if not __value.__class__ is LazyOp: return False
+    if __value.__class__ is not LazyOp: return False
     __value = cast(LazyOp, __value)
     return self.op == __value.op and self.src == __value.src and self.arg == __value.arg
   def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
