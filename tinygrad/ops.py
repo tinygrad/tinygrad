@@ -33,11 +33,8 @@ class LazyOp:
     self.op = op
     self.src = src
     self.arg = arg
-    buffers: Tuple[LazyBuffer, ...] = tuple()
-    for s in src:
-      try: buffers += s.get_buffers()
-      except AttributeError: pass
-    self.buffers = buffers
+    # TODO: this hasattr is required because the key function maps the buffers to ints
+    self.buffers = functools.reduce(lambda x,s: (x+s.get_buffers()) if hasattr(s, 'get_buffers') else x, src, tuple())
 
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   def __eq__(self, __value: object) -> bool:
