@@ -1,6 +1,5 @@
 # NOTE: this only tests the speed of the LLaMA codegen, it doesn't actually run the net
 import unittest, time
-from statistics import median
 from examples.llama import Transformer, args_7B
 from test.test_net_speed import start_profile, stop_profile
 from tinygrad.tensor import Tensor
@@ -34,7 +33,8 @@ class TestLLaMASpeed(unittest.TestCase):
         model(Tensor([[2]]), i).realize()
         tms.append(time.perf_counter())
       timings = [(tms[i+1]-tms[i])*1000 for i in range(len(tms)-1)]
-      print(f"{st:15s}runtime (median): {median(timings):7.2f}ms, runs: ", ", ".join(f'{x:7.2f}' for x in timings))
+      print(f"{st:15s}runtime: {sum(timings)/len(timings):7.2f}ms , runs: ", ", ".join(f'{x:7.2f}' for x in timings))
+
 
     run_llama("codegen")
     run_llama("methodcache", False)
