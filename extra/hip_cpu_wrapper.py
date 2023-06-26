@@ -195,6 +195,7 @@ def hipStreamSynchronize(stream):
   status = _libhip['my_hipStreamSynchronize'](stream)
   hipCheckStatus(status)
 
+# Define some unused dummy functions to satisfy mypy
 def hiprtcCreateProgram(source, name, header_names, header_sources):
   return ""
 
