@@ -11,7 +11,7 @@ from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
 from tinygrad.shape.symbolic import Variable
 
 # bottom ones are asm only
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); \
+class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); \
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
 
 class LocalBuffer(NamedTuple):
@@ -277,8 +277,13 @@ class Linearizer:
 
       # copy in any global buffers
       for i in self.local_alias:
-        ll = self.global_load(i, gl_idxs+reduce_idxs)
-        self.global_store(self.bufs.index(self.local_alias[i]), gl_idxs+reduce_idxs, ll, ssa)
+        extra_locals = [j for j,st in enumerate(self.sts[i].real_strides()) if st == 0]
+        idxs = gl_idxs+reduce_idxs+[gl_idxs[extra_locals[-1]]]
+        self.upcasted -= 1
+        ll = self.global_load(i, idxs)
+        self.global_store(self.bufs.index(self.local_alias[i]), idxs, ll, ssa)
+        self.upcasted += 1
+      self.uop(UOps.BARRIER, None, [], ())
 
       # load earlybufs
       loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, gl_idxs+reduce_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
@@ -293,6 +298,7 @@ class Linearizer:
       if self.group_for_reduce:
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs, acc, ssa)  # store accumulators
+        self.uop(UOps.BARRIER, None, [], ())
         self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))   # this is a barrier on GPUs
 
         # local indexs are over, 0 them out
@@ -528,8 +534,8 @@ class Linearizer:
     self.alias_buffer(1, [False, False, True, True, False, True])
     self.alias_buffer(2, [False, False, True, True, False, True])
 
-    self.shift_to(3, 2)
-    self.upcast()
+    #self.shift_to(3, 2)
+    #self.upcast()
 
     return
 
