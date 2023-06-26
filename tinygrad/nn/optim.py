@@ -1,5 +1,5 @@
 # sorted in order of increasing complexity
-from typing import List
+from typing import List, Set
 from tinygrad.tensor import Tensor
 
 class Optimizer:
@@ -8,7 +8,7 @@ class Optimizer:
     for x in params:
       if x.requires_grad is None: x.requires_grad = True
 
-    params = set(params)
+    params: Set[Tensor] = set(params)
     self.params: List[Tensor] = [x for x in params if x.requires_grad]
     self.buffers: List[Tensor] = [x for x in params if not x.requires_grad]   # buffers are still realized
 
