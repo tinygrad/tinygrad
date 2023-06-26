@@ -1,17 +1,16 @@
 from __future__ import annotations
 import operator
-from typing import Optional, Tuple, Union, List, Dict, Any, cast
+from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast
 import sys, importlib, inspect, functools, pathlib
 from weakref import ref
 
 import numpy as np
-from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, LightWeakSet, LightWeakValueDictionary
+from tinygrad.helpers import GRAPH, prod, getenv, DType, dtypes, flatten, ImageDType, LightWeakSet, LightWeakValueDictionary
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.shape.shapetracker import MovementOps, ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, LoadOps, OpType, LazyOp
 from tinygrad.runtime.lib import RawBufferMapped, RawConst, RawBuffer
-from tinygrad.graph import log_op, GRAPH
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -29,7 +28,7 @@ def _ast_reduceops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = self.op.src[0]
   if MERGE_ELEMENTWISE_INTO_REDUCE and not src.realized and src.optype == BinaryOps and len(src.children) <= 1:
-    src = src.op
+    src = src.op # type: ignore
   return LazyOp(self.op.op, (src,), self.op.arg, src.get_buffers())
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
@@ -60,13 +59,12 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
 
 # **** lazy operations ****
 
-def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(root.op.src[0]) if getattr(root, 'op', None) and len(root.op.src) == 1 else root
-def get_movementroot(root:LazyBuffer, allow_contiguous=False) -> LazyBuffer: return get_movementroot(root.op.src[0], allow_contiguous) if not root.realized and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and allow_contiguous and root.op.src[0].st.contiguous)) else root
-def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot_contiguous(x.op.src[0]) if not x.realized and x.op.op == LoadOps.CONTIGUOUS else (get_movementroot(x, True) if x.optype == MovementOps and x.st.contiguous else x)
+def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(cast(LazyBuffer, root.op.src[0])) if getattr(root, 'op', None) and len(root.op.src) == 1 else root
+def get_movementroot(root:LazyBuffer, allow_contiguous=False) -> LazyBuffer: return get_movementroot(cast(LazyBuffer, root.op.src[0]), allow_contiguous) if not root.realized and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and allow_contiguous and root.op.src[0].st.contiguous)) else root
+def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot_contiguous(cast(LazyBuffer, x.op.src[0])) if not x.realized and x.op.op == LoadOps.CONTIGUOUS else (get_movementroot(x, True) if x.optype == MovementOps and x.st.contiguous else x)
 
-lazycache: LightWeakValueDictionary[Tuple[str, DType, OpType, LazyOp], LazyBuffer] = LightWeakValueDictionary()
-def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp, dtype:DType):
-  st = shape if shape.__class__ is ShapeTracker else ShapeTracker(tuple(shape))
+lazycache: LightWeakValueDictionary = LightWeakValueDictionary()
+def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType):
 
   # fromcpu aren't cached
   if optype == LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}: return LazyBuffer(device, st, optype, op, dtype)
@@ -81,9 +79,6 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
   lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype)
   return ret
 
-def create_movement_buffer(buffer: LazyBuffer, shape:Union[ShapeTracker, Tuple[int, ...]], op: MovementOps, arg:Tuple[int, ...]):
-  return create_lazybuffer(buffer.device, shape, MovementOps, LazyOp(op, (buffer,), arg, (buffer,)), buffer.dtype)
-
 class LazyBuffer:
   __slots__ = 'st', 'device', 'shape', 'optype', 'dtype', 'op', 'realized', 'output_buffer', 'children', 'node_id', '__weakref__'
   __deletable__ = ('op',)
@@ -93,7 +88,7 @@ class LazyBuffer:
     self.realized: Optional[RawBuffer] = src
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
-    self.children: LightWeakSet[LazyBuffer] = LightWeakSet()
+    self.children: LightWeakSet = LightWeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
     if op:
       self.op: LazyOp = op
@@ -101,13 +96,15 @@ class LazyBuffer:
     if not LAZY: self.realize()
 
     # log phantom ops to the graph
-    if GRAPH >= 3: log_op(self, self.op, phantom=True)
+    if GRAPH >= 3:
+      from tinygrad.graph import log_op
+      log_op(self, self.op, phantom=True)
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
   @property
   def key(self):
-    try: return (self.dtype.key, self.realized.key, self.st.key)
-    except AttributeError: return (self.dtype.key, self.op.op, self.st.key)
+    if self.realized: return (self.dtype.key, self.realized.key, self.st.key)
+    return (self.dtype.key, self.op.op, self.st.key)
 
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
 
@@ -123,7 +120,7 @@ class LazyBuffer:
         for x in self.op.buffers: x.realize()
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
-        if self.optype != MovementOps and self.dtype.__class__ is ImageDType and (prod(self.shape) != prod(self.dtype.shape) or not any([self.shape[x]%4 == 0 for x in self.st.unit_stride_axes()])):
+        if self.optype != MovementOps and self.dtype.__class__ is ImageDType and (prod(self.shape) != prod(cast(ImageDType, self.dtype).shape) or not any([self.shape[x]%4 == 0 for x in self.st.unit_stride_axes()])):
           if self.op.op == MovementOps.RESHAPE:
             # put CAST before the final RESHAPE
             self.op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, self.op.src, dtypes.float32),), self.op.arg)
@@ -132,13 +129,15 @@ class LazyBuffer:
           self.dtype = dtypes.float32
         self.realized = Device[self.device].exec_ast(self.op, output=self, **self._device_extra_args())
 
-      assert self.realized.__class__ in {RawConst, Device[self.device].buffer}, f"device mismatch on realized got {type(self.realized)} expected {self.device}"
+      assert self.realized and isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
       # HACK: allow hot casting of images
       assert self.realized.dtype == self.dtype or self.dtype.name.startswith("image"), f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
       self.dtype = self.realized.dtype
 
       # log to the graph
-      if self.realized.__class__ is not RawConst or GRAPH >= 2: log_op(self, self.op)
+      if self.realized.__class__ is not RawConst or GRAPH >= 2: 
+        from tinygrad.graph import log_op
+        log_op(self, self.op)
 
       # no need to keep the op after realization
       del self.op
@@ -146,7 +145,7 @@ class LazyBuffer:
 
   @staticmethod
   def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
-    return create_lazybuffer(device, shape, LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
+    return create_lazybuffer(device, ShapeTracker(tuple(shape)), LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
 
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
@@ -169,12 +168,12 @@ class LazyBuffer:
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
-    return create_lazybuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None, (self,)), self.dtype)
+    return create_lazybuffer(self.device, ShapeTracker(self.shape), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None, (self,)), self.dtype)
   
-  def shuffle_and_prune_movement_ops(self, st: ShapeTracker, op: MovementOps, arg: Tuple[int, ...]) -> LazyBuffer:
+  def shuffle_and_prune_movement_ops(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> LazyBuffer:
     if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and (op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and self.op.op in UnaryOps)) and len(self.children) == 0:
       return self.op.replace_with_movement_ops([(op, arg)])
-    ret = create_movement_buffer(self, st, op, arg)
+    ret = create_lazybuffer(self.device, st, MovementOps, LazyOp(op, (self,), arg, (self,)), self.dtype)
     if REMOVE_MOVEMENT_NOPS and not self.realized and not ret.realized and ret.st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
       root = get_movementroot(self)
@@ -185,7 +184,7 @@ class LazyBuffer:
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
     srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
-    return create_lazybuffer(self.device, new_shape, ReduceOps, LazyOp(op, srcs, new_shape), self.dtype)
+    return create_lazybuffer(self.device, ShapeTracker(new_shape), ReduceOps, LazyOp(op, srcs, new_shape), self.dtype)
 
   def reshape_op(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == arg: return self
@@ -194,7 +193,7 @@ class LazyBuffer:
       return self.op.src[0].reshape_op(arg)
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).reshape(arg), MovementOps.RESHAPE, arg)
 
-  def pad_op(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
+  def pad_op(self:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
     if all([b == 0 and e == 0 for b,e in arg]): return self
     if not self.realized and self.op.op == MovementOps.PAD: return self.op.src[0].pad_op(tuple([(b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)]))
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).pad(arg), MovementOps.PAD, arg)
@@ -215,7 +214,7 @@ class LazyBuffer:
         src, rop = self.op.src[0], self.op.op
         src.children.discard(self)
         del self  # TODO: why doesn't this delete remove it from the children
-        return src.permute_op(arg).reduce_op(rop, narg)
+        return src.permute_op(arg).reduce_op(cast(ReduceOps, rop), narg)
 
       # move permutes before expands (always, this is safe)
       if self.op.op == MovementOps.EXPAND:
@@ -229,9 +228,9 @@ class LazyBuffer:
             .reshape_op(ShapeTracker(self.st).permute(arg).shape)
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).permute(arg), MovementOps.PERMUTE, arg)
   
-  def shrink_op(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
+  def shrink_op(self:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
     if all([b - a == s for s, (a, b) in zip(self.shape, arg)]): return self
-    if not self.realized and self.op.op == MovementOps.SHRINK: return self.op.src[0].shrink_op(tuple([(b1+b2, b1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)]))
+    if not self.realized and self.op.op == MovementOps.SHRINK: return self.op.src[0].shrink_op(tuple([(b1+b2, b1+e2) for (b1,_),(b2,e2) in zip(self.op.arg, arg)]))
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).shrink(arg), MovementOps.SHRINK, arg)
   
   def stride_op(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
@@ -241,9 +240,9 @@ class LazyBuffer:
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).stride(arg), MovementOps.STRIDE, arg)
 
   def map_buffers(self, real_srcs: Dict[Any, Any]): return real_srcs.get(self, self)
-  def get_buffers(self) -> Tuple[LazyBuffer]: return (self,)
+  def get_buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
   def get_lazyops(self) -> List[Any]: return []
-  def replace_with_movement_ops(self: LazyBuffer, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> LazyBuffer:
+  def replace_with_movement_ops(self: LazyBuffer, ops:List[Tuple[MovementOps, Any]]) -> LazyBuffer:
     y = self
     for op, arg in ops: y = MOVEMENT_OPS_DISPATCHER[op](y, arg)
     return y
@@ -251,13 +250,13 @@ class LazyBuffer:
 def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
   new_srcs = []
   for x in srcs:
-    mops: List[Tuple[MovementOps, Tuple[Any, ...]]] = []
+    mops: List[Tuple[MovementOps, Any]] = []
     bx = x
     # backwalk all the movement ops. don't push PAD or EXPAND
     while not bx.realized and bx.optype == MovementOps and bx.op.op != MovementOps.EXPAND and (SHUFFLE_PAD_OPS or bx.op.op != MovementOps.PAD) and len(bx.children) <= 1:
-      assert bx.op.op.__class__ is MovementOps
+      assert isinstance(bx.op.op, MovementOps)
       mops.append((bx.op.op, bx.op.arg))
-      bx = bx.op.src[0]
+      bx = cast(LazyBuffer, bx.op.src[0])
     # NOTE: can't push pads with a div
     if not bx.realized and bx.optype == BinaryOps and len(bx.children) <= 1 and len(mops) and (all([x[0] != MovementOps.PAD for x in mops]) or all([x.op != BinaryOps.DIV for x in bx.op.get_lazyops()])):
       new_srcs.append(bx.op.replace_with_movement_ops(mops[::-1]))
@@ -274,11 +273,11 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer, arg:Optional
 
   # push all contiguous to the end of BinaryOps. kernels 198 -> 196
   if PUSH_CONTIGUOUS and any([not x.realized and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1 for x in srcs]):
-    new_srcs = []
+    new_srcs: List[LazyBuffer] = []
     for x in srcs:
       if not x.realized and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1:
         x.op.src[0].children.discard(x)
-        new_srcs.append(x.op.src[0])
+        new_srcs.append(cast(LazyBuffer, x.op.src[0]))
       else:
         new_srcs.append(x)
     return elementwise_op(op, *new_srcs, arg=arg).contiguous()
@@ -287,7 +286,7 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer, arg:Optional
     # remove the buffers from any (childless) BinaryOps that feed into this
     srcs = tuple([x.op if x.optype == BinaryOps and len(x.children) == 0 and not x.realized else x for x in srcs])  # type: ignore
 
-  return create_lazybuffer(out_device, out_shape, BinaryOps, LazyOp(op, srcs, arg), out_dtype)
+  return create_lazybuffer(out_device, ShapeTracker(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype)
 
 class _Device:
   def __init__(self) -> None:
@@ -308,7 +307,7 @@ Device = _Device()
 
 def _realize_contiguous(buffer: LazyBuffer) -> None:
   realized = buffer.op.src[0].realize().realized
-  if buffer.op.src[0].st.contiguous and realized.__class__ is not RawConst and realized.size == prod(buffer.shape):
+  if buffer.op.src[0].st.contiguous and realized.__class__ is not RawConst and cast(RawBuffer, realized).size == prod(buffer.shape):
     # no need to run an AST, this is already contiguous
     buffer.realized = realized
   else:
@@ -333,7 +332,7 @@ def _realize_empty(buffer: LazyBuffer) -> None:
 
 def _realize_rand(buffer: LazyBuffer) -> None:
   rng = np.random.default_rng(buffer.op.arg)
-  buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=buffer.shape, dtype=buffer.dtype.np), **buffer._device_extra_args())
+  buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=buffer.shape, dtype=buffer.dtype.np), **buffer._device_extra_args()) # type: ignore
         
 def _realize_const(buffer: LazyBuffer) -> None:
   if hasattr(Device[buffer.device].codegen, 'supports_constant_folding'):
@@ -341,7 +340,7 @@ def _realize_const(buffer: LazyBuffer) -> None:
   else:
     buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args())
 
-REALIZE_DISPATCHER = {
+REALIZE_DISPATCHER: Dict[Any, Callable] = {
   LoadOps.CONTIGUOUS: _realize_contiguous,
   LoadOps.CUSTOM: _realize_custom,
   LoadOps.FROM: _realize_from,
@@ -352,7 +351,7 @@ REALIZE_DISPATCHER = {
   BinaryOps: _ast_binaryops,
 }
 
-MOVEMENT_OPS_DISPATCHER = {
+MOVEMENT_OPS_DISPATCHER: Dict[MovementOps, Callable] = {
   MovementOps.RESHAPE: LazyBuffer.reshape_op,
   MovementOps.EXPAND: LazyBuffer.expand_op,
   MovementOps.SHRINK: LazyBuffer.shrink_op,

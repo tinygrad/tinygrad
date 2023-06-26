@@ -201,8 +201,7 @@ class Shrink(Function):
 class Flip(Function):
   __slots__ = 'arg'
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]):
-    axis = set(axis)
-    self.arg = tuple([-1 if i in axis else 1 for i in range(len(x.shape))])
+    self.arg = tuple([-1 if i in set(axis) else 1 for i in range(len(x.shape))])
     return x.stride_op(self.arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:

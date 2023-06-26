@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, itertools, random, time
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, ClassVar
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, ClassVar, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer, RawConst
@@ -25,10 +25,10 @@ class LazyOp:
   __slots__ = "op", "src", "arg", "buffers", "__weakref__"
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
-  arg: Union[LazyOp, LazyBuffer]
-  buffers: Tuple[LazyBuffer]
+  arg: Any
+  buffers: Tuple[LazyBuffer, ...]
 
-  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Union[LazyOp, LazyBuffer] = None, buffers: Tuple[LazyBuffer] = None):
+  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None, buffers: Optional[Tuple[LazyBuffer, ...]] = None):
     self.op = op
     self.src = src
     self.arg = arg
@@ -40,7 +40,10 @@ class LazyOp:
     self.buffers = buffers
 
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
-  def __eq__(self, __value: object) -> bool: return self.op == __value.op and self.src == __value.src and self.arg == __value.arg
+  def __eq__(self, __value: object) -> bool:
+    if not __value.__class__ is LazyOp: return False
+    __value = cast(LazyOp, __value)
+    return self.op == __value.op and self.src == __value.src and self.arg == __value.arg
   def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
@@ -48,13 +51,31 @@ class LazyOp:
   # Any == Union[LazyBuffer, DeviceBuffer]
   def map_buffers(self, real_srcs: Dict[Any, Any]): return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
 
-  def get_buffers(self) -> Tuple[LazyBuffer]: return self.buffers
+  def get_buffers(self) -> Tuple[LazyBuffer, ...]: return self.buffers
   def get_lazyops(self) -> List['LazyOp']: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self: LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
     from tinygrad.lazy import elementwise_op
     assert self.op in BinaryOps or self.op in UnaryOps
     return elementwise_op(self.op, *[z.replace_with_movement_ops(ops) for z in self.src], arg=self.arg)   # type: ignore
+  
+  @property
+  def st(self): raise NotImplementedError
+  @property
+  def children(self): raise NotImplementedError
+  @property
+  def shape(self): raise NotImplementedError
+  @property
+  def realized(self): raise NotImplementedError
+  @property
+  def optype(self): raise NotImplementedError
+  def realize(self): raise NotImplementedError
+  def reshape_op(self, _): raise NotImplementedError
+  def pad_op(self, _): raise NotImplementedError
+  def expand_op(self, _): raise NotImplementedError
+  def permute_op(self, _): raise NotImplementedError
+  def shrink_op(self, _): raise NotImplementedError
+  def stride_op(self, _): raise NotImplementedError
 
 # **************** for Interpreted Buffers ****************
 
@@ -70,11 +91,11 @@ class Interpreted:
 
   def exec_ast(self, ast:LazyOp, output=None, context=None, **kwargs):
     if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and ast.src[0].__class__ is LazyOp and ast.src[0].op == BinaryOps.MUL:
-      ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
+      ast = LazyOp(FusedOps.MULACC, cast(LazyOp, ast.src[0]).src, ast.arg)
     created_context = context is None
     if context is None: context = dict()
     if not created_context and ast in context: return context[ast]
-    srcs = [self.exec_ast(x, context=context, **kwargs) if x.__class__ is LazyOp else self.from_lazybuffer(x) for x in ast.src]
+    srcs = [self.exec_ast(cast(LazyOp, x), context=context, **kwargs) if x.__class__ is LazyOp else self.from_lazybuffer(x) for x in ast.src]
     if DEBUG >= 3: st = time.perf_counter()
     ret = self.from_underlying(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
     if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(time.perf_counter()-st)*1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape) if hasattr(ret._buf, 'shape') else str(len(ret._buf)):30s} in({len(srcs)}):", list(set(x._buf.shape if hasattr(x._buf, 'shape') else len(x._buf) for x in srcs)), ast.arg if ast.arg is not None else "")

@@ -4,14 +4,11 @@ try:
 except ImportError:
   nx = None # graph won't work
 from collections import defaultdict
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import Dict, List, Optional
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps, Op, OpType, LazyOp
-if TYPE_CHECKING:
-  from tinygrad.tensor import LazyBuffer
-from tinygrad.helpers import getenv, DEBUG, GlobalCounters
+from tinygrad.tensor import LazyBuffer
+from tinygrad.helpers import GRAPH, GRAPHPATH, PRUNEGRAPH, DEBUG, GlobalCounters
 from tinygrad.runtime.lib import RawConst
-
-GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 
 # **** debugging and graphing ****
 
