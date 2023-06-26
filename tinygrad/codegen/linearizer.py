@@ -323,7 +323,7 @@ class Linearizer:
 
     if not self.group_for_reduce:
       # end the global+local loop
-      self.uop(UOps.ENDLOOP, None, [], (global_idxs+local_idxs, "global"))
+      self.uop(UOps.ENDLOOP, None, [], (global_idxs+local_idxs, "global+local"))
     else:
       # end the global loop
       self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
