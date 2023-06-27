@@ -17,6 +17,7 @@ sys.setrecursionlimit(10000)
 
 OPT = getenv("OPT", 2)
 LAZY = getenv("LAZY", 1)
+LAZYCACHE = getenv("LAZYCACHE", 1)
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
@@ -68,7 +69,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dty
   #print("create_lazybuffer", device, shape, optype, op, dtype)
 
   # fromcpu aren't cached
-  if optype is LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}: return LazyBuffer(device, st, optype, op, dtype)
+  if not LAZYCACHE or (optype is LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}): return LazyBuffer(device, st, optype, op, dtype)
 
   # wop is the deduping key. i feel this used to compare more deeply
   wop = (device, dtype, optype, ref(op))

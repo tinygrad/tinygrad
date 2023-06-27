@@ -11,7 +11,7 @@ ShapeType = Tuple[int, ...]
 OSX = platform.system() == "Darwin"
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
-def argfix(*x): 
+def argfix(*x):
   if x[0].__class__ in {tuple, list}:
     try: return tuple(x[0])
     except IndexError: return tuple()
@@ -148,6 +148,7 @@ class LightWeakValueDictionary:
     if o is None: raise KeyError(key)
     else: return o
 
+  def __len__(self): return len(self.data)
+  def __delitem__(self, key): del self.data[key]
   def __setitem__(self, key, value): self.data[key] = KeyedRef(value, self._remove, key)
-
   def __contains__(self, key): return key in self.data
