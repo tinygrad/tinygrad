@@ -320,8 +320,8 @@ def _realize_from(buffer: LazyBuffer) -> None:
   if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
     buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
     rawbuf.realized.readinto(cast(RawBufferMapped, buffer.realized)._buffer())
-  elif isinstance(rawbuf.realized, RawBufferTransfer) and issubclass(Device[self.device].buffer, RawBufferTransfer):
-    self.realized = cast(RawBufferTransfer, Device[self.device].buffer).transfer(rawbuf.realized, self.shape, self.dtype, **self._device_extra_args())
+  elif isinstance(rawbuf.realized, RawBufferTransfer) and issubclass(Device[buffer.device].buffer, RawBufferTransfer):
+    buffer.realized = cast(RawBufferTransfer, Device[buffer.device].buffer).transfer(rawbuf.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
   else:
     buffer.realized = Device[buffer.device].buffer.fromCPU(rawbuf.toCPU(), **buffer._device_extra_args())
 
