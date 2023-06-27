@@ -1,4 +1,4 @@
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict, Iterator
 import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
@@ -74,7 +74,7 @@ def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
       return zip(new_idxs, new_values)
   return zip([[i] for i in range(len(values[0]))], zip(*values))
 
-def expand_idxs(idxs:List[Variable]):
+def expand_idxs(idxs:List[Variable]) -> Iterator[List[Variable]]:
   for x in itertools.product(*[[idx] if idx.__class__ is not Variable or idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)] for idx in idxs[::-1]]):
     yield x[::-1]
 
@@ -173,16 +173,24 @@ class Linearizer:
         store_offset_float4[tuple(uidxs2)].append(var)
     return store_offset_float4
 
-  def global_load(self, i, idxs:List[Variable], const=None, localtype=dtypes.float) -> List[Token]:
+  def global_load(self, i, idxs:List[Variable], const=None) -> List[Token]:
+    upcast_dim = [x for x in self.sts[i].unit_stride_axes() if self.supports_float4 and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == 4]
+    localtype = dtypes._float4 if len(upcast_dim) == 1 else dtypes.float
     cache: Dict[str, Token] = {}
     ret = []
-    for idx in expand_idxs(idxs):
-      idx, valid = self.sts[i].expr_idxs(idx)
+    for _idx in expand_idxs(idxs):
+      if localtype == dtypes._float4:
+        idx, valid = self.sts[i].expr_idxs(_idx[:upcast_dim[0]] + (Variable.num(0),) + _idx[upcast_dim[0]+1:])
+      else:
+        idx, valid = self.sts[i].expr_idxs(_idx)
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
                      self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
-      ret.append(cache[key])
+      if localtype == dtypes._float4:
+        ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b))
+      else:
+        ret.append(cache[key])
     return ret
 
     load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(dtypes.float,uidxs)+self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
