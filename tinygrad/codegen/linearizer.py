@@ -162,6 +162,7 @@ class Linearizer:
     acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
+  """
   def _group_float4(self, i, store_offset):
     store_offset_float4 = {}
     float4_axis = (self.upcasted-1) - self.float4_axis(i)[0]
@@ -173,25 +174,29 @@ class Linearizer:
         uidxs2[float4_axis] -= uidxs2[float4_axis]%4
         store_offset_float4[tuple(uidxs2)].append(var)
     return store_offset_float4
+  """
 
   def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
-    upcast_dim = [x for x in self.sts[i].unit_stride_axes() if self.supports_float4 and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == 4]
-    localtype = dtypes._float4 if len(upcast_dim) == 1 else dtypes.float
+    should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
+    upcast_dim = [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == 4]
     cache: Dict[str, Token] = {}
     ret = []
     for _idx in expand_idxs(idxs):
-      if localtype == dtypes._float4:
-        idx, valid = self.sts[i].expr_idxs(_idx[:upcast_dim[0]] + (Variable.num(0),) + _idx[upcast_dim[0]+1:])
+      if len(upcast_dim) == 1:
+        idx, valid = self.sts[i].expr_idxs((_idx[:upcast_dim[0]] + (Variable.num(0),) + _idx[upcast_dim[0]+1:]))
+        localtype = dtypes._float4
+        # disallow unaligned access
+        if idx.render() != ((idx//4)*4).render():
+          idx, valid = self.sts[i].expr_idxs(_idx)
+          localtype = dtypes.float
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
+        localtype = dtypes.float
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
                      self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
-      if localtype == dtypes._float4:
-        ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b))
-      else:
-        ret.append(cache[key])
+      ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b) if localtype == dtypes._float4 else cache[key])
 
     """
     load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(dtypes.float,uidxs)+self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
