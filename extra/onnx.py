@@ -93,17 +93,13 @@ def get_run_onnx(onnx_model: ModelProto):
       tensor_type=inp.type.optional_type.elem_type.tensor_type if inp.type.HasField("optional_type") else (inp.type.sequence_type.elem_type.tensor_type if inp.type.HasField("sequence_type") else inp.type.tensor_type)
       shape = shape_to_tuple(tensor_type.shape)
       if len(shape) >= 1 and shape[0] == 0: shape = tuple([1]+list(shape[1:]))   # 1 batch size
-      if inp.name in inputs:
-        if isinstance(inputs[inp.name], Tensor):
-          input_tensors[inp.name] = inputs[inp.name]
-        else:
-          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
-        input_shape = input_tensors[inp.name].shape
-        if input_shape == (0,): raise NotImplementedError("empty tensors aren't supported in tinygrad")
-        assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
-        for _,v in input_tensors.items(): v.realize()
-      else:
-        raise Exception(f"no data for {inp.name} with shape {shape}")
+      try: input = inputs[inp.name]
+      except KeyError: raise Exception(f"no data for {inp.name} with shape {shape}")
+      input_tensors[inp.name] = input if isinstance(input, Tensor) else Tensor(input, requires_grad=False)
+      input_shape = input_tensors[inp.name].shape
+      if input_shape == (0,): raise NotImplementedError("empty tensors aren't supported in tinygrad")
+      assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
+      for v in input_tensors.values(): v.realize()
 
     def fetch_tensor(x: str):
       if x in tensors: return tensors[x]
