@@ -176,16 +176,19 @@ class Linearizer:
     return store_offset_float4
   """
 
-  def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
+  def get_upcast_dim(self, i, amt=4):
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
-    upcast_dim = [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == 4]
+    return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == amt]
+
+  def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
+    upcast_dim = self.get_upcast_dim(i)
     cache: Dict[str, Token] = {}
     ret = []
     for _idx in expand_idxs(idxs):
       if len(upcast_dim) == 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:upcast_dim[0]] + (Variable.num(0),) + _idx[upcast_dim[0]+1:]))
         localtype = dtypes._float4
-        # disallow unaligned access
+        # disallow unaligned access, fall back to float
         if idx.render() != ((idx//4)*4).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
           localtype = dtypes.float
@@ -233,7 +236,24 @@ class Linearizer:
     return ret
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
-    for idx, var in zip(expand_idxs(idxs), store):
+    store_offset = dict(zip(expand_idxs(idxs), store))
+
+    # float4 grouping
+    upcast_dim = self.get_upcast_dim(i)
+    if len(upcast_dim) == 1:
+      grouped_store_offset = defaultdict(list)
+      for k in store_offset:
+        _idx = k[:upcast_dim[0]] + (Variable.num(0),) + k[upcast_dim[0]+1:]
+        grouped_store_offset[_idx].append(store_offset[k])
+      store_offset_new = {}
+      for k,out_tokens in grouped_store_offset.items():
+        if all_same([x.name for x in out_tokens]) and tuple(range(4)) == tuple(x.offset for x in out_tokens):
+          store_offset_new[k] = Token(out_tokens[0].name, dtypes._float4)
+        else:
+          store_offset_new[k] = self.uop(UOps.CAST, ssa("alu", dtypes._float4), out_tokens)
+      store_offset = store_offset_new
+
+    for idx, var in store_offset.items():
       self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idx)))
 
     """
