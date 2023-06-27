@@ -1,18 +1,23 @@
 from __future__ import annotations
-import platform
-from dataclasses import dataclass, asdict
-import os, math, functools, time, re
+import os, functools, platform, time, re
+from weakref import KeyedRef, ref
+from _weakref import _remove_dead_weakref # type: ignore
 import numpy as np
-from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
+from math import prod # noqa: F401 # pylint:disable=unused-import
+
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
-def prod(x:Union[List[int], Tuple[int, ...]]) -> int: return math.prod(x)
-def argfix(*x): return tuple() if len(x) == 0 else tuple(x[0]) if isinstance(x[0], (tuple, list)) else tuple(x)
+def argfix(*x):
+  if x[0].__class__ in {tuple, list}:
+    try: return tuple(x[0])
+    except IndexError: return tuple()
+  return tuple(x)
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
-def all_same(items): return all(x == items[0] for x in items) if len(items) > 0 else True
+def all_same(items): return all([x == items[0] for x in items]) if len(items) > 1 else True
 def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
 def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
 def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if not fxn(x)]
@@ -43,6 +48,7 @@ class ContextVar:
   def value(self): return ContextVar.ctx_stack[-1][self.key] if self.key in ContextVar.ctx_stack[-1] else self.initial_value
 
 DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
+GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 
 class Timing(object):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
@@ -60,6 +66,8 @@ class DType(NamedTuple):
   np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
   sz: int = 1
   def __repr__(self): return f"dtypes.{self.name}"
+  @property
+  def key(self): return (self.name)
 
 # dependent typing?
 class ImageDType(DType):
@@ -70,7 +78,6 @@ class ImageDType(DType):
     super().__init__()
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
-@dataclass
 class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   def is_int(x: DType)-> bool: return x in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64)
@@ -79,7 +86,9 @@ class dtypes:
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint32, dtypes.uint64)
   @staticmethod
-  def from_np(x) -> DType: return asdict(dtypes())[np.dtype(x).name]
+  def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
+  @staticmethod
+  def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   half = float16
@@ -97,6 +106,9 @@ class dtypes:
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
 
+# HACK: staticmethods are not callable in 3.8 so we have to compare the class
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}
+
 class GlobalCounters:
   global_ops: ClassVar[int] = 0
   global_mem: ClassVar[int] = 0
@@ -106,3 +118,37 @@ class GlobalCounters:
   cache: ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
+
+# Stripped down version of a WeakSet
+class LightWeakSet:
+  __slots__ = 'data', '_remove', '__weakref__'
+  def __init__(self):
+    self.data = set()
+    def _remove(item, selfref=ref(self)):
+      self = selfref()
+      if self: self.data.discard(item)
+    self._remove = _remove
+
+  def __len__(self): return len(self.data)
+  def add(self, item): self.data.add(ref(item, self._remove))
+  def discard(self, item): self.data.discard(ref(item))
+
+# Stripped down version of a WeakValueDictionary
+class LightWeakValueDictionary:
+  __slots__ = 'data', '_remove', '__weakref__'
+  def __init__(self):
+    def remove(wr, selfref=ref(self), _atomic_removal=_remove_dead_weakref):
+      self = selfref()
+      if self: _atomic_removal(self.data, wr.key)
+    self._remove = remove
+    self.data = {}
+
+  def __getitem__(self, key):
+    o = self.data[key]()
+    if o is None: raise KeyError(key)
+    else: return o
+
+  def __len__(self): return len(self.data)
+  def __delitem__(self, key): del self.data[key]
+  def __setitem__(self, key, value): self.data[key] = KeyedRef(value, self._remove, key)
+  def __contains__(self, key): return key in self.data
