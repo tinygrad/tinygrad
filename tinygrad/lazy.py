@@ -108,10 +108,9 @@ class LazyBuffer:
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       # get real ops first
-      if self.optype in REALIZE_DISPATCHER:
-        self.op = REALIZE_DISPATCHER[self.optype](self)
-      elif self.op.op in REALIZE_DISPATCHER:
-        REALIZE_DISPATCHER[self.op.op](self)
+      if self.optype is BinaryOps: self.op = _ast_binaryops(self)
+      elif self.optype is ReduceOps: self.op = _ast_reduceops(self)
+      elif self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
       # run the ast if we still have to, and log the op
       if not self.realized:
         for x in self.op.buffers: x.realize()
@@ -336,15 +335,13 @@ def _realize_const(buffer: LazyBuffer) -> None:
   else:
     buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args())
 
-REALIZE_DISPATCHER: Dict[Any, Callable] = {
+LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
   LoadOps.CONTIGUOUS: _realize_contiguous,
   LoadOps.CUSTOM: _realize_custom,
   LoadOps.FROM: _realize_from,
   LoadOps.EMPTY: _realize_empty,
   LoadOps.RAND: _realize_rand,
   LoadOps.CONST: _realize_const,
-  ReduceOps: _ast_reduceops,
-  BinaryOps: _ast_binaryops,
 }
 
 MOVEMENT_OPS_DISPATCHER: Dict[MovementOps, Callable] = {
