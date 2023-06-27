@@ -5,7 +5,8 @@ import numpy as np
 
 def test_model(model, *inputs):
   GlobalCounters.reset()
-  model(*inputs).numpy()
+  out = model(*inputs)
+  if isinstance(out, Tensor): out = out.numpy()
   # TODO: return event future to still get the time_sum_s without DEBUG=2
   print(f"{GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.time_sum_s*1000:.2f} ms")
 
@@ -49,15 +50,21 @@ def spec_bert():
   tt = Tensor(np.random.randint(0, 2, (1, 384)).astype(np.float32))
   test_model(mdl, x, am, tt)
 
+def spec_mrcnn():
+  from models.mask_rcnn import MaskRCNN, ResNet
+  mdl = MaskRCNN(ResNet(50, num_classes=None, stride_in_1x1=True))
+  mdl.load_from_pretrained()
+  x = Tensor.randn(3, 224, 224)
+  test_model(mdl, [x])
+
 if __name__ == "__main__":
   # inference only for now
   Tensor.training = False
   Tensor.no_grad = True
 
-  for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert").split(","):
+  for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,mrcnn").split(","):
     nm = f"spec_{m}"
     if nm in globals():
       print(f"testing {m}")
       globals()[nm]()
-
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
-import functools, itertools, operator, random, time
+import functools, time
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Callable, ClassVar
-from tinygrad.helpers import prod, DEBUG, getenv, GlobalCounters, DType, colored, ansilen
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer, RawConst
+if TYPE_CHECKING:
+  from tinygrad.lazy import LazyBuffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -19,19 +21,61 @@ class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[FusedOps]]
 
-class LazyOp(NamedTuple):
-  op: Op
-  # Any == Union[LazyOp, LazyBuffer, DeviceBuffer]
-  src: Tuple[Any, ...]  # type: ignore
-  arg: Any = None
+class LazyOp:
   # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
+  __slots__ = "op", "src", "arg", "buffers", "__weakref__"
+  op: Op
+  src: Tuple[Union[LazyOp, LazyBuffer], ...]
+  arg: Any
+  buffers: Tuple[LazyBuffer, ...]
 
-# Any == Union[LazyBuffer, DeviceBuffer]
-def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
-def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
-def map_buffers(real_srcs:Dict[Any, Any], x:Any) -> LazyOp:
-  if len(real_srcs) and x in real_srcs: return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
-  return LazyOp(x.op, tuple((map_buffers(real_srcs, y) if isinstance(y, LazyOp) else real_srcs[y]) for y in x.src), x.arg)
+  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None):
+    self.op = op
+    self.src = src
+    self.arg = arg
+    try:
+      self.buffers = tuple([y for x in src for y in x.buffers])
+    except AttributeError:
+      # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
+      pass
+
+  def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
+  def __eq__(self, __value: object) -> bool:
+    if __value.__class__ is not LazyOp: return False
+    __value = cast(LazyOp, __value)
+    return self.op == __value.op and self.src == __value.src and self.arg == __value.arg
+  def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
+  @property
+  def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
+
+  # Any == Union[LazyBuffer, DeviceBuffer]
+  def map_buffers(self, real_srcs: Dict[Any, Any]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
+  def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
+
+  def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
+    from tinygrad.lazy import elementwise_op
+    assert self.op in BinaryOps or self.op in UnaryOps
+    return elementwise_op(self.op, *[z.replace_with_movement_ops(ops) for z in self.src], arg=self.arg)   # type: ignore
+
+  @property
+  def st(self): raise NotImplementedError
+  @property
+  def children(self): raise NotImplementedError
+  @property
+  def shape(self): raise NotImplementedError
+  @property
+  def realized(self): raise NotImplementedError
+  @property
+  def optype(self): raise NotImplementedError
+  def realize(self): raise NotImplementedError
+
+  # movement ops
+  def reshape(self, _): raise NotImplementedError
+  def pad(self, _): raise NotImplementedError
+  def expand(self, _): raise NotImplementedError
+  def permute(self, _): raise NotImplementedError
+  def shrink(self, _): raise NotImplementedError
+  def stride(self, _): raise NotImplementedError
 
 # **************** for Interpreted Buffers ****************
 
@@ -46,12 +90,12 @@ class Interpreted:
     self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, context=None, **kwargs):
-    if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
-      ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
+    if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and ast.src[0].__class__ is LazyOp and ast.src[0].op == BinaryOps.MUL:
+      ast = LazyOp(FusedOps.MULACC, cast(LazyOp, ast.src[0]).src, ast.arg)
     created_context = context is None
     if context is None: context = dict()
     if not created_context and ast in context: return context[ast]
-    srcs = [self.exec_ast(x, context=context, **kwargs) if isinstance(x, LazyOp) else self.from_lazybuffer(x) for x in ast.src]
+    srcs = [self.exec_ast(cast(LazyOp, x), context=context, **kwargs) if x.__class__ is LazyOp else self.from_lazybuffer(x) for x in ast.src]
     if DEBUG >= 3: st = time.perf_counter()
     ret = self.from_underlying(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
     if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(time.perf_counter()-st)*1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape) if hasattr(ret._buf, 'shape') else str(len(ret._buf)):30s} in({len(srcs)}):", list(set(x._buf.shape if hasattr(x._buf, 'shape') else len(x._buf) for x in srcs)), ast.arg if ast.arg is not None else "")
@@ -90,41 +134,22 @@ class ASTRunner:
     return self
 
   def exec(self, bufs) -> Optional[float]:
-    rawbufs = [x.realized for x in bufs if x.realized is not None and not isinstance(x.realized, RawConst)]
+    rawbufs = [x.realized for x in bufs if x.realized is not None and x.realized.__class__ is not RawConst]
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs)
 
   def __call__(self, rawbufs:List[RawBuffer], jit=False, force_wait=False) -> Optional[float]:
-    if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs, allow_cache=(getenv("OPTLOCAL") >= 2))
-    if et := self.clprg(self.global_size, self.local_size, *rawbufs, wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
+    if et := self.clprg((self.global_size + [1]*(3-len(self.global_size))) if self.global_size is not None else None,
+                        (self.local_size + [1]*(3-len(self.local_size))) if self.local_size is not None else None,
+                        *rawbufs, wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
     if DEBUG >= 2:
       print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(29-ansilen(self.display_name))) if self.display_name is not None else self.name:26s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {int(self.op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
-            (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/(et*1e9):8.2f} GFLOPS, {self.mem_estimate/(et*1e9):7.2f} GB/s)"))
+            (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {self.mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
     GlobalCounters.kernel_count += 1
     GlobalCounters.global_ops += self.op_estimate
     GlobalCounters.global_mem += self.mem_estimate
     if getenv("EARLY_STOPPING") and GlobalCounters.kernel_count == getenv("EARLY_STOPPING"): exit(0)
     return et
-
-  def timeit(self, rawbufs:List[RawBuffer], local_override=None) -> float:
-    try: return self.clprg(self.global_size, local_override if local_override is not None else self.local_size, *rawbufs, wait=True)
-    except Exception: return float('inf')
-
-  optlocal_cache: ClassVar[Any] = None
-  def optimize_local_size(self, rawbufs:List[RawBuffer], preserve_output=False, allow_cache=False) -> List[int]:
-    assert self.global_size is not None, "needs a global size to optimize local size"
-    if allow_cache:
-      import dbm, pickle
-      if ASTRunner.optlocal_cache is None: ASTRunner.optlocal_cache = dbm.open('/tmp/optlocal.db', 'c')
-      if self.prg not in ASTRunner.optlocal_cache: ASTRunner.optlocal_cache[self.prg] = pickle.dumps(self.optimize_local_size(rawbufs, preserve_output, allow_cache=False)) # pylint: disable=unsupported-membership-test,unsupported-assignment-operation
-      return pickle.loads(ASTRunner.optlocal_cache[self.prg])
-    if preserve_output or any(x == rawbufs[0] for x in rawbufs[1:]):  # this is an assignment, replace the output buffer
-      output_replacement = type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype)
-      rawbufs = [output_replacement if x == rawbufs[0] else x for x in rawbufs]
-    MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
-    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in self.global_size]
-    local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
-    return min([(self.timeit(rawbufs, local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
 
 class Compiled:
   def __init__(self, buffer: Type[RawBuffer], codegen, runtime, synchronize=lambda: None):
@@ -133,21 +158,21 @@ class Compiled:
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):
     # all movementops do nothing in a Compiled buffer!
-    if ast.op in MovementOps and not isinstance(ast.src[0], LazyOp) and ast.src[0].realized is not None: return ast.src[0].realized
+    if ast.op in MovementOps and ast.src[0].__class__ is not LazyOp and ast.src[0].realized: return ast.src[0].realized
 
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
     output.realized = output.output_buffer
-    if output.realized is not None:
-      if isinstance(output.realized, RawConst): output.realized = None  # can't assign to RawConst
-      for a in get_buffers(ast):
+    if output.realized:
+      if output.realized.__class__ is RawConst: output.realized = None  # can't assign to RawConst
+      for a in ast.buffers:
         if a.realized == output.realized and not a.st.contiguous:
           output.realized = None
           break
 
     # we don't have an output buffer, we have to create it
-    if output.realized is None:
+    if not output.realized:
       output.realized = self.buffer(prod(output.shape), output.dtype, **kwargs)
 
     # compilation time
