@@ -112,12 +112,10 @@ def get_run_onnx(onnx_model: ModelProto):
       return None
 
     for num,n in enumerate(onnx_model.graph.node):
-      inp: List[Tensor] = []
-      if debug: print("inputs:")
-      for x in n.input:
-        t = fetch_tensor(x)
-        if debug: print(f"\t{x} - {t}")
-        inp.append(t)
+      inp = [fetch_tensor(x) for x in n.input]
+      if debug:
+        print('inputs:')
+        for x,i in zip(n.input, inp): print(f"\t{x} - {i}")
       opt = attribute_dict[num]
       if debug: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
       # free ones
