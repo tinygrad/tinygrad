@@ -212,10 +212,10 @@ class Compiled:
         #print(x, tm)
         return tm
       except Exception:
-        #import traceback
-        #traceback.print_exc()
+        if DEBUG >= 2:
+          import traceback
+          traceback.print_exc()
         return 100000
-        #return float('inf')
 
     # compilation time
     k = self.codegen(ast, output)
@@ -234,6 +234,7 @@ class Compiled:
         optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=10*len(opts))
         recommendation = optimizer.minimize(opt)
         apply_opt(k, recommendation.value)
+        if DEBUG >= 1: print("optimizer hit", k.colored_shape())
         self.method_cache[k.key] = k.codegen().build(self.runtime)
       elif DEBUG >= 5: print(f"method cache hit : {k.key}")
       prg = self.method_cache[k.key]
