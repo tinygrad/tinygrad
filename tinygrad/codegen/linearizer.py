@@ -162,20 +162,6 @@ class Linearizer:
     acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
-  """
-  def _group_float4(self, i, store_offset):
-    store_offset_float4 = {}
-    float4_axis = (self.upcasted-1) - self.float4_axis(i)[0]
-    for uidxs, var in store_offset.items():
-      if uidxs[float4_axis]%4 == 0:
-        store_offset_float4[uidxs] = [var]
-      else:
-        uidxs2 = list(uidxs)
-        uidxs2[float4_axis] -= uidxs2[float4_axis]%4
-        store_offset_float4[tuple(uidxs2)].append(var)
-    return store_offset_float4
-  """
-
   def get_upcast_dim(self, i, amt=4):
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == amt]
@@ -200,39 +186,6 @@ class Linearizer:
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
                      self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
       ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b) if localtype == dtypes._float4 else cache[key])
-
-    """
-    load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(dtypes.float,uidxs)+self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
-
-    # float4 grouping (optional)
-    should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType)) and len(self.float4_axis(i)) == 1
-    if should_upcast:
-      load_offset_new = {}
-      for k,out_tokens in self._group_float4(i, load_offset).items():
-        idxs = [x[2]-out_tokens[0][2] for x in out_tokens]
-        valids_okay = all_same([x[3] for x in out_tokens]) or (all_same([x[3]//4 for x in out_tokens]) and (out_tokens[0][3]//4)*4 == out_tokens[0][3])
-        if any([idx.min != idx.max or idx.min != val for idx,val in zip(idxs, range(4))]) or (out_tokens[0][2]//4)*4 != out_tokens[0][2] or not valids_okay:
-          # idxs not in order, valids don't match, or idx doesn't evenly divide 4. use normal float
-          for x in out_tokens: load_offset_new[x[1]] = x
-        else:
-          load_offset_new[k] = (dtypes._float4, [x[1] for x in out_tokens], out_tokens[0][2], out_tokens[0][3])
-      load_offset = load_offset_new
-
-    # do loads
-    cache: Dict[str, Token] = {}
-    loaded = {}
-    for uidxs, (localtype, uidx_list, idx, valid) in load_offset.items():
-      key = f"{localtype}{idx.render()}{valid.render()}"
-      if key not in cache:
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
-      if localtype == dtypes._float4:
-        for j,uidx in enumerate(uidx_list):
-          loaded[uidx] = Token(cache[key].name, dtypes._float4, j)
-      else:
-        loaded[uidxs] = cache[key]
-    return [loaded[uidxs] for uidxs in self.shape_offsets(i)]
-    """
-
     return ret
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
@@ -247,6 +200,9 @@ class Linearizer:
         grouped_store_offset[_idx].append(store_offset[k])
       store_offset_new = {}
       for k,out_tokens in grouped_store_offset.items():
+        idx, valid = self.sts[i].expr_idxs(k)
+        assert idx.render() == ((idx//4)*4).render(), "float4 stores are always aligned"
+        assert valid.min == 1, "stores are always valid"
         if all_same([x.name for x in out_tokens]) and tuple(range(4)) == tuple(x.offset for x in out_tokens):
           store_offset_new[k] = Token(out_tokens[0].name, dtypes._float4)
         else:
@@ -255,26 +211,6 @@ class Linearizer:
 
     for idx, var in store_offset.items():
       self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idx)))
-
-    """
-    store_offset: Dict[Tuple[int, ...], Token] = dict(zip(self.shape_offsets(i), store))
-
-    # float4 grouping (optional)
-    # TODO: why does this not work for float16?
-    should_upcast = self.supports_float4 and (self.bufs[i].dtype == dtypes.float32 or isinstance(self.bufs[i].dtype, ImageDType)) and len(self.float4_axis(i)) == 1
-    if should_upcast:
-      store_offset_new = {}
-      for k,out_tokens in self._group_float4(i, store_offset).items():
-        if all_same([x.name for x in out_tokens]) and tuple(range(4)) == tuple(x.offset for x in out_tokens):
-          store_offset_new[k] = Token(out_tokens[0].name, dtypes._float4)
-        else:
-          store_offset_new[k] = self.uop(UOps.CAST, ssa("alu", dtypes._float4), out_tokens)
-      store_offset = store_offset_new
-
-    # do stores
-    for uidxs, var in store_offset.items():
-      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])))
-    """
 
   def linearize(self):
     # uops

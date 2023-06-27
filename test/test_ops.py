@@ -147,7 +147,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], torch.minimum, Tensor.minimum)
     helper_test_op([(), ()], torch.minimum, Tensor.minimum)
   def test_add(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add)
+    helper_test_op([(45,68), (45,68)], lambda x,y: x+y, Tensor.add)
   def test_add_number(self):
     helper_test_op([(), ()], lambda x,y: x+y, Tensor.add)
   def test_add3(self):
