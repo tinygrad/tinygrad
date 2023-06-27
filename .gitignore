@@ -17,6 +17,8 @@ pandecode.dump
 vertex.bin
 recognize*
 .idea
+.replit
+replit.nix
 disassemblers/applegpu
 disassemblers/cuda_ioctl_sniffer
 *.prof
