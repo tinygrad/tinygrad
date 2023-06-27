@@ -138,20 +138,13 @@ class Transformer:
     self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2))
 
   def __call__(self, tokens:Tensor, start_pos:int):
-    _bsz, seqlen = tokens.shape
+    _, seqlen = tokens.shape
     h = self.tok_embeddings(tokens)
 
     # get only the part we are using. making it contiguous avoids more kernel calls
     freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen].contiguous().realize()
-    if seqlen > 1:
-      mask = np.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=np.float32)
-      mask = np.triu(mask, k=start_pos + 1)  # TODO: this is hard to do in tinygrad
-      mask = Tensor(mask)
-    else:
-      mask = None
-    # mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1) if seqlen > 1 else None #TODO: Pending(#942)
+    mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1) if seqlen > 1 else None
     for layer in self.layers:
-      h.realize()  # TODO: why do i need this?
       h = layer(h, start_pos, freqs_cis, mask)
 
     return self.output(self.norm(h)[:, -1, :])
