@@ -43,7 +43,7 @@ class LazyOp:
   def __eq__(self, __value: object) -> bool:
     if __value.__class__ is not LazyOp: return False
     __value = cast(LazyOp, __value)
-    return self.op == __value.op and self.src == __value.src and self.arg == __value.arg
+    return self.op is __value.op and self.src == __value.src and self.arg == __value.arg
   def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
@@ -90,7 +90,7 @@ class Interpreted:
     self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, context=None, **kwargs):
-    if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and ast.src[0].__class__ is LazyOp and ast.src[0].op == BinaryOps.MUL:
+    if FusedOps.MULACC in self.fxn_for_op and ast.op is ReduceOps.SUM and ast.src[0].__class__ is LazyOp and ast.src[0].op is BinaryOps.MUL:
       ast = LazyOp(FusedOps.MULACC, cast(LazyOp, ast.src[0]).src, ast.arg)
     created_context = context is None
     if context is None: context = dict()
@@ -101,7 +101,7 @@ class Interpreted:
     if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(time.perf_counter()-st)*1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape) if hasattr(ret._buf, 'shape') else str(len(ret._buf)):30s} in({len(srcs)}):", list(set(x._buf.shape if hasattr(x._buf, 'shape') else len(x._buf) for x in srcs)), ast.arg if ast.arg is not None else "")
     if not created_context: context[ast] = ret
     if output is not None and output.output_buffer is not None:
-      assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
+      assert output.output_buffer.size == ret.size, output.output_buffer.dtype is ret.dtype
       output.output_buffer._buf = ret._buf
       return output.output_buffer
     else:

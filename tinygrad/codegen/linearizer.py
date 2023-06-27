@@ -28,9 +28,9 @@ class Token(NamedTuple):
       assert self.offset is None
       return f"{self.dtype.name} {self.name}"
     if self.offset is None: return self.name
-    assert self.dtype == dtypes._float4
+    assert self.dtype is dtypes._float4
     return self.name+"."+"xyzw"[int(self.offset)]
-  def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
+  def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype is dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
 # TODO: the next three functions are poorly written
 def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
@@ -54,7 +54,7 @@ def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
 
 def to_float4(x:List[Token]) -> Optional[Token]:
   if all_same(x): return x[0]
-  if all_same([y.name for y in x]) and all([y.dtype == dtypes._float4 and y.offset == i for i,y in enumerate(x)]):
+  if all_same([y.name for y in x]) and all([y.dtype is dtypes._float4 and y.offset == i for i,y in enumerate(x)]):
     return Token(x[0].name, dtypes._float4)
   return None
 
@@ -92,7 +92,7 @@ class Linearizer:
 
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
-    self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
+    self.ast = ast.src[0] if ast.op is MovementOps.RESHAPE else ast
 
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)
@@ -193,7 +193,7 @@ class Linearizer:
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
-      if localtype == dtypes._float4:
+      if localtype is dtypes._float4:
         for j,uidx in enumerate(uidx_list):
           loaded[uidx] = Token(cache[key].name, dtypes._float4, j)
       else:
@@ -205,7 +205,7 @@ class Linearizer:
 
     # float4 grouping (optional)
     # TODO: why does this not work for float16?
-    should_upcast = self.supports_float4 and (self.bufs[i].dtype == dtypes.float32 or isinstance(self.bufs[i].dtype, ImageDType)) and len(self.float4_axis(i)) == 1
+    should_upcast = self.supports_float4 and (self.bufs[i].dtype is dtypes.float32 or isinstance(self.bufs[i].dtype, ImageDType)) and len(self.float4_axis(i)) == 1
     if should_upcast:
       store_offset_new = {}
       for k,out_tokens in self._group_float4(i, store_offset).items():
@@ -340,9 +340,9 @@ class Linearizer:
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
     # MULACC fusion. TODO: this is copied from Interpreted
-    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
+    if x.op is ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op is BinaryOps.MUL:
       x = LazyOp(FusedOps.MULACC, x.src[0].src, x.arg)
-    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL:
+    if x.op is ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op is UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op is BinaryOps.MUL:
       x = LazyOp(FusedOps.MULACC, x.src[0].src[0].src, x.arg)
     if x.op in {BinaryOps.ADD, BinaryOps.MUL}:
       # Reorder sources to put constants first so get_grouped_maybe_float4 can fold the op
@@ -352,12 +352,12 @@ class Linearizer:
     if x.op.__class__ in {ReduceOps, FusedOps}:
       ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
     else:
-      ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
+      ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype is dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
       for o,k in enumerate(i):
-        ordered_ret[k] = Token(j.name, j.dtype, o) if j.dtype == dtypes._float4 else j
+        ordered_ret[k] = Token(j.name, j.dtype, o) if j.dtype is dtypes._float4 else j
     assert all(isinstance(x, Token) for x in ordered_ret), "some tokens didn't get scattered?"
     return cast(List[Token], ordered_ret)
 
@@ -436,7 +436,7 @@ class Linearizer:
     # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride
     if self.shape_len == 0: return
-    all_ones = [all([st.shape[i]==1 for st in self.sts]) for i in range(self.shape_len)]
+    all_ones = [all([st.shape[i] == 1 for st in self.sts]) for i in range(self.shape_len)]
     # keep at least 1 one
     if all(all_ones): all_ones[-1] = False
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
@@ -468,7 +468,7 @@ class Linearizer:
   def required_optimizations(self, early_only=False):
     for buf_index,buf in enumerate(self.bufs):
       unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes() if self.sts[buf_index].shape[i]%4 == 0]
-      if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype.__class__ is ImageDType:
+      if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype is ImageDType:
         assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
         if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
           self.shift_to(unit_stride_axes_mul_4[0], 4)

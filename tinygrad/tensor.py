@@ -53,7 +53,7 @@ class Tensor:
     self._ctx: Optional[Function] = None
     if data.__class__ is LazyBuffer:
       data = cast(LazyBuffer, data) # NOTE: this is a noop, it makes mypy happy
-      assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
+      assert dtype is None or dtype is data.dtype, "dtype doesn't match, and casting isn't supported"
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
 
@@ -530,7 +530,7 @@ class Tensor:
   # ***** broadcasted binary mlops *****
 
   def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
-    dtype = self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
+    dtype = self.dtype if self.dtype != dtypes.bool and self.dtype is not ImageDType else dtypes.float32
     x: Tensor = self
     y: Tensor = Tensor(cast(float, other), device=self.device, requires_grad=False, dtype=dtype) if other.__class__ is not Tensor else cast(Tensor, other)
     if reverse: x, y = y, x
