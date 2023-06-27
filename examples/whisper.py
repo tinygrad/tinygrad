@@ -181,6 +181,7 @@ def img(x):
 RATE = 16000
 CHUNK = 1600
 RECORD_SECONDS = 10
+MAX_ITERS = 60
 
 def listener(q):
   prep_audio(torch.zeros(300), RATE)
@@ -217,11 +218,13 @@ if __name__ == "__main__":
       log_spec = prep_audio(waveform, sample_rate)
       lst = [enc._special_tokens["<|startoftranscript|>"]]
       dat = model.encoder(Tensor(log_spec)).realize()
-      while lst[-1] not in [enc._special_tokens["<|endoftext|>"], 13, 30, 0]: # temp fix: stop at the end of the sentence
+      iters = 0
+      while lst[-1] not in [enc._special_tokens["<|endoftext|>"], 13, 30, 0] and iters < MAX_ITERS: # temp fix: stop at the end of the sentence
         out = model.decoder(Tensor([lst]), dat)
         out.realize()
         idx = out[0,-1].numpy().argmax()
         lst.append(idx)
+        iters += 1
       predicted = "".join(enc.decode(lst[2:-1]))[1:].lower().translate(str.maketrans("", "", string.punctuation))
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
       sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
