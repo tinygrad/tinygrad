@@ -32,7 +32,7 @@ ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
-  def type_parse(type_proto: TypeProto, inp):
+  def type_parse(type_proto: TypeProto):
     while True: # NEED BETTER PARSER :D
       attr = type_proto.WhichOneof('value')
       if attr == 'tensor_type': return tuple(x.dim_value for x in getattr(type_proto, attr).shape.dim)

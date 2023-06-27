@@ -370,33 +370,24 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
   spacial_shape = X.shape[2:]
   bs,c,py,px = X.shape
   
-  if upscale:
-    if mode == "nearest":
-      if sizes:
-        if keep_aspect_ratio_policy == "stretch":
-          dividable = [True, True, sizes[2]%X.shape[2] == 0, sizes[3]%X.shape[3] == 0]
-          return X.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, math.ceil(sizes[2]/py), px, math.ceil(sizes[3]/px)).reshape(*[s if d else s+1 for s,d in zip(sizes, dividable)]).shrink(tuple([(0,s) for s in output_shape]))
-    elif mode == "linear":
-      return
-    elif mode == "cubic":
-      return 
-  else:
   if mode == "nearest":
     if sizes:
       if keep_aspect_ratio_policy == "stretch":
         dividable = [True, True, sizes[2]%X.shape[2] == 0, sizes[3]%X.shape[3] == 0]
         return X.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, math.ceil(sizes[2]/py), px, math.ceil(sizes[3]/px)).reshape(*[s if d else s+1 for s,d in zip(sizes, dividable)]).shrink(tuple([(0,s) for s in output_shape]))
     else:
-      if all([int(x) == x and x >= 1 for x in scales]): # upscale
+      if upscale: # upscale
         scales = [int(i) for i in scales]
         return X.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, scales[2], px, scales[3]).reshape(bs, c, py*scales[2], px*scales[3])
       else: # downsample
         output_shape = [math.floor(sh*sc) for sh, sc in zip(X.shape, scales)]
-        indices = [xs/os for xs, os in zip(X.shape, output_shape)]
-        print(indices)
-        print(output_shape)
-        down_scaleable = [not bool(sh%o) for sh, o in zip(X.shape, output_shape)]
-        slice_arg = []
+        repeat_args = prod(output_shape[-2:])
+        X = X.repeat((1,1,repeat_args,repeat_args))
+        print(X.numpy())
+        # print(outsh)
+        # flat_indices = Tensor.arange(X.shape[-1]) 
+        # indices_scaled = flat_indices / output_shape[-1] 
+        
         # Tensor.arange(output_shape[-1]).resize(spacial_shape)
 
   elif mode == "linear":
