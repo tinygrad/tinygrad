@@ -299,7 +299,7 @@ class Linearizer:
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs, acc, ssa)  # store accumulators
         self.uop(UOps.BARRIER, None, [], ())
-        self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))   # this is a barrier on GPUs
+        self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
 
         # local indexs are over, 0 them out
         local_idxs = [x*0 for x in local_idxs]
@@ -339,11 +339,11 @@ class Linearizer:
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs, val, ssa)
 
     if not self.group_for_reduce:
-      # end the local loop
-      self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
-
-    # end the global loop
-    self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
+      # end the global+local loop
+      self.uop(UOps.ENDLOOP, None, [], (global_idxs+local_idxs, "global+local"))
+    else:
+      # end the global loop
+      self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
   _OT = TypeVar("_OT")
   def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None) -> _OT:

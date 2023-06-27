@@ -5,7 +5,7 @@ import sys, importlib, inspect, functools, pathlib
 from weakref import ref
 
 import numpy as np
-from tinygrad.helpers import GRAPH, prod, getenv, DType, dtypes, flatten, ImageDType, LightWeakSet, LightWeakValueDictionary
+from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, LightWeakSet, LightWeakValueDictionary
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.shape.shapetracker import MovementOps, ShapeTracker, get_contraction
@@ -17,6 +17,7 @@ sys.setrecursionlimit(10000)
 
 OPT = getenv("OPT", 2)
 LAZY = getenv("LAZY", 1)
+LAZYCACHE = getenv("LAZYCACHE", 1)
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
@@ -27,7 +28,7 @@ PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = self.op.src[0]
-  if MERGE_ELEMENTWISE_INTO_REDUCE and not src.realized and src.optype == BinaryOps and len(src.children) <= 1:
+  if MERGE_ELEMENTWISE_INTO_REDUCE and not src.realized and src.optype is BinaryOps and len(src.children) <= 1:
     src = src.op # type: ignore
   return LazyOp(self.op.op, (src,), self.op.arg)
 
@@ -65,17 +66,15 @@ def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movement
 
 lazycache: LightWeakValueDictionary = LightWeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType):
-
-  # fromcpu aren't cached
-  if optype == LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}: return LazyBuffer(device, st, optype, op, dtype)
-
   #print("create_lazybuffer", device, shape, optype, op, dtype)
 
-  # NOTE: shape should be deterministic. annoying to cache with the ShapeTracker
-  # get_weakop makes all the LazyBuffers in the op have a weakref
-  wop = (device, dtype, optype, ref(op))
+  # fromcpu aren't cached
+  if not LAZYCACHE or (optype is LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}): return LazyBuffer(device, st, optype, op, dtype)
 
+  # wop is the deduping key. i feel this used to compare more deeply
+  wop = (device, dtype, optype, ref(op))
   if wop in lazycache: return lazycache[wop]
+
   lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype)
   return ret
 
@@ -83,16 +82,15 @@ class LazyBuffer:
   __slots__ = 'st', 'device', 'shape', 'optype', 'dtype', 'op', 'realized', 'output_buffer', 'children', 'node_id', '__weakref__'
   __deletable__ = ('op',)
   def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, src:Optional[RawBuffer]=None):
-    self.st = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
+    self.st: ShapeTracker = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
     self.device, self.shape, self.optype, self.dtype = device, self.st.shape, optype, dtype
     self.realized: Optional[RawBuffer] = src
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: LightWeakSet = LightWeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
-    if op:
-      self.op: LazyOp = op
-      for x in op.buffers: x.children.add(self)
+    self.op: LazyOp = op
+    for x in op.buffers: x.children.add(self)
     if not LAZY: self.realize()
 
     # log phantom ops to the graph
@@ -111,16 +109,15 @@ class LazyBuffer:
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       # get real ops first
-      if self.optype in REALIZE_DISPATCHER:
-        self.op = REALIZE_DISPATCHER[self.optype](self)
-      elif self.op.op in REALIZE_DISPATCHER:
-        REALIZE_DISPATCHER[self.op.op](self)
+      if self.optype is BinaryOps: self.op = _ast_binaryops(self)
+      elif self.optype is ReduceOps: self.op = _ast_reduceops(self)
+      elif self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
       # run the ast if we still have to, and log the op
       if not self.realized:
         for x in self.op.buffers: x.realize()
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
-        if self.optype != MovementOps and self.dtype.__class__ is ImageDType and (prod(self.shape) != prod(cast(ImageDType, self.dtype).shape) or not any([self.shape[x]%4 == 0 for x in self.st.unit_stride_axes()])):
+        if self.dtype.__class__ is ImageDType and self.optype != MovementOps and (prod(self.shape) != prod(cast(ImageDType, self.dtype).shape) or not any([self.shape[x]%4 == 0 for x in self.st.unit_stride_axes()])):
           if self.op.op == MovementOps.RESHAPE:
             # put CAST before the final RESHAPE
             self.op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, self.op.src, dtypes.float32),), self.op.arg)
@@ -131,11 +128,11 @@ class LazyBuffer:
 
       assert self.realized and isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
       # HACK: allow hot casting of images
-      assert self.realized.dtype == self.dtype or self.dtype.name.startswith("image"), f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
+      assert self.realized.dtype == self.dtype or self.dtype.__class__ is ImageDType, f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
       self.dtype = self.realized.dtype
 
       # log to the graph
-      if self.realized.__class__ is not RawConst or GRAPH >= 2:
+      if (DEBUG or GRAPH) and (self.realized.__class__ is not RawConst or GRAPH >= 2):
         from tinygrad.graph import log_op
         log_op(self, self.op)
 
@@ -339,15 +336,13 @@ def _realize_const(buffer: LazyBuffer) -> None:
   else:
     buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args())
 
-REALIZE_DISPATCHER: Dict[Any, Callable] = {
+LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
   LoadOps.CONTIGUOUS: _realize_contiguous,
   LoadOps.CUSTOM: _realize_custom,
   LoadOps.FROM: _realize_from,
   LoadOps.EMPTY: _realize_empty,
   LoadOps.RAND: _realize_rand,
   LoadOps.CONST: _realize_const,
-  ReduceOps: _ast_reduceops,
-  BinaryOps: _ast_binaryops,
 }
 
 MOVEMENT_OPS_DISPATCHER: Dict[MovementOps, Callable] = {

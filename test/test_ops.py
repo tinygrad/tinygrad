@@ -292,7 +292,7 @@ class TestOps(unittest.TestCase):
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
     helper_test_op([(32,45,65), (32,65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises(AssertionError):
       a = Tensor(3.14)
       a.matmul(a)
 
@@ -319,7 +319,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(256,256), (256,256)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   def test_broadcastdot(self):
     helper_test_op([(10,45,65), (65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises(AssertionError):
       a = Tensor(3.14)
       b = Tensor.ones(3,3)
       a @ b

@@ -33,8 +33,11 @@ class LazyOp:
     self.op = op
     self.src = src
     self.arg = arg
-    # TODO: this hasattr is required because the key function maps the buffers to ints
-    self.buffers = functools.reduce(lambda x,s: (x+s.buffers) if hasattr(s, 'buffers') else x, src, tuple())
+    try:
+      self.buffers = tuple([y for x in src for y in x.buffers])
+    except AttributeError:
+      # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
+      pass
 
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   def __eq__(self, __value: object) -> bool:
@@ -46,10 +49,10 @@ class LazyOp:
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
   # Any == Union[LazyBuffer, DeviceBuffer]
-  def map_buffers(self, real_srcs: Dict[Any, Any]): return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
-  def get_lazyops(self) -> List['LazyOp']: return [self] + [item for x in self.src for item in x.get_lazyops()]
+  def map_buffers(self, real_srcs: Dict[Any, Any]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
+  def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
-  def replace_with_movement_ops(self: LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
+  def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
     from tinygrad.lazy import elementwise_op
     assert self.op in BinaryOps or self.op in UnaryOps
     return elementwise_op(self.op, *[z.replace_with_movement_ops(ops) for z in self.src], arg=self.arg)   # type: ignore
