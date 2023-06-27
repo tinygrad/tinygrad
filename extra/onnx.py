@@ -5,7 +5,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
 from typing import Dict
-from onnx.onnx_pb import AttributeProto, ModelProto, TensorProto
+from onnx.onnx_pb import AttributeProto, ModelProto, TensorProto, TensorShapeProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -29,7 +29,7 @@ onnx_ops = importlib.import_module('extra.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
-  def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
+  def shape_to_tuple(s: TensorShapeProto): return tuple(x.dim_value for x in s.dim)
   def buffer_parse(inp: TensorProto) -> Tensor:
     if inp.data_type in (1,10,6,7):
       # TODO: this is shared with below
@@ -90,8 +90,8 @@ def get_run_onnx(onnx_model: ModelProto):
     # get inputs
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
-      tmp=inp.type.optional_type.elem_type.tensor_type if inp.type.HasField("optional_type") else (inp.type.sequence_type.elem_type.tensor_type if inp.type.HasField("sequence_type") else inp.type.tensor_type)
-      shape = shape_to_tuple(tmp.shape)
+      tensor_type=inp.type.optional_type.elem_type.tensor_type if inp.type.HasField("optional_type") else (inp.type.sequence_type.elem_type.tensor_type if inp.type.HasField("sequence_type") else inp.type.tensor_type)
+      shape = shape_to_tuple(tensor_type.shape)
       if len(shape) >= 1 and shape[0] == 0: shape = tuple([1]+list(shape[1:]))   # 1 batch size
       if inp.name in inputs:
         if isinstance(inputs[inp.name], Tensor):
