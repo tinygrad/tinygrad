@@ -14,6 +14,7 @@ from tinygrad.helpers import getenv
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
 from datasets.librispeech import ci, BASEDIR
+from examples.mlperf.metrics import word_error_rate
 
 # TODO: you have written this fifteen times
 class MultiHeadAttention:
@@ -228,7 +229,7 @@ if __name__ == "__main__":
       predicted = "".join(enc.decode(lst[2:-1]))[1:].lower().translate(str.maketrans("", "", string.punctuation))
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
       sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
-      print(f"\nsimilarity score: {difflib.SequenceMatcher(None, predicted, transcript).ratio():.2f}")
+      print(f"word error rate: {word_error_rate([predicted], [transcript])[0]}")
   elif len(sys.argv) > 1:
     # offline
     waveform, sample_rate = torchaudio.load(sys.argv[1], normalize=True)
