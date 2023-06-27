@@ -202,9 +202,9 @@ def get_run_onnx(onnx_model: ModelProto):
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       if debug: print([x.shape if isinstance(x, Tensor) else None for x in ret])
       if debug: print("outputs:")
-      for i in range(len(n.output)): 
-        if debug: print(f"\t{n.output[i]} - {ret[i]}")
-        intermediate_tensors[n.output[i]] = ret[i]
+      for i, x in enumerate(n.output):
+        if debug: print(f"\t{x} - {ret[i]}")
+        intermediate_tensors[x] = ret[i]
       #print(ret[0].numpy().mean())
       if num == ONNXLIMIT:
         output_tensor_names = n.output
