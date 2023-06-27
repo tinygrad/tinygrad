@@ -65,7 +65,7 @@ class View:
   # generate an expression if you have a single idx variable
   def expr_node(self, idx=None) -> Node:
     if idx is None: idx = Variable('idx', 0, prod(self.shape))
-    ret = [Variable.num(self.offset)]
+    ret: List[Node] = [Variable.num(self.offset)]
     acc = 1
     for d,s in reversed(self.shape_strides):
       ret.append(((idx//acc)%d)*s)
@@ -162,9 +162,9 @@ class ShapeTracker:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx, valid = self.expr_idxs(idxs)
-    ret = [None for _ in self.views[-1].shape]
+    ret: List[Optional[int]] = [None for _ in self.views[-1].shape]
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
-      if isinstance(this_dim, MulNode) and this_dim.a.__class__ is Variable:
+      if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
         ret[idxs.index(this_dim.a)] = this_dim.b
       elif isinstance(this_dim, Variable):
         ret[idxs.index(this_dim)] = 1

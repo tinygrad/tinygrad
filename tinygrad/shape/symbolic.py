@@ -54,7 +54,7 @@ class Node:
     return create_node(ModNode(self, b))
 
   @staticmethod
-  def num(num:int) -> Node: return NumNode(num)
+  def num(num:int) -> NumNode: return NumNode(num)
 
   @staticmethod
   def factorize(nodes:List[Node]):
@@ -105,7 +105,7 @@ class Variable(Node):
     if nmin == nmax: return NumNode(nmin)
     return super().__new__(cls)
 
-  def __init__(self, expr:str, nmin:int, nmax:int):
+  def __init__(self, expr:Optional[str], nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
 
 class NumNode(Node):
@@ -184,7 +184,7 @@ class SumNode(RedNode):
     return Node.__floordiv__(self, b, factoring_allowed)
 
   def __mod__(self, b: int):
-    new_nodes = []
+    new_nodes: List[Node] = []
     for x in self.nodes:
       if x.__class__ is NumNode: new_nodes.append(Variable.num(x.b%b))
       elif isinstance(x, MulNode): new_nodes.append(x.a * (x.b%b))

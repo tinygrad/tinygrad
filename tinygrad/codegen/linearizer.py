@@ -1,4 +1,4 @@
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict, Iterator
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict, Iterator, Union, Sequence
 import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
@@ -9,7 +9,8 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
-from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.symbolic import Variable, NumNode
+VariableOrNum = Union[Variable, NumNode]
 
 class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); \
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
@@ -74,8 +75,8 @@ def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
       return zip(new_idxs, new_values)
   return zip([[i] for i in range(len(values[0]))], zip(*values))
 
-def expand_idxs(idxs:List[Variable]) -> Iterator[List[Variable]]:
-  for x in itertools.product(*[[idx] if idx.__class__ is not Variable or idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)] for idx in idxs[::-1]]):
+def expand_idxs(idxs:Sequence[VariableOrNum]) -> Iterator[Tuple[VariableOrNum, ...]]:
+  for x in itertools.product(*[[idx] if not isinstance(idx, Variable) or idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)] for idx in idxs[::-1]]):
     yield x[::-1]
 
 class MemOp(NamedTuple):
@@ -173,7 +174,7 @@ class Linearizer:
         store_offset_float4[tuple(uidxs2)].append(var)
     return store_offset_float4
 
-  def global_load(self, i, idxs:List[Variable], const=None) -> List[Token]:
+  def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
     upcast_dim = [x for x in self.sts[i].unit_stride_axes() if self.supports_float4 and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == 4]
     localtype = dtypes._float4 if len(upcast_dim) == 1 else dtypes.float
     cache: Dict[str, Token] = {}
@@ -191,8 +192,8 @@ class Linearizer:
         ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b))
       else:
         ret.append(cache[key])
-    return ret
 
+    """
     load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(dtypes.float,uidxs)+self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
 
     # float4 grouping (optional)
@@ -222,12 +223,15 @@ class Linearizer:
       else:
         loaded[uidxs] = cache[key]
     return [loaded[uidxs] for uidxs in self.shape_offsets(i)]
+    """
 
-  def global_store(self, i, idxs:List[Variable], store:List[Token], ssa) -> None:
+    return ret
+
+  def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
     for idx, var in zip(expand_idxs(idxs), store):
       self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idx)))
-    return
 
+    """
     store_offset: Dict[Tuple[int, ...], Token] = dict(zip(self.shape_offsets(i), store))
 
     # float4 grouping (optional)
@@ -245,6 +249,7 @@ class Linearizer:
     # do stores
     for uidxs, var in store_offset.items():
       self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])))
+    """
 
   def linearize(self):
     # uops
