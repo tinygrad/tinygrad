@@ -1,6 +1,6 @@
 # NOTE: this only tests the speed of the LLaMA codegen, it doesn't actually run the net
 import unittest, time
-from examples.llama import Transformer, args_7B
+from examples.llama import Transformer, LLAMA_STANDARD_CONFIGS
 from test.test_net_speed import start_profile, stop_profile
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import Device
@@ -19,7 +19,7 @@ class TestLLaMASpeed(unittest.TestCase):
     print("using", Device['fake'].codegen)
 
     print("testing llama python run time")
-    model = Transformer(**args_7B)
+    model = Transformer(**LLAMA_STANDARD_CONFIGS['7B'])
     print("built model")
     # assign fake tensors to the values
     for v in get_state_dict(model).values(): v.assign(Tensor.empty(*v.shape, dtype=v.dtype))
