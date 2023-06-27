@@ -43,8 +43,6 @@ class View(NamedTuple):
   offset:int=0
   mask:Optional[Tuple[Tuple[int, int]]]=None
 
-  @functools.cached_property
-  def key(self): return (self.shape, self.strides, self.offset, self.mask)
 
   @staticmethod
   @functools.lru_cache(maxsize=None)
@@ -165,7 +163,7 @@ class ShapeTracker:
   def shape(self) -> Tuple[int, ...]: return self.views[-1].shape
 
   @property
-  def key(self) -> Tuple[int, ...]: return tuple(map(View.key, self.views))
+  def key(self) -> Tuple[int, ...]: return tuple(self.views)
 
   # this is the real size (ish)
   def size(self): return prod([s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])
