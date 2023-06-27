@@ -2,7 +2,7 @@ from __future__ import annotations
 from abc import abstractmethod
 import functools
 from math import gcd
-from typing import List, Dict, Callable, Tuple, Type, Union
+from typing import List, Dict, Callable, Tuple, Type, Union, Optional
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
@@ -100,7 +100,7 @@ class Node:
 # 4 basic node types
 
 class Variable(Node):
-  def __new__(cls, expr:str, nmin:int, nmax:int):
+  def __new__(cls, expr:Optional[str], nmin:int, nmax:int):
     assert nmin >= 0 and nmin <= nmax
     if nmin == nmax: return NumNode(nmin)
     return super().__new__(cls)
