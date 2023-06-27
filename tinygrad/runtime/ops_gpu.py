@@ -32,7 +32,6 @@ class _CL:
 CL = _CL()
 CL.post_init() if not os.environ.get("DELAYED_RUNTIME_INIT", False) else None
 
-# TODO: merge CLImage in here
 class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device='0'):
     assert not OSX or dtype != dtypes.float64, "OpenCL on Mac doesn't support float64"
