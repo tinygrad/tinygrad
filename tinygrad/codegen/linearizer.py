@@ -399,11 +399,12 @@ class Linearizer:
     colors += ["magenta" if self.full_shape[i] != self.sts[0].shape[i] else "yellow" for i in range(self.shape_len-self.upcasted, self.shape_len)]
     assert len(colors) == self.shape_len, "colors size mismatch"
     return colors
+  def colored_shape(self) -> str: return ' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors()))
 
   def printbufs(self, prefix=""):
     for i in range(len(self.sts)):
       print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i] is not None else 'FAKE':47s}", self.sts[i].views)
-    print(' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors())))
+    print(self.colored_shape())
 
   # ******************** base simplifiers ********************
 

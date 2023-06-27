@@ -189,7 +189,7 @@ class CStyleCodegen(Linearizer):
 
   def codegen(self):
     self.process()
-    self.hand_coded_optimizations()
+    #self.hand_coded_optimizations()
     self.limit_global_dims(len(self.lang.gid))
     self.linearize()
 
