@@ -215,8 +215,15 @@ class Linearizer:
       store_offset = store_offset_new
 
     # do stores
+    print("global store", self, i, idxs, store, ssa)
+    # print(store[0])
     for uidxs, var in store_offset.items():
-      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])))
+      print(var.dtype, self.bufs[i].dtype)
+      if var.dtype != self.bufs[i].dtype and not should_upcast:
+        tmp = self.uop(UOps.CAST, ssa("cast", self.bufs[i].dtype), [var])
+        self.uop(UOps.STORE, None, [tmp], MemOp(i, *self.sts[i].expr_idxs(idxs + [Variable.num(x) for x in uidxs[::-1]])))
+      else:
+        self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])))
 
   def linearize(self):
     # uops

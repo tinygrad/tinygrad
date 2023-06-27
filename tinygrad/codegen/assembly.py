@@ -7,7 +7,7 @@ import functools
 import math
 from collections import defaultdict
 
-_type_to_letter = {dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a', dtypes.uint32: 'u', dtypes.uint64: 'b', dtypes._float4: 'x'}
+_type_to_letter = {dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a', dtypes.uint32: 'u', dtypes.uint64: 'b', dtypes._float4: 'x', dtypes.half: 'h', dtypes.float64: 'd', dtypes.int8: 'c', dtypes.uint8: 'e'}
 def type_to_letter(x): return _type_to_letter[x[0]].upper() if x[1] else _type_to_letter[x[0]]
 
 class Register(NamedTuple):
@@ -134,8 +134,14 @@ class AssemblyCodegen(Linearizer):
       elif uop == UOps.CAST and newvar is not None:
         # TODO: we should reconsider outputting CAST in the linearizer. these are needless copies
         out = newreg(newvar)
+        print("++++++ casting", uop, newvar, vin, args)
+        # ins.append(AssemblyInstruction(UOps.CAST, out, [sr], args))
+        ins.append(AssemblyInstruction(UOps.CAST, out, [tor[vin[0]]]))
         for i,sr in enumerate(out.subregs()):
+          print("CAST ENUMERATING")
           ins.append(AssemblyInstruction(UOps.ALU, sr, [tor[vin[i]]], UnaryOps.NOOP))
+      # elif uop == UOps.CAST:
+      #   print("cast!")
       elif uop == UOps.ALU and newvar is not None:
         out = newreg(newvar) if newvar not in tor else tor[newvar]
         # this is the only thing that can violate SSA
