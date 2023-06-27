@@ -125,6 +125,8 @@ class TestOps(unittest.TestCase):
     tt2 = Tensor.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (tt1 < tt2).sum().backward)
 
+  def test_floor(self): helper_test_op([(45,65)], lambda x: torch.floor(x), lambda x: x.floor(), forward_only=True)
+  def test_ceil(self): helper_test_op([(45,65)], lambda x: torch.ceil(x), lambda x:x.ceil(), forward_only=True)
   def test_tril(self):
     helper_test_op([(3,3)], lambda x: x.tril(), lambda x: x.tril())
     helper_test_op([(3,3)], lambda x: x.tril(1), lambda x: x.tril(1))
@@ -146,7 +148,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(), ()], torch.minimum, Tensor.minimum)
   def test_add(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add)
+  def test_add_number(self):
     helper_test_op([(), ()], lambda x,y: x+y, Tensor.add)
+  def test_add3(self):
+    helper_test_op([(45,65), (45,65), (45,65)], lambda x,y,z: x+y+z)
   def test_add_simple(self):
     helper_test_op([(256), (256)], lambda x,y: x+y, Tensor.add, forward_only=True)
   def test_broadcasted_add(self):
@@ -164,9 +169,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(64,64), (64,64)], lambda x,y: x*y, Tensor.mul)
     helper_test_op([(), ()], lambda x,y: x*y, Tensor.mul)
   def test_mul_const(self):
-    helper_test_op([(45,65)], lambda x: x*float("inf"),  lambda x: x*float("inf"))
-    helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x*-float("inf"))
-    helper_test_op([(45,65)], lambda x: x*float("nan"),  lambda x: x*float("nan"))
+    helper_test_op([(45,65)], lambda x: x*2,  lambda x: x*2)
+    helper_test_op([(45,65)], lambda x: x*-1, lambda x: x*-1)
+    helper_test_op([(45,65)], lambda x: 255*x, lambda x: 255*x)
   def test_div(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
     helper_test_op([(), ()], lambda x,y: x/y, Tensor.div)
@@ -176,15 +181,23 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 1/x, lambda x: 1/x)
     helper_test_op([(45,65)], lambda x: x/2, lambda x: x/2)
     helper_test_op([(45,65)], lambda x: 2/x, lambda x: 2/x)
+    helper_test_op([()], lambda x: x/2, lambda x: x/2)
+    helper_test_op([()], lambda x: 2/x, lambda x: 2/x)
+  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL has issues with -inf")
+  def test_mul_const_naninf(self):
+    helper_test_op([(45,65)], lambda x: x*float("inf"),  lambda x: x*float("inf"))
+    helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x*-float("inf"))
+    helper_test_op([(45,65)], lambda x: x*float("nan"),  lambda x: x*float("nan"))
+  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL has issues with -inf")
+  def test_div_const_naninf(self):
     helper_test_op([(45,65)], lambda x: x/float("inf"),  lambda x: x/float("inf"))
     helper_test_op([(45,65)], lambda x: x/-float("inf"), lambda x: x/-float("inf"))
     helper_test_op([(45,65)], lambda x: x/float("nan"),  lambda x: x/float("nan"))
     helper_test_op([(45,65)], lambda x: float("inf")/x,    lambda x: float("inf")/x)
     helper_test_op([(45,65)], lambda x: (-float("inf"))/x, lambda x: (-float("inf"))/x)
     helper_test_op([(45,65)], lambda x: float("nan")/x,    lambda x: float("nan")/x)
-    helper_test_op([()], lambda x: x/2, lambda x: x/2)
-    helper_test_op([()], lambda x: 2/x, lambda x: 2/x)
   def test_pow(self):
+    # TODO: why is a=0 for these tests?
     helper_test_op([(45,65)], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
     helper_test_op([(45,65)], lambda x: x**3, lambda x: Tensor.pow(x,3), a=0)
     helper_test_op([(45,65)], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
@@ -193,6 +206,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
   def test_pow_const(self):
     helper_test_op([(45,65)], lambda x: x**1.0, lambda x: x**1.0)
+    helper_test_op([(45,65)], lambda x: x**-1.0, lambda x: x**-1.0)
     helper_test_op([(45,65)], lambda x: 1.0**x, lambda x: 1.0**x)
     helper_test_op([(45,65)], lambda x: x**2.0, lambda x: x**2.0)
     helper_test_op([(45,65)], lambda x: 2.0**x, lambda x: 2.0**x)
@@ -290,6 +304,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3), (1,3,3,5)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
+  def test_big_gemm(self):
+    helper_test_op([(256,256), (256,256)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   def test_broadcastdot(self):
     helper_test_op([(10,45,65), (65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
     with self.assertRaises(RuntimeError):
@@ -303,6 +319,8 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.sum(), Tensor.sum, vals=[[1.,1.]])
   def test_sum_full(self):
     helper_test_op([(16384)], lambda x: x.sum(), lambda x: x.sum())
+  def test_sum_small_full(self):
+    helper_test_op([(45,5)], lambda x: x.sum(), Tensor.sum)
   def test_sum_relu(self):
     helper_test_op([(3,4,5)], lambda x: x.relu().sum().relu(), lambda x: x.relu().sum().relu())
   def test_sum(self):
