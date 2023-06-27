@@ -63,7 +63,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
   local_size = []
   pend_close = None
 
-  bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(bufs)]
+  bufnames = [b.name if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(bufs)]
 
   depth = 0
   def kk(s): kernel.append("  "*depth+s)
@@ -88,10 +88,11 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
           else:
             kk(f"for (int {var.expr} = {var.min}; {var.expr} <= {var.max}; ++{var.expr}) {{")
       depth += 1
+    elif uop == UOps.BARRIER:
+      kk(lang.barrier)
     elif uop == UOps.ENDLOOP:
       if args[1] == "local" and len(lang.lid):
         # TODO: this is a bit of a hack. the local loop isn't real on the GPU
-        kk(lang.barrier)
         kk(f"if ({Variable.sum(args[0]).render(render_cl)} == 0) {{")
         pend_close = "}"*(len(args[0])+1) + f" /* {args[1]} */"
       else:

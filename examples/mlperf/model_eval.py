@@ -184,12 +184,49 @@ def eval_bert():
 
     st = time.perf_counter()
 
+def eval_mrcnn():
+  from tqdm import tqdm
+  from models.mask_rcnn import MaskRCNN
+  from models.resnet import ResNet
+  from datasets.coco import BASEDIR, images, convert_prediction_to_coco_bbox, convert_prediction_to_coco_mask, accumulate_predictions_for_coco, evaluate_predictions_on_coco, iterate
+  from examples.mask_rcnn import compute_prediction_batched, Image
+  mdl = MaskRCNN(ResNet(50, num_classes=None, stride_in_1x1=True))
+  mdl.load_from_pretrained()
+
+  bbox_output = '/tmp/results_bbox.json'
+  mask_output = '/tmp/results_mask.json'
+
+  accumulate_predictions_for_coco([], bbox_output, rm=True)
+  accumulate_predictions_for_coco([], mask_output, rm=True)
+
+  #TODO: bs > 1 not as accurate 
+  bs = 1 
+
+  for batch in tqdm(iterate(images, bs=bs), total=len(images)//bs):
+    batch_imgs = []
+    for image_row in batch:
+      image_name = image_row['file_name']
+      img = Image.open(BASEDIR/f'val2017/{image_name}').convert("RGB")
+      batch_imgs.append(img)
+    batch_result = compute_prediction_batched(batch_imgs, mdl)
+    for image_row, result in zip(batch, batch_result):
+      image_name = image_row['file_name']
+      box_pred = convert_prediction_to_coco_bbox(image_name, result)
+      mask_pred = convert_prediction_to_coco_mask(image_name, result)
+      accumulate_predictions_for_coco(box_pred, bbox_output)
+      accumulate_predictions_for_coco(mask_pred, mask_output)
+    del batch_imgs
+    del batch_result
+
+  evaluate_predictions_on_coco(bbox_output, iou_type='bbox')
+  evaluate_predictions_on_coco(mask_output, iou_type='segm')
+
 if __name__ == "__main__":
   # inference only
   Tensor.training = False
   Tensor.no_grad = True
 
-  models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert").split(",")
+  models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,mrcnn").split(",")
   for m in models:
     nm = f"eval_{m}"
     if nm in globals():

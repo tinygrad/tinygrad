@@ -243,6 +243,9 @@ class TestOps(unittest.TestCase):
   def test_log(self):
     helper_test_op([(45,65)], lambda x: torch.log(x), Tensor.log)
     helper_test_op([()], lambda x: torch.log(x), Tensor.log)
+  def test_log2(self):
+    helper_test_op([(45,65)], lambda x: torch.log2(x), Tensor.log2)
+    helper_test_op([()], lambda x: torch.log2(x), Tensor.log2)
   def test_exp(self):
     helper_test_op([(45,65)], lambda x: torch.exp(x), Tensor.exp)
     helper_test_op([()], lambda x: torch.exp(x), Tensor.exp)
@@ -279,9 +282,17 @@ class TestOps(unittest.TestCase):
       return x*torch.tanh(torch.nn.functional.softplus(x))
     helper_test_op([(45,65)], _mish_pytorch, Tensor.mish, atol=1e-4)
     helper_test_op([()], _mish_pytorch, Tensor.mish, atol=1e-4)
+  @unittest.skipIf(IMAGE>0, "no 1d dot for images")
+  def test_dot_1d(self):
+    helper_test_op([(65), (65)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+    helper_test_op([(65), (65,45)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+    helper_test_op([(45,65), (65)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+    helper_test_op([(32,45,65), (65)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+    helper_test_op([(65), (32,65,45)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
-    with self.assertRaises(RuntimeError):
+    helper_test_op([(32,45,65), (32,65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+    with self.assertRaises(AssertionError):
       a = Tensor(3.14)
       a.matmul(a)
 
@@ -308,7 +319,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(256,256), (256,256)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   def test_broadcastdot(self):
     helper_test_op([(10,45,65), (65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises(AssertionError):
       a = Tensor(3.14)
       b = Tensor.ones(3,3)
       a @ b
