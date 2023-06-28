@@ -68,7 +68,7 @@ jobs:
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[testing,webgpu]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
       run: WEBGPU=1 python -m pytest -s -v -n=auto test/
 
