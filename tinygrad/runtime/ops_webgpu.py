@@ -32,7 +32,7 @@ type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes
 code_for_op = {
   UnaryOps.EXP2: lambda x: f"exp2({x})", UnaryOps.LOG2: lambda x: f"log2({x})", UnaryOps.SIN: lambda x: f"sin({x})",
   BinaryOps.ADD: lambda x,y: f"({x}+{y})", BinaryOps.SUB: lambda x,y: f"({x}-{y})", BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})",
-  BinaryOps.POW: lambda x,y: f"pow({x}, {y})", BinaryOps.MAX: lambda x,y: f"max({x}, {y})", BinaryOps.CMPEQ: lambda x,y: f"f32({x}=={y})",
+  BinaryOps.POW: lambda x,y: f"pow({x},{y})", BinaryOps.MAX: lambda x,y: f"max({x},{y})", BinaryOps.CMPEQ: lambda x,y: f"f32({x}=={y})",
   FusedOps.MULACC: lambda x,y,z: f"(({x}*{y})+{z})",
 }
 
@@ -107,12 +107,13 @@ class WebGpuCodegen(Linearizer):
       elif uop == UOps.BARRIER: kk("workgroupBarrier();")
       else: raise RuntimeError(f"failed to render {uop}")
     prg = "\n".join([f"@group(0) @binding({i}) var<storage,read_write> data{i}: array<{type_map[x.dtype]}>;" for i,x in enumerate(self.bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)])
-    
     prg += f"\n@compute @workgroup_size(1) fn {self.function_name}(@builtin(global_invocation_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}" # TODO: revert local_size {','.join([str(x) for x in local_size])} once bug is fixed
     return ASTRunner(self.function_name, prg, global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else [1])
   
 class RawWebGPUBuffer(RawBufferMapped):
-    def __init__(self, size, dtype: DType): super().__init__(size, dtype, device.create_buffer(size=size*dtype.itemsize, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC))
+    def __init__(self, size:int, dtype:DType):
+      assert dtype not in [dtypes.int8,dtypes.uint8,dtypes.int64,dtypes.uint64,dtypes.float64], f"dtype {dtype} not supported on WEBGPU"
+      super().__init__(size, dtype, device.create_buffer(size=size*dtype.itemsize, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC))
     def _copyin(self, x) -> None: device.queue.write_buffer(self._buf, 0, x)
     def _buffer(self) -> memoryview: return device.queue.read_buffer(self._buf, 0)
 

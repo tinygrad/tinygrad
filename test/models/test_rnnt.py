@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, Device
 from models.rnnt import LSTM
 import torch
 
+@unittest.skipIf(Device.DEFAULT == "WEBGPU", "too many buffers for webgpu")
 class TestRNNT(unittest.TestCase):
   def test_lstm(self):
     BS, SQ, IS, HS, L = 2, 20, 40, 128, 2
