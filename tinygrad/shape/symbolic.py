@@ -32,7 +32,7 @@ class Node:
     if isinstance(lhs, SumNode):
       muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
       if len(muls):
-        mul_gcd = gcd(*[x.b for x in muls])
+        mul_gcd = gcd(*[x.b for x in muls]) if len(muls) >= 2 else muls[0].b
         if b%mul_gcd == 0:
           all_others = Variable.sum(others)
           #print(mul_gcd, muls, all_others)
