@@ -6,6 +6,7 @@ import numpy as np
 import functools
 from typing import Union, Tuple, Optional
 import math
+from copy import deepcopy
 
 def Unsqueeze(data, axes):
   axes = [len(data.shape) + int(x) if x < 0 else int(x) for x in safe_numpy(axes)]
@@ -354,12 +355,19 @@ def _round(x:Tensor, n:float, eq_is_down = True) -> Tensor:
 
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
   assert scales or sizes and not (scales and sizes), "only scales or sizes, cmon"
-  assert not roi, "roi is not None"
+  assert not roi, "roi should be None"
 
-  def _nearest_gather(X:Tensor, output_shape): # MAYBE USE SOMETHING ELSE OTHER THAN GATHER, ugh
-    indices = Tensor.arange(output_shape[-1]*output_shape[-2])*(X.shape[-1]/output_shape[-1]) # HACK DOES NOT WORK FOR ALL CASES CUZ WHEN X.shape[-2] % output_shape[-2] != 0, it's bad
-    indices = _round(indices, 0.5)
+  def _nearest_gather(X: Tensor, indices: Tensor, output_shape): # MAYBE USE SOMETHING ELSE OTHER THAN GATHER??? (reshape -> expand -> reshape -> [shrink]) bad gather many kernel bad, OR TRY NOT FLATTEN()?
     return _gather(X.flatten(), indices).reshape(output_shape)
+  def _nearest_mode(x_resized: Tensor, nearest_mode: str, x_len):
+    if nearest_mode == "round_prefer_floor": ret = _round(x_resized, 0.5, True)
+    elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, 0.5, False)
+    elif nearest_mode == "floor": ret = x_resized.floor()
+    elif nearest_mode == "ceil": ret = x_resized.ceil()
+    ret = (ret<0).where(ret+1, ret) # Wrap the ends of the ret
+    ret = (ret>x_len-1).where(ret-1, ret)
+    return ret
+      
 
   if scales:
     scales = safe_numpy(scales).tolist()
@@ -380,40 +388,45 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
       sizes = sizes_
     if keep_aspect_ratio_policy == "not_larger":
       scale = min(scales)
-      sizes = _round(Tensor(list(X.shape))*scale, 0.5, False)
-      sizes = [int(i) for i in safe_numpy(sizes)]
+      sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, False)
+      sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
     elif keep_aspect_ratio_policy == "not_smaller":
       scale = max(scales)
-      sizes = _round(Tensor(list(X.shape))*scale, 0.5, False)
-      sizes = [int(i) for i in safe_numpy(sizes)]
+      sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, False)
+      sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
 
-  output_shape = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
+  output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
   upscale = all([os >= xs for os, xs in zip(output_shape, X.shape)]) 
   spacial_shape = X.shape[2:]
   bs,c,py,px = X.shape
-  
+  print(output_shape, "output shape")
+  scales_lol = [os/xs for xs, os in zip(X.shape, output_shape)]
+
+  # x_resized = Tensor.arange(output_shape[-1]*output_shape[-2])
+  x_resized = Tensor.arange(output_shape[-1])
+  y_resized = Tensor.arange(output_shape[-2])
+  if coordinate_transformation_mode == "half_pixel":
+    x_resized = (x_resized + 0.5)/scales_lol[-1] - 0.5
+    y_resized = (y_resized + 0.5)/scales_lol[-2] - 0.5
+  if coordinate_transformation_mode == "align_corners":
+    x_resized = x_resized * (X.shape[-1] - 1) / (output_shape[-1] - 1)
+    y_resized = y_resized * (X.shape[-2] - 1) / (output_shape[-2] - 1)
+  if coordinate_transformation_mode == "asymmetric":
+    x_resized = x_resized/scales_lol[-1]
+    y_resized = y_resized/scales_lol[-2]
+
+
+  x_resized = _nearest_mode(x_resized, nearest_mode, X.shape[-1])
+  y_resized = _nearest_mode(y_resized, nearest_mode, X.shape[-1])
+  y_resized = [int(i) for i in safe_numpy(y_resized)]
+  stack_args = []
+  for y in y_resized: # HACK this is incredibly stupid lol cuz I'm stupid
+    stack_args.append(deepcopy(x_resized) + y * X.shape[-1])
+  indices = Tensor.stack(stack_args).flatten()
+  # indices = _nearest_mode(x_resized, nearest_mode)
+  print("indices", indices.numpy())
   if mode == "nearest":
-    if sizes:
-      if keep_aspect_ratio_policy == "stretch":
-        if upscale:
-          dividable = [True, True, sizes[2]%X.shape[2] == 0, sizes[3]%X.shape[3] == 0]
-          return X.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, math.ceil(sizes[2]/py), px, math.ceil(sizes[3]/px)).reshape(*[s if d else s+1 for s,d in zip(sizes, dividable)]).shrink(tuple([(0,s) for s in output_shape]))
-        else:
-          return _nearest_gather(X, output_shape)
-      elif keep_aspect_ratio_policy == "not_larger":
-        return _nearest_gather(X, output_shape)
-      elif keep_aspect_ratio_policy == "not_smaller":
-        return _nearest_gather(X, output_shape)
-        
-    else:
-      if upscale:
-        scales = [int(i) for i in scales]
-        return X.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, scales[2], px, scales[3]).reshape(bs, c, py*scales[2], px*scales[3])
-      else:
-        output_shape = [math.floor(sh*sc) for sh, sc in zip(X.shape, scales)]
-        return _nearest_gather(X, output_shape)
-
-
+    return _nearest_gather(X, indices, output_shape)
   elif mode == "linear":
     # upsample
     if scales:
@@ -423,18 +436,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
 
   def _cubic_coeffs(ratio, scale=None, A=-0.75):
     return Tensor([((A * (ratio + 1) - 5 * A) * (ratio + 1) + 8 * A) * (ratio + 1) - 4 * A, ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1, ((A + 2) * (1 - ratio) - (A + 3)) * (1 - ratio) * (1 - ratio) + 1, ((A * ((1 - ratio) + 1) - 5 * A) * ((1 - ratio) + 1) + 8 * A) * ((1 - ratio) + 1) - 4 * A,])
-  def _nearest_coeffs(ratio, mode="round_prefer_floor") -> Tensor:
-    # Tensor.where(cond)
-    if ratio.dtype == dtypes.int64: return Tensor([0,1])
-    if mode == "round_prefer_floor": return Tensor([ratio <= 0.5, ratio > 0.5])
-    if mode == "round_prefer_ceil": return Tensor([ratio < 0.5, ratio >= 0.5])
-    if mode == "floor": return Tensor([1, 0])
-    if mode == "ceil": return Tensor([0, 1])
-    raise ValueError(f"Unexpected value {mode!r}.")
-  # if antialias and scale > 1.0: 
-  # sx = sx.reshape(1, -1).repeat([h, 1]).reshape(-1)
-  # sy = sy.reshape(-1, 1).repeat([1, w]).reshape(-1)
-  # if not axes: axes = list(range(X.ndim))
 
 def CenterCropPad(input, shape, axes=None):
   if not axes: axes = list(range(input.ndim))
