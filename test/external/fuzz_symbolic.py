@@ -21,6 +21,14 @@ def add_num(expr, rng=None):
   if rng is None: rng = random.randint(-4,4)
   return expr + rng, rng
 
+def lt(expr, rng=None):
+  if rng is None: rng = random.randint(-4,4)
+  return expr < rng, rng
+
+def ge(expr, rng=None):
+  if rng is None: rng = random.randint(-4,4)
+  return expr >= rng, rng
+
 if __name__ == "__main__":
   ops = [add_v, div, mul, add_num]
   while 1:
@@ -29,6 +37,9 @@ if __name__ == "__main__":
     u3 = Variable("v3", 0, 4)
     v = [u1,u2,u3]
     tape = [random.choice(ops) for _ in range(20)]
+    # 10% of the time, add a less than or greater than
+    if random.random() < 0.05: tape.append(lt)
+    elif random.random() < 0.05: tape.append(ge)
     expr = Variable.num(0)
     rngs = []
     for t in tape:
