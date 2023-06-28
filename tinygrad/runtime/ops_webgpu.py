@@ -3,13 +3,14 @@ from tinygrad.runtime.lib import RawBufferMapped, RawConst
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
 from tinygrad.helpers import DType, dtypes, DEBUG
 from tinygrad.ops import Compiled, Op, UnaryOps, BinaryOps, ASTRunner, FusedOps
-from tinygrad.shape.symbolic import NumNode, render_python, DivNode
+from tinygrad.shape.symbolic import NumNode, render_python, DivNode, AndNode
 import math
 import wgpu
 device = get_default_device()
 
 render_cl = render_python.copy()
 render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops, ctx)}/{self.b})"
+render_cl[AndNode] = lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
 
 class WebGPUProgram:
   def __init__(self, name: str, prg: str):
@@ -63,8 +64,9 @@ class WebGpuCodegen(Linearizer):
       if uop == UOps.LOOP:
         for i,var in enumerate(args[0]):
           if isinstance(var, NumNode): 
-            print("NUMNODE", var)
-            continue
+            if args[1] == "global": global_size.append(1)
+            if args[1] == "local": local_size.append(1)
+            kk("{")
           else:
             if args[1] == "global":
               global_size.append(var.max+1)
@@ -80,16 +82,14 @@ class WebGpuCodegen(Linearizer):
         if args[1] == "local":
           kk("workgroupBarrier();")
           depth -= 1
-        print("ENDING LOOP")
         kk("}"*len(args[0])  + f" /* {args[1]} */")
       elif uop == UOps.LOAD and newvar is not None:
         if self.bufs[args.i] is not None and isinstance(self.bufs[args.i].realized, RawConst):
           assert newvar.dtype == dtypes.float, "only floats"
-          print("LOADING")
+          print("LOADING RAW CONST", self.bufs[args.i], newvar)
         else:
           val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
-          print(val)
-        if args.valid.min == 1: kk(f"let {newvar.render()}: {type_map[newvar.dtype]} = {val};")
+        if args.valid.min == 1: kk(f"let {newvar.render()} = {val};")
         else: kk(f"var {newvar.render()} = select(0.0f, {val}, {args.valid.render(render_cl)});")
       elif uop == UOps.ALU:
         assert newvar is not None
@@ -98,10 +98,21 @@ class WebGpuCodegen(Linearizer):
         else:
           kk(f"let {newvar.render()} = {code_for_op[args](*[x.render() for x in vin])};")
       elif uop == UOps.STORE:
-        kk(f"{bufnames[args.i]}[{args.idx.render(render_cl)}] = {vin[0].render()};")
+        val = vin[0].render()
+        if vin[0].dtype != self.bufs[args.i].dtype:
+          val = f"{type_map[self.bufs[args.i].dtype]}({val})"
+        
+        kk(f"{bufnames[args.i]}[{args.idx.render(render_cl)}] = {val};")
       elif uop == UOps.CONST:
         assert newvar is not None
-        kk(f"var {newvar.render()}: {type_map[newvar.dtype]} = {args};")
+        if args == -math.inf:
+          kk(f"var {newvar.render()} = 0x1p-149f;")
+        else:
+          kk(f"var {newvar.render()} = {args};")
+      elif uop == UOps.DEFINE_LOCAL:
+        kk(f"var {args[0]} = array<f32,{args[1]}>();")
+      elif uop == UOps.BARRIER:
+        kk("workgroupBarrier();")
       else:
         raise RuntimeError(f"failed to render {uop}")
 
