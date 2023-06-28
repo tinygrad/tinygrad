@@ -21,6 +21,14 @@ def add_num(expr, rng=None):
   if rng is None: rng = random.randint(-4,4)
   return expr + rng, rng
 
+def add_lt(expr, rng=None):
+  if rng is None: rng = random.randint(-4,4)
+  return expr < rng, rng
+
+def add_ge(expr, rng=None):
+  if rng is None: rng = random.randint(-4,4)
+  return expr >= rng, rng
+
 if __name__ == "__main__":
   ops = [add_v, div, mul, add_num]
   while 1:
@@ -29,13 +37,15 @@ if __name__ == "__main__":
     u3 = Variable("v3", 0, 4)
     v = [u1,u2,u3]
     tape = [random.choice(ops) for _ in range(20)]
+    # 10% of the time, add a less than or greater than
+    if random.random() < 0.05: tape.append(add_lt)
+    elif random.random() < 0.05: tape.append(add_ge)
     expr = Variable.num(0)
     rngs = []
     for t in tape:
       expr, rng = t(expr)
       print(t.__name__, rng)
       rngs.append(rng)
-    print(expr)
     for v1 in range(u1.min, u1.max+1):
       for v2 in range(u2.min, u2.max+1):
         for v3 in range(u3.min, u3.max+1):
@@ -44,7 +54,7 @@ if __name__ == "__main__":
           for t,r in zip(tape, rngs):
             rn, _ = t(rn, r)
           num = eval(expr.render())
-          assert num == rn, f"mismatch at {v1} {v2} {v3}, {num} != {rn}"
+          assert num == rn, f"mismatch at {v1} {v2} {v3}, {num} != {rn} -- {expr}"
           #print(v1, v2, v3, num, rn)
 
 

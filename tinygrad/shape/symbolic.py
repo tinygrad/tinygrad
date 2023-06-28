@@ -30,10 +30,15 @@ class Node:
   def __lt__(self, b:int):
     lhs = self
     if isinstance(lhs, SumNode):
-      trigger, small = partition(lhs.nodes, lambda x: b <= x.max)
-      if all([isinstance(x, MulNode) and x.b > 0 for x in trigger]):
-        all_small = Variable.sum(small)  # all Node that can't trigger it on their own
-        if min([x.b for x in trigger] + [b]) > all_small.max: lhs = Variable.sum(trigger)  # filter out all_small
+      muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
+      if len(muls):
+        mul_gcd = gcd(*[x.b for x in muls])
+        if b%mul_gcd == 0:
+          all_others = Variable.sum(others)
+          #print(mul_gcd, muls, all_others)
+          if all_others.min >= 0 and all_others.max < mul_gcd:
+            # TODO: should we divide both by mul_gcd here?
+            lhs = Variable.sum(muls)
     return create_node(LtNode(lhs, b))
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
