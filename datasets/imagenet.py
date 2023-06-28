@@ -28,12 +28,15 @@ def image_load(fn):
   ret = np.array(img)
   return ret
 
-def iterate(bs=32, val=True, shuffle=True):
+def iterate(bs=32, val=True, shuffle=True, no_image=False):
   files = get_val_files() if val else get_train_files()
+  #files = files[:100]
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
+  from multiprocessing import Pool
+  p = Pool(32)
   for i in range(0, len(files), bs):
-    X = [image_load(files[i]) for i in order[i:i+bs]]
+    X = p.map(image_load, [files[i] for i in order[i:i+bs]])
     Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
     yield (np.array(X), np.array(Y))
 

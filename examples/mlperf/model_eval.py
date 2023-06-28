@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, dtypes
 from examples.mlperf import helpers
 
 def eval_resnet():
@@ -16,23 +16,33 @@ def eval_resnet():
   input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
   input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
   def input_fixup(x):
-    x = x.permute([0,3,1,2]) / 255.0
+    x = x.permute([0,3,1,2]).cast(dtypes.float32) / 255.0
     x -= input_mean
     x /= input_std
     return x
 
-  mdlrun = TinyJit(lambda x: mdl(input_fixup(x)).realize())
+  mdlrun = lambda x: mdl(input_fixup(x)).realize()
+  mdljit = TinyJit(mdlrun)
 
   # evaluation on the mlperf classes of the validation set from imagenet
   from datasets.imagenet import iterate
   from extra.helpers import cross_process
 
+  BS = 64
   n,d = 0,0
   st = time.perf_counter()
-  for x,y in cross_process(iterate):
-    dat = Tensor(x.astype(np.float32))
+  iterator = cross_process(lambda: iterate(BS))
+  x,ny = next(iterator)
+  dat = Tensor(x)
+  while dat is not None:
+    y = ny
     mt = time.perf_counter()
-    outs = mdlrun(dat)
+    outs = mdlrun(dat) if dat.shape[0] != BS else mdljit(dat)
+    try:
+      x,ny = next(iterator)
+      dat = Tensor(x)
+    except StopIteration:
+      dat = None
     t = outs.numpy().argmax(axis=1)
     et = time.perf_counter()
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
@@ -42,7 +52,7 @@ def eval_resnet():
     d += len(t)
     print(f"****** {n}/{d}  {n*100.0/d:.2f}%")
     st = time.perf_counter()
-  
+
 def eval_unet3d():
   # UNet3D
   from models.unet3d import UNet3D
@@ -103,7 +113,7 @@ def eval_retinanet():
     n += len(targets)
     print(f"[{n}/{len(coco.imgs)}] == {(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model, {(ext-et)*1000:.2f} ms for postprocessing")
     img_ids = [t["image_id"] for t in targets]
-    coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box, "score": score} 
+    coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box, "score": score}
       for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
     with redirect_stdout(None):
       coco_eval.cocoDt = coco.loadRes(coco_results)
@@ -199,8 +209,8 @@ def eval_mrcnn():
   accumulate_predictions_for_coco([], bbox_output, rm=True)
   accumulate_predictions_for_coco([], mask_output, rm=True)
 
-  #TODO: bs > 1 not as accurate 
-  bs = 1 
+  #TODO: bs > 1 not as accurate
+  bs = 1
 
   for batch in tqdm(iterate(images, bs=bs), total=len(images)//bs):
     batch_imgs = []
