@@ -9,7 +9,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
-from tinygrad.shape.symbolic import Variable, NumNode
+from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode
 VariableOrNum = Union[Variable, NumNode]
 
 # bottom ones are asm only
@@ -77,8 +77,21 @@ def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
       return zip(new_idxs, new_values)
   return zip([[i] for i in range(len(values[0]))], zip(*values))
 
-def expand_idxs(idxs:Sequence[VariableOrNum]) -> Iterator[Tuple[VariableOrNum, ...]]:
-  for x in itertools.product(*[[idx] if not isinstance(idx, Variable) or idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)] for idx in idxs[::-1]]):
+# TODO: visitor pattern
+def expand_node(idx:Node) -> List[Node]:
+  if isinstance(idx, Variable):
+    return [idx] if idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)]
+  elif isinstance(idx, NumNode):
+    return [idx]
+  elif isinstance(idx, MulNode):
+    return [x*idx.b for x in expand_node(idx.a)]
+  elif isinstance(idx, SumNode):
+    return [Variable.sum(it) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
+  else:
+    raise NotImplementedError(idx)
+
+def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
+  for x in itertools.product(*[expand_node(idx) for idx in idxs[::-1]]):
     yield x[::-1]
 
 class MemOp(NamedTuple):
@@ -275,8 +288,21 @@ class Linearizer:
       # copy in any global buffers
       if len(self.local_alias): self.uop(UOps.BARRIER, None, [], ())
       for i in self.local_alias:
-        extra_locals = [j for j,st in enumerate(self.sts[i].real_strides()) if st == 0]
-        idxs = global_idxs+local_idxs+reduce_idxs+[local_idxs[extra_locals[-1]-len(global_idxs)]]
+        strides = self.sts[i].real_strides()
+        extra_locals = [local_idxs[j-len(global_idxs)] for j,st in enumerate(strides[len(global_idxs):self.first_reduce]) if st == 0]
+        this_upcast_idxs = []
+        for j,v in enumerate(full_upcast_idxs):
+          if strides[len(global_idxs)+len(local_idxs)+len(reduce_idxs)+j] == 0:
+            this_upcast_idxs.append(Variable.num(0))
+          elif (elc:=[el for el in extra_locals if v.min == el.min and v.max == el.max]):
+            this_upcast_idxs.append(elc[0])
+            extra_locals.remove(elc[0])
+          elif (elc:=[el for el in extra_locals if v.min == el.min and (v.max+1)%(el.max+1) == 0]):
+            shift = (v.max+1)//(elc[0].max+1)
+            this_upcast_idxs.append((elc[0] * shift) + Variable(None, 0, shift-1))
+          else:
+            this_upcast_idxs.append(v)
+        idxs = global_idxs+local_idxs+reduce_idxs+this_upcast_idxs
         ll = self.global_load(i, idxs)
         self.global_store(self.bufs.index(self.local_alias[i]), idxs, ll, ssa)
       if len(self.local_alias): self.uop(UOps.BARRIER, None, [], ())
@@ -500,13 +526,15 @@ class Linearizer:
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
       if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
 
-  def alias_buffer(self, i, pattern):
+  def alias_buffer(self, i, pattern, invert_strides=False):
     self.bufs.append(LocalBuffer(name=f"ldata{i}", alias=self.bufs[i]))
     self.local_alias[i] = self.bufs[-1]
     acc = 1
     # NOTE: these strides can be selected in many different ways
     shp, stride = [], []
-    for p,s,st in zip(pattern, self.sts[i].shape, self.sts[i].real_strides()):
+    itt = zip(pattern, self.sts[i].shape, self.sts[i].real_strides())
+    if invert_strides: itt = list(itt)[::-1]
+    for p,s,st in itt:
       if p:
         shp.append(s)
         if st != 0:
@@ -517,6 +545,7 @@ class Linearizer:
       else:
         stride.append(0)
         shp.append(1)
+    if invert_strides: shp, stride = shp[::-1], stride[::-1]
     self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
 
   def hand_coded_optimizations(self):
@@ -535,11 +564,11 @@ class Linearizer:
     self.upcast()
 
     #self.alias_buffer(0, [False, False, True, True, False, True])
-    self.alias_buffer(1, [False, False, True, True, False, True])
+    self.alias_buffer(1, [False, False, True, True, False, True], invert_strides=True)
     self.alias_buffer(2, [False, False, True, True, False, True])
 
-    #self.shift_to(3, 2)
-    #self.upcast()
+    self.shift_to(3, 2)
+    self.upcast()
 
     return
 
