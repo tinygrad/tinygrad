@@ -108,7 +108,7 @@ def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_
 
   def f1(torch_dat): return torch_conv(torch_dat)
   def f2(tiny_dat): return tiny_conv(tiny_dat).realize()
-  helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
+  helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d} k:{kernel_size}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
 
 @unittest.skipIf(getenv("BIG") != 1, "no big tests")
 class TestBigSpeed(unittest.TestCase):
@@ -116,12 +116,12 @@ class TestBigSpeed(unittest.TestCase):
     global prefix
     prefix = " " if prefix is None else ""
     return super().setUp()
+  def test_add(self):
+    def f(a, b): return a+b
+    helper_test_generic_square('add', 16384, f, f)
   def test_exp(self):
     def f(a, b): return a.exp()
     helper_test_generic_square('exp', 16384, f, f, onearg=True)
-  def test_gemm_1024(self):
-    def f(a, b): return a @ b
-    helper_test_generic_square('gemm', 1024, f, f)
   def test_gemm_2048(self):
     def f(a, b): return a @ b
     helper_test_generic_square('gemm', 2048, f, f)
