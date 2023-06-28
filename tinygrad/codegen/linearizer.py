@@ -273,14 +273,13 @@ class Linearizer:
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
       # copy in any global buffers
+      if len(self.local_alias): self.uop(UOps.BARRIER, None, [], ())
       for i in self.local_alias:
         extra_locals = [j for j,st in enumerate(self.sts[i].real_strides()) if st == 0]
         idxs = global_idxs+local_idxs+reduce_idxs+[local_idxs[extra_locals[-1]-len(global_idxs)]]
-        self.upcasted -= 1
         ll = self.global_load(i, idxs)
         self.global_store(self.bufs.index(self.local_alias[i]), idxs, ll, ssa)
-        self.upcasted += 1
-      self.uop(UOps.BARRIER, None, [], ())
+      if len(self.local_alias): self.uop(UOps.BARRIER, None, [], ())
 
       # load earlybufs
       loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
@@ -526,8 +525,6 @@ class Linearizer:
 
     # simplify
     self.simplify_ones()
-
-    return
 
     if self.bufs[0].shape != (256, 256, 1): return
 
