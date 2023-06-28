@@ -1,18 +1,45 @@
 import subprocess
 from typing import Optional
+import time
 import numpy as np
-import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
-import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import compile as cuda_compile # type: ignore
 from tinygrad.helpers import DEBUG, getenv, fromimport
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferCopyInOut
+from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
-class RawCUDABuffer(RawBufferCopyInOut):
-  def __init__(self, size, dtype): super().__init__(size, dtype, cuda.mem_alloc(size * dtype.itemsize))
-  def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x, stream)
-  def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf)
+if getenv("CUDACPU", 0) == 1:
+  import ctypes, ctypes.util
+  lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
+  lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+  class cuda:
+    class module:
+      def __init__(self, src): self.src = src
+      def get_function(self, _): return self
+      def __call__(self, *args, block, grid): lib.ptx_run(self.src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), *block, *grid)
+    module_from_buffer = lambda src: cuda.module(src) # pylint: disable=unnecessary-lambda # noqa: E731
+    class Event:
+      def __init__(self): pass
+      def record(self): self.start = time.perf_counter()
+      def time_till(self, other): return self.start - other.start
+      def synchronize(self): pass
+    class Context:
+      synchronize = lambda:0 # noqa: E731
+    CompileError = Exception
+  class context:
+    class device:
+      compute_capability = lambda: (3,5) # pylint: disable=unnecessary-lambda # noqa: E731
+    get_device = lambda: context.device # pylint: disable=unnecessary-lambda # noqa: E731
+  import pycuda.driver # type: ignore
+  pycuda.driver.Context = context
+  RawCUDABuffer = RawMallocBuffer
+else:
+  import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
+  import pycuda.driver as cuda # type: ignore
+  class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
+    def __init__(self, size, dtype): super().__init__(size, dtype, cuda.mem_alloc(size * dtype.itemsize)) # type: ignore
+    def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x, stream) # type: ignore
+    def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) # type: ignore
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
@@ -22,7 +49,7 @@ class CUDAProgram:
           f.write(cuda_compile(prg, target="cubin", no_extern_c=True))
         sass = subprocess.check_output(['nvdisasm', '/tmp/cubin']).decode('utf-8')
         print(sass)
-      if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True).decode('utf-8')
+      if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8')
     except cuda.CompileError as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
@@ -42,7 +69,7 @@ class CUDAProgram:
 
 class CUDACodegen(CStyleCodegen):
   lang = CStyleLanguage(
-    kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
+    kernel_prefix = "typedef unsigned char uchar;\ntypedef unsigned int uint;\ntypedef unsigned long ulong;\n__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
     half_prekernel = """
@@ -51,8 +78,6 @@ class CUDACodegen(CStyleCodegen):
         half2 x, y;
         __device__ __forceinline__ explicit operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
       };
-      typedef unsigned char uchar;
-      typedef long long int64;
     """)
   supports_float4_alu = False
 
