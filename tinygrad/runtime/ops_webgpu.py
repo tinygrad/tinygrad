@@ -111,10 +111,10 @@ class WebGpuCodegen(Linearizer):
     return ASTRunner(self.function_name, prg, global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else [1])
   
 class RawWebGPUBuffer(RawBufferMapped):
-    def __init__(self, size:int, dtype:DType):
-      assert dtype not in [dtypes.int8,dtypes.uint8,dtypes.int64,dtypes.uint64,dtypes.float64], f"dtype {dtype} not supported on WEBGPU"
-      super().__init__(size, dtype, device.create_buffer(size=size*dtype.itemsize, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC))
-    def _copyin(self, x) -> None: device.queue.write_buffer(self._buf, 0, x)
-    def _buffer(self) -> memoryview: return device.queue.read_buffer(self._buf, 0)
+  def __init__(self, size:int, dtype:DType):
+    assert dtype not in [dtypes.int8,dtypes.uint8,dtypes.int64,dtypes.uint64,dtypes.float64], f"dtype {dtype} not supported on WEBGPU"
+    super().__init__(size, dtype, device.create_buffer(size=size*dtype.itemsize, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC))
+  def _copyin(self, x) -> None: device.queue.write_buffer(self._buf, 0, x)
+  def _buffer(self) -> memoryview: return device.queue.read_buffer(self._buf, 0)
 
 WebGpuBuffer = Compiled(RawWebGPUBuffer, WebGpuCodegen, WebGPUProgram)
