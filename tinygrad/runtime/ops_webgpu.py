@@ -2,11 +2,12 @@ from wgpu.utils._device import get_default_device
 from tinygrad.runtime.lib import RawBufferMapped, RawConst
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
 from tinygrad.helpers import DType, dtypes
-from tinygrad.ops import Compiled, UnaryOps, BinaryOps, ASTRunner, FusedOps
+from tinygrad.ops import Compiled, UnaryOps, Op, BinaryOps, ASTRunner, FusedOps
 from tinygrad.shape.symbolic import NumNode, Variable
 from tinygrad.codegen.cstyle import render_cl
 import math
 import wgpu
+from typing import Dict, Callable
 
 device = get_default_device()
 
@@ -29,7 +30,7 @@ class WebGPUProgram:
 
 
 type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
-code_for_op = {
+code_for_op: Dict[Op, Callable] = {
   UnaryOps.EXP2: lambda x: f"exp2({x})", UnaryOps.LOG2: lambda x: f"log2({x})", UnaryOps.SIN: lambda x: f"sin({x})",
   BinaryOps.ADD: lambda x,y: f"({x}+{y})", BinaryOps.SUB: lambda x,y: f"({x}-{y})", BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})",
   BinaryOps.POW: lambda x,y: f"pow({x},{y})", BinaryOps.MAX: lambda x,y: f"max({x},{y})", BinaryOps.CMPEQ: lambda x,y: f"f32({x}=={y})",
