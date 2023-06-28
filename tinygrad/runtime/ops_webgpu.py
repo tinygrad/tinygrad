@@ -3,15 +3,18 @@ from tinygrad.runtime.lib import RawBufferMapped, RawConst
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
 from tinygrad.helpers import DType, dtypes, DEBUG
 from tinygrad.ops import Compiled, Op, UnaryOps, BinaryOps, ASTRunner, FusedOps
-from tinygrad.shape.symbolic import NumNode
+from tinygrad.shape.symbolic import NumNode, render_python, DivNode
 import math
 import wgpu
 device = get_default_device()
 
+render_cl = render_python.copy()
+render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops, ctx)}/{self.b})"
 
 class WebGPUProgram:
   def __init__(self, name: str, prg: str):
-    if DEBUG >= 5: print(prg)
+    # if DEBUG >= 5: print(prg)
+    print("NAME", name)
     self.name,self.prg = name,device.create_shader_module(code=prg)
 
   def __call__(self, global_size, local_size, *bufs, wait=False):
@@ -84,10 +87,10 @@ class WebGpuCodegen(Linearizer):
           assert newvar.dtype == dtypes.float, "only floats"
           print("LOADING")
         else:
-          val = f"{bufnames[args.i]}[{args.idx.render()}]"
+          val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
           print(val)
         if args.valid.min == 1: kk(f"let {newvar.render()}: {type_map[newvar.dtype]} = {val};")
-        else: kk(f"var {newvar.render()} = select(0.0f, {val}, {args.valid.render()});")
+        else: kk(f"var {newvar.render()} = select(0.0f, {val}, {args.valid.render(render_cl)});")
       elif uop == UOps.ALU:
         assert newvar is not None
         if newvar in vin:
@@ -95,7 +98,7 @@ class WebGpuCodegen(Linearizer):
         else:
           kk(f"let {newvar.render()} = {code_for_op[args](*[x.render() for x in vin])};")
       elif uop == UOps.STORE:
-        kk(f"{bufnames[args.i]}[{args.idx.render()}] = {vin[0].render()};")
+        kk(f"{bufnames[args.i]}[{args.idx.render(render_cl)}] = {vin[0].render()};")
       elif uop == UOps.CONST:
         assert newvar is not None
         kk(f"var {newvar.render()}: {type_map[newvar.dtype]} = {args};")
