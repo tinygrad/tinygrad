@@ -63,13 +63,30 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Update packages
+    - name: install swiftshader
+      shell: bash
       run: |
-        wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
-        echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+        set -e
+
+        mkdir -p swiftshader
+        curl -LsSf https://github.com/gfx-rs/ci-build/releases/latest/download/swiftshader-linux-x86_64.tar.xz | tar -xf - -C swiftshader
+
+        echo "VK_ICD_FILENAMES=$PWD/swiftshader/vk_swiftshader_icd.json" >> $GITHUB_ENV
+
+    - name: install llvmpipe, vulkan sdk
+      shell: bash
+      run: |
+        set -e
+
+        sudo apt-get update -y -qq
+
+        # vulkan sdk
+        wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+        sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+
         sudo apt-get update
-    - name: Install OpenCL
-      run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
+        sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev vulkan-sdk
+
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
