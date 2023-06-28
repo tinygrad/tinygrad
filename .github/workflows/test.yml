@@ -6,20 +6,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # OMG THIS TEST IS DISABLED, PLZ MAKE TINYGRAD TINY AGAIN
-  lines:
-    name: Less than 1000 lines
-    runs-on: ubuntu-latest
-    if: ${{ false }}
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Install SLOCCount
-      run: sudo apt-get install sloccount
-    - name: Check <1000 lines
-      run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
-
   linter:
     name: Linters
     runs-on: ubuntu-latest
@@ -43,6 +29,10 @@ jobs:
       run: pylint tinygrad/
     - name: Run mypy
       run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
+    - name: Install SLOCCount
+      run: sudo apt-get install sloccount
+    - name: Check <5000 lines
+      run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
 
   testcpu:
     name: CPU Tests
@@ -190,12 +180,12 @@ jobs:
       run: |
         GPU=1 IMAGE=1 python3 test/test_ops.py
         FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 test/test_ops.py
-    - name: Test openpilot model
+    - name: Test openpilot model compile and size
       run: |
-        ALLOWED_KERNEL_COUNT=199 FLOAT16=1 VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+        ALLOWED_KERNEL_COUNT=199 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
         python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
-        DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
-        VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+    - name: Test openpilot model correctness (float32)
+      run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
 
   testmetal:
     name: Metal Tests
