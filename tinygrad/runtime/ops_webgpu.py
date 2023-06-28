@@ -3,7 +3,7 @@ from tinygrad.runtime.lib import RawBufferMapped, RawConst
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
 from tinygrad.helpers import DType, dtypes
 from tinygrad.ops import Compiled, UnaryOps, BinaryOps, ASTRunner, FusedOps
-from tinygrad.shape.symbolic import NumNode, render_python, DivNode, AndNode, Variable
+from tinygrad.shape.symbolic import NumNode, Variable
 from tinygrad.codegen.cstyle import render_cl
 import math
 import wgpu
