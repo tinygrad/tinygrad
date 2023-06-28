@@ -1,30 +1,72 @@
 #!/usr/bin/env python3
 
 import sys
-from sz import gen_stats
+from sz import gen_stats, FileStats
 from tabulate import tabulate
-import itertools
+
+class RefDiff:
+  def __init__(self, base: list[FileStats], pr: list[FileStats], unchanged=False):
+    self.base_files, self.pr_files = base, pr
+
+    self.base_files_set = dict({f.name: f for f in base})
+    self.base_total_lc = sum(f.lines_count for f in base)
+
+    self.pr_files_set = dict({f.name: f for f in pr})
+    self.pr_total_lc = sum(f.lines_count for f in pr)
+
+    self._modified = self.modified(unchanged)
+    self._added = self.added()
+    self._deleted = self.deleted()
+
+  def format(self, files: list[dict], op: str):
+    return [{**f, **{"diff": f'{f["diff"]:+}', "op": op}} for f in files]
+
+  def files_diff_table(self):
+    changes = (self.format(self._modified, "M")
+               + self.format(self._added, "A")
+               + self.format(self._deleted, "D"))
+    return tabulate(changes, headers="keys", floatfmt=".1f", colalign=("left",) + ("right",) * 4)
+
+  def files_line_count_diff(self, name: str):
+    return self.base_files_set.get(name).lines_count - self.pr_files_set.get(name).lines_count
+
+  def modified(self, unchanged):
+    files = []
+    for f in self.base_files:
+      if f.name in self.pr_files_set:
+        diff = self.files_line_count_diff(f.name)
+        if unchanged or diff != 0:
+          files.append({**f.format(), **{"diff": diff}})
+    return files
+
+  def added(self):
+    files = []
+    for f in self.pr_files:
+      if f.name not in self.base_files_set:
+        files.append({**f.format(), **{"diff": f.lines_count}})
+    return files
+
+  def deleted(self):
+    files = []
+    for f in self.base_files:
+      if f.name not in self.pr_files_set:
+        files.append({**f.format(), **{"diff": -f.lines_count}})
+    return files
+
+  def total_loc(self):
+    return self.pr_total_lc
+
+  def diff_loc(self):
+    return self.pr_total_lc - self.base_total_lc
+
 
 if __name__ == '__main__':
   base, pr = gen_stats(sys.argv[1]), gen_stats(sys.argv[2])
-  base_files, pr_files = {x[0]: x for x in base}, {x[0]: x for x in pr}
-  base_loc, pr_loc = sum(x[1] for x in base), sum(x[1] for x in pr)
-  def first_dir(x): return x.rsplit("/", 1)[0]
+  diff = RefDiff(base, pr, unchanged=False)
 
-  modified = [[x[0], x[1], x[2], x[1]-base_files[x[0]][1], "M"] for x in pr if x[0] in base_files]
-  modified = [[x[0], x[1], x[2], f'{x[3]:+}', x[4]] if x[3] != 0 else [x[0], x[1], x[2], "", ""] for x in modified]
-  added = [[x[0], x[1], x[2], f'{x[1]:+}', "A"] for x in pr if x[0] not in base_files]
-  deleted = [[x[0], x[1], x[2], f'{-x[1]:+}', "D"] for x in base if x[0] not in pr_files]
-  files = modified+added+deleted
+  print(diff.files_diff_table(), "\n")
+  print(f"total line count: {diff.total_loc()} ({diff.diff_loc():+})")
 
-  dirs = []
-  base_dirs_sum = {dir: sum([c[1] for c in group]) for dir, group in itertools.groupby(sorted([(first_dir(x[0]), x[1]) for x in base]), key=lambda x: x[0])}
-  for dir, group in itertools.groupby(sorted([(first_dir(x[0]), x[1]) for x in pr]), key=lambda x: x[0]):
-    count = sum([x[1] for x in group])
-    diff = count-base_dirs_sum.get(dir, 0)
-    dirs.append([dir, count, f'{diff:+}' if diff != 0 else ""])
-  dirs = sorted(dirs, key=lambda x: -x[1])
-
-  print(tabulate(files, headers=["File", "Lines", "Tokens/Line", "Diff", "Op"], floatfmt=".1f", colalign=("left", "right", "right", "right", "right"))+"\n")
-  print(tabulate(dirs, headers=["Dir", "Lines", "Diff"], colalign=("left", "right", "right"))+"\n")
-  print(f"total line count: {pr_loc} ({pr_loc-base_loc:+})")
+  if diff.diff_loc() < 0:
+    sys.exit(1)
+  sys.exit(0)

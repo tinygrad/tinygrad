@@ -35,10 +35,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
-      - name: Set up Python 3.8
+      - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: '3.10'
       - name: Count Lines Of Code
         run: |
           pip install tabulate
@@ -52,7 +52,14 @@ jobs:
           EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
           echo "loc_content<<$EOF" >> "$GITHUB_ENV"
           ./sz-diff.py "$BASE" "$PR" >> "$GITHUB_ENV"
+          CODE="$?"
           echo "$EOF" >> "$GITHUB_ENV"
+
+          if [ "$CODE" == "1" ]; then
+            echo "kudos<<$EOF" >> "$GITHUB_ENV"
+            echo "🎉🎉 This PR decreases the loc in tinygrad, well done!! 🎉🎉" >> "$GITHUB_ENV"
+            echo "$EOF" >> "$GITHUB_ENV"
+          fi
 
       - name: Comment Code Lines
         continue-on-error: false
@@ -62,8 +69,9 @@ jobs:
           recreate: true
           header: LOC
           message: |
-            ### Lines Of Code
+            ### Changes
             ```
             ${{ env.loc_content }}
             ```
+            ${{ env.kudos }}
 
