@@ -2,7 +2,7 @@ from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, 
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
-from tinygrad.helpers import partition, ImageDType, DEBUG, dtypes, colored
+from tinygrad.helpers import partition, ImageDType, DEBUG, dtypes, colored, getenv
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
 from tinygrad.lazy import LazyBuffer
@@ -86,6 +86,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
             kk(f"{{ int {var.expr} = {lang.lid[len(args[0])-1-i]};  /* {var.max+1} */")
             local_size.append(var.max+1)
           else:
+            if getenv("NOUNROLL"): kk("#pragma unroll(1)")   # prevent loop unrolling
             kk(f"for (int {var.expr} = {var.min}; {var.expr} <= {var.max}; ++{var.expr}) {{")
       depth += 1
     elif uop == UOps.BARRIER:
@@ -102,6 +103,23 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
           pend_close = None
         depth -= 1
         kk("}"*len(args[0]) + f" /* {args[1]} */")
+    elif uop == UOps.WMMA:
+      kk("simdgroup_float8x8 a;")
+      kk("simdgroup_float8x8 b;")
+      kk("simdgroup_float8x8 c;")
+      #kk("a.thread_elements()[0] = val1_0;")
+      #kk("a.thread_elements()[1] = val1_1;")
+      #kk("b.thread_elements()[0] = val2_0;")
+      #kk("b.thread_elements()[1] = val2_1;")
+      kk("c.thread_elements()[0] = acc0_0;")
+      kk("c.thread_elements()[1] = acc0_1;")
+      kk("simdgroup_load(a, data1, 8, ulong2(0,0), false);")
+      kk("simdgroup_load(b, data2, 8, ulong2(0,0), false);")
+      #kk("c = simdgroup_float8x8(0);")
+      kk("simdgroup_multiply_accumulate(c, a, b, c);")
+      kk("acc0_0 = c.thread_elements()[0];")
+      kk("acc0_0 = simdidx;")
+      kk("acc0_1 = c.thread_elements()[1];")
     elif uop == UOps.CONST:
       assert newvar is not None
       if args == -math.inf:

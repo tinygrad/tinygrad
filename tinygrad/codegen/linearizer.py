@@ -3,7 +3,7 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same
+from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, getenv
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
@@ -13,7 +13,7 @@ from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode
 VariableOrNum = Union[Variable, NumNode]
 
 # bottom ones are asm only
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); \
+class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
 
 class LocalBuffer(NamedTuple):
@@ -286,32 +286,39 @@ class Linearizer:
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
       # copy in any global buffers
-      if len(self.local_alias): self.uop(UOps.BARRIER, None, [], ())
-      for i in self.local_alias:
-        strides = self.sts[i].real_strides()
-        extra_locals = [local_idxs[j-len(global_idxs)] for j,st in enumerate(strides[len(global_idxs):self.first_reduce]) if st == 0]
-        this_upcast_idxs = []
-        for j,v in enumerate(full_upcast_idxs):
-          if strides[len(global_idxs)+len(local_idxs)+len(reduce_idxs)+j] == 0:
-            this_upcast_idxs.append(Variable.num(0))
-          elif (elc:=[el for el in extra_locals if v.min == el.min and v.max == el.max]):
-            this_upcast_idxs.append(elc[0])
-            extra_locals.remove(elc[0])
-          elif (elc:=[el for el in extra_locals if v.min == el.min and (v.max+1)%(el.max+1) == 0]):
-            shift = (v.max+1)//(elc[0].max+1)
-            this_upcast_idxs.append((elc[0] * shift) + Variable(None, 0, shift-1))
-          else:
-            this_upcast_idxs.append(v)
-        idxs = global_idxs+local_idxs+reduce_idxs+this_upcast_idxs
-        ll = self.global_load(i, idxs)
-        self.global_store(self.bufs.index(self.local_alias[i]), idxs, ll, ssa)
-      if len(self.local_alias): self.uop(UOps.BARRIER, None, [], ())
+      if getenv("TC"):
+        self.uop(UOps.WMMA, None, [], ())
+      else:
+        locals_to_store = []
+        for i in self.local_alias:
+          strides = self.sts[i].real_strides()
+          extra_locals = [local_idxs[j-len(global_idxs)] for j,st in enumerate(strides[len(global_idxs):self.first_reduce]) if st == 0]
+          this_upcast_idxs = []
+          for j,v in enumerate(full_upcast_idxs):
+            if strides[len(global_idxs)+len(local_idxs)+len(reduce_idxs)+j] == 0:
+              this_upcast_idxs.append(Variable.num(0))
+            elif (elc:=[el for el in extra_locals if v.min == el.min and v.max == el.max]):
+              this_upcast_idxs.append(elc[0])
+              extra_locals.remove(elc[0])
+            elif (elc:=[el for el in extra_locals if v.min == el.min and (v.max+1)%(el.max+1) == 0]):
+              shift = (v.max+1)//(elc[0].max+1)
+              this_upcast_idxs.append((elc[0] * shift) + Variable(None, 0, shift-1))
+            else:
+              this_upcast_idxs.append(v)
+          idxs = global_idxs+local_idxs+reduce_idxs+this_upcast_idxs
+          ll = self.global_load(i, idxs)
+          locals_to_store.append((self.bufs.index(self.local_alias[i]), idxs, ll))
 
-      # load earlybufs
-      loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
+        if locals_to_store:
+          self.uop(UOps.BARRIER, None, [], ())
+          for i, idxs, ll in locals_to_store: self.global_store(i, idxs, ll, ssa)
+          self.uop(UOps.BARRIER, None, [], ())
 
-      # run early AST (with reduce)
-      self.ast_parse(self.reduceop, [acc[off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True)
+        # load earlybufs
+        loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
+
+        # run early AST (with reduce)
+        self.ast_parse(self.reduceop, [acc[off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True)
 
       # end the reduce loop
       self.uop(UOps.ENDLOOP, None, [], (reduce_idxs, "reduce"))
@@ -555,20 +562,29 @@ class Linearizer:
     # simplify
     self.simplify_ones()
 
-    if self.bufs[0].shape != (256, 256, 1): return
+    if self.bufs[0].shape != (256, 256, 1) and self.bufs[0].shape != (64, 64, 1) and self.bufs[0].shape != (8, 8, 1): return
 
     self.shift_to(0, 8, insert_before=self.first_reduce)
     self.shift_to(1, 8, insert_before=self.first_reduce)
-    self.local_dims += 2
-    self.shift_to(self.first_reduce, 8)
+    self.shift_to(3, 4, insert_before=self.first_reduce)
+
+    self.reshape_and_permute(None, [0,1,3,2,4,5])
+
+    #self.shift_to(3, 4, insert_before=self.first_reduce)
+    #self.local_dims += 3
+    if self.full_shape[self.first_reduce] > 8: self.shift_to(self.first_reduce, 8)
     self.upcast()
 
-    #self.alias_buffer(0, [False, False, True, True, False, True])
-    self.alias_buffer(1, [False, False, True, True, False, True], invert_strides=True)
-    self.alias_buffer(2, [False, False, True, True, False, True])
+    #pattern = [False, False, True, True, False, True] if self.shape_len == 6 else [False, False, True, True, True]
+    #self.alias_buffer(1, pattern, invert_strides=True)
+    #self.alias_buffer(2, pattern)
 
-    self.shift_to(3, 2)
+    self.shift_to(self.first_reduce-1, 2)
     self.upcast()
+
+    fr = self.first_reduce
+    #self.reshape_and_permute(lambda x: (x[0], x[1], prod(x[2:fr])) + x[fr:], None)
+    self.local_dims = self.first_reduce - 2
 
     return
 
