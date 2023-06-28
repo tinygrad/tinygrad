@@ -168,7 +168,9 @@ class Tensor:
 
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
     cond = (self != 0.0)
-    return cond * input_ + (1.0 - cond) * other
+    input_special = (input_ != input_) + (input_ == float("inf"))
+    other_special = (other != other) + (other == float("inf"))
+    return cond * (input_ ** (1 - input_special)) + (1.0 - cond) * (other ** (1 - other_special))
 
   # ***** rng hlops *****
 

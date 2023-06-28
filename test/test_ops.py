@@ -95,6 +95,11 @@ class TestOps(unittest.TestCase):
         shps,
         lambda x, a, b: torch.where(x > 0.5, a, b),
         lambda x, a, b: (x > 0.5).where(a, b), forward_only=True)
+  def test_special_where(self):
+    for x in [float("nan"), float("inf"), float("-inf")]:
+      a = Tensor.full((3, 3), x)
+      b = torch.full((3, 3), x)
+      helper_test_op([], lambda: torch.where(b < 0, b, 1), lambda: (a < 0).where(a, 1), forward_only=True)
 
   def _test_cmp(self, fxn, reverse=True):
     for shps in [[(3, 4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
@@ -977,12 +982,6 @@ class TestOps(unittest.TestCase):
   def test_max_inf(self):
     n = Tensor([1, float("nan")]).max().numpy()
     assert math.isnan(n.item()), f"{n.item()} is not nan"
-
-  @unittest.skip("this test is broken #942")
-  def test_inf_where(self):
-    x = Tensor.full((3, 3), float("inf"))
-    n = (x < 0).where(x, 1).numpy()
-    assert np.all(n == 1.)
 
 if __name__ == '__main__':
   np.random.seed(1337)
