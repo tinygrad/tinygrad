@@ -101,6 +101,8 @@ class Linearizer:
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
     self.key = f"ASTKernelKey ast={str(map_buffers({x:i for i,x in enumerate(self.bufs)}, ast))} bufs={self.bufs}"
 
+    self.uop_cache = {}
+
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
 
@@ -329,8 +331,20 @@ class Linearizer:
 
   _OT = TypeVar("_OT")
   def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None) -> _OT:
+    # we don't need to check UOps.LOAD because global_load has a cache for that already
+    # all arg for these UOps types must be hashable
+    cache_uop = uop in [UOps.ALU, UOps.CONST]
+    if cache_uop:
+      input_key = (uop, tuple(vin), arg)
+      if input_key in self.uop_cache:
+        if DEBUG >= 4: print(f'; {out} = {(uop, vin, arg)} from cache')
+        return self.uop_cache[input_key]
+    else:
+      input_key = None
     self.uops.append(UOp(uop, cast(Optional[Token], out), vin, arg))
     if DEBUG >= 4: print(self.uops[-1])
+    if cache_uop:
+      self.uop_cache[input_key] = out
     return out
 
   def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
