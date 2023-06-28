@@ -60,18 +60,25 @@ def train_step_jitted(model, optimizer, X, Y):
     optimizer.step()
   return loss.realize()
 
-def fetch_batch(X_train, Y_train, BS):
-  # fetch a batch
-  samp = np.random.randint(0, X_train.shape[0], size=(BS))
-  Y = np.zeros((BS, num_classes), np.float32)
-  Y[range(BS),Y_train[samp]] = -1.0*num_classes
-  X = Tensor(X_train[samp])
-  Y = Tensor(Y.reshape(BS, num_classes))
-  return X.realize(), Y.realize()
+def fetch_batches(X_train, Y_train, BS, is_train=False):
+  if not is_train:
+    ind = np.arange(Y_train.shape[0])
+    np.random.shuffle(ind)
+    X_train, Y_train = X_train[ind, ...], Y_train[ind, ...]
+  while True:
+    for batch_start in range(0, Y_train.shape[0], BS):
+      batch_end = min(batch_start+BS, Y_train.shape[0])
+      X = Tensor(X_train[batch_end-BS:batch_end]) # batch_end-BS for padding
+      Y = np.zeros((BS, num_classes), np.float32)
+      Y[range(BS),Y_train[batch_end-BS:batch_end]] = -1.0*num_classes
+      Y = Tensor(Y.reshape(BS, num_classes))
+      yield X, Y
+    if not is_train:
+      break
 
 def train_cifar():
   Tensor.training = True
-  BS, STEPS = getenv("BS", 512), getenv("STEPS", 10)
+  BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 512), getenv("STEPS", 10)
   if getenv("FAKEDATA"):
     N = 2048
     X_train = np.random.default_rng().standard_normal(size=(N, 3, 32, 32), dtype=np.float32)
@@ -80,8 +87,6 @@ def train_cifar():
   else:
     X_train, Y_train = fetch_cifar(train=True)
     X_test, Y_test = fetch_cifar(train=False)
-  print(X_train.shape, Y_train.shape)
-  Xt, Yt = fetch_batch(X_test, Y_test, BS=BS)
   model = SpeedyResNet()
 
   # init weights with torch
@@ -101,7 +106,7 @@ def train_cifar():
   if getenv("ADAM"):
     optimizer = optim.Adam(optim.get_parameters(model), lr=Tensor([0.001]).realize())
   else:
-    optimizer = optim.SGD(optim.get_parameters(model), lr=0.01, momentum=0.85, nesterov=True)
+    optimizer = optim.SGD(optim.get_parameters(model), lr=0.02, momentum=0.85, nesterov=True)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
@@ -111,26 +116,34 @@ def train_cifar():
 
   # https://www.anandtech.com/show/16727/nvidia-announces-geforce-rtx-3080-ti-3070-ti-upgraded-cards-coming-in-june
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
-
-  X, Y = fetch_batch(X_train, Y_train, BS=BS)
-  for i in range(max(1, STEPS)):
-    if i%10 == 0 and STEPS != 1:
+  best_eval = -1
+  i = 0
+  for X, Y in fetch_batches(X_train, Y_train, BS=BS, is_train=True):
+    if i >= STEPS: break
+    if i%50 == 0 and STEPS != 1:
       # use training batchnorm (and no_grad would change the kernels)
-      out = model(Xt)
-      outs = out.numpy().argmax(axis=1)
-      loss = (out * Yt).mean().numpy()
-      correct = outs == Yt.numpy().argmin(axis=1)
-      print(f"eval {sum(correct)}/{len(correct)} {sum(correct)/len(correct)*100.0:.2f}%, {loss:7.2f} val_loss")
+      corrects = []
+      losses = []
+      for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS):
+        out = model(Xt)
+        outs = out.numpy().argmax(axis=1)
+        loss = (out * Yt).mean().numpy()
+        losses.append(loss.tolist())
+        correct = outs == Yt.numpy().argmin(axis=1)
+        corrects.extend(correct.tolist())
+      acc = sum(corrects)/len(corrects)*100.0
+      if acc > best_eval:
+        best_eval = acc
+        print(f"eval {sum(corrects)}/{len(corrects)} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
     if STEPS == 0: break
     GlobalCounters.reset()
     st = time.monotonic()
     loss = train_step_jitted(model, optimizer, X, Y)
     et = time.monotonic()
-    X, Y = fetch_batch(X_train, Y_train, BS=BS)  # do this here
     loss_cpu = loss.numpy()
     cl = time.monotonic()
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
-
+    i += 1
   #train(model, X, Y, optimizer, steps=X.shape[0]//BS, BS=BS)
   #evaluate(model, X_test, Y_test)
 
