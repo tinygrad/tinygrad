@@ -2,6 +2,7 @@ from __future__ import annotations
 from abc import abstractmethod
 import functools
 from math import gcd
+from tinygrad.helpers import partition
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional
 
 # NOTE: Python has different behavior for negative mod and floor div than c
@@ -25,8 +26,14 @@ class Node:
   def __neg__(self): return self*-1
   def __add__(self, b:Union[Node, int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __sub__(self, b:Union[Node, int]): return self+-b
-  def __ge__(self, b:int): return create_node(LtNode(-self, -b+1))
-  def __lt__(self, b:int): return create_node(LtNode(self, b))
+  def __ge__(self, b:int): return (-self) < (-b+1)
+  def __lt__(self, b:int):
+    lhs = self
+    if isinstance(lhs, SumNode):
+      trigger, small = partition(lhs.nodes, lambda x: b <= x.max)
+      all_small = Variable.sum(small)  # all Node that can't trigger it on their own
+      if b > all_small.max: lhs = Variable.sum(trigger)  # filter out all_small
+    return create_node(LtNode(lhs, b))
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
     elif b == 1: return self
@@ -128,6 +135,7 @@ class LtNode(OpNode):
   def __mul__(self, b: int): return (self.a*b) < (self.b*b)
   def __floordiv__(self, b: int, _=False): return (self.a//b) < (self.b//b)
   def get_bounds(self) -> Tuple[int, int]: return int(self.a.max < self.b), int(self.a.min < self.b)
+
 class MulNode(OpNode):
   def __mul__(self, b: int): return self.a*(self.b*b) # two muls in one mul
   def __floordiv__(self, b: int, factoring_allowed=False): # NOTE: mod negative isn't handled right
@@ -139,11 +147,13 @@ class MulNode(OpNode):
     return Node.__mod__(a, b)
   def get_bounds(self) -> Tuple[int, int]:
     return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
+
 class DivNode(OpNode):
   def __floordiv__(self, b: int, _=False): return self.a//(self.b*b) # two divs is one div
   def get_bounds(self) -> Tuple[int, int]:
     assert self.a.min >= 0
     return self.a.min//self.b, self.a.max//self.b
+
 class ModNode(OpNode):
   def __floordiv__(self, b: int, factoring_allowed=True):
     if (self.b % b == 0): return (self.a//b) % (self.b//b) # put the div inside mod

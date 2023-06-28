@@ -158,7 +158,7 @@ class ShapeTracker:
     return real_offset.b
 
   # NOTE: if a stride is not always valid, it will be None
-  def real_strides(self) -> Tuple[Optional[int], ...]:
+  def real_strides(self, ignore_valid=False) -> Tuple[Optional[int], ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx, valid = self.expr_idxs(idxs)
@@ -170,10 +170,10 @@ class ShapeTracker:
         ret[idxs.index(this_dim)] = 1
     render_idx, render_valid = idx.render(), valid.render()
     for i in range(len(self.shape)):
-      if f'idx{i}' in render_valid: ret[i] = None
+      if f'idx{i}' in render_valid and not ignore_valid: ret[i] = None
       elif f'idx{i}' not in render_idx: ret[i] = 0
     return tuple(ret)
-  def unit_stride_axes(self) -> List[int]: return [i for i,st in enumerate(self.real_strides()) if st == 1]
+  def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
   def _expr_idx(self, idx, valid):
     for v in reversed(self.views[0:-1]):

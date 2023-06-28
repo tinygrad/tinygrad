@@ -125,7 +125,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
         else: val = f"{x}" +  ("f" if not dtypes.is_int(bufs[args.i].dtype) else "")
       elif isinstance(bufs[args.i].dtype, ImageDType):
-        assert newvar.dtype == dtypes._float4, "image must be float4"
+        assert newvar.dtype == dtypes._float4, f"image must be float4 {newvar}"
         prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
         idx, idy = to_image_idx(bufs[args.i].dtype.shape, args.idx, args.valid)
         val = f"read_imagef({bufnames[args.i]}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}))"
