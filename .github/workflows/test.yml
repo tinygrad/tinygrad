@@ -63,6 +63,13 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
+    - name: Update packages
+      run: |
+        wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+        echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+        sudo apt-get update
+    - name: Install OpenCL
+      run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
