@@ -347,10 +347,20 @@ def ArrayFeatureExtractor(input, indices):
   ret = Gather(input, indices, input.ndim-1)
   return ret
 
+def _round(x:Tensor, n:float, eq_is_down = True) -> Tensor:
+  assert n <= 1, f"n:{n} is larger than 1"
+  b = x.cast(dtypes.int32).contiguous().cast(x.dtype) + n
+  return (x > b).where(b+1-n, b-n) if eq_is_down else (x >= b).where(b+1-n, b-n)
 
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
   assert scales or sizes and not (scales and sizes), "only scales or sizes, cmon"
   assert not roi, "roi is not None"
+
+  def _nearest_gather(X:Tensor, output_shape): # MAYBE USE SOMETHING ELSE OTHER THAN GATHER, ugh
+    indices = Tensor.arange(output_shape[-1]*output_shape[-2])*(X.shape[-1]/output_shape[-1]) # HACK DOES NOT WORK FOR ALL CASES CUZ WHEN X.shape[-2] % output_shape[-2] != 0, it's bad
+    indices = _round(indices, 0.5)
+    return _gather(X.flatten(), indices).reshape(output_shape)
+
   if scales:
     scales = safe_numpy(scales).tolist()
     if axes: 
@@ -358,13 +368,25 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
       for a,s in zip(axes, scales):
         scales_[a] = s
       scales = scales_
+
   elif sizes:
     sizes = [int(i) for i in safe_numpy(sizes)]
+    scales = []
     if axes:
       sizes_ = [1]*X.ndim
       for a,s in zip(axes, sizes):
         sizes_[a] = s
+        scales.append(s/X.shape[a])
       sizes = sizes_
+    if keep_aspect_ratio_policy == "not_larger":
+      scale = min(scales)
+      sizes = _round(Tensor(list(X.shape))*scale, 0.5, False)
+      sizes = [int(i) for i in safe_numpy(sizes)]
+    elif keep_aspect_ratio_policy == "not_smaller":
+      scale = max(scales)
+      sizes = _round(Tensor(list(X.shape))*scale, 0.5, False)
+      sizes = [int(i) for i in safe_numpy(sizes)]
+
   output_shape = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
   upscale = all([os >= xs for os, xs in zip(output_shape, X.shape)]) 
   spacial_shape = X.shape[2:]
@@ -373,22 +395,24 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
   if mode == "nearest":
     if sizes:
       if keep_aspect_ratio_policy == "stretch":
-        dividable = [True, True, sizes[2]%X.shape[2] == 0, sizes[3]%X.shape[3] == 0]
-        return X.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, math.ceil(sizes[2]/py), px, math.ceil(sizes[3]/px)).reshape(*[s if d else s+1 for s,d in zip(sizes, dividable)]).shrink(tuple([(0,s) for s in output_shape]))
+        if upscale:
+          dividable = [True, True, sizes[2]%X.shape[2] == 0, sizes[3]%X.shape[3] == 0]
+          return X.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, math.ceil(sizes[2]/py), px, math.ceil(sizes[3]/px)).reshape(*[s if d else s+1 for s,d in zip(sizes, dividable)]).shrink(tuple([(0,s) for s in output_shape]))
+        else:
+          return _nearest_gather(X, output_shape)
+      elif keep_aspect_ratio_policy == "not_larger":
+        return _nearest_gather(X, output_shape)
+      elif keep_aspect_ratio_policy == "not_smaller":
+        return _nearest_gather(X, output_shape)
+        
     else:
-      if upscale: # upscale
+      if upscale:
         scales = [int(i) for i in scales]
         return X.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, scales[2], px, scales[3]).reshape(bs, c, py*scales[2], px*scales[3])
-      else: # downsample
+      else:
         output_shape = [math.floor(sh*sc) for sh, sc in zip(X.shape, scales)]
-        repeat_args = prod(output_shape[-2:])
-        X = X.repeat((1,1,repeat_args,repeat_args))
-        print(X.numpy())
-        # print(outsh)
-        # flat_indices = Tensor.arange(X.shape[-1]) 
-        # indices_scaled = flat_indices / output_shape[-1] 
-        
-        # Tensor.arange(output_shape[-1]).resize(spacial_shape)
+        return _nearest_gather(X, output_shape)
+
 
   elif mode == "linear":
     # upsample

@@ -104,7 +104,7 @@ def get_run_onnx(onnx_model: ModelProto):
     # get inputs
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
-      shape = type_parse(inp.type, inputs[inp.name])
+      shape = type_parse(inp.type)
       # tmp=inp.type.optional_type.elem_type.tensor_type if inp.type.optional_type.elem_type.HasField("tensor_type") else inp.type.optional_type.elem_type.sequence_type.elem_type.tensor_type if inp.type.HasField("optional_type") else (inp.type.sequence_type.elem_type.tensor_type if inp.type.HasField("sequence_type") else inp.type.tensor_type)
       # shape = shape_to_tuple(tmp.shape)
       if len(shape) >= 1 and shape[0] == 0 and shape != (0,): shape = tuple([1]+list(shape[1:]))   # 1 batch size
@@ -189,9 +189,7 @@ def get_run_onnx(onnx_model: ModelProto):
         starts, ends = inp[1:3]
         axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3])
         steps = safe_numpy(inp[4]) if len(inp) > 4 else [1]*inp[0].ndim
-        # starts, ends = safe_numpy(starts.cast(dtypes.int32)).tolist(), safe_numpy(ends.cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
-        starts, ends = safe_numpy(starts).tolist(), safe_numpy(ends).tolist() # TODO: when indexing is added use that
-        starts, ends = [math.ceil(i) for i in starts], [math.ceil(i) for i in ends] # TENSOR CEIL NO WORK :(
+        starts, ends = safe_numpy(starts.ceil().cast(dtypes.int32)).tolist(), safe_numpy(ends.ceil().cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
         # VERY HACKY BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise Tensor.reshape() has to allow 0 in newshape 
         # A FIX COULD BE PAD -> RESHAPE -> SHRINK IF s == e ELSE SHRINK
         shrink = False 
