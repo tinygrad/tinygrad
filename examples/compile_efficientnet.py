@@ -18,9 +18,9 @@ def compile_net(run, special_names, statement_builder = lambda name, cargs, glob
       key = id(arg)
       if key not in bufs:
         if key in special_names:
-          bufs[key] = (special_names[key], arg._buf.size)
+          bufs[key] = (special_names[key], len(arg._buf))
         else:
-          bufs[key] = (f"buf_{bufnum}", arg._buf.size)
+          bufs[key] = (f"buf_{bufnum}", len(arg._buf))
           bufnum += 1
           if i > 0: bufs_to_save[bufs[key][0]] = arg   # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
