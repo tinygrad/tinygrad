@@ -1,86 +1,133 @@
 <html>
-	<head>
-		<title>Efficientnet</title>
-		<script src="./net.js"></script>
-	</head>
-	<body>
-		<p id="result">None</p>
-		<input type="file" /> <br /><canvas id="myCanvas" width="224" height="224"></canvas>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+#result {
+  font-size: 48px;
+  padding: 50px;
+}
+#mybox {
+  padding: 20px;
+}
+.bigggg {
+  font-size: 18px;
+  margin-top: 10px;
+}
+.bigg {
+  font-size: 18px;
+}
+#url {
+  font-size: 18px;
+  width: 70%;
+}
+a {
+  text-decoration: none;
+}
+h1 {
+  padding: 50px;
+  padding-bottom: 0px;
+  font-size: 36px;
+  font-weight: normal;
+}
+#imagebox {
+  height:224px;
+  width:224px;
+  border: 1px dotted black;
+}
+#video {
+  height:0px;
+  width:0px;
+  border: 1px dotted black;
+  object-fit: cover;
+}
+canvas {
+  display: none;
+}
+* {
+  text-align: center;
+  font-family: monospace;
+}
+</style>
+<title>tinygrad has WebGPU</title>
+<script src="./net.js"></script>
+</head>
+<body>
+<h1>WebGPU <a href="https://github.com/geohot/tinygrad">tinygrad</a> EfficientNet!</h1>
+<div id="mybox">
+<input type="text" id="url" placeholder="put url here" value="https://upload.wikimedia.org/wikipedia/commons/d/da/Norwegian_hen.jpg">
+<input class="bigg" type="button" onclick="run_net_w_resource(document.getElementById('url').value)" value="Use URL">
+</div>
+<br/>
+<img id="imagebox"></img>
+<canvas id="canvas" width="200" height="200"> </canvas>
+<div id="result">result will go here</div>
+<script>
+	const getDevice = async () => {
+		if (!navigator.gpu) throw Error("WebGPU not supported.");
+		const adapter = await navigator.gpu.requestAdapter();
+		return await adapter.requestDevice();
+	};
 
-		<script>
-			var c = document.getElementById("myCanvas");
-			var ctx = c.getContext("2d");
+	const getLabels = async () => {
+		return (await fetch("https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json")).json()
+	}
 
-			window.addEventListener("load", function () {
-				document.querySelector('input[type="file"]').addEventListener("change", function () {
-					if (this.files && this.files[0]) {
-						var img = new Image();
-						img.onload = () => {
-							URL.revokeObjectURL(img.src); // no longer needed, free memory
+	const reorderChannelsAndRemoveAlpha = (data) => {
+		const out = [];
+		let i = 0;
+		for (let c = 0; c < 3; c++) {
+			for (let x = 0; x < 224 * 224; x++) {
+				out[i] = data[x * 4 + c];
+				i++;
+			}
+		}
+		return out;
+	};
 
-							document.getElementById("result").textContent = "Detecting";
+	const ctx = document.getElementById("canvas").getContext("2d");
+	const resultText = document.getElementById('result');
 
-							ctx.drawImage(img, 0, 0, 224, 224);
-							console.log(img.width);
-							var data = ctx.getImageData(0, 0, 224, 224).data; //.subarray(0 * 224 * 224, 3 * 224 * 224);
-							console.log(data);
+	const  run_net_w_resource = async (resource) => {
+		resultText.innerHTML = "pending..."
+		if (resource == "") {
+			const err = "sir. please type in a URL"
+			alert(err)
+			throw new Error(err)
+		}
+		const response = await fetch(resource)
+		if (!response.ok) {
+			const err = "sir. that is not a good URL. try a new one"
+			alert(err)
+			throw new Error(err)
+		}
+		document.getElementById("imagebox").src = resource
+		
+		const img = new Image();
+		img.crossOrigin = "Anonymous";
+		img.onload = () => {
+			URL.revokeObjectURL(img.src);
+			ctx.drawImage(img, 0, 0, 224, 224);
+			const data = ctx.getImageData(0, 0, 224, 224).data;
+			run_net(data);
+		};
+		img.src = resource;
+	}
 
-							run(data);
-						};
+	const run_net = async (data) => {
+		const labels = await getLabels();
+		const device = await getDevice();
 
-						img.src = URL.createObjectURL(this.files[0]); // set src to blob url
-					}
-				});
-			});
+		const input = reorderChannelsAndRemoveAlpha(Array.from(data).map((pix) => (pix / 255.0) * 0.45 - 0.225));
 
-			const run = async (data) => {
-				const getDevice = async () => {
-					if (!navigator.gpu) throw Error("WebGPU not supported.");
-					const adapter = await navigator.gpu.requestAdapter();
-					return await adapter.requestDevice();
-				};
+		console.time("Execution Time");
+		const out = await net(device, new Float32Array(input));
+		console.timeEnd("Execution Time");
 
-				const res = await fetch(
-					"https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json"
-				);
-				const labels = await res.json();
-				console.log(labels);
+		const arr = Array.from(new Float32Array(out));
+		const index = arr.indexOf(Math.max(...arr));
 
-				const device = await getDevice();
-
-				const pix = Array.from(data).map((pix) => (pix / 255.0) * 0.45 - 0.225);
-				const inputData = [];
-				let i = 0;
-				for (let c = 0; c < 3; c++) {
-					for (let x = 0; x < 224 * 224; x++) {
-						inputData[i] = pix[x * 4 + c];
-						i++;
-					}
-				}
-				console.log(inputData);
-
-				console.time("Execution Time");
-
-				const out = await net(device, new Float32Array(inputData));
-
-				console.timeEnd("Execution Time");
-
-				const arr = Array.from(new Float32Array(out));
-				console.log(arr);
-
-				const index = arr.indexOf(Math.max(...arr));
-				console.log(index);
-				console.log(labels[index]);
-
-				const indices = [...arr.keys()].sort((a, b) => arr[b] - arr[a]);
-				console.log("10 Biggest:");
-				console.log(indices.slice(0, 10));
-				for (const index of indices.slice(0, 10)) {
-					console.log(labels[index]);
-				}
-
-				document.getElementById("result").textContent = labels[index];
-			};
-		</script>
-	</body>
+		resultText.textContent = labels[index];
+	};
+</script>
+</body>
 </html>
