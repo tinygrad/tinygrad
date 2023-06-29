@@ -18,8 +18,10 @@ class Node:
     return ops[type(self)](self, ops, ctx)
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
+  @functools.cached_property
+  def hash(self) -> int: return hash(self.key)
   def __repr__(self): return "<"+self.key+">"
-  def __hash__(self): return hash(self.__repr__())
+  def __hash__(self): return self.hash
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
