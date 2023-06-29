@@ -478,7 +478,7 @@ class Tensor:
       x = self.pad2d(padding_)._pool(HW4, stride * 2, dilation)  # double stride for winograd kernel granularity
       rcout, oyx4 = cout // groups, x.shape[2:-len(HW4)]
       x = x.reshape(bs, groups, cin, 1, *oyx4, *HW4).expand(bs, groups, cin, rcout, *oyx4, *HW4).permute(0, 1, 3, *[4 + i for i in range(len(oyx4))], 2, *[4 + len(oyx4) + i for i in range(len(HW4))])
-      x = x.realize()  # (bs, groups, rcout, *oyx, cin, *HW)
+      # x = x.realize()  # (bs, groups, rcout, *oyx, cin, *HW)
       x = x.permute(*[len(x.shape) - len(HW4) + i for i in range(len(HW4))], *[i for i in range(len(x.shape) - 2)])  # move HW to the front
       g = weight.reshape(1, groups, rcout, *[1 for _ in range(len(oyx4))], cin, *HW)
       g = g.permute(*[len(x.shape) - len(HW) + i for i in range(len(HW))], *[i for i in range(len(x.shape) - 2)])  # move HW to the front
@@ -494,7 +494,9 @@ class Tensor:
         gb = compute_g((g_[0] - g_[1] + g_[2]) / 2, dim=dim+1)
         g2 = compute_g(g_[2], dim=dim+1)
         return Tensor.stack([g0, ga, gb, g2])
-      gfactors = compute_g(g).realize()
+      gfactors = compute_g(g).permute(*[len(HW) + i for i in range(len(x.shape) - 2)], *[i for i in range(len(HW))])  # move HW to the back
+      gfactors = gfactors.realize()  # realize gfactors
+      gfactors = gfactors.permute(*[len(x.shape) - len(HW) + i for i in range(len(HW))], *[i for i in range(len(x.shape) - 2)])  # move HW to the front
       def _winograd(d, gfactors, dim=0):
         if dim == 2:
           # base dot
@@ -508,7 +510,10 @@ class Tensor:
         r2 = m2 - m3 - m4
         return Tensor.stack([r1, r2])
       ret = _winograd(x, gfactors)  # outputs 2x2 result from 4x4 block: (H2, W2, bs, groups, rcout, *oyx4, cin)
-      ret = ret.sum(axis=-1).realize()  # sum across cin: (H2, W2, bs, groups, rcout, *oyx4)
+      ret = ret.permute(*[len(HW) + i for i in range(len(x.shape) - 2)], *[i for i in range(len(HW))])  # move HW to the back: (bs, groups, rcout, *oyx4, cin, HW2)
+      ret = ret.sum(axis=-3).realize()  # sum across cin: (bs, groups, rcout, *oyx4, H2, W2)
+
+      ret = ret.permute(*[len(ret.shape) - len(HW) + i for i in range(len(HW))], *[i for i in range(len(ret.shape) - 2)])  # move HW to the front
 
       ret = ret.permute([0, *[i for i in range(2, len(ret.shape))], 1])  # move W to end: (H2, bs, groups, rcout, *oyx4, W2)
       ret = ret.flatten(-2)  # flatten x axis: (H2, bs, groups, rcout, *oyx)

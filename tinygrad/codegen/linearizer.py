@@ -262,7 +262,7 @@ class Linearizer:
     if self.reduceop is not None:
       # define indexes
       reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
-      fake_reduce_idxs = [x*0 for x in reduce_idxs]
+      fake_reduce_idxs = [x*1 for x in reduce_idxs]
 
       # define accumulator
       acc = self.global_load(0, gl_idxs+fake_reduce_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
@@ -281,12 +281,12 @@ class Linearizer:
 
       # end the local loop, do the local reduce
       if self.group_for_reduce:
-        fake_global_idxs = [x*0 for x in global_idxs]
+        fake_global_idxs = [x*1 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs, acc, ssa)  # store accumulators
         self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))   # this is a barrier on GPUs
 
         # local indexs are over, 0 them out
-        local_idxs = [x*0 for x in local_idxs]
+        local_idxs = [x*1 for x in local_idxs]
 
         # if any group_for_reduce items aren't reduces, upcast them here
         for j in self.upcast_in_mid_reduce_axes:
@@ -333,7 +333,7 @@ class Linearizer:
   def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None) -> _OT:
     # we don't need to check UOps.LOAD because global_load has a cache for that already
     # all arg for these UOps types must be hashable
-    cache_uop = uop in [UOps.ALU, UOps.CONST]
+    cache_uop = uop in [UOps.ALU]
     if cache_uop:
       input_key = (uop, tuple(vin), arg)
       if input_key in self.uop_cache:
@@ -537,7 +537,19 @@ class Linearizer:
 
     # potentially do more upcasts of non reduce axes based on a heuristic
     upcasted_axis = set()
-    while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
+    upcasted_cardinality = 1  # number of unrolled upcasted ops at the bottom layer
+
+    # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
+    # this can be made much smarter
+    for axis in range(self.first_reduce-1, -1, -1):
+      if self.full_shape[axis] <= 16 and any(self.sts[buf_index].axis_needs_valid(axis) for buf_index in range(len(self.sts))) and self.full_shape[axis] * upcasted_cardinality <= 256:
+        if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
+        self.shift_to(axis, self.full_shape[axis])
+        self.upcast()
+        self.simplify_ones()
+        upcasted_axis.add(axis)
+
+    while False and prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
         # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
@@ -554,7 +566,7 @@ class Linearizer:
         break
 
     # if last dim <= 16 and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
-    if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
+    if False and self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
       if self.full_unupcasted_shape[-1] <= 16:
         self.upcast()
       else:
@@ -567,6 +579,7 @@ class Linearizer:
     # if nothing at all is upcasted and it's easy to, do an upcast
     # TODO: this is breaking the tests
     for splits in [4]:
+      break
       if self.upcasted == 0 and len(self.full_unupcasted_shape) > 0 and self.full_unupcasted_shape[-1] % splits == 0:
         self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
         self.upcast()
@@ -577,7 +590,7 @@ class Linearizer:
       local_size = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
       if self.full_shape[axis] == 1: continue
       last_try = self.local_dims == 0 and axis == 0
-      if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))) or last_try:
+      if True or any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))) or last_try:
         for sz in [x for x in (([32] if last_try else []) + [16,8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 128]:
           self.shift_to(axis, sz, insert_before=self.first_reduce-self.local_dims)
           self.local_dims += 1

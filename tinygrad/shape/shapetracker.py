@@ -202,8 +202,8 @@ class ShapeTracker:
     if idx.__class__ is str: idx = Variable(idx, 0, prod(self.shape)-1)
     return self._expr_idx(self.views[-1].expr_node(idx), self.views[-1].expr_node_mask(idx))
 
-  def needs_valid(self) -> bool:
-    return any([v.mask is not None for v in self.views])
+  def axis_needs_valid(self, axis) -> bool:
+    return any([v.mask is not None and v.mask[axis] != (0, v.shape[axis]) for v in self.views])
 
   # *** under this line are the movement ops ***
 
