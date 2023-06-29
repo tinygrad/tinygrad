@@ -106,7 +106,7 @@ def train_cifar():
   if getenv("ADAM"):
     optimizer = optim.Adam(optim.get_parameters(model), lr=Tensor([0.001]).realize())
   else:
-    optimizer = optim.SGD(optim.get_parameters(model), lr=0.02, momentum=0.85, nesterov=True)
+    optimizer = optim.SGD(optim.get_parameters(model), lr=0.01, momentum=0.85, nesterov=True)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
@@ -119,7 +119,7 @@ def train_cifar():
   best_eval = -1
   i = 0
   for X, Y in fetch_batches(X_train, Y_train, BS=BS, is_train=True):
-    if i >= STEPS: break
+    if i > STEPS: break
     if i%50 == 0 and STEPS != 1:
       # use training batchnorm (and no_grad would change the kernels)
       corrects = []
