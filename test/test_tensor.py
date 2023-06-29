@@ -110,10 +110,10 @@ class TestTinygrad(unittest.TestCase):
     n, classes = 100, 20
     x = np.random.randint(0, classes, n).astype(np.int64)
     X = Tensor(x)
-    y = X.onehot(classes)
-    assert X.dtype == y.dtype
+    Y = X.onehot(classes)
+    assert X.dtype == Y.dtype
     y_torch = torch.nn.functional.one_hot(torch.tensor(x), num_classes=classes)
-    np.testing.assert_allclose(y.cpu().numpy(), y_torch.cpu().numpy())
+    np.testing.assert_allclose(Y.cpu().numpy(), y_torch.cpu().numpy())
 
   def test_cross_entropy(self):
     np.random.seed(1337)
@@ -121,7 +121,7 @@ class TestTinygrad(unittest.TestCase):
     x = np.random.random_sample((n, classes)).astype(np.float32)
     y = np.random.randint(0, classes, n, dtype=np.int64)
     label_mask = np.random.randint(2, size=n)
-    y[label_mask == 0] = -100 # ignore these
+    y[label_mask == 0] = -100
     
     weight_options = None, np.random.random_sample(classes).astype(np.float32) * 10
     reduction_options = ['mean', 'sum', 'none']

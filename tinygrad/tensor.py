@@ -630,15 +630,21 @@ class Tensor:
     # label_valid = (Y >= 0).mul(Y < self.shape[-1]).add(Y == ignore_index).minimum(1).min().cast(dtypes.bool)
     # assert label_valid == True, "Cross entropy label out of range or not 'ignore_index' value" # cant check without realizing tensor :(  
     num_classes = self.shape[-1]
-    y = target.onehot(num_classes)
+    Y = target.onehot(num_classes)
+    assert Y.dtype == target.dtype
     if weight is not None:
       W = Tensor.eye(num_classes, dtype=weight.dtype) * weight
-      y = y.matmul(W)
-    ret = -1*self.mul(y)
-    if reduction == 'none': return ret.sum(-1)
-    elif reduction == 'mean': return ret.sum() / y.sum() # if entire batch is ignored, this will return nan
-    elif reduction == 'sum': return ret.sum()
+      assert W.dtype == weight.dtype
+      Y = Y.matmul(W)
+      assert Y.dtype == W.dtype
+    ret = -1*self.mul(Y)
+    assert ret.dtype == self.dtype
+    if reduction == 'none': ret = ret.sum(-1)
+    elif reduction == 'mean': ret = ret.sum() / Y.sum() # if entire batch is ignored, this will return nan
+    elif reduction == 'sum': ret = ret.sum()
     else: raise ValueError(f"Invalid reduction type: {reduction}")
+    assert ret.dtype == self.dtype
+    return ret
 
   def cross_entropy(self, target:Tensor, weight:Optional[Tensor] = None, ignore_index=-100, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor:
     return self.log_softmax().negative_log_likelihood(target, weight=weight, ignore_index=ignore_index, reduction=reduction)
