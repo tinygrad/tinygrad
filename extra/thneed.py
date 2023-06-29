@@ -161,7 +161,7 @@ class Thneed:
     for prg, args in self.cl_cache:
       # get binaries for saving
       if prg.name not in saved_binaries:
-        binary = prg.clprogram.get_info(cl.program_info.BINARIES)
+        binary = prg.clprograms[0].get_info(cl.program_info.BINARIES)
         assert len(binary) == 1
         jdat['binaries'].append({"name":prg.name, "length":len(binary[0])})
         binaries.append(binary[0])
