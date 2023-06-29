@@ -94,7 +94,7 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
   seq_pads = [math.ceil(i) for i in seq_pads]
   seq_axes = safe_numpy(axes).astype(np.int32).tolist() if axes is not None else None
   base_shape = x.shape
-  # pads_ = [(st,ed) for st, ed in zip(seq_pads[:len(seq_pads)//2], seq_pads[len(seq_pads)//2:])]
+  # pads_ = [(st,ed) for st, ed in zip(seq_pads[:len(seq_pads)//2], seq_pads[len(seq_pads)//2:])] # TODO maybe _format_padding() doesn't need that many lines
   pads_ = _format_padding(seq_pads)
   if mode == "wrap":
     repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(pads_, base_shape)]
@@ -102,18 +102,21 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh) if dim[1]%sh != 0 else nsh) for dim, sh, nsh in zip(pads_, base_shape, new_shape)]
     return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
   elif mode == "reflect":
-    print(pads_)
-    '''
-    # out_shape = [b+sum(p) for p,b in zip(pads_,base_shape)]
-    repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(pads_, base_shape)]
-    x = x.repeat(tuple(repeat_args))
-    for i,pad in enumerate(pads_):
-      x.slice(((0,pad[0]), ()))
-    '''
-    pass
+    n_pads = [(n,pad) for n,pad in enumerate(pads_)][::-1]
+    for n, pad in n_pads: # TODO NOT SURE IF FOR LOOPING LIKE THIS IS A GOOD IDEA IN TINYGRAD, so find another way to do this?
+      if pad == (0,0): continue
+      pad_begin, pad_end = pad
+      begin_repeat_args = [(1) if i != n else math.ceil(pad_begin+1/x.shape[i]) for i in range(x.ndim)] 
+      end_repeat_args = [(1) if i != n else math.ceil(pad_end+1/x.shape[i]) for i in range(x.ndim)] 
+      begin_shrink_arg = [(0,s) if i != n else (s-1-pad_begin,s-1) for i,s in enumerate(x.shape)]
+      end_shrink_arg = [(0,s) if i != n else (1,1+pad_end) for i,s in enumerate(x.shape)]
+      b = x.repeat(begin_repeat_args).flip(n).shrink(tuple(begin_shrink_arg))
+      e = x.repeat(end_repeat_args).flip(n).shrink(tuple(end_shrink_arg))
+      x = b.cat(x, dim=n).cat(e, dim=n)
+    return x
   elif mode == "edge":
     n_pads = [(n,pad) for n,pad in enumerate(pads_)][::-1]
-    for n, pad in n_pads:
+    for n, pad in n_pads: # TODO NOT SURE IF FOR LOOPING LIKE THIS IS A GOOD IDEA IN TINYGRAD, there are probably better ways
       if pad == (0,0): continue
       pad_st, pad_ed = pad
       st_slice_arg = [(0,s) if dim != n else (0,1) for dim,s in enumerate(x.shape)]
@@ -415,7 +418,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
     y_out = _nearest_mode(y_out, nearest_mode, X.shape[-1])
     y_out = [int(i) for i in safe_numpy(y_out)]
-    stack_args = [deepcopy(x_out) + y * X.shape[-1] for y in y_out] # HACK wow this is bad but I see no other way cuz me stupid!
+    stack_args = [deepcopy(x_out) + y * X.shape[-1] for y in y_out] # HACK wow this is ugly but I see no other way cuz me stupid!
     indices_out = Tensor.stack(stack_args).flatten()
     return _nearest_gather(X, indices_out, output_shape)
   elif mode == "linear":
