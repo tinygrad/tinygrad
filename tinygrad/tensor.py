@@ -619,7 +619,7 @@ class Tensor:
 
   # note: the way onehot is implemented, if value is out of range, all 0s are returned
   def onehot(self, num_classes) -> Tensor: 
-    assert dtypes.is_int(self.dtype), f"onehot only supported for ints, got {self.dtype}"
+    assert dtypes.is_int(self.dtype) or dtypes.is_unsigned(self.dtype), f"onehot only supported for ints, got {self.dtype}"
     return self.reshape(list(self.shape)+[1]).repeat([1]*len(self.shape)+[num_classes]).eq(Tensor.arange(num_classes, dtype=self.dtype)) # could cast to smaller type, currently just same as self
   
   def negative_log_likelihood(self, target:Tensor, weight:Optional[Tensor] = None, ignore_index=-100, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor: 
