@@ -94,14 +94,13 @@ class WebGpuCodegen(Linearizer):
           val = self.float_const(self.bufs[args.i].realized._buf)
         else:
           val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
-        if args.valid.min == 1: kk(f"let {newvar.render()} = {val};")
+        if args.valid.min == 1: kk(f"let {newvar.render()} = f32({val});")
         elif args.valid.render(render_cl) == "0": kk(f"var {newvar.render()} = 0.0f;")
-        else: kk(f"var {newvar.render()} = select(0.0f, {val}, bool({args.valid.render(render_cl)}));")
+        else: kk(f"var {newvar.render()} = select(0.0f, f32({val}), bool({args.valid.render(render_cl)}));")
       elif uop == UOps.ALU:
         assert newvar is not None
-        vars = [f"{upcast_type(vin)}({x.render()})" for x in vin] if any([x.dtype != vin[0].dtype for x in vin]) else [x.render() for x in vin]
-        if newvar in vin: kk(f"{newvar.render()} = {code_for_op[args](*vars)};")
-        else: kk(f"let {newvar.render()} = {code_for_op[args](*vars)};")
+        if newvar in vin: kk(f"{newvar.render()} = {code_for_op[args](*[x.render() for x in vin])};")
+        else: kk(f"let {newvar.render()} = {code_for_op[args](*[x.render() for x in vin])};")
       elif uop == UOps.STORE:
         val = vin[0].render()
         if vin[0].dtype != self.bufs[args.i].dtype:
