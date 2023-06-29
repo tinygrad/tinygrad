@@ -1,8 +1,8 @@
 import numpy as np
 from wgpu.utils._device import get_default_device
-from tinygrad.runtime.lib import RawBufferMapped, RawConst
+from tinygrad.runtime.lib import RawBufferCopyInOut, RawConst
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
-from tinygrad.helpers import DType, dtypes
+from tinygrad.helpers import dtypes
 from tinygrad.ops import Compiled, UnaryOps, Op, BinaryOps, ASTRunner, FusedOps
 from tinygrad.shape.symbolic import NumNode, Variable
 from tinygrad.codegen.cstyle import render_cl
@@ -119,11 +119,12 @@ class WebGpuCodegen(Linearizer):
     prg = "\n".join([f"@group(0) @binding({next(bind_it)}) var<storage,read_write> data{i}: array<{type_map[x.dtype]}>;" for i,x in enumerate(self.bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)])
     prg += f"\n@compute @workgroup_size(1) fn {function_name}(@builtin(global_invocation_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}" # TODO: revert local_size {','.join([str(x) for x in local_size])} once bug is fixed
     return ASTRunner(function_name, prg, global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else [1])
-class RawWebGPUBuffer(RawBufferMapped):
-  def __init__(self, size:int, dtype:DType):
-    assert dtype not in [dtypes.int8,dtypes.uint8,dtypes.int64,dtypes.uint64,dtypes.float64], f"dtype {dtype} not supported on WEBGPU"
+
+class RawWebGPUBuffer(RawBufferCopyInOut):
+  def __init__(self, size, dtype): 
     super().__init__(size, dtype, device.create_buffer(size=size*dtype.itemsize, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC))
-  def _copyin(self, x) -> None: device.queue.write_buffer(self._buf, 0, np.ascontiguousarray(x))
-  def _buffer(self) -> memoryview: return device.queue.read_buffer(self._buf, 0)
+  def _copyin(self, x:np.ndarray): device.queue.write_buffer(self._buf, 0, np.ascontiguousarray(x))
+  # TODO remove the copyto
+  def _copyout(self, x:np.ndarray): np.copyto(x, np.frombuffer(device.queue.read_buffer(self._buf, 0), dtype=np.dtype(self.dtype.np, metadata={"backing": self})))
 
 WebGpuBuffer = Compiled(RawWebGPUBuffer, WebGpuCodegen, WebGPUProgram)
