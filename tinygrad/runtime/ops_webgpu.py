@@ -90,6 +90,7 @@ class WebGpuCodegen(Linearizer):
         else:
           val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
         if args.valid.min == 1: kk(f"let {newvar.render()} = {val};")
+        elif args.valid.render(render_cl) == "0": kk(f"var {newvar.render()} = 0.0f;")
         else: kk(f"var {newvar.render()} = select(0.0f, {val}, bool({args.valid.render(render_cl)}));")
       elif uop == UOps.ALU:
         assert newvar is not None
@@ -102,7 +103,7 @@ class WebGpuCodegen(Linearizer):
         kk(f"{bufnames[args.i]}[{args.idx.render(render_cl)}] = {val};")
       elif uop == UOps.CONST:
         assert newvar is not None
-        if args == -math.inf: kk(f"var {newvar.render()} = 1.17549435082228750797e-38f;")
+        if args == -math.inf: kk(f"var {newvar.render()} = -0x1.fffffep+127f;")
         else: kk(f"var {newvar.render()} = {args};")
       elif uop == UOps.DEFINE_LOCAL: kk(f"var {args[0]} = array<f32,{args[1]}>();")
       elif uop == UOps.BARRIER: kk("workgroupBarrier();")
