@@ -112,7 +112,6 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     '''
     pass
   elif mode == "edge":
-    print("edge")
     n_pads = [(n,pad) for n,pad in enumerate(pads_)][::-1]
     for n, pad in n_pads:
       if pad == (0,0): continue
@@ -124,11 +123,8 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
       pad_st = x.slice(st_slice_arg).repeat(st_repeat_arg)
       pad_ed = x.slice(ed_slice_arg).repeat(ed_repeat_arg)
       x = pad_st.cat(x, dim=n).cat(pad_ed, dim=n)
-    print(x.numpy())
     return x
   elif mode == "constant":
-    print(seq_pads)
-    print(seq_axes)
     return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value)
 
 def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
@@ -202,7 +198,7 @@ def Celu(X, alpha=1.0): return X.relu() - (-alpha*(X/alpha).exp()+1).relu()
 def Selu(X, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
 def Softplus(X): return X.softplus()
 def PRelu(X:Tensor, slope:Tensor): 
-  slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope # OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE LOL
+  slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope # OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
   return X.clip(0, float("inf")) + X.clip(float("-inf"), 0) * slope
 def LeakyRelu(X, alpha=0.01): return X.leakyrelu(alpha)
 def ThresholdedRelu(X, alpha=1.0): return (X-alpha).relu() + (X-alpha).relu().sign() * alpha
@@ -363,7 +359,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
     elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, 0.5, False)
     elif nearest_mode == "floor": ret = x_resized.floor()
     elif nearest_mode == "ceil": ret = x_resized.ceil()
-    ret = (ret<0).where(ret+1, ret) # Wrap the ends of the ret
+    ret = (ret<0).where(ret+1, ret) # Clamp the ends of the ret
     ret = (ret>x_len-1).where(ret-1, ret)
     return ret
   def _coordinate_transformation(x_out, y_out, output_shape, scales_lol):
@@ -387,7 +383,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
       for a,s in zip(axes, scales):
         scales_[a] = s
       scales = scales_
-
   elif sizes:
     sizes = [int(i) for i in safe_numpy(sizes)]
     scales = []
@@ -407,28 +402,25 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
       sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
 
   output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
-  upscale = all([os >= xs for os, xs in zip(output_shape, X.shape)]) 
-  spacial_shape = X.shape[2:]
-  bs,c,py,px = X.shape
-  print(output_shape, "output shape")
+  # upscale = all([os >= xs for os, xs in zip(output_shape, X.shape)]) 
+  # spacial_shape = X.shape[2:]
+  # bs,c,py,px = X.shape
   scales_lol = [os/xs for xs, os in zip(X.shape, output_shape)]
   x_out = Tensor.arange(output_shape[-1])
   y_out = Tensor.arange(output_shape[-2])
+  print(output_shape, "output shape")
 
   if mode == "nearest":
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol)
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
     y_out = _nearest_mode(y_out, nearest_mode, X.shape[-1])
     y_out = [int(i) for i in safe_numpy(y_out)]
-    stack_args = []
-    for y in y_out: # HACK wow this is bad but I see no other way cuz me stupid!
-      stack_args.append(deepcopy(x_out) + y * X.shape[-1])
+    stack_args = [deepcopy(x_out) + y * X.shape[-1] for y in y_out] # HACK wow this is bad but I see no other way cuz me stupid!
     indices_out = Tensor.stack(stack_args).flatten()
     return _nearest_gather(X, indices_out, output_shape)
   elif mode == "linear":
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol=scales)
-    X_flattened = X.flatten()
-    print(X_flattened.numpy())
+    print("linear")
     print(x_out.numpy())
     print(y_out.numpy())
     return
