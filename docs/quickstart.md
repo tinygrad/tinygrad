@@ -6,7 +6,8 @@ It is intended to be a very quick overview of the high level API that tinygrad p
 This guide is also structured as a tutorial which at the end of it you will have a working model that can classify handwritten digits.
 
 We need some imports to get started:
-```py
+
+```python
 import numpy as np
 import time
 ```
@@ -17,19 +18,22 @@ Tensors are the base data structure in tinygrad. They can be thought of as a mul
 All high level operations in tinygrad operate on these tensors.
 
 The tensor class can be imported like so:
-```py
+
+```python
 from tinygrad.tensor import Tensor
 ```
 
 Tensors can be created from an existing data structure like a python list or numpy ndarray:
-```py
+
+```python
 t1 = Tensor([1, 2, 3, 4, 5])
 na = np.array([1, 2, 3, 4, 5])
 t2 = Tensor(na)
 ```
 
 Tensors can also be created using one of the many factory methods:
-```py
+
+```python
 full = Tensor.full(shape=(2, 3), fill_value=5) # create a tensor of shape (2, 3) filled with 5
 zeros = Tensor.zeros(2, 3) # create a tensor of shape (2, 3) filled with 0
 ones = Tensor.ones(2, 3) # create a tensor of shape (2, 3) filled with 1
@@ -45,24 +49,28 @@ rand = Tensor.rand(2, 3) # create a tensor of shape (2, 3) filled with random va
 randn = Tensor.randn(2, 3) # create a tensor of shape (2, 3) filled with random values from a normal distribution
 uniform = Tensor.uniform(2, 3, low=0, high=10) # create a tensor of shape (2, 3) filled with random values from a uniform distribution between 0 and 10
 ```
+
 There are even more of these factory methods, you can find them in the [tensor.py](/tinygrad/tensor.py) file.
 
 All the tensors creation methods can take a `dtype` argument to specify the data type of the tensor.
-```py
+
+```python
 from tinygrad.helpers import dtypes
 
 t3 = Tensor([1, 2, 3, 4, 5], dtype=dtypes.int32)
 ```
 
 Tensors allow you to perform operations on them like so:
-```py
+
+```python
 t4 = Tensor([1, 2, 3, 4, 5])
 t5 = (t4 + 1) * 2
 t6 = (t5 * t4).relu().log_softmax()
 ```
 
 All of these operations are lazy and are only executed when you realize the tensor using `.realize()` or `.numpy()`.
-```py
+
+```python
 print(t6.numpy())
 # [-56. -48. -36. -20.   0.]
 ```
@@ -77,7 +85,8 @@ These operations are commonly grouped into the `__call__` method of a class whic
 These classes do not need to inherit from any base class, in fact if they don't need any trainable parameters they don't even need to be a class!
 
 An example of this would be the `nn.Linear` class which represents a linear layer in a neural network.
-```py
+
+```python
 # from tinygrad.nn import Linear
 class Linear:
   def __init__(self, in_features, out_features, bias=True, initialization: str='kaiming_uniform'):
@@ -87,12 +96,14 @@ class Linear:
   def __call__(self, x):
     return x.linear(self.weight.transpose(), self.bias)
 ```
+
 There are more neural network modules already implemented in [nn](/tinygrad/nn/__init__.py), and you can also implement your own.
 
 We will be implementing a simple neural network that can classify handwritten digits from the MNIST dataset.
 Our classifier will be a simple 2 layer neural network with a Leaky ReLU activation function.
 It will use a hidden layer size of 128 and an output layer size of 10 (one for each digit) with no bias on either Linear layer.
-```py
+
+```python
 from tinygrad.nn import Linear
 
 class TinyNet:
@@ -108,6 +119,7 @@ class TinyNet:
 
 net = TinyNet()
 ```
+
 We can see that the forward pass of our neural network is just the sequence of operations performed on the input tensor `x`.
 We can also see that functional operations like `leakyrelu` and `log_softmax` are not defined as classes and instead are just methods we can just call.
 Finally, we just initialize an instance of our neural network, and we are ready to start training it.
@@ -120,12 +132,14 @@ All we need to do is define our neural network, define our loss function, and th
 They can then be used to update the parameters of our neural network using one of the many optimizers in [optim.py](/tinygrad/nn/optim.py).
 
 First we need to set the training flag in `Tensor`:
-```py
+
+```python
 Tensor.training = True
 ```
 
 For our loss function we will be using cross entropy loss.
-```py
+
+```python
 # from extra.training import sparse_categorical_crossentropy
 def cross_entropy(out, Y):
   num_classes = out.shape[-1]
@@ -136,16 +150,19 @@ def cross_entropy(out, Y):
   y = Tensor(y)
   return out.mul(y).mean()
 ```
+
 As we can see in this implementation of cross entropy loss, there are certain operations that tinygrad does not support.
 Namely, operations that are load/store like indexing a tensor with another tensor or assigning a value to a tensor at a certain index.
 Load/store ops are not supported in tinygrad because they add complexity when trying to port to different backends and 90% of the models out there don't use/need them.
 
 For our optimizer we will be using the traditional stochastic gradient descent optimizer with a learning rate of 3e-4.
-```py
+
+```python
 from tinygrad.nn.optim import SGD
 
 opt = SGD([net.l1.weight, net.l2.weight], lr=3e-4)
 ```
+
 We can see that we are passing in the parameters of our neural network to the optimizer.
 This is due to the fact that the optimizer needs to know which parameters to update.
 There is a simpler way to do this just by using `get_parameters(net)` from `tinygrad.nn.optim` which will return a list of all the parameters in the neural network.
@@ -154,13 +171,15 @@ The parameters are just listed out explicitly here for clarity.
 Now that we have our network, loss function, and optimizer defined all we are missing is the data to train on!
 There are a couple of dataset loaders in tinygrad located in [/datasets](/datasets).
 We will be using the MNIST dataset loader.
-```py
+
+```python
 from datasets import fetch_mnist
 ```
 
 Now we have everything we need to start training our neural network.
 We will be training for 1000 steps with a batch size of 64.
-```py
+
+```python
 X_train, Y_train, X_test, Y_test = fetch_mnist()
 
 for step in range(1000):
@@ -197,7 +216,8 @@ for step in range(1000):
 
 Now that we have trained our neural network we can evaluate it on the test set.
 We will be using the same batch size of 64 and will be evaluating for 1000 of those batches.
-```py
+
+```python
 # set training flag to false
 Tensor.training = False
 
@@ -220,7 +240,7 @@ print(f"Test Accuracy: {avg_acc / 1000}")
 print(f"Time: {time.perf_counter() - st}")
 ```
 
-## And that's it!
+## And that's it
 
 Highly recommend you check out the [examples/](/examples) folder for more examples of using tinygrad.
 Reading the source code of tinygrad is also a great way to learn how it works.
@@ -238,7 +258,8 @@ Currently, this does not support models with varying input sizes and non tinygra
 
 To use the JIT we just need to add a function decorator to the forward pass of our neural network and ensure that the input and output are realized tensors.
 Or in this case we will create a wrapper function and decorate the wrapper function to speed up the evaluation of our neural network.
-```py
+
+```python
 from tinygrad.jit import TinyJit
 
 @TinyJit
@@ -263,13 +284,15 @@ for step in range(1000):
 print(f"Test Accuracy: {avg_acc / 1000}")
 print(f"Time: {time.perf_counter() - st}")
 ```
+
 You will find that the evaluation time is much faster than before and that your accelerator utilization is much higher.
 
 ### Saving and Loading Models
 
 The standard weight format for tinygrad is [safetensors](https://github.com/huggingface/safetensors). This means that you can load the weights of any model also using safetensors into tinygrad.
 There are functions in [state.py](/tinygrad/state.py) to save and load models to and from this format.
-```py
+
+```python
 from tinygrad.state import safe_save, safe_load, get_state_dict, load_state_dict
 
 # first we need the state dict of our model
