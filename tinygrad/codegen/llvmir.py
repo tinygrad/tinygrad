@@ -88,8 +88,8 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
       else:
         val = bb[-1].load(bb[-1].gep(func.args[args.i], [idx], inbounds=True))
       if func_dtypes[args.i] != ir.FloatType():
-        if dtypes.is_int(bufs[args.i].dtype):
-          val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(bufs[args.i].dtype) else bb[-1].sitofp(val, ir.FloatType())
+        if dtypes.is_signed_int(bufs[args.i].dtype):
+          val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned_int(bufs[args.i].dtype) else bb[-1].sitofp(val, ir.FloatType())
         elif bufs[args.i].dtype == dtypes.float64:
           val = bb[-1].fptrunc(val, ir.FloatType())
         else:
@@ -100,8 +100,8 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
       idx = args.idx.render(render_llvm, bb[-1])
       element = lvars[vin[0]]
       if func_dtypes[0] != ir.FloatType():
-        if dtypes.is_int(bufs[args.i].dtype):
-          element = bb[-1].fptoui(element, func_dtypes[0]) if dtypes.is_unsigned(bufs[args.i].dtype) else bb[-1].fptosi(element, func_dtypes[0])
+        if dtypes.is_signed_int(bufs[args.i].dtype):
+          element = bb[-1].fptoui(element, func_dtypes[0]) if dtypes.is_unsigned_int(bufs[args.i].dtype) else bb[-1].fptosi(element, func_dtypes[0])
         elif bufs[args.i].dtype == dtypes.float64:
           element = bb[-1].fpext(element, func_dtypes[0])
         else:

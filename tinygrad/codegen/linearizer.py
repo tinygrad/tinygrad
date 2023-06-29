@@ -177,10 +177,10 @@ class Linearizer:
         # disallow unaligned access, fall back to float
         if idx.render() != ((idx//4)*4).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
-          localtype = dtypes.float
+          localtype = dtypes.float32
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
-        localtype = dtypes.float
+        localtype = dtypes.float32
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
@@ -236,7 +236,7 @@ class Linearizer:
 
     # ssa
     _ssa:DefaultDict[str,int] = defaultdict(int)
-    def ssa(name, ltype=dtypes.float) -> Token:
+    def ssa(name, ltype=dtypes.float32) -> Token:
       _ssa[name] += 1
       return Token(f"{name}{_ssa[name]-1}", ltype)
 

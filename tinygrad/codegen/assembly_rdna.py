@@ -79,7 +79,7 @@ class RDNACodegen(AssemblyCodegen):
             if arg[0][0] == dtypes._float4:
               for off in range(4):
                 reg_name = f"s{s_cnt-align+off}" if arg[0][1] else f"v{v_cnt-align+off}"
-                rtor[Register(f"%{arg[1]}{i}", dtypes.float, False, off=off)] = reg_name
+                rtor[Register(f"%{arg[1]}{i}", dtypes.float32, False, off=off)] = reg_name
         elif arg[0][0] == dtypes.bool:
           for i in range(arg[2]):
             reg_name = "scc" if arg[0][1] else "vcc_lo" # `_lo` suffix since we're running wavefront_size=32
@@ -111,7 +111,7 @@ class RDNACodegen(AssemblyCodegen):
         elif arg == float('-inf'): arg = "0xff800000"
         if out.dtype == dtypes._float4:
           for off in range(4):
-            ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(Register(out.nm, dtypes.float, False, off=off))}, {arg}")
+            ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(Register(out.nm, dtypes.float32, False, off=off))}, {arg}")
         else:
           ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, {arg}")
       elif uop == UOps.ALU:

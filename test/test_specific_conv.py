@@ -22,9 +22,9 @@ class TestSpecific(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "LLVM", "Broken on LLVM")
   def test_big_vec_mul(self):
     # from LLaMA
-    #   0 buffer<4096, dtypes.float>                      [View((1024, 1, 1, 4), (4, 0, 0, 1), 0, None)]
-    #   1 buffer<4096, dtypes.float>                      [View((1024, 1024, 4, 4), (0, 4, 1, 0), 0, None)]
-    #   2 buffer<16777216, dtypes.half>                   [View((1024, 1024, 4, 4), (16384, 4, 1, 4096), 0, None)]
+    #   0 buffer<4096, dtypes.float32>                      [View((1024, 1, 1, 4), (4, 0, 0, 1), 0, None)]
+    #   1 buffer<4096, dtypes.float32>                      [View((1024, 1024, 4, 4), (0, 4, 1, 0), 0, None)]
+    #   2 buffer<16777216, dtypes.float16>                   [View((1024, 1024, 4, 4), (16384, 4, 1, 4096), 0, None)]
     x = Tensor.randn(4096).realize()
     w = Tensor.randn(4096, 4096, device='cpu').cast(dtypes.float16).to(Device.DEFAULT).realize()
     (x @ w.T).realize()

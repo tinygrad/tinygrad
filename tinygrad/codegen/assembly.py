@@ -18,7 +18,7 @@ class Register(NamedTuple):
   def __repr__(self): return self.nm if self.off is None else f"{self.nm}:{self.off}"
   def subregs(self):
     if self.dtype == dtypes._float4:
-      return [Register(self.nm, dtypes.float, False, off=off) for off in range(4)]
+      return [Register(self.nm, dtypes.float32, False, off=off) for off in range(4)]
     return []
 class AssemblyInstruction(NamedTuple):
   op: UOps
@@ -50,7 +50,7 @@ class AssemblyCodegen(Linearizer):
       tor[tok] = ret = Register(f"%{type_to_letter((dtype, scalar))}{cnts[(dtype, scalar)]}", dtype, scalar)
       if dtype == dtypes._float4:
         for off in range(4):
-          tor[Token(tok.name, tok.dtype, off)] = Register(ret.nm, dtypes.float, ret.scalar, off)
+          tor[Token(tok.name, tok.dtype, off)] = Register(ret.nm, dtypes.float32, ret.scalar, off)
       cnts[(dtype, scalar)] += 1
       return ret
 
