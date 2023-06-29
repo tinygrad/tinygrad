@@ -190,9 +190,8 @@ def get_run_onnx(onnx_model: ModelProto):
         axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3])
         steps = safe_numpy(inp[4]) if len(inp) > 4 else [1]*inp[0].ndim
         starts, ends = safe_numpy(starts.ceil().cast(dtypes.int32)).tolist(), safe_numpy(ends.ceil().cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
-        # HACKY BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise Tensor.reshape() has to allow 0 in newshape 
-        # TODO: A FIX COULD BE PAD -> RESHAPE -> SHRINK IF s == e ELSE just SHRINK
-        shrink = False 
+        # TODO: Change __getitem__() to PAD -> RESHAPE -> SHRINK IF s == e ELSE SHRINK
+        shrink = False # HACKY BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise Tensor.reshape() has to allow 0 in newshape 
         for i,axis in enumerate(axes.tolist()):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
           starts[i] = starts[i] + inp[0].shape[axis] if starts[i] < 0 else starts[i]
