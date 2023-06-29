@@ -102,6 +102,7 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh) if dim[1]%sh != 0 else nsh) for dim, sh, nsh in zip(pads_, base_shape, new_shape)]
     return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
   elif mode == "reflect":
+    print(pads_)
     '''
     # out_shape = [b+sum(p) for p,b in zip(pads_,base_shape)]
     repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(pads_, base_shape)]
@@ -302,15 +303,7 @@ def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, red
   elif reduction == "sum": return loss.sum()
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
 
-'''
-def Gather(input, indices, axis):
-  if axis != 0: input, indices = input.transpose(ax1=0, ax2=axis), indices.transpose(ax1=0, ax2=axis)
-  ret = _gather(input, indices)
-  if axis != 0: ret = ret.transpose(ax1=axis, ax2=0)
-  return ret
-
-'''
-def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY
+def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
   reshape_arg = [1]*input.ndim + [input.shape[-1]]
   return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]))*input).sum(indices.ndim)
 
@@ -354,9 +347,6 @@ def _round(x:Tensor, n:float, eq_is_down = True) -> Tensor:
   return (x > b).where(b+1-n, b-n) if eq_is_down else (x >= b).where(b+1-n, b-n)
 
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
-  assert scales or sizes and not (scales and sizes), "only scales or sizes, cmon"
-  assert not roi, "roi should be None"
-
   def _nearest_gather(X: Tensor, indices: Tensor, output_shape): # MAYBE USE SOMETHING ELSE OTHER THAN GATHER??? (reshape -> expand -> reshape -> [shrink]) bad gather many kernel bad, OR TRY NOT FLATTEN()?
     return _gather(X.flatten(), indices).reshape(output_shape)
   def _nearest_mode(x_resized: Tensor, nearest_mode: str, x_len):
@@ -367,8 +357,20 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
     ret = (ret<0).where(ret+1, ret) # Wrap the ends of the ret
     ret = (ret>x_len-1).where(ret-1, ret)
     return ret
+  def _coordinate_transformation(x_out, y_out, output_shape, scales_lol):
+    if coordinate_transformation_mode == "half_pixel":
+      x_out = (x_out + 0.5)/scales_lol[-1] - 0.5
+      y_out = (y_out + 0.5)/scales_lol[-2] - 0.5
+    elif coordinate_transformation_mode == "align_corners":
+      x_out = x_out * (X.shape[-1] - 1) / (output_shape[-1] - 1)
+      y_out = y_out * (X.shape[-2] - 1) / (output_shape[-2] - 1)
+    elif coordinate_transformation_mode == "asymmetric":
+      x_out = x_out/scales_lol[-1]
+      y_out = y_out/scales_lol[-2]
+    return x_out, y_out
       
-
+  assert scales or sizes and not (scales and sizes), "only scales or sizes, cmon"
+  assert not roi, "roi should be None"
   if scales:
     scales = safe_numpy(scales).tolist()
     if axes: 
@@ -402,36 +404,27 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
   print(output_shape, "output shape")
   scales_lol = [os/xs for xs, os in zip(X.shape, output_shape)]
 
-  # x_resized = Tensor.arange(output_shape[-1]*output_shape[-2])
-  x_resized = Tensor.arange(output_shape[-1])
-  y_resized = Tensor.arange(output_shape[-2])
-  if coordinate_transformation_mode == "half_pixel":
-    x_resized = (x_resized + 0.5)/scales_lol[-1] - 0.5
-    y_resized = (y_resized + 0.5)/scales_lol[-2] - 0.5
-  if coordinate_transformation_mode == "align_corners":
-    x_resized = x_resized * (X.shape[-1] - 1) / (output_shape[-1] - 1)
-    y_resized = y_resized * (X.shape[-2] - 1) / (output_shape[-2] - 1)
-  if coordinate_transformation_mode == "asymmetric":
-    x_resized = x_resized/scales_lol[-1]
-    y_resized = y_resized/scales_lol[-2]
-
-
-  x_resized = _nearest_mode(x_resized, nearest_mode, X.shape[-1])
-  y_resized = _nearest_mode(y_resized, nearest_mode, X.shape[-1])
-  y_resized = [int(i) for i in safe_numpy(y_resized)]
-  stack_args = []
-  for y in y_resized: # HACK this is incredibly stupid lol cuz I'm stupid
-    stack_args.append(deepcopy(x_resized) + y * X.shape[-1])
-  indices = Tensor.stack(stack_args).flatten()
-  # indices = _nearest_mode(x_resized, nearest_mode)
-  print("indices", indices.numpy())
   if mode == "nearest":
-    return _nearest_gather(X, indices, output_shape)
+    x_out = Tensor.arange(output_shape[-1])
+    y_out = Tensor.arange(output_shape[-2])
+    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol)
+    x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
+    y_out = _nearest_mode(y_out, nearest_mode, X.shape[-1])
+    y_out = [int(i) for i in safe_numpy(y_out)]
+    stack_args = []
+    for y in y_out: # HACK wow this is bad but I see no other way cuz me stupid!
+      stack_args.append(deepcopy(x_out) + y * X.shape[-1])
+    indices_out = Tensor.stack(stack_args).flatten()
+    print("indices", indices_out.numpy())
+    return _nearest_gather(X, indices_out, output_shape)
   elif mode == "linear":
-    # upsample
-    if scales:
-      return
+    x_out, y_out = _coordinate_transformation()
+    print(x_out.numpy())
+    print(y_out.numpy())
+    return
   elif mode == "cubic":
+    print(x_out.numpy())
+    print(y_out.numpy())
     return 
 
   def _cubic_coeffs(ratio, scale=None, A=-0.75):

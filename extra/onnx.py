@@ -31,7 +31,7 @@ onnx_ops = importlib.import_module('extra.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
-  def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
+  # def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
   def type_parse(type_proto: TypeProto):
     while True: # NEED BETTER PARSER :D
       attr = type_proto.WhichOneof('value')
@@ -190,8 +190,8 @@ def get_run_onnx(onnx_model: ModelProto):
         axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3])
         steps = safe_numpy(inp[4]) if len(inp) > 4 else [1]*inp[0].ndim
         starts, ends = safe_numpy(starts.ceil().cast(dtypes.int32)).tolist(), safe_numpy(ends.ceil().cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
-        # VERY HACKY BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise Tensor.reshape() has to allow 0 in newshape 
-        # A FIX COULD BE PAD -> RESHAPE -> SHRINK IF s == e ELSE SHRINK
+        # HACKY BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise Tensor.reshape() has to allow 0 in newshape 
+        # TODO: A FIX COULD BE PAD -> RESHAPE -> SHRINK IF s == e ELSE just SHRINK
         shrink = False 
         for i,axis in enumerate(axes.tolist()):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
@@ -199,7 +199,7 @@ def get_run_onnx(onnx_model: ModelProto):
           ends[i] = ends[i] + inp[0].shape[axis] if ends[i] < 0 else ends[i]
           starts[i] = max(0, min(starts[i], inp[0].shape[axis]))
           ends[i] = max(0, min(ends[i], inp[0].shape[axis]))
-          if starts[i] == ends[i]: 
+          if starts[i] == ends[i]: # ugly ass hack
             shrink_args[axis] = (starts[i], ends[i])
             shrink = True
           elif starts[i] > ends[i] and steps[i] >= 0:
@@ -207,11 +207,6 @@ def get_run_onnx(onnx_model: ModelProto):
             arg[axis] = (starts[i], ends[i], steps[i])
           else: 
             arg[axis] = (starts[i], ends[i], steps[i])
-        print(starts, ends, axes, steps)
-        print(arg)
-        print('lol')
-        print(shrink_args)
-        print(tuple([slice(st,ed,step) for st,ed,step in arg]))
         ret = inp[0].shrink(tuple(shrink_args)) if shrink else inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
       elif n.op_type == "Shrink":
         bias = opt['bias'] if 'bias' in opt else 0
@@ -236,7 +231,6 @@ def get_run_onnx(onnx_model: ModelProto):
         if debug: print(f"\t{n.output[i]} - {ret[i]}")
         if debug: print(f"{ret[i].numpy() if isinstance(ret[i], Tensor) else type(ret[i])}")
         intermediate_tensors[n.output[i]] = ret[i]
-      #print(ret[0].numpy().mean())
       if num == ONNXLIMIT:
         output_tensor_names = n.output
         break
