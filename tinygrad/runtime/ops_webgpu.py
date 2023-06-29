@@ -56,7 +56,7 @@ class WebGpuCodegen(Linearizer):
     def kk(s): kernel.append(" "*depth+s)
     bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(self.bufs)]
     depth += 1
-    gid = [f"gindex.{'xyz'[x]}" for x in range(3)],[]
+    gid = [f"gindex.{'xyz'[x]}" for x in range(3)]
     lid: List[str] = []
     pend_close = None
     for uop,newvar,vin,args in self.uops:
