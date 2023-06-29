@@ -6,9 +6,9 @@ from tinygrad.helpers import dtypes, DType
 from tinygrad.ops import Compiled, UnaryOps, Op, BinaryOps, ASTRunner, FusedOps
 from tinygrad.shape.symbolic import NumNode, Variable
 from tinygrad.codegen.cstyle import render_cl
+from typing import Dict, Callable, List
 import math
 import wgpu
-from typing import Dict, Callable
 
 device = get_default_device()
 
@@ -56,7 +56,8 @@ class WebGpuCodegen(Linearizer):
     def kk(s): kernel.append(" "*depth+s)
     bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(self.bufs)]
     depth += 1
-    gid,lid = [f"gindex.{'xyz'[x]}" for x in range(3)],[]
+    gid = [f"gindex.{'xyz'[x]}" for x in range(3)],[]
+    lid: List[str] = []
     pend_close = None
     for uop,newvar,vin,args in self.uops:
       if uop == UOps.LOOP:
@@ -107,6 +108,7 @@ class WebGpuCodegen(Linearizer):
           val = f"{type_map[self.bufs[args.i].dtype]}({val})"
         kk(f"{bufnames[args.i]}[{args.idx.render(render_cl)}] = {val};")
       elif uop == UOps.CONST:
+        assert newvar is not None
         kk(f"var {newvar.render()} = {self.float_const(args)};")
       elif uop == UOps.DEFINE_LOCAL: kk(f"var {args[0]} = array<f32,{args[1]}>();")
       elif uop == UOps.BARRIER: kk("workgroupBarrier();")
