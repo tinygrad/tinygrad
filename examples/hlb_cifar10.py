@@ -51,13 +51,15 @@ class SpeedyResNet:
 
 from tinygrad.jit import TinyJit
 @TinyJit
-def train_step_jitted(model, optimizer, X, Y):
+def train_step_jitted(model, optimizer, optimizer_bias, X, Y):
   out = model(X)
   loss = out.mul(Y).mean()
   if not getenv("DISABLE_BACKWARD"):
     optimizer.zero_grad()
+    optimizer_bias.zero_grad()
     loss.backward()
     optimizer.step()
+    optimizer_bias.step()
   return loss.realize()
 
 def fetch_batches(X_train, Y_train, BS, is_train=False):
@@ -103,10 +105,12 @@ def train_cifar():
       print(f"initted {k:40s} {str(model_state_dict[k].shape):20s} from torch mean:{old_mean_std[0]:8.5f} -> {new_mean_std[0]:8.5f} std:{old_mean_std[1]:8.5f} -> {new_mean_std[1]:8.5f}")
     exit(0)
 
-  if getenv("ADAM"):
-    optimizer = optim.Adam(optim.get_parameters(model), lr=Tensor([0.001]).realize())
-  else:
-    optimizer = optim.SGD(optim.get_parameters(model), lr=0.01, momentum=0.85, nesterov=True)
+  non_bias_params, bias_params = [], []
+  for name, param in optim.get_state_dict(model).items():
+    if 'bias' in name: bias_params.append(param)
+    else: non_bias_params.append(param)
+  optimizer = optim.SGD(non_bias_params, lr=0.01, momentum=0.85, nesterov=True, weight_decay=0.01)
+  optimizer_bias = optim.SGD(bias_params, lr=0.1, momentum=0.85, nesterov=True, weight_decay=0.003)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
@@ -138,7 +142,7 @@ def train_cifar():
     if STEPS == 0: break
     GlobalCounters.reset()
     st = time.monotonic()
-    loss = train_step_jitted(model, optimizer, X, Y)
+    loss = train_step_jitted(model, optimizer, optimizer_bias, X, Y)
     et = time.monotonic()
     loss_cpu = loss.numpy()
     cl = time.monotonic()
