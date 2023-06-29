@@ -627,24 +627,9 @@ class Tensor:
     assert target.shape == self.shape[:-1], f"target shape must match all except last self dimension {self.shape}, got {target.shape}"
     assert weight is None or weight.dtype in (dtypes.float32, dtypes.float64) or dtypes.is_int(weight.dtype), f"weight only supported for dtype float32 and float64 or ints, got {self.dtype}"
     assert weight is None or (len(weight.shape) == 1 and weight.shape[0] == self.shape[-1]), f"weight shape must match last self dimension {self.shape[-1]}, got {weight.shape}"
-    # label_valid = (Y >= 0).mul(Y < self.shape[-1]).add(Y == ignore_index).minimum(1).min().cast(dtypes.bool)
-    # assert label_valid == True, "Cross entropy label out of range or not 'ignore_index' value" # cant check without realizing tensor :(  
-    num_classes = self.shape[-1]
-    Y = target.onehot(num_classes)
-    assert Y.dtype == target.dtype
-    if weight is not None:
-      W = Tensor.eye(num_classes, dtype=weight.dtype) * weight
-      assert W.dtype == weight.dtype
-      Y = Y.matmul(W)
-      assert Y.dtype == W.dtype
-    ret = -1*self.mul(Y)
-    assert ret.dtype == self.dtype
-    if reduction == 'none': ret = ret.sum(-1)
-    elif reduction == 'mean': ret = ret.sum() / Y.sum() # if entire batch is ignored, this will return nan
-    elif reduction == 'sum': ret = ret.sum()
-    else: raise ValueError(f"Invalid reduction type: {reduction}")
-    assert ret.dtype == self.dtype
-    return ret
+    Y = target.onehot(self.shape[-1])
+    Y = Y if weight is None else Y.matmul(Tensor.eye(self.shape[-1], dtype=weight.dtype) * weight)
+    return {'none': -1*self.mul(Y).sum(-1), 'mean': -1*self.mul(Y).sum() / Y.sum(), 'sum': -1*self.mul(Y).sum()}[reduction]
 
   def cross_entropy(self, target:Tensor, weight:Optional[Tensor] = None, ignore_index=-100, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor:
     return self.log_softmax().negative_log_likelihood(target, weight=weight, ignore_index=ignore_index, reduction=reduction)
