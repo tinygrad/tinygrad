@@ -103,8 +103,8 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
   elif mode == "reflect":
     n_pads = [(n,pad) for n,pad in enumerate(pads_)][::-1]
-    for n, pad in n_pads: # TODO NOT SURE IF FOR LOOPING LIKE THIS IS A GOOD IDEA IN TINYGRAD, so find another way to do this?
-      if pad == (0,0): continue
+    for n, pad in n_pads: # TODO NOT SURE IF FOR LOOPING LIKE THIS IS A GOOD IDEA IN TINYGRAD, there are probably better way
+      if pad == (0,0): continue # BUG assert pad[0] != 0 and pad[1] != 0, might be bug when one of the pads == 0
       pad_begin, pad_end = pad
       begin_repeat_args = [(1) if i != n else math.ceil(pad_begin+1/x.shape[i]) for i in range(x.ndim)] 
       end_repeat_args = [(1) if i != n else math.ceil(pad_end+1/x.shape[i]) for i in range(x.ndim)] 
@@ -117,7 +117,7 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
   elif mode == "edge":
     n_pads = [(n,pad) for n,pad in enumerate(pads_)][::-1]
     for n, pad in n_pads: # TODO NOT SURE IF FOR LOOPING LIKE THIS IS A GOOD IDEA IN TINYGRAD, there are probably better ways
-      if pad == (0,0): continue
+      if pad == (0,0): continue # BUG assert pad[0] != 0 and pad[1] != 0, might be bug when one of the pads == 0
       pad_st, pad_ed = pad
       st_slice_arg = [(0,s) if dim != n else (0,1) for dim,s in enumerate(x.shape)]
       ed_slice_arg = [(0,s) if dim != n else (s-1, s) for dim,s in enumerate(x.shape)]
