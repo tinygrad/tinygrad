@@ -74,7 +74,7 @@ def _padding(X, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., stri
   if pads is None: return X
   np_pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
   zero_padded = X.pad(tuple(np_pads))
-  constant_padder = Tensor(np.pad(np.zeros(X.shape, dtype=np.float32), np_pads, constant_values=constant_value), dtype=X.dtype)
+  constant_padder = Tensor(np.pad(np.zeros(X.shape, dtype=np.float32), np_pads, constant_values=constant_value), dtype=X.dtype) # Should we avoid using np?
   return zero_padded + constant_padder
 
 def _auto_pad(X, auto_pad, strides, kernel_shape, dilations):
@@ -112,11 +112,20 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     '''
     pass
   elif mode == "edge":
-    '''
-    for i,pad in enumerate(pads_):
-      slice_arg = [(0,x) for x in base_shape]
-    '''
-    pass
+    print("edge")
+    n_pads = [(n,pad) for n,pad in enumerate(pads_)][::-1]
+    for n, pad in n_pads:
+      if pad == (0,0): continue
+      pad_st, pad_ed = pad
+      st_slice_arg = [(0,s) if dim != n else (0,1) for dim,s in enumerate(x.shape)]
+      ed_slice_arg = [(0,s) if dim != n else (s-1, s) for dim,s in enumerate(x.shape)]
+      st_repeat_arg = [(1) if i != n else (pad_st) for i in range(x.ndim)]
+      ed_repeat_arg = [(1) if i != n else (pad_ed) for i in range(x.ndim)]
+      pad_st = x.slice(st_slice_arg).repeat(st_repeat_arg)
+      pad_ed = x.slice(ed_slice_arg).repeat(ed_repeat_arg)
+      x = pad_st.cat(x, dim=n).cat(pad_ed, dim=n)
+    print(x.numpy())
+    return x
   elif mode == "constant":
     print(seq_pads)
     print(seq_axes)
@@ -403,10 +412,10 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
   bs,c,py,px = X.shape
   print(output_shape, "output shape")
   scales_lol = [os/xs for xs, os in zip(X.shape, output_shape)]
+  x_out = Tensor.arange(output_shape[-1])
+  y_out = Tensor.arange(output_shape[-2])
 
   if mode == "nearest":
-    x_out = Tensor.arange(output_shape[-1])
-    y_out = Tensor.arange(output_shape[-2])
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol)
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
     y_out = _nearest_mode(y_out, nearest_mode, X.shape[-1])
@@ -415,14 +424,16 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
     for y in y_out: # HACK wow this is bad but I see no other way cuz me stupid!
       stack_args.append(deepcopy(x_out) + y * X.shape[-1])
     indices_out = Tensor.stack(stack_args).flatten()
-    print("indices", indices_out.numpy())
     return _nearest_gather(X, indices_out, output_shape)
   elif mode == "linear":
-    x_out, y_out = _coordinate_transformation()
+    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol=scales)
+    X_flattened = X.flatten()
+    print(X_flattened.numpy())
     print(x_out.numpy())
     print(y_out.numpy())
     return
   elif mode == "cubic":
+    print("cubic")
     print(x_out.numpy())
     print(y_out.numpy())
     return 
