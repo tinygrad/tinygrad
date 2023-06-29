@@ -2,6 +2,8 @@
 import os
 import multiprocessing as mp
 
+from tinygrad.helpers import DEBUG
+
 # this needs to be called before everything else if you are using multidevice
 def preinit():
   os.environ["DELAYED_RUNTIME_INIT"] = "1" # TODO: this is kinda cursed, find a way to do this without env vars
@@ -35,7 +37,7 @@ def _process_wrap(rank, world_size, device, oob, fn, args=()):
   if "GPU" in device:
     from tinygrad.runtime.ops_gpu import CL
     CL.post_init(device_num)
-  print(f"DDPProcess {rank} initialized runtime for device {device}")
+  if DEBUG >= 1: print(f"DDPProcess {rank} initialized runtime for device {device}")
 
   fn(rank, world_size, device, *args)
 
