@@ -623,12 +623,11 @@ class Tensor:
     return self.reshape(list(self.shape)+[1]).repeat([1]*len(self.shape)+[num_classes]).eq(Tensor.arange(num_classes, dtype=self.dtype)) # could cast to smaller type, currently just same as self
   
   def negative_log_likelihood(self, target:Tensor, weight:Optional[Tensor] = None, ignore_index=-100, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor: 
-    assert self.dtype in (dtypes.float32, dtypes.float64), f"applying negative_log_likelihood only supported for dtype float32 and float64, got {self.dtype}" # float16 multiplications with int32 and int64 results in int dtype, not float
+    assert dtypes.is_float(self.dtype) and self.dtype.priority >= target.dtype.priority and (weight is None or self.dtype.priority >= weight.dtype.priority), f"input types would not result in valid result or same dtype as self, got self:{self.dtype}, target:{target.dtype}, weight:{weight.dtype}"
     assert target.shape == self.shape[:-1], f"target shape must match all except last self dimension {self.shape}, got {target.shape}"
-    assert weight is None or weight.dtype in (dtypes.float32, dtypes.float64) or dtypes.is_int(weight.dtype), f"weight only supported for dtype float32 and float64 or ints, got {self.dtype}"
     assert weight is None or (len(weight.shape) == 1 and weight.shape[0] == self.shape[-1]), f"weight shape must match last self dimension {self.shape[-1]}, got {weight.shape}"
     Y = target.onehot(self.shape[-1])
-    Y = Y if weight is None else Y.matmul(Tensor.eye(self.shape[-1], dtype=weight.dtype) * weight)
+    Y = Y if weight is None else Y.matmul(Tensor.eye(self.shape[-1], dtype=weight.dtype) * weight) # add weighting
     return {'none': -1*self.mul(Y).sum(-1), 'mean': -1*self.mul(Y).sum() / Y.sum(), 'sum': -1*self.mul(Y).sum()}[reduction]
 
   def cross_entropy(self, target:Tensor, weight:Optional[Tensor] = None, ignore_index=-100, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor:
