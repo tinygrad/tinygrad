@@ -38,6 +38,8 @@ code_for_op: Dict[Op, Callable] = {
   FusedOps.MULACC: lambda x,y,z: f"(({x}*{y})+{z})",
 }
 
+def upcast_type(types) -> str: return type_map[max([x.dtype for x in types])] 
+
 class WebGpuCodegen(Linearizer):
   supports_float4 = False
   supports_constant_folding = True
@@ -97,8 +99,9 @@ class WebGpuCodegen(Linearizer):
         else: kk(f"var {newvar.render()} = select(0.0f, {val}, bool({args.valid.render(render_cl)}));")
       elif uop == UOps.ALU:
         assert newvar is not None
-        if newvar in vin: kk(f"{newvar.render()} = {code_for_op[args](*[x.render() for x in vin])};")
-        else: kk(f"let {newvar.render()} = {code_for_op[args](*[x.render() for x in vin])};")
+        vars = [f"{upcast_type(vin)}({x.render()})" for x in vin] if any([x.dtype != vin[0].dtype for x in vin]) else [x.render() for x in vin]
+        if newvar in vin: kk(f"{newvar.render()} = {code_for_op[args](*vars)};")
+        else: kk(f"let {newvar.render()} = {code_for_op[args](*vars)};")
       elif uop == UOps.STORE:
         val = vin[0].render()
         if vin[0].dtype != self.bufs[args.i].dtype:

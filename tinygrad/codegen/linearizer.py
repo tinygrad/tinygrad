@@ -168,7 +168,7 @@ class Linearizer:
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == amt]
 
-  def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
+  def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
     upcast_dim = self.get_upcast_dim(i)
     cache: Dict[str, Token] = {}
     ret = []
@@ -179,10 +179,10 @@ class Linearizer:
         # disallow unaligned access, fall back to float
         if idx.render() != ((idx//4)*4).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
-          localtype = dtypes.float
+          localtype = self.bufs[i].dtype
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
-        localtype = dtypes.float
+        localtype = self.bufs[i].dtype
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
