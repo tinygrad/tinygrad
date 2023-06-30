@@ -12,8 +12,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.ops import GlobalCounters
 
-Tensor.manual_seed(getenv('SEED', 6)) # Deterministic
-np.random.seed(getenv('SEED', 6))
+def set_seed(seed):
+  Tensor.manual_seed(getenv('SEED', seed)) # Deterministic
+  np.random.seed(getenv('SEED', seed))
 
 num_classes = 10
 
@@ -52,19 +53,6 @@ class SpeedyResNet:
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
   def __call__(self, x): return x.sequential(self.net).log_softmax()
 
-from tinygrad.jit import TinyJit
-@TinyJit
-def train_step_jitted(model, optimizer, optimizer_bias, X, Y):
-  out = model(X)
-  loss = out.mul(Y).mean()
-  if not getenv("DISABLE_BACKWARD"):
-    optimizer.zero_grad()
-    optimizer_bias.zero_grad()
-    loss.backward()
-    optimizer.step()
-    optimizer_bias.step()
-  return loss.realize()
-
 def fetch_batches(X_train, Y_train, BS, is_train=False):
   if not is_train:
     ind = np.arange(Y_train.shape[0])
@@ -81,11 +69,36 @@ def fetch_batches(X_train, Y_train, BS, is_train=False):
     if not is_train:
       break
 
-def train_cifar(bs=256, eval_bs=250, steps=2000, lr=0.01, momentum=0.85, wd=0.01, lr_bias=0.1, momentum_bias=0.85, wd_bias=0.003):
+class SGDOneCycle(optim.SGD):
+  def __init__(self, params, max_lr, initial_div_factor, final_div_factor, total_steps, pct_start, momentum=0, weight_decay=0.0, nesterov=False,):
+    self.initial_lr = Tensor([max_lr / initial_div_factor])
+    self.max_lr = Tensor([max_lr])
+    self.min_lr = self.initial_lr/final_div_factor
+    super().__init__(params, self.initial_lr, momentum, weight_decay, nesterov)
+    self.total_steps = total_steps
+    self.pct_start = pct_start
+    self.step_count = 0
+
+  @staticmethod
+  def _annealing_linear(start, end, pct): return (end - start) * pct + start
+
+  def step(self) -> None:
+    self.lr.realize()
+    super().step()
+    self.lr = self._annealing_linear(self.initial_lr, self.max_lr, self.step_count/(self.total_steps*self.pct_start)) \
+      if self.step_count < self.total_steps*self.pct_start else \
+      self._annealing_linear(self.max_lr, self.min_lr, (self.step_count-(self.total_steps*self.pct_start))/(self.total_steps*(1-self.pct_start)))
+    self.lr.realize()
+    self.step_count += 1
+
+def train_cifar(bs=256, eval_bs=250, steps=2000, div_factor=1e16, final_lr_ratio=0.07, max_lr=0.005, pct_start=0.25, momentum=0.85, wd=0.17, bias_factor=28, seed=6):
+  set_seed(seed)
   Tensor.training = True
+
   BS, EVAL_BS, STEPS = getenv("BS", bs), getenv('EVAL_BS', eval_bs), getenv("STEPS", steps)
-  LR, MOMENTUM, WD = getenv("LR", lr), getenv('MOMENTUM', momentum), getenv("WD", wd)
-  LR_BIAS, MOMENTUM_BIAS, WD_BIAS = getenv("LR_BIAS", lr_bias), getenv('MOMENTUM_BIAS', momentum_bias), getenv("WD_BIAS", wd_bias)
+  MAX_LR, PCT_START, MOMENTUM, WD = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start), getenv('MOMENTUM', momentum), getenv("WD", wd)
+  BIAS_FACTOR, DIV_FACTOR = getenv('BIAS_FACTOR', bias_factor), getenv('DIV_FACTOR', div_factor)
+  FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio))
 
   if getenv("FAKEDATA"):
     N = 2048
@@ -115,8 +128,27 @@ def train_cifar(bs=256, eval_bs=250, steps=2000, lr=0.01, momentum=0.85, wd=0.01
   for name, param in optim.get_state_dict(model).items():
     if 'bias' in name: bias_params.append(param)
     else: non_bias_params.append(param)
-  optimizer = optim.SGD(non_bias_params, lr=LR, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
-  optimizer_bias = optim.SGD(bias_params, lr=LR_BIAS, momentum=MOMENTUM_BIAS, nesterov=True, weight_decay=WD_BIAS)
+
+  optimizer = SGDOneCycle(non_bias_params, max_lr=MAX_LR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR,
+                          total_steps=STEPS, pct_start=PCT_START, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  optimizer_bias = SGDOneCycle(bias_params, max_lr=MAX_LR*BIAS_FACTOR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR,
+                          total_steps=STEPS, pct_start=PCT_START, momentum=MOMENTUM, nesterov=True, weight_decay=WD/BIAS_FACTOR)
+
+
+  # JIT at every run
+  from tinygrad.jit import TinyJit
+  @TinyJit
+  def train_step_jitted(model, optimizer, optimizer_bias, X, Y):
+    out = model(X)
+    loss = out.mul(Y).mean()
+    if not getenv("DISABLE_BACKWARD"):
+      optimizer.zero_grad()
+      optimizer_bias.zero_grad()
+      loss.backward()
+      for param in optimizer.params: param.grad.realize() # HACK: partial JIT of optimizer.step
+      for param in optimizer_bias.params: param.grad.realize() # HACK: partial JIT of optimizer_bias.step
+
+    return loss.realize()
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
@@ -130,7 +162,7 @@ def train_cifar(bs=256, eval_bs=250, steps=2000, lr=0.01, momentum=0.85, wd=0.01
   i = 0
   for X, Y in fetch_batches(X_train, Y_train, BS=BS, is_train=True):
     if i > STEPS: break
-    if i%20 == 0 and STEPS != 1:
+    if i%20 == 0 and i > 1:
       # use training batchnorm (and no_grad would change the kernels)
       corrects = []
       losses = []
@@ -150,12 +182,12 @@ def train_cifar(bs=256, eval_bs=250, steps=2000, lr=0.01, momentum=0.85, wd=0.01
     st = time.monotonic()
     loss = train_step_jitted(model, optimizer, optimizer_bias, X, Y)
     et = time.monotonic()
+    optimizer.step() # JIT does not work with LR scheduling 
+    optimizer_bias.step()
     loss_cpu = loss.numpy()
     cl = time.monotonic()
-    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy().tolist()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
-  #train(model, X, Y, optimizer, steps=X.shape[0]//BS, BS=BS)
-  #evaluate(model, X_test, Y_test)
 
 if __name__ == "__main__":
   train_cifar()
