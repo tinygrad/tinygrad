@@ -55,22 +55,31 @@ canvas {
 <h1>WebGPU <a href="https://github.com/geohot/tinygrad">tinygrad</a> EfficientNet!</h1>
 <div id="mybox">
 <input type="text" id="url" placeholder="put url here" value="https://upload.wikimedia.org/wikipedia/commons/d/da/Norwegian_hen.jpg">
-<input class="bigg" type="button" onclick="run_net_w_resource(document.getElementById('url').value)" value="Use URL">
+<input class="bigg" type="button" onclick="runNetWResource(document.getElementById('url').value)" value="Use URL">
 </div>
 <br/>
 <img id="imagebox"></img>
 <canvas id="canvas" width="200" height="200"> </canvas>
 <div id="result">result will go here</div>
 <script>
+	const ctx = document.getElementById("canvas").getContext("2d");
+	const resultText = document.getElementById('result');
+	let labels, net;
+
 	const getDevice = async () => {
 		if (!navigator.gpu) throw Error("WebGPU not supported.");
 		const adapter = await navigator.gpu.requestAdapter();
 		return await adapter.requestDevice();
 	};
 
-	const getLabels = async () => {
-		return (await fetch("https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json")).json()
+	const error = (err) => {
+		resultText.innerHTML = `Error: ${err}`;
+		throw new Error(err);
 	}
+
+	const getLabels = async () => (await fetch("https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json")).json();
+
+	const getSavetensorBuffer = async () => new Uint8Array(await (await fetch("./net.safetensors")).arrayBuffer());
 
 	const reorderChannelsAndRemoveAlpha = (data) => {
 		const out = [];
@@ -84,22 +93,11 @@ canvas {
 		return out;
 	};
 
-	const ctx = document.getElementById("canvas").getContext("2d");
-	const resultText = document.getElementById('result');
-
-	const  run_net_w_resource = async (resource) => {
+	const  runNetWResource = async (resource) => {
 		resultText.innerHTML = "pending..."
-		if (resource == "") {
-			const err = "sir. please type in a URL"
-			alert(err)
-			throw new Error(err)
-		}
+		if (resource == "") error("sir. please type in a URL");
 		const response = await fetch(resource)
-		if (!response.ok) {
-			const err = "sir. that is not a good URL. try a new one"
-			alert(err)
-			throw new Error(err)
-		}
+		if (!response.ok) error("sir. that is not a good URL. try a new one");
 		document.getElementById("imagebox").src = resource
 		
 		const img = new Image();
@@ -108,19 +106,26 @@ canvas {
 			URL.revokeObjectURL(img.src);
 			ctx.drawImage(img, 0, 0, 224, 224);
 			const data = ctx.getImageData(0, 0, 224, 224).data;
-			run_net(data);
+			setTimeout(() => runNet(data), 0);
 		};
 		img.src = resource;
 	}
 
-	const run_net = async (data) => {
-		const labels = await getLabels();
+	const loadLet = async () => {
+		labels = await getLabels();
+		const safetensor = await getSavetensorBuffer();
 		const device = await getDevice();
+		console.time("Compilation Time");
+		net = setupNet(device, safetensor);
+		console.timeEnd("Compilation Time");
+	}
 
+	const runNet = async (data) => {
+		if (!net) error("Net not loaded yet.");
 		const input = reorderChannelsAndRemoveAlpha(Array.from(data).map((pix) => (pix / 255.0) * 0.45 - 0.225));
 
 		console.time("Execution Time");
-		const out = await net(device, new Float32Array(input));
+		const out = await net(new Float32Array(input));
 		console.timeEnd("Execution Time");
 
 		const arr = Array.from(new Float32Array(out));
@@ -128,6 +133,8 @@ canvas {
 
 		resultText.textContent = labels[index];
 	};
+
+	loadLet();
 </script>
 </body>
 </html>

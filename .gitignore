@@ -31,4 +31,5 @@ extra/datasets/kits/
 extra/datasets/COCO/
 extra/datasets/audio*
 venv
-net.js
+examples/webgpu/net.js
+examples/webgpu/net.safetensors

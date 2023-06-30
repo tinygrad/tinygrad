@@ -1,25 +1,40 @@
 from os import path
-from examples.compile_efficientnet import compile_net, jit_efficientnet
+from examples.compile_efficientnet import compile_net, jit_model
+from models.efficientnet import EfficientNet
+from tinygrad.state import get_state_dict, safe_save
+from tinygrad.tensor import Tensor
 
 if __name__ == "__main__":
-  run, special_names = jit_efficientnet()
-  functions, statements, bufs, bufs_to_save = compile_net(run, special_names, lambda name, cargs, global_size: {'kernel': name, 'args': cargs, 'global_size': global_size})
+  model = EfficientNet(0)
+  model.load_from_pretrained()
+  run, special_names = jit_model(model, Tensor.randn(1,3,224,224))
+  functions, statements, bufs, _bufs_to_save = compile_net(run, special_names, lambda name, cargs, global_size: {'kernel': name, 'args': cargs, 'global_size': global_size})
+  
+  state = get_state_dict(model)
+  weights = {id(x.lazydata.realized): name for name, x in state.items()}
+  safe_save(state, path.join(path.dirname(__file__), "net.safetensors"))
 
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
-  weight_values = '\n'.join([f'const data_{key} = "' + (''.join(["\\x%02X"%x for x in buf.toCPU().tobytes()])) + '";' for key, buf in bufs_to_save.items() ])
-  kernel_calls = '\n  '.join([f"addComputePass(device, commandEncoder, {statement['kernel']}, [{', '.join(statement['args'])}], {statement['global_size']});" for statement in statements ])
-  bufs =  '\n  '.join([f"const {buf[0]} = createEmptyBuf(device, {buf[1]});" if buf[0] not in bufs_to_save and buf[0] != 'input' else f"const {buf[0]} = createWeightBuf(device, {buf[1]}, {'inputData' if buf[0] == 'input' else f'str2buf(data_{buf[0]})'});" for buf in bufs.values() ])
+  kernel_calls = '\n    '.join([f"addComputePass(device, commandEncoder, {statement['kernel']}, [{', '.join(statement['args'])}], {statement['global_size']});" for statement in statements ])
+  bufs =  '\n    '.join([f"const {buf[0]} = " + (f"createEmptyBuf(device, {buf[1]});" if buf[2] not in weights else f"createWeightBuf(device, {buf[1]}, getTensorBuffer(safetensor, metadata['{weights[buf[2]]}']))") + ";"  for buf in bufs.values()])
 
-  prg = f"""
-const str2buf = (str) => new Float32Array(Uint8Array.from(str, c => c.charCodeAt(0)).buffer);
-
-const createEmptyBuf = (device, size) => {{
-    return device.createBuffer({{size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }});
+  prg = f"""const getTensorMetadata = (safetensorBuffer) => {{
+  const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
+  const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
+  return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
 }};
 
-const createWeightBuf = (device, size, dataBuf) => {{
+const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {{
+  return safetensorBuffer.subarray(...tensorMetadata.data_offsets);
+}}
+  
+const createEmptyBuf = (device, size) => {{
+    return device.createBuffer({{size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }});
+}};
+
+const createWeightBuf = (device, size, data) => {{
   const buf = device.createBuffer({{ mappedAtCreation: true, size, usage: GPUBufferUsage.STORAGE }});
-  new Float32Array(buf.getMappedRange()).set(dataBuf);
+  new Uint8Array(buf.getMappedRange()).set(data);
   buf.unmap();
   return buf;
 }};
@@ -35,24 +50,31 @@ const addComputePass = (device, commandEncoder, code, bufs, workgroup) => {{
 }};
 
 {kernel_code}
-
-{weight_values}
       
-const net = async (device, inputData) => {{
-    const commandEncoder = device.createCommandEncoder();
+const setupNet = (device, safetensor) => {{
+    const metadata = getTensorMetadata(safetensor);
 
     {bufs}
 
-    {kernel_calls}
-
+    const gpuWriteBuffer = device.createBuffer({{size:input.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});
     const gpuReadBuffer = device.createBuffer({{ size: outputs.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }});
-    
+
+    const commandEncoder = device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(gpuWriteBuffer, 0, input, 0, gpuWriteBuffer.size);
+    {kernel_calls}
     commandEncoder.copyBufferToBuffer(outputs, 0, gpuReadBuffer, 0, outputs.size);
     const gpuCommands = commandEncoder.finish();
-    device.queue.submit([gpuCommands]);
 
-    await gpuReadBuffer.mapAsync(GPUMapMode.READ);
-    return gpuReadBuffer.getMappedRange();
+    return async (data) => {{
+        await gpuWriteBuffer.mapAsync(GPUMapMode.WRITE);
+        new Float32Array(gpuWriteBuffer.getMappedRange()).set(data);
+        gpuWriteBuffer.unmap();
+
+        device.queue.submit([gpuCommands]);
+
+        await gpuReadBuffer.mapAsync(GPUMapMode.READ);
+        return gpuReadBuffer.getMappedRange();
+    }}
 }}
 """
 
