@@ -96,9 +96,9 @@ def train_cifar():
   # non_bias_lr = 1.64 / 512
   # momentum = .85
   # weight_decay = 1.08 * 6.45e-4 * batchsize
-  optimizer = optim.SGD(model.parameters(), lr=1.75/512, momentum=0.85, nesterov=True, weight_decay=1.08 * 6.45e-4 * BS)
+  optimizer = optim.SGD(model.parameters(), lr=1.75/BS, momentum=0.85, nesterov=True, weight_decay=1.08 * 6.45e-4 * BS)
   initial_div_factor, final_lr_ratio = 1e16, .07
-  lr_sched = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=1.64/512, pct_start=.25, 
+  lr_sched = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=1.75/BS, pct_start=.25, 
                                                 div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), 
                                                 total_steps=STEPS, anneal_strategy='linear', cycle_momentum=False)
   X, Y = fetch_batch(X_train, Y_train, BS=BS)
