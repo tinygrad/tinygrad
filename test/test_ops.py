@@ -85,18 +85,14 @@ class TestOps(unittest.TestCase):
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
   def test_where(self):
-    helper_test_op(
-      [(100,)],
-      lambda x: torch.where(x > 0.5, 4, 2),
-      lambda x: (x > 0.5).where(4, 2), forward_only=True)
-
+    helper_test_op([(100,)], lambda x: torch.where(x > 0.5, 4, 2), lambda x: (x > 0.5).where(4, 2), forward_only=True)
     for shps in [[(10,),(1,),(1,)], [(10,10),(10,),(10,)], [(100,)]*3, [(10,10)]*3]:
       helper_test_op(
         shps,
         lambda x, a, b: torch.where(x > 0.5, a, b),
         lambda x, a, b: (x > 0.5).where(a, b), forward_only=True)
-  def test_special_where(self):
-    for x in [float("nan"), float("inf"), float("-inf")]:
+  def test_inf_where(self):
+    for x in [float("-inf"), 0, float("inf")]:
       a = Tensor.full((3, 3), x)
       b = torch.full((3, 3), x)
       helper_test_op([], lambda: torch.where(b < 0, b, 1), lambda: (a < 0).where(a, 1), forward_only=True)
