@@ -41,7 +41,12 @@ class ARMCodegen(AssemblyCodegen):
         ins.append(f"str x1, {reg_map[out.nm]}")
       elif uop == UOps.ALU:
         if arg == FusedOps.MULACC and out == vin[2]:
-          ins.append(f"{alu[arg]} {reg_map[out.nm]}, {reg_map[vin[0].nm]}, {reg_map[vin[1].nm]}, {reg_map[vin[2].nm]}")
+          ins.append(f"ldr s0, {reg_map[vin[0].nm]}")
+          ins.append(f"ldr s1, {reg_map[vin[1].nm]}")
+          ins.append(f"ldr s2, {reg_map[vin[2].nm]}")
+          ins.append(f"{alu[arg]} s0, s0, s1, s2")
+          ins.append(f"str s0, {reg_map[out.nm]}")
+#          ins.append(f"{alu[arg]} {reg_map[out.nm]}, {reg_map[vin[0].nm]}, {reg_map[vin[1].nm]}, {reg_map[vin[2].nm]}")
         elif dtypes.is_float(out.dtype):
           if arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2]:
             ins.append(f"stp x29, x30, [sp, #0]!")
