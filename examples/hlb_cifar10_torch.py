@@ -77,6 +77,7 @@ def fetch_batch(X_train, Y_train, BS):
 
 def train_cifar():
   BS = getenv("BS", 512)
+  STEPS = getenv("STEPS", 10)
   if getenv("FAKEDATA"):
     N = 2048
     X_train = np.random.default_rng().standard_normal(size=(N, 3, 32, 32), dtype=np.float32)
@@ -90,9 +91,18 @@ def train_cifar():
 
   model = SpeedyResNet().to(device)
   model.train()
-  optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.85, nesterov=True)
+  #optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.85, nesterov=True)
+  # what was used in https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
+  # non_bias_lr = 1.64 / 512
+  # momentum = .85
+  # weight_decay = 1.08 * 6.45e-4 * batchsize
+  optimizer = optim.SGD(model.parameters(), lr=1.75/512, momentum=0.85, nesterov=True, weight_decay=1.08 * 6.45e-4 * BS)
+  initial_div_factor, final_lr_ratio = 1e16, .07
+  lr_sched = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=1.64/512, pct_start=.25, 
+                                                div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), 
+                                                total_steps=STEPS, anneal_strategy='linear', cycle_momentum=False)
   X, Y = fetch_batch(X_train, Y_train, BS=BS)
-  for i in range(getenv("STEPS", 10)):
+  for i in range(STEPS):
     #for param_group in optimizer.param_groups: print(param_group['lr'])
     if i%10 == 0:
       # use training batchnorm (and no_grad would change the kernels)
@@ -104,6 +114,7 @@ def train_cifar():
     st = time.monotonic()
     loss, correct = train_step_jitted(model, optimizer, X, Y)
     et = time.monotonic()
+    lr_sched.step()
     X, Y = fetch_batch(X_train, Y_train, BS=BS)  # do this here
     loss_cpu = loss.detach().cpu().item()
     correct = correct.cpu().numpy()
