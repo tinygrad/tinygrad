@@ -91,7 +91,7 @@ class SGDOneCycle(optim.SGD):
     self.lr.realize()
     self.step_count += 1
 
-def train_cifar(bs=256, eval_bs=250, steps=2000, div_factor=1e16, final_lr_ratio=0.07, max_lr=0.005, pct_start=0.25, momentum=0.85, wd=0.17, bias_factor=28, seed=6):
+def train_cifar(bs=512, eval_bs=1000, steps=1000, div_factor=1e16, final_lr_ratio=0.07, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.17, bias_factor=1, seed=6):
   set_seed(seed)
   Tensor.training = True
 
