@@ -86,16 +86,16 @@ class dtypes:
   @staticmethod
   def is_signed_int(x)-> bool: return x in (dtypes.int8, dtypes.uint16, dtypes.int32, dtypes.int64)
   @staticmethod
-  def is_float(x) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes.float64, dtypes._float4)
-  @staticmethod
   def is_unsigned_int(x) -> bool: return x in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
   def is_int(x) -> bool: return dtypes.is_signed_int(x) or dtypes.is_unsigned_int(x)
+  @staticmethod
+  def is_float(x) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes.float64, dtypes._float4)
   bool: Final[DType] = DType(0, 1, "bool", bool)
   int8: Final[DType] = DType(1, 1, "char", np.int8)
   uint8: Final[DType] = DType(2, 1, "uchar", np.uint8)
-  int16: Final[DType] = DType(3, 2, "int16", np.int16)
-  uint16: Final[DType] = DType(4, 2, "uint16", np.uint16)
+  int16: Final[DType] = DType(3, 2, "short", np.int16)
+  uint16: Final[DType] = DType(4, 2, "ushort", np.uint16)
   float16: Final[DType] = DType(5, 2, "half", np.float16)
   int32: Final[DType] = DType(6, 4, "int", np.int32)
   uint32: Final[DType] = DType(7, 4, "uint", np.uint32)
