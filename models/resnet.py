@@ -27,14 +27,15 @@ class BasicBlock:
 
 
 class Bottleneck:
-  # NOTE: the original implementation places stride at the first convolution (self.conv1), this is the v1.5 variant
+  # NOTE: stride_in_1x1=False, this is the v1.5 variant
   expansion = 4
 
-  def __init__(self, in_planes, planes, stride=1, groups=1, base_width=64):
+  def __init__(self, in_planes, planes, stride=1, stride_in_1x1=False, groups=1, base_width=64):
     width = int(planes * (base_width / 64.0)) * groups
-    self.conv1 = nn.Conv2d(in_planes, width, kernel_size=1, bias=False)
+    # NOTE: the original implementation places stride at the first convolution (self.conv1), control with stride_in_1x1
+    self.conv1 = nn.Conv2d(in_planes, width, kernel_size=1, stride=stride if stride_in_1x1 else 1, bias=False)
     self.bn1 = nn.BatchNorm2d(width)
-    self.conv2 = nn.Conv2d(width, width, kernel_size=3, padding=1, stride=stride, groups=groups, bias=False)
+    self.conv2 = nn.Conv2d(width, width, kernel_size=3, padding=1, stride=1 if stride_in_1x1 else stride, groups=groups, bias=False)
     self.bn2 = nn.BatchNorm2d(width)
     self.conv3 = nn.Conv2d(width, self.expansion*planes, kernel_size=1, bias=False)
     self.bn3 = nn.BatchNorm2d(self.expansion*planes)
@@ -54,9 +55,8 @@ class Bottleneck:
     return out
 
 class ResNet:
-  def __init__(self, num, num_classes, groups=1, width_per_group=64):
+  def __init__(self, num, num_classes=None, groups=1, width_per_group=64, stride_in_1x1=False):
     self.num = num
-
     self.block = {
       18: BasicBlock,
       34: BasicBlock,
@@ -79,30 +79,41 @@ class ResNet:
     self.base_width = width_per_group
     self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, bias=False, padding=3)
     self.bn1 = nn.BatchNorm2d(64)
-    self.layer1 = self._make_layer(self.block, 64, self.num_blocks[0], stride=1)
-    self.layer2 = self._make_layer(self.block, 128, self.num_blocks[1], stride=2)
-    self.layer3 = self._make_layer(self.block, 256, self.num_blocks[2], stride=2)
-    self.layer4 = self._make_layer(self.block, 512, self.num_blocks[3], stride=2)
-    self.fc = nn.Linear(512 * self.block.expansion, num_classes)
+    self.layer1 = self._make_layer(self.block, 64, self.num_blocks[0], stride=1, stride_in_1x1=stride_in_1x1)
+    self.layer2 = self._make_layer(self.block, 128, self.num_blocks[1], stride=2, stride_in_1x1=stride_in_1x1)
+    self.layer3 = self._make_layer(self.block, 256, self.num_blocks[2], stride=2, stride_in_1x1=stride_in_1x1)
+    self.layer4 = self._make_layer(self.block, 512, self.num_blocks[3], stride=2, stride_in_1x1=stride_in_1x1)
+    self.fc = nn.Linear(512 * self.block.expansion, num_classes) if num_classes is not None else None
 
-  def _make_layer(self, block, planes, num_blocks, stride):
+  def _make_layer(self, block, planes, num_blocks, stride, stride_in_1x1):
     strides = [stride] + [1] * (num_blocks-1)
     layers = []
     for stride in strides:
-      layers.append(block(self.in_planes, planes, stride, self.groups, self.base_width))
+      if block == Bottleneck:
+        layers.append(block(self.in_planes, planes, stride, stride_in_1x1, self.groups, self.base_width))
+      else:
+        layers.append(block(self.in_planes, planes, stride, self.groups, self.base_width))
       self.in_planes = planes * block.expansion
     return layers
 
   def forward(self, x):
+    is_feature_only = self.fc is None
+    if is_feature_only: features = []
     out = self.bn1(self.conv1(x)).relu()
     out = out.pad2d([1,1,1,1]).max_pool2d((3,3), 2)
     out = out.sequential(self.layer1)
+    if is_feature_only: features.append(out)
     out = out.sequential(self.layer2)
+    if is_feature_only: features.append(out)
     out = out.sequential(self.layer3)
+    if is_feature_only: features.append(out)
     out = out.sequential(self.layer4)
-    out = out.mean([2,3])
-    out = self.fc(out).log_softmax()
-    return out
+    if is_feature_only: features.append(out)
+    if not is_feature_only:
+      out = out.mean([2,3])
+      out = self.fc(out).log_softmax()
+      return out
+    return features
 
   def __call__(self, x):
     return self.forward(x)

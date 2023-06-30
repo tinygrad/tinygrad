@@ -25,10 +25,8 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
   return np.stack([np.cos(freqs), np.sin(freqs)], axis=-1).reshape(1, end, 1, dim//2, 2)
 
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
-def complex_mult(A, B):
-  assert len(A.shape) == 5 and len(B.shape) == 5
+def complex_mult(A, c, d):
   a,b = A[:, :, :, :, 0:1], A[:, :, :, :, 1:2]
-  c,d = B[:, :, :, :, 0:1], B[:, :, :, :, 1:2]
   ro = a*c - b*d
   co = a*d + b*c
   return ro.cat(co, dim=-1)
@@ -37,8 +35,10 @@ def apply_rotary_emb(xq, xk, freqs_cis) -> Tuple[Tensor, Tensor]:
   assert freqs_cis.shape[1] == xq.shape[1] and freqs_cis.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
   xq = xq.reshape(*xq.shape[0:-1], -1, 2)
   xk = xk.reshape(*xk.shape[0:-1], -1, 2)
-  xq_out = complex_mult(xq, freqs_cis)
-  xk_out = complex_mult(xk, freqs_cis)
+  assert len(xq.shape) == 5 and len(xk.shape) == 5 and len(freqs_cis.shape) == 5
+  c, d = freqs_cis[:, :xq.shape[1], :, :, 0:1], freqs_cis[:, :xq.shape[1], :, :, 1:2]
+  xq_out = complex_mult(xq, c, d)
+  xk_out = complex_mult(xk, c, d)
   return xq_out.flatten(3), xk_out.flatten(3)
 
 class RMSNorm:

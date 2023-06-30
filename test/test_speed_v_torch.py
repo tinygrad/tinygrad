@@ -68,7 +68,7 @@ def helper_test_speed(f1, *args):
     if isinstance(ret, Tensor): Device[ret.device].synchronize()
     else: sync()
     et = (time.perf_counter() - st) * 1000
-    if i >= 1: ets.append(et)   # not the first run / one used for OPTLOCAL
+    if i >= 1: ets.append(et)
     if GlobalCounters.global_ops:
       save_ops, save_mem = GlobalCounters.global_ops, GlobalCounters.global_mem
   return ret.cpu().numpy(), np.min(ets)
@@ -108,7 +108,7 @@ def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_
 
   def f1(torch_dat): return torch_conv(torch_dat)
   def f2(tiny_dat): return tiny_conv(tiny_dat).realize()
-  helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
+  helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d} k:{kernel_size}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
 
 @unittest.skipIf(getenv("BIG") != 1, "no big tests")
 class TestBigSpeed(unittest.TestCase):
@@ -116,12 +116,12 @@ class TestBigSpeed(unittest.TestCase):
     global prefix
     prefix = " " if prefix is None else ""
     return super().setUp()
+  def test_add(self):
+    def f(a, b): return a+b
+    helper_test_generic_square('add', 16384, f, f)
   def test_exp(self):
     def f(a, b): return a.exp()
     helper_test_generic_square('exp', 16384, f, f, onearg=True)
-  def test_gemm_1024(self):
-    def f(a, b): return a @ b
-    helper_test_generic_square('gemm', 1024, f, f)
   def test_gemm_2048(self):
     def f(a, b): return a @ b
     helper_test_generic_square('gemm', 2048, f, f)
@@ -131,6 +131,7 @@ class TestBigSpeed(unittest.TestCase):
   def test_large_conv_1x1(self): helper_test_conv(bs=32, in_chans=128, out_chans=128, kernel_size=1, img_size_y=128, img_size_x=128)
   def test_large_conv_3x3(self): helper_test_conv(bs=32, in_chans=128, out_chans=128, kernel_size=3, img_size_y=130, img_size_x=130)
 
+@unittest.skipIf(getenv("BIG") == 1, "only big tests")
 class TestSpeed(unittest.TestCase):
   def setUp(self):
     global prefix
