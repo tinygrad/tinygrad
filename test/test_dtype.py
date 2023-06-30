@@ -100,7 +100,7 @@ class TestInt8Dtype(unittest.TestCase):
 
 class TestInt16Dtype(unittest.TestCase):
   def test_int16_to_np(self): _test_to_np(Tensor([1,2,3,4], dtype=dtypes.int16), np.int16, [1,2,3,4])
-  def test_uint16_to_float(self): _test_cast(Tensor([1,2,3,4], dtype=dtypes.uint16), dtypes.float32, [1,2,3,4])
+  def test_int16_to_float(self): _test_cast(Tensor([1,2,3,4], dtype=dtypes.int16), dtypes.float32, [1,2,3,4])
 
   def test_int16_add(self): _test_add(Tensor([1,2,3,4], dtype=dtypes.int16), Tensor([1,2,3,4], dtype=dtypes.int16), dtypes.int16, [2,4,6,8])
   def test_int16_mul(self): _test_mul(Tensor([1,2,3,4], dtype=dtypes.int16), Tensor([1,2,3,4], dtype=dtypes.int16), dtypes.int16, [1,4,9,16])
