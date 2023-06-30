@@ -38,8 +38,6 @@ code_for_op: Dict[Op, Callable] = {
   FusedOps.MULACC: lambda x,y,z: f"(({x}*{y})+{z})",
 }
 
-def upcast_type(types) -> str: return type_map[max([x.dtype for x in types])] 
-
 class WebGpuCodegen(Linearizer):
   supports_float4 = False
   supports_constant_folding = True
@@ -92,6 +90,7 @@ class WebGpuCodegen(Linearizer):
       elif uop == UOps.LOAD and newvar is not None:
         if self.bufs[args.i] is not None and isinstance(self.bufs[args.i].realized, RawConst):
           assert newvar.dtype == dtypes.float, "only floats"
+          assert not math.isnan(self.bufs[args.i].realized._buf), "nans are not supported in webgpu"
           val = self.float_const(self.bufs[args.i].realized._buf)
         else:
           val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
