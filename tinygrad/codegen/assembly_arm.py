@@ -9,9 +9,10 @@ def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 class ARMCodegen(AssemblyCodegen):
   def specialize(self, asm):
     ins = [] 
+    #NOTE: MACOS needs lm func to start with _ 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.MOD: "", BinaryOps.CMPLT: "cmp", BinaryOps.CMPEQ: "cmp",
-           UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "bl _log2", UnaryOps.EXP2: "ex2.approx.ftz",
+           UnaryOps.NOOP: "mov", UnaryOps.SIN: "bl _sin", UnaryOps.LOG2: "bl _log2", UnaryOps.EXP2: "bl _exp",
            FusedOps.MULACC: "fmadd"}
 
     reg_map = {}
@@ -29,8 +30,6 @@ class ARMCodegen(AssemblyCodegen):
       elif uop == UOps.CONST:
         if isinstance(arg, float):
           ins.append(f"ldr x0, 0x{float_to_hex(arg)}")
-          #ins.append(f"movz x0, 0x{float_to_hex(arg)}, lsl #16")
-          #ins.append(f"fmov s0, x0")
           ins.append(f"str s0, {reg_map[out.nm]}")
         else:
           ins.append(f"mov x0, #{arg}")
@@ -43,7 +42,7 @@ class ARMCodegen(AssemblyCodegen):
         if arg == FusedOps.MULACC and out == vin[2]:
           ins.append(f"{alu[arg]} {reg_map[out.nm]}, {reg_map[vin[0].nm]}, {reg_map[vin[1].nm]}, {reg_map[vin[2].nm]}")
         elif dtypes.is_float(out.dtype):
-          if arg == UnaryOps.LOG2:
+          if arg in [UnaryOps.LOG2, UnaryOps.SIN]:
             ins.append(f"stp x29, x30, [sp, #0]!")
             ins.append(f"mov x29, sp")
             ins.append(f"ldr s0, {reg_map[vin[0].nm]}")
