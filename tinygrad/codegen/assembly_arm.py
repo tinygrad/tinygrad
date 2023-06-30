@@ -11,11 +11,11 @@ class ARMCodegen(AssemblyCodegen):
     ins = [] 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.MOD: "", BinaryOps.CMPLT: "cmp", BinaryOps.CMPEQ: "cmp",
-           UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
+           UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "bl _log2", UnaryOps.EXP2: "ex2.approx.ftz",
            FusedOps.MULACC: "fmadd"}
 
     reg_map = {}
-    var_size = 0
+    var_size = 16
     for i, (uop, out, vin, arg) in enumerate(asm):
 #      print(asm[i])
       if uop == UOps.DEFINE_REGISTER and dtypes.bool != arg[0][0]: 
@@ -43,10 +43,21 @@ class ARMCodegen(AssemblyCodegen):
         if arg == FusedOps.MULACC and out == vin[2]:
           ins.append(f"{alu[arg]} {reg_map[out.nm]}, {reg_map[vin[0].nm]}, {reg_map[vin[1].nm]}, {reg_map[vin[2].nm]}")
         elif dtypes.is_float(out.dtype):
-          ins.append(f"ldr s0, {reg_map[vin[0].nm]}")
-          ins.append(f"ldr s1, {reg_map[vin[1].nm]}")
-          ins.append(f"f{alu[arg]} s1, s0, s1")
-          ins.append(f"str s1, {reg_map[out.nm]}")
+          if arg == UnaryOps.LOG2:
+            ins.append(f"stp x29, x30, [sp, #0]!")
+            ins.append(f"mov x29, sp")
+            ins.append(f"ldr s0, {reg_map[vin[0].nm]}")
+            ins.append(f"fcvt d0, s0")
+            ins.append(f"{alu[arg]}")
+            ins.append(f"fcvt s0, d0")
+            ins.append(f"str s0, {reg_map[out.nm]}")
+            ins.append(f"mov sp, x29")
+            ins.append(f"ldp x29, x30, [sp], #0")
+          else:
+            ins.append(f"ldr s0, {reg_map[vin[0].nm]}")
+            ins.append(f"ldr s1, {reg_map[vin[1].nm]}")
+            ins.append(f"f{alu[arg]} s1, s0, s1")
+            ins.append(f"str s1, {reg_map[out.nm]}")
         else:
           if arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
             ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
@@ -57,6 +68,7 @@ class ARMCodegen(AssemblyCodegen):
             if arg in [BinaryOps.MUL, BinaryOps.DIV] and isint:
               ins.append(f"mov x2, #{vin[1]}")
               ins.append(f"{'s' if arg==BinaryOps.DIV else ''}{alu[arg]} x3, x1, x2")
+           
             elif arg == BinaryOps.MOD:
               ins.append(f"{'mov x2, #' + str(vin[1]) if isint else 'ldr x2, ' + reg_map[vin[1].nm]}")
               ins.append(f"udiv x3, x1, x2")
@@ -79,4 +91,4 @@ class ARMCodegen(AssemblyCodegen):
         ins.append(f"{'b.ne' if arg[1] else 'beq'} {arg[0][1:]}")
       elif uop == UOps.LABEL:
         ins.append(f"{arg[1:]}:")
-    return "test", "\n".join([".arch armv8-a",".text", ".global _test",".balign 4"] + ["_test:"] + [f"sub sp, sp, #{var_size}"] + ins  + [f"add sp, sp, #{var_size}"]+ ["ret;"])
+    return "test", "\n".join([".section  __TEXT,__text,regular,pure_instructions",".build_version macos, 13, 0 sdk_version 13, 3",".text", ".global _test",".p2align 2"] + ["_test:"] + [f"sub sp, sp, #{var_size}"] + ins  + [f"add sp, sp, #{var_size}"]+ ["ret;"])
