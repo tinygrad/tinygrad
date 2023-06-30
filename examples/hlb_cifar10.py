@@ -12,6 +12,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.ops import GlobalCounters
 
+Tensor.manual_seed(getenv('SEED', 6)) # Deterministic
+np.random.seed(getenv('SEED', 6))
+
 num_classes = 10
 
 # TODO: eval won't work with track_running_stats=False
@@ -78,9 +81,12 @@ def fetch_batches(X_train, Y_train, BS, is_train=False):
     if not is_train:
       break
 
-def train_cifar():
+def train_cifar(bs=256, eval_bs=250, steps=2000, lr=0.01, momentum=0.85, wd=0.01, lr_bias=0.1, momentum_bias=0.85, wd_bias=0.003):
   Tensor.training = True
-  BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 512), getenv("STEPS", 10)
+  BS, EVAL_BS, STEPS = getenv("BS", bs), getenv('EVAL_BS', eval_bs), getenv("STEPS", steps)
+  LR, MOMENTUM, WD = getenv("LR", lr), getenv('MOMENTUM', momentum), getenv("WD", wd)
+  LR_BIAS, MOMENTUM_BIAS, WD_BIAS = getenv("LR_BIAS", lr_bias), getenv('MOMENTUM_BIAS', momentum_bias), getenv("WD_BIAS", wd_bias)
+
   if getenv("FAKEDATA"):
     N = 2048
     X_train = np.random.default_rng().standard_normal(size=(N, 3, 32, 32), dtype=np.float32)
@@ -109,8 +115,8 @@ def train_cifar():
   for name, param in optim.get_state_dict(model).items():
     if 'bias' in name: bias_params.append(param)
     else: non_bias_params.append(param)
-  optimizer = optim.SGD(non_bias_params, lr=0.01, momentum=0.85, nesterov=True, weight_decay=0.01)
-  optimizer_bias = optim.SGD(bias_params, lr=0.1, momentum=0.85, nesterov=True, weight_decay=0.003)
+  optimizer = optim.SGD(non_bias_params, lr=LR, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  optimizer_bias = optim.SGD(bias_params, lr=LR_BIAS, momentum=MOMENTUM_BIAS, nesterov=True, weight_decay=WD_BIAS)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
@@ -124,7 +130,7 @@ def train_cifar():
   i = 0
   for X, Y in fetch_batches(X_train, Y_train, BS=BS, is_train=True):
     if i > STEPS: break
-    if i%50 == 0 and STEPS != 1:
+    if i%20 == 0 and STEPS != 1:
       # use training batchnorm (and no_grad would change the kernels)
       corrects = []
       losses = []
