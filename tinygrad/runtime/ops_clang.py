@@ -18,7 +18,7 @@ class ClangProgram:
     else:
       if DEBUG >= 5: print(prg)
       print(subprocess.run(["as","-arch", "arm64", "-o", "kernel.o"], input=prg.encode('utf-8')))
-      print(subprocess.run(["clang","-target", "arm64-apple-darwin" "-lm", "-shared", "kernel.o", "-o", fn]))
+      print(subprocess.run(["clang", "-lm", "-shared", "kernel.o", "-o", fn]))
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
 

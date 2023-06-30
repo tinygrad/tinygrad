@@ -12,7 +12,7 @@ class ARMCodegen(AssemblyCodegen):
     #NOTE: MACOS needs lm func to start with _ 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.MOD: "", BinaryOps.CMPLT: "cmp", BinaryOps.CMPEQ: "cmp",
-           UnaryOps.NOOP: "mov", UnaryOps.SIN: "bl _sin", UnaryOps.LOG2: "bl _log2", UnaryOps.EXP2: "bl _exp",
+           UnaryOps.NOOP: "mov", UnaryOps.SIN: "bl _sin", UnaryOps.LOG2: "bl _log2", UnaryOps.EXP2: "bl _exp2",
            FusedOps.MULACC: "fmadd"}
 
     reg_map = {}
@@ -29,7 +29,8 @@ class ARMCodegen(AssemblyCodegen):
           ins.append(f"str x{arg[3:]}, {reg_map[out.nm]}")
       elif uop == UOps.CONST:
         if isinstance(arg, float):
-          ins.append(f"ldr x0, 0x{float_to_hex(arg)}")
+          ins.append(f"mov x0, 0x{float_to_hex(arg)}")
+          ins.append(f"fmov s0, w0")
           ins.append(f"str s0, {reg_map[out.nm]}")
         else:
           ins.append(f"mov x0, #{arg}")
@@ -42,7 +43,7 @@ class ARMCodegen(AssemblyCodegen):
         if arg == FusedOps.MULACC and out == vin[2]:
           ins.append(f"{alu[arg]} {reg_map[out.nm]}, {reg_map[vin[0].nm]}, {reg_map[vin[1].nm]}, {reg_map[vin[2].nm]}")
         elif dtypes.is_float(out.dtype):
-          if arg in [UnaryOps.LOG2, UnaryOps.SIN]:
+          if arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2]:
             ins.append(f"stp x29, x30, [sp, #0]!")
             ins.append(f"mov x29, sp")
             ins.append(f"ldr s0, {reg_map[vin[0].nm]}")
@@ -90,4 +91,4 @@ class ARMCodegen(AssemblyCodegen):
         ins.append(f"{'b.ne' if arg[1] else 'beq'} {arg[0][1:]}")
       elif uop == UOps.LABEL:
         ins.append(f"{arg[1:]}:")
-    return "test", "\n".join([".section  __TEXT,__text,regular,pure_instructions",".build_version macos, 13, 0 sdk_version 13, 3",".text", ".global _test",".p2align 2"] + ["_test:"] + [f"sub sp, sp, #{var_size}"] + ins  + [f"add sp, sp, #{var_size}"]+ ["ret;"])
+    return "test", "\n".join([".arch armv8-a",".text", ".global _test",".p2align 2"] + ["_test:"] + [f"sub sp, sp, #{var_size}"] + ins  + [f"add sp, sp, #{var_size}"]+ ["ret;"])
