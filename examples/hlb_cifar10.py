@@ -61,7 +61,7 @@ class SpeedyResNet:
       out = x.sequential(self.net)
     return out.log_softmax()
 
-def fetch_batches(X_train, Y_train, BS, is_train=False):
+def fetch_batches(X_train, Y_train, BS, is_train=False, flip_chance=0.5):
   if not is_train:
     ind = np.arange(Y_train.shape[0])
     np.random.shuffle(ind)
@@ -70,12 +70,12 @@ def fetch_batches(X_train, Y_train, BS, is_train=False):
     for batch_start in range(0, Y_train.shape[0], BS):
       batch_end = min(batch_start+BS, Y_train.shape[0])
       X = Tensor(X_train[batch_end-BS:batch_end]) # batch_end-BS for padding
+      X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < flip_chance, X[..., ::-1], X) # flip augmentation 
       Y = np.zeros((BS, num_classes), np.float32)
       Y[range(BS),Y_train[batch_end-BS:batch_end]] = -1.0*num_classes
       Y = Tensor(Y.reshape(BS, num_classes))
       yield X, Y
-    if not is_train:
-      break
+    if not is_train: break
 
 class SGDOneCycle(optim.SGD):
   def __init__(self, params, max_lr, initial_div_factor, final_div_factor, total_steps, pct_start, momentum=0, weight_decay=0.0, nesterov=False,):
