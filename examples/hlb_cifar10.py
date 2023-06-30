@@ -51,7 +51,15 @@ class SpeedyResNet:
     ]
 
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
-  def __call__(self, x): return x.sequential(self.net).log_softmax()
+  def __call__(self, x, training=True): 
+    if not training:
+      x_flipped = x[..., ::-1]
+      out_original = x.sequential(self.net)
+      out_flipped = x_flipped.sequential(self.net)
+      out = (out_original * 0.5) + (out_flipped * 0.5)
+    else:
+      out = x.sequential(self.net)
+    return out.log_softmax()
 
 def fetch_batches(X_train, Y_train, BS, is_train=False):
   if not is_train:
@@ -167,7 +175,7 @@ def train_cifar(bs=512, eval_bs=1000, steps=1000, div_factor=1e16, final_lr_rati
       corrects = []
       losses = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS):
-        out = model(Xt)
+        out = model(Xt, training=False)
         outs = out.numpy().argmax(axis=1)
         loss = (out * Yt).mean().numpy()
         losses.append(loss.tolist())
