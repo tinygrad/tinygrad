@@ -7,7 +7,6 @@ from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mn
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
-from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
 from tinygrad.shape.symbolic import Variable
 
@@ -60,18 +59,20 @@ def to_float4(x:List[Token]) -> Optional[Token]:
 
 def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
   assert all_same([len(x) for x in values]), f"all values are not the same length {values}"
-  # these use accumulators, we can only fold if the acc is a float4
-  idxs = get_grouped_float4_idxs(values[-1]) if grouping_allowed else None
-  if idxs is not None:
-    new_idxs = []
-    new_values = []
-    for i in range(0, len(idxs), 4):
-      nv = [to_float4([v[j] for j in idxs[i:i+4]]) for v in values]
-      if any([x is None for x in nv]): break
-      new_idxs.append(idxs[i:i+4])
-      new_values.append(nv)
-    if len(new_values) == len(idxs)//4:
-      return zip(new_idxs, new_values)
+  # We must re-order the values by type size in order to codegen broadcasted ops correctly
+  values = list(sorted(acc, key=lambda x: x.dtype.sz) for acc in values)
+  for acc in values:
+    idxs = get_grouped_float4_idxs(acc) if grouping_allowed else None
+    if idxs is not None:
+      new_idxs = []
+      new_values = []
+      for i in range(0, len(idxs), 4):
+        nv = [to_float4([v[j] for j in idxs[i:i+4]]) for v in values]
+        if any([x is None for x in nv]): break
+        new_idxs.append(idxs[i:i+4])
+        new_values.append(nv)
+      if len(new_values) == len(idxs)//4:
+        return zip(new_idxs, new_values)
   return zip([[i] for i in range(len(values[0]))], zip(*values))
 
 class MemOp(NamedTuple):
@@ -344,10 +345,6 @@ class Linearizer:
       x = LazyOp(FusedOps.MULACC, x.src[0].src, x.arg)
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL:
       x = LazyOp(FusedOps.MULACC, x.src[0].src[0].src, x.arg)
-    if x.op in {BinaryOps.ADD, BinaryOps.MUL}:
-      # Reorder sources to put constants first so get_grouped_maybe_float4 can fold the op
-      srcs = sorted(x.src, key=lambda x: (x.realized.__class__ != RawConst) if x.__class__ == LazyBuffer else 0)
-      x.src = tuple(srcs)
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     if x.op.__class__ in {ReduceOps, FusedOps}:
       ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
