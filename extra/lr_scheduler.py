@@ -65,7 +65,7 @@ class CosineAnnealingLR(LR_Scheduler):
 
 class OneCycleLR(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, max_lr: float, initial_div_factor: float, final_div_factor: float, total_steps: int, pct_start: float):
-    self.initial_lr = Tensor([max_lr / initial_div_factor]) # TODO: why is Tensor of lr over 2x faster? 
+    self.initial_lr = Tensor([max_lr / initial_div_factor])
     self.max_lr = Tensor([max_lr])
     self.min_lr = self.initial_lr/final_div_factor
     super().__init__(optimizer)

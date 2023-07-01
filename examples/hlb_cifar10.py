@@ -91,20 +91,6 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     X_test, Y_test = fetch_cifar(train=False)
   model = SpeedyResNet()
 
-  # init weights with torch
-  # TODO: it doesn't learn with the tinygrad weights, likely since kaiming init
-  if getenv("TORCHWEIGHTS"):
-    from examples.hlb_cifar10_torch import SpeedyResNet as SpeedyResNetTorch
-    torch_model = SpeedyResNetTorch()
-    model_state_dict = optim.get_state_dict(model)
-    torch_state_dict = torch_model.state_dict()
-    for k,v in torch_state_dict.items():
-      old_mean_std = model_state_dict[k].mean().numpy(), model_state_dict[k].std().numpy()
-      model_state_dict[k].assign(Tensor(v.detach().numpy())).realize()
-      new_mean_std = model_state_dict[k].mean().numpy(), model_state_dict[k].std().numpy()
-      print(f"initted {k:40s} {str(model_state_dict[k].shape):20s} from torch mean:{old_mean_std[0]:8.5f} -> {new_mean_std[0]:8.5f} std:{old_mean_std[1]:8.5f} -> {new_mean_std[1]:8.5f}")
-    exit(0)
-
   optimizer = optim.SGD(optim.get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
 
