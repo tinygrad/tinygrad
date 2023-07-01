@@ -4,7 +4,6 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.helpers import getenv, dtypes
-from examples.mlperf import helpers
 
 def eval_resnet():
   # Resnet50-v1.5

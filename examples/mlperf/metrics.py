@@ -21,12 +21,9 @@ def levenshtein(a, b):
   return current[n]
 
 def word_error_rate(x, y):
-  scores = words = 0
-  for h, r in zip(x, y):
-    h_list = h.split()
-    r_list = r.split()
-    words += len(r_list)
-    scores += levenshtein(h_list, r_list)
+  r_list, h_list = x.split(), y.split()
+  words = len(r_list)
+  scores = levenshtein(r_list, h_list)
   return float(scores) / words, float(scores), words
 
 def one_hot(arr, num_classes=3):
