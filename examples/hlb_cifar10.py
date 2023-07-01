@@ -91,25 +91,27 @@ def train_cifar(bs=512, eval_bs=500, steps=900, div_factor=1e16, final_lr_ratio=
     X_test, Y_test = fetch_cifar(train=False)
   model = SpeedyResNet()
 
-  optimizer = optim.SGD(optim.get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  optimizer = optim.SGD(optim.get_parameters(model), lr=Tensor([0.01]), momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
 
   # JIT at every run
   from tinygrad.jit import TinyJit
   @TinyJit
-  def train_step_jitted(model, optimizer, X, Y):
+  def train_step_jitted(model, optimizer, lr_scheduler, X, Y):
     out = model(X)
     loss = out.mul(Y).mean()
     if not getenv("DISABLE_BACKWARD"):
       optimizer.zero_grad()
       loss.backward()
-      for param in optimizer.params: param.grad.realize() # HACK: partial JIT of optimizer.step
+      optimizer.step()
+      lr_scheduler.step()
     return loss.realize()
 
   @TinyJit
-  def eval_step_jitted(model, X):
+  def eval_step_jitted(model, X, Y):
     out = model(X, training=False)
-    return out.realize()
+    loss = out.mul(Y).mean()
+    return out.realize(), loss.realize()
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
   # 4 seconds for tfloat32 ~ 28 TFLOPS, 41% of max 68
@@ -127,8 +129,7 @@ def train_cifar(bs=512, eval_bs=500, steps=900, div_factor=1e16, final_lr_ratio=
       corrects = []
       losses = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS):
-        out = eval_step_jitted(model, Xt)
-        loss = out.mul(Yt).mean()
+        out, loss = eval_step_jitted(model, Xt, Yt)
         outs = out.numpy().argmax(axis=1)
         correct = outs == Yt.numpy().argmin(axis=1)
         losses.append(loss.numpy().tolist())
@@ -140,10 +141,8 @@ def train_cifar(bs=512, eval_bs=500, steps=900, div_factor=1e16, final_lr_ratio=
     if STEPS == 0: break
     GlobalCounters.reset()
     st = time.monotonic()
-    loss = train_step_jitted(model, optimizer, X, Y)
+    loss = train_step_jitted(model, optimizer, lr_scheduler, X, Y)
     et = time.monotonic()
-    optimizer.step() # JIT doesnt behave well with lr_scheduler
-    lr_scheduler.step()
     loss_cpu = loss.numpy()
     cl = time.monotonic()
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")

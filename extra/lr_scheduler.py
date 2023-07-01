@@ -6,13 +6,13 @@ from tinygrad.tensor import Tensor
 class LR_Scheduler:
   def __init__(self, optimizer: Optimizer):
     self.optimizer = optimizer
-    self.epoch_counter = 0 
+    self.epoch_counter = Tensor([0], requires_grad=False)
   
   def get_lr(self): pass
   
   def step(self) -> None:
-    self.epoch_counter += 1
-    self.optimizer.lr = self.get_lr()
+    self.epoch_counter.assign(self.epoch_counter + 1).realize()
+    self.optimizer.lr.assign(self.get_lr()).realize()
 
 class MultiStepLR(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, milestones: List[int], gamma=0.1):
@@ -73,7 +73,7 @@ class OneCycleLR(LR_Scheduler):
     self.pct_start = pct_start
 
   @staticmethod
-  def _annealing_linear(start, end, pct): return ((end - start) * pct + start).realize()
+  def _annealing_linear(start, end, pct): return ((end - start) * pct + start)
 
   def get_lr(self):
     return self._annealing_linear(self.initial_lr, self.max_lr, self.epoch_counter/(self.total_steps*self.pct_start)) \
