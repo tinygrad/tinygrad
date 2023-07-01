@@ -6,7 +6,6 @@ import numpy as np
 import functools
 from typing import Union, Tuple, Optional
 import math
-from copy import deepcopy
 
 def Unsqueeze(data, axes):
   axes = [len(data.shape) + int(x) if x < 0 else int(x) for x in safe_numpy(axes)]
@@ -81,6 +80,7 @@ def _auto_pad(X, auto_pad, strides, kernel_shape, dilations):
   strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
   dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
   pad_shape = [(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(X.shape[-len(strides):], strides, kernel_shape, dilations)]
+  print(pad_shape)
   if dilations == (2,2): print(pad_shape)
   if auto_pad == "SAME_UPPER": return [pad_shape[0]//2, pad_shape[1]//2, pad_shape[0]-pad_shape[0]//2, pad_shape[1]-pad_shape[1]//2]
   elif auto_pad == "SAME_LOWER": return [pad_shape[0]-pad_shape[0]//2, pad_shape[1]-pad_shape[1]//2, pad_shape[0]//2,  pad_shape[1]//2]
@@ -88,7 +88,6 @@ def _auto_pad(X, auto_pad, strides, kernel_shape, dilations):
 
 # pads = [up, left, down, right]
 def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.): # BUG: OUTPUT HAS WRONG SHAPE BUT CHECK DIDNT PICK UP
-  # assert mode == "constant", f"WARNING: Pad mode {mode} not implemented"
   constant_value = value if constant_value is None else safe_numpy(constant_value)
   seq_pads = list(pads) if isinstance(pads, tuple) else safe_numpy(pads)
   seq_pads = [math.ceil(i) for i in seq_pads]
@@ -146,13 +145,16 @@ def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=N
   return _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-2:], strides=strides, kernel_shape=kernel_shape, dilations=dilations).max_pool2d(kernel_shape, stride=strides, dilation=dilations)
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
-  padding = [p for ps in zip(pads[:len(pads)//2][::-1], pads[len(pads)//2:][::-1]) for p in ps] if pads is not None else 0 # reorder padding
+  if auto_pad != "NOTSET": padding = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
+  else: padding = [p for ps in zip(pads[:len(pads)//2][::-1], pads[len(pads)//2:][::-1]) for p in ps] if pads is not None else 0 # reorder padding
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=padding)
 
 def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, output_shape=None, output_padding=0, strides=1):
   if auto_pad != "NOTSET":
     if not kernel_shape: kernel_shape = W.shape[-len(strides):]
     pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
+  # if output_shape: pads = [(output_shape[0]-X.shape[-2])//2, (output_shape[1]-X.shape[-1])//2, math.ceil((output_shape[0]-X.shape[-2])/2), math.ceil((output_shape[1]-X.shape[-1])/2)]
+  print(pads)
   return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0, output_padding=output_padding)
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
@@ -259,7 +261,7 @@ def Tile(input, repeats):
   final_shape = [r*s for r,s in zip(repeats_, input.shape)]
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
-def Range(start, limit, delta): return Tensor.arange(int(safe_numpy(limit)), int(safe_numpy(start)), int(safe_numpy(delta))) #TODO negative delta
+def Range(start, limit, delta): return Tensor.arange(int(safe_numpy(limit)), int(safe_numpy(start)), int(safe_numpy(delta)), dtype=delta.dtype) # TODO negative delta
 def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
 
 def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
@@ -418,7 +420,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
     y_out = _nearest_mode(y_out, nearest_mode, X.shape[-1])
     y_out = [int(i) for i in safe_numpy(y_out)]
-    stack_args = [deepcopy(x_out) + y * X.shape[-1] for y in y_out] # HACK wow this is ugly but I see no other way cuz me stupid!
+    stack_args = [x_out + y * X.shape[-1] for y in y_out] # HACK wow this is ugly but I see no other way cuz me stupid!
     indices_out = Tensor.stack(stack_args).flatten()
     return _nearest_gather(X, indices_out, output_shape)
   elif mode == "linear":

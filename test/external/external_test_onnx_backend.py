@@ -156,6 +156,7 @@ backend_test.exclude('test_depthtospace_*')
 backend_test.exclude('test_spacetodepth_*')
 backend_test.exclude('test_scan*')
 backend_test.exclude('test_split_to_sequence_*')
+backend_test.exclude('test_upsample_nearest_cpu') # Deprecated since version 10 of the default ONNX operator set.
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):

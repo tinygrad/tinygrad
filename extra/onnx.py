@@ -66,7 +66,9 @@ def get_run_onnx(onnx_model: ModelProto):
     elif a.type == AttributeProto.TENSOR: return buffer_parse(a.t) # TENSOR
     elif a.type == AttributeProto.FLOATS: return tuple(float(x) for x in a.floats)
     elif a.type == AttributeProto.INTS: return tuple(int(x) for x in a.ints)
-    elif a.type == AttributeProto.GRAPH: raise NotImplementedError(f"attribute graph not implemented {a}")
+    elif a.type == AttributeProto.GRAPH:
+      print(a.g) 
+      print(a.graphs) 
     else: raise Exception(f"can't parse {a.type} {a}")
   def attribute_to_dict(a: RepeatedCompositeFieldContainer[AttributeProto]): return {x.name:attribute_parse(x) for x in a}
 
@@ -198,9 +200,9 @@ def get_run_onnx(onnx_model: ModelProto):
           ends[i] = ends[i] + inp[0].shape[axis] if ends[i] < 0 else ends[i]
           starts[i] = max(0, min(starts[i], inp[0].shape[axis]))
           ends[i] = max(0, min(ends[i], inp[0].shape[axis]))
-          if starts[i] == ends[i]: # ugly ass hack
+          if starts[i] == ends[i]:
             shrink_args[axis] = (starts[i], ends[i])
-            shrink = True
+            shrink = True # ugly ass hack
           elif starts[i] > ends[i] and steps[i] >= 0:
             steps[i] = -steps[i]
             arg[axis] = (starts[i], ends[i], steps[i])
