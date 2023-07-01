@@ -5,14 +5,17 @@ import string
 import pathlib
 import difflib
 import base64
+import functools
+import itertools
 import multiprocessing
-import numpy as np
 from typing import Optional
-from extra.utils import download_file
+import librosa
+import numpy as np
+from tinygrad import nn
 from tinygrad.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv
-import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
+from extra.utils import download_file
 from datasets.librispeech import ci, BASEDIR
 from examples.mlperf.metrics import word_error_rate
 
@@ -109,30 +112,24 @@ class Whisper:
     return self.decoder(tokens, self.encoder(mel))
 
 # TODO: this is tragic. remove this
-import functools
-import itertools
-import torch
 import torchaudio
-import librosa
 
 @functools.lru_cache(None)
-def get_filters(sample_rate, n_fft, n_mels):return torch.tensor(librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels))
+def get_filters(sample_rate, n_fft, n_mels): return librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels)
 @functools.lru_cache(None)
-def get_window(n_fft): return torch.hann_window(n_fft)
-#def get_window(n_fft): return (1 - (2 * math.pi * Tensor.arange(n_fft) / n_fft).cos()) / 2
+def get_window(n_fft): return (1 - np.cos(2 * math.pi * np.arange(n_fft) / n_fft)) / 2
 
 def prep_audio(waveform, sample_rate) -> Tensor:
   N_FFT = 400
   HOP_LENGTH = 160
   N_MELS = 80
-  stft = torch.stft(waveform, N_FFT, HOP_LENGTH, window=get_window(N_FFT), return_complex=True)
-  magnitudes = stft[..., :-1].abs() ** 2
+  stft = librosa.stft(waveform, n_fft=N_FFT, hop_length=HOP_LENGTH, window=get_window(N_FFT))
+  magnitudes = np.abs(stft[..., :-1]) ** 2
   mel_spec = get_filters(sample_rate, N_FFT, N_MELS) @ magnitudes
-  log_spec = torch.clamp(mel_spec, min=1e-10).log10()
-  log_spec = torch.maximum(log_spec, log_spec.max() - 8.0)
+  log_spec = np.log10(np.clip(mel_spec, a_min=1e-10, a_max=None))
+  log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
-  #print(waveform.shape, log_spec.shape)
-  return log_spec.numpy()
+  return log_spec
 
 LANGUAGES = {
   "en": "english", "zh": "chinese", "de": "german", "es": "spanish", "ru": "russian", "ko": "korean", "fr": "french", "ja": "japanese", "pt": "portuguese", "tr": "turkish",
@@ -186,7 +183,7 @@ RECORD_SECONDS = 10
 MAX_ITERS = 60
 
 def listener(q):
-  prep_audio(torch.zeros(300), RATE)
+  prep_audio(np.zeros(300), RATE)
   import pyaudio
   p = pyaudio.PyAudio()
   stream = p.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
@@ -217,7 +214,7 @@ if __name__ == "__main__":
       print("-" * 128)
       print(f"{fn.stem}\n")
       waveform, sample_rate = torchaudio.load(fn, normalize=True)
-      log_spec = prep_audio(waveform, sample_rate)
+      log_spec = prep_audio(waveform.numpy(), sample_rate)
       lst = [enc._special_tokens["<|startoftranscript|>"]]
       dat = model.encoder(Tensor(log_spec)).realize()
       iters = 0
@@ -234,7 +231,7 @@ if __name__ == "__main__":
   elif len(sys.argv) > 1:
     # offline
     waveform, sample_rate = torchaudio.load(sys.argv[1], normalize=True)
-    log_spec = prep_audio(waveform, sample_rate)
+    log_spec = prep_audio(waveform.numpy(), sample_rate)
     lst = [enc._special_tokens["<|startoftranscript|>"]]
     dat = model.encoder(Tensor(log_spec)).realize()
     while lst[-1] not in [enc._special_tokens["<|endoftext|>"], 13, 30, 0]:
@@ -261,7 +258,7 @@ if __name__ == "__main__":
         did_read = True
       if did_read:
         last_total = total.shape[1]
-        log_spec = prep_audio(torch.Tensor(total), RATE)
+        log_spec = prep_audio(torch.Tensor(total).numpy(), RATE)
         encoded_audio = model.encoder(Tensor(log_spec)).realize()
       out = model.decoder(Tensor([lst]), encoded_audio).realize()
       idx = out[0,-1].numpy().argmax()
