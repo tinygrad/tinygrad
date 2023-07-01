@@ -1,5 +1,4 @@
 import math
-import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d
 from extra.utils import get_child
