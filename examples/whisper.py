@@ -1,5 +1,5 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
-
+import math
 import sys
 import string
 import pathlib
@@ -119,6 +119,7 @@ import librosa
 def get_filters(sample_rate, n_fft, n_mels):return torch.tensor(librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels))
 @functools.lru_cache(None)
 def get_window(n_fft): return torch.hann_window(n_fft)
+#def get_window(n_fft): return (1 - (2 * math.pi * Tensor.arange(n_fft) / n_fft).cos()) / 2
 
 def prep_audio(waveform, sample_rate) -> Tensor:
   N_FFT = 400
