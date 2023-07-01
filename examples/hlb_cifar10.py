@@ -53,14 +53,8 @@ class SpeedyResNet:
 
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
   def __call__(self, x, training=True): 
-    if not training:
-      x_flipped = x[..., ::-1]
-      out_original = x.sequential(self.net)
-      out_flipped = x_flipped.sequential(self.net)
-      out = (out_original * 0.5) + (out_flipped * 0.5)
-    else:
-      out = x.sequential(self.net)
-    return out.log_softmax()
+    if not training: return ((x.sequential(self.net) * 0.5) + (x[..., ::-1].sequential(self.net) * 0.5)).log_softmax()
+    return x.sequential(self.net).log_softmax()
 
 def fetch_batches(X_train, Y_train, BS, is_train=False, flip_chance=0.5):
   if not is_train:
@@ -71,20 +65,20 @@ def fetch_batches(X_train, Y_train, BS, is_train=False, flip_chance=0.5):
     for batch_start in range(0, Y_train.shape[0], BS):
       batch_end = min(batch_start+BS, Y_train.shape[0])
       X = Tensor(X_train[batch_end-BS:batch_end]) # batch_end-BS for padding
-      X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < flip_chance, X[..., ::-1], X) # flip augmentation 
+      if is_train: X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < flip_chance, X[..., ::-1], X) # flip augmentation 
       Y = np.zeros((BS, num_classes), np.float32)
       Y[range(BS),Y_train[batch_end-BS:batch_end]] = -1.0*num_classes
       Y = Tensor(Y.reshape(BS, num_classes))
       yield X, Y
     if not is_train: break
 
-def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.07, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.16, bias_factor=1, seed=6):
+def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.07, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.16, seed=6):
   set_seed(seed)
   Tensor.training = True
 
   BS, EVAL_BS, STEPS = getenv("BS", bs), getenv('EVAL_BS', eval_bs), getenv("STEPS", steps)
   MAX_LR, PCT_START, MOMENTUM, WD = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start), getenv('MOMENTUM', momentum), getenv("WD", wd)
-  BIAS_FACTOR, DIV_FACTOR = getenv('BIAS_FACTOR', bias_factor), getenv('DIV_FACTOR', div_factor)
+  DIV_FACTOR = getenv('DIV_FACTOR', div_factor)
   FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio))
 
   if getenv("FAKEDATA"):
@@ -112,8 +106,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     exit(0)
 
   optimizer = optim.SGD(optim.get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
-  lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS,
-                            pct_start=PCT_START)
+  lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
 
   # JIT at every run
   from tinygrad.jit import TinyJit
