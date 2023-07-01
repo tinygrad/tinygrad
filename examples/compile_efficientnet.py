@@ -4,7 +4,7 @@ from tinygrad.jit import TinyJit
 from extra.utils import fetch
 import ast
 
-def compile_net(run, special_names, statement_builder = lambda name, cargs, global_size: f"{name}({', '.join(cargs)});"):
+def compile_net(run, special_names):
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
   for fxn,args in run.jit_cache:
     functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
@@ -19,7 +19,7 @@ def compile_net(run, special_names, statement_builder = lambda name, cargs, glob
           bufnum += 1
           if i > 0: bufs_to_save[bufs[key][0]] = arg   # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
-    statements.append(statement_builder(fxn.name, cargs, fxn.global_size))
+    statements.append((fxn.name, cargs, fxn.global_size))
 
   return functions, statements, bufs, bufs_to_save
 
@@ -69,8 +69,8 @@ if __name__ == "__main__":
   # the functions
   cprog += list(functions.values())
 
-  # the net
-  cprog += ["void net() {"] + statements + ["}"]
+  # the net 
+  cprog += ["void net() {"] + [f"{name}({', '.join(args)});" for (name, args, _global_size) in statements] + ["}"]
 
   cprog += ["""
 int main(int argc, char* argv[]) {

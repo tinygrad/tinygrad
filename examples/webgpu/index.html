@@ -2,51 +2,19 @@
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-#result {
-  font-size: 48px;
-  padding: 50px;
-}
-#mybox {
-  padding: 20px;
-}
-.bigggg {
-  font-size: 18px;
-  margin-top: 10px;
-}
-.bigg {
-  font-size: 18px;
-}
-#url {
-  font-size: 18px;
-  width: 70%;
-}
-a {
-  text-decoration: none;
-}
-h1 {
-  padding: 50px;
-  padding-bottom: 0px;
-  font-size: 36px;
-  font-weight: normal;
-}
-#imagebox {
-  height:224px;
-  width:224px;
-  border: 1px dotted black;
-}
-#video {
-  height:0px;
-  width:0px;
-  border: 1px dotted black;
-  object-fit: cover;
-}
-canvas {
-  display: none;
-}
-* {
-  text-align: center;
-  font-family: monospace;
-}
+#result {  font-size: 48px; }
+#time {  font-size: 16px;  color: grey; }
+#mybox {  padding: 20px; }
+#resultbox {  padding: 50px; }
+.bigggg {  font-size: 18px;  margin-top: 10px; }
+.bigg {  font-size: 18px; }
+#url {  font-size: 18px;  width: 70%; }
+a {  text-decoration: none; }
+h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: normal; }
+#imagebox {  height:224px;  width:224px;  border: 1px dotted black; }
+#video {  height:0px;  width:0px;  border: 1px dotted black;  object-fit: cover;}
+canvas {  display: none; }
+* {  text-align: center;  font-family: monospace; }
 </style>
 <title>tinygrad has WebGPU</title>
 <script src="./net.js"></script>
@@ -60,22 +28,35 @@ canvas {
 <br/>
 <img id="imagebox"></img>
 <canvas id="canvas" width="200" height="200"> </canvas>
+<div id="resultbox">
 <div id="result">result will go here</div>
+<div id="time"></div>
+</div>
 <script>
-	const ctx = document.getElementById("canvas").getContext("2d");
+	const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
 	const resultText = document.getElementById('result');
 	let labels, net;
-
-	const getDevice = async () => {
-		if (!navigator.gpu) throw Error("WebGPU not supported.");
-		const adapter = await navigator.gpu.requestAdapter();
-		return await adapter.requestDevice();
-	};
 
 	const error = (err) => {
 		resultText.innerHTML = `Error: ${err}`;
 		throw new Error(err);
 	}
+
+	const getDevice = async () => {
+		if (!navigator.gpu) error("WebGPU not supported.");
+		const adapter = await navigator.gpu.requestAdapter();
+		return await adapter.requestDevice();
+	};
+
+	const timer = async (func, label = "") => {
+		document.getElementById('time').innerHTML = "";
+		const start = performance.now();
+		const out = await func();
+		const delta = (performance.now() - start).toFixed(1)
+		console.log(`${delta} ms ${label}`);
+		document.getElementById('time').innerHTML = `${delta} ms ${label}`;
+		return out;
+	}	
 
 	const getLabels = async () => (await fetch("https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json")).json();
 
@@ -93,7 +74,7 @@ canvas {
 		return out;
 	};
 
-	const  runNetWResource = async (resource) => {
+	const runNetWResource = async (resource) => {
 		resultText.innerHTML = "pending..."
 		if (resource == "") error("sir. please type in a URL");
 		const response = await fetch(resource)
@@ -106,27 +87,25 @@ canvas {
 			URL.revokeObjectURL(img.src);
 			ctx.drawImage(img, 0, 0, 224, 224);
 			const data = ctx.getImageData(0, 0, 224, 224).data;
-			setTimeout(() => runNet(data), 0);
+			runNet(data)
 		};
 		img.src = resource;
 	}
 
 	const loadLet = async () => {
+		resultText.innerHTML = "loading..."
 		labels = await getLabels();
 		const safetensor = await getSavetensorBuffer();
 		const device = await getDevice();
-		console.time("Compilation Time");
-		net = setupNet(device, safetensor);
-		console.timeEnd("Compilation Time");
+		net = await timer(() => setupNet(device, safetensor), "(compilation)");
+		resultText.innerHTML = "ready"
 	}
 
 	const runNet = async (data) => {
 		if (!net) error("Net not loaded yet.");
-		const input = reorderChannelsAndRemoveAlpha(Array.from(data).map((pix) => (pix / 255.0) * 0.45 - 0.225));
 
-		console.time("Execution Time");
-		const out = await net(new Float32Array(input));
-		console.timeEnd("Execution Time");
+		const input = reorderChannelsAndRemoveAlpha(Array.from(data).map((pix) => (pix / 255.0) * 0.45 - 0.225));
+		const out = await timer(() => net(new Float32Array(input)));
 
 		const arr = Array.from(new Float32Array(out));
 		const index = arr.indexOf(Math.max(...arr));
