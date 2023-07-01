@@ -1,13 +1,6 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
-import math
-import sys
-import string
-import pathlib
-import difflib
-import base64
-import functools
-import itertools
-import multiprocessing
+import sys, math, string, difflib, base64, functools, itertools, soundfile, multiprocessing
+from pathlib import Path
 from typing import Optional
 import librosa
 import numpy as np
@@ -111,9 +104,6 @@ class Whisper:
   def __call__(self, mel:Tensor, tokens:Tensor):
     return self.decoder(tokens, self.encoder(mel))
 
-# TODO: this is tragic. remove this
-import torchaudio
-
 @functools.lru_cache(None)
 def get_filters(sample_rate, n_fft, n_mels): return librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels)
 @functools.lru_cache(None)
@@ -144,7 +134,8 @@ LANGUAGES = {
   "as": "assamese", "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa", "ba": "bashkir", "jw": "javanese", "su": "sundanese",
 }
 
-BASE = pathlib.Path(__file__).parent.parent / "weights"
+BASE = Path(__file__).parent.parent / "weights"
+
 def get_encoding(n_vocab_in):
   download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/gpt2.tiktoken", BASE / "gpt2.tiktoken")
   ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(BASE / "gpt2.tiktoken") if line)}
@@ -194,6 +185,12 @@ def listener(q):
     q.put(waveform)
   print("done listening")
 
+def load_wav(file):
+  sample, rate = soundfile.read(file)
+  sample = sample.astype(np.float32)
+  sample = np.expand_dims(sample, axis=0)
+  return sample, rate
+
 if __name__ == "__main__":
   if getenv("SMALL"):
     fn = BASE / "whisper-small.en.pt"
@@ -213,8 +210,8 @@ if __name__ == "__main__":
       fn = BASEDIR / c["files"][0]["fname"]
       print("-" * 128)
       print(f"{fn.stem}\n")
-      waveform, sample_rate = torchaudio.load(fn, normalize=True)
-      log_spec = prep_audio(waveform.numpy(), sample_rate)
+      waveform, sample_rate = load_wav(fn)
+      log_spec = prep_audio(waveform, sample_rate)
       lst = [enc._special_tokens["<|startoftranscript|>"]]
       dat = model.encoder(Tensor(log_spec)).realize()
       iters = 0
@@ -230,8 +227,8 @@ if __name__ == "__main__":
       print(f"word error rate: {word_error_rate([predicted], [transcript])[0]}")
   elif len(sys.argv) > 1:
     # offline
-    waveform, sample_rate = torchaudio.load(sys.argv[1], normalize=True)
-    log_spec = prep_audio(waveform.numpy(), sample_rate)
+    waveform, sample_rate = load_wav(sys.argv[1])
+    log_spec = prep_audio(waveform, sample_rate)
     lst = [enc._special_tokens["<|startoftranscript|>"]]
     dat = model.encoder(Tensor(log_spec)).realize()
     while lst[-1] not in [enc._special_tokens["<|endoftext|>"], 13, 30, 0]:
@@ -258,7 +255,7 @@ if __name__ == "__main__":
         did_read = True
       if did_read:
         last_total = total.shape[1]
-        log_spec = prep_audio(torch.Tensor(total).numpy(), RATE)
+        log_spec = prep_audio(total, RATE)
         encoded_audio = model.encoder(Tensor(log_spec)).realize()
       out = model.decoder(Tensor([lst]), encoded_audio).realize()
       idx = out[0,-1].numpy().argmax()
