@@ -76,6 +76,7 @@ class OneCycleLR(LR_Scheduler):
   def _annealing_linear(start, end, pct): return ((end - start) * pct + start)
 
   def get_lr(self):
-    return self._annealing_linear(self.initial_lr, self.max_lr, self.epoch_counter/(self.total_steps*self.pct_start)) \
-      if self.epoch_counter < self.total_steps*self.pct_start else \
+    return (self.epoch_counter < self.total_steps*self.pct_start).where(
+      self._annealing_linear(self.initial_lr, self.max_lr, self.epoch_counter/(self.total_steps*self.pct_start)),
       self._annealing_linear(self.max_lr, self.min_lr, (self.epoch_counter-(self.total_steps*self.pct_start))/(self.total_steps*(1-self.pct_start)))
+    )
