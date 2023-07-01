@@ -87,12 +87,10 @@ class TextDecoder:
     x = self.token_embedding(x) + self.positional_embedding[offset : offset + x.shape[-1]]
 
     seqlen, start_pos = x.shape[1], 0
+    mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf")).triu(k=start_pos+1)
 
-    mask = np.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=np.float32)
-    mask = np.triu(mask, k=start_pos + 1)  # TODO: this is hard to do in tinygrad
-    mask = Tensor(mask)
-
-    for block in self.blocks: x = block(x, xa, mask)
+    for block in self.blocks:
+      x = block(x, xa, mask)
     x = self.ln(x)
     return x @ self.token_embedding.weight.T
 
@@ -215,7 +213,8 @@ if __name__ == "__main__":
       lst = [enc._special_tokens["<|startoftranscript|>"]]
       dat = model.encoder(Tensor(log_spec)).realize()
       iters = 0
-      while lst[-1] not in [enc._special_tokens["<|endoftext|>"], 13, 30, 0] and iters < MAX_ITERS: # temp fix: stop at the end of the sentence
+			# TODO: keep going if the audio has more than one sentence
+      while lst[-1] not in [enc._special_tokens["<|endoftext|>"], 13, 30, 0] and iters < MAX_ITERS:
         out = model.decoder(Tensor([lst]), dat)
         out.realize()
         idx = out[0,-1].numpy().argmax()
@@ -224,7 +223,7 @@ if __name__ == "__main__":
       predicted = "".join(enc.decode(lst[2:-1]))[1:].lower().translate(str.maketrans("", "", string.punctuation))
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
       sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
-      print(f"word error rate: {word_error_rate([predicted], [transcript])[0]}")
+      print(f"word error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
   elif len(sys.argv) > 1:
     # offline
     waveform, sample_rate = load_wav(sys.argv[1])
