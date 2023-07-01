@@ -1,7 +1,7 @@
 from typing import Callable, Dict, Final
 import math, hashlib
 from triton.compiler import compile as triton_compile # type: ignore
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, prod
 from tinygrad.ops import BinaryOps, ASTRunner, Op, UnaryOps
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
 from tinygrad.shape.symbolic import NumNode
@@ -11,9 +11,24 @@ class TritonCodegen(Linearizer):
 
   def codegen(self):
     self.process()
-    self.hand_coded_optimizations()
+    #self.hand_coded_optimizations()
+
+    for axis in range(self.first_reduce - self.local_dims - 1, -1, -1):
+      local_size = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
+      if self.full_shape[axis] == 1: continue
+      last_try = self.local_dims == 0 and axis == 0
+      if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))) or last_try:
+        for sz in [x for x in (([32] if last_try else []) + [8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 128]:
+          self.shift_to(axis, sz, insert_before=self.first_reduce-self.local_dims)
+          self.local_dims += 1
+          break
+      if self.local_dims >= 3: break
+
+    self.simplify_ones()
     self.limit_global_dims(3)
     self.linearize()
+
+    TRITON_RANGE_LOCAL = True
 
     kernel = []
     global_size = []
@@ -36,6 +51,7 @@ class TritonCodegen(Linearizer):
     }
     bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(self.bufs)]
 
+    full_local_shape = None
     for uop,newvar,vin,args in self.uops:
       if uop == UOps.LOOP:
         for i,var in enumerate(args[0]):
@@ -46,8 +62,12 @@ class TritonCodegen(Linearizer):
               else:
                 global_size.append(var.max+1)
                 kk(f"{var.expr} = {gid[len(args[0])-1-i]} # {var.max+1}")
+            elif args[1] == "local" and TRITON_RANGE_LOCAL:
+              full_local_shape = [var.max+1 for var in args[0]]
+              t_shape = [1]*len(args[0])
+              t_shape[i] = var.max+1
+              kk(f"{var.expr} = tl.ravel(tl.broadcast_to(tl.view(tl.arange({var.min}, {var.max+1}), {t_shape}), {full_local_shape}))")
             else:
-              # NOTE: locals are just normal loops in triton
               kk(f"for {var.expr} in range({var.min}, {var.max+1}):")
               depth += 1
       elif uop == UOps.ENDLOOP:
@@ -57,16 +77,19 @@ class TritonCodegen(Linearizer):
           kk(f"# end {args[1]}")
       elif uop == UOps.CONST:
         assert newvar is not None
-        if args == -math.inf: kk(f"{newvar.render()} = -math.inf")
-        else: kk(f"{newvar.render()} = {args}")
+        if args == -math.inf: ld = "-math.inf"
+        else: ld = args
+        if full_local_shape: ld = f"tl.full(({prod(full_local_shape)},), {ld}, tl.float32)"
+        kk(f"{newvar.render()} = {ld}")
       elif uop == UOps.ALU:
         assert newvar is not None
         kk(f"{newvar.render()} = {code_for_op[args](*[x.render() for x in vin])}")
       elif uop == UOps.LOAD:
         assert newvar is not None
         val = f"{bufnames[args.i]} + {args.idx.render()}" # defaults to render_python
-        if args.valid.min == 1: kk(f"{newvar.render()} = tl.load({val})")
-        else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({val}, mask={args.valid.render()}), 0.0)")
+        if args.valid.min == 1: ld = f"tl.load({val})"
+        else: ld = f"tl.where({args.valid.render()}, tl.load({val}, mask={args.valid.render()}), 0.0)"
+        kk(f"{newvar.render()} = {ld}")
       elif uop == UOps.STORE:
         assert args.valid.min == 1, "store must be valid"
         kk(f"tl.store({bufnames[args.i]} + {args.idx.render()}, {vin[0].render()})")

@@ -165,6 +165,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), ()], lambda x,y: x+y, lambda x,y: x+y)
   def test_broadcasted_add_2(self):
     helper_test_op([(45,65), (65,)], lambda x,y: x+y, lambda x,y: x+y)
+  def test_broadcasted_add_sq(self):
+    helper_test_op([(64,64), (64,)], lambda x,y: x+y, lambda x,y: x+y)
   def test_sub(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub)
     helper_test_op([(), ()], lambda x,y: x-y, Tensor.sub)
@@ -320,6 +322,8 @@ class TestOps(unittest.TestCase):
   @unittest.skipIf(IMAGE>0, "no batched matmul on images")
   def test_matmul_batched_vector(self):
     helper_test_op([(4,3), (1,3,3,5)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+  def test_small_gemm(self):
+    helper_test_op([(8,8), (8,8)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   def test_big_gemm(self):
