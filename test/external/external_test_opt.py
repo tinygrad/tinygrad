@@ -182,7 +182,7 @@ class TestOpt(unittest.TestCase):
     Tensor.training = True
     img = Tensor.ones(2,3,4,4)
     c1 = nn.Conv2d(3,32,3)
-    opt = optim.SGD(optim.get_parameters(c1))
+    opt = optim.SGD(get_parameters(c1))
     with CLCache():
       opt.zero_grad()
       c1(img).relu().sum().backward()
@@ -199,7 +199,7 @@ class TestOpt(unittest.TestCase):
     img = Tensor.ones(2,3,64,64)
     c1 = nn.Conv2d(3,16,3,bias=False)
     c2 = nn.Conv2d(16,32,3,bias=False)
-    opt = optim.SGD(optim.get_parameters([c1, c2]))
+    opt = optim.SGD(get_parameters([c1, c2]))
     with CLCache(allowed=9):
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
@@ -214,7 +214,7 @@ class TestOpt(unittest.TestCase):
     c2 = nn.Conv2d(4,8,3,bias=False)
     c3 = nn.Conv2d(8,16,3,bias=False)
     c4 = nn.Conv2d(16,32,3,bias=False)
-    opt = optim.SGD(optim.get_parameters([c1, c2, c3, c4]))
+    opt = optim.SGD(get_parameters([c1, c2, c3, c4]))
     with CLCache(allowed=19):
       opt.zero_grad()
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
@@ -227,7 +227,7 @@ class TestOpt(unittest.TestCase):
     img = Tensor.ones(1,3,4,4)
     c1 = nn.Conv2d(3,32,3)
     bn = nn.BatchNorm2d(32, track_running_stats=False)
-    opt = optim.SGD(optim.get_parameters([c1, bn]))
+    opt = optim.SGD(get_parameters([c1, bn]))
     with CLCache(allowed=18): # this is too high
       img_bn = bn(c1(img)).elu().sum()
       opt.zero_grad()
