@@ -1,6 +1,7 @@
 from typing import Callable, Dict, Final
 import math, hashlib
 from triton.compiler import compile as triton_compile # type: ignore
+from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, ASTRunner, Op, UnaryOps
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
 from tinygrad.shape.symbolic import NumNode
@@ -10,6 +11,7 @@ class TritonCodegen(Linearizer):
 
   def codegen(self):
     self.process()
+    self.hand_coded_optimizations()
     self.limit_global_dims(3)
     self.linearize()
 
@@ -44,8 +46,8 @@ class TritonCodegen(Linearizer):
               else:
                 global_size.append(var.max+1)
                 kk(f"{var.expr} = {gid[len(args[0])-1-i]} # {var.max+1}")
-            elif args[1] == "local": raise NotImplementedError("unimplemented: local loop")
             else:
+              # NOTE: locals are just normal loops in triton
               kk(f"for {var.expr} in range({var.min}, {var.max+1}):")
               depth += 1
       elif uop == UOps.ENDLOOP:
@@ -73,8 +75,10 @@ class TritonCodegen(Linearizer):
       else:
         raise NotImplementedError(f"unimplemented: {uop}")
 
-    # write out python to compile
     prg = '\n'.join(kernel)
+    if DEBUG >= 4: print(prg)
+
+    # write out python to compile
     signature = ','.join(["*fp32" for _ in range(prg.splitlines()[1].count("data"))])
     prg = "import triton\nimport triton.language as tl\n" + prg
     fn = f"/tmp/{hashlib.md5(prg.encode('utf-8')).hexdigest()}.py"
