@@ -23,6 +23,8 @@ setup(name='tinygrad',
       python_requires='>=3.8',
       extras_require={
         'llvm': ["llvmlite"],
+        # export CPATH=$CPATH:/usr/local/cuda/include
+        # export LIBRARY_PATH=$LIBRARY_PATH:/usr/local/cuda/lib64
         'cuda': ["pycuda"],
         'triton': ["triton>=2.0.0.dev20221202"],
         'metal': ["pyobjc-framework-Metal", "pyobjc-framework-Cocoa", "pyobjc-framework-libdispatch"],

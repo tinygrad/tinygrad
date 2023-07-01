@@ -81,4 +81,7 @@ class CUDACodegen(CStyleCodegen):
     """)
   supports_float4_alu = False
 
-CUDABuffer = Compiled(RawCUDABuffer, fromimport("tinygrad.codegen.assembly_ptx", "PTXCodegen") if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)
+if getenv("PTX"): codegen = fromimport("tinygrad.codegen.assembly_ptx", "PTXCodegen")
+elif getenv("TRITON"): codegen = fromimport("tinygrad.codegen.triton", "TritonCodegen")
+else: codegen = CUDACodegen
+CUDABuffer = Compiled(RawCUDABuffer, codegen, CUDAProgram, cuda.Context.synchronize)
