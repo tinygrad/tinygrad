@@ -18,7 +18,7 @@ class ARMCodegen(AssemblyCodegen):
     var_size = 16
     for i, (uop, out, vin, arg) in enumerate(asm):
 #      print(asm[i])
-      if uop == UOps.DEFINE_REGISTER and dtypes.bool != arg[0][0]: 
+      if uop == UOps.DEFINE_REGISTER: 
       #https://developer.arm.com/documentation/den0024/a/The-ABI-for-ARM-64-bit-Architecture/Register-use-in-the-AArch64-Procedure-Call-Standard/Parameters-in-general-purpose-registers
        for i in range(arg[2]):
         reg_map[f"%{arg[1]}{i}"] = f"[sp, #{var_size}]"  
@@ -35,9 +35,14 @@ class ARMCodegen(AssemblyCodegen):
           ins.append(f"mov x0, #{arg}")
           ins.append(f"str x0, {reg_map[out.nm]}")
       elif uop == UOps.CAST:
-        ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
-        ins.append(f"sxtw x0, x0")
-        ins.append(f"str x0, {reg_map[out.nm]}")
+        if arg == BinaryOps.CMPEQ:
+          ins.append(f"cset w0, eq")
+          ins.append(f"scvtf s0, w0")
+          ins.append(f"str s0, {reg_map[out.nm]}")
+        else:
+          ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
+          ins.append(f"sxtw x0, x0")
+          ins.append(f"str x0, {reg_map[out.nm]}")
       elif uop == UOps.ALU:
         if arg == FusedOps.MULACC and out == vin[2]:
           ins.append(f"ldr s0, {reg_map[vin[0].nm]}")
@@ -56,8 +61,13 @@ class ARMCodegen(AssemblyCodegen):
           ins.append(f"mov sp, x29")
           ins.append(f"ldp x29, x30, [sp], #0")
         elif arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
-          ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
-          ins.append(f"{alu[arg]} x0, #{vin[1]}")
+          reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
+          ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
+          if vin[1].__class__ is int:
+            ins.append(f"mov {reg}1, #{vin[1]}")
+          else:
+            ins.append(f"ldr {reg}1, {reg_map[vin[1].nm]}")
+          ins.append(f"{'f' if reg == 's' else ''}{alu[arg]} {reg}0, {reg}1")
         elif arg == BinaryOps.MOD:
           ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
           ins.append(f"{'mov x1, #' + str(vin[1]) if vin[1].__class__ is int else 'ldr x1, ' + reg_map[vin[1].nm]}")
