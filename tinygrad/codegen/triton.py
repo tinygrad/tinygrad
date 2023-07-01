@@ -1,19 +1,20 @@
-from typing import Callable, Dict, Final, Optional
+from typing import Callable, Dict, Final
 import math, hashlib
 from triton.compiler import compile as triton_compile # type: ignore
-from tinygrad.ops import BinaryOps, ASTRunner, FusedOps, Op, UnaryOps
+from tinygrad.ops import BinaryOps, ASTRunner, Op, UnaryOps
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
 from tinygrad.shape.symbolic import NumNode
 
 class TritonCodegen(Linearizer):
+  has_mulacc: bool = False
+
   def codegen(self):
     self.process()
-
+    self.limit_global_dims(3)
     self.linearize()
 
     kernel = []
     global_size = []
-    local_size = []
     depth = 0
     def kk(s): kernel.append("  "*depth+s)
 
@@ -23,14 +24,13 @@ class TritonCodegen(Linearizer):
 
     gid = [f"tl.program_id({i})" for i in range(3)]
     code_for_op: Final[Dict[Op, Callable]] = {
-      UnaryOps.EXP2: lambda x: f"tl.exp2({x})",
-      UnaryOps.LOG2: lambda x: f"tl.log2({x})",
+      UnaryOps.EXP2: lambda x: f"tl.exp({x}*{math.log(2)})",
+      UnaryOps.LOG2: lambda x: f"(tl.log({x})*{1/math.log(2)})",
       UnaryOps.SIN: lambda x: f"tl.sin({x})",
       BinaryOps.ADD: lambda x,y: f"({x}+{y})", BinaryOps.SUB: lambda x,y: f"({x}-{y})",
       BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})",
-      BinaryOps.POW: lambda x,y: f"({x}**{y})", BinaryOps.MAX: lambda x,y: f"tl.max({x},{y})", # axis?
-      BinaryOps.CMPEQ: lambda x,y: f"({x}=={y}).astype(np.float32)",
-      FusedOps.MULACC: lambda s,a,b: f"({a}*{b}) + {s}",
+      BinaryOps.POW: lambda x,y: f"({x}**{y})", BinaryOps.MAX: lambda x,y: f"tl.maximum({x},{y})", # axis?
+      BinaryOps.CMPEQ: lambda x,y: f"(({x}=={y})*1.0)",
     }
     bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(self.bufs)]
 
@@ -73,10 +73,8 @@ class TritonCodegen(Linearizer):
       else:
         raise NotImplementedError(f"unimplemented: {uop}")
 
-    prg = '\n'.join(kernel)
-    print(prg)
-
     # write out python to compile
+    prg = '\n'.join(kernel)
     signature = ','.join(["*fp32" for _ in range(prg.splitlines()[1].count("data"))])
     prg = "import triton\nimport triton.language as tl\n" + prg
     fn = f"/tmp/{hashlib.md5(prg.encode('utf-8')).hexdigest()}.py"
@@ -85,8 +83,10 @@ class TritonCodegen(Linearizer):
     exec(codeobj, globals()) # pylint: disable=W0122
     triton_prg = triton_compile(globals()["fxn"], signature=signature, device_type="cuda", debug=True)
     asm = triton_prg.asm['ptx']
-    name = asm.split(".visible .entry ")[1].split("(")[0]
 
+    # send along the ptx kernel
+    name = asm.split(".visible .entry ")[1].split("(")[0]
+    local_size = [int(x) for x in asm.split(".maxntid ")[1].split("\n")[0].split(", ")]  # [128, 1, 1] is num_warps=4
     return ASTRunner(name, asm,
-      global_size[::-1], local_size[::-1],
+      global_size[::-1], local_size,
       op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name, runtime_args={"binary": True})
