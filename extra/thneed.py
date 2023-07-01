@@ -271,7 +271,7 @@ class Thneed:
     events = []
     st = time.monotonic()
     for prg, args in self.cl_cache:
-      events.append(prg.clprg(CL.cl_queue[0], *args))
+      events.append(prg.clprgs[0](CL.cl_queue[0], *args))
     mt = time.monotonic()
     CL.synchronize()
     et = time.monotonic() - st
