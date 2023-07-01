@@ -91,7 +91,7 @@ def train_cifar(bs=512, eval_bs=500, steps=900, div_factor=1e16, final_lr_ratio=
     X_test, Y_test = fetch_cifar(train=False)
   model = SpeedyResNet()
 
-  optimizer = optim.SGD(optim.get_parameters(model), lr=Tensor([0.01]), momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  optimizer = optim.SGD(optim.get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
 
   # JIT at every run

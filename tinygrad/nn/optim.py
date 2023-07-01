@@ -24,7 +24,7 @@ class Optimizer:
 class SGD(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
     super().__init__(params)
-    self.lr, self.momentum, self.wd, self.nesterov = lr, momentum, weight_decay, nesterov
+    self.lr, self.momentum, self.wd, self.nesterov = Tensor([lr]), momentum, weight_decay, nesterov
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
 
   # https://pytorch.org/docs/stable/generated/torch.optim.SGD.html
