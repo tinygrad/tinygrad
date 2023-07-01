@@ -107,12 +107,9 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     return loss.realize()
 
   @TinyJit
-  def eval_step_jitted(model, X, Y):
+  def eval_step_jitted(model, X):
     out = model(X, training=False)
-    loss = out.mul(Y).mean()
-    outs = out.numpy().argmax(axis=1)
-    correct = outs == Y.numpy().argmin(axis=1)
-    return loss.numpy().tolist(), correct.tolist()
+    return out.realize()
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
   # 4 seconds for tfloat32 ~ 28 TFLOPS, 41% of max 68
@@ -130,9 +127,12 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
       corrects = []
       losses = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS):
-        loss, correct = eval_step_jitted(model, Xt, Yt)
-        losses.append(loss)
-        corrects.extend(correct)
+        out = eval_step_jitted(model, Xt)
+        loss = out.mul(Yt).mean()
+        outs = out.numpy().argmax(axis=1)
+        correct = outs == Yt.numpy().argmin(axis=1)
+        losses.append(loss.numpy().tolist())
+        corrects.extend(correct.tolist())
       acc = sum(corrects)/len(corrects)*100.0
       if acc > best_eval:
         best_eval = acc
