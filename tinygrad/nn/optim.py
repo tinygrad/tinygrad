@@ -18,8 +18,8 @@ class Optimizer:
   def realize(self, extra=None):
     # TODO: corealize
     # NOTE: in extra is too late for most of the params due to issues with assign
-    for p in extra + self.params + self.buffers if extra is not None else self.params + self.buffers:
-      p.realize()
+    [p.realize() for p in (extra if extra else []) + self.params + self.buffers]
+
 
 class SGD(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
@@ -67,7 +67,3 @@ class LAMB(Optimizer):
         r = 1.0
       t.assign(t.detach() - self.lr * r * up)
     self.realize([self.t] + self.m + self.v)
-
-# TODO: remove this
-from tinygrad.state import get_state_dict, get_parameters # pylint: disable=unused-import # noqa: F401
-
