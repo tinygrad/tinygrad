@@ -117,7 +117,7 @@ class LazyBuffer:
         for x in self.op.buffers: x.realize()
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
-        if self.dtype.__class__ is ImageDType and self.optype != MovementOps and (prod(self.shape) != prod(cast(ImageDType, self.dtype).shape) or not any([self.shape[x]%4 == 0 for x in self.st.unit_stride_axes()])):
+        if isinstance(self.dtype, ImageDType) and self.optype != MovementOps and (prod(self.shape) != prod(self.dtype.shape) or not any([self.shape[x]%4 == 0 for x in self.st.unit_stride_axes()])):
           if self.op.op == MovementOps.RESHAPE:
             # put CAST before the final RESHAPE
             self.op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, self.op.src, dtypes.float32),), self.op.arg)
@@ -156,7 +156,8 @@ class LazyBuffer:
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
     realized = self.cast(dtypes.from_np(self.dtype.np)).contiguous().realize().realized
-    ret = cast(RawBuffer, realized).toCPU().reshape(self.shape)
+    assert isinstance(realized, RawBuffer)
+    ret = realized.toCPU().reshape(self.shape)
     return ret
 
   def cast(self:LazyBuffer, arg:DType) -> LazyBuffer: return elementwise_op(UnaryOps.CAST, self, arg=arg) if self.dtype != arg else self
@@ -252,7 +253,8 @@ def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
     while not bx.realized and bx.optype == MovementOps and bx.op.op != MovementOps.EXPAND and (SHUFFLE_PAD_OPS or bx.op.op != MovementOps.PAD) and len(bx.children) <= 1:
       assert isinstance(bx.op.op, MovementOps)
       mops.append((bx.op.op, bx.op.arg))
-      bx = cast(LazyBuffer, bx.op.src[0])
+      assert isinstance(bx.op.src[0], LazyBuffer)
+      bx = bx.op.src[0]
     # NOTE: can't push pads with a div
     if not bx.realized and bx.optype == BinaryOps and len(bx.children) <= 1 and len(mops) and (all([x[0] != MovementOps.PAD for x in mops]) or all([x.op != BinaryOps.DIV for x in bx.op.get_lazyops()])):
       new_srcs.append(bx.op.replace_with_movement_ops(mops[::-1]))
@@ -273,7 +275,8 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer, arg:Optional
     for x in srcs:
       if not x.realized and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1:
         x.op.src[0].children.discard(x)
-        new_srcs.append(cast(LazyBuffer, x.op.src[0]))
+        assert isinstance(x.op.src[0], LazyBuffer)
+        new_srcs.append(x.op.src[0])
       else:
         new_srcs.append(x)
     return elementwise_op(op, *new_srcs, arg=arg).contiguous()
@@ -303,7 +306,7 @@ Device = _Device()
 
 def _realize_contiguous(buffer: LazyBuffer) -> None:
   realized = buffer.op.src[0].realize().realized
-  if buffer.op.src[0].st.contiguous and realized.__class__ is not RawConst and cast(RawBuffer, realized).size == prod(buffer.shape):
+  if buffer.op.src[0].st.contiguous and realized.__class__ is not RawConst and realized is not None and realized.size == prod(buffer.shape):
     # no need to run an AST, this is already contiguous
     buffer.realized = realized
   else:

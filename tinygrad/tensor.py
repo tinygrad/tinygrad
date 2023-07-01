@@ -51,8 +51,7 @@ class Tensor:
 
     # internal variables used for autograd graph construction
     self._ctx: Optional[Function] = None
-    if data.__class__ is LazyBuffer:
-      data = cast(LazyBuffer, data) # NOTE: this is a noop, it makes mypy happy
+    if isinstance(data, LazyBuffer):
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
@@ -64,8 +63,7 @@ class Tensor:
     if data.__class__ is list:
       data = np.array(data, dtype=(dtype or Tensor.default_type).np)
 
-    if data.__class__ is np.ndarray:
-      data = cast(np.ndarray, data)
+    if isinstance(data, np.ndarray):
       data = LazyBuffer.fromCPU(data)
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
