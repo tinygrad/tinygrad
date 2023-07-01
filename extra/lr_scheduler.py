@@ -61,3 +61,22 @@ class CosineAnnealingLR(LR_Scheduler):
 
   def get_lr(self) -> float:
     return self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter/self.T_max) * math.pi))
+
+class OneCycleLR(LR_Scheduler):
+  def __init__(self, optimizer: Optimizer, max_lr: float, initial_div_factor: float, final_div_factor: float, total_steps: int, pct_start: float):
+    self.initial_lr = max_lr / initial_div_factor
+    self.max_lr = max_lr
+    self.min_lr = self.initial_lr/final_div_factor
+    super().__init__(optimizer)
+    self.total_steps = total_steps
+    self.pct_start = pct_start
+
+  @staticmethod
+  def _annealing_linear(start, end, pct): return (end - start) * pct + start
+
+  def get_lr(self):
+    lr = self._annealing_linear(self.initial_lr, self.max_lr, self.epoch_counter/(self.total_steps*self.pct_start)) \
+      if self.epoch_counter < self.total_steps*self.pct_start else \
+      self._annealing_linear(self.max_lr, self.min_lr, (self.epoch_counter-(self.total_steps*self.pct_start))/(self.total_steps*(1-self.pct_start)))
+    self.epoch_counter += 1
+    return lr

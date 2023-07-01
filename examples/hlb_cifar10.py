@@ -11,6 +11,7 @@ from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.ops import GlobalCounters
+from extra.lr_scheduler import OneCycleLR
 
 def set_seed(seed):
   Tensor.manual_seed(getenv('SEED', seed)) # Deterministic
@@ -77,28 +78,6 @@ def fetch_batches(X_train, Y_train, BS, is_train=False, flip_chance=0.5):
       yield X, Y
     if not is_train: break
 
-class SGDOneCycle(optim.SGD):
-  def __init__(self, params, max_lr, initial_div_factor, final_div_factor, total_steps, pct_start, momentum=0, weight_decay=0.0, nesterov=False,):
-    self.initial_lr = Tensor([max_lr / initial_div_factor])
-    self.max_lr = Tensor([max_lr])
-    self.min_lr = self.initial_lr/final_div_factor
-    super().__init__(params, self.initial_lr, momentum, weight_decay, nesterov)
-    self.total_steps = total_steps
-    self.pct_start = pct_start
-    self.step_count = 0
-
-  @staticmethod
-  def _annealing_linear(start, end, pct): return (end - start) * pct + start
-
-  def step(self) -> None:
-    self.lr.realize()
-    super().step()
-    self.lr = self._annealing_linear(self.initial_lr, self.max_lr, self.step_count/(self.total_steps*self.pct_start)) \
-      if self.step_count < self.total_steps*self.pct_start else \
-      self._annealing_linear(self.max_lr, self.min_lr, (self.step_count-(self.total_steps*self.pct_start))/(self.total_steps*(1-self.pct_start)))
-    self.lr.realize()
-    self.step_count += 1
-
 def train_cifar(bs=512, eval_bs=1000, steps=1000, div_factor=1e16, final_lr_ratio=0.07, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.16, bias_factor=1, seed=6):
   set_seed(seed)
   Tensor.training = True
@@ -132,29 +111,20 @@ def train_cifar(bs=512, eval_bs=1000, steps=1000, div_factor=1e16, final_lr_rati
       print(f"initted {k:40s} {str(model_state_dict[k].shape):20s} from torch mean:{old_mean_std[0]:8.5f} -> {new_mean_std[0]:8.5f} std:{old_mean_std[1]:8.5f} -> {new_mean_std[1]:8.5f}")
     exit(0)
 
-  non_bias_params, bias_params = [], []
-  for name, param in optim.get_state_dict(model).items():
-    if 'bias' in name: bias_params.append(param)
-    else: non_bias_params.append(param)
-
-  optimizer = SGDOneCycle(non_bias_params, max_lr=MAX_LR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR,
-                          total_steps=STEPS, pct_start=PCT_START, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
-  optimizer_bias = SGDOneCycle(bias_params, max_lr=MAX_LR*BIAS_FACTOR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR,
-                          total_steps=STEPS, pct_start=PCT_START, momentum=MOMENTUM, nesterov=True, weight_decay=WD/BIAS_FACTOR)
-
+  optimizer = optim.SGD(optim.get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS,
+                            pct_start=PCT_START)
 
   # JIT at every run
   from tinygrad.jit import TinyJit
   @TinyJit
-  def train_step_jitted(model, optimizer, optimizer_bias, X, Y):
+  def train_step_jitted(model, optimizer, X, Y):
     out = model(X)
     loss = out.mul(Y).mean()
     if not getenv("DISABLE_BACKWARD"):
       optimizer.zero_grad()
-      optimizer_bias.zero_grad()
       loss.backward()
       for param in optimizer.params: param.grad.realize() # HACK: partial JIT of optimizer.step
-      for param in optimizer_bias.params: param.grad.realize() # HACK: partial JIT of optimizer_bias.step
 
     return loss.realize()
 
@@ -188,13 +158,13 @@ def train_cifar(bs=512, eval_bs=1000, steps=1000, div_factor=1e16, final_lr_rati
     if STEPS == 0: break
     GlobalCounters.reset()
     st = time.monotonic()
-    loss = train_step_jitted(model, optimizer, optimizer_bias, X, Y)
+    loss = train_step_jitted(model, optimizer, X, Y)
     et = time.monotonic()
-    optimizer.step() # JIT does not work with LR scheduling 
-    optimizer_bias.step()
+    optimizer.step() # JIT doesnt behave well with lr_scheduler
+    lr_scheduler.step()
     loss_cpu = loss.numpy()
     cl = time.monotonic()
-    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy().tolist()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
 
 if __name__ == "__main__":
