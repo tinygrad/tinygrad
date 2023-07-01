@@ -80,7 +80,6 @@ class TextDecoder:
     self.positional_embedding = Tensor.empty(n_text_ctx, n_text_state)
     self.blocks = [ResidualAttentionBlock(n_text_state, n_text_head, cross_attention=True) for _ in range(n_text_layer)]
     self.ln = nn.LayerNorm(n_text_state)
-    #mask = torch.empty(n_ctx, n_ctx).fill_(-np.inf).triu_(1)
 
   def __call__(self, x, xa):
     offset = 0
@@ -206,8 +205,7 @@ if __name__ == "__main__":
     diff = difflib.Differ()
     for c in ci:
       fn = BASEDIR / c["files"][0]["fname"]
-      print("-" * 128)
-      print(f"{fn.stem}\n")
+      print("-" * 128, f"{fn.stem}\n", sep="\n")
       waveform, sample_rate = load_wav(fn)
       log_spec = prep_audio(waveform, sample_rate)
       lst = [enc._special_tokens["<|startoftranscript|>"]]
@@ -223,13 +221,14 @@ if __name__ == "__main__":
       predicted = "".join(enc.decode(lst[2:-1]))[1:].lower().translate(str.maketrans("", "", string.punctuation))
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
       sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
-      print(f"word error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
+      print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
   elif len(sys.argv) > 1:
     # offline
     waveform, sample_rate = load_wav(sys.argv[1])
     log_spec = prep_audio(waveform, sample_rate)
     lst = [enc._special_tokens["<|startoftranscript|>"]]
     dat = model.encoder(Tensor(log_spec)).realize()
+    # TODO: same as above
     while lst[-1] not in [enc._special_tokens["<|endoftext|>"], 13, 30, 0]:
       out = model.decoder(Tensor([lst]), dat)
       out.realize()
