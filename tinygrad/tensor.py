@@ -167,8 +167,8 @@ class Tensor:
   def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
 
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
-    cond, input_inf, other_inf = (self != 0.0), (input_ == float("inf")), (other == float("inf"))
-    return cond * (input_ ** (1 - input_inf)) + (1.0 - cond) * (other ** (1 - other_inf))
+    cond = (self != 0.0)
+    return cond * ((input_ != float("inf")) * input_) + (1.0 - cond) * ((other != float("inf")) * other)
 
   # ***** rng hlops *****
 
