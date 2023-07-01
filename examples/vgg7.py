@@ -6,8 +6,8 @@ import numpy
 from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import SGD
-from examples.yolo.kinne import KinneDir
-from examples.yolo.waifu2x import image_load, image_save, Vgg7
+from examples.vgg7_helpers.kinne import KinneDir
+from examples.vgg7_helpers.waifu2x import image_load, image_save, Vgg7
 
 # amount of context erased by model
 CONTEXT = 7
