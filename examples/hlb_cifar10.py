@@ -53,7 +53,7 @@ class SpeedyResNet:
 
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
   def __call__(self, x, training=True): 
-    if not training: return ((x.sequential(self.net) * 0.5) + (x[..., ::-1].sequential(self.net) * 0.5)).log_softmax()
+    if not training and getenv('TTA', 1)==1: return ((x.sequential(self.net) * 0.5) + (x[..., ::-1].sequential(self.net) * 0.5)).log_softmax()
     return x.sequential(self.net).log_softmax()
 
 def fetch_batches(X_train, Y_train, BS, is_train=False, flip_chance=0.5):
