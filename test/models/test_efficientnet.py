@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 
 from tinygrad.helpers import getenv
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, Device
 from models.efficientnet import EfficientNet
 from models.vit import ViT
 from models.resnet import ResNet50
@@ -93,6 +93,7 @@ class TestViT(unittest.TestCase):
     label = _infer(self.model, car_img)
     self.assertEqual(label, "racer, race car, racing car")
 
+@unittest.skipIf(getenv("CI","") != "" and Device.DEFAULT == "WEBGPU", "segfaulting in CI")
 class TestResNet(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
