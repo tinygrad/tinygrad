@@ -63,10 +63,7 @@ class ARMCodegen(AssemblyCodegen):
         elif arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
           reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
           ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
-          if vin[1].__class__ is int:
-            ins.append(f"mov {reg}1, #{vin[1]}")
-          else:
-            ins.append(f"ldr {reg}1, {reg_map[vin[1].nm]}")
+          ins.append(f"{f'mov {reg}1, #' + str(vin[1]) if vin[1].__class__ is int else f'ldr {reg}1, ' + reg_map[vin[1].nm]}")
           ins.append(f"{'f' if reg == 's' else ''}{alu[arg]} {reg}0, {reg}1")
         elif arg == BinaryOps.MOD:
           ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
@@ -77,10 +74,11 @@ class ARMCodegen(AssemblyCodegen):
         else:
           reg = 's' if dtypes.is_float(out[1]) else 'x'
           ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
-          if vin[1].__class__ is int:
-            ins.append(f"mov {reg}1, #{vin[1]}")
-          else:
-            ins.append(f"ldr {reg}1, {reg_map[vin[1].nm]}")
+          ins.append(f"{f'mov {reg}1, #' + str(vin[1]) if vin[1].__class__ is int else f'ldr {reg}1, ' + reg_map[vin[1].nm]}")
+          # if vin[1].__class__ is int:
+          #   ins.append(f"mov {reg}1, #{vin[1]}")
+          # else:
+          #   ins.append(f"ldr {reg}1, {reg_map[vin[1].nm]}")
           ins.append(f"{'f' if reg == 's' else 's' if arg==BinaryOps.DIV else ''}{alu[arg]} {reg}0, {reg}0, {reg}1")
           ins.append(f"str {reg}0, {reg_map[out.nm]}")
       elif uop == UOps.LOAD:
