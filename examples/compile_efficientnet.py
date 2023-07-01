@@ -64,7 +64,7 @@ if __name__ == "__main__":
   cprog.append(f"char *lbls[] = {{{','.join(lbls)}}};")
 
   # buffers (empty + weights)
-  cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,len in bufs.values()]
+  cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,len,_key in bufs.values()]
 
   # the functions
   cprog += list(functions.values())
