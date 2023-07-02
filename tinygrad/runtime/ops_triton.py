@@ -5,7 +5,7 @@ import torch
 import math
 
 from tinygrad.ops import BinaryOps, Compiled, ASTRunner, FusedOps, Op, UnaryOps
-from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, LocalTypes, UOps
+from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
 from tinygrad.helpers import DType, ImageDType, dtypes
 from tinygrad.shape.symbolic import NumNode
 from tinygrad.runtime.lib import RawBuffer
@@ -33,13 +33,17 @@ class TritonProgram:
       return start.elapsed_time(end)*1e-3
   
 class TritonCodegen(Linearizer):
+  supports_float4 = False
+  supports_float4_alu = False
+
   def codegen(self):
     self.process()
-
+    self.limit_global_dims(3)
     self.linearize()
 
     kernel = []
     global_size = []
+    local_size = []
     depth = 0
     def kk(s): kernel.append("  "*depth+s)
 
@@ -49,14 +53,14 @@ class TritonCodegen(Linearizer):
 
     gid = [f"tl.program_id({i})" for i in range(3)]
     code_for_op: Final[Dict[Op, Callable]] = {
-      UnaryOps.EXP: lambda x: f"tl.exp({x})",
-      UnaryOps.LOG: lambda x: f"tl.log({x})",
+      UnaryOps.EXP2: lambda x: f"tl.math.exp2({x})",
+      UnaryOps.LOG2: lambda x: f"tl.math.log2({x})", # TODO: is fast_log2f ok?
       UnaryOps.SIN: lambda x: f"tl.sin({x})",
       BinaryOps.ADD: lambda x,y: f"({x}+{y})", BinaryOps.SUB: lambda x,y: f"({x}-{y})",
-      BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})",
-      BinaryOps.POW: lambda x,y: f"({x}**{y})", BinaryOps.MAX: lambda x,y: f"tl.max({x},{y})", # axis?
-      BinaryOps.CMPEQ: lambda x,y: f"({x}=={y}).astype(np.float32)",
-      FusedOps.MULACC: lambda s,a,b: f"({a}*{b}) + {s}",
+      BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})", # fdiv?
+      BinaryOps.POW: lambda x,y: f"tl.math.pow({x}, {y})", BinaryOps.MAX: lambda x,y: f"tl.maximum({x},{y})", # axis?
+      BinaryOps.CMPEQ: lambda x,y: f"({x}=={y})",
+      FusedOps.MULACC: lambda a,b,c: f"tl.math.fma({a}, {b}, {c})"
     }
     bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(self.bufs)]
 
@@ -66,17 +70,16 @@ class TritonCodegen(Linearizer):
           if isinstance(var, NumNode): continue # python doesnt have block scope
           else:
             if args[1] == "global":
-              if len(args[0]) >= 4 and len(args[0])-i > 2: raise NotImplementedError("unimplemented: global loop with more than 3 dims")
-              else:
-                global_size.append(var.max+1)
-                kk(f"{var.expr} = {gid[len(args[0])-1-i]} # {var.max+1}")
-            elif args[1] == "local": raise NotImplementedError("unimplemented: local loop")
+              global_size.append(var.max+1)
+              kk(f"{var.expr} = {gid[len(args[0])-1-i]} # {var.max+1}")
+            elif args[1] == "local":
+              local_size.append(var.max+1)
+              kk(f"{var.expr} = tl.arange({var.min}, {var.max+1})")
             else:
               kk(f"for {var.expr} in range({var.min}, {var.max+1}):")
               depth += 1
       elif uop == UOps.ENDLOOP:
-        if args[1] == "local": raise NotImplementedError("unimplemented: local loop")
-        else:
+        if args[1] not in ["global", "local"]:
           depth -= 1
           kk(f"# end {args[1]}")
       elif uop == UOps.CONST:
@@ -89,10 +92,10 @@ class TritonCodegen(Linearizer):
       elif uop == UOps.LOAD:
         assert newvar is not None
         val = f"{bufnames[args.i]} + {args.idx.render()}" # defaults to render_python
-        if args.valid.min == 1: kk(f"{newvar.render()} = tl.load({val})")
+        if args.valid.min == 1: kk(f"{newvar.render()} = tl.load({val})")#; kk(f"if ridx2 == 0: tl.device_print('test', {newvar.render()})")
         else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({val}, mask={args.valid.render()}), 0.0)")
       elif uop == UOps.STORE:
-        assert vin[0].ltype == LocalTypes.float, "unimplemented: float4 store"
+        assert vin[0].dtype == dtypes.float, "unimplemented: float4 store"
         assert not isinstance(self.bufs[args.i].dtype, ImageDType), "unimplemented: image store"
         assert args.valid.min == 1, "store must be valid"
         kk(f"tl.store({bufnames[args.i]} + {args.idx.render()}, {vin[0].render()})")

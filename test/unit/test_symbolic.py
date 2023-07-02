@@ -32,10 +32,10 @@ class TestSymbolic(unittest.TestCase):
   def test_ge_divides_and(self):
     expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
                           (Variable("idx2", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512])
-    self.helper_test_variable(expr//4, 0, 1, "((idx1<128) and (idx2<128))")
+    self.helper_test_variable(expr//4, 0, 1, "((idx1<128) and ((idx2<128)))")
     expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
                           (Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7)) < 512])
-    self.helper_test_variable(expr//4, 0, 1, "((((FLOAT8_INDEX//4)+idx2)<128) and (idx1<128))")
+    self.helper_test_variable(expr//4, 0, 1, "((((FLOAT8_INDEX//4)+idx2)<128) and ((idx1<128)))")
 
   def test_lt_factors(self):
     expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256)) < 512])
