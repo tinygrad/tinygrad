@@ -170,11 +170,11 @@ class Tensor:
   def meshgrid(*tensors):
     accum = []
     for curr_idx, tensor in enumerate(tensors):
-        assert(type(tensor) == Tensor) # doesn't support scalars
-        assert(len(tensor.shape) == 1) # currently only supports 1-D tensors
-        brod_to = [1 if (i != curr_idx) else tensor.shape[0] for i in range(len(tensors))]
-        repeat_tensor = [1 if (i == curr_idx) else tensors[i].shape[0] for i in range(len(tensors)) ]
-        accum.append(tensor.reshape(brod_to).repeat(repeat_tensor))
+      assert(type(tensor) == Tensor) # doesn't support scalars
+      assert(len(tensor.shape) == 1) # currently only supports 1-D tensors
+      brod_to = [1 if (i != curr_idx) else tensor.shape[0] for i in range(len(tensors))]
+      repeat_tensor = [1 if (i == curr_idx) else tensors[i].shape[0] for i in range(len(tensors)) ]
+      accum.append(tensor.reshape(brod_to).repeat(repeat_tensor))
     return accum
 
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
