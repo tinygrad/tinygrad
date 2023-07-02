@@ -54,21 +54,26 @@ class SpeedyResNet:
     if not training and getenv('TTA', 0)==1: return ((x.sequential(self.net) * 0.5) + (x[..., ::-1].sequential(self.net) * 0.5)).log_softmax()
     return x.sequential(self.net).log_softmax()
 
-def fetch_batches(X_train, Y_train, BS, is_train=False, flip_chance=0.5):
-  if not is_train:
-    ind = np.arange(Y_train.shape[0])
-    np.random.shuffle(ind)
-    X_train, Y_train = X_train[ind, ...], Y_train[ind, ...]
+def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
+  def _shuffle(all_X, all_Y):
+    if not is_train:
+      ind = np.arange(all_Y.shape[0])
+      np.random.shuffle(ind)
+      all_X, all_Y = all_X[ind, ...], all_Y[ind, ...]
+    return all_X, all_Y
   while True:
-    for batch_start in range(0, Y_train.shape[0], BS):
-      batch_end = min(batch_start+BS, Y_train.shape[0])
-      X = Tensor(X_train[batch_end-BS:batch_end]) # batch_end-BS for padding
+    set_seed(seed)
+    _shuffle(all_X, all_Y)
+    for batch_start in range(0, all_Y.shape[0], BS):
+      batch_end = min(batch_start+BS, all_Y.shape[0])
+      X = Tensor(all_X[batch_end-BS:batch_end]) # batch_end-BS for padding
       if is_train: X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < flip_chance, X[..., ::-1], X) # flip augmentation 
       Y = np.zeros((BS, num_classes), np.float32)
-      Y[range(BS),Y_train[batch_end-BS:batch_end]] = -1.0*num_classes
+      Y[range(BS),all_Y[batch_end-BS:batch_end]] = -1.0*num_classes
       Y = Tensor(Y.reshape(BS, num_classes))
       yield X, Y
     if not is_train: break
+    seed += 1
 
 def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.15, label_smoothing=0., seed=6):
   set_seed(seed)
@@ -120,9 +125,9 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
   best_eval = -1
   i = 0
-  left_batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
+  left_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
   set_seed(seed+1)
-  right_batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
+  right_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
   while i < STEPS:
     (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
     mixup_prob = Tensor.rand(1).realize()
@@ -131,7 +136,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
       losses = []
-      for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS):
+      for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
         out, loss = eval_step_jitted(model, Xt, Yt)
         outs = out.numpy().argmax(axis=1)
         correct = outs == Yt.numpy().argmin(axis=1)
