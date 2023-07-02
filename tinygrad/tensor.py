@@ -481,7 +481,7 @@ class Tensor:
       HW4 = (4, 4)  # F(2x2,3x3) winograd kernel granularity
       assert len(HW) == len(HW4)  # only support 2d winograd for now
       # todo: even pooling
-      x = self.pad2d(padding_)._pool(HW4, stride * 2, dilation)  # double stride for winograd kernel granularity
+      x = self.pad2d(padding_)._pool(HW4, stride * 2 if isinstance(stride, int) else [s * 2 for s in stride], dilation)  # double stride for winograd kernel granularity
       rcout, oyx4 = cout // groups, x.shape[2:-len(HW4)]
       x = x.reshape(bs, groups, cin, 1, *oyx4, *HW4).expand(bs, groups, cin, rcout, *oyx4, *HW4).permute(0, 1, 3, *[4 + i for i in range(len(oyx4))], 2, *[4 + len(oyx4) + i for i in range(len(HW4))])
       # x = x.realize()  # (bs, groups, rcout, *oyx, cin, *HW)
