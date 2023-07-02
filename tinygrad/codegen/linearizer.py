@@ -120,6 +120,8 @@ class Linearizer:
     # this helps in the case where different views of the same rawbuffer are passed as arguments.
     if isinstance(buf, LazyBuffer):
       raw_buf = buf.realized
+    else:
+      raw_buf = buf
     if raw_buf in self.raw_bufs:
       self.bufmap.append(self.raw_bufs.index(raw_buf))
     else:
