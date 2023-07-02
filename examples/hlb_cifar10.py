@@ -75,13 +75,13 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
     if not is_train: break
     seed += 1
 
-def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.15, label_smoothing=0., seed=6):
+def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.15, label_smoothing=0., mixup_prob=0.5, seed=6):
   set_seed(seed)
   Tensor.training = True
 
   BS, EVAL_BS, STEPS = getenv("BS", bs), getenv('EVAL_BS', eval_bs), getenv("STEPS", steps)
   MAX_LR, PCT_START, MOMENTUM, WD = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start), getenv('MOMENTUM', momentum), getenv("WD", wd)
-  DIV_FACTOR, LABEL_SMOOTHING = getenv('DIV_FACTOR', div_factor), getenv('LABEL_SMOOTHING', label_smoothing)
+  DIV_FACTOR, LABEL_SMOOTHING, MIXUP_PROB = getenv('DIV_FACTOR', div_factor), getenv('LABEL_SMOOTHING', label_smoothing), getenv('MIXUP_PROB', mixup_prob)
   FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio))
   if getenv("FAKEDATA"):
     N = 2048
@@ -128,7 +128,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   left_batcher, right_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True), fetch_batches(X_train, Y_train, BS=BS, seed=seed+1, is_train=True)
   while i <= STEPS:
     (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
-    mixup_prob = Tensor.rand(1).realize()
+    mixup_prob = (Tensor.rand(Xr.shape[0]) > MIXUP_PROB).where(Tensor.rand(Xr.shape[0]).realize(), Tensor.ones(Xr.shape[0])).reshape(Xr.shape[0], 1, 1, 1)
     X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
     if i%50 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
