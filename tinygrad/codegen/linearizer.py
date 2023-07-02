@@ -118,10 +118,12 @@ class Linearizer:
 
     # dedup by python object comparison of RawBuffer -- this is OK since we expect all non-output non-local buffers to be realized here.
     # this helps in the case where different views of the same rawbuffer are passed as arguments.
-    if isinstance(buf, LazyBuffer) and buf.realized in self.raw_bufs:
-      self.bufmap.append(self.raw_bufs.index(buf.realized))
+    if isinstance(buf, LazyBuffer):
+      raw_buf = buf.realized
+    if raw_buf in self.raw_bufs:
+      self.bufmap.append(self.raw_bufs.index(raw_buf))
     else:
-      self.raw_bufs.append(buf.realized)
+      self.raw_bufs.append(raw_buf)
       self.bufmap.append(len(self.raw_bufs) - 1)
 
   # the bufs we want to pass in at kernel execution time; ie realized LazyBuffers and not RawConst or LocalBuffer
@@ -190,7 +192,6 @@ class Linearizer:
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == amt]
 
   def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
-    assert self.bufs[i].__class__ not in [RawConst, LocalBuffer]
     upcast_dim = self.get_upcast_dim(i)
     cache: Dict[str, Token] = {}
     ret = []
