@@ -128,7 +128,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   left_batcher, right_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True), fetch_batches(X_train, Y_train, BS=BS, seed=seed+1, is_train=True)
   while i <= STEPS:
     (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
-    mixup_prob = (Tensor.rand(Xr.shape[0]) > MIXUP_PROB).where(Tensor.rand(Xr.shape[0]).realize(), Tensor.ones(Xr.shape[0])).reshape(Xr.shape[0], 1, 1, 1)
+    mixup_prob = (Tensor.rand(Xr.shape[0]) < MIXUP_PROB).where(Tensor.rand(Xr.shape[0]).realize(), Tensor.ones(Xr.shape[0])).reshape(Xr.shape[0], 1, 1, 1)
     X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
     if i%50 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
