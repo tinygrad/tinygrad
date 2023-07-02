@@ -109,11 +109,20 @@ class TestNN(unittest.TestCase):
       torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
 
     # test
-    x = Tensor.uniform(BS, C1, H, W)
+    x = Tensor.uniform(BS, C1, H, W, requires_grad=True)
     z = layer(x)
-    torch_x = torch.tensor(x.cpu().numpy())
+    torch_x = torch.tensor(x.cpu().numpy(), requires_grad=True)
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+
+    m = z.mean()
+    m.backward()
+    g = x.grad.realize()
+    torch_m = torch_z.mean()
+    torch_m.backward()
+    torch_g = torch_x.grad
+    np.testing.assert_allclose(g.numpy(), torch_g.detach().numpy(), atol=5e-4, rtol=1e-5)
+
 
   @unittest.skipIf(getenv("CI", "") != "" and WINDOWS, "runs out of memory in CI")
   def test_conv_transpose2d(self):

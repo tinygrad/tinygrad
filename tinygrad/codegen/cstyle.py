@@ -68,7 +68,11 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
   bufmap = []
   realized_bufs = {}
   for i, b in enumerate(bufs):
-    bufname = "temp" if isinstance(b, LocalBuffer) else f"data{i}"
+    if isinstance(b, LocalBuffer):
+      bufnames.append("temp")
+      bufmap.append("temp")
+      continue
+    bufname = f"data{i}"
     bufnames.append(bufname)
     if b.realized._buf in realized_bufs:
       bufmap.append(realized_bufs[b.realized._buf])

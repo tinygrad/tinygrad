@@ -450,8 +450,8 @@ class Tensor:
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
     if isinstance(padding, (tuple, list)): assert len(padding) == 2 * len(HW) or len(padding) == len(HW), f"Expected padding of length {2 * len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {self.shape}"
-    padding_ = [padding] * 2 * len(HW) if isinstance(padding, int) else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
-    if not all(x == 3 for x in HW):
+    padding_ = [padding] * 2 * len(HW) if isinstance(padding, int) else (list(padding) if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
+    if not all(x == 3 for x in HW) or any(x < 4 for x in self.shape[-2:]):
 
       if True:
         # conv2d is a pooling op (with padding)
@@ -471,7 +471,13 @@ class Tensor:
     else:
       # winograd conv
       # todo: padding edge cases
-      assert(all(x % 2 == 0 and x >= 4 for x in self.shape[-2:]))  # block by 4; ignore odd cases for now
+      end_shrink = []
+      for i, dim in enumerate(self.shape[-2:]):
+        if dim % 2 != 0:
+          padding_[i * 2 + 1] = padding_[i * 2 + 1] + 1
+          end_shrink.append(1)
+        else:
+          end_shrink.append(0)
       HW4 = (4, 4)  # F(2x2,3x3) winograd kernel granularity
       assert len(HW) == len(HW4)  # only support 2d winograd for now
       # todo: even pooling
@@ -519,6 +525,7 @@ class Tensor:
       ret = ret.flatten(-2)  # flatten x axis: (H2, bs, groups, rcout, *oyx)
       ret = ret.permute([*[i for i in range(1, len(ret.shape) - 1)], 0, len(ret.shape)-1])  # interleave H2: (bs, groups, rcout, y, h, x)
       ret = ret.reshape(bs, cout, *[c * 2 for c in oyx4])
+      ret = ret.shrink(tuple([(0,s) for s in ret.shape[:-2]] + [(0, s - end_shrink[i]) for i, s in enumerate(ret.shape[-2:])]))
     return ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))
 
   def dot(self, w:Tensor) -> Tensor:

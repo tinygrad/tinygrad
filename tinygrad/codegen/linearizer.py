@@ -144,7 +144,7 @@ class Linearizer:
 
     # group simplifies
     self.simplify_ones()
-    self.simplify_merge_adjacent()
+    #self.simplify_merge_adjacent()
 
     # print early
     if DEBUG >= 5: self.printbufs("early")
@@ -548,12 +548,14 @@ class Linearizer:
     # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
     # this can be made much smarter
     for axis in range(self.first_reduce-1, -1, -1):
+      # todo: we need to be able to split axes that are masked, or refuse to merge them in simplify_merge_adjacent
       if self.full_shape[axis] <= 16 and any(self.sts[buf_index].axis_needs_valid(axis) for buf_index in range(len(self.sts))) and self.full_shape[axis] * upcasted_cardinality <= 256:
         if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
         self.shift_to(axis, self.full_shape[axis])
         self.upcast()
         self.simplify_ones()
         upcasted_axis.add(axis)
+        upcasted_cardinality *= self.full_shape[axis]
 
     while False and prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
       xb_choices = []
