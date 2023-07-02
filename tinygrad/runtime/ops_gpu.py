@@ -30,7 +30,6 @@ CL = _CL()
 
 class CLBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype, device='0'):
-    assert not OSX or dtype != dtypes.float64, "OpenCL on Mac doesn't support float64"
     if isinstance(dtype, ImageDType):
       fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
       buf = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=(dtype.shape[1], dtype.shape[0]))
