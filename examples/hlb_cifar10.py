@@ -43,7 +43,7 @@ class SpeedyResNet:
     self.net = [
       nn.Conv2d(3, 64, kernel_size=1),
       nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
-      lambda x: x.gelu(),
+      lambda x: x.gelu(), # may not converge with high batch size (512 didnt work)
       ConvGroup(64, 128, short=False),
       ConvGroup(128, 256, short=True),
       ConvGroup(256, 512, short=False),
@@ -72,14 +72,15 @@ def fetch_batches(X_train, Y_train, BS, is_train=False, flip_chance=0.5):
       yield X, Y
     if not is_train: break
 
-def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.14, label_smoothing=0., seed=6):
+def train_cifar(bs=256, eval_bs=500, steps=1500, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.2, momentum=0.8, wd=0.14, label_smoothing=0., seed=6,
+                lr_scheduler_pause_step=1200, lr_scheduler_resume_step=1450):
   set_seed(seed)
   Tensor.training = True
 
   BS, EVAL_BS, STEPS = getenv("BS", bs), getenv('EVAL_BS', eval_bs), getenv("STEPS", steps)
   MAX_LR, PCT_START, MOMENTUM, WD = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start), getenv('MOMENTUM', momentum), getenv("WD", wd)
   DIV_FACTOR, LABEL_SMOOTHING = getenv('DIV_FACTOR', div_factor), getenv('LABEL_SMOOTHING', label_smoothing)
-  FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio))
+  FINAL_DIV_FACTOR, LR_PAUSE, LR_RESUME = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio)), getenv('LR_PAUSE', lr_scheduler_pause_step), getenv('LR_RESUME', lr_scheduler_resume_step)
 
   if getenv("FAKEDATA"):
     N = 2048
@@ -90,9 +91,9 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     X_train, Y_train = fetch_cifar(train=True)
     X_test, Y_test = fetch_cifar(train=False)
   model = SpeedyResNet()
-
   optimizer = optim.SGD(optim.get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
-  lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
+  lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, 
+                            total_steps=STEPS - (LR_RESUME-LR_PAUSE), pause_range=[LR_PAUSE, LR_RESUME], pct_start=PCT_START)
 
   # JIT at every run
   from tinygrad.jit import TinyJit
