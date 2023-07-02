@@ -18,8 +18,8 @@ class Optimizer:
   def realize(self, extra=None):
     # TODO: corealize
     # NOTE: in extra is too late for most of the params due to issues with assign
-    [p.realize() for p in (extra if extra else []) + self.params + self.buffers]
-
+    for p in extra + self.params + self.buffers if extra is not None else self.params + self.buffers:
+      p.realize()
 
 class SGD(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
