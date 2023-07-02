@@ -120,8 +120,13 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
   best_eval = -1
   i = 0
-  for X, Y in fetch_batches(X_train, Y_train, BS=BS, is_train=True):
-    if i > STEPS: break
+  left_batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
+  set_seed(seed+1)
+  right_batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
+  while i < STEPS:
+    (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
+    mixup_prob = Tensor.rand(1).realize()
+    X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
     if i%50 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
