@@ -21,7 +21,7 @@ class MultiStepLR(LR_Scheduler):
     self.gamma = gamma
   
   def get_lr(self) -> float:
-    if self.epoch_counter not in self.milestones:
+    if self.epoch_counter.numpy()[0] not in self.milestones:
       return self.optimizer.lr
     return self.optimizer.lr * self.gamma
 
@@ -42,7 +42,7 @@ class ReduceLROnPlateau(LR_Scheduler):
     return current > dynamic_threshold
   
   def step(self, current: float) -> None:
-    self.epoch_counter += 1
+    self.epoch_counter.assign(self.epoch_counter + 1).realize()
     if self.is_better(current):
       self.bad_epoch = 0
       self.best = current
@@ -58,7 +58,7 @@ class CosineAnnealingLR(LR_Scheduler):
     super().__init__(optimizer)
     self.T_max = T_max
     self.eta_min = eta_min
-    self.eta_max = optimizer.lr
+    self.eta_max = optimizer.lr.numpy()[0]
 
   def get_lr(self) -> float:
     return self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter/self.T_max) * math.pi))
