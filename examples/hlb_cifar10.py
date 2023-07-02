@@ -75,7 +75,7 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
     if not is_train: break
     seed += 1
 
-def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.15, label_smoothing=0., mixup_prob=0.5, seed=6):
+def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.15, label_smoothing=0., mixup_prob=0., seed=6):
   set_seed(seed)
   Tensor.training = True
 
