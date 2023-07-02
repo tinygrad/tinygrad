@@ -122,7 +122,7 @@ class WebGpuCodegen(Linearizer):
     assert len([x for x in self.bufs if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]) <= 31, "WEBGPU max number of buffers is 31" 
     function_name = f"{self.function_name}_{abs(hash(self.key))}"
     bind_it = iter(range(len(self.bufs)))
-    local_size = local_size if len(local_size) else [1]
+    local_size = local_size[::-1] if len(local_size) else [1]
     prg = "\n".join([f"@group(0) @binding({next(bind_it)}) var<storage,read_write> data{i}: array<{type_map[x.dtype]}>;" for i,x in enumerate(self.bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)])
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(global_invocation_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
     return ASTRunner(function_name, prg, global_size[::-1] if len(global_size) else [1], local_size)
