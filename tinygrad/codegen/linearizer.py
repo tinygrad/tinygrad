@@ -111,8 +111,6 @@ class Linearizer:
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
     self.key = (ast.map_buffers({x:i for i,x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
 
-    self.uop_cache = {}
-
   def add_buf(self, buf:Union[LazyBuffer,LocalBuffer]):
     self.bufs.append(buf)
 
@@ -296,7 +294,7 @@ class Linearizer:
       loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
 
       # run early AST (with reduce)
-      self.ast_parse(self.reduceop, [acc[off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True)
+      self.ast_parse(self.reduceop, [acc[off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True, uop_cache={})
 
       # end the reduce loop
       self.uop(UOps.ENDLOOP, None, [], (reduce_idxs, "reduce"))
@@ -355,24 +353,25 @@ class Linearizer:
       self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
   _OT = TypeVar("_OT")
-  def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None) -> _OT:
+  def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None, uop_cache=None) -> _OT:
     # we don't need to check UOps.LOAD because global_load has a cache for that already
     # all arg for these UOps types must be hashable
-    cache_uop = uop in [UOps.ALU]
+    # also, we don't want to cache accumulator operations
+    cache_uop = uop_cache is not None and uop in [UOps.ALU]
     if cache_uop:
       input_key = (uop, tuple(vin), arg)
-      if input_key in self.uop_cache:
+      if input_key in uop_cache:
         if DEBUG >= 4: print(f'; {out} = {(uop, vin, arg)} from cache')
-        return self.uop_cache[input_key]
+        return uop_cache[input_key]
     else:
       input_key = None
     self.uops.append(UOp(uop, cast(Optional[Token], out), vin, arg))
     if DEBUG >= 4: print(self.uops[-1])
     if cache_uop:
-      self.uop_cache[input_key] = out
+      uop_cache[input_key] = out
     return out
 
-  def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
+  def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False, uop_cache=None) -> List[Token]:
     if x.__class__ is not LazyOp: return loaded_buffers[x]
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
@@ -389,7 +388,7 @@ class Linearizer:
     if x.op.__class__ in {ReduceOps, FusedOps}:
       ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
     else:
-      ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
+      ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op, uop_cache=uop_cache)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
