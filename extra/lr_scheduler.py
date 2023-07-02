@@ -20,7 +20,7 @@ class MultiStepLR(LR_Scheduler):
     self.milestones = milestones
     self.gamma = gamma
   
-  def get_lr(self) -> float:
+  def get_lr(self) -> Tensor:
     if self.epoch_counter.numpy()[0] not in self.milestones:
       return self.optimizer.lr
     return self.optimizer.lr * self.gamma
@@ -60,7 +60,7 @@ class CosineAnnealingLR(LR_Scheduler):
     self.eta_min = eta_min
     self.eta_max = optimizer.lr.numpy()[0]
 
-  def get_lr(self) -> float:
+  def get_lr(self) -> Tensor:
     return Tensor([self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter.numpy()[0]/self.T_max) * math.pi))])
 
 class OneCycleLR(LR_Scheduler):
@@ -73,9 +73,9 @@ class OneCycleLR(LR_Scheduler):
     self.pct_start = pct_start
 
   @staticmethod
-  def _annealing_linear(start, end, pct): return ((end - start) * pct + start)
+  def _annealing_linear(start: Tensor, end: Tensor, pct: Tensor) -> Tensor: return ((end - start) * pct + start)
 
-  def get_lr(self): 
+  def get_lr(self) -> Tensor: 
     return (self.epoch_counter < self.total_steps*self.pct_start).where(
       self._annealing_linear(self.initial_lr, self.max_lr, self.epoch_counter/(self.total_steps*self.pct_start)),
       self._annealing_linear(self.max_lr, self.min_lr, (self.epoch_counter-(self.total_steps*self.pct_start))/(self.total_steps*(1-self.pct_start)))
