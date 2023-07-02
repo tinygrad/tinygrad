@@ -129,7 +129,6 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   while i <= STEPS:
     (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
     mixup_prob = Tensor(np.random.beta(MIXUP_ALPHA, MIXUP_ALPHA, size=Xr.shape[0]).astype(np.float32).reshape(Xr.shape[0], 1, 1, 1)) if MIXUP_ALPHA > 0 else Tensor.ones(Xr.shape[0], 1, 1, 1)
-    print(mixup_prob.numpy())
     X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
     if i%50 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
