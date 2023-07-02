@@ -133,8 +133,7 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg, **self.runtime_args)
     return self
 
-  def exec(self, bufs) -> Optional[float]:
-    rawbufs = [x.realized for x in bufs if x.realized is not None and x.realized.__class__ is not RawConst]
+  def exec(self, rawbufs) -> Optional[float]:
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs)
 
@@ -188,5 +187,5 @@ class Compiled:
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
-    prg.exec(k.bufs)
+    prg.exec(k.raw_input_bufs)
     return output.realized

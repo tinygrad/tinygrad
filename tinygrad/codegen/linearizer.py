@@ -100,7 +100,11 @@ class Linearizer:
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
 
     # get the output buffers
-    self.bufs = [output_buffer] + dedup(ast.buffers)
+    self.bufs = []
+    self.bufmap = []  # map from buf to index into raw_input_bufs, only for global buffers
+    self.raw_bufs = []  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
+    for buf in [output_buffer] + dedup(ast.buffers):
+      self.add_buf(buf)
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
@@ -109,11 +113,28 @@ class Linearizer:
 
     self.uop_cache = {}
 
+  def add_buf(self, buf):
+    self.bufs.append(buf)
+
+    # dedup by python object comparison of RawBuffer -- this is OK since we expect all non-output non-local buffers to be realized here.
+    # this helps in the case where different views of the same rawbuffer are passed as arguments.
+    if isinstance(buf, LazyBuffer) and buf.realized in self.raw_bufs:
+      self.bufmap.append(self.raw_bufs.index(buf.realized))
+    else:
+      self.raw_bufs.append(buf.realized)
+      self.bufmap.append(len(self.raw_bufs) - 1)
+
+  # the bufs we want to pass in at kernel execution time; ie realized LazyBuffers and not RawConst or LocalBuffer
+  @property
+  def raw_input_bufs(self):
+    return [buf for buf in self.raw_bufs if buf.__class__ not in [RawConst, LocalBuffer]]
+
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
+    # todo: update calculation for raw buffer dedup
     self.mem_estimate: int = sum(x.dtype.itemsize*(x.realized.size if x.realized is not None else prod(x.shape)) for x in self.bufs if x is not None)
 
     # there's only allowed to be one reduceop
@@ -169,6 +190,7 @@ class Linearizer:
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == amt]
 
   def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
+    assert self.bufs[i].__class__ not in [RawConst, LocalBuffer]
     upcast_dim = self.get_upcast_dim(i)
     cache: Dict[str, Token] = {}
     ret = []
@@ -185,12 +207,13 @@ class Linearizer:
         localtype = dtypes.float
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.bufmap[i], idx, valid)) if const is None else \
                      self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
       ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b) if localtype == dtypes._float4 else cache[key])
     return ret
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
+    assert self.bufs[i].__class__ not in [RawConst, LocalBuffer]
     store_offset = dict(zip(expand_idxs(idxs), store))
 
     # float4 grouping
@@ -212,7 +235,7 @@ class Linearizer:
       store_offset = store_offset_new
 
     for idx, var in store_offset.items():
-      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idx)))
+      self.uop(UOps.STORE, None, [var], MemOp(self.bufmap[i], *self.sts[i].expr_idxs(idx)))
 
   def linearize(self):
     # uops
@@ -220,7 +243,7 @@ class Linearizer:
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
-      self.bufs.append(LocalBuffer("temp"))
+      self.add_buf(LocalBuffer("temp"))
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
