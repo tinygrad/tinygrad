@@ -18,7 +18,7 @@ def compile_and_test_ast(ast, local_size=None):
     apply_optimization(k, ast, 10, getenv("KCACHE", 0))
   prg = k.codegen().build(CLProgram)
   if local_size is not None: prg.local_size = local_size
-  for i in range(5): prg(prg.lower(k.bufs))
+  for i in range(5): prg(prg.lower(k.raw_bufs))
   if getenv("TEST", 0): test_ast(k)
 
 class TestAST(unittest.TestCase):

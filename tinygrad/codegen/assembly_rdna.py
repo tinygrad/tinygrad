@@ -36,7 +36,7 @@ class RDNACodegen(AssemblyCodegen):
 
   def specialize(self, asm) -> Tuple[str, str]:
     args = []
-    for i,b in enumerate(self.bufs): args.append({'.address_space': 'global', '.name': f'buf_{i}', '.offset': i*8, '.size': 8, '.type_name': b.dtype.name+"*", '.value_kind': 'global_buffer'})
+    for i,b in enumerate(self.raw_bufs): args.append({'.address_space': 'global', '.name': f'buf_{i}', '.offset': i*8, '.size': 8, '.type_name': b.dtype.name+"*", '.value_kind': 'global_buffer'})
     ins = []
 
     v_cnt = 3  # v[0:2] is local_xyz
