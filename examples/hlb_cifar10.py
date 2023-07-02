@@ -72,13 +72,13 @@ def fetch_batches(X_train, Y_train, BS, is_train=False, flip_chance=0.5):
       yield X, Y
     if not is_train: break
 
-def train_cifar(bs=512, eval_bs=500, steps=900, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.14, seed=6):
+def train_cifar(bs=512, eval_bs=500, steps=900, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.14, label_smoothing=0, seed=6):
   set_seed(seed)
   Tensor.training = True
 
   BS, EVAL_BS, STEPS = getenv("BS", bs), getenv('EVAL_BS', eval_bs), getenv("STEPS", steps)
   MAX_LR, PCT_START, MOMENTUM, WD = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start), getenv('MOMENTUM', momentum), getenv("WD", wd)
-  DIV_FACTOR = getenv('DIV_FACTOR', div_factor)
+  DIV_FACTOR, LABEL_SMOOTHING = getenv('DIV_FACTOR', div_factor), getenv('LABEL_SMOOTHING', label_smoothing)
   FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio))
 
   if getenv("FAKEDATA"):
@@ -99,7 +99,7 @@ def train_cifar(bs=512, eval_bs=500, steps=900, div_factor=1e16, final_lr_ratio=
   @TinyJit
   def train_step_jitted(model, optimizer, lr_scheduler, X, Y):
     out = model(X)
-    loss = out.mul(Y).mean()
+    loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
     if not getenv("DISABLE_BACKWARD"):
       optimizer.zero_grad()
       loss.backward()
