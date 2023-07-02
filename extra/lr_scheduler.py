@@ -61,7 +61,7 @@ class CosineAnnealingLR(LR_Scheduler):
     self.eta_max = optimizer.lr.numpy()[0]
 
   def get_lr(self) -> float:
-    return self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter/self.T_max) * math.pi))
+    return Tensor([self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter.numpy()[0]/self.T_max) * math.pi))])
 
 class OneCycleLR(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, max_lr: float, initial_div_factor: float, final_div_factor: float, total_steps: int, pct_start: float):

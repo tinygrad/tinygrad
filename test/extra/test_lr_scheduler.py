@@ -38,12 +38,16 @@ def lr_scheduler_training(sched_fn=None, args=None):
 
 def current_lr(optim): return optim.param_groups[0]['lr'] if hasattr(optim, 'param_groups') else optim.lr
 def get_lrs(optim, sched, epochs, steps=1, accs=None):
-  lrs = [current_lr(optim)]
+  lr = current_lr(optim)
+  if not isinstance(lr, float): lr = lr.numpy()[0]
+  lrs = [lr]
   for e in range(epochs):
     for _ in range(steps):
       optim.step()
     sched.step() if accs is None else sched.step(accs[e])
-    lrs.append(current_lr(optim))
+    lr = current_lr(optim)
+    if not isinstance(lr, float): lr = lr.numpy()[0]
+    lrs.append(lr)
   return lrs
 
 class TestLrScheduler(unittest.TestCase):
