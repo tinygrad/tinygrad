@@ -2,7 +2,7 @@ import numpy as np
 from wgpu.utils._device import get_default_device
 from tinygrad.runtime.lib import RawBufferCopyIn, RawConst
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
-from tinygrad.helpers import dtypes, DType
+from tinygrad.helpers import dtypes, DType, getenv
 from tinygrad.ops import Compiled, UnaryOps, Op, BinaryOps, ASTRunner, FusedOps
 from tinygrad.shape.symbolic import NumNode, Variable
 from tinygrad.codegen.cstyle import render_cl
@@ -38,6 +38,8 @@ code_for_op: Dict[Op, Callable] = {
   FusedOps.MULACC: lambda x,y,z: f"(({x}*{y})+{z})",
 }
 
+LOCAL_GROUPS=getenv("LOCAL_GROUPS","") != ""
+
 class WebGpuCodegen(Linearizer):
   supports_float4 = False
   supports_constant_folding = True
@@ -55,28 +57,31 @@ class WebGpuCodegen(Linearizer):
     bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(self.bufs)]
     depth += 1
     gid = [f"gindex.{'xyz'[x]}" for x in range(3)]
-    lid: List[str] = []
+    lid: List[str] = [] if not LOCAL_GROUPS else [f"lindex.{'xyz'[x]}" for x in range(3)]
     pend_close = None
     for uop,newvar,vin,args in self.uops:
       if uop == UOps.LOOP:
         for i,var in enumerate(args[0]):
           if isinstance(var, NumNode): 
             if args[1] == "global": global_size.append(1)
-            if args[1] == "local" and len(lid): local_size.append(1)
+            if args[1] == "local" and LOCAL_GROUPS: local_size.append(1)
             kk("{")
           else:
             if args[1] == "global":
               global_size.append(var.max+1)
               kk(f"{{ let {var.expr} = i32({gid[len(args[0])-1-i]}); // {var.max+1}")
-            elif args[1] == "local" and len(lid):
-              kk(f"for(var {var.expr}: i32 = 0; {var.expr} <= {var.max}; {var.expr}++) {{")
+            elif args[1] == "local":
+              if LOCAL_GROUPS:
+                kk(f"{{ let {var.expr} = i32({lid[len(args[0])-1-i]}); // {var.max+1}") 
+                local_size.append(var.max+1)
+              else:
+                kk(f"for(var {var.expr}: i32 = 0; {var.expr} <= {var.max}; {var.expr}++) {{")
               depth += 1
-              local_size.append(var.max+1)
             else:
               kk(f"for(var {var.expr}: i32 = 0; {var.expr} <= {var.max}; {var.expr}++) {{")
         depth += 1
       elif uop == UOps.ENDLOOP:
-        if args[1] == "local" and len(lid):
+        if args[1] == "local":
           kk("workgroupBarrier();")
           kk(f"if ({Variable.sum(args[0]).render(render_cl)} == 0) {{")
           pend_close = "}"*(len(args[0])+1) + f" // {args[1]}"
@@ -117,9 +122,10 @@ class WebGpuCodegen(Linearizer):
     assert len([x for x in self.bufs if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]) <= 31, "WEBGPU max number of buffers is 31" 
     function_name = f"{self.function_name}_{abs(hash(self.key))}"
     bind_it = iter(range(len(self.bufs)))
+    local_size = local_size if len(local_size) else [1]
     prg = "\n".join([f"@group(0) @binding({next(bind_it)}) var<storage,read_write> data{i}: array<{type_map[x.dtype]}>;" for i,x in enumerate(self.bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)])
-    prg += f"\n@compute @workgroup_size(1) fn {function_name}(@builtin(global_invocation_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}" # TODO: revert local_size {','.join([str(x) for x in local_size])} once bug is fixed
-    return ASTRunner(function_name, prg, global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else [1])
+    prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(global_invocation_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
+    return ASTRunner(function_name, prg, global_size[::-1] if len(global_size) else [1], local_size)
 
 class RawWebGPUBuffer(RawBufferCopyIn):
   def __init__(self, size:int, dtype:DType):
