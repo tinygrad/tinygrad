@@ -72,16 +72,14 @@ def fetch_batches(X_train, Y_train, BS, is_train=False, flip_chance=0.5):
       yield X, Y
     if not is_train: break
 
-def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.15, label_smoothing=0., seed=6,
-                lr_scheduler_pause_step=1000, lr_scheduler_resume_step=1000):
+def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.15, label_smoothing=0., seed=6):
   set_seed(seed)
   Tensor.training = True
 
   BS, EVAL_BS, STEPS = getenv("BS", bs), getenv('EVAL_BS', eval_bs), getenv("STEPS", steps)
   MAX_LR, PCT_START, MOMENTUM, WD = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start), getenv('MOMENTUM', momentum), getenv("WD", wd)
   DIV_FACTOR, LABEL_SMOOTHING = getenv('DIV_FACTOR', div_factor), getenv('LABEL_SMOOTHING', label_smoothing)
-  FINAL_DIV_FACTOR, LR_PAUSE, LR_RESUME = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio)), getenv('LR_PAUSE', lr_scheduler_pause_step), getenv('LR_RESUME', lr_scheduler_resume_step)
-
+  FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio))
   if getenv("FAKEDATA"):
     N = 2048
     X_train = np.random.default_rng().standard_normal(size=(N, 3, 32, 32), dtype=np.float32)
@@ -93,7 +91,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   model = SpeedyResNet()
   optimizer = optim.SGD(optim.get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, 
-                            total_steps=STEPS - (LR_RESUME-LR_PAUSE), pause_range=[LR_PAUSE, LR_RESUME], pct_start=PCT_START)
+                            total_steps=STEPS, pct_start=PCT_START)
 
   # JIT at every run
   from tinygrad.jit import TinyJit
