@@ -213,7 +213,6 @@ class Linearizer:
     return ret
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
-    assert self.bufs[i].__class__ not in [RawConst, LocalBuffer]
     store_offset = dict(zip(expand_idxs(idxs), store))
 
     # float4 grouping
