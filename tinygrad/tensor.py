@@ -166,6 +166,17 @@ class Tensor:
   @staticmethod
   def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
 
+  @staticmethod
+  def meshgrid(*tensors):
+      accum = []
+      for curr_idx, tensor in enumerate(tensors):
+          assert(type(tensor) == Tensor) # doesn't support scalars
+          assert(len(tensor.shape) == 1) # currently only supports 1-D tensors
+          brod_to = [1 if (i != curr_idx) else tensor.shape[0] for i in range(len(tensors))]
+          repeat_tensor = [1 if (i == curr_idx) else tensors[i].shape[0] for i in range(len(tensors)) ]
+          accum.append(tensor.reshape(brod_to).repeat(repeat_tensor))
+      return accum
+
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
     cond = (self != 0.0)
     return cond * input_ + (1.0 - cond) * other
