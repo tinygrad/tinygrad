@@ -9,23 +9,25 @@ def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 class ARMCodegen(AssemblyCodegen):
   def specialize(self, asm):
     ins = [] 
-    #NOTE: MACOS needs lm func to start with _ 
+    #NOTE: MACOS needs lm func to start with _, linux doesn't need it 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.MOD: "", BinaryOps.CMPLT: "cmp", BinaryOps.CMPEQ: "cmp",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "bl _sin", UnaryOps.LOG2: "bl _log2", UnaryOps.EXP2: "bl _exp2",
            FusedOps.MULACC: "fmadd"}
     reg_map = {}
-    var_size = 16
+    var_size = 32
     for i, (uop, out, vin, arg) in enumerate(asm):
 #      print(asm[i])
       if uop == UOps.DEFINE_REGISTER: 
       #https://developer.arm.com/documentation/den0024/a/The-ABI-for-ARM-64-bit-Architecture/Register-use-in-the-AArch64-Procedure-Call-Standard/Parameters-in-general-purpose-registers
-       for i in range(arg[2]):
-        reg_map[f"%{arg[1]}{i}"] = f"[sp, #{var_size}]"  
-        var_size += 16
+        for i in range(arg[2]):
+          #NOTE: more than 8 args and it will go into the stack 
+          reg_map[f"%{arg[1]}{i}"] = f"[sp, #{'0' if arg[1] + str(i) == 'B8' else str(var_size) + ']'}" 
+          var_size += 16
       elif uop == UOps.SPECIAL:
         if arg.startswith('buf'):
-          ins.append(f"str x{arg[3:]}, {reg_map[out.nm]}")
+          if arg != 'buf8': 
+            ins.append(f"str x{arg[3:]}, {reg_map[out.nm]}")
       elif uop == UOps.CONST:
         if arg.__class__ is float:
           ins.append(f"mov x0, 0x{float_to_hex(arg)}")
@@ -75,10 +77,6 @@ class ARMCodegen(AssemblyCodegen):
           reg = 's' if dtypes.is_float(out[1]) else 'x'
           ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
           ins.append(f"{f'mov {reg}1, #' + str(vin[1]) if vin[1].__class__ is int else f'ldr {reg}1, ' + reg_map[vin[1].nm]}")
-          # if vin[1].__class__ is int:
-          #   ins.append(f"mov {reg}1, #{vin[1]}")
-          # else:
-          #   ins.append(f"ldr {reg}1, {reg_map[vin[1].nm]}")
           ins.append(f"{'f' if reg == 's' else 's' if arg==BinaryOps.DIV else ''}{alu[arg]} {reg}0, {reg}0, {reg}1")
           ins.append(f"str {reg}0, {reg_map[out.nm]}")
       elif uop == UOps.LOAD:
