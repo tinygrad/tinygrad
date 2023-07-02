@@ -2,7 +2,6 @@
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
-# TODO: gelu is causing nans!
 import time
 import numpy as np
 from datasets import fetch_cifar
@@ -19,7 +18,6 @@ def set_seed(seed):
 
 num_classes = 10
 
-# TODO: eval won't work with track_running_stats=False
 class ConvGroup:
   def __init__(self, channels_in, channels_out, short, se=True):
     self.short, self.se = short, se and not short
@@ -43,7 +41,7 @@ class SpeedyResNet:
     self.net = [
       nn.Conv2d(3, 64, kernel_size=1),
       nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
-      lambda x: x.clip(1e-15, 1e15).gelu(), # may not converge with high batch size (512 didnt work)
+      lambda x: x.clip(1e-15, 1e15).gelu(), # TODO: find exact range on which gelu works 
       ConvGroup(64, 128, short=False),
       ConvGroup(128, 256, short=True),
       ConvGroup(256, 512, short=False),
@@ -111,6 +109,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     out = model(X, training=False)
     loss = out.mul(Y).mean()
     return out.realize(), loss.realize()
+  
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
   # 4 seconds for tfloat32 ~ 28 TFLOPS, 41% of max 68
@@ -124,7 +123,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   for X, Y in fetch_batches(X_train, Y_train, BS=BS, is_train=True):
     if i > STEPS: break
     if i%50 == 0 and i > 1:
-      # use training batchnorm (and no_grad would change the kernels)
+      # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
       losses = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS):
