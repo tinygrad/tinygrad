@@ -1,5 +1,7 @@
+from tqdm import tqdm
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
+from tinygrad.nn import optim
 
 def train_resnet():
   # TODO: Resnet50-v1.5
@@ -22,8 +24,40 @@ def train_bert():
   pass
 
 def train_maskrcnn():
-  # TODO: Mask RCNN
-  pass
+  from models.mask_rcnn import MaskRCNN
+  from models.resnet import ResNet
+
+  resnet = ResNet(50, num_classes=None, stride_in_1x1=True)
+  model = MaskRCNN(backbone=resnet)
+  model.load_from_pretrained()
+
+  optimizer = optim.SGD(optim.get_parameters(model), lr=0.001, weight_decay=0.0005, momentum=0.9)
+
+  # scheduler = make_lr_scheduler(cfg, optimizer)
+
+  # data_loader, iters_per_epoch = make_data_loader(
+      # cfg,
+      # is_train=True,
+      # is_distributed=distributed,
+      # start_iter=arguments["iteration"],
+      # random_number_generator=random_number_generator
+  # )
+
+  # The mlcommons has the loss functions defined inside their model definition
+  #
+  # loss_dict = model(images, targets)
+  # losses = sum(loss for loss in loss_dict.values()) 
+  # 
+  # do_train(
+  #     model,
+  #     data_loader,
+  #     optimizer,
+  #     scheduler,
+  #     checkpointer,
+  #     device,
+  #     checkpoint_period,
+  #     arguments,
+  # )
 
 if __name__ == "__main__":
   Tensor.training = True
