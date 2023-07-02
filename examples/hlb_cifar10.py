@@ -43,7 +43,7 @@ class SpeedyResNet:
     self.net = [
       nn.Conv2d(3, 64, kernel_size=1),
       nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
-      lambda x: x.relu(),
+      lambda x: x.gelu(),
       ConvGroup(64, 128, short=False),
       ConvGroup(128, 256, short=True),
       ConvGroup(256, 512, short=False),
