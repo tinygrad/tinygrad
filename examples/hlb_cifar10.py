@@ -56,14 +56,14 @@ class SpeedyResNet:
 
 def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
   def _shuffle(all_X, all_Y):
-    if not is_train:
+    if is_train:
       ind = np.arange(all_Y.shape[0])
       np.random.shuffle(ind)
       all_X, all_Y = all_X[ind, ...], all_Y[ind, ...]
     return all_X, all_Y
   while True:
     set_seed(seed)
-    _shuffle(all_X, all_Y)
+    all_X, all_Y = _shuffle(all_X, all_Y)
     for batch_start in range(0, all_Y.shape[0], BS):
       batch_end = min(batch_start+BS, all_Y.shape[0])
       X = Tensor(all_X[batch_end-BS:batch_end]) # batch_end-BS for padding
@@ -125,9 +125,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
   best_eval = -1
   i = 0
-  left_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
-  set_seed(seed+1)
-  right_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
+  left_batcher, right_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True), fetch_batches(X_train, Y_train, BS=BS, seed=seed+1, is_train=True)
   while i <= STEPS:
     (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
     mixup_prob = Tensor.rand(1).realize()
