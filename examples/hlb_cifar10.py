@@ -29,12 +29,12 @@ class ConvGroup:
 
   def __call__(self, x):
     x = self.conv[0](x).max_pool2d(2)
-    x = self.norm[0](x).relu()
+    x = self.norm[0](x).clip(1e-15, 1e15).gelu()
     if self.short: return x
     residual = x
-    mult = self.se2(self.se1(residual.mean((2,3))).relu()).sigmoid().reshape(x.shape[0], x.shape[1], 1, 1) if self.se else 1.0
-    x = self.norm[1](self.conv[1](x)).relu()
-    x = self.norm[2](self.conv[2](x) * mult).relu()
+    mult = self.se2(self.se1(residual.mean((2,3))).clip(1e-15, 1e15).gelu()).sigmoid().reshape(x.shape[0], x.shape[1], 1, 1) if self.se else 1.0
+    x = self.norm[1](self.conv[1](x)).clip(1e-15, 1e15).gelu()
+    x = self.norm[2](self.conv[2](x) * mult).clip(1e-15, 1e15).gelu()
     return x + residual
 
 class SpeedyResNet:
@@ -43,7 +43,7 @@ class SpeedyResNet:
     self.net = [
       nn.Conv2d(3, 64, kernel_size=1),
       nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
-      lambda x: x.gelu(), # may not converge with high batch size (512 didnt work)
+      lambda x: x.clip(1e-15, 1e15).gelu(), # may not converge with high batch size (512 didnt work)
       ConvGroup(64, 128, short=False),
       ConvGroup(128, 256, short=True),
       ConvGroup(256, 512, short=False),
@@ -72,8 +72,8 @@ def fetch_batches(X_train, Y_train, BS, is_train=False, flip_chance=0.5):
       yield X, Y
     if not is_train: break
 
-def train_cifar(bs=256, eval_bs=500, steps=1500, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.2, momentum=0.8, wd=0.14, label_smoothing=0., seed=6,
-                lr_scheduler_pause_step=1200, lr_scheduler_resume_step=1450):
+def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.14, label_smoothing=0., seed=6,
+                lr_scheduler_pause_step=1000, lr_scheduler_resume_step=1000):
   set_seed(seed)
   Tensor.training = True
 
