@@ -31,8 +31,6 @@ class TritonCodegen(Linearizer):
     self.limit_global_dims(3)
     self.linearize()
 
-    TRITON_RANGE_LOCAL = True
-
     kernel = []
     global_size = []
     depth = 0
@@ -66,10 +64,10 @@ class TritonCodegen(Linearizer):
               else:
                 global_size.append(var.max+1)
                 kk(f"{var.expr} = {gid[len(args[0])-1-i]} # {var.max+1}")
-            elif args[1] == "local" and TRITON_RANGE_LOCAL:
-              full_local_shape = [var.max+1 for var in args[0]]
+            elif args[1] == "local":
+              full_local_shape = tuple([var.max+1 for var in args[0]])
               assert var.min == 0
-              kk(f"{var.expr} = (tl.arange({0}, {prod(full_local_shape)})//{acc_local_shape})%{var.max+1}")
+              kk(f"{var.expr} = tl.view((tl.arange({0}, {prod(full_local_shape)})//{acc_local_shape})%{var.max+1}, {full_local_shape})")
               acc_local_shape *= var.max+1
             else:
               kk(f"for {var.expr} in range({var.min}, {var.max+1}):")
@@ -83,7 +81,7 @@ class TritonCodegen(Linearizer):
         assert newvar is not None
         if args == -math.inf: ld = "-math.inf"
         else: ld = args
-        if full_local_shape: ld = f"tl.full(({prod(full_local_shape)},), {ld}, tl.float32)"
+        if full_local_shape: ld = f"tl.full({full_local_shape}, {ld}, tl.float32)"
         kk(f"{newvar.render()} = {ld}")
       elif uop == UOps.ALU:
         assert newvar is not None
@@ -113,7 +111,8 @@ class TritonCodegen(Linearizer):
     codeobj = compile(prg, fn, "exec")
     exec(codeobj, globals()) # pylint: disable=W0122
     triton_prg = triton_compile(globals()["fxn"], signature=signature, device_type="cuda", debug=True)
-    asm = triton_prg.asm['ptx']
+    asm = triton_prg.asm['ptx']  # ['ast', 'ttir', 'ttgir', 'llir', 'ptx', 'cubin']
+    #print(triton_prg.asm['ttir'])
 
     # send along the ptx kernel
     name = asm.split(".visible .entry ")[1].split("(")[0]
