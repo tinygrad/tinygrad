@@ -75,6 +75,9 @@ class Tensor:
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
 
+  def __str__(self):
+    return np.array2string(self.lazydata.toCPU())
+
   # Python has a non moving GC, so this should be okay
   def __hash__(self): return id(self)
 
