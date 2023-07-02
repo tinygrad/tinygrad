@@ -7,7 +7,7 @@ from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mn
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
-from tinygrad.runtime.lib import RawConst
+from tinygrad.runtime.lib import RawBuffer, RawConst
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
 from tinygrad.shape.symbolic import Variable, NumNode
 VariableOrNum = Union[Variable, NumNode]
@@ -100,9 +100,9 @@ class Linearizer:
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
 
     # get the output buffers
-    self.bufs = []
-    self.bufmap = []  # map from buf to index into raw_input_bufs, only for global buffers
-    self.raw_bufs = []  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
+    self.bufs: List[Union[LazyBuffer,LocalBuffer]] = []
+    self.bufmap: List[int] = []  # map from buf to index into raw_input_bufs, only for global buffers
+    self.raw_bufs: List[Union[LocalBuffer,RawBuffer,RawConst]] = []  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
     for buf in [output_buffer] + dedup(ast.buffers):
       self.add_buf(buf)
 
@@ -113,7 +113,7 @@ class Linearizer:
 
     self.uop_cache = {}
 
-  def add_buf(self, buf):
+  def add_buf(self, buf:Union[LazyBuffer,LocalBuffer]):
     self.bufs.append(buf)
 
     # dedup by python object comparison of RawBuffer -- this is OK since we expect all non-output non-local buffers to be realized here.
@@ -130,7 +130,7 @@ class Linearizer:
 
   # the bufs we want to pass in at kernel execution time; ie realized LazyBuffers and not RawConst or LocalBuffer
   @property
-  def raw_input_bufs(self):
+  def raw_input_bufs(self) -> List[RawBuffer]:
     return [buf for buf in self.raw_bufs if buf.__class__ not in [RawConst, LocalBuffer]]
 
   def process(self) -> None:
