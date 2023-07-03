@@ -2,26 +2,36 @@ from typing import Callable, Dict, Final
 import math, hashlib
 from triton.compiler import compile as triton_compile # type: ignore
 from tinygrad.helpers import DEBUG, prod
-from tinygrad.ops import BinaryOps, ASTRunner, Op, UnaryOps
+from tinygrad.ops import BinaryOps, ASTRunner, Op, UnaryOps, ReduceOps
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
 from tinygrad.shape.symbolic import NumNode
 
 class TritonCodegen(Linearizer):
   has_mulacc: bool = False
+  triton_style_group: bool = True
 
   def hand_coded_triton_optimizations(self):
+    if len(self.full_shape) == 1: return
+
+    # if nothing at all is upcasted and it's easy to, do an upcast
+    for splits in [32]:
+      if self.upcasted == 0 and len(self.full_unupcasted_shape) > 0 and self.full_unupcasted_shape[-1] % splits == 0:
+        self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape)-1)
+        self.group_for_reduce.append(splits)
+        break
+        #self.upcast()
+
     # only locals
     for axis in range(self.first_reduce - self.local_dims - 1, -1, -1):
       local_size = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
       if self.full_shape[axis] == 1: continue
       last_try = self.local_dims == 0 and axis == 0
       if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))) or last_try:
-        for sz in [x for x in [32,16,8,4,3] if self.full_shape[axis] % x == 0 and local_size*x <= 1024]:
+        for sz in [x for x in [64,32,16,8,4,3] if self.full_shape[axis] % x == 0]:
           self.shift_to(axis, sz, insert_before=self.first_reduce-self.local_dims)
           self.local_dims += 1
           break
       if self.local_dims >= 3: break
-
 
   def codegen(self):
     self.process()
@@ -49,6 +59,7 @@ class TritonCodegen(Linearizer):
       BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})",
       BinaryOps.POW: lambda x,y: f"({x}**{y})", BinaryOps.MAX: lambda x,y: f"tl.maximum({x},{y})", # axis?
       BinaryOps.CMPEQ: lambda x,y: f"(({x}=={y})*1.0)",
+      ReduceOps.SUM: lambda x: f"tl.expand_dims(tl.sum({x}, axis=2), axis=2)"
     }
     bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(self.bufs)]
 
@@ -82,7 +93,7 @@ class TritonCodegen(Linearizer):
         assert newvar is not None
         if args == -math.inf: ld = "-math.inf"
         else: ld = args
-        if full_local_shape: ld = f"tl.full({full_local_shape}, {ld}, tl.float32)"
+        if full_local_shape: ld = f"tl.full({full_local_shape[:-len(self.group_for_reduce)] + (1,)*len(self.group_for_reduce) if len(self.group_for_reduce) else full_local_shape}, {ld}, tl.float32)"
         kk(f"{newvar.render()} = {ld}")
       elif uop == UOps.ALU:
         assert newvar is not None
@@ -98,8 +109,7 @@ class TritonCodegen(Linearizer):
         kk(f"tl.store({bufnames[args.i]} + {args.idx.render()}, {vin[0].render()})")
       elif uop == UOps.CAST: raise NotImplementedError("unimplemented: cast")
       elif uop == UOps.DEFINE_LOCAL: raise NotImplementedError("unimplemented: define local")
-      else:
-        raise NotImplementedError(f"unimplemented: {uop}")
+      else: raise NotImplementedError(f"unimplemented: {uop}")
 
     prg = '\n'.join(kernel)
     if DEBUG >= 4: print(prg)
@@ -113,7 +123,7 @@ class TritonCodegen(Linearizer):
     exec(codeobj, globals()) # pylint: disable=W0122
     triton_prg = triton_compile(globals()["fxn"], signature=signature, device_type="cuda", debug=True)
     asm = triton_prg.asm['ptx']  # ['ast', 'ttir', 'ttgir', 'llir', 'ptx', 'cubin']
-    #print(triton_prg.asm['ttir'])
+    if DEBUG >= 6: print(triton_prg.asm['ttir'])
 
     # send along the ptx kernel
     name = asm.split(".visible .entry ")[1].split("(")[0]

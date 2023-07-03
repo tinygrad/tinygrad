@@ -95,6 +95,7 @@ class Linearizer:
   supports_float4: bool = False
   supports_float4_alu: bool = False
   has_mulacc: bool = True
+  triton_style_group: bool = False
 
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
@@ -218,7 +219,7 @@ class Linearizer:
     self.uops: List[UOp] = []
 
     # add a local buffer for multistage reduce
-    if len(self.group_for_reduce):
+    if len(self.group_for_reduce) and not self.triton_style_group:
       self.bufs.append(LocalBuffer("temp"))
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
@@ -276,7 +277,7 @@ class Linearizer:
       self.uop(UOps.ENDLOOP, None, [], (reduce_idxs, "reduce"))
 
       # end the local loop, do the local reduce
-      if self.group_for_reduce:
+      if self.group_for_reduce and not self.triton_style_group:
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc, ssa)  # store accumulators
         self.uop(UOps.BARRIER, None, [], ())
@@ -349,7 +350,11 @@ class Linearizer:
       x.src = tuple(srcs)
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     if x.op.__class__ in {ReduceOps, FusedOps}:
-      ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
+      if x.op.__class__ == ReduceOps and self.group_for_reduce and self.triton_style_group:
+        lred = [self.uop(UOps.ALU, ssa('lred'), list(val), x.op) for val in values]
+        ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(lred, acc, grouping_allowed=self.supports_float4_alu)]
+      else:
+        ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
     else:
       ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])
@@ -560,7 +565,6 @@ class Linearizer:
             break
 
     # if nothing at all is upcasted and it's easy to, do an upcast
-    # TODO: this is breaking the tests
     for splits in [4]:
       if self.upcasted == 0 and len(self.full_unupcasted_shape) > 0 and self.full_unupcasted_shape[-1] % splits == 0:
         self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
