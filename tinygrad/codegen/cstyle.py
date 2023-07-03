@@ -112,18 +112,17 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         depth -= 1
         kk("}"*len(args[0]) + f" /* {args[1]} */")
     elif uop == UOps.WMMA:
-      #((((lidx2/2)%4)*8)+(((lidx2/8)%2)*4)+((lidx2*2)%4)+((lidx2/16)*32))
-
+      # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
       kk("simdgroup_float8x8 a;")
       kk("simdgroup_float8x8 b;")
       kk("simdgroup_float8x8 c;")
-      #kk("a.thread_elements()[0] = val1_0;")
-      #kk("a.thread_elements()[1] = val1_1;")
+      kk("a.thread_elements()[0] = val1_0;")
+      kk("a.thread_elements()[1] = val1_1;")
       kk("b.thread_elements()[0] = val2_0;")
       kk("b.thread_elements()[1] = val2_1;")
       kk("c.thread_elements()[0] = acc0_0;")
       kk("c.thread_elements()[1] = acc0_1;")
-      kk("simdgroup_load(a, data1, 8, ulong2(0,0), false);")
+      #kk("simdgroup_load(a, data1, 8, ulong2(0,0), false);")
       #kk("simdgroup_load(b, data2, 8, ulong2(0,0), false);")
       #kk("c = simdgroup_float8x8(0);")
       kk("simdgroup_multiply_accumulate(c, a, b, c);")

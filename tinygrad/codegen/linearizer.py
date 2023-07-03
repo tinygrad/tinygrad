@@ -578,7 +578,7 @@ class Linearizer:
     # simplify
     self.simplify_ones()
 
-    if self.bufs[0].shape != (256, 256, 1) and self.bufs[0].shape != (64, 64, 1) and self.bufs[0].shape != (8, 8, 1): return
+    if self.bufs[0].shape != (2048, 2048, 1) and self.bufs[0].shape != (256, 256, 1) and self.bufs[0].shape != (64, 64, 1) and self.bufs[0].shape != (8, 8, 1): return
 
     # upcast first
     if self.full_shape[self.first_reduce] > 8: self.shift_to(self.first_reduce, 8)
@@ -592,35 +592,22 @@ class Linearizer:
     self.shift_to(2, 2, insert_before=self.first_reduce)
     self.shift_to(2, 2, insert_before=self.first_reduce)
     self.shift_to(3, 4, insert_before=self.first_reduce)
-    self.reshape_and_permute(None, [0,1,2,3,5,4,6,7])
-    #self.reshape_and_permute(lambda x: (x[0], x[1], x[2], x[3], x[4]*x[5], x[6], x[7]), None)
-
-    #self.simplify_merge_adjacent()
-
-
-    #self.reshape_and_permute(None, [0,1,3,2,4,5])
-
-    #self.shift_to(3, 4, insert_before=self.first_reduce)
-    #self.local_dims += 3
+    self.reshape_and_permute(None, [0,1,2,3,5,4] + list(range(6, self.shape_len)))
+    #self.reshape_and_permute(lambda x: x[0:4] + tuple([x[4]*x[5],]) + x[6:], None)
 
     # TODO: we have put the index aliasing stuff here
     self.local_dims = self.first_reduce - 2
     self.alias_buffer(1, [False, False] + [True] * self.local_dims + ([False] if self.shape_len-self.first_reduce > 1 else []) + [True])
     self.alias_buffer(2, [False, False] + [True] * self.local_dims + ([False] if self.shape_len-self.first_reduce > 1 else []) + [True])
 
-    print(self.colored_shape())
-
-    # can do this at the end and get different views
-    #fr = self.first_reduce
-    #self.reshape_and_permute(lambda x: (x[0], x[1], prod(x[2:fr])) + x[fr:], None)
-    self.local_dims = self.first_reduce - 2
-
-    #print(self.colored_shape())
     self.shift_to(self.first_reduce-1, 2)
     self.upcast()
 
-    #print(self.colored_shape())
-
+    # final 2x2 upcast
+    #self.shift_to(0, 2)
+    #self.upcast()
+    #self.shift_to(1, 2)
+    #self.upcast()
 
     return
 

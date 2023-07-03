@@ -90,9 +90,11 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
+  print(vm2, vm1)
   if vm2.mask: return None  # this isn't supported yet
   mst = ShapeTracker(vm1.shape, [vm2, vm1])
   strides = mst.real_strides()
+  print(strides)
   if None in strides: return None
   return View(vm1.shape, cast(Tuple[int, ...], strides), mst.real_offset(), vm1.mask)
 
@@ -120,6 +122,7 @@ def _reshape(view: View, new_shape: Tuple[int, ...]) -> Tuple[View, bool]:
   else:
     if (merged_view := merge_views(view, new_view)) is not None: return merged_view, False
     else:
+      print(shape, new_shape, new_view)
       if DEBUG >= 4: print(f"WARNING: creating new view with reshape {view} -> {new_shape}")
       return new_view, True
 
@@ -168,10 +171,11 @@ class ShapeTracker:
         ret[idxs.index(this_dim.a)] = this_dim.b
       elif isinstance(this_dim, Variable):
         ret[idxs.index(this_dim)] = 1
-    render_idx, render_valid = idx.render(), valid.render()
-    for i in range(len(self.shape)):
-      if f'idx{i}' in render_valid and not ignore_valid: ret[i] = None
-      elif f'idx{i}' not in render_idx: ret[i] = 0
+
+    idx_vars, valid_vars = idx.vars(), valid.vars()
+    for i,tidx in enumerate(idxs):
+      if tidx in valid_vars and not ignore_valid: ret[i] = None
+      elif tidx not in idx_vars: ret[i] = 0
     return tuple(ret)
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
