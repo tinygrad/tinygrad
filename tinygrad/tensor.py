@@ -302,7 +302,8 @@ class Tensor:
       new_shape = new_shape[::2]
       final_slice = reduce(operator.add, (((0, sh), (0, 1)) for sh in new_shape), ())
       sliced_tensor = reshaped_tensor.shrink(final_slice)
-    return sliced_tensor.reshape(tuple([next(iter(new_shape)) if isinstance(i, slice) else 1 for i in orig_slices if isinstance(i, (int, slice))]))  # Reshape
+    it_shape = iter(new_shape)
+    return sliced_tensor.reshape(tuple([next(it_shape) if isinstance(i, slice) else 1 for i in orig_slices if isinstance(i, (int, slice))]))  # Reshape
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
