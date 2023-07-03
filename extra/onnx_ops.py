@@ -360,7 +360,7 @@ def _round(x:Tensor, n:float, eq_is_down = True) -> Tensor:
   b = x.cast(dtypes.int32).contiguous().cast(x.dtype) + n
   return (x > b).where(b+1-n, b-n) if eq_is_down else (x >= b).where(b+1-n, b-n)
 
-def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
+def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
   def _nearest_gather(X: Tensor, indices: Tensor, output_shape): # MAYBE USE SOMETHING ELSE OTHER THAN GATHER like reshape -> expand -> reshape -> [shrink]? bad gather many kernel bad, OR TRY NOT FLATTEN()?
     return _gather(X.flatten(), indices).reshape(output_shape)
   def _nearest_mode(x_resized: Tensor, nearest_mode: str, x_len):
@@ -368,8 +368,9 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
     elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, 0.5, False)
     elif nearest_mode == "floor": ret = x_resized.floor()
     elif nearest_mode == "ceil": ret = x_resized.ceil()
-    ret = (ret<0).where(ret+1, ret) # Clamp the ends of the ret
-    ret = (ret>x_len-1).where(ret-1, ret)
+    # ret = (ret<0).where(ret+1, ret) # Clamp the ends of the ret
+    # ret = (ret>x_len-1).where(ret-1, ret)
+    ret = ret.clip(0, x_len-1)
     return ret
   def _coordinate_transformation(x_out, y_out, output_shape, scales_lol):
     if coordinate_transformation_mode == "half_pixel":
@@ -381,6 +382,11 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
     elif coordinate_transformation_mode == "asymmetric":
       x_out = x_out/scales_lol[-1]
       y_out = y_out/scales_lol[-2]
+    elif coordinate_transformation_mode == "half_pixel_symmetric":
+      x_out = X.shape[-1] / 2 * (1 - int(output_shape[-1]) / output_shape[-1]) + (x_out + 0.5) / scales_lol[-1] - 0.5
+      y_out = X.shape[-2] / 2 * (1 - int(output_shape[-2]) / output_shape[-2]) + (y_out + 0.5) / scales_lol[-2] - 0.5
+    x_out = x_out.clip(0, X.shape[-1]-1)
+    y_out = y_out.clip(0, X.shape[-2]-1)
     return x_out, y_out
       
   assert scales or sizes and not (scales and sizes), "only scales or sizes, cmon"
@@ -410,7 +416,8 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
       sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, False)
       sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
 
-  output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
+  output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)] 
+  output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
   # upscale = all([os >= xs for os, xs in zip(output_shape, X.shape)]) 
   # spacial_shape = X.shape[2:]
   # bs,c,py,px = X.shape
@@ -428,19 +435,38 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
     indices_out = Tensor.stack(stack_args).flatten()
     return _nearest_gather(X, indices_out, output_shape)
   elif mode == "linear":
-    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol=scales)
+    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape_, scales_lol=scales)
     print("linear")
     print(x_out.numpy())
     print(y_out.numpy())
     ret = []
-    for x in safe_numpy(x_out): # HACK a little dumb, but maybe not so dumb
-      for y in safe_numpy(y_out):
+    for y in safe_numpy(y_out):
+      for x in safe_numpy(x_out): # HACK maybe hacky?
         x_floor, y_floor = int(x), int(y)
-        shrink_args = ((0, X.shape[0]), (0, X.shape[1]), (y_floor, y_floor+2), (x_floor, x_floor+2))
-        q11, q21, q12, q22 = safe_numpy(X.shrink(shrink_args).flatten()) # q_xy
+        y_shrink = (0, X.shape[2]) if X.shape[2] == 1 else (y_floor, y_floor+2) if y != y_floor else (y_floor, y_floor+1)
+        x_shrink = (x_floor, x_floor+2) if x != x_floor else (x_floor, x_floor+1)
+        shrink_args = ((0, X.shape[0]), (0, X.shape[1]), y_shrink, x_shrink)
+        corners = safe_numpy(X.shrink(shrink_args).flatten()) # q_xy TOP LEFT TOP RIGHT BOTTOM LEFT BOTTOM RIGHT
+        print(corners, x, y)
         x1, x2, y1, y2 = x_floor, x_floor+1, y_floor, y_floor+1
-        ret.append((q11 * (x2 - x) * (y2 - y) + q21 * (x - x1) * (y2 - y) + q12 * (x2 - x) * (y - y1) + q22 * (x - x1) * (y - y1)) / ((x2 - x1) * (y2 - y1)))
+        if len(corners) == 1: # TODO BAD CODE, UGLY IF STATEMENTS.... https://en.wikipedia.org/wiki/Bilinear_interpolation maybe do weighted mean?
+          ret.append(corners[0]) 
+        elif len(corners) == 2:
+          if x == x_floor:
+            ret.append((corners[0] * (y2 - y) + corners[1] * (y - y1)) / (y2 - y1)) # args = sum([]) / prod() TODO
+          elif y == y_floor:
+            ret.append((corners[0] * (x2 - x) + corners[1] * (x - x1)) / (x2 - x1))
+          else: raise Exception(f"what the fuck x:{x} y:{y}")
+        elif len(corners) == 4:
+          ret.append((corners[0] * (x2 - x) * (y2 - y) + corners[1] * (x - x1) * (y2 - y) + corners[2] * (x2 - x) * (y - y1) + corners[3] * (x - x1) * (y - y1)) / ((x2 - x1) * (y2 - y1)))
+        else: raise Exception(f"corners:{corners} is what the fuck")
+
+        # shrink_args = ((0, X.shape[0]), (0, X.shape[1]), (y_floor, min(y_floor+2, X.shape[-2])), (x_floor, min(x_floor+2, X.shape[-1])))
+        # q11, q21, q12, q22 = safe_numpy(X.shrink(shrink_args).flatten()) # q_xy BUG 
+        # x1, x2, y1, y2 = x_floor, x_floor+1, y_floor, y_floor+1
+        # ret.append((q11 * (x2 - x) * (y2 - y) + q21 * (x - x1) * (y2 - y) + q12 * (x2 - x) * (y - y1) + q22 * (x - x1) * (y - y1)) / ((x2 - x1) * (y2 - y1)))
     return Tensor(ret).reshape(output_shape)
+    return 
   elif mode == "cubic":
     print("cubic")
     print(x_out.numpy())
