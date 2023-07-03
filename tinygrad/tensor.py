@@ -554,11 +554,8 @@ class Tensor:
   def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if x.__class__ is Tensor or x or reverse else self
   def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse) if x.__class__ is Tensor or x != 1.0 else self
   def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ is Tensor or reverse or not x else self.mul(1/x)
-  def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+  def pow(self, x:Union[Tensor, float]) -> Tensor:
     if x.__class__ is not Tensor:
-      if reverse:
-        return Tensor(x).log().mul(self).exp()
-      else:
         # simple pow identities
         if x == 2.0: return self*self
         if x == 1.0: return self
@@ -583,7 +580,7 @@ class Tensor:
   def __radd__(self, x) -> Tensor: return self.add(x, True)
   def __rsub__(self, x) -> Tensor: return self.sub(x, True)
   def __rmul__(self, x) -> Tensor: return self.mul(x, True)
-  def __rpow__(self, x) -> Tensor: return self.pow(x, True)
+  def __rpow__(self, x) -> Tensor: return Tensor(x, requires_grad=False).pow(self)
   def __rtruediv__(self, x) -> Tensor: return self.div(x, True)
   def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
 
