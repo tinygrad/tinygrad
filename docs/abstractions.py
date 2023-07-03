@@ -217,7 +217,7 @@ from tinygrad.runtime.lib import RawMallocBuffer
 # ClangProgram is the simplest runtime (in tinygrad/runtime/ops_clang.py, code 7/10)
 # __init__ calls clang, and __call__ calls the function in the *.so outputted by clang
 # in CLANG, global_size and local_size are ignored
-from tinygrad.runtime.ops_clang import ClangProgram
+from tinygrad.runtime.ops_clang import ClangProgram, ClangCodegen
 
 # a concrete example looks like this, this adds two size 1 RawBuffer
 # first we create two numpy buffers containing 2 and 3
@@ -229,7 +229,7 @@ input_a, input_b = RawMallocBuffer.fromCPU(numpy_a), RawMallocBuffer.fromCPU(num
 output = RawMallocBuffer(1, dtypes.float32)
 
 # compile the program, run it, and 2+3 does indeed equal 5
-program = ClangProgram("add", "void add(float *a, float *b, float *c) { *a = *b + *c; }")
+program = ClangProgram("add", f"{ClangCodegen.lang.kernel_prefix} void add(float *a, float *b, float *c) {{ *a = *b + *c; }}")
 program(None, None, output, input_a, input_b)  # NOTE: the None are for global_size and local_size
 print(output.toCPU())
 assert output.toCPU()[0] == 5, "it's still 5"
