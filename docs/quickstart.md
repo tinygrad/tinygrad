@@ -165,7 +165,7 @@ opt = SGD([net.l1.weight, net.l2.weight], lr=3e-4)
 
 We can see that we are passing in the parameters of our neural network to the optimizer.
 This is due to the fact that the optimizer needs to know which parameters to update.
-There is a simpler way to do this just by using `get_parameters(net)` from `tinygrad.nn.optim` which will return a list of all the parameters in the neural network.
+There is a simpler way to do this just by using `get_parameters(net)` from `tinygrad.state` which will return a list of all the parameters in the neural network.
 The parameters are just listed out explicitly here for clarity.
 
 Now that we have our network, loss function, and optimizer defined all we are missing is the data to train on!
