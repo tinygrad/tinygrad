@@ -2,16 +2,19 @@ import struct
 from tinygrad.codegen.assembly import AssemblyCodegen
 from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
 from tinygrad.codegen.linearizer import UOps
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import dtypes, DEBUG
+import numpy as np
 
 dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "f16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32", dtypes.uint8: 'u8', dtypes.float64: 'f64', dtypes.int8: 's8'}
 dtype_to_nvtypes = {dtypes.float32: "f32", dtypes.float16: "b16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32", dtypes.uint8: 'u8', dtypes.float64: 'f64', dtypes.int8: 's8'}
-def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
+def float_to_hex(x): return "0F%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
+def half_to_hex(x): return "0H" + hex(np.float16(x).view('e'))[2:].zfill(4)
+def double_to_hex(x): return "0D" + struct.pack('d', np.float64(x)).hex()[2:].zfill(16)
 
 # https://docs.nvidia.com/cuda/parallel-thread-execution/#
 class PTXCodegen(AssemblyCodegen):
   #supports_constant_folding: bool = True
-
+  # supports_float4 = False
   def specialize(self, asm):
     ins = [".version 7.8", ".target sm_86", ".address_size 64",
            f".visible .entry test({', '.join(f'.param .u64 buf{i}' for i in range(len(self.bufs)))}) {{"]
@@ -41,24 +44,28 @@ class PTXCodegen(AssemblyCodegen):
           otype = vin[0].dtype if arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT] else out.dtype
           ins.append(f"{alu[arg]}{'.lo' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''}{'.rn' if arg == BinaryOps.DIV and out.dtype == dtypes.float32 else ''}.{dtype_to_nvtype[otype]} {out}, {', '.join(str(x) for x in vin)};")
       elif uop == UOps.LOAD:
-        ins.append(f"ld.{arg[1]}.{dtype_to_nvtype[out.dtype]} {out}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
+        ins.append(f"ld.{arg[1]}.{dtype_to_nvtypes[out.dtype]} {out}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
       elif uop == UOps.STORE:
         ins.append(f"st.{arg[1]}.{dtype_to_nvtypes[vin[1].dtype]} [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {vin[1]};")
       elif uop == UOps.CAST:
         if vin[0].dtype == dtypes.bool:
           ins.append(f"selp.{dtype_to_nvtype[out.dtype]} {out}, 0f3F800000, 0f00000000, {vin[0]};")
         else:
-          if   dtypes.is_float(vin[0].dtype) and dtypes.is_float(out.dtype): mod = "rn." if out.dtype.sz < vin[0].dtype.sz else "" # f2f
-          elif dtypes.is_float(vin[0].dtype) or  dtypes.is_float(out.dtype): mod = "rzi." # s2f
+          if   out.dtype == dtypes.float16 and vin[0].dtype == dtypes.float: mod = "rn." #f2f
+          elif vin[0].dtype.itemsize == 1: mod = "rn."
+          elif vin[0].dtype.itemsize == 8: mod = "rz."
+          elif dtypes.is_float(vin[0].dtype) ^ dtypes.is_float(out.dtype): mod = "rzi." # s2f
           else: mod = ""
+          # print(vin[0].dtype, "->", out.dtype)
           ins.append(f"cvt.{mod}{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
           # ins.append(f"cvt.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
       elif uop == UOps.CONST:
-        ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {'0f'+float_to_hex(arg) if dtypes.is_float(out.dtype) else arg};")
+        # print("++++++++++++++= CONST UOPPPPp")
+        ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {float_to_hex(arg) if dtypes.is_float(out.dtype) else arg};")
       elif uop == UOps.LABEL:
         ins.append(f"{arg}:")
       elif uop == UOps.COND_BRANCH:
         ins.append(f"@{'!' if not arg[1] else ''}{vin[0]} bra {arg[0]};")
-
+    
     ins += ["bar.sync 0;", "ret;", "}"]
     return "test", '\n'.join(ins)

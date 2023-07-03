@@ -170,7 +170,18 @@ class AssemblyCodegen(Linearizer):
         idx, treg, off = addr_w_offset(args)
         reg = newreg(newvar, dtype=newvar.dtype, scalar=(idx.scalar and (not isinstance(treg, Register) or treg.scalar))) # and not dtypes.is_float(newvar.dtype)))
         if args.valid.min == 0:
-          ins.append(AssemblyInstruction(UOps.CONST, reg, [], 0))
+          if reg.dtype == dtypes.float16:
+            zero = newreg(reg.nm + "_wide", dtypes.float32)
+            print(reg.nm, zero)
+            ins.append(AssemblyInstruction(UOps.CONST, zero, [], 0))
+            ins.append(AssemblyInstruction(UOps.CAST, reg, [zero]))
+          elif reg.dtype.itemsize == 1:
+            zero = newreg(reg.nm + "_wide", dtypes.int32)
+            print(reg.nm, zero)
+            ins.append(AssemblyInstruction(UOps.CONST, zero, [], 0))
+            ins.append(AssemblyInstruction(UOps.CAST, reg, [zero]))
+          else:
+            ins.append(AssemblyInstruction(UOps.CONST, reg, [], 0))
           if args.valid.max == 1:
             pred = args.valid.render(render_ops)
             ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
@@ -183,7 +194,7 @@ class AssemblyCodegen(Linearizer):
       elif uop == UOps.STORE:
         idx, treg, off = addr_w_offset(args)
         ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if args.i != -1 else 'shared')))
-
+      # input(str(ins[-1]))
     # define registers
     ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)) for dtype,c in cnts.items()] + ins
 

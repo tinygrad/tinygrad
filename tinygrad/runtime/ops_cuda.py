@@ -2,11 +2,24 @@ import subprocess
 from typing import Optional
 import time
 import numpy as np
+import re
 from pycuda.compiler import compile as cuda_compile # type: ignore
-from tinygrad.helpers import DEBUG, getenv, fromimport
+from tinygrad.helpers import DEBUG, getenv, fromimport, colored
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
+
+def pretty_ptx(s):
+  s = re.sub("(//.*\\n)", "", s)
+  s = re.sub("\\n\\s+", "\\n", s)
+  s0, s1 = s.split(".visible .entry ")
+  s1 = '\n'.join([t[0] + " "*(8 - (len(t[0]) + 1) % 8) + " ".join(t[1:]) if t[-1][-1] in [";",":"] else " ".join(t) for t in [x.split() for x in s1.splitlines()]])
+  s1 = re.sub("\\n\\.reg", "\\n"+" "*8+".reg", s1)
+  s1 = re.sub("^(\\w+)(?=(?:\\.\\w+)+\\s)|ret|bra", lambda m:" "*8+colored(m[0], "yellow"), s1, flags=re.MULTILINE)
+  s1 = re.sub("\\b(([0-9]+\\.?[0-9]*)|(\\.[0-9]+)|(0[f|F|d|D][0-9a-fA-F]+))\\b", lambda m:colored(m[1], "yellow"), s1)
+  s1 = re.sub("((?:[_$%][a-zA-Z0-9_$]+))", lambda m:colored(m[1], "blue"), s1)
+  s1 = re.sub("(.(?:b|s|u|f)(?:8|16|32|64)|.pred)(?=[.\\s])", lambda m:colored(m[1], "green"), s1)
+  return s0 + ".visible .entry " + s1
 
 if getenv("CUDACPU", 0) == 1:
   import ctypes, ctypes.util
@@ -49,11 +62,11 @@ class CUDAProgram:
           f.write(cuda_compile(prg, target="cubin", no_extern_c=True))
         sass = subprocess.check_output(['nvdisasm', '/tmp/cubin']).decode('utf-8')
         print(sass)
-      if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=False, options=['-Wno-deprecated-gpu-targets', '--verbose']).decode('utf-8')
+      if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets', '--verbose']).decode('utf-8')
     except cuda.CompileError as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
-    if DEBUG >= 5: print(prg)
+    if DEBUG >= 5: print(pretty_ptx(prg))
     # TODO: name is wrong, so we get it from the ptx using hacks
     self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
 
