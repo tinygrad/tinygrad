@@ -55,6 +55,15 @@ class Exp(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.binary_op(BinaryOps.MUL, grad_output)
 
+class Sqrt(Function):
+  __slots__ = "ret"
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.ret = x.unary_op(UnaryOps.SQRT)
+    return self.ret
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return grad_output.binary_op(BinaryOps.DIV, self.ret.binary_op(BinaryOps.MUL, self.ret.const_like(2)))
+
 # ************* reduce ops *************
 
 class Sum(Function):
@@ -133,7 +142,7 @@ class Mul(Function):
 class Pow(Function):
   __slots__ = 'x', 'y', 'ret'
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    self.x, self.y, self.ret = x, y, x.binary_op(BinaryOps.POW, y)
+    self.x, self.y, self.ret = x, y, x.unary_op(UnaryOps.LOG2).binary_op(BinaryOps.MUL, y).unary_op(UnaryOps.EXP2)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer):
