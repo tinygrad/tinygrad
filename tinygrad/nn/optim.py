@@ -22,15 +22,16 @@ class Optimizer:
       p.realize()
 
 class SGD(Optimizer):
-  def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
+  def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, gradient_clip=None, nesterov=False):
     super().__init__(params)
-    self.lr, self.momentum, self.wd, self.nesterov = Tensor([lr], requires_grad=False), momentum, weight_decay, nesterov
+    self.lr, self.momentum, self.wd, self.nesterov, self.gradient_clip = Tensor([lr], requires_grad=False), momentum, weight_decay, nesterov, gradient_clip
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
 
   # https://pytorch.org/docs/stable/generated/torch.optim.SGD.html
   def step(self) -> None:
     for i, t in enumerate(self.params):
       assert t.grad is not None
+      if self.gradient_clip: t.grad = t.grad.clip(-self.gradient_clip, self.gradient_clip)
       g = t.grad.realize() + self.wd * t.detach()
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g).realize()  # NOTE: self.b[i] is zero on the first run, no if required
@@ -39,13 +40,13 @@ class SGD(Optimizer):
     self.realize(self.b)
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
-def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01): return LAMB(params, lr, b1, b2, eps, wd, adam=True)
-def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8): return LAMB(params, lr, b1, b2, eps, 0.0, adam=True)
+def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01, gradient_clip=None): return LAMB(params, lr, b1, b2, eps, wd, adam=True, gradient_clip=gradient_clip)
+def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, gradient_clip=None): return LAMB(params, lr, b1, b2, eps, 0.0, adam=True, gradient_clip=gradient_clip)
 
 class LAMB(Optimizer):
-  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
+  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, gradient_clip=None, adam=False):
     super().__init__(params)
-    self.lr, self.b1, self.b2, self.eps, self.wd, self.adam, self.t = Tensor([lr], requires_grad=False), b1, b2, eps, wd, adam, Tensor([0], requires_grad=False).realize()
+    self.lr, self.b1, self.b2, self.eps, self.wd, self.adam, self.t, self.gradient_clip = Tensor([lr], requires_grad=False), b1, b2, eps, wd, adam, Tensor([0], requires_grad=False).realize(), gradient_clip
     self.m = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
     self.v = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
 
@@ -53,6 +54,7 @@ class LAMB(Optimizer):
     self.t.assign(self.t + 1).realize()
     for i, t in enumerate(self.params):
       assert t.grad is not None
+      if self.gradient_clip: t.grad = t.grad.clip(-self.gradient_clip, self.gradient_clip)
       g = t.grad.realize()
       self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * g).realize()
       self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).realize()
