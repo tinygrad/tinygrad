@@ -42,7 +42,7 @@ else:
     def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) # type: ignore
 
 class CUDAProgram:
-  def __init__(self, name:str, prg:str, binary=False):
+  def __init__(self, name:str, prg:str, binary=False, shared=0):
     try:
       if DEBUG >= 6:
         with open("/tmp/cubin", "wb") as f:
@@ -55,13 +55,13 @@ class CUDAProgram:
       raise e
     if DEBUG >= 5: print(prg)
     # TODO: name is wrong, so we get it from the ptx using hacks
-    self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
+    self.prg, self.shared = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]), shared
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
-    self.prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size))
+    self.prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size), shared=self.shared)
     if wait:
       end.record()
       end.synchronize()

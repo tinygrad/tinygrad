@@ -67,7 +67,8 @@ class TritonCodegen(Linearizer):
             elif args[1] == "local":
               full_local_shape = tuple([var.max+1 for var in args[0]])
               assert var.min == 0
-              kk(f"{var.expr} = tl.view((tl.arange({0}, {prod(full_local_shape)})//{acc_local_shape})%{var.max+1}, {full_local_shape})")
+              kk(f"{var.expr} = tl.arange({0}, {var.max+1})[{', '.join([':' if i == j else 'None' for j in range(len(args[0]))])}]")
+              #kk(f"{var.expr} = tl.view((tl.arange({0}, {prod(full_local_shape)})//{acc_local_shape})%{var.max+1}, {full_local_shape})")
               acc_local_shape *= var.max+1
             else:
               kk(f"for {var.expr} in range({var.min}, {var.max+1}):")
@@ -119,4 +120,4 @@ class TritonCodegen(Linearizer):
     local_size = [int(x) for x in asm.split(".maxntid ")[1].split("\n")[0].split(", ")]  # [128, 1, 1] is num_warps=4
     return ASTRunner(name, asm,
       global_size[::-1], local_size,
-      op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name, runtime_args={"binary": True})
+      op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name, runtime_args={"binary": True, "shared": triton_prg.metadata['shared']})
