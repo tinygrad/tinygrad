@@ -192,7 +192,7 @@ class SumNode(RedNode):
       factor_term = [x.a * x.b//b if isinstance(x, MulNode) else NumNode(x.b//b) for x in factors]
       if nofactor_mul and not nofactor_nonmul:
         gcds = [gcd(x.b, b) for x in nofactor_mul]
-        if (t := min(gcds)) > 1 and all([x.b%t == 0 for x in nofactor_mul]):
+        if (t := min(gcds)) > 1 and all(x.b%t == 0 for x in nofactor_mul):
           nofactor_term = [Node.sum([x.a * x.b//t for x in nofactor_mul if isinstance(x, MulNode)])//(b//t)]  # mypy wants the isinstance
         else:
           nofactor_term = [Node.sum(nofactor_mul)//b] if nofactor_mul else []
