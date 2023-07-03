@@ -43,11 +43,21 @@ class Resize:
 
       return (oh, ow)
 
-  def __call__(self, image):
+  def __call__(self, image, target):
     size = self.get_size(image.size)
     image = Ft.resize(image, size)
-    return image
+    target = target.resize(image.size)
+    return image, target
 
+class RandomHorizontalFlip(object):
+  def __init__(self, prob=0.5):
+    self.prob = prob
+
+  def __call__(self, image, target):
+    if random.random() < self.prob:
+      image = Ft.hflip(image)
+      target = target.transpose(0)
+    return image, target
 
 class Normalize:
   def __init__(self, mean, std, to_bgr255=True):
@@ -55,13 +65,24 @@ class Normalize:
     self.std = std
     self.to_bgr255 = to_bgr255
 
-  def __call__(self, image):
+  def __call__(self, image, target):
     if self.to_bgr255:
       image = image[[2, 1, 0]] * 255
     else:
       image = image[[0, 1, 2]] * 255
     image = Ft.normalize(image, mean=self.mean, std=self.std)
-    return image
+    return image, target
+
+transforms_train = T.Compose(
+  [
+    Resize(800, 1333),
+    RandomHorizontalFlip(0.5),
+    T.ToTensor(),
+    Normalize(
+      mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
+    ),
+  ]
+)
 
 transforms = lambda size_scale: T.Compose(
   [

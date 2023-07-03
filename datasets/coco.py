@@ -6,6 +6,7 @@ from tinygrad.tensor import Tensor
 from extra.utils import download_file
 import pycocotools._mask as _mask
 from examples.mask_rcnn import Masker
+from examples.mask_rcnn import transforms_train
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
@@ -74,7 +75,7 @@ class COCODataset(torchvision.datasets.coco.CocoDetection):
   def __init__(self, root=pathlib.Path(BASEDIR/'train2017'),
                      ann_file=pathlib.Path(BASEDIR/'annotations/instances_train2017.json'), 
                      remove_images_without_annotations=1, 
-                     transforms=None):
+                     transforms=transforms_train):
 
     super(COCODataset, self).__init__(root, ann_file)
     # sort indices for reproducible results
