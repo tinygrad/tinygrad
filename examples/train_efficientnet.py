@@ -3,6 +3,7 @@ import time
 from multiprocessing import Process, Queue
 import numpy as np
 from tqdm import trange
+from tinygrad.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
@@ -37,7 +38,7 @@ if __name__ == "__main__":
   else:
     model = EfficientNet(getenv("NUM", 0), classes, has_se=False)
 
-  parameters = optim.get_parameters(model)
+  parameters = get_parameters(model)
   print("parameter count", len(parameters))
   optimizer = optim.Adam(parameters, lr=0.001)
 

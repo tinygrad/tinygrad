@@ -184,7 +184,7 @@ class Runtime(ABC):
 # == RawBuffer (in tinygrad/runtime/lib.py, code 5/10) ==
 import numpy as np
 
-# RawBuffer is where the data is actualy held. it's pretty close to just memory
+# RawBuffer is where the data is actually held. it's pretty close to just memory
 class RawBuffer(ABC):
   # create an empty rawbuffer that holds `size` elements of type `dtype`
   # `buf` is an opaque container class
