@@ -1,39 +1,14 @@
-import hashlib
-from typing import Callable, Dict, Final, Optional
+from typing import Callable, Dict, Final
 from triton.compiler import compile as triton_compile # type: ignore
-import torch
+import hashlib
 import math
 
-from tinygrad.ops import BinaryOps, Compiled, ASTRunner, FusedOps, Op, UnaryOps
+from tinygrad.ops import BinaryOps, ASTRunner, FusedOps, Op, UnaryOps
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
-from tinygrad.helpers import DType, ImageDType, dtypes
+from tinygrad.helpers import ImageDType, dtypes
 from tinygrad.shape.symbolic import NumNode
-from tinygrad.runtime.lib import RawBuffer
 
-class TritonProgram:
-  def __init__(self, name:str, prg:str, signature:str):
-    self.name = name
-    prg = "import triton\nimport triton.language as tl\n" + prg
-    fn = f"/tmp/{hashlib.md5(prg.encode('utf-8')).hexdigest()}.py"
-    with open(fn, "w") as f: f.write(prg)
-    codeobj = compile(prg, fn, "exec")
-    exec(codeobj, globals()) # pylint: disable=W0122
-    self.prg = triton_compile(globals()[name], signature=signature)
-
-  def __call__(self, global_size, local_size, *args, wait=False):
-    if wait:
-      start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-      start.record()
-    self.prg[tuple(global_size + [1]*(3-len(global_size)))](*[x._buf for x in args])
-    if wait:
-      end.record()
-      torch.cuda.synchronize()
-      return start.elapsed_time(end)*1e-3
-  
 class TritonCodegen(Linearizer):
-  supports_float4 = False
-  supports_float4_alu = False
-
   def codegen(self):
     self.process()
     self.limit_global_dims(3)
@@ -103,12 +78,18 @@ class TritonCodegen(Linearizer):
         raise NotImplementedError(f"unimplemented: {uop}")
 
     prg = '\n'.join(kernel)
-    return ASTRunner("fxn", prg, global_size[::-1] if len(global_size) else [1], op_estimate=self.info.flops, runtime_args={"signature":','.join([{dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.float64: "*fp64", dtypes.int8: "*i8", dtypes.uint8: "*u8", dtypes.int32: "*i32", dtypes.int64: "*i64"}[buf.dtype] for buf in self.bufs])})
+    print(prg)
 
-class RawTritonBuffer(RawBuffer):
-  def __init__(self, size:int, dtype:DType, buf:Optional[torch.Tensor]=None): super().__init__(size, dtype, buf) if buf is not None else super().__init__(size, dtype, torch.empty(size, dtype={dtypes.float32: torch.float32, dtypes.float16: torch.float16, dtypes.float64: torch.float64, dtypes.int8: torch.int8, dtypes.uint8: torch.uint8, dtypes.int32: torch.int32, dtypes.int64: torch.int64, dtypes.bool: torch.bool}[dtype], device='cuda'))
-  @classmethod
-  def fromCPU(cls, x): return cls(x.size, dtypes.from_np(x.dtype), buf=torch.from_numpy(x).requires_grad_(False).to('cuda'))
-  def toCPU(self): return self._buf.cpu().numpy()
+    # write out python to compile
+    prg = "import triton\nimport triton.language as tl\n" + prg
+    fn = f"/tmp/{hashlib.md5(prg.encode('utf-8')).hexdigest()}.py"
+    with open(fn, "w") as f: f.write(prg)
+    codeobj = compile(prg, fn, "exec")
+    exec(codeobj, globals()) # pylint: disable=W0122
+    triton_prg = triton_compile(globals()["fxn"], signature=','.join([{dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.float64: "*fp64", dtypes.int8: "*i8", dtypes.uint8: "*u8", dtypes.int32: "*i32", dtypes.int64: "*i64"}[buf.dtype] for buf in self.bufs]), device_type="cuda", debug=True)
+    asm = triton_prg.asm['ptx']
+    name = asm.split(".visible .entry ")[1].split("(")[0]
 
-TritonBuffer = Compiled(RawTritonBuffer, TritonCodegen, TritonProgram)
+    return ASTRunner(name, asm,
+      global_size[::-1], local_size[::-1],
+      op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name, runtime_args={"binary": True})
