@@ -266,7 +266,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.softsign(x), Tensor.softsign)
     helper_test_op([()], lambda x: torch.nn.functional.softsign(x), Tensor.softsign)
   def test_sigmoid(self):
-    helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid)
+    helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid, a=-100)
     helper_test_op([()], lambda x: x.sigmoid(), Tensor.sigmoid, forward_only=True)
   def test_softplus(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.softplus(x), Tensor.softplus, atol=1e-6, grad_atol=1e-6)
