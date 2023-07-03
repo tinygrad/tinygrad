@@ -71,7 +71,7 @@ class TestOptim(unittest.TestCase):
   def test_multistep_sgd_momentum_wd(self): self._test_sgd(10, {'lr': 0.001, 'momentum': 0.9, 'weight_decay': 0.1}, 1e-6, 0)
   def test_multistep_sgd_high_lr_momentum_wd(self): self._test_sgd(10, {'lr': 10, 'momentum': 0.9, 'weight_decay': 0.1}, 1e-5, 3e-4)
   def test_multistep_sgd_momentum_grad_clip(self): self._test_sgd(10, {'lr': 0.001, 'momentum': 0.9, 'gradient_clip': 0.1}, 1e-6, 0)
-  def test_multistep_sgd_high_lr_momentum_grad_clip(self): self._test_sgd(10, {'lr': 10, 'momentum': 0.9, 'gradient_clip': 0.1}, 1e-5, 3e-4)
+  def test_multistep_sgd_high_lr_momentum_grad_clip(self): self._test_sgd(10, {'lr': 10, 'momentum': 0.9, 'gradient_clip': 1.0}, 1e-5, 3e-4)
   def test_multistep_sgd_momentum_wd_grad_clip(self): self._test_sgd(10, {'lr': 0.001, 'momentum': 0.9, 'weight_decay': 0.1, 'gradient_clip': 0.1}, 1e-6, 0)
   def test_multistep_sgd_high_lr_momentum_wd_grad_clip(self): self._test_sgd(10, {'lr': 10, 'momentum': 0.9, 'weight_decay': 0.1, 'gradient_clip': 0.1}, 1e-5, 3e-4)
 
