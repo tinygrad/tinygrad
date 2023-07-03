@@ -560,6 +560,8 @@ class Tensor:
       if x == 2.0: return self*self
       if x == 1.0: return self
       if x == -1.0: return 1/self
+      if x == 0.5: return self.sqrt()
+      if x == -0.5: return self.rsqrt()
     return self.log().mul(x).exp()
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
