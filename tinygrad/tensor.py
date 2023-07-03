@@ -311,14 +311,13 @@ class Tensor:
         if isinstance(i, slice): final_shape.append(dim_shape)
       else: # i is None
         final_shape.append(1)
-    assert 5 == 6
     assert sliced_tensor.reshape(tuple(final_shape)) != sliced_tensor.reshape(tuple(
       [dim_shape for i, dim_shape in zip(orig_slices, new_shape) if isinstance(i, slice) or i is None]
       ))
     return sliced_tensor.reshape(tuple(final_shape))  # Reshape
-    return sliced_tensor.reshape(tuple(
-      [dim_shape for i, dim_shape in zip(orig_slices, new_shape) if isinstance(i, slice) or i is None]
-      ))  # Reshape
+    # return sliced_tensor.reshape(tuple(
+    #   [dim_shape for i, dim_shape in zip(orig_slices, new_shape) if isinstance(i, slice) or i is None]
+    #   ))  # Reshape
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
