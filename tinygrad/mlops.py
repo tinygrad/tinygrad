@@ -139,16 +139,6 @@ class Mul(Function):
     return self.y.binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[0] else None, \
            self.x.binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[1] else None
 
-class Pow(Function):
-  __slots__ = 'x', 'y', 'ret'
-  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    self.x, self.y, self.ret = x, y, x.unary_op(UnaryOps.LOG2).binary_op(BinaryOps.MUL, y).unary_op(UnaryOps.EXP2)
-    return self.ret
-
-  def backward(self, grad_output:LazyBuffer):
-    return grad_output.binary_op(BinaryOps.MUL, self.y.binary_op(BinaryOps.MUL, self.ret.binary_op(BinaryOps.DIV, self.x))) if self.needs_input_grad[0] else None, \
-           grad_output.binary_op(BinaryOps.MUL, self.x.unary_op(UnaryOps.LOG2).binary_op(BinaryOps.MUL, self.x.const_like(math.log(2)/math.log(math.e))).binary_op(BinaryOps.MUL, self.ret)) if self.needs_input_grad[1] else None
-
 class Div(Function):
   __slots__ = 'x', 'y'
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
