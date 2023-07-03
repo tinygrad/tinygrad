@@ -158,7 +158,7 @@ class ShapeTracker:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx, valid = self.expr_idxs(idxs)
-    ret: List[Optional[int]] = [None for _ in self.views[-1].shape]
+    ret: List[Optional[int]] = [None] * len(self.views[-1].shape)
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
       if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
         ret[idxs.index(this_dim.a)] = this_dim.b
