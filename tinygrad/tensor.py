@@ -486,6 +486,8 @@ class Tensor:
   def exp(self): return mlops.Exp.apply(self)
   def relu(self): return mlops.Relu.apply(self)
   def sin(self): return mlops.Sin.apply(self)
+  def sqrt(self): return mlops.Sqrt.apply(self)
+  def rsqrt(self): return (1/self).sqrt()
   def cos(self): return ((pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
 
@@ -503,8 +505,6 @@ class Tensor:
     return (self < b).where(b-1, b)
 
   def __neg__(self): return 0.0-self
-  def sqrt(self): return self.pow(0.5)
-  def rsqrt(self): return self.pow(-0.5)
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
   def abs(self): return self.relu() + (-self).relu()
