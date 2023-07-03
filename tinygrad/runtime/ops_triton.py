@@ -103,7 +103,7 @@ class TritonCodegen(Linearizer):
         raise NotImplementedError(f"unimplemented: {uop}")
 
     prg = '\n'.join(kernel)
-    return ASTRunner("fxn", prg, global_size[::-1] if len(global_size) else [1], op_estimate=self.info.flops, runtime_args={"signature":','.join([{dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.float64: "*fp64", dtypes.int8: "*i8", dtypes.int32: "*i32", dtypes.int64: "*i64"}[buf.dtype] for buf in self.bufs])})
+    return ASTRunner("fxn", prg, global_size[::-1] if len(global_size) else [1], op_estimate=self.info.flops, runtime_args={"signature":','.join([{dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.float64: "*fp64", dtypes.int8: "*i8", dtypes.uint8: "*u8", dtypes.int32: "*i32", dtypes.int64: "*i64"}[buf.dtype] for buf in self.bufs])})
 
 class RawTritonBuffer(RawBuffer):
   def __init__(self, size:int, dtype:DType, buf:Optional[torch.Tensor]=None): super().__init__(size, dtype, buf) if buf is not None else super().__init__(size, dtype, torch.empty(size, dtype={dtypes.float32: torch.float32, dtypes.float16: torch.float16, dtypes.float64: torch.float64, dtypes.int8: torch.int8, dtypes.uint8: torch.uint8, dtypes.int32: torch.int32, dtypes.int64: torch.int64, dtypes.bool: torch.bool}[dtype], device='cuda'))
