@@ -285,30 +285,42 @@ class Linearizer:
       # reduce loop
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
+      # compute local aliases
+      locals_to_store = []
+      for i in self.local_alias:
+        strides = self.sts[i].real_strides()
+        extra_locals = [lidx for lidx,st in zip(local_idxs, strides[len(global_idxs):self.first_reduce]) if st == 0]
+        this_upcast_idxs = []
+        for j,v in enumerate(full_upcast_idxs):
+          if strides[len(global_idxs)+len(local_idxs)+len(reduce_idxs)+j] == 0:
+            if DEBUG >= 4: print("upcasting stride 0")
+            this_upcast_idxs.append(Variable.num(0))
+          elif (elc:=[el for el in extra_locals if v.min == el.min and v.max == el.max]):
+            if DEBUG >= 4: print("upcasting matched stride")
+            this_upcast_idxs.append(elc[0])
+            extra_locals.remove(elc[0])
+          elif (elc:=[el for el in extra_locals if v.min == el.min and (v.max+1)%(el.max+1) == 0]):
+            tacc = Variable.num(0)
+            rem = v.max+1
+            while len(elc) and rem%(elc[0].max+1) == 0:
+              if DEBUG >= 4: print(f"upcasting partial stride {rem} {elc[0]} left: {elc[1:]}")
+              rem = rem//(elc[0].max+1)
+              tacc += (elc[0] * rem)
+              extra_locals.remove(elc[0])
+              elc = [el for el in extra_locals if v.min == el.min and rem%(el.max+1) == 0]
+            if DEBUG >= 4 and rem > 1: print("FAILED upcasting partial stride")
+            this_upcast_idxs.append(tacc + Variable(None, 0, rem-1))
+          else:
+            if DEBUG >= 4: print("FAILED upcasting stride")
+            this_upcast_idxs.append(v)
+        idxs = global_idxs+local_idxs+reduce_idxs+this_upcast_idxs
+        ll = self.global_load(i, idxs)
+        locals_to_store.append((self.bufs.index(self.local_alias[i]), idxs, ll))
+
       # copy in any global buffers
       if getenv("TC"):
         self.uop(UOps.WMMA, None, [], ())
       else:
-        locals_to_store = []
-        for i in self.local_alias:
-          strides = self.sts[i].real_strides()
-          extra_locals = [local_idxs[j-len(global_idxs)] for j,st in enumerate(strides[len(global_idxs):self.first_reduce]) if st == 0]
-          this_upcast_idxs = []
-          for j,v in enumerate(full_upcast_idxs):
-            if strides[len(global_idxs)+len(local_idxs)+len(reduce_idxs)+j] == 0:
-              this_upcast_idxs.append(Variable.num(0))
-            elif (elc:=[el for el in extra_locals if v.min == el.min and v.max == el.max]):
-              this_upcast_idxs.append(elc[0])
-              extra_locals.remove(elc[0])
-            elif (elc:=[el for el in extra_locals if v.min == el.min and (v.max+1)%(el.max+1) == 0]):
-              shift = (v.max+1)//(elc[0].max+1)
-              this_upcast_idxs.append((elc[0] * shift) + Variable(None, 0, shift-1))
-            else:
-              this_upcast_idxs.append(v)
-          idxs = global_idxs+local_idxs+reduce_idxs+this_upcast_idxs
-          ll = self.global_load(i, idxs)
-          locals_to_store.append((self.bufs.index(self.local_alias[i]), idxs, ll))
-
         if locals_to_store:
           self.uop(UOps.BARRIER, None, [], ())
           for i, idxs, ll in locals_to_store: self.global_store(i, idxs, ll, ssa)
@@ -449,11 +461,12 @@ class Linearizer:
     colors += ["magenta" if self.full_shape[i] != self.sts[0].shape[i] else "yellow" for i in range(self.shape_len-self.upcasted, self.shape_len)]
     assert len(colors) == self.shape_len, "colors size mismatch"
     return colors
+  def colored_shape(self) -> str: return ' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors()))
 
   def printbufs(self, prefix=""):
     for i in range(len(self.sts)):
       print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i] is not None else 'FAKE':47s}", self.sts[i].views)
-    print(' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors())))
+    print(self.colored_shape())
 
   # ******************** base simplifiers ********************
 
@@ -535,6 +548,9 @@ class Linearizer:
 
   def alias_buffer(self, i, pattern, invert_strides=False):
     self.bufs.append(LocalBuffer(name=f"ldata{i}", alias=self.bufs[i]))
+    assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
+    print("aliasing buffer", self.sts[i])
+
     self.local_alias[i] = self.bufs[-1]
     acc = 1
     # NOTE: these strides can be selected in many different ways
@@ -564,27 +580,47 @@ class Linearizer:
 
     if self.bufs[0].shape != (256, 256, 1) and self.bufs[0].shape != (64, 64, 1) and self.bufs[0].shape != (8, 8, 1): return
 
-    self.shift_to(0, 8, insert_before=self.first_reduce)
-    self.shift_to(1, 8, insert_before=self.first_reduce)
-    self.shift_to(3, 4, insert_before=self.first_reduce)
-
-    self.reshape_and_permute(None, [0,1,3,2,4,5])
-
-    #self.shift_to(3, 4, insert_before=self.first_reduce)
-    #self.local_dims += 3
+    # upcast first
     if self.full_shape[self.first_reduce] > 8: self.shift_to(self.first_reduce, 8)
     self.upcast()
 
-    #pattern = [False, False, True, True, False, True] if self.shape_len == 6 else [False, False, True, True, True]
-    #self.alias_buffer(1, pattern, invert_strides=True)
-    #self.alias_buffer(2, pattern)
+    # locals
+    self.shift_to(0, 8, insert_before=self.first_reduce)
+    self.shift_to(1, 8, insert_before=self.first_reduce)
 
+    # permuted for tensor cores
+    self.shift_to(2, 2, insert_before=self.first_reduce)
+    self.shift_to(2, 2, insert_before=self.first_reduce)
+    self.shift_to(3, 4, insert_before=self.first_reduce)
+    self.reshape_and_permute(None, [0,1,2,3,5,4,6,7])
+    #self.reshape_and_permute(lambda x: (x[0], x[1], x[2], x[3], x[4]*x[5], x[6], x[7]), None)
+
+    #self.simplify_merge_adjacent()
+
+
+    #self.reshape_and_permute(None, [0,1,3,2,4,5])
+
+    #self.shift_to(3, 4, insert_before=self.first_reduce)
+    #self.local_dims += 3
+
+    # TODO: we have put the index aliasing stuff here
+    self.local_dims = self.first_reduce - 2
+    self.alias_buffer(1, [False, False] + [True] * self.local_dims + ([False] if self.shape_len-self.first_reduce > 1 else []) + [True])
+    self.alias_buffer(2, [False, False] + [True] * self.local_dims + ([False] if self.shape_len-self.first_reduce > 1 else []) + [True])
+
+    print(self.colored_shape())
+
+    # can do this at the end and get different views
+    #fr = self.first_reduce
+    #self.reshape_and_permute(lambda x: (x[0], x[1], prod(x[2:fr])) + x[fr:], None)
+    self.local_dims = self.first_reduce - 2
+
+    #print(self.colored_shape())
     self.shift_to(self.first_reduce-1, 2)
     self.upcast()
 
-    fr = self.first_reduce
-    #self.reshape_and_permute(lambda x: (x[0], x[1], prod(x[2:fr])) + x[fr:], None)
-    self.local_dims = self.first_reduce - 2
+    #print(self.colored_shape())
+
 
     return
 

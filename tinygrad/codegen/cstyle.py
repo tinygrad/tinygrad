@@ -2,7 +2,7 @@ from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, 
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
-from tinygrad.helpers import partition, ImageDType, DEBUG, dtypes, colored, getenv
+from tinygrad.helpers import partition, ImageDType, DEBUG, dtypes, colored, getenv, prod
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
 from tinygrad.lazy import LazyBuffer
@@ -82,9 +82,17 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
             kk(f"{{ int {var.expr} = {lang.gid[len(args[0])-1-i]};  /* {var.max+1} */")
             global_size.append(var.max+1)
           elif args[1] == "local" and lang.lid:
-            assert len(args[0]) <= len(lang.lid)
-            kk(f"{{ int {var.expr} = {lang.lid[len(args[0])-1-i]};  /* {var.max+1} */")
-            local_size.append(var.max+1)
+            # for tensor core stuff, support > 3 dims
+            if len(args[0]) > len(lang.lid) and i < len(args[0])-len(lang.lid)+1:
+              full_local_size = prod(x.max+1 for x in args[0][0:-len(lang.lid)+1])
+              if len(local_size) == 0: local_size.append(1)
+              local_size[0] *= var.max+1
+              div = full_local_size//local_size[0]
+              kk(f"{{ int {var.expr} = ({lang.lid[-1]}/{div})%{var.max+1};  /* {var.max+1} */")
+            else:
+              #assert len(args[0]) <= len(lang.lid)
+              kk(f"{{ int {var.expr} = {lang.lid[len(args[0])-1-i]};  /* {var.max+1} */")
+              local_size.append(var.max+1)
           else:
             if getenv("NOUNROLL"): kk("#pragma unroll(1)")   # prevent loop unrolling
             kk(f"for (int {var.expr} = {var.min}; {var.expr} <= {var.max}; ++{var.expr}) {{")
@@ -104,22 +112,25 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         depth -= 1
         kk("}"*len(args[0]) + f" /* {args[1]} */")
     elif uop == UOps.WMMA:
+      #((((lidx2/2)%4)*8)+(((lidx2/8)%2)*4)+((lidx2*2)%4)+((lidx2/16)*32))
+
       kk("simdgroup_float8x8 a;")
       kk("simdgroup_float8x8 b;")
       kk("simdgroup_float8x8 c;")
       #kk("a.thread_elements()[0] = val1_0;")
       #kk("a.thread_elements()[1] = val1_1;")
-      #kk("b.thread_elements()[0] = val2_0;")
-      #kk("b.thread_elements()[1] = val2_1;")
+      kk("b.thread_elements()[0] = val2_0;")
+      kk("b.thread_elements()[1] = val2_1;")
       kk("c.thread_elements()[0] = acc0_0;")
       kk("c.thread_elements()[1] = acc0_1;")
       kk("simdgroup_load(a, data1, 8, ulong2(0,0), false);")
-      kk("simdgroup_load(b, data2, 8, ulong2(0,0), false);")
+      #kk("simdgroup_load(b, data2, 8, ulong2(0,0), false);")
       #kk("c = simdgroup_float8x8(0);")
       kk("simdgroup_multiply_accumulate(c, a, b, c);")
       kk("acc0_0 = c.thread_elements()[0];")
-      kk("acc0_0 = simdidx;")
       kk("acc0_1 = c.thread_elements()[1];")
+      #kk("acc0_0 = simdidx*2;")
+      #kk("acc0_1 = simdidx*2+1;")
     elif uop == UOps.CONST:
       assert newvar is not None
       if args == -math.inf:
