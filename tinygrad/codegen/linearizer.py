@@ -55,7 +55,7 @@ def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
 
 def to_float4(x:List[Token]) -> Optional[Token]:
   if all_same(x): return x[0]
-  if all_same([y.name for y in x]) and all([y.dtype == dtypes._float4 and y.offset == i for i,y in enumerate(x)]):
+  if all_same([y.name for y in x]) and all(y.dtype == dtypes._float4 and y.offset == i for i,y in enumerate(x)):
     return Token(x[0].name, dtypes._float4)
   return None
 
@@ -68,7 +68,7 @@ def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
     new_values = []
     for i in range(0, len(idxs), 4):
       nv = [to_float4([v[j] for j in idxs[i:i+4]]) for v in values]
-      if any([x is None for x in nv]): break
+      if any(x is None for x in nv): break
       new_idxs.append(idxs[i:i+4])
       new_values.append(nv)
     if len(new_values) == len(idxs)//4:
@@ -437,7 +437,7 @@ class Linearizer:
     # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride
     if self.shape_len == 0: return
-    all_ones = [all([st.shape[i]==1 for st in self.sts]) for i in range(self.shape_len)]
+    all_ones = [all(st.shape[i]==1 for st in self.sts) for i in range(self.shape_len)]
     # keep at least 1 one
     if all(all_ones): all_ones[-1] = False
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
@@ -495,7 +495,7 @@ class Linearizer:
     if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
-        if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
+        if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
           self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
           self.group_for_reduce.append(sz)
           break
