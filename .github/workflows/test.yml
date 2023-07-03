@@ -275,3 +275,56 @@ jobs:
       run: pip install -e '.[testing, cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run pytest
       run: FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"
+
+  testtriton:
+    name: (emulated) Triton tests
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Update packages
+      run: |
+        export DEBIAN_FRONTEND=noninteractive
+        sudo apt-get update -y
+    - name: Install packages
+      run: sudo apt-get install -y git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+    - name: Cache gpuocelot
+      id: cache-build
+      uses: actions/cache@v3
+      env:
+        cache-name: cache-gpuocelot-build
+      with:
+        path: ${{ github.workspace }}/gpuocelot/ocelot/
+        key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
+        restore-keys: |
+          ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
+    - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
+      name: Clone gpuocelot
+      uses: actions/checkout@v3
+      with:
+        repository: gpuocelot/gpuocelot
+        ref: 19626fc00b6ee321638c3111074269c69050e091
+        path: ${{ github.workspace }}/gpuocelot
+        submodules: true
+    - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
+      name: Compile gpuocelot
+      run: |
+        cd ${{ github.workspace }}/gpuocelot/ocelot
+        mkdir build
+        cd build
+        cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
+        ninja
+    - name: Install gpuocelot
+      run: |
+        cd ${{ github.workspace }}/gpuocelot/ocelot/build
+        sudo ninja install
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+        cache: 'pip'
+        cache-dependency-path: setup.py
+    - name: Install tinygrad dependencies
+      run: pip install -e '.[testing, triton]' --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Run pytest
+      run: FORWARD_ONLY=1 JIT=1 OPT=2 TRITON=1 TRITONCPU=1 python -m pytest -s -v -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"
