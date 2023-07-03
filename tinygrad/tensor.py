@@ -1,15 +1,21 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
+
+import operator
 import time
 from functools import partialmethod, reduce
 from itertools import accumulate, filterfalse
-import operator
+from math import ceil, log, pi, prod, sqrt
+from typing import (Callable, ClassVar, List, Optional, Sequence, Tuple, Type,
+                    Union, cast)
+
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
-from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
-from math import ceil, pi, prod, sqrt, log
+
+from tinygrad.helpers import (DEBUG, IMAGE, DType, ImageDType, argfix, dtypes,
+                              flatten, getenv, make_pair)
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
+
 
 # An instantiation of the Function is the Context
 class Function:
@@ -234,8 +240,8 @@ class Tensor:
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))]))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
-  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Pad.apply(self, arg=arg) if any([x != (0,0) for x in arg]) else self
-  def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any([x != (0,s) for x,s in zip(arg, self.shape)]) else self
+  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Pad.apply(self, arg=arg) if any(x != (0,0) for x in arg) else self
+  def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
 
   # ***** movement hlops *****
 
@@ -314,7 +320,7 @@ class Tensor:
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
-    assert all(len(y.shape) == len(self.shape) and all([y.shape[i] == s for i,s in enumerate(self.shape) if i != dim]) for y in args)
+    assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
     catargs = [self] + list(args)
     assert all(len(t.shape) != 0 for t in catargs), "zero-dimensional tensor cannot be concatenated"
     shape_cumsum = [0, *accumulate([y.shape[dim] for y in catargs])]
@@ -641,6 +647,7 @@ for device in Device._buffers:
 
 # if IMAGE>0 we install these replacement functions in Tensor (hack!)
 from tinygrad.nn.image import image_conv2d, image_dot
+
 if IMAGE:
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
