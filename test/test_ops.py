@@ -86,7 +86,6 @@ class TestOps(unittest.TestCase):
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
 
-  @unittest.skipIf(ARM64>0,"segs fault in arm64, needs fixing")
   def test_where(self):
     helper_test_op(
       [(100,)],
@@ -129,7 +128,6 @@ class TestOps(unittest.TestCase):
     self.assertRaises(RuntimeError, (tt1 < tt2).sum().backward)
 
 
-  @unittest.skipIf(ARM64>0,"segs fault in arm64, needs fixing")
   def test_floor(self): helper_test_op([(45,65)], lambda x: torch.floor(x), lambda x: x.floor(), forward_only=True)
   def test_ceil(self): helper_test_op([(45,65)], lambda x: torch.ceil(x), lambda x:x.ceil(), forward_only=True)
   def test_tril(self):
@@ -238,6 +236,7 @@ class TestOps(unittest.TestCase):
   def test_leakyrelu(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu)
     helper_test_op([()], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu)
+ 
   def test_celu(self):
     for val in range(1, 5):
       helper_test_op([(45,65)], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val))

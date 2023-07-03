@@ -101,7 +101,8 @@ class AssemblyCodegen(Linearizer):
         return reg, None, off
 
     ins = []
-    ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64, scalar=True), [], f"buf{i}") for i in range(len(self.bufs))]
+    #TODO: ceil needs to know output type 
+    ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=self.bufs[i].dtype, scalar=True), [], f"buf{i}") for i in range(len(self.bufs))]
     global_size, local_size = [], []
     skipload_branch = 0
     # for uop,newvar,vin,args in self.uops:

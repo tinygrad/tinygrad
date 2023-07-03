@@ -1,4 +1,5 @@
 import os, time, ctypes, hashlib, subprocess, platform
+import numpy as np
 from tinygrad.codegen.assembly_arm import ARMCodegen
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.ops import Compiled
@@ -17,6 +18,18 @@ class ClangProgram:
         os.rename(fn+".tmp", fn)
     else:
       if DEBUG >= 5: print(prg)
+#       prg = """
+#       .arch armv8-a
+# .text
+# .global _test
+# .p2align 2
+# _test:
+# ldr     s0, [x1]
+# ldr     s1, [x2]
+# fadd  s0, s0, s1
+# str     s0, [x0]
+# ret;
+#       ""
       subprocess.run(["as","-arch", "arm64", "-o", "kernel.o"], input=prg.encode('utf-8'))
       subprocess.run(["clang", "-lm", "-shared", "kernel.o", "-o", fn])
     self.lib = ctypes.CDLL(fn)

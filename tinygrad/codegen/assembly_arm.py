@@ -15,18 +15,23 @@ class ARMCodegen(AssemblyCodegen):
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "bl _sin", UnaryOps.LOG2: "bl _log2", UnaryOps.EXP2: "bl _exp2",
            FusedOps.MULACC: "fmadd"}
     reg_map = {}
+    buf_map = {}
     var_size = 32
     for i, (uop, out, vin, arg) in enumerate(asm):
-#      print(asm[i])
+      #print(asm[i])
       if uop == UOps.DEFINE_REGISTER: 
       #https://developer.arm.com/documentation/den0024/a/The-ABI-for-ARM-64-bit-Architecture/Register-use-in-the-AArch64-Procedure-Call-Standard/Parameters-in-general-purpose-registers
         for i in range(arg[2]):
           #NOTE: more than 8 args and it will go into the stack 
-          reg_map[f"%{arg[1]}{i}"] = f"[sp, #{'0' if arg[1] + str(i) == 'B8' else str(var_size) + ']'}" 
+          reg_map[f"%{arg[1]}{i}"] = f"[sp, #{var_size}]" 
           var_size += 16
       elif uop == UOps.SPECIAL:
+        buf_map[arg] = out[1] 
         if arg.startswith('buf'):
-          if arg != 'buf8': 
+          if arg in ['buf8', 'buf9', 'buf10']: 
+            ins.append(f"ldr x1, [x19, #{(int(arg[3:]) - 8) * 8}]")
+            ins.append(f"str x1, {reg_map[out.nm]}")
+          else:
             ins.append(f"str x{arg[3:]}, {reg_map[out.nm]}")
       elif uop == UOps.CONST:
         if arg.__class__ is float:
@@ -42,8 +47,8 @@ class ARMCodegen(AssemblyCodegen):
           ins.append(f"scvtf s0, w0")
           ins.append(f"str s0, {reg_map[out.nm]}")
         else:
-          ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
-          ins.append(f"sxtw x0, x0")
+          ins.append(f"ldr w0, {reg_map[vin[0].nm]}")
+          ins.append(f"sxtw x0, w0")
           ins.append(f"str x0, {reg_map[out.nm]}")
       elif uop == UOps.ALU:
         if arg == FusedOps.MULACC and out == vin[2]:
@@ -87,10 +92,14 @@ class ARMCodegen(AssemblyCodegen):
       elif uop == UOps.STORE:
         reg = 's0' if dtypes.is_float(vin[1][1]) else 'x0'
         ins.append(f"ldr {reg}, {reg_map[vin[1].nm]}")
+        #TODO: ugly refactor this
+        if "buf0" in buf_map and buf_map["buf0"] == dtypes.int32 and reg == 's0': 
+          ins.append(f"fcvtzs w0, s0")
+          reg = 'w0'
         ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
         ins.append(f"str {reg}, [x1, #{arg[0]}]")
       elif uop == UOps.COND_BRANCH:
         ins.append(f"{'b.ne' if arg[1] else 'beq'} {arg[0][1:]}")
       elif uop == UOps.LABEL:
         ins.append(f"{arg[1:]}:")
-    return "test", "\n".join([".arch armv8-a",".text", ".global _test",".p2align 2"] + ["_test:"] + [f"sub sp, sp, #{var_size}"] + ins  + [f"add sp, sp, #{var_size}"]+ ["ret;"])
+    return "test", "\n".join([".arch armv8-a",".text", ".global _test",".p2align 2"] + ["_test:"] + ["mov x19, sp",f"sub sp, sp, #{var_size}"] + ins  + [f"add sp, sp, #{var_size}"]+ ["ret;"])
