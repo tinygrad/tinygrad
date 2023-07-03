@@ -37,7 +37,7 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
   module = ir.Module(name=__file__)
 
   # create llvm function
-  func_dtypes = [{dtypes.float16:ir.HalfType(), dtypes.float32:ir.FloatType(), dtypes.float64:ir.DoubleType(), dtypes.bool: ir.IntType(1), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.int16:ir.IntType(16), dtypes.int32: ir.IntType(32), dtypes.int64: ir.IntType(64)}[buf.dtype] for buf in bufs]
+  func_dtypes = [{dtypes.float16:ir.HalfType(), dtypes.float32:ir.FloatType(), dtypes.float64:ir.DoubleType(), dtypes.bool:ir.IntType(1), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.int16:ir.IntType(16), dtypes.int32:ir.IntType(32), dtypes.int64:ir.IntType(64)}[buf.dtype] for buf in bufs]
   func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in func_dtypes]), name='exec')
 
   # force llvmlite to allow us to add function attribute then add the attribute
@@ -88,7 +88,7 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
       else:
         val = bb[-1].load(bb[-1].gep(func.args[args.i], [idx], inbounds=True))
       if func_dtypes[args.i] != ir.FloatType():
-        if dtypes.is_signed_int(bufs[args.i].dtype):
+        if dtypes.is_int(bufs[args.i].dtype):
           val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned_int(bufs[args.i].dtype) else bb[-1].sitofp(val, ir.FloatType())
         elif bufs[args.i].dtype == dtypes.float64:
           val = bb[-1].fptrunc(val, ir.FloatType())
@@ -100,7 +100,7 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
       idx = args.idx.render(render_llvm, bb[-1])
       element = lvars[vin[0]]
       if func_dtypes[0] != ir.FloatType():
-        if dtypes.is_signed_int(bufs[args.i].dtype):
+        if dtypes.is_int(bufs[args.i].dtype):
           element = bb[-1].fptoui(element, func_dtypes[0]) if dtypes.is_unsigned_int(bufs[args.i].dtype) else bb[-1].fptosi(element, func_dtypes[0])
         elif bufs[args.i].dtype == dtypes.float64:
           element = bb[-1].fpext(element, func_dtypes[0])
