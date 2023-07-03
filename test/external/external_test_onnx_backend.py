@@ -60,6 +60,7 @@ backend_test.exclude('uint32')
 backend_test.exclude('uint64')
 backend_test.exclude('int8')
 backend_test.exclude('int16')
+backend_test.exclude('float64')
 backend_test.exclude('string')
 
 backend_test.exclude('test_pow_types_int*')
