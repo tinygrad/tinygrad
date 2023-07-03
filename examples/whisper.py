@@ -188,12 +188,18 @@ def load_wav(file):
   sample = np.expand_dims(sample, axis=0)
   return sample, rate
 
+def remove_specials(sentence):
+  while "<" in sentence and ">" in sentence:
+    start, end = sentence.index("<"), sentence.index(">")
+    if start < end: sentence = sentence[:start] + sentence[end+1:]
+  return sentence
 
 def remove_repeated(sentence):
-  eos_idx = [-2] + [i for i, c in enumerate(sentence) if c in (".", "?", "!")]
+  eos_idx = [-2] + [i for i, c in enumerate(sentence) if c in (".", "?", "!", '"')]
   for i in range(len(eos_idx) - 2):
     low, mid, high = eos_idx[i:i+3]
-    if sentence[low+2:mid] == sentence[mid+2:high]: return sentence[:mid+1]
+    offset = 5 if mid - low > 5 and high - mid > 5 else min(mid-low, high-mid)
+    if sentence[low+offset:mid].strip() == sentence[mid+offset:high].strip(): return sentence[:mid+1]
   else: return sentence
 
 if __name__ == "__main__":
@@ -208,42 +214,39 @@ if __name__ == "__main__":
   load_state_dict(model, state['model_state_dict'])
   enc = get_encoding(state['dims']['n_vocab'])
 
-  # TODO: clean up, clean up, everybody clean up
-  if getenv("TEST"):
-    diff = difflib.Differ()
-    for c in ci:
-      fn = BASEDIR / c["files"][0]["fname"]
-      print("-" * 128, f"{fn.stem}\n", sep="\n")
-      waveform, sample_rate = load_wav(fn)
-      log_spec = prep_audio(waveform, sample_rate)
-      lst = [enc._special_tokens["<|startoftranscript|>"]]
-      dat = model.encoder(Tensor(log_spec)).realize()
-      iters = 0
-      while lst[-1] != enc._special_tokens["<|endoftext|>"] and iters < MAX_ITERS:
-        out = model.decoder(Tensor([lst]), dat)
-        out.realize()
-        idx = out[0,-1].numpy().argmax()
-        lst.append(idx)
-        iters += 1
-      predicted = remove_repeated("".join(enc.decode(lst[2:-1]))[1:].lower())
-      predicted = predicted.translate(str.maketrans("", "", string.punctuation))
-      transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
-      sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
-      print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
-  elif len(sys.argv) > 1:
-    # offline
-    waveform, sample_rate = load_wav(sys.argv[1])
+  def transcribe_file(fn):
+    waveform, sample_rate = load_wav(fn)
     log_spec = prep_audio(waveform, sample_rate)
     lst = [enc._special_tokens["<|startoftranscript|>"]]
     dat = model.encoder(Tensor(log_spec)).realize()
-    while lst[-1] != enc._special_tokens["<|endoftext|>"]:
+    iters = 0
+    while lst[-1] != enc._special_tokens["<|endoftext|>"] and iters < MAX_ITERS:
       out = model.decoder(Tensor([lst]), dat)
       out.realize()
       idx = out[0,-1].numpy().argmax()
       lst.append(idx)
-      print(enc.decode(lst))
+      iters += 1
+    predicted = "".join(enc.decode(lst[2:-1]))[1:].lower()
+    predicted = remove_specials(predicted)
+    predicted = remove_repeated(predicted)
+    predicted = predicted.translate(str.maketrans("", "", string.punctuation))
+    predicted = "".join(x for x in predicted if not x.isdigit())
+    return predicted
+
+  if getenv("TEST"):
+    diff = difflib.Differ()
+    lens = []
+    for c in ci[::-1]:
+      fn = BASEDIR / c["files"][0]["fname"]
+      print("-" * 128, f"{fn.stem}\n", sep="\n")
+      predicted = transcribe_file(fn)
+      transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
+      lens.append(len(transcript.split(" ")))
+      sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
+      print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
+  elif len(sys.argv) > 1:
+    print(transcribe_file(sys.argv[1]))
   else:
-    # online
     q = multiprocessing.Queue()
     p = multiprocessing.Process(target=listener, args=(q,))
     p.daemon = True
