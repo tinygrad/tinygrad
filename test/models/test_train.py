@@ -1,6 +1,7 @@
 import unittest
 import time
 import numpy as np
+from tinygrad.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.tensor import Device
 from tinygrad.helpers import getenv
@@ -14,7 +15,7 @@ from models.resnet import ResNet18
 BS = getenv("BS", 2)
 
 def train_one_step(model,X,Y):
-  params = optim.get_parameters(model)
+  params = get_parameters(model)
   pcount = 0
   for p in params:
     pcount += np.prod(p.shape)

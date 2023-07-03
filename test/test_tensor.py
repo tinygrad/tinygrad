@@ -186,8 +186,7 @@ class TestTinygrad(unittest.TestCase):
     # assert Tensor.randn(1,0,2,5) == 0 # TODO: fix empty tensors
 
   def test_element_size(self):
-    for f in dataclasses.fields(dtypes):
-      dtype = f.default
+    for _, dtype in dtypes.fields().items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
 
 if __name__ == '__main__':
