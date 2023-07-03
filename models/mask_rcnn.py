@@ -10,7 +10,10 @@ from extra.utils import get_child, download_file
 from tinygrad.state import torch_load
 from models.resnet import ResNet
 from models.retinanet import nms as _box_nms
+import pycocotools.mask as mask_utils
 
+FLIP_LEFT_RIGHT = 0
+FLIP_TOP_BOTTOM = 1
 
 USE_NP_GATHER = os.getenv('FULL_TINYGRAD', '0') == '0'
 
@@ -279,6 +282,316 @@ class BoxList:
   def __len__(self):
     return self.bbox.shape[0]
 
+class Polygons(object):
+  """
+  This class holds a set of polygons that represents a single instance
+  of an object mask. The object can be represented as a set of
+  polygons
+  """
+  def __init__(self, polygons, size, mode):
+    # assert isinstance(polygons, list), '{}'.format(polygons)
+    if isinstance(polygons, list):
+      polygons = [Tensor(p) for p in polygons]
+    elif isinstance(polygons, Polygons):
+      polygons = polygons.polygons
+
+    self.polygons = polygons
+    self.size = size
+    self.mode = mode
+
+  def transpose(self, method):
+    if method not in (FLIP_LEFT_RIGHT, FLIP_TOP_BOTTOM):
+      raise NotImplementedError(
+        "Only FLIP_LEFT_RIGHT and FLIP_TOP_BOTTOM implemented"
+      )
+    
+    flipped_polygons = []
+    width, height = self.size
+    if method == FLIP_LEFT_RIGHT:
+      dim = width
+      idx = 0
+    elif method == FLIP_TOP_BOTTOM:
+      dim = height
+      idx = 1
+
+    for poly in self.polygons:
+      p = poly.clone()
+      TO_REMOVE = 1
+      p[idx::2] = dim - poly[idx::2] - TO_REMOVE
+      flipped_polygons.append(p)
+
+    return Polygons(flipped_polygons, size=self.size, mode=self.mode)
+
+  def convert(self, mode):
+    width, height = self.size
+    if mode == "mask":
+      rles = mask_utils.frPyObjects(
+          [p.numpy() for p in self.polygons], height, width
+      )
+      rle = mask_utils.merge(rles)
+      mask = mask_utils.decode(rle)
+      mask = Tensor(mask)
+      # TODO add squeeze?
+      return mask
+
+  def __repr__(self):
+    s = self.__class__.__name__ + "("
+    s += "num_polygons={}, ".format(len(self.polygons))
+    s += "image_width={}, ".format(self.size[0])
+    s += "image_height={}, ".format(self.size[1])
+    s += "mode={})".format(self.mode)
+    return s
+
+class SegmentationMask(object):
+  """
+  This class stores the segmentations for all objects in the image
+  """
+  def __init__(self, polygons, size, mode=None):
+    """
+    Arguments:
+        polygons: a list of list of lists of numbers. The first
+            level of the list correspond to individual instances,
+            the second level to all the polygons that compose the
+            object, and the third level to the polygon coordinates.
+    """
+    assert isinstance(polygons, list)
+
+    self.polygons = [Polygons(p, size, mode) for p in polygons]
+    self.size = size
+    self.mode = mode
+
+  def transpose(self, method):
+    if method not in (FLIP_LEFT_RIGHT, FLIP_TOP_BOTTOM):
+      raise NotImplementedError(
+          "Only FLIP_LEFT_RIGHT and FLIP_TOP_BOTTOM implemented"
+      )
+
+    flipped = []
+    for polygon in self.polygons:
+      flipped.append(polygon.transpose(method))
+      
+    return SegmentationMask(flipped, size=self.size, mode=self.mode)
+
+  def crop(self, box):
+    w, h = box[2] - box[0], box[3] - box[1]
+    cropped = []
+    for polygon in self.polygons:
+      cropped.append(polygon.crop(box))
+    return SegmentationMask(cropped, size=(w, h), mode=self.mode)
+
+  def resize(self, size, *args, **kwargs):
+    scaled = []
+    for polygon in self.polygons:
+      scaled.append(polygon.resize(size, *args, **kwargs))
+    return SegmentationMask(scaled, size=size, mode=self.mode)
+
+  def to(self, *args, **kwargs):
+    return self
+
+  def __getitem__(self, item):
+    if isinstance(item, (int, slice)):
+      selected_polygons = [self.polygons[item]]
+    else:
+      # advanced indexing on a single dimension
+      selected_polygons = []
+      if isinstance(item, Tensor) and \
+        (item.dtype == dtypes.uint8 or item.dtype == dtypes.bool):
+        item = item.nonzero()
+        item = item.squeeze(1) if item.numel() > 0 else item
+        item = item.tolist()
+      for i in item:
+        selected_polygons.append(self.polygons[i])
+    return SegmentationMask(selected_polygons, size=self.size, mode=self.mode)
+
+  def __iter__(self):
+    return iter(self.polygons)
+
+  def __repr__(self):
+    s = self.__class__.__name__ + "("
+    s += "num_instances={}, ".format(len(self.polygons))
+    s += "image_width={}, ".format(self.size[0])
+    s += "image_height={})".format(self.size[1])
+    return s
+
+class Keypoints(object):
+  def __init__(self, keypoints, size, mode=None):
+    # FIXME remove check once we have better integration with device
+    # in my version this would consistently return a CPU tensor
+    keypoints = Tensor(keypoints, dtype=dtypes.float32)
+    num_keypoints = keypoints.shape[0]
+    if num_keypoints:
+      keypoints = keypoints.view(num_keypoints, -1, 3)
+    
+    # TODO should I split them?
+    # self.visibility = keypoints[..., 2]
+    self.keypoints = keypoints# [..., :2]
+
+    self.size = size
+    self.mode = mode
+    self.extra_fields = {}
+
+  def crop(self, box):
+    raise NotImplementedError()
+
+  def resize(self, size, *args, **kwargs):
+    ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(size, self.size))
+    ratio_w, ratio_h = ratios
+    resized_data = self.keypoints.clone()
+    resized_data[..., 0] *= ratio_w
+    resized_data[..., 1] *= ratio_h
+    keypoints = type(self)(resized_data, size, self.mode)
+    for k, v in self.extra_fields.items():
+      keypoints.add_field(k, v)
+    return keypoints
+
+  def transpose(self, method):
+    if method not in (FLIP_LEFT_RIGHT,):
+      raise NotImplementedError("Only FLIP_LEFT_RIGHT implemented")
+
+    flip_inds = type(self).FLIP_INDS
+    flipped_data = self.keypoints[:, flip_inds]
+    width = self.size[0]
+    TO_REMOVE = 1
+    # Flip x coordinates
+    flipped_data[..., 0] = width - flipped_data[..., 0] - TO_REMOVE
+
+    # Maintain COCO convention that if visibility == 0, then x, y = 0
+    inds = flipped_data[..., 2] == 0
+    flipped_data[inds] = 0
+
+    keypoints = type(self)(flipped_data, self.size, self.mode)
+    for k, v in self.extra_fields.items():
+      keypoints.add_field(k, v)
+    return keypoints
+
+  def to(self, *args, **kwargs):
+    keypoints = type(self)(self.keypoints.to(*args, **kwargs), self.size, self.mode)
+    for k, v in self.extra_fields.items():
+      if hasattr(v, "to"):
+        v = v.to(*args, **kwargs)
+      keypoints.add_field(k, v)
+    return keypoints
+
+  def __getitem__(self, item):
+    keypoints = type(self)(self.keypoints[item], self.size, self.mode)
+    for k, v in self.extra_fields.items():
+      keypoints.add_field(k, v[item])
+    return keypoints
+
+  def add_field(self, field, field_data):
+    self.extra_fields[field] = field_data
+
+  def get_field(self, field):
+    return self.extra_fields[field]
+
+  def __repr__(self):
+    s = self.__class__.__name__ + '('
+    s += 'num_instances={}, '.format(len(self.keypoints))
+    s += 'image_width={}, '.format(self.size[0])
+    s += 'image_height={})'.format(self.size[1])
+    return s
+
+
+def _create_flip_indices(names, flip_map):
+  full_flip_map = flip_map.copy()
+  full_flip_map.update({v: k for k, v in flip_map.items()})
+  flipped_names = [i if i not in full_flip_map else full_flip_map[i] for i in names]
+  flip_indices = [names.index(i) for i in flipped_names]
+  return Tensor(flip_indices)
+
+
+class PersonKeypoints(Keypoints):
+  NAMES = [
+    'nose',
+    'left_eye',
+    'right_eye',
+    'left_ear',
+    'right_ear',
+    'left_shoulder',
+    'right_shoulder',
+    'left_elbow',
+    'right_elbow',
+    'left_wrist',
+    'right_wrist',
+    'left_hip',
+    'right_hip',
+    'left_knee',
+    'right_knee',
+    'left_ankle',
+    'right_ankle'
+  ]
+  FLIP_MAP = {
+    'left_eye': 'right_eye',
+    'left_ear': 'right_ear',
+    'left_shoulder': 'right_shoulder',
+    'left_elbow': 'right_elbow',
+    'left_wrist': 'right_wrist',
+    'left_hip': 'right_hip',
+    'left_knee': 'right_knee',
+    'left_ankle': 'right_ankle'
+  }
+
+
+# TODO this doesn't look great
+PersonKeypoints.FLIP_INDS = _create_flip_indices(PersonKeypoints.NAMES, PersonKeypoints.FLIP_MAP)
+def kp_connections(keypoints):
+  kp_lines = [
+    [keypoints.index('left_eye'), keypoints.index('right_eye')],
+    [keypoints.index('left_eye'), keypoints.index('nose')],
+    [keypoints.index('right_eye'), keypoints.index('nose')],
+    [keypoints.index('right_eye'), keypoints.index('right_ear')],
+    [keypoints.index('left_eye'), keypoints.index('left_ear')],
+    [keypoints.index('right_shoulder'), keypoints.index('right_elbow')],
+    [keypoints.index('right_elbow'), keypoints.index('right_wrist')],
+    [keypoints.index('left_shoulder'), keypoints.index('left_elbow')],
+    [keypoints.index('left_elbow'), keypoints.index('left_wrist')],
+    [keypoints.index('right_hip'), keypoints.index('right_knee')],
+    [keypoints.index('right_knee'), keypoints.index('right_ankle')],
+    [keypoints.index('left_hip'), keypoints.index('left_knee')],
+    [keypoints.index('left_knee'), keypoints.index('left_ankle')],
+    [keypoints.index('right_shoulder'), keypoints.index('left_shoulder')],
+    [keypoints.index('right_hip'), keypoints.index('left_hip')],
+  ]
+  return kp_lines
+PersonKeypoints.CONNECTIONS = kp_connections(PersonKeypoints.NAMES)
+
+
+# TODO make this nicer, this is a direct translation from C2 (but removing the inner loop)
+def keypoints_to_heat_map(keypoints, rois, heatmap_size):
+  if rois.numel() == 0:
+    return rois.new().long(), rois.new().long()
+  offset_x = rois[:, 0]
+  offset_y = rois[:, 1]
+  scale_x = heatmap_size / (rois[:, 2] - rois[:, 0])
+  scale_y = heatmap_size / (rois[:, 3] - rois[:, 1])
+
+  offset_x = offset_x[:, None]
+  offset_y = offset_y[:, None]
+  scale_x = scale_x[:, None]
+  scale_y = scale_y[:, None]
+
+  x = keypoints[..., 0]
+  y = keypoints[..., 1]
+
+  x_boundary_inds = x == rois[:, 2][:, None]
+  y_boundary_inds = y == rois[:, 3][:, None]
+
+  x = (x - offset_x) * scale_x
+  x = x.floor().long()
+  y = (y - offset_y) * scale_y
+  y = y.floor().long()
+  
+  x[x_boundary_inds] = heatmap_size - 1
+  y[y_boundary_inds] = heatmap_size - 1
+
+  valid_loc = (x >= 0) & (y >= 0) & (x < heatmap_size) & (y < heatmap_size)
+  vis = keypoints[..., 2] > 0
+  valid = (valid_loc & vis).long()
+
+  lin_ind = y * heatmap_size + x
+  heatmaps = lin_ind * valid
+
+  return heatmaps, valid
 
 def cat_boxlist(bboxes):
   size = bboxes[0].size
@@ -1004,7 +1317,7 @@ class Pooler:
           all_idxs.extend(idx_in_level)
           results.append(pooler_output)
 
-      return tensor_gather(Tensor.cat(*results), [x[0] for x in sorted({i:idx for i, idx in enumerate(all_idxs)}.items(), key=lambda x: x[1])])
+      return    (Tensor.cat(*results), [x[0] for x in sorted({i:idx for i, idx in enumerate(all_idxs)}.items(), key=lambda x: x[1])])
 
 
 class FPNPredictor:
