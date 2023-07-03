@@ -11,10 +11,8 @@ from tinygrad.shape.symbolic import NumNode
 from tinygrad.runtime.lib import RawBuffer
 
 class TritonProgram:
-  def __init__(self, name:str, prg:str):
+  def __init__(self, name:str, prg:str, signature:str):
     self.name = name
-    # hack to get the signature
-    signature = ','.join(["*fp32" for _ in range(prg.splitlines()[1].count("data"))])
     prg = "import triton\nimport triton.language as tl\n" + prg
     fn = f"/tmp/{hashlib.md5(prg.encode('utf-8')).hexdigest()}.py"
     with open(fn, "w") as f: f.write(prg)
@@ -105,10 +103,10 @@ class TritonCodegen(Linearizer):
         raise NotImplementedError(f"unimplemented: {uop}")
 
     prg = '\n'.join(kernel)
-    return ASTRunner("fxn", prg, global_size[::-1] if len(global_size) else [1], op_estimate=self.info.flops)
+    return ASTRunner("fxn", prg, global_size[::-1] if len(global_size) else [1], op_estimate=self.info.flops, runtime_args={"signature":','.join([{dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.float64: "*fp64", dtypes.int8: "*i8", dtypes.int32: "*i32", dtypes.int64: "*i64"}[buf.dtype] for buf in self.bufs])})
 
 class RawTritonBuffer(RawBuffer):
-  def __init__(self, size:int, dtype:DType, buf:Optional[torch.Tensor]=None): super().__init__(size, dtype, buf) if buf is not None else super().__init__(size, dtype, torch.empty(size, dtype=torch.float, device='cuda'))
+  def __init__(self, size:int, dtype:DType, buf:Optional[torch.Tensor]=None): super().__init__(size, dtype, buf) if buf is not None else super().__init__(size, dtype, torch.empty(size, dtype={dtypes.float32: torch.float32, dtypes.float16: torch.float16, dtypes.float64: torch.float64, dtypes.int8: torch.int8, dtypes.uint8: torch.uint8, dtypes.int32: torch.int32, dtypes.int64: torch.int64, dtypes.bool: torch.bool}[dtype], device='cuda'))
   @classmethod
   def fromCPU(cls, x): return cls(x.size, dtypes.from_np(x.dtype), buf=torch.from_numpy(x).requires_grad_(False).to('cuda'))
   def toCPU(self): return self._buf.cpu().numpy()
