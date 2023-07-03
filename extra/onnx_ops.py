@@ -370,7 +370,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     elif nearest_mode == "ceil": ret = x_resized.ceil()
     ret = ret.clip(0, x_len-1)
     return ret
-  def _coordinate_transformation(x_out, y_out, output_shape, scales_lol):
+  def _coordinate_transformation(x_out, y_out, output_shape, scales_lol, roi=None):
     if coordinate_transformation_mode == "half_pixel":
       x_out = (x_out + 0.5)/scales_lol[-1] - 0.5
       y_out = (y_out + 0.5)/scales_lol[-2] - 0.5
@@ -383,12 +383,23 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     elif coordinate_transformation_mode == "half_pixel_symmetric":
       x_out = X.shape[-1] / 2 * (1 - int(output_shape[-1]) / output_shape[-1]) + (x_out + 0.5) / scales_lol[-1] - 0.5
       y_out = X.shape[-2] / 2 * (1 - int(output_shape[-2]) / output_shape[-2]) + (y_out + 0.5) / scales_lol[-2] - 0.5
-    x_out = x_out.clip(0, X.shape[-1]-1)
-    y_out = y_out.clip(0, X.shape[-2]-1)
-    return x_out, y_out
+    elif coordinate_transformation_mode == "pytorch_half_pixel":
+      x_out = (x_out + 0.5)/scales_lol[-1] - 0.5 if output_shape[-1] > 1 else Tensor([0])
+      y_out = (y_out + 0.5)/scales_lol[-2] - 0.5 if output_shape[-2] > 1 else Tensor([0])
+    elif coordinate_transformation_mode == "tf_crop_and_resize":
+      x_out = roi[-1][0] * (X.shape[-1] - 1) + x_out * ((roi[-1][1] - roi[-1][0]) * (X.shape[-1] - 1) / (output_shape[-1] - 1))  if output_shape[-1] > 1 else Tensor([0.5 * (roi[-1][0] + roi[-1][1]) * (X.shape[-1] - 1)])
+      y_out = roi[-2][0] * (X.shape[-2] - 1) + y_out * ((roi[-2][1] - roi[-2][0]) * (X.shape[-2] - 1) / (output_shape[-2] - 1))  if output_shape[-2] > 1 else Tensor([0.5 * (roi[-2][0] + roi[-2][1]) * (X.shape[-2] - 1)])
+    return x_out.clip(0, X.shape[-1]-1), y_out.clip(0, X.shape[-2]-1)
       
-  assert scales or sizes and not (scales and sizes), "only scales or sizes, cmon"
-  assert not roi, "roi should be None"
+  assert scales or sizes and not (scales and sizes), "only scales or sizes, sir"
+  if roi:
+    roi = safe_numpy(roi)
+    roi = [(st,ed) for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])]
+    roi_ = [(1,1)] * 4
+    if axes:
+      for a,r in zip(axes, roi):
+        roi_[a] = r
+      roi = roi_
   if scales:
     scales = safe_numpy(scales).tolist()
     if axes: 
@@ -424,7 +435,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   print(output_shape, "output shape")
 
   if mode == "nearest":
-    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol)
+    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol, roi)
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
     y_out = _nearest_mode(y_out, nearest_mode, X.shape[-1])
     y_out = [int(i) for i in safe_numpy(y_out)]
@@ -432,27 +443,24 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     indices_out = Tensor.stack(stack_args).flatten()
     return _nearest_gather(X, indices_out, output_shape)
   elif mode == "linear":
-    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape_, scales_lol=scales)
+    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape_, scales, roi)
     ret = []
     for y in safe_numpy(y_out):
-      for x in safe_numpy(x_out): # HACK maybe hacky?
+      for x in safe_numpy(x_out):
         x_floor, y_floor = int(x), int(y)
         y_shrink = (0, X.shape[2]) if X.shape[2] == 1 else (y_floor, y_floor+2) if y != y_floor else (y_floor, y_floor+1)
         x_shrink = (x_floor, x_floor+2) if x != x_floor else (x_floor, x_floor+1)
         shrink_args = ((0, X.shape[0]), (0, X.shape[1]), y_shrink, x_shrink)
-        corners = safe_numpy(X.shrink(shrink_args).flatten()) # q_xy TOP LEFT TOP RIGHT BOTTOM LEFT BOTTOM RIGHT
+        corners = safe_numpy(X.shrink(shrink_args).flatten()) # TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT
         x1, x2, y1, y2 = x_floor, x_floor+1, y_floor, y_floor+1
-        if len(corners) == 1: # TODO BAD CODE, UGLY IF STATEMENTS.... https://en.wikipedia.org/wiki/Bilinear_interpolation maybe do weighted mean?
+        if x == x_floor and y == y_floor: # TODO UGLY IF STATEMENTS.... https://en.wikipedia.org/wiki/Bilinear_interpolation maybe do weighted mean?
           ret.append(corners[0]) 
-        elif len(corners) == 2:
-          if x == x_floor:
-            ret.append((corners[0] * (y2 - y) + corners[1] * (y - y1)) / (y2 - y1)) # args = sum([]) / prod() TODO
-          elif y == y_floor:
-            ret.append((corners[0] * (x2 - x) + corners[1] * (x - x1)) / (x2 - x1))
-          else: raise Exception(f"what the fuck x:{x} y:{y}")
-        elif len(corners) == 4:
+        elif x == x_floor:
+          ret.append((corners[0] * (y2 - y) + corners[1] * (y - y1)) / (y2 - y1)) # args = sum([]) / prod() TODO
+        elif y == y_floor:
+          ret.append((corners[0] * (x2 - x) + corners[1] * (x - x1)) / (x2 - x1))
+        else: 
           ret.append((corners[0] * (x2 - x) * (y2 - y) + corners[1] * (x - x1) * (y2 - y) + corners[2] * (x2 - x) * (y - y1) + corners[3] * (x - x1) * (y - y1)) / ((x2 - x1) * (y2 - y1)))
-        else: raise Exception(f"corners:{corners} what the fuck")
     return Tensor(ret).reshape(output_shape)
   elif mode == "cubic":
     print("cubic")
