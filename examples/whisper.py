@@ -168,7 +168,7 @@ def img(x):
 RATE = 16000
 CHUNK = 1600
 RECORD_SECONDS = 10
-MAX_ITERS = 60
+MAX_ITERS = 100
 
 def listener(q):
   prep_audio(np.zeros(300), RATE)
@@ -187,6 +187,14 @@ def load_wav(file):
   sample = sample.astype(np.float32)
   sample = np.expand_dims(sample, axis=0)
   return sample, rate
+
+
+def remove_repeated(sentence):
+  eos_idx = [-2] + [i for i, c in enumerate(sentence) if c in (".", "?", "!")]
+  for i in range(len(eos_idx) - 2):
+    low, mid, high = eos_idx[i:i+3]
+    if sentence[low+2:mid] == sentence[mid+2:high]: return sentence[:mid+1]
+  else: return sentence
 
 if __name__ == "__main__":
   if getenv("SMALL"):
@@ -211,14 +219,14 @@ if __name__ == "__main__":
       lst = [enc._special_tokens["<|startoftranscript|>"]]
       dat = model.encoder(Tensor(log_spec)).realize()
       iters = 0
-			# TODO: keep going if the audio has more than one sentence
-      while lst[-1] not in [enc._special_tokens["<|endoftext|>"], 13, 30, 0] and iters < MAX_ITERS:
+      while lst[-1] != enc._special_tokens["<|endoftext|>"] and iters < MAX_ITERS:
         out = model.decoder(Tensor([lst]), dat)
         out.realize()
         idx = out[0,-1].numpy().argmax()
         lst.append(idx)
         iters += 1
-      predicted = "".join(enc.decode(lst[2:-1]))[1:].lower().translate(str.maketrans("", "", string.punctuation))
+      predicted = remove_repeated("".join(enc.decode(lst[2:-1]))[1:].lower())
+      predicted = predicted.translate(str.maketrans("", "", string.punctuation))
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
       sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
       print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
@@ -228,8 +236,7 @@ if __name__ == "__main__":
     log_spec = prep_audio(waveform, sample_rate)
     lst = [enc._special_tokens["<|startoftranscript|>"]]
     dat = model.encoder(Tensor(log_spec)).realize()
-    # TODO: same as above
-    while lst[-1] not in [enc._special_tokens["<|endoftext|>"], 13, 30, 0]:
+    while lst[-1] != enc._special_tokens["<|endoftext|>"]:
       out = model.decoder(Tensor([lst]), dat)
       out.realize()
       idx = out[0,-1].numpy().argmax()
