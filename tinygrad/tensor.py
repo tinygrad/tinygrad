@@ -556,10 +556,10 @@ class Tensor:
   def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ is Tensor or reverse or not x else self.mul(1/x)
   def pow(self, x:Union[Tensor, float]) -> Tensor:
     if x.__class__ is not Tensor:
-        # simple pow identities
-        if x == 2.0: return self*self
-        if x == 1.0: return self
-        if x == -1.0: return 1/self
+      # simple pow identities
+      if x == 2.0: return self*self
+      if x == 1.0: return self
+      if x == -1.0: return 1/self
     return self.log().mul(x).exp()
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
