@@ -84,7 +84,7 @@ class dtypes:
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   @staticmethod
-  def is_signed_int(x)-> bool: return x in (dtypes.int8, dtypes.uint16, dtypes.int32, dtypes.int64)
+  def is_signed_int(x)-> bool: return x in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
   @staticmethod
   def is_unsigned_int(x) -> bool: return x in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
