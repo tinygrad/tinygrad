@@ -4,7 +4,7 @@ from enum import Enum, auto
 import functools
 from typing import Dict, Tuple, Union, List, Optional, Callable, cast
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node
+from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode
 
 # these ops live here
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
@@ -65,7 +65,7 @@ class View:
   # generate an expression if you have a single idx variable
   def expr_node(self, idx=None) -> Node:
     if idx is None: idx = Variable('idx', 0, prod(self.shape))
-    ret = [Variable.num(self.offset)]
+    ret: List[Node] = [Variable.num(self.offset)]
     acc = 1
     for d,s in reversed(self.shape_strides):
       ret.append(((idx//acc)%d)*s)
@@ -157,26 +157,23 @@ class ShapeTracker:
     assert real_offset.__class__ is NumNode, f"how is the offset not a number? {real_offset} {mask}"
     return real_offset.b
 
-  def real_strides(self) -> Tuple[Optional[int], ...]:
-    if len(self.views) == 1: return self.views[-1].strides
-    ret: List[Optional[int]] = []
-    acc, real_offset = 1, self.real_offset()
-    for s in reversed(self.shape):
-      if s == 1:  # fast path, all shape 1 have stride 0
-        ret.append(0)
-        continue
-      var = Variable('idx', 0, s-1)
-      this_dim, _ = self.expr_node(var*acc)
-      this_dim -= real_offset
-      acc *= s
-      # TODO: sometimes a mod here is okay if you are say, reading a float4, since you only care %4
-      # if test.__class__ is ModNode and test.b%4 == 0: return check_no_mul(test.a, var)   # removing a mod is okay
-      if this_dim.__class__ is MulNode and cast(MulNode, this_dim).a.__class__ is Variable: ret.append(this_dim.b)
-      elif this_dim.__class__ is NumNode and this_dim.b == 0: ret.append(0)
-      elif this_dim.__class__ is Variable: ret.append(1)
-      else: ret.append(None)
-    return tuple(ret[::-1])
-  def unit_stride_axes(self) -> List[int]: return [i for i,st in enumerate(self.real_strides()) if st == 1]
+  # NOTE: if a stride is not always valid, it will be None
+  def real_strides(self, ignore_valid=False) -> Tuple[Optional[int], ...]:
+    if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
+    idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
+    idx, valid = self.expr_idxs(idxs)
+    ret: List[Optional[int]] = [None for _ in self.views[-1].shape]
+    for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
+      if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
+        ret[idxs.index(this_dim.a)] = this_dim.b
+      elif isinstance(this_dim, Variable):
+        ret[idxs.index(this_dim)] = 1
+    render_idx, render_valid = idx.render(), valid.render()
+    for i in range(len(self.shape)):
+      if f'idx{i}' in render_valid and not ignore_valid: ret[i] = None
+      elif f'idx{i}' not in render_idx: ret[i] = 0
+    return tuple(ret)
+  def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
   def _expr_idx(self, idx, valid):
     for v in reversed(self.views[0:-1]):

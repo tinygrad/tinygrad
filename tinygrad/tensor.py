@@ -151,7 +151,7 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
 
   @staticmethod
-  def arange(stop, start=0, step=1, **kwargs): return Tensor.full(((stop-start)//step,), step, **kwargs).cumsum() + (start - step)
+  def arange(stop, start=0, step=1, **kwargs): return Tensor.full((ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
 
   @staticmethod
   def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
@@ -496,9 +496,11 @@ class Tensor:
 
   # ***** math functions (unary) *****
   def ceil(self: Tensor) -> Tensor:
-    b = self.cast(dtypes.int32).contiguous()
-    return (self > 0).where(b+1, b)
-  def floor(self: Tensor) -> Tensor: return self.ceil() - 1
+    b = self.cast(dtypes.int32).contiguous().cast(self.dtype)
+    return (self > b).where(b+1, b)
+  def floor(self: Tensor) -> Tensor:
+    b = self.cast(dtypes.int32).contiguous().cast(self.dtype)
+    return (self < b).where(b-1, b)
 
   def __neg__(self): return 0.0-self
   def sqrt(self): return self.pow(0.5)

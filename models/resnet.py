@@ -1,4 +1,3 @@
-from tinygrad.tensor import Tensor
 import tinygrad.nn as nn
 from extra.utils import get_child
 

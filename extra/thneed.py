@@ -79,7 +79,7 @@ class Thneed:
             # buffer isn't supported in image2d, copy buffer into image
             if 'buffer_id' in o and bufs_loaded[o['buffer_id']]:
               arr = np.zeros(bufs[o['buffer_id']].size // 2, dtype=np.float16)
-              cl.enqueue_copy(q, arr, bufs[o['buffer_id']])
+              cl.enqueue_copy(CL.cl_queue[0], arr, bufs[o['buffer_id']])
               buf = cl.Image(CL.cl_ctxs[0], mf.READ_WRITE | mf.COPY_HOST_PTR, tfmt,
                 shape=(o['width'], o['height']), pitches=(o['row_pitch'],), hostbuf=arr)
             elif o['needs_load']:
