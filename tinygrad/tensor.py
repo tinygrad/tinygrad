@@ -318,7 +318,7 @@ class Tensor:
     catargs = [self] + list(args)
     assert all(len(t.shape) != 0 for t in catargs), "zero-dimensional tensor cannot be concatenated"
     shape_cumsum = [0, *accumulate([y.shape[dim] for y in catargs])]
-    slc = [[(0, s) for s in self.shape] for _ in catargs]
+    slc = [[(0, s) for s in self.shape] * len(catargs)]
     for s,k in zip(slc, shape_cumsum):
       s[dim] = (-k, shape_cumsum[-1]-k)
     return reduce(Tensor.__add__, [arg.slice(s) for arg,s in zip(catargs, slc)])
@@ -341,7 +341,7 @@ class Tensor:
 
   # TODO: make this nicer with syntactic sugar in slice
   def chunk(self, num, dim):
-    slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
+    slice_params = [[(0, s) for s in self.shape] * num]
     for i,k in enumerate(range(0, self.shape[dim], self.shape[dim]//num)):
       slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
     return [self.slice(p) for p in slice_params]
