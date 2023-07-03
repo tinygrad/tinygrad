@@ -302,6 +302,7 @@ class Tensor:
       new_shape = new_shape[::2]
       final_slice = reduce(operator.add, (((0, sh), (0, 1)) for sh in new_shape), ())
       sliced_tensor = reshaped_tensor.shrink(final_slice)
+    
     final_shape = []
     it_shape = iter(new_shape)
     for i in orig_slices:
@@ -310,7 +311,14 @@ class Tensor:
         if isinstance(i, slice): final_shape.append(dim_shape)
       else: # i is None
         final_shape.append(1)
+    assert 5 == 6
+    assert sliced_tensor.reshape(tuple(final_shape)) != sliced_tensor.reshape(tuple(
+      [dim_shape for i, dim_shape in zip(orig_slices, new_shape) if isinstance(i, slice) or i is None]
+      ))
     return sliced_tensor.reshape(tuple(final_shape))  # Reshape
+    return sliced_tensor.reshape(tuple(
+      [dim_shape for i, dim_shape in zip(orig_slices, new_shape) if isinstance(i, slice) or i is None]
+      ))  # Reshape
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
@@ -318,7 +326,7 @@ class Tensor:
     catargs = [self] + list(args)
     assert all(len(t.shape) != 0 for t in catargs), "zero-dimensional tensor cannot be concatenated"
     shape_cumsum = [0, *accumulate([y.shape[dim] for y in catargs])]
-    slc = [[(0, s) for s in self.shape] for _ in catargs]
+    slc = [[(0, s) for s in self.shape] * len(catargs)]
     for s,k in zip(slc, shape_cumsum):
       s[dim] = (-k, shape_cumsum[-1]-k)
     return reduce(Tensor.__add__, [arg.slice(s) for arg,s in zip(catargs, slc)])
@@ -341,7 +349,7 @@ class Tensor:
 
   # TODO: make this nicer with syntactic sugar in slice
   def chunk(self, num, dim):
-    slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
+    slice_params = [[(0, s) for s in self.shape] * num]
     for i,k in enumerate(range(0, self.shape[dim], self.shape[dim]//num)):
       slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
     return [self.slice(p) for p in slice_params]
