@@ -5,7 +5,7 @@ import math
 
 from tinygrad.ops import BinaryOps, ASTRunner, FusedOps, Op, UnaryOps
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
-from tinygrad.helpers import ImageDType, dtypes
+from tinygrad.helpers import DEBUG, ImageDType, dtypes
 from tinygrad.shape.symbolic import NumNode
 
 class TritonCodegen(Linearizer):
@@ -44,7 +44,7 @@ class TritonCodegen(Linearizer):
           else:
             if args[1] == "global":
               global_size.append(var.max+1)
-              kk(f"{var.expr} = {gid[len(args[0])-1-i]} # {var.max+1}")
+              kk(f"{var.expr} = {gid[i]} # {var.max+1}")
             elif args[1] == "local":
               local_size.append(var.max+1)
               kk(f"{var.expr} = tl.arange({var.min}, {var.max+1})")
@@ -65,8 +65,9 @@ class TritonCodegen(Linearizer):
       elif uop == UOps.LOAD:
         assert newvar is not None
         val = f"{bufnames[args.i]} + {args.idx.render()}" # defaults to render_python
-        if args.valid.min == 1: kk(f"{newvar.render()} = tl.load({val})")#; kk(f"if ridx2 == 0: tl.device_print('test', {newvar.render()})")
-        else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({val}, mask={args.valid.render()}), 0.0)")
+        triton_dtype = {dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.float64: "tl.float64", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64"}[newvar.dtype]
+        if args.valid.min == 1: kk(f"{newvar.render()} = tl.load({val}).to({triton_dtype})")#; kk(f"if ridx2 == 0: tl.device_print('test', {newvar.render()})")
+        else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({val}, mask={args.valid.render()}), 0.0).to({triton_dtype})")
       elif uop == UOps.STORE:
         assert vin[0].dtype == dtypes.float, "unimplemented: float4 store"
         assert not isinstance(self.bufs[args.i].dtype, ImageDType), "unimplemented: image store"
@@ -78,7 +79,7 @@ class TritonCodegen(Linearizer):
         raise NotImplementedError(f"unimplemented: {uop}")
 
     prg = '\n'.join(kernel)
-    print(prg)
+    if DEBUG >=5: print(prg)
 
     # write out python to compile
     prg = "import triton\nimport triton.language as tl\n" + prg
@@ -91,5 +92,5 @@ class TritonCodegen(Linearizer):
     name = asm.split(".visible .entry ")[1].split("(")[0]
 
     return ASTRunner(name, asm,
-      global_size[::-1], local_size[::-1],
-      op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name, runtime_args={"binary": True})
+      global_size, local_size,
+      op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name, runtime_args={"binary": True, "shared": triton_prg.metadata['shared']})
