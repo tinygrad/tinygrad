@@ -196,7 +196,7 @@ class ShapeTracker:
     return self._expr_idx(self.views[-1].expr_node(idx), self.views[-1].expr_node_mask(idx))
 
   def needs_valid(self) -> bool:
-    return any([v.mask is not None for v in self.views])
+    return any(v.mask is not None for v in self.views)
 
   # *** under this line are the movement ops ***
 
@@ -211,7 +211,7 @@ class ShapeTracker:
 
   def pad(self, arg: Tuple[Tuple[int, int], ...]):
     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
-    if any([b or e for b, e in arg]):
+    if any(b or e for b, e in arg):
       zvarg, mask = get_pad_args(self.shape, arg)
       self.__unsafe_resize(zvarg, mask=mask)
     return self

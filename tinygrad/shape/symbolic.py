@@ -108,7 +108,7 @@ class Node:
   def ands(nodes:List[Node]) -> Node:
     if not nodes: return NumNode(1)
     if len(nodes) == 1: return nodes[0]
-    if any([x.min == x.max == 0 for x in nodes]): return NumNode(0)
+    if any(x.min == x.max == 0 for x in nodes): return NumNode(0)
 
     # filter 1s
     nodes = [x for x in nodes if x.min != x.max]

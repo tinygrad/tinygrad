@@ -68,7 +68,7 @@ def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
     new_values = []
     for i in range(0, len(idxs), 4):
       nv = [to_float4([v[j] for j in idxs[i:i+4]]) for v in values]
-      if any([x is None for x in nv]): break
+      if any(x is None for x in nv): break
       new_idxs.append(idxs[i:i+4])
       new_values.append(nv)
     if len(new_values) == len(idxs)//4:
