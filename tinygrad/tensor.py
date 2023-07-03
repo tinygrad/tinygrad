@@ -517,7 +517,7 @@ class Tensor:
         return Tensor.stack([r1, r2])
       ret = _winograd(x, gfactors)  # outputs 2x2 result from 4x4 block: (H2, W2, bs, groups, rcout, *oyx4, cin)
       ret = ret.permute(*[len(HW) + i for i in range(len(x.shape) - 2)], *[i for i in range(len(HW))])  # move HW to the back: (bs, groups, rcout, *oyx4, cin, HW2)
-      ret = ret.sum(axis=-3).realize()  # sum across cin: (bs, groups, rcout, *oyx4, H2, W2)
+      ret = ret.sum(axis=-3)  # sum across cin: (bs, groups, rcout, *oyx4, H2, W2)
 
       ret = ret.permute(*[len(ret.shape) - len(HW) + i for i in range(len(HW))], *[i for i in range(len(ret.shape) - 2)])  # move HW to the front
 
