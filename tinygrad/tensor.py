@@ -1,21 +1,15 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-
-import operator
 import time
 from functools import partialmethod, reduce
 from itertools import accumulate, filterfalse
-from math import ceil, log, pi, prod, sqrt
-from typing import (Callable, ClassVar, List, Optional, Sequence, Tuple, Type,
-                    Union, cast)
-
+import operator
 import numpy as np
-
-from tinygrad.helpers import (DEBUG, IMAGE, DType, ImageDType, argfix, dtypes,
-                              flatten, getenv, make_pair)
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
+from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
+from math import ceil, pi, prod, sqrt, log
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
-
 
 # An instantiation of the Function is the Context
 class Function:
@@ -647,7 +641,6 @@ for device in Device._buffers:
 
 # if IMAGE>0 we install these replacement functions in Tensor (hack!)
 from tinygrad.nn.image import image_conv2d, image_dot
-
 if IMAGE:
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
