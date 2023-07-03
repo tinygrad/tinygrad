@@ -368,8 +368,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, 0.5, False)
     elif nearest_mode == "floor": ret = x_resized.floor()
     elif nearest_mode == "ceil": ret = x_resized.ceil()
-    # ret = (ret<0).where(ret+1, ret) # Clamp the ends of the ret
-    # ret = (ret>x_len-1).where(ret-1, ret)
     ret = ret.clip(0, x_len-1)
     return ret
   def _coordinate_transformation(x_out, y_out, output_shape, scales_lol):
@@ -407,6 +405,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
         sizes_[a] = s
         scales.append(s/X.shape[a])
       sizes = sizes_
+    else: scales = [si/xs for xs, si in zip(X.shape, sizes)]
     if keep_aspect_ratio_policy == "not_larger":
       scale = min(scales)
       sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, False)
@@ -418,8 +417,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
 
   output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)] 
   output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
-  # upscale = all([os >= xs for os, xs in zip(output_shape, X.shape)]) 
-  # spacial_shape = X.shape[2:]
   # bs,c,py,px = X.shape
   scales_lol = [os/xs for xs, os in zip(X.shape, output_shape)]
   x_out = Tensor.arange(output_shape[-1])
@@ -436,9 +433,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     return _nearest_gather(X, indices_out, output_shape)
   elif mode == "linear":
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape_, scales_lol=scales)
-    print("linear")
-    print(x_out.numpy())
-    print(y_out.numpy())
     ret = []
     for y in safe_numpy(y_out):
       for x in safe_numpy(x_out): # HACK maybe hacky?
@@ -447,7 +441,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
         x_shrink = (x_floor, x_floor+2) if x != x_floor else (x_floor, x_floor+1)
         shrink_args = ((0, X.shape[0]), (0, X.shape[1]), y_shrink, x_shrink)
         corners = safe_numpy(X.shrink(shrink_args).flatten()) # q_xy TOP LEFT TOP RIGHT BOTTOM LEFT BOTTOM RIGHT
-        print(corners, x, y)
         x1, x2, y1, y2 = x_floor, x_floor+1, y_floor, y_floor+1
         if len(corners) == 1: # TODO BAD CODE, UGLY IF STATEMENTS.... https://en.wikipedia.org/wiki/Bilinear_interpolation maybe do weighted mean?
           ret.append(corners[0]) 
@@ -459,14 +452,8 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
           else: raise Exception(f"what the fuck x:{x} y:{y}")
         elif len(corners) == 4:
           ret.append((corners[0] * (x2 - x) * (y2 - y) + corners[1] * (x - x1) * (y2 - y) + corners[2] * (x2 - x) * (y - y1) + corners[3] * (x - x1) * (y - y1)) / ((x2 - x1) * (y2 - y1)))
-        else: raise Exception(f"corners:{corners} is what the fuck")
-
-        # shrink_args = ((0, X.shape[0]), (0, X.shape[1]), (y_floor, min(y_floor+2, X.shape[-2])), (x_floor, min(x_floor+2, X.shape[-1])))
-        # q11, q21, q12, q22 = safe_numpy(X.shrink(shrink_args).flatten()) # q_xy BUG 
-        # x1, x2, y1, y2 = x_floor, x_floor+1, y_floor, y_floor+1
-        # ret.append((q11 * (x2 - x) * (y2 - y) + q21 * (x - x1) * (y2 - y) + q12 * (x2 - x) * (y - y1) + q22 * (x - x1) * (y - y1)) / ((x2 - x1) * (y2 - y1)))
+        else: raise Exception(f"corners:{corners} what the fuck")
     return Tensor(ret).reshape(output_shape)
-    return 
   elif mode == "cubic":
     print("cubic")
     print(x_out.numpy())
