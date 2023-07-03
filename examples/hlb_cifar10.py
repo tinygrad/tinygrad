@@ -6,6 +6,7 @@ import time
 import numpy as np
 from datasets import fetch_cifar
 from tinygrad import nn
+from tinygrad.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
@@ -92,7 +93,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     X_train, Y_train = fetch_cifar(train=True)
     X_test, Y_test = fetch_cifar(train=False)
   model = SpeedyResNet()
-  optimizer = optim.SGD(optim.get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, 
                             total_steps=STEPS, pct_start=PCT_START)
 

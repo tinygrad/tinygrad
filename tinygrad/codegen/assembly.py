@@ -125,7 +125,7 @@ class AssemblyCodegen(Linearizer):
               ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32, scalar=True), [], 0))
               ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
       elif uop == UOps.ENDLOOP:
-        if args[1] not in ["global", "local"]:
+        if args[1] not in ["global", "local", "global+local"]:
           for var in reversed(args[0]):
             if not isinstance(var, NumNode):  # TODO: why is this coming through?
               ins.append(AssemblyInstruction(UOps.ALU, tor[var], [tor[var], 1], BinaryOps.ADD))

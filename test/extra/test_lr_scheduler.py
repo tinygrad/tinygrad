@@ -2,7 +2,8 @@ import numpy as np
 import torch
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.nn.optim import Adam, get_parameters
+from tinygrad.state import get_parameters
+from tinygrad.nn.optim import Adam
 from extra.lr_scheduler import MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR
 from extra.training import train, evaluate
 from datasets import fetch_mnist
