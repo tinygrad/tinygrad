@@ -26,6 +26,7 @@ def Gemm(A, B, C=None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=0):
 # TODO: this is copied from tinygrad/nn/__init__.py
 # spatial is from opset 7 and has since been removed
 def BatchNormalization(X, scale, B, input_mean, input_var, epsilon=1e-05, momentum=0.9, training_mode=0, spatial=1, is_test=0):
+  X: Tensor
   if training_mode:
     x_detached = X.detach()
     current_mean = x_detached.mean(axis=(0,2,3))
@@ -140,9 +141,12 @@ def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_p
     return padding_included / div
 
 def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
-  assert storage_order == 0, f"WARNING: MaxPool ceil_mode {ceil_mode} and storage_order {storage_order} not implemented"
   if ceil_mode: auto_pad = "SAME_UPPER"
-  return _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-2:], strides=strides, kernel_shape=kernel_shape, dilations=dilations).max_pool2d(kernel_shape, stride=strides, dilation=dilations)
+  ret = _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-2:], strides=strides, kernel_shape=kernel_shape, dilations=dilations).max_pool2d(kernel_shape, stride=strides, dilation=dilations)
+  return ret # (ret, indices)
+
+def MaxUnpool(xT, xI, kernel_shape, outshape=None, pads=None, strides=None):
+  return
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
   if auto_pad != "NOTSET": padding = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
@@ -428,7 +432,15 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
     print("linear")
     print(x_out.numpy())
     print(y_out.numpy())
-    return
+    ret = []
+    for x in safe_numpy(x_out): # HACK a little dumb, but maybe not so dumb
+      for y in safe_numpy(y_out):
+        x_floor, y_floor = int(x), int(y)
+        shrink_args = ((0, X.shape[0]), (0, X.shape[1]), (y_floor, y_floor+2), (x_floor, x_floor+2))
+        q11, q21, q12, q22 = safe_numpy(X.shrink(shrink_args).flatten()) # q_xy
+        x1, x2, y1, y2 = x_floor, x_floor+1, y_floor, y_floor+1
+        ret.append((q11 * (x2 - x) * (y2 - y) + q21 * (x - x1) * (y2 - y) + q12 * (x2 - x) * (y - y1) + q22 * (x - x1) * (y - y1)) / ((x2 - x1) * (y2 - y1)))
+    return Tensor(ret).reshape(output_shape)
   elif mode == "cubic":
     print("cubic")
     print(x_out.numpy())
@@ -437,6 +449,13 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=None, axes=Non
 
   def _cubic_coeffs(ratio, scale=None, A=-0.75):
     return Tensor([((A * (ratio + 1) - 5 * A) * (ratio + 1) + 8 * A) * (ratio + 1) - 4 * A, ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1, ((A + 2) * (1 - ratio) - (A + 3)) * (1 - ratio) * (1 - ratio) + 1, ((A * ((1 - ratio) + 1) - 5 * A) * ((1 - ratio) + 1) + 8 * A) * ((1 - ratio) + 1) - 4 * A,])
+
+def Gradient(a, b, xs, y):
+  print(a, "a")
+  print(b, "b")
+  print(xs, "xs")
+  print(y, "y")
+  
 
 def CenterCropPad(input, shape, axes=None):
   if not axes: axes = list(range(input.ndim))

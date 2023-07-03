@@ -117,6 +117,7 @@ backend_test.exclude('test_simple_rnn_*')
 # no control flow
 backend_test.exclude('test_if_*')
 backend_test.exclude('test_loop*')
+backend_test.exclude('test_range_float_type_positive_delta_expanded_cpu') # requires LOOP
 
 # unsupported (strange) ops
 backend_test.exclude('test_bitwise_*')

@@ -12,8 +12,6 @@ except ImportError:
   # for onnx < 1.13
   from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
   tensor_dtype_to_np_dtype = lambda x: TENSOR_TYPE_TO_NP_TYPE[x]
-from google.protobuf.descriptor import FieldDescriptor
-import math
 
 # global numpy cache for parameters
 numpy_cache = {}
@@ -31,12 +29,11 @@ onnx_ops = importlib.import_module('extra.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
-  # def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
   def type_parse(type_proto: TypeProto):
     while True: # NEED BETTER PARSER :D
       attr = type_proto.WhichOneof('value')
       if attr == 'tensor_type': return tuple(x.dim_value for x in getattr(type_proto, attr).shape.dim)
-      elif attr == 'sequence_type': raise NotImplementedError(f"sequence_type is not implemented: {type_proto}")
+      elif attr == 'sequence_type': raise NotImplementedError(f"sequence type is not implemented: {type_proto}") 
       elif attr == 'map_type': raise NotImplementedError(f"map_type is not implemented: {type_proto}")
       elif attr == 'opaque_type': raise NotImplementedError(f"opaque_type is not implemented: {type_proto}")
       elif attr == 'sparse_tensor_type': raise NotImplementedError(f"sparse_tensor_type is not implemented: {type_proto}")
@@ -66,9 +63,8 @@ def get_run_onnx(onnx_model: ModelProto):
     elif a.type == AttributeProto.TENSOR: return buffer_parse(a.t) # TENSOR
     elif a.type == AttributeProto.FLOATS: return tuple(float(x) for x in a.floats)
     elif a.type == AttributeProto.INTS: return tuple(int(x) for x in a.ints)
-    elif a.type == AttributeProto.GRAPH:
-      print(a.g) 
-      print(a.graphs) 
+    elif a.type == AttributeProto.STRINGS: return tuple(x.decode("utf-8") for x in a.strings)
+    elif a.type == AttributeProto.GRAPH: raise Exception(f"graph not implemented: {a.g}")
     else: raise Exception(f"can't parse {a.type} {a}")
   def attribute_to_dict(a: RepeatedCompositeFieldContainer[AttributeProto]): return {x.name:attribute_parse(x) for x in a}
 
@@ -107,8 +103,6 @@ def get_run_onnx(onnx_model: ModelProto):
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
       shape = type_parse(inp.type)
-      # tmp=inp.type.optional_type.elem_type.tensor_type if inp.type.optional_type.elem_type.HasField("tensor_type") else inp.type.optional_type.elem_type.sequence_type.elem_type.tensor_type if inp.type.HasField("optional_type") else (inp.type.sequence_type.elem_type.tensor_type if inp.type.HasField("sequence_type") else inp.type.tensor_type)
-      # shape = shape_to_tuple(tmp.shape)
       if len(shape) >= 1 and shape[0] == 0 and shape != (0,): shape = tuple([1]+list(shape[1:]))   # 1 batch size
       if inp.name in inputs:
         if isinstance(inputs[inp.name], Tensor):
@@ -225,6 +219,7 @@ def get_run_onnx(onnx_model: ModelProto):
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise Exception(f"op_type {n.op_type} not supported")
       if not isinstance(ret, tuple): ret = (ret, )
+      # else: print(ret); print(len(ret))
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       if debug: print([x.shape if isinstance(x, Tensor) else None for x in ret])
       if debug: print("outputs:")
