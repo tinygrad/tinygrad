@@ -104,7 +104,7 @@ def _reshape(view: View, new_shape: Tuple[int, ...]) -> Tuple[View, bool]:
     if mask:
       for x,y in zip(shape, mask):
         if x == 1 and y != (0, 1):
-          new_mask_tuple = ((0,0),) * len(new_shape)
+          new_mask_tuple = tuple([(0,0) for _ in new_shape])
           break
       else:
         new_mask: List[Tuple[int, int]] = [y for x,y in zip(shape, mask) if x != 1]
