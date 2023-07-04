@@ -555,7 +555,6 @@ class Tensor:
   def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse) if x.__class__ is Tensor or x != 1.0 else self
   def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ is Tensor or reverse or not x else self.mul(1/x)
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
-    a = self
     if x.__class__ is not Tensor and not reverse:
       # simple pow identities
       if x < 0: return (1.0/self).pow(-x)
