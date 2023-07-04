@@ -2,11 +2,11 @@ import numpy as np
 from wgpu.utils._device import get_default_device
 from tinygrad.runtime.lib import RawBufferCopyIn, RawConst
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
-from tinygrad.helpers import dtypes, DType, getenv
+from tinygrad.helpers import dtypes, DType
 from tinygrad.ops import Compiled, UnaryOps, Op, BinaryOps, ASTRunner, FusedOps
 from tinygrad.shape.symbolic import NumNode, Variable
 from tinygrad.codegen.cstyle import render_cl
-from typing import Dict, Callable, List
+from typing import Dict, Callable
 import math
 import wgpu
 
@@ -38,8 +38,6 @@ code_for_op: Dict[Op, Callable] = {
   FusedOps.MULACC: lambda x,y,z: f"(({x}*{y})+{z})",
 }
 
-LOCAL_GROUPS=getenv("LOCAL_GROUPS","") != ""
-
 class WebGpuCodegen(Linearizer):
   supports_float4 = False
   supports_constant_folding = True
@@ -51,39 +49,27 @@ class WebGpuCodegen(Linearizer):
     self.limit_global_dims(3)
     self.linearize()
 
-    kernel,global_size,local_size = [],[],[]
+    kernel,shared,global_size,local_size = [],[],[],[]
     depth = 0
     def kk(s): kernel.append(" "*depth+s)
     bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(self.bufs)]
-    depth += 1
-    gid = [f"gindex.{'xyz'[x]}" for x in range(3)]
-    lid: List[str] = [] if not LOCAL_GROUPS else [f"lindex.{'xyz'[x]}" for x in range(3)]
     pend_close = None
-    shared = []
     for uop,newvar,vin,args in self.uops:
       if uop == UOps.LOOP:
         for i,var in enumerate(args[0]):
           if isinstance(var, NumNode): 
             if args[1] == "global": global_size.append(1)
-            if args[1] == "local" and LOCAL_GROUPS: local_size.append(1)
+            if args[1] == "local": local_size.append(1)
             kk("{")
           else:
-            if args[1] == "global":
-              global_size.append(var.max+1)
-              kk(f"{{ let {var.expr} = i32({gid[len(args[0])-1-i]}); // {var.max+1}")
-            elif args[1] == "local":
-              if LOCAL_GROUPS:
-                kk(f"{{ let {var.expr} = i32({lid[len(args[0])-1-i]}); // {var.max+1}") 
-                local_size.append(var.max+1)
-              else:
-                kk(f"for(var {var.expr}: i32 = 0; {var.expr} <= {var.max}; {var.expr}++) {{")
-              depth += 1
+            if args[1] == "global" or args[1] == "local":
+              kk(f"{{ let {var.expr} = i32({'g' if args[1] == 'global' else 'l'}index.{'xyz'[len(args[0])-1-i]}); // {var.max+1}")
+              (global_size if args[1] == "global" else local_size).append(var.max+1)
             else:
               kk(f"for(var {var.expr}: i32 = 0; {var.expr} <= {var.max}; {var.expr}++) {{")
         depth += 1
       elif uop == UOps.ENDLOOP:
-        if args[1] == "local" and LOCAL_GROUPS:
-          # kk("workgroupBarrier();")
+        if args[1] == "local":
           kk(f"if ({Variable.sum(args[0]).render(render_cl)} == 0) {{")
           pend_close = "}"*(len(args[0])+1) + f" // {args[1]}"
         else:
@@ -118,16 +104,14 @@ class WebGpuCodegen(Linearizer):
       elif uop == UOps.DEFINE_LOCAL: shared.append(f"var<workgroup> {args[0]}: array<f32,{args[1]}>;")
       elif uop == UOps.BARRIER: kk("workgroupBarrier();")
       else: raise RuntimeError(f"failed to render {uop}")
-    # Function name itself isn't unique
     assert all(x <= 65535 for x in global_size), "WEBGPU max global size is 65535 in any dimension"
     assert len([x for x in self.bufs if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]) <= 31, "WEBGPU max number of buffers is 31" 
-    function_name = f"{self.function_name}_{abs(hash(self.key))}"
+    function_name = f"{self.function_name}_{id(self.key)}" # Function name itself isn't unique
     bind_it = iter(range(len(self.bufs)))
-    local_size = local_size[::-1] if len(local_size) else [1]
-    params = "@builtin(workgroup_id) gindex: vec3<u32>, @builtin(num_workgroups) local_index: vec3<u32>,@builtin(local_invocation_id) lindex: vec3<u32>" if LOCAL_GROUPS else "@builtin(global_invocation_id) gindex: vec3<u32>"
+    global_size, local_size = global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else [1]
     prg = "\n".join(shared+[f"@group(0) @binding({next(bind_it)}) var<storage,read_write> data{i}: array<{type_map[x.dtype]}>;" for i,x in enumerate(self.bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)])
-    prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}({params}) {{\n" + "\n".join(kernel) + "\n}"
-    return ASTRunner(function_name, prg, global_size[::-1] if len(global_size) else [1], local_size)
+    prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
+    return ASTRunner(function_name, prg, global_size, local_size)
 
 class RawWebGPUBuffer(RawBufferCopyIn):
   def __init__(self, size:int, dtype:DType):
