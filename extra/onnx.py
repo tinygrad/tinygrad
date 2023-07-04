@@ -166,8 +166,11 @@ def get_run_onnx(onnx_model: ModelProto):
         if n.op_type == "Mul": ret = inp[0] * inp[1]
         if n.op_type == "Pow": ret = (inp[0] ** inp[1]).cast(inp[0].dtype)
       elif n.op_type == "Split":
-        if 'split' not in opt: opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
         if 'axis' not in opt: opt['axis'] = 0
+        if 'num_outputs' in opt: # There should only be either num_outputs or split
+          r = inp[0].shape[opt['axis']] % opt['num_outputs']
+          opt['split'] = [inp[0].shape[opt['axis']] // opt['num_outputs']] * (opt['num_outputs'] - (1 if r else 0)) + ([r] if r else []) # compute split if give num_outputs instead
+        if 'split' not in opt: opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
         i = 0
         arg = [(0,x) for x in inp[0].shape]
         for o,s in zip(n.output, opt['split']):
