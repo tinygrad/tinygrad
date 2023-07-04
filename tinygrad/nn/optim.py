@@ -4,13 +4,14 @@ from tinygrad.helpers import dedup
 from tinygrad.tensor import Tensor
 
 class Optimizer:
-  def __init__(self, params: List[Tensor]):
+  def __init__(self, params: List[Tensor], lr: float, gradient_clip: float):
     # if it's None, but being put into an optimizer, set it to True
     for x in params:
       if x.requires_grad is None: x.requires_grad = True
 
     self.params: List[Tensor] = dedup([x for x in params if x.requires_grad])
     self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
+    self.lr, self.gradient_clip = Tensor([lr], requires_grad=False), gradient_clip
 
   def zero_grad(self):
     for param in self.params: param.grad = None
@@ -22,16 +23,17 @@ class Optimizer:
       p.realize()
 
 class SGD(Optimizer):
-  def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, gradient_clip:float=float('inf'), nesterov=False):
-    super().__init__(params)
-    self.lr, self.momentum, self.wd, self.nesterov, self.gradient_clip = Tensor([lr], requires_grad=False), momentum, weight_decay, nesterov, gradient_clip
+  def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, gradient_clip=float('inf'), nesterov=False):
+    super().__init__(params, lr, gradient_clip)
+    self.momentum, self.wd, self.nesterov = momentum, weight_decay, nesterov
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
 
   # https://pytorch.org/docs/stable/generated/torch.optim.SGD.html
   def step(self) -> None:
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      if self.gradient_clip!=float('inf'): t.grad = t.grad.clip(-self.gradient_clip, self.gradient_clip)
+      if self.gradient_clip != float('inf'): t.grad = t.grad.clip(-self.gradient_clip, self.gradient_clip)
+      assert t.grad is not None # this is only for mypy, no reason grad can be None after clipping
       g = t.grad.realize() + self.wd * t.detach()
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g).realize()  # NOTE: self.b[i] is zero on the first run, no if required
@@ -45,8 +47,8 @@ def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, gradient_cl
 
 class LAMB(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, gradient_clip:float=float('inf'), adam=False):
-    super().__init__(params)
-    self.lr, self.b1, self.b2, self.eps, self.wd, self.adam, self.t, self.gradient_clip = Tensor([lr], requires_grad=False), b1, b2, eps, wd, adam, Tensor([0], requires_grad=False).realize(), gradient_clip
+    super().__init__(params, lr, gradient_clip)
+    self.b1, self.b2, self.eps, self.wd, self.adam, self.t = b1, b2, eps, wd, adam, Tensor([0], requires_grad=False).realize()
     self.m = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
     self.v = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
 
@@ -54,7 +56,8 @@ class LAMB(Optimizer):
     self.t.assign(self.t + 1).realize()
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      if self.gradient_clip!=float('inf'): t.grad = t.grad.clip(-self.gradient_clip, self.gradient_clip)
+      if self.gradient_clip != float('inf'): t.grad = t.grad.clip(-self.gradient_clip, self.gradient_clip)
+      assert t.grad is not None # this is only for mypy, no reason grad can be None after clipping
       g = t.grad.realize()
       self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * g).realize()
       self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).realize()
