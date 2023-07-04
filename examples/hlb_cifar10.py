@@ -21,6 +21,12 @@ def set_seed(seed):
 
 num_classes = 10
 
+def erf(x):
+  t = (1 + 0.3275911 * x.abs()).reciprocal()
+  return x.sign() * (1 - ((((1.061405429 * t + -1.453152027) * t + 1.421413741) * t + -0.284496736) * t + 0.254829592) * t * (-(x.square())).exp())
+
+def gelu(x): return x * 0.5 * (1.0 + erf(x / 1.41421))
+
 class ConvGroup:
   def __init__(self, channels_in, channels_out, short, se=True):
     self.short, self.se = short, se and not short
@@ -30,12 +36,12 @@ class ConvGroup:
 
   def __call__(self, x):
     x = self.conv[0](x).max_pool2d(2)
-    x = self.norm[0](x).relu()
+    x = gelu(self.norm[0](x))
     if self.short: return x
     residual = x
-    mult = self.se2(self.se1(residual.mean((2,3))).relu()).sigmoid().reshape(x.shape[0], x.shape[1], 1, 1) if self.se else 1.0
-    x = self.norm[1](self.conv[1](x)).relu()
-    x = self.norm[2](self.conv[2](x) * mult).relu()
+    mult = self.se2(gelu(self.se1(residual.mean((2,3))))).sigmoid().reshape(x.shape[0], x.shape[1], 1, 1) if self.se else 1.0
+    x = gelu(self.norm[1](self.conv[1](x)))
+    x = gelu(self.norm[2](self.conv[2](x) * mult))
     return x + residual
 
 class SpeedyResNet:
@@ -44,7 +50,7 @@ class SpeedyResNet:
     self.net = [
       nn.Conv2d(3, 64, kernel_size=1),
       nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
-      lambda x: x.relu(),
+      gelu,
       ConvGroup(64, 128, short=False),
       ConvGroup(128, 256, short=True),
       ConvGroup(256, 512, short=False),
