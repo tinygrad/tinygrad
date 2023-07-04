@@ -31,6 +31,7 @@ setup(name='tinygrad',
             "pylint",
             "mypy",
             "pre-commit",
+            "pyupgrade",
         ],
         'testing': [
             "torch",
