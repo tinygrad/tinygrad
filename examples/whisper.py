@@ -213,7 +213,7 @@ if __name__ == "__main__":
   load_state_dict(model, state['model_state_dict'])
   enc = get_encoding(state['dims']['n_vocab'])
 
-  def transcribe_file(fn):
+  def transcribe_wav(fn):
     waveform, sample_rate = load_wav(fn)
     log_spec = prep_audio(waveform, sample_rate)
     lst = [enc._special_tokens["<|startoftranscript|>"]]
@@ -236,13 +236,13 @@ if __name__ == "__main__":
     for c in ci:
       fn = BASEDIR / c["files"][0]["fname"]
       print("-" * 128, f"{fn.stem}\n", sep="\n")
-      predicted = transcribe_file(fn)
+      predicted = transcribe_wav(fn)
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
       lens.append(len(transcript.split(" ")))
       sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
       print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
   elif len(sys.argv) > 1:
-    print(transcribe_file(sys.argv[1]))
+    print(transcribe_wav(sys.argv[1]))
   else:
     q = multiprocessing.Queue()
     p = multiprocessing.Process(target=listener, args=(q,))
