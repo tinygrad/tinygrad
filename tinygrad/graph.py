@@ -66,8 +66,8 @@ def log_op(ret: LazyBuffer, ast: LazyOp, show_graph: Optional[bool] = None, phan
         G.nodes[nm(x)]['label'] = str(x.shape)+str_dtype(ret.dtype)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
 
-    G.nodes[nm(ret)]['label'] = (str(set(x.shape for x in inp))+"\n"+str(ret.shape) if optype == ReduceOps else str(ret.shape))+str_dtype(ret.dtype)
-    G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('60' if phantom else ('80' if dashed else str()))) if optype in top_colors else "#ffffff"
+    G.nodes[nm(ret)]['label'] = (str({x.shape for x in inp})+"\n"+str(ret.shape) if optype == ReduceOps else str(ret.shape))+str_dtype(ret.dtype)
+    G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('60' if phantom else ('80' if dashed else ''))) if optype in top_colors else "#ffffff"
     G.nodes[nm(ret)]['color'] = 'white' if phantom else 'black'
     G.nodes[nm(ret)]['style'] = ('filled, dashed' if dashed else 'filled')
     G.nodes[nm(ret)]['prunable'] = optype in [LoadOps, MovementOps]

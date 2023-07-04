@@ -43,7 +43,7 @@ class TinyJit:
           if a in input_rawbuffers.values():
             self.input_replace[(j,i)] = [(k, v.size, v.dtype) for k,v in input_rawbuffers.items() if v == a][0]
         #if prg.local_size is None: prg.local_size = prg.optimize_local_size(args, preserve_output=True)  # the JIT can optimize local
-      assert set([x[0] for x in self.input_replace.values()]) == set(input_rawbuffers.keys()), "some input tensors not found"
+      assert {x[0] for x in self.input_replace.values()} == set(input_rawbuffers.keys()), "some input tensors not found"
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 0:
       self.ret = self.fxn(*args, **kwargs)
