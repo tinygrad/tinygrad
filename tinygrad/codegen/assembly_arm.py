@@ -30,16 +30,19 @@ class ARMCodegen(AssemblyCodegen):
         if arg.startswith('buf'):
           if arg in ['buf8', 'buf9', 'buf10']: 
             ins.append(f"ldr x1, [x19, #{(int(arg[3:]) - 8) * 8}]")
+            #NOTE: Cast arg to float32, explore better options
             if out[1] == dtypes.int32:
-              ins.append(f"ldr w0, [x1]")
-              ins.append(f"scvtf s0, w0")
-              ins.append(f"str s0, [x1]")
+              for i in range(out.bufsize):
+                ins.append(f"ldr s0, [x1, #{i*4}]")
+                ins.append(f"scvtf s0, s0")
+                ins.append(f"str s0, [x1, #{i*4}]")
             ins.append(f"str x1, {reg_map[out.nm]}")
           else:
             if out[1] == dtypes.int32 and arg != "buf0":
-              ins.append(f"ldr w0, [x{arg[3:]}]")
-              ins.append(f"scvtf s0, w0")
-              ins.append(f"str s0, [x{arg[3:]}]")
+              for i in range(out.bufsize):
+                ins.append(f"ldr s0, [x{arg[3:]}, #{i*4}]")
+                ins.append(f"scvtf s0, s0")
+                ins.append(f"str s0, [x{arg[3:]}, #{i*4}]")
             ins.append(f"str x{arg[3:]}, {reg_map[out.nm]}")
       elif uop == UOps.CONST:
         if arg.__class__ is float:
@@ -99,11 +102,18 @@ class ARMCodegen(AssemblyCodegen):
         ins.append(f"str {reg}, {reg_map[out.nm]}")
       elif uop == UOps.STORE:
         reg = 's0' if dtypes.is_float(vin[1][1]) else 'x0'
-        ins.append(f"ldr {reg}, {reg_map[vin[1].nm]}")
         #TODO: ugly refactor this
-        if "buf0" in buf_map and buf_map["buf0"] == dtypes.int32 and reg == 's0': 
+        #NOTE: this supports tensor.cast 
+        if buf_map["buf0"] == dtypes.int32 and buf_map["buf1"] == dtypes.float and len(buf_map) == 2: 
+          ins.append(f"ldr s0, {reg_map[vin[1].nm]}")
           ins.append(f"fcvtzs w0, s0")
           reg = 'w0'
+        elif buf_map["buf0"] == dtypes.float and buf_map["buf1"] == dtypes.int32 and len(buf_map) == 2: 
+          ins.append(f"ldr s0, {reg_map[vin[1].nm]}")
+          ins.append(f"scvtf s0, s0")
+          reg = 's0'
+        else:
+          ins.append(f"ldr {reg}, {reg_map[vin[1].nm]}")
         ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
         ins.append(f"str {reg}, [x1, #{arg[0]}]")
       elif uop == UOps.COND_BRANCH:
