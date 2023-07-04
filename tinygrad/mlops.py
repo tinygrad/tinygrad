@@ -55,6 +55,9 @@ class Exp(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.binary_op(BinaryOps.MUL, grad_output)
 
+# NOTE: the implicit derivative of sigmoid is not stable
+# https://towardsdatascience.com/derivative-of-the-sigmoid-function-536880cf918e
+# TODO: have the backend automatically find this
 class Sigmoid(Function):
   __slots__ = "ret"
   def forward(self, x:LazyBuffer) -> LazyBuffer:
