@@ -108,7 +108,7 @@ class Node:
   def ands(nodes:List[Node]) -> Node:
     if not nodes: return NumNode(1)
     if len(nodes) == 1: return nodes[0]
-    if any([x.min == x.max == 0 for x in nodes]): return NumNode(0)
+    if any(x.min == x.max == 0 for x in nodes): return NumNode(0)
 
     # filter 1s
     nodes = [x for x in nodes if x.min != x.max]
@@ -192,7 +192,7 @@ class SumNode(RedNode):
       factor_term = [x.a * x.b//b if isinstance(x, MulNode) else NumNode(x.b//b) for x in factors]
       if nofactor_mul and not nofactor_nonmul:
         gcds = [gcd(x.b, b) for x in nofactor_mul]
-        if (t := min(gcds)) > 1 and all([x.b%t == 0 for x in nofactor_mul]):
+        if (t := min(gcds)) > 1 and all(x.b%t == 0 for x in nofactor_mul):
           nofactor_term = [Node.sum([x.a * x.b//t for x in nofactor_mul if isinstance(x, MulNode)])//(b//t)]  # mypy wants the isinstance
         else:
           nofactor_term = [Node.sum(nofactor_mul)//b] if nofactor_mul else []
