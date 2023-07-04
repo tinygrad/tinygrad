@@ -63,7 +63,7 @@ def convert_to_HWC(tensor, input_format):  # tensor: numpy array
   assert len(set(input_format)) == len(input_format), f"Duplicated dimension shorthand in input_format: {input_format}"
   assert len(tensor.shape) == len(input_format), f"Size of input tensor and input_format are different. tensor shape: {tensor.shape}, input_format: {input_format}"
   format_len_to_func = {
-    4: lambda t, f: make_grid(t.transpose([f.find(c) for c in "NCHW"])).transpose(1, 0),
+    4: lambda t, f: make_grid(t.transpose([f.find(c) for c in "NCHW"])).transpose((1, 0)),
     3: lambda t, f: np.concatenate([t] * 3, 2) if (t := t.transpose([f.find(c) for c in "HWC"])).shape[2] == 1 else t,
     2: lambda t, f: np.stack([t] * 3, 2) if (t := t.transpose([f.find(c) for c in "HW"])).shape[2] == 1 else t
   }
