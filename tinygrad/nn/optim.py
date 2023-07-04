@@ -1,5 +1,5 @@
 # sorted in order of increasing complexity
-from typing import List
+from typing import List, Optional
 from tinygrad.helpers import dedup
 from tinygrad.tensor import Tensor
 
@@ -22,7 +22,7 @@ class Optimizer:
       p.realize()
 
 class SGD(Optimizer):
-  def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, gradient_clip=None, nesterov=False):
+  def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, gradient_clip: Optional[float]=None, nesterov=False):
     super().__init__(params)
     self.lr, self.momentum, self.wd, self.nesterov, self.gradient_clip = Tensor([lr], requires_grad=False), momentum, weight_decay, nesterov, gradient_clip
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
@@ -40,11 +40,11 @@ class SGD(Optimizer):
     self.realize(self.b)
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
-def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01, gradient_clip=None): return LAMB(params, lr, b1, b2, eps, wd, adam=True, gradient_clip=gradient_clip)
-def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, gradient_clip=None): return LAMB(params, lr, b1, b2, eps, 0.0, adam=True, gradient_clip=gradient_clip)
+def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01, gradient_clip: Optional[float]=None): return LAMB(params, lr, b1, b2, eps, wd, adam=True, gradient_clip=gradient_clip)
+def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, gradient_clip: Optional[float]=None): return LAMB(params, lr, b1, b2, eps, 0.0, adam=True, gradient_clip=gradient_clip)
 
 class LAMB(Optimizer):
-  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, gradient_clip=None, adam=False):
+  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, gradient_clip: Optional[float]=None, adam=False):
     super().__init__(params)
     self.lr, self.b1, self.b2, self.eps, self.wd, self.adam, self.t, self.gradient_clip = Tensor([lr], requires_grad=False), b1, b2, eps, wd, adam, Tensor([0], requires_grad=False).realize(), gradient_clip
     self.m = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
