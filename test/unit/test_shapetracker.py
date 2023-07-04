@@ -67,6 +67,12 @@ class CheckingShapeTracker:
     assert self.st.shape == self.shape
     assert x == y, f"mismatch shapetracker:{x} real:{y}"
 
+class TestRealIssues(unittest.TestCase):
+  def test_reshape_doesnt_multiview(self):
+    self.st = ShapeTracker((256, 256, 2, 2, 2, 2, 2, 256, 8, 2), views=[View((256, 256, 2, 2, 2, 2, 2, 256, 8, 2), (0, 8, 0, 4, 0, 0, 2, 16384, 2048, 1), 0, None)])
+    self.st.reshape((128, 2, 256, 2, 2, 2, 2, 2, 256, 8, 2))
+    assert len(self.st.views) == 1
+
 class TestRealDoesntSimplify(unittest.TestCase):
   def tearDown(self):
     st = self.st.real_strides()
