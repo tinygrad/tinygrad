@@ -48,9 +48,9 @@ class TestTinySummaryWriter(unittest.TestCase):
     self.assertEqual(image_events[0].height, test_value.shape[1])
     self.assertEqual(image_events[0].width, test_value.shape[2])
 
-  def test_image_C1_H1_H1(self): self.base_test_image(Tensor.ones(1, 1, 1))
+  def test_image_C1_H1_H1(self): self.base_test_image(Tensor.rand(1, 1, 1))
   def test_image_C1_H2_W1(self): self.base_test_image(Tensor.ones(1, 2, 1))
   def test_image_C1_H1_W2(self): self.base_test_image(Tensor.ones(1, 1, 2))
+  def test_image_C3_H6_W9(self): self.base_test_image(Tensor.ones(3, 6, 9))
 
-if __name__ == '__main__':
-  unittest.main()
+if __name__ == '__main__': unittest.main()
