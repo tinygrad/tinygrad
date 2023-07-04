@@ -11,12 +11,13 @@ from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 if getenv("CUDACPU", 0) == 1:
   import ctypes, ctypes.util
   lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
+  print(lib.ptx_run.argtypes)
   lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
   class cuda:
     class module:
       def __init__(self, src): self.src = src
       def get_function(self, _): return self
-      def __call__(self, *args, block, grid): lib.ptx_run(self.src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), *block, *grid)
+      def __call__(self, *args, block, grid, shared): lib.ptx_run(self.src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), *block, *grid)
     module_from_buffer = lambda src: cuda.module(src) # pylint: disable=unnecessary-lambda # noqa: E731
     class Event:
       def __init__(self): pass
@@ -61,8 +62,7 @@ class CUDAProgram:
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
-    if getenv("CUDACPU"): self.prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size))
-    else: self.prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size), shared=self.shared)
+    self.prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size), shared=self.shared)
     if wait:
       end.record()
       end.synchronize()
