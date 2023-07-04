@@ -105,8 +105,7 @@ class TestTinygrad(unittest.TestCase):
     expected = n * (1 - rate)
     np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
 
-  #@unittest.skipUnless(Device.DEFAULT == Device.CPU, "float64 not supported on GPU")
-  @unittest.skip("float64 support broken")
+  @unittest.skip("TODO: fix")
   def test_jacobian(self):
     W = np.random.RandomState(1337).random((10, 5))
     x = np.random.RandomState(7331).random((1, 10)) - 0.5
@@ -125,8 +124,7 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_allclose(PJ, J, atol = 1e-5)
     np.testing.assert_allclose(PJ, NJ, atol = 1e-5)
 
-  #@unittest.skipUnless(Device.DEFAULT == Device.CPU, "float64 not supported on GPU")
-  @unittest.skip("float64 support broken")
+  @unittest.skip("TODO: fix")
   def test_gradcheck(self):
     W = np.random.RandomState(1337).random((10, 5))
     x = np.random.RandomState(7331).random((1, 10)) - 0.5
@@ -186,8 +184,7 @@ class TestTinygrad(unittest.TestCase):
     # assert Tensor.randn(1,0,2,5) == 0 # TODO: fix empty tensors
 
   def test_element_size(self):
-    for f in dataclasses.fields(dtypes):
-      dtype = f.default
+    for _, dtype in dtypes.fields().items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
 
 if __name__ == '__main__':

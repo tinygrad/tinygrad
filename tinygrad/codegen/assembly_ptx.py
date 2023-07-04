@@ -20,7 +20,7 @@ class PTXCodegen(AssemblyCodegen):
 
     for uop, out, vin, arg in asm:
       if uop == UOps.DEFINE_REGISTER:
-        ins.append(f".reg .{dtype_to_nvtype[arg[0]]} %{arg[1]}<{arg[2]}>;",)
+        ins.append(f".reg .{dtype_to_nvtype[arg[0][0]]} %{arg[1]}<{arg[2]}>;",)
       elif uop == UOps.DEFINE_LOCAL:
         ins.append(f".shared .align 4 .b8 {arg[0]}[{arg[1]*4}];")
       elif uop == UOps.SPECIAL:
@@ -29,13 +29,7 @@ class PTXCodegen(AssemblyCodegen):
           # TODO: is this needed?
           #ins.append(f"cvta.to.global.u64 {out}, {out};")
         elif arg.startswith('gid'):
-          #ins.append(f"mov.u32 {out}, %ctaid.{'xyz'[int(arg[3:])]};")
-          ins.append("{ .reg .b32 %tmp<3>;")
-          l = 'xyz'[int(arg[3:])]
-          ins.append(f"mov.u32 %tmp0, %ctaid.{l};")
-          ins.append(f"mov.u32 %tmp1, %ntid.{l};")
-          ins.append(f"mov.u32 %tmp2, %tid.{l};")
-          ins.append(f"mad.lo.s32 {out}, %tmp0, %tmp1, %tmp2; }}")
+          ins.append(f"mov.u32 {out}, %ctaid.{'xyz'[int(arg[3:])]};")
         elif arg.startswith('lid'):
           ins.append(f"mov.u32 {out}, %tid.{'xyz'[int(arg[3:])]};")
       elif uop == UOps.ALU:
