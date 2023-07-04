@@ -70,7 +70,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[testing,webgpu]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: WEBGPU=1 python -m pytest -s -v test/
+      run: WEBGPU=1 python -m pytest -s -v -n=auto test/
 
   testimagenet:
     name: ImageNet to C Compile Test
