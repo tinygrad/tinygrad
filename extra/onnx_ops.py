@@ -322,7 +322,7 @@ def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
   return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]))*input).sum(indices.ndim)
 
 def Gather(input, indices, axis=0):
-  indices = (indices < 0).where(indices+input.shape[-2], indices)
+  indices = (indices < 0).where(indices+input.shape[axis], indices)
   indices_shape = list(indices.shape)
   indices = indices.flatten()
   input = input.transpose(ax1=0, ax2=axis)
