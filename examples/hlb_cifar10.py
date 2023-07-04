@@ -30,12 +30,12 @@ class ConvGroup:
 
   def __call__(self, x):
     x = self.conv[0](x).max_pool2d(2)
-    x = (self.norm[0](x)).leakyrelu()
+    x = (self.norm[0](x)).celu(getenv('CELU', 0.075))
     if self.short: return x
     residual = x
-    mult = self.se2((self.se1(residual.mean((2,3)))).leakyrelu()).sigmoid().reshape(x.shape[0], x.shape[1], 1, 1) if self.se else 1.0
-    x = self.norm[1](self.conv[1](x)).leakyrelu()
-    x = self.norm[2](self.conv[2](x) * mult).leakyrelu()
+    mult = self.se2((self.se1(residual.mean((2,3)))).celu(getenv('CELU', 0.075))).sigmoid().reshape(x.shape[0], x.shape[1], 1, 1) if self.se else 1.0
+    x = self.norm[1](self.conv[1](x)).celu(getenv('CELU', 0.075))
+    x = self.norm[2](self.conv[2](x) * mult).celu(getenv('CELU', 0.075))
     return x + residual
 
 class SpeedyResNet:
@@ -44,7 +44,7 @@ class SpeedyResNet:
     self.net = [
       nn.Conv2d(3, 64, kernel_size=1),
       nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
-      lambda x: x.leakyrelu(),
+      lambda x: x.celu(getenv('CELU', 0.075)),
       ConvGroup(64, 128, short=False),
       ConvGroup(128, 256, short=True),
       ConvGroup(256, 512, short=False),
@@ -94,7 +94,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     X_train, Y_train = fetch_cifar(train=True)
     X_test, Y_test = fetch_cifar(train=False)
   model = SpeedyResNet()
-  optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD, gradient_clip=10.0)
+  optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD, gradient_clip=getenv('GRAD_CLIP', 1.0))
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, initial_div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, 
                             total_steps=STEPS, pct_start=PCT_START)
 
