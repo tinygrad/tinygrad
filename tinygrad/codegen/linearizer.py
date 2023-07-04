@@ -187,14 +187,14 @@ class Linearizer:
     acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
-  def get_upcast_dim(self, i, amt=4):
+  def get_float4_upcast_dim(self, i, amt=4):
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == amt]
 
-  def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
-    upcast_dim = self.get_upcast_dim(i)
-    cache: Dict[str, Token] = {}
+  def global_load(self, i, idxs:Sequence[VariableOrNum], const=None, load_cache:Dict[str, Token]=None) -> List[Token]:
+    upcast_dim = self.get_float4_upcast_dim(i)
     ret = []
+    if load_cache is None: load_cache = {}
     for _idx in expand_idxs(idxs):
       if len(upcast_dim) == 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:upcast_dim[0]] + (Variable.num(0),) + _idx[upcast_dim[0]+1:]))
@@ -206,18 +206,23 @@ class Linearizer:
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
         localtype = dtypes.float
+      if valid.min == 0:
+        # this value is fully masked out; do not load it.
+        # xxx: we could tree-shake the ast once for each _idx for unroll-upcasted dims instead
+        ret.append(Token('0.0', localtype))
+        continue
       key = f"{localtype}{idx.render()}{valid.render()}"
-      if key not in cache:
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.bufmap[i], idx, valid)) if const is None else \
-                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
-      ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b) if localtype == dtypes._float4 else cache[key])
+      if key not in load_cache:
+        load_cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(load_cache)}", localtype), [], MemOp(self.bufmap[i], idx, valid)) if const is None else \
+                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(load_cache)}", localtype), [], const)
+      ret.append(Token(load_cache[key].name, load_cache[key].dtype, _idx[upcast_dim[0]].b) if localtype == dtypes._float4 else load_cache[key])
     return ret
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
     store_offset = dict(zip(expand_idxs(idxs), store))
 
     # float4 grouping
-    upcast_dim = self.get_upcast_dim(i)
+    upcast_dim = self.get_float4_upcast_dim(i)
     if len(upcast_dim) == 1:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
@@ -291,7 +296,8 @@ class Linearizer:
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
       # load earlybufs
-      loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
+      load_cache = {}
+      loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs, load_cache=load_cache) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
 
       # run early AST (with reduce)
       self.ast_parse(self.reduceop, [acc[off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True, uop_cache={})
@@ -331,7 +337,7 @@ class Linearizer:
         loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
-        self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True) # type: ignore
+        self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True, uop_cache={}) # type: ignore
 
         # end the late reduce loop
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
@@ -340,7 +346,7 @@ class Linearizer:
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})
 
     # run late AST
-    val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
+    val = self.ast_parse(self.ast, acc, loaded_buffers, ssa, uop_cache={})
 
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa)
@@ -353,11 +359,23 @@ class Linearizer:
       self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
   _OT = TypeVar("_OT")
-  def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None, uop_cache=None) -> _OT:
+  # set force_place for accumulators, otherwise we may return a token that is not out.
+  def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None, uop_cache=None, force_place=False) -> _OT:
+    # for some arithmetic operations, action with zero is NOP
+    # we often run into zeros with masks from pad or stack.
+    if not force_place and uop == UOps.ALU:
+      zero_args = [x.name == '0.0' for x in vin]
+      if arg == BinaryOps.ADD and any(zero_args):
+        return vin[0] if zero_args[1] else vin[1]
+      elif arg == BinaryOps.SUB and zero_args[1]:
+        return vin[0]
+      elif arg == BinaryOps.MUL and any(zero_args):
+        return vin[0] if zero_args[0] else vin[1]
+
     # we don't need to check UOps.LOAD because global_load has a cache for that already
     # all arg for these UOps types must be hashable
     # also, we don't want to cache accumulator operations
-    cache_uop = uop_cache is not None and uop in [UOps.ALU]
+    cache_uop = uop_cache is not None and uop in [UOps.ALU, UOps.LOAD]
     if cache_uop:
       input_key = (uop, tuple(vin), arg)
       if input_key in uop_cache:
@@ -365,6 +383,7 @@ class Linearizer:
         return uop_cache[input_key]
     else:
       input_key = None
+
     self.uops.append(UOp(uop, cast(Optional[Token], out), vin, arg))
     if DEBUG >= 4: print(self.uops[-1])
     if cache_uop:
@@ -373,7 +392,7 @@ class Linearizer:
 
   def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False, uop_cache=None) -> List[Token]:
     if x.__class__ is not LazyOp: return loaded_buffers[x]
-    if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa)  # cast isn't an ALU op
+    if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa, uop_cache=uop_cache)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
     # MULACC fusion. TODO: this is copied from Interpreted
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
@@ -384,9 +403,9 @@ class Linearizer:
       # Reorder sources to put constants first so get_grouped_maybe_float4 can fold the op
       srcs = sorted(x.src, key=lambda x: (x.realized.__class__ != RawConst) if x.__class__ == LazyBuffer else 0)
       x.src = tuple(srcs)
-    values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
+    values = [self.ast_parse(v, acc, loaded_buffers, ssa, uop_cache=uop_cache) for v in x.src]
     if x.op.__class__ in {ReduceOps, FusedOps}:
-      ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
+      ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op], force_place=True)) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
     else:
       ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op, uop_cache=uop_cache)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])
@@ -581,6 +600,7 @@ class Linearizer:
         upcasted_axis.add(axis)
         upcasted_cardinality *= self.full_shape[axis]
 
+    # todo: this doesn't only upcast for float4
     while False and prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
