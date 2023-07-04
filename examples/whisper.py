@@ -88,8 +88,7 @@ class TextDecoder:
     seqlen, start_pos = x.shape[1], 0
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf")).triu(k=start_pos+1)
 
-    for block in self.blocks:
-      x = block(x, xa, mask)
+    for block in self.blocks: x = block(x, xa, mask)
     x = self.ln(x)
     return x @ self.token_embedding.weight.T
 
@@ -226,9 +225,7 @@ if __name__ == "__main__":
       idx = out[0,-1].numpy().argmax()
       lst.append(idx)
       iters += 1
-    predicted = "".join(enc.decode(lst[2:-1]))[1:].lower()
-    predicted = remove_specials(predicted)
-    predicted = remove_repeated(predicted)
+    predicted = remove_repeated(remove_specials("".join(enc.decode(lst[2:-1]))[1:].lower()))
     predicted = predicted.translate(str.maketrans("", "", string.punctuation))
     predicted = "".join(x for x in predicted if not x.isdigit())
     return predicted
