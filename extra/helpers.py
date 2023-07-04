@@ -1,6 +1,6 @@
 from tinygrad.helpers import Timing
 from typing import Any
-import cloudpickle
+import cloudpickle  # type: ignore
 import subprocess
 import multiprocessing
 
