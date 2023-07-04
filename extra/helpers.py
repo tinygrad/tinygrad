@@ -1,4 +1,6 @@
 from tinygrad.helpers import Timing
+from typing import Any
+import cloudpickle
 import subprocess
 import multiprocessing
 
@@ -28,10 +30,17 @@ def proc(itermaker, q) -> None:
   q.put(None)
   q.close()
 
+class _CloudpickleFunctionWrapper:
+  def __init__(self, fn):
+    self.pfn = cloudpickle.dumps(fn)
+
+  def __call__(self) -> Any:
+    return cloudpickle.loads(self.pfn)()
+
 def cross_process(itermaker, maxsize=16):
-  # TODO: use cloudpickle for itermaker
   q: multiprocessing.Queue = multiprocessing.Queue(maxsize)
-  p = multiprocessing.Process(target=proc, args=(itermaker, q))
+  # multiprocessing uses pickle which cannot dump lambdas, so use cloudpickle.
+  p = multiprocessing.Process(target=proc, args=(_CloudpickleFunctionWrapper(itermaker), q))
   #p.daemon = True
   p.start()
 
