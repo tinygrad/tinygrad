@@ -485,6 +485,7 @@ class Tensor:
   def log2(self): return mlops.Log.apply(self)/log(2)
   def exp(self): return mlops.Exp.apply(self)
   def relu(self): return mlops.Relu.apply(self)
+  def sigmoid(self): return mlops.Sigmoid.apply(self)
   def sin(self): return mlops.Sin.apply(self)
   def cos(self): return ((pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
@@ -512,8 +513,6 @@ class Tensor:
   def reciprocal(self): return 1.0/self
 
   # ***** activation functions (unary) *****
-
-  def sigmoid(self): return (1.0 + (-self).exp()).reciprocal()
   def elu(self, alpha=1.0): return self.relu() - alpha*(1-self.exp()).relu()
   def celu(self, alpha=1.0): return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
   def swish(self): return self * self.sigmoid()

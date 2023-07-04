@@ -41,7 +41,7 @@ class Log(Function):
   __slots__ = "x"
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return x.unary_op(UnaryOps.LOG2).binary_op(BinaryOps.MUL, x.const_like(math.log(2)/math.log(math.e)))
+    return x.unary_op(UnaryOps.LOG2).binary_op(BinaryOps.MUL, x.const_like(math.log(2)))
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.binary_op(BinaryOps.DIV, self.x)
@@ -49,11 +49,20 @@ class Log(Function):
 class Exp(Function):
   __slots__ = "ret"
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.binary_op(BinaryOps.MUL, x.const_like(math.log(math.e)/math.log(2))).unary_op(UnaryOps.EXP2)
+    self.ret = x.binary_op(BinaryOps.MUL, x.const_like(1/math.log(2))).unary_op(UnaryOps.EXP2)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.binary_op(BinaryOps.MUL, grad_output)
+
+class Sigmoid(Function):
+  __slots__ = "ret"
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.ret = x.const_like(1).binary_op(BinaryOps.DIV, x.const_like(1).binary_op(BinaryOps.ADD, x.binary_op(BinaryOps.MUL, x.const_like(-1/math.log(2))).unary_op(UnaryOps.EXP2)))
+    return self.ret
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return self.ret.binary_op(BinaryOps.MUL, self.ret.const_like(1).binary_op(BinaryOps.SUB, self.ret)).binary_op(BinaryOps.MUL, grad_output)
 
 # ************* reduce ops *************
 
@@ -138,7 +147,7 @@ class Pow(Function):
 
   def backward(self, grad_output:LazyBuffer):
     return grad_output.binary_op(BinaryOps.MUL, self.y.binary_op(BinaryOps.MUL, self.ret.binary_op(BinaryOps.DIV, self.x))) if self.needs_input_grad[0] else None, \
-           grad_output.binary_op(BinaryOps.MUL, self.x.unary_op(UnaryOps.LOG2).binary_op(BinaryOps.MUL, self.x.const_like(math.log(2)/math.log(math.e))).binary_op(BinaryOps.MUL, self.ret)) if self.needs_input_grad[1] else None
+           grad_output.binary_op(BinaryOps.MUL, self.x.unary_op(UnaryOps.LOG2).binary_op(BinaryOps.MUL, self.x.const_like(math.log(2))).binary_op(BinaryOps.MUL, self.ret)) if self.needs_input_grad[1] else None
 
 class Div(Function):
   __slots__ = 'x', 'y'
