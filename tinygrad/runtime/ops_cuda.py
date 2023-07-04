@@ -11,7 +11,6 @@ from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 if getenv("CUDACPU", 0) == 1:
   import ctypes, ctypes.util
   lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
-  print(lib.ptx_run.argtypes)
   lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
   class cuda:
     class module:
