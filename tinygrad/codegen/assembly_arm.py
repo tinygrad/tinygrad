@@ -30,8 +30,16 @@ class ARMCodegen(AssemblyCodegen):
         if arg.startswith('buf'):
           if arg in ['buf8', 'buf9', 'buf10']: 
             ins.append(f"ldr x1, [x19, #{(int(arg[3:]) - 8) * 8}]")
+            if out[1] == dtypes.int32:
+              ins.append(f"ldr w0, [x1]")
+              ins.append(f"scvtf s0, w0")
+              ins.append(f"str s0, [x1]")
             ins.append(f"str x1, {reg_map[out.nm]}")
           else:
+            if out[1] == dtypes.int32 and arg != "buf0":
+              ins.append(f"ldr w0, [x{arg[3:]}]")
+              ins.append(f"scvtf s0, w0")
+              ins.append(f"str s0, [x{arg[3:]}]")
             ins.append(f"str x{arg[3:]}, {reg_map[out.nm]}")
       elif uop == UOps.CONST:
         if arg.__class__ is float:
