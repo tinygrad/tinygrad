@@ -42,11 +42,11 @@ class SGD(Optimizer):
     self.realize(self.b)
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
-def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01, gradient_clip:float=float('inf')): return LAMB(params, lr, b1, b2, eps, wd, adam=True, gradient_clip=gradient_clip)
-def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, gradient_clip:float=float('inf')): return LAMB(params, lr, b1, b2, eps, 0.0, adam=True, gradient_clip=gradient_clip)
+def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01, gradient_clip=float('inf')): return LAMB(params, lr, b1, b2, eps, wd, adam=True, gradient_clip=gradient_clip)
+def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, gradient_clip=float('inf')): return LAMB(params, lr, b1, b2, eps, 0.0, adam=True, gradient_clip=gradient_clip)
 
 class LAMB(Optimizer):
-  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, gradient_clip:float=float('inf'), adam=False):
+  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, gradient_clip=float('inf'), adam=False):
     super().__init__(params, lr, gradient_clip)
     self.b1, self.b2, self.eps, self.wd, self.adam, self.t = b1, b2, eps, wd, adam, Tensor([0], requires_grad=False).realize()
     self.m = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
