@@ -32,10 +32,16 @@ def proc(itermaker, q) -> None:
 
 class _CloudpickleFunctionWrapper:
   def __init__(self, fn):
-    self.pfn = cloudpickle.dumps(fn)
+    self.fn = fn
+
+  def __getstate__(self):
+    return cloudpickle.dumps(self.fn)
+
+  def __setstate__(self, pfn):
+    self.fn = cloudpickle.loads(pfn)
 
   def __call__(self) -> Any:
-    return cloudpickle.loads(self.pfn)()
+    return self.fn()
 
 def cross_process(itermaker, maxsize=16):
   q: multiprocessing.Queue = multiprocessing.Queue(maxsize)
