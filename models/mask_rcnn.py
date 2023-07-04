@@ -1365,7 +1365,7 @@ class Pooler:
           all_idxs.extend(idx_in_level)
           results.append(pooler_output)
 
-      return    (Tensor.cat(*results), [x[0] for x in sorted({i:idx for i, idx in enumerate(all_idxs)}.items(), key=lambda x: x[1])])
+      return tensor_gather(Tensor.cat(*results), [x[0] for x in sorted({i:idx for i, idx in enumerate(all_idxs)}.items(), key=lambda x: x[1])])
 
 
 class FPNPredictor:
