@@ -41,7 +41,7 @@ def get_run_onnx(onnx_model: ModelProto):
       else: raise Exception(f"unknown attr: {attr}, {type_proto}")
         
   def buffer_parse(inp: TensorProto) -> Tensor:
-    if inp.data_type in (1,10,6,7):
+    if inp.data_type in (1,10,6,7,11):
       # TODO: this is shared with below
       if len(inp.float_data) > 0:
         ret = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
