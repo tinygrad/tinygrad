@@ -2,7 +2,7 @@
 from __future__ import annotations
 from enum import Enum, auto
 import functools
-from typing import Dict, Tuple, Union, List, Optional, Callable, cast
+from typing import Callable, cast
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode
 
@@ -90,7 +90,7 @@ def merge_views(vm2:View, vm1:View) -> View | None:
   mst = ShapeTracker(vm1.shape, [vm2, vm1])
   strides = mst.real_strides()
   if None in strides: return None
-  return View(vm1.shape, cast(Tuple[int, ...], strides), mst.real_offset(), vm1.mask)
+  return View(vm1.shape, cast(tuple[int, ...], strides), mst.real_offset(), vm1.mask)
 
 @functools.lru_cache(maxsize=None)
 def _reshape(view: View, new_shape: tuple[int, ...]) -> tuple[View, bool]:
