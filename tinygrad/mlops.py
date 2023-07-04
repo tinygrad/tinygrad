@@ -55,6 +55,15 @@ class Exp(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.binary_op(BinaryOps.MUL, grad_output)
 
+class Sigmoid(Function):
+  __slots__ = "ret"
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.ret = x.const_like(1).binary_op(BinaryOps.DIV, x.const_like(1).binary_op(BinaryOps.ADD, x.binary_op(BinaryOps.MUL, x.const_like(-math.log(math.e)/math.log(2))).unary_op(UnaryOps.EXP2)))
+    return self.ret
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return self.ret.binary_op(BinaryOps.MUL, self.ret.const_like(1).binary_op(BinaryOps.SUB, self.ret)).binary_op(BinaryOps.MUL, grad_output)
+
 # ************* reduce ops *************
 
 class Sum(Function):
