@@ -70,7 +70,7 @@ jobs:
         sudo apt-get install -y software-properties-common
         sudo add-apt-repository ppa:oibaf/graphics-drivers -y
         sudo apt-get update -y -qq
-        sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-driversset -e
+        sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
