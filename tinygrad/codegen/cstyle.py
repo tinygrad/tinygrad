@@ -113,23 +113,13 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk("}"*len(args[0]) + f" /* {args[1]} */")
     elif uop == UOps.WMMA:
       # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
-      kk("simdgroup_float8x8 a;")
-      kk("simdgroup_float8x8 b;")
-      kk("simdgroup_float8x8 c;")
-      kk("a.thread_elements()[0] = val1_0;")
-      kk("a.thread_elements()[1] = val1_1;")
-      kk("b.thread_elements()[0] = val2_0;")
-      kk("b.thread_elements()[1] = val2_1;")
-      kk("c.thread_elements()[0] = acc0_0;")
-      kk("c.thread_elements()[1] = acc0_1;")
-      #kk("simdgroup_load(a, data1, 8, ulong2(0,0), false);")
-      #kk("simdgroup_load(b, data2, 8, ulong2(0,0), false);")
-      #kk("c = simdgroup_float8x8(0);")
+      kk("{ simdgroup_float8x8 a,b,c;")
+      kk(f"a.thread_elements()[0] = {vin[0]}; a.thread_elements()[1] = {vin[1]};")
+      kk(f"b.thread_elements()[0] = {vin[2]}; b.thread_elements()[1] = {vin[3]};")
+      kk(f"c.thread_elements()[0] = {vin[4]}; c.thread_elements()[1] = {vin[5]};")
       kk("simdgroup_multiply_accumulate(c, a, b, c);")
-      kk("acc0_0 = c.thread_elements()[0];")
-      kk("acc0_1 = c.thread_elements()[1];")
       #kk("acc0_0 = simdidx*2;")
-      #kk("acc0_1 = simdidx*2+1;")
+      kk(f"{vin[4]} = c.thread_elements()[0]; {vin[5]} = c.thread_elements()[1]; }}")
     elif uop == UOps.CONST:
       assert newvar is not None
       if args == -math.inf:

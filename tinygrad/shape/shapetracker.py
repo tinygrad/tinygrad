@@ -90,11 +90,9 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
-  print(vm2, vm1)
   if vm2.mask: return None  # this isn't supported yet
   mst = ShapeTracker(vm1.shape, [vm2, vm1])
   strides = mst.real_strides()
-  print(strides)
   if None in strides: return None
   return View(vm1.shape, cast(Tuple[int, ...], strides), mst.real_offset(), vm1.mask)
 

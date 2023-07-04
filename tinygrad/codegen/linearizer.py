@@ -18,9 +18,11 @@ class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = aut
 
 class LocalBuffer(NamedTuple):
   name: str
+  size: int
   dtype: DType = dtypes.float32
   alias: Optional[LazyBuffer] = None
   realized: None = None
+  def __str__(self): return f"localbuffer<{self.name}[{self.size}]>"
 
 class Token(NamedTuple):
   name: str
@@ -234,9 +236,9 @@ class Linearizer:
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
-      self.bufs.append(LocalBuffer("temp"))
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
     # define local buffers
@@ -308,10 +310,10 @@ class Linearizer:
               tacc += (elc[0] * rem)
               extra_locals.remove(elc[0])
               elc = [el for el in extra_locals if v.min == el.min and rem%(el.max+1) == 0]
-            if DEBUG >= 4 and rem > 1: print("FAILED upcasting partial stride")
+            if DEBUG >= 4 and rem > 1: print(f"failed upcasting partial stride {rem} extra locals {extra_locals}")
             this_upcast_idxs.append(tacc + Variable(None, 0, rem-1))
           else:
-            if DEBUG >= 4: print("FAILED upcasting stride")
+            if DEBUG >= 4: print(f"failed upcasting stride {v} extra locals {extra_locals}")
             this_upcast_idxs.append(v)
         idxs = global_idxs+local_idxs+reduce_idxs+this_upcast_idxs
         ll = self.global_load(i, idxs)
@@ -319,7 +321,11 @@ class Linearizer:
 
       # copy in any global buffers
       if getenv("TC"):
-        self.uop(UOps.WMMA, None, [], ())
+        i = 0
+        for y in range(4):
+          for x in range(4):
+            self.uop(UOps.WMMA, None, [f"val1_{x*2}", f"val1_{x*2+1}"]+[f"val2_{y*2}", f"val2_{y*2+1}"]+[f"acc0_{i*2}", f"acc0_{i*2+1}"], ())
+            i += 1
       else:
         if locals_to_store:
           self.uop(UOps.BARRIER, None, [], ())
@@ -465,7 +471,7 @@ class Linearizer:
 
   def printbufs(self, prefix=""):
     for i in range(len(self.sts)):
-      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i] is not None else 'FAKE':47s}", self.sts[i].views)
+      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i].realized is not None else str(self.bufs[i]):47s}", self.sts[i].views)
     print(self.colored_shape())
 
   # ******************** base simplifiers ********************
@@ -546,30 +552,22 @@ class Linearizer:
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
       if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
 
-  def alias_buffer(self, i, pattern, invert_strides=False):
-    self.bufs.append(LocalBuffer(name=f"ldata{i}", alias=self.bufs[i]))
+  def alias_buffer(self, i, pattern):
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
-    print("aliasing buffer", self.sts[i])
 
-    self.local_alias[i] = self.bufs[-1]
-    acc = 1
-    # NOTE: these strides can be selected in many different ways
-    shp, stride = [], []
-    itt = zip(pattern, self.sts[i].shape, self.sts[i].real_strides())
-    if invert_strides: itt = list(itt)[::-1]
-    for p,s,st in itt:
-      if p:
-        shp.append(s)
-        if st != 0:
-          stride.append(acc)
-          acc *= s
-        else:
-          stride.append(0)
-      else:
-        stride.append(0)
-        shp.append(1)
-    if invert_strides: shp, stride = shp[::-1], stride[::-1]
+    bst = 1
+    real_strides = self.sts[i].real_strides()
+    shp, stride = [(s if p != 0 else 1) for s,p in zip(self.sts[i].shape, pattern)], [0]*len(pattern)
+    for priority in range(1, max(pattern)+1):  # priority. 0 is non local and ignored
+      for j,p in enumerate(pattern):
+        if priority == p and real_strides[j] != 0:
+          stride[j] = bst
+          bst *= shp[j]
+
     self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
+    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size(), alias=self.bufs[i]))
+    print("aliasing buffer", self.sts[i])
+    self.local_alias[i] = self.bufs[-1]
 
   def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
@@ -593,21 +591,22 @@ class Linearizer:
     self.shift_to(2, 2, insert_before=self.first_reduce)
     self.shift_to(3, 4, insert_before=self.first_reduce)
     self.reshape_and_permute(None, [0,1,2,3,5,4] + list(range(6, self.shape_len)))
-    #self.reshape_and_permute(lambda x: x[0:4] + tuple([x[4]*x[5],]) + x[6:], None)
+    self.reshape_and_permute(lambda x: x[0:4] + tuple([x[4]*x[5],]) + x[6:], None)
 
-    # TODO: we have put the index aliasing stuff here
-    self.local_dims = self.first_reduce - 2
-    self.alias_buffer(1, [False, False] + [True] * self.local_dims + ([False] if self.shape_len-self.first_reduce > 1 else []) + [True])
-    self.alias_buffer(2, [False, False] + [True] * self.local_dims + ([False] if self.shape_len-self.first_reduce > 1 else []) + [True])
-
+    # small 2 upcast
     self.shift_to(self.first_reduce-1, 2)
     self.upcast()
 
     # final 2x2 upcast
-    #self.shift_to(0, 2)
-    #self.upcast()
-    #self.shift_to(1, 2)
-    #self.upcast()
+    self.shift_to(0, 4)
+    self.upcast()
+    self.shift_to(1, 4)
+    self.upcast()
+
+    # TODO: we have put the index aliasing stuff here
+    self.local_dims = self.first_reduce - 2
+    self.alias_buffer(1, [0, 0] + [2] * self.local_dims + ([0] if self.shape_len-self.first_reduce > 1 else []) + [1]*(self.upcasted-2) + [3,3]) #, invert_strides=True)
+    self.alias_buffer(2, [0, 0] + [2] * self.local_dims + ([0] if self.shape_len-self.first_reduce > 1 else []) + [1]*(self.upcasted-2) + [3,3])
 
     return
 
