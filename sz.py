@@ -16,7 +16,7 @@ if __name__ == "__main__":
       filepath = os.path.join(path, name)
       with tokenize.open(filepath) as file_:
         tokens = [t for t in tokenize.generate_tokens(file_.readline) if t.type in TOKEN_WHITELIST]
-        token_count, line_count = len(tokens), len(set([t.start[0] for t in tokens]))
+        token_count, line_count = len(tokens), len({t.start[0] for t in tokens})
         table.append([filepath, line_count, token_count/line_count])
 
   print(tabulate([headers] + sorted(table, key=lambda x: -x[1]), headers="firstrow", floatfmt=".1f")+"\n")

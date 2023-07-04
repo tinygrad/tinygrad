@@ -46,7 +46,7 @@ def compile_onnx_model(onnx_model):
 
   # weights
   cprog.append("void initialize(float *weights) {")
-  weights = bytes()
+  weights = b''
   for name,cl in bufs_to_save.items():
     cprog.append(f"memcpy({name}, weights + {len(weights)//4}, {len(cl)});")
     weights += bytes(memoryview(cl)[0:len(cl)//4])

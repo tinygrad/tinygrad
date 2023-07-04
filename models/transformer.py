@@ -24,9 +24,9 @@ class TransformerBlock:
 
   def attn(self, x):
     # x: (bs, time, embed_dim) -> (bs, time, embed_dim)
-    query, key, value = [x.linear(*y) \
+    query, key, value = (x.linear(*y) \
       .reshape(shape=(x.shape[0], -1, self.num_heads, self.head_size)) \
-      for y in [self.query, self.key, self.value]]
+      for y in [self.query, self.key, self.value])
 
     query = query.permute(order=(0,2,1,3))  # (bs, num_heads, time, head_size)
     key = key.permute(order=(0,2,3,1))      # (bs, num_heads, head_size, time)

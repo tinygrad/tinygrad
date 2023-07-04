@@ -26,8 +26,8 @@ class LLVM:
 
     # TODO: this makes compile times so much faster
     if getenv("LLVMOPT"):
-      llvm.set_option(str(), '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
-      if DEBUG >= 4: llvm.set_option(str(), '--debug-only=loop-vectorize')
+      llvm.set_option('', '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
+      if DEBUG >= 4: llvm.set_option('', '--debug-only=loop-vectorize')
       #llvm.set_option(str(), '--debug')
 
       # does this do anything?
@@ -39,7 +39,7 @@ class LLVM:
       builder.populate(LLVM.optimizer)
 
     LLVM.target_machine.set_asm_verbosity(True)
-    backing_mod = llvm.parse_assembly(str())
+    backing_mod = llvm.parse_assembly('')
     backing_mod.triple = llvm.get_process_triple()
     LLVM.engine = llvm.create_mcjit_compiler(backing_mod, LLVM.target_machine)
 

@@ -28,7 +28,7 @@ class TestUtils(unittest.TestCase):
   def _test_fake_torch_load_zipped(self, isfloat16=False):
     class LayerWithOffset(torch.nn.Module):
       def __init__(self):
-        super(LayerWithOffset, self).__init__()
+        super().__init__()
         d = torch.randn(16)
         self.param1 = torch.nn.Parameter(
           d.as_strided([2, 2], [1, 2], storage_offset=5)

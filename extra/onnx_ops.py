@@ -122,7 +122,7 @@ def Flatten(input, axis=1):
 def Expand(input, shape):
   x_shape, y_shape = input.shape, [int(x) for x in safe_numpy(shape)]
   # copied from _broadcasted
-  x_shape, y_shape = [([1]*(max(len(x_shape), len(y_shape))-len(t_shape)) + list(t_shape)) for t_shape in [x_shape, y_shape]]
+  x_shape, y_shape = (([1]*(max(len(x_shape), len(y_shape))-len(t_shape)) + list(t_shape)) for t_shape in [x_shape, y_shape])
   shape_ret = tuple(max(sx, sy) for sx,sy in zip(x_shape, y_shape))
   return input.reshape(x_shape).expand(shape_ret)
 
@@ -210,7 +210,7 @@ def Xor(x:Tensor, y:Tensor): return Where((x==y), Tensor.zeros(*x.shape), Tensor
 def Not(x:Tensor): return Where((x==1), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1): 
-  k = int(k.numpy().item()) if k is not 0 else 0 # onnx passes k as a tensor int64 with one element, default is 0
+  k = int(k.numpy().item()) if k != 0 else 0 # onnx passes k as a tensor int64 with one element, default is 0
   return x.triu(k) if upper else x.tril(k)
 
 def ConstantOfShape(input, value:Tensor=None):

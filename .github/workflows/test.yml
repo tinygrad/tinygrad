@@ -28,7 +28,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: pylint tinygrad/
     - name: Lint with pyupgrade
-      run: pyupgrade --py38-plus
+      run: pyupgrade --py38-plus **/*.py
     - name: Run mypy
       run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
     - name: Install SLOCCount

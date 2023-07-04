@@ -25,7 +25,7 @@ def get_interventions(k, winning_interventions=[]):
     if up_axis >= k.first_reduce and up_axis < (k.first_reduce + len(k.group_for_reduce)): continue
     max_up = max(st.shape[up_axis] for st in k.sts)
     if max_up == 1: continue
-    for amount in sorted(list(set([2,4,8,max_up]))):
+    for amount in sorted(list({2,4,8,max_up})):
       if amount >= 32: continue
       if not all(st.shape[up_axis] == 1 or st.shape[up_axis]%amount == 0 for st in k.sts): continue
       p3.append((Interventions.UPCAST, (up_axis, amount)))

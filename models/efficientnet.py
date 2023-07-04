@@ -161,5 +161,5 @@ class EfficientNet:
       if mv.shape == vnp.shape:
         mv.assign(vnp.to(mv.device))
       else:
-        print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
+        print("MISMATCH SHAPE IN {}, {!r} {!r}".format(k, mv.shape, vnp.shape))
 

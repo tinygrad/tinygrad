@@ -83,7 +83,7 @@ def export_to_coco(class_map, annotations, image_list, dataset_path, output_path
   # Annotations
   annots = []
   for i, row in annotations.iterrows():
-    xmin, ymin, xmax, ymax, img_w, img_h = [row[k] for k in ["XMin", "YMin", "XMax", "YMax", "width", "height"]]
+    xmin, ymin, xmax, ymax, img_w, img_h = (row[k] for k in ["XMin", "YMin", "XMax", "YMax", "width", "height"])
     x, y, w, h = xmin * img_w, ymin * img_h, (xmax - xmin) * img_w, (ymax - ymin) * img_h
     coco_annot = {"id": int(i) + 1, "image_id": int(row["image_id"] + 1), "category_id": int(row["category_id"]), "bbox": [x, y, w, h], "area": w * h}
     coco_annot.update({k: row[k] for k in ["IsOccluded", "IsInside", "IsDepiction", "IsTruncated", "IsGroupOf"]})

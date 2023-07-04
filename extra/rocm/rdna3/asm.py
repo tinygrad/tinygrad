@@ -20,7 +20,7 @@ if ENABLE_NON_ASM:
 
 print(colored("creating CLBuffer", "green"))
 buf = CLBuffer.fromCPU(np.zeros(10, np.float32))
-code = open(pathlib.Path(__file__).parent / "prog.s", "r").read()
+code = open(pathlib.Path(__file__).parent / "prog.s").read()
 
 gen = []
 FLOPS = 0

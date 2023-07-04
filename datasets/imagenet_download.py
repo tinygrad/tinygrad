@@ -14,7 +14,7 @@ def imagenet_extract(file, path, small=False):
 
 def imagenet_prepare_val():
   # Read in the labels file
-  with open(Path(__file__).parent.parent / "datasets/imagenet/imagenet_2012_validation_synset_labels.txt", 'r') as f:
+  with open(Path(__file__).parent.parent / "datasets/imagenet/imagenet_2012_validation_synset_labels.txt") as f:
     labels = f.read().splitlines()
   f.close()
   # Get a list of images

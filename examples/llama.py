@@ -52,13 +52,13 @@ class RMSNorm:
 
 class Attention:
   def __init__(self, dim, n_heads):
-    self.wq, self.wk, self.wv, self.wo = [Linear(dim, dim, bias=False) for _ in range(4)]
+    self.wq, self.wk, self.wv, self.wo = (Linear(dim, dim, bias=False) for _ in range(4))
     self.n_heads = n_heads
     self.head_dim = dim // n_heads
 
   def prepare_attention(self, x:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-    xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], self.n_heads, self.head_dim) for x in (xq, xk, xv)]
+    xq, xk, xv = (x.reshape(x.shape[0], x.shape[1], self.n_heads, self.head_dim) for x in (xq, xk, xv))
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
     return xq, xk, xv
 

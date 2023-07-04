@@ -464,7 +464,7 @@ class CLIPTextTransformer:
     return self.final_layer_norm(x)
 
 # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
-@lru_cache()
+@lru_cache
 def default_bpe():
   return Path(__file__).parent.parent / "weights/bpe_simple_vocab_16e6.txt.gz"
 

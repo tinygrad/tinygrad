@@ -99,7 +99,7 @@ def compile(dat, output_fn):
     try:
       from test.models.test_onnx import run_onnx_torch
       torch_out = run_onnx_torch(onnx_model, np_inputs).numpy()
-      print(thneed_out, torch_out, "mse", np.sum((thneed_out-torch_out)**2), "max err", np.max(np.abs((thneed_out-torch_out))))
+      print(thneed_out, torch_out, "mse", np.sum((thneed_out-torch_out)**2), "max err", np.max(np.abs(thneed_out-torch_out)))
       np.testing.assert_allclose(torch_out, thneed_out, atol=1e-4, rtol=1e-2)
 
       # test loading/run thneed

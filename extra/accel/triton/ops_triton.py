@@ -19,7 +19,7 @@ from tinygrad.compiler.ast import ASTKernel
 stream = cuda.Stream()
 
 class TritonASTKernel(ASTKernel):
-  code_for_op : Dict[Op, str] = {
+  code_for_op : dict[Op, str] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "tl.maximum(A, 0.0)", UnaryOps.GT0: "tl.where(A>0,1,0)",
     UnaryOps.EXP: "tl.exp(A)", UnaryOps.LOG: "tl.log(A)", UnaryOps.RECIPROCAL: "(1.0/A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
@@ -28,7 +28,7 @@ class TritonASTKernel(ASTKernel):
   }
   start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "float('-inf')"}
 
-  def ast_parse(self, x:Union[TritonBuffer, LazyOp], acc:str, do_reduce=False) -> str:
+  def ast_parse(self, x:TritonBuffer | LazyOp, acc:str, do_reduce=False) -> str:
     if not isinstance(x, LazyOp):
       # this is a load
       buf_index = self.bufs.index(x)
@@ -103,11 +103,11 @@ class TritonASTKernel(ASTKernel):
     return runner
 
 class TritonBuffer(ExplicitExecAST):
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[TritonBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
+  def __init__(self, shape:ShapeTracker | tuple[int, ...], hostbuf:TritonBuffer | None=None, backing:np.ndarray | None=None, force_create=False):
     super().__init__(shape, hostbuf)
-    self._buf : Optional[TritonDeviceAllocation] = hostbuf._buf if hostbuf is not None else None
-    self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
-    self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
+    self._buf : TritonDeviceAllocation | None = hostbuf._buf if hostbuf is not None else None
+    self._base_shape : tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
+    self._backing : np.ndarray | None = hostbuf._backing if hostbuf is not None else backing
     if force_create: self.cuda
 
   @property
@@ -128,7 +128,7 @@ class TritonBuffer(ExplicitExecAST):
     return data
 
   @classmethod
-  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[TritonBuffer]=None):
+  def exec_ast(cls, ast:LazyOp, output_buffer:TritonBuffer | None=None):
     k = TritonASTKernel(ast, output_buffer)
     k.codegen()(*k.bufs)
     return k.ret

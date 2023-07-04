@@ -33,7 +33,7 @@ if not pathlib.Path(BASEDIR/'annotations').is_dir():
     zip_ref.extractall(BASEDIR)
   fn.unlink()
 
-with open(BASEDIR/'annotations/instances_val2017.json', 'r') as f:
+with open(BASEDIR/'annotations/instances_val2017.json') as f:
   annotations_raw = json.loads(f.read())
 images = annotations_raw['images']
 categories = annotations_raw['categories']
@@ -170,12 +170,12 @@ class NpEncoder(json.JSONEncoder):
       return float(obj)
     if isinstance(obj, np.ndarray):
       return obj.tolist()
-    return super(NpEncoder, self).default(obj)
+    return super().default(obj)
 
 
 def evaluate_predictions_on_coco(json_result_file, iou_type="bbox"):
   coco_results = []
-  with open(json_result_file, "r") as f:
+  with open(json_result_file) as f:
     for line in f:
       coco_results.append(json.loads(line))
   

@@ -41,11 +41,11 @@ import tinygrad.mlops as mlops
 # this is the good old familiar Tensor class
 class Tensor:
   # these two are pretty straightforward
-  grad: Optional[Tensor]
-  requires_grad: Optional[bool]
+  grad: Tensor | None
+  requires_grad: bool | None
 
   # this is the graph for the autograd engine
-  _ctx: Optional[Function]
+  _ctx: Function | None
 
   # this is where the data (and other tensor properties) actually live
   lazydata: LazyBuffer
@@ -74,7 +74,7 @@ from tinygrad.helpers import DType
 class LazyBuffer:
   # these three define the "type" of the buffer, and they are returned as Tensor properties
   device: str
-  shape: Tuple[int, ...]
+  shape: tuple[int, ...]
   dtype: DType
 
   # a ShapeTracker is used to track things like reshapes and permutes
@@ -85,18 +85,18 @@ class LazyBuffer:
 
   # if the LazyBuffer is realized, it has a RawBuffer
   # we will come back to RawBuffers later
-  realized: Optional[RawBuffer]
+  realized: RawBuffer | None
 
   # if the lazybuffer is unrealized, it has a LazyOp
   # this LazyOp describes the computation needed to realize this LazyBuffer
-  op: Optional[LazyOp]
+  op: LazyOp | None
 
 # LazyOp (in tinygrad/ops.py, code 4/10)
 # in a tree they form an Abstract Syntax Tree for a single GPU kernel
 class LazyOp:
   op: Op                                       # the type of the compute
-  src: Tuple[Union[LazyOp, LazyBuffer], ...]   # the sources
-  arg: Optional[Any] = None                    # and an optional static argument
+  src: tuple[LazyOp | LazyBuffer, ...]   # the sources
+  arg: Any | None = None                    # and an optional static argument
 
 # there's currently 27 Ops you have to implement for an accelerator.
 class UnaryOps(Enum):    NOOP = auto(); EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto()
@@ -154,23 +154,23 @@ assert result.lazydata.realized.toCPU()[0] == 5, "when put in numpy with toCPU, 
 # Interpreted backends are very simple (example: CPU and TORCH)
 class Interpreted:
   # they have a backing RawBuffer
-  buffer: Type[RawBuffer]
+  buffer: type[RawBuffer]
 
   # and they have a lookup table to functions for the Ops
-  fxn_for_op: Dict[Op, Callable] = {
+  fxn_for_op: dict[Op, Callable] = {
     UnaryOps.EXP2: lambda x: np.exp2(x),
     BinaryOps.ADD: lambda x,y: x+y}
 
 # Compiled backends take a little more (example: GPU and LLVM)
 class Compiled:
   # they also have a backing RawBuffer
-  buffer: Type[RawBuffer]
+  buffer: type[RawBuffer]
 
   # a code generator, which compiles the AST
-  codegen: Type[ASTKernel]
+  codegen: type[ASTKernel]
 
   # and a runtime, which runs the generated code
-  runtime: Type[Runtime]
+  runtime: type[Runtime]
 
 # Runtime is what actually runs the kernels for a compiled backend
 class Runtime(ABC):
@@ -178,7 +178,7 @@ class Runtime(ABC):
   # the constructor compiles the code
   def __init__(self, name:str, prg:str): pass
   # call runs the code on the bufs. NOTE: the output is always bufs[0], but this is just a convention
-  def __call__(self, global_size:Optional[List[int]], local_size:Optional[List[int]], *bufs:List[RawBuffer]): pass
+  def __call__(self, global_size:list[int] | None, local_size:list[int] | None, *bufs:list[RawBuffer]): pass
 
 # %%
 # == RawBuffer (in tinygrad/runtime/lib.py, code 5/10) ==
@@ -251,9 +251,9 @@ class ASTKernel:
 
 # we return a class that runs code on LazyBuffers, which are all expected to be realized
 class ASTRunner:  # (from tinygrad/ops.py)
-  def __init__(self, name, prg, global_size:Optional[List[int]], local_size:Optional[List[int]]): pass
+  def __init__(self, name, prg, global_size:list[int] | None, local_size:list[int] | None): pass
   def build(self, runtime:Runtime): pass
-  def exec(self, bufs:List[LazyBuffer]): pass
+  def exec(self, bufs:list[LazyBuffer]): pass
 
 # that hides a lot of complexity that will be refactored, but that's the basic idea of code generation
 

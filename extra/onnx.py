@@ -56,7 +56,7 @@ def get_run_onnx(onnx_model: ModelProto):
     else: raise Exception(f"can't parse {a.type} {a}")
   def attribute_to_dict(a: RepeatedCompositeFieldContainer[AttributeProto]): return {x.name:attribute_parse(x) for x in a}
 
-  tensors: Dict[str, Tensor] = {}
+  tensors: dict[str, Tensor] = {}
 
   # get weights and biases
   for inp in onnx_model.graph.initializer:
@@ -83,8 +83,8 @@ def get_run_onnx(onnx_model: ModelProto):
 
   def run_onnx(inputs={}, debug=False):
     if getenv("DEBUGONNX"): debug = True
-    input_tensors: Dict[str,Tensor] = {}
-    intermediate_tensors: Dict[str,Tensor] = {}
+    input_tensors: dict[str,Tensor] = {}
+    intermediate_tensors: dict[str,Tensor] = {}
     output_tensor_names = [x.name for x in onnx_model.graph.output]
 
     # get inputs
@@ -108,11 +108,11 @@ def get_run_onnx(onnx_model: ModelProto):
     def fetch_tensor(x: str):
       if x in tensors: return tensors[x]
       if x in intermediate_tensors: return intermediate_tensors[x]
-      if x != str(): return input_tensors[x]
+      if x != '': return input_tensors[x]
       return None
 
     for num,n in enumerate(onnx_model.graph.node):
-      inp: List[Tensor] = []
+      inp: list[Tensor] = []
       if debug: print("inputs:")
       for x in n.input:
         t = fetch_tensor(x)

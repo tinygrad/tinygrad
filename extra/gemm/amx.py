@@ -58,7 +58,7 @@ func = ir.Function(module, ir.FunctionType(ir.IntType(64), [ir.FloatType().as_po
 
 # load all 
 entry = ir.IRBuilder(func.append_basic_block(name="entry"))
-zm, xm, ym = [entry.ptrtoint(func.args[i], ir.IntType(64)) for i in range(3)]
+zm, xm, ym = (entry.ptrtoint(func.args[i], ir.IntType(64)) for i in range(3))
 
 loop_1 = ir.IRBuilder(func.append_basic_block(name="loop_y"))
 loop_1_exit = ir.IRBuilder(func.append_basic_block(name="loop_y_exit"))

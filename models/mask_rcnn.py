@@ -120,7 +120,7 @@ class BoxList:
       bbox = Tensor(bbox)
     if bbox.ndim != 2:
       raise ValueError(
-        "bbox should have 2 dimensions, got {}".format(bbox.ndim)
+        f"bbox should have 2 dimensions, got {bbox.ndim}"
       )
     if bbox.shape[-1] != 4:
       raise ValueError(
@@ -137,10 +137,10 @@ class BoxList:
 
   def __repr__(self):
     s = self.__class__.__name__ + "("
-    s += "num_boxes={}, ".format(len(self))
-    s += "image_width={}, ".format(self.size[0])
-    s += "image_height={}, ".format(self.size[1])
-    s += "mode={})".format(self.mode)
+    s += f"num_boxes={len(self)}, "
+    s += f"image_width={self.size[0]}, "
+    s += f"image_height={self.size[1]}, "
+    s += f"mode={self.mode})"
     return s
 
   def area(self):
@@ -505,7 +505,7 @@ class RPNHead:
     return logits, bbox_reg
 
 
-class BoxCoder(object):
+class BoxCoder:
   def __init__(self, weights, bbox_xform_clip=math.log(1000. / 16)):
     self.weights = weights
     self.bbox_xform_clip = bbox_xform_clip
@@ -1187,7 +1187,7 @@ class RoIHeads:
     return x, detections, {}
 
 
-class ImageList(object):
+class ImageList:
   def __init__(self, tensors, image_sizes):
     self.tensors = tensors
     self.image_sizes = image_sizes
@@ -1229,7 +1229,7 @@ def to_image_list(tensors, size_divisible=32):
 
     return ImageList(batched_imgs, image_sizes)
   else:
-    raise TypeError("Unsupported type for to_image_list: {}".format(type(tensors)))
+    raise TypeError(f"Unsupported type for to_image_list: {type(tensors)}")
 
 
 class MaskRCNN:

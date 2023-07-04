@@ -172,7 +172,7 @@ class Linearizer:
     ret = []
     for _idx in expand_idxs(idxs):
       if len(upcast_dim) == 1:
-        idx, valid = self.sts[i].expr_idxs((_idx[:upcast_dim[0]] + (Variable.num(0),) + _idx[upcast_dim[0]+1:]))
+        idx, valid = self.sts[i].expr_idxs(_idx[:upcast_dim[0]] + (Variable.num(0),) + _idx[upcast_dim[0]+1:])
         localtype = dtypes._float4
         # disallow unaligned access, fall back to float
         if idx.render() != ((idx//4)*4).render():
