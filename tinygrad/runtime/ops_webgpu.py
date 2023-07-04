@@ -57,7 +57,7 @@ class WebGpuCodegen(Linearizer):
     bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(self.bufs)]
     depth += 1
     gid = [f"gindex.{'xyz'[x]}" for x in range(3)]
-    lid: List[str] = [] if not LOCAL_GROUPS else [f"lindex.{'xyz'[x]}" for x in range(3)]
+    lid: List[str] = [] if not LOCAL_GROUPS else [f"lindex.{'xyz'[x]}*local_index.{'xyz'[x]}" for x in range(3)]
     pend_close = None
     for uop,newvar,vin,args in self.uops:
       if uop == UOps.LOOP:
@@ -123,8 +123,9 @@ class WebGpuCodegen(Linearizer):
     function_name = f"{self.function_name}_{abs(hash(self.key))}"
     bind_it = iter(range(len(self.bufs)))
     local_size = local_size[::-1] if len(local_size) else [1]
+    params = "@builtin(workgroup_id) gindex: vec3<u32>, @builtin(num_workgroups) local_index: vec3<u32>,@builtin(local_invocation_id) lindex: vec3<u32>" if LOCAL_GROUPS else "@builtin(global_invocation_id) gindex: vec3<u32>"
     prg = "\n".join([f"@group(0) @binding({next(bind_it)}) var<storage,read_write> data{i}: array<{type_map[x.dtype]}>;" for i,x in enumerate(self.bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)])
-    prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(global_invocation_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
+    prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}({params}) {{\n" + "\n".join(kernel) + "\n}"
     return ASTRunner(function_name, prg, global_size[::-1] if len(global_size) else [1], local_size)
 
 class RawWebGPUBuffer(RawBufferCopyIn):
