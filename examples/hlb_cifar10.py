@@ -100,8 +100,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
 
   # JIT at every run
   @TinyJit
-  def train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl):
-    mixup_prob = Tensor(np.random.beta(MIXUP_ALPHA, MIXUP_ALPHA, (1, )).astype(np.float32)) if MIXUP_ALPHA > 0 else Tensor.ones(Xr.shape[0], 1, 1, 1)
+  def train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
     X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
     X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < 0.5, X[..., ::-1], X) # flip augmentation 
     out = model(X)
@@ -132,6 +131,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   left_batcher, right_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True), fetch_batches(X_train, Y_train, BS=BS, seed=seed+1, is_train=True)
   while i <= STEPS:
     (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
+    mixup_prob = Tensor(np.random.beta(MIXUP_ALPHA, MIXUP_ALPHA, (1, )).astype(np.float32)) if MIXUP_ALPHA > 0 else Tensor.ones(Xr.shape[0], 1, 1, 1)
     if i%50 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
@@ -149,7 +149,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     if STEPS == 0: break
     GlobalCounters.reset()
     st = time.monotonic()
-    loss = train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl)
+    loss = train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
     et = time.monotonic()
     loss_cpu = loss.numpy()
     cl = time.monotonic()
