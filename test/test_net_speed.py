@@ -91,8 +91,8 @@ class TestConvSpeed(unittest.TestCase):
     stop_profile(pr, sort='time')
     fpt = (fpt*1000/cnt)
     bpt = (bpt*1000/cnt)
-    print("forward pass:  {:.3f} ms, {:.2f}x off baseline {:.3f} ms".format(fpt, fpt/fpt_baseline, fpt_baseline))
-    print("backward pass: {:.3f} ms, {:.2f}x off baseline {:.3f} ms".format(bpt, bpt/bpt_baseline, bpt_baseline))
+    print(f"forward pass:  {fpt:.3f} ms, {fpt/fpt_baseline:.2f}x off baseline {fpt_baseline:.3f} ms")
+    print(f"backward pass: {bpt:.3f} ms, {bpt/bpt_baseline:.2f}x off baseline {bpt_baseline:.3f} ms")
 
 
 if __name__ == '__main__':

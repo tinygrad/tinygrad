@@ -17,7 +17,7 @@ def benchmark(ane):
   ts = (et-st)
   ops = 1000*512*512*2
 
-  print("{:.2f} ms, {:.2f} gigaops/sec".format(ts*1000, ops*1e-9/ts))
+  print(f"{ts*1000:.2f} ms, {ops*1e-9/ts:.2f} gigaops/sec")
 
 
 if __name__ == "__main__":

@@ -3,10 +3,10 @@ import os, functools, platform, time, re
 from weakref import KeyedRef, ref
 from _weakref import _remove_dead_weakref # type: ignore
 import numpy as np
-from typing import NamedTuple, Final, Iterator, ClassVar, Callable, Any
+from typing import NamedTuple, Final, Iterator, ClassVar, Callable, Any, Tuple
 from math import prod # noqa: F401 # pylint:disable=unused-import
 
-ShapeType = tuple[int, ...]
+ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
 
