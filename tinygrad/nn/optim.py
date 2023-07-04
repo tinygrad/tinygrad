@@ -67,7 +67,3 @@ class LAMB(Optimizer):
         r = 1.0
       t.assign(t.detach() - self.lr * r * up)
     self.realize([self.t] + self.m + self.v)
-
-# TODO: remove this
-from tinygrad.state import get_state_dict, get_parameters # pylint: disable=unused-import # noqa: F401
-
