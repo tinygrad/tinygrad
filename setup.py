@@ -42,6 +42,7 @@ setup(name='tinygrad',
             "tabulate",
             "safetensors",
             "types-PyYAML",
+            "cloudpickle",
         ],
       },
       include_package_data=True)

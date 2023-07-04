@@ -561,8 +561,23 @@ def hiprtcCompileProgram(prog, options):
   c_options = (ctypes.c_char_p * len(e_options))()
   c_options[:] = e_options
   status = _libhiprtc.hiprtcCompileProgram(prog, len(c_options), c_options)
+  if status == 6: print(hiprtcGetProgramLog(prog))
   hipCheckStatus(status)
 
+_libhiprtc.hiprtcGetProgramLogSize.restype = int
+_libhiprtc.hiprtcGetProgramLogSize.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t)]
+
+_libhiprtc.hiprtcGetProgramLog.restype = int
+_libhiprtc.hiprtcGetProgramLog.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+
+def hiprtcGetProgramLog(prog):
+  logsz = ctypes.c_size_t()
+  status = _libhiprtc.hiprtcGetProgramLogSize(prog, logsz)
+  hipCheckStatus(status)
+  logstr = ctypes.create_string_buffer(logsz.value)
+  status = _libhiprtc.hiprtcGetProgramLog(prog, logstr)
+  hipCheckStatus(status)
+  return logstr.value.decode()
 
 _libhiprtc.hiprtcGetCodeSize.restype = int
 _libhiprtc.hiprtcGetCodeSize.argtypes = [ctypes.c_void_p,                 # hiprtcProgram

@@ -7,6 +7,7 @@ import time
 import numpy as np
 from datasets import fetch_cifar
 from tinygrad import nn
+from tinygrad.state import get_parameters, get_state_dict
 from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
@@ -89,7 +90,7 @@ def train_cifar():
   if getenv("TORCHWEIGHTS"):
     from examples.hlb_cifar10_torch import SpeedyResNet as SpeedyResNetTorch
     torch_model = SpeedyResNetTorch()
-    model_state_dict = optim.get_state_dict(model)
+    model_state_dict = get_state_dict(model)
     torch_state_dict = torch_model.state_dict()
     for k,v in torch_state_dict.items():
       old_mean_std = model_state_dict[k].mean().numpy(), model_state_dict[k].std().numpy()
@@ -99,9 +100,9 @@ def train_cifar():
     exit(0)
 
   if getenv("ADAM"):
-    optimizer = optim.Adam(optim.get_parameters(model), lr=Tensor([0.001]).realize())
+    optimizer = optim.Adam(get_parameters(model), lr=Tensor([0.001]).realize())
   else:
-    optimizer = optim.SGD(optim.get_parameters(model), lr=0.01, momentum=0.85, nesterov=True)
+    optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=0.85, nesterov=True)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
