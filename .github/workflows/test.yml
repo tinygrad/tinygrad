@@ -63,30 +63,14 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: install swiftshader
+    - name: Install dependencies
       shell: bash
       run: |
-        set -e
-
-        mkdir -p swiftshader
-        curl -LsSf https://github.com/gfx-rs/ci-build/releases/latest/download/swiftshader-linux-x86_64.tar.xz | tar -xf - -C swiftshader
-
-        echo "VK_ICD_FILENAMES=$PWD/swiftshader/vk_swiftshader_icd.json" >> $GITHUB_ENV
-
-    - name: install llvmpipe, vulkan sdk
-      shell: bash
-      run: |
-        set -e
-
         sudo apt-get update -y -qq
-
-        # vulkan sdk
-        wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
-        sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
-
-        sudo apt-get update
-        sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev vulkan-sdk
-
+        sudo apt-get install -y software-properties-common
+        sudo add-apt-repository ppa:oibaf/graphics-drivers -y
+        sudo apt-get update -y -qq
+        sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-driversset -e
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
@@ -94,7 +78,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[testing,webgpu]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: WEBGPU=1 python -m pytest -s -v -n=auto test/
+      run: WEBGPU=1 python -m pytest -s -v test/
 
   testimagenet:
     name: ImageNet to C Compile Test
