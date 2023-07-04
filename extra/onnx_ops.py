@@ -322,6 +322,7 @@ def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
   return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]))*input).sum(indices.ndim)
 
 def Gather(input, indices, axis=0):
+  indices = (indices < 0).where(indices+input.shape[-2], indices)
   indices_shape = list(indices.shape)
   indices = indices.flatten()
   input = input.transpose(ax1=0, ax2=axis)
@@ -368,8 +369,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, 0.5, False)
     elif nearest_mode == "floor": ret = x_resized.floor()
     elif nearest_mode == "ceil": ret = x_resized.ceil()
-    ret = ret.clip(0, x_len-1)
-    return ret
+    return ret.clip(0, x_len-1)
   def _coordinate_transformation(x_out, y_out, output_shape, scales_lol, roi=None):
     if coordinate_transformation_mode == "half_pixel":
       x_out = (x_out + 0.5)/scales_lol[-1] - 0.5
@@ -453,10 +453,10 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
         shrink_args = ((0, X.shape[0]), (0, X.shape[1]), y_shrink, x_shrink)
         corners = safe_numpy(X.shrink(shrink_args).flatten()) # TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT
         x1, x2, y1, y2 = x_floor, x_floor+1, y_floor, y_floor+1
-        if x == x_floor and y == y_floor: # TODO UGLY IF STATEMENTS.... https://en.wikipedia.org/wiki/Bilinear_interpolation maybe do weighted mean?
+        if x == x_floor and y == y_floor: # TODO UGLY IF STATEMENTS.... https://en.wikipedia.org/wiki/Bilinear_interpolation#Weighted_mean maybe do weighted mean?
           ret.append(corners[0]) 
         elif x == x_floor:
-          ret.append((corners[0] * (y2 - y) + corners[1] * (y - y1)) / (y2 - y1)) # args = sum([]) / prod() TODO
+          ret.append((corners[0] * (y2 - y) + corners[1] * (y - y1)) / (y2 - y1))
         elif y == y_floor:
           ret.append((corners[0] * (x2 - x) + corners[1] * (x - x1)) / (x2 - x1))
         else: 
