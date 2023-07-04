@@ -23,7 +23,7 @@ def imagenet_prepare_val():
   # Create folders and move files into those
   for co,dir in enumerate(labels):
     os.makedirs(Path(__file__).parent.parent / "datasets/imagenet/val" / dir, exist_ok=True)
-    os.replace(Path(__file__).parent.parent / "datasets/imagenet/val" / images[co], Path(__file__).parent.parent / "datasets/imagenet/val" / dir / images[co], exist_ok=True)
+    os.replace(Path(__file__).parent.parent / "datasets/imagenet/val" / images[co], Path(__file__).parent.parent / "datasets/imagenet/val" / dir / images[co])
   os.remove(Path(__file__).parent.parent / "datasets/imagenet/imagenet_2012_validation_synset_labels.txt")
 
 def imagenet_prepare_train():
@@ -45,7 +45,7 @@ if __name__ == "__main__":
   download_file("https://image-net.org/data/ILSVRC/2012/ILSVRC2012_img_val.tar", Path(__file__).parent.parent / "datasets/imagenet/ILSVRC2012_img_val.tar") # 7GB
   imagenet_extract(Path(__file__).parent.parent / "datasets/imagenet/ILSVRC2012_img_val.tar", Path(__file__).parent.parent / "datasets/imagenet/val")
   imagenet_prepare_val()
-  if os.getenv['IMGNET_TRAIN'] is not None:
+  if os.getenv('IMGNET_TRAIN', None) is not None:
     download_file("https://image-net.org/data/ILSVRC/2012/ILSVRC2012_img_train.tar", Path(__file__).parent.parent / "datasets/imagenet/ILSVRC2012_img_train.tar") #138GB!
     imagenet_extract(Path(__file__).parent.parent / "datasets/imagenet/ILSVRC2012_img_train.tar", Path(__file__).parent.parent / "datasets/imagenet/train")
     imagenet_prepare_train()
