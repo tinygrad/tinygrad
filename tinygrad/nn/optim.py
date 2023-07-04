@@ -1,5 +1,5 @@
 # sorted in order of increasing complexity
-from typing import List, Optional
+from typing import List
 from tinygrad.helpers import dedup
 from tinygrad.tensor import Tensor
 
