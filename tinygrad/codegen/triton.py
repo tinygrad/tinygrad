@@ -98,7 +98,7 @@ class TritonCodegen(Linearizer):
       elif uop == UOps.LOAD:
         assert newvar is not None
         val = f"{bufnames[args.i]} + {args.idx.render()}" # defaults to render_python
-        triton_dtype = {dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.float64: "tl.float64", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64"}[newvar.dtype]
+        triton_dtype = {dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64"}[newvar.dtype]
         if args.valid.min == 1: kk(f"{newvar.render()} = tl.load({val}).to({triton_dtype})")#; kk(f"if ridx2 == 0: tl.device_print('test', {newvar.render()})")
         else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({val}, mask={args.valid.render()}), 0.0).to({triton_dtype})")
       elif uop == UOps.STORE:
@@ -119,7 +119,7 @@ class TritonCodegen(Linearizer):
     with open(fn, "w") as f: f.write(prg)
     codeobj = compile(prg, fn, "exec")
     exec(codeobj, globals()) # pylint: disable=W0122
-    triton_prg = triton_compile(globals()["fxn"], signature=','.join([{dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.float64: "*fp64", dtypes.int8: "*i8", dtypes.uint8: "*u8", dtypes.int32: "*i32", dtypes.int64: "*i64"}[buf.dtype] for buf in self.bufs]), device_type="cuda", debug=True)
+    triton_prg = triton_compile(globals()["fxn"], signature=','.join([{dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.int8: "*i8", dtypes.uint8: "*u8", dtypes.int32: "*i32", dtypes.int64: "*i64"}[buf.dtype] for buf in self.bufs]), device_type="cuda", debug=True)
     asm = triton_prg.asm['ptx']
     name = asm.split(".visible .entry ")[1].split("(")[0]
     local_size = [int(x) for x in asm.split(".maxntid ")[1].split("\n")[0].split(", ")]  # [128, 1, 1] is num_warps=4
