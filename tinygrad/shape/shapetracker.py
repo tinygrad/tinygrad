@@ -164,10 +164,10 @@ class ShapeTracker:
         ret[idxs.index(this_dim.a)] = this_dim.b
       elif isinstance(this_dim, Variable):
         ret[idxs.index(this_dim)] = 1
-    render_idx, render_valid = idx.render(), valid.render()
-    for i in range(len(self.shape)):
-      if f'idx{i}' in render_valid and not ignore_valid: ret[i] = None
-      elif f'idx{i}' not in render_idx: ret[i] = 0
+    idx_vars, valid_vars = idx.vars(), valid.vars()
+    for i,tidx in enumerate(idxs):
+      if tidx in valid_vars and not ignore_valid: ret[i] = None
+      elif tidx not in idx_vars: ret[i] = 0
     return tuple(ret)
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 

@@ -17,8 +17,10 @@ class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = aut
 
 class LocalBuffer(NamedTuple):
   name: str
+  size: int
   dtype: DType = dtypes.float32
   realized: None = None
+  def __str__(self): return f"localbuffer<{self.name}[{self.size}]>"
 
 class Token(NamedTuple):
   name: str
@@ -218,9 +220,9 @@ class Linearizer:
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
-      self.bufs.append(LocalBuffer("temp"))
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
     # print
@@ -401,10 +403,11 @@ class Linearizer:
     assert len(colors) == self.shape_len, "colors size mismatch"
     return colors
 
+  def colored_shape(self) -> str: return ' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors()))
   def printbufs(self, prefix=""):
     for i in range(len(self.sts)):
-      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i] is not None else 'FAKE':47s}", self.sts[i].views)
-    print(' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors())))
+      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i].realized is not None else str(self.bufs[i]):47s}", self.sts[i].views)
+    print(self.colored_shape())
 
   # ******************** base simplifiers ********************
 
