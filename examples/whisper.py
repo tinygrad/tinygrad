@@ -86,7 +86,9 @@ class TextDecoder:
     x = self.token_embedding(x) + self.positional_embedding[offset : offset + x.shape[-1]]
 
     seqlen, start_pos = x.shape[1], 0
-    mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf")).triu(k=start_pos+1)
+    # TODO: triu is broken, # 942
+    #mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf")).triu(k=start_pos+1)
+    mask = Tensor(np.triu(np.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=np.float32), k=start_pos+1))
 
     for block in self.blocks: x = block(x, xa, mask)
     x = self.ln(x)
