@@ -12,6 +12,26 @@ import torch
 import argparse
 import cv2
 
+class Compose(object):
+  def __init__(self, transforms):
+    self.transforms = transforms
+
+  def __call__(self, image, target):
+    for t in self.transforms:
+      image, target = t(image, target)
+    return image, target
+
+  def __repr__(self):
+    format_string = self.__class__.__name__ + "("
+    for t in self.transforms:
+      format_string += "\n"
+      format_string += "    {0}".format(t)
+    format_string += "\n)"
+    return format_string
+
+class ToTensor(object):
+  def __call__(self, image, target):
+    return Ft.to_tensor(image), target
 
 class Resize:
   def __init__(self, min_size, max_size):
@@ -43,11 +63,14 @@ class Resize:
 
       return (oh, ow)
 
-  def __call__(self, image, target):
+  def __call__(self, image, target=None):
     size = self.get_size(image.size)
     image = Ft.resize(image, size)
-    target = target.resize(image.size)
-    return image, target
+    if target:
+      target = target.resize(image.size)
+      return image, target
+    else:
+      return image
 
 class RandomHorizontalFlip(object):
   def __init__(self, prob=0.5):
@@ -65,19 +88,35 @@ class Normalize:
     self.std = std
     self.to_bgr255 = to_bgr255
 
-  def __call__(self, image, target):
+  def __call__(self, image, target=None):
+    # TODO the normalization mean and std are used from the inference 
+    # implementation which appears to be RGB w/o scaling to 255
+    # need to double check otherwise the entire training won't work.
+    # Here are a informative explanation for the history of using BGR 
+    # https://stackoverflow.com/questions/70115749/is-there-any-reason-for-changing-the-channels-order-of-an-image-from-rgb-to-bgr
+    #
+    # Values to be used for image normalization
+    # `_C.INPUT.PIXEL_MEAN = [102.9801, 115.9465, 122.7717]
+    # ` Values to be used for image normalization
+    # `_C.INPUT.PIXEL_STD = [1., 1., 1.]
+    # ` Convert image to BGR format (for Caffe2 models), in range 0-255
+    # `_C.INPUT.TO_BGR255 = True
+
     if self.to_bgr255:
       image = image[[2, 1, 0]] * 255
     else:
       image = image[[0, 1, 2]] * 255
-    image = Ft.normalize(image, mean=self.mean, std=self.std)
-    return image, target
+    image = Tensor(Ft.normalize(image, mean=self.mean, std=self.std).numpy())
+    if target:
+      return image, target
+    else:
+      return image
 
-transforms_train = T.Compose(
+transforms_train = Compose(
   [
     Resize(800, 1333),
     RandomHorizontalFlip(0.5),
-    T.ToTensor(),
+    ToTensor(),
     Normalize(
       mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
     ),

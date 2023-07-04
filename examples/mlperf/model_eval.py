@@ -212,6 +212,7 @@ def eval_mrcnn():
   #TODO: bs > 1 not as accurate
   bs = 1
 
+  print("load batch")
   for batch in tqdm(iterate(images, bs=bs), total=len(images)//bs):
     batch_imgs = []
     for image_row in batch:

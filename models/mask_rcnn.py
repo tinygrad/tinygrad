@@ -197,8 +197,8 @@ class BoxList:
       return (
         xmin,
         ymin,
-        xmin + (w - TO_REMOVE).clamp(min=0),
-        ymin + (h - TO_REMOVE).clamp(min=0),
+        xmin + (w - TO_REMOVE).clip(0, w - TO_REMOVE), #TO-DO: clip make min, max optional
+        ymin + (h - TO_REMOVE).clip(0, h - TO_REMOVE),
       )
 
   def resize(self, size, *args, **kwargs):
@@ -257,26 +257,41 @@ class BoxList:
 
   def clip_to_image(self, remove_empty=True):
     TO_REMOVE = 1
-    bb1 = self.bbox.clip(min_=0, max_=self.size[0] - TO_REMOVE)[:, 0]
-    bb2 = self.bbox.clip(min_=0, max_=self.size[1] - TO_REMOVE)[:, 1]
-    bb3 = self.bbox.clip(min_=0, max_=self.size[0] - TO_REMOVE)[:, 2]
-    bb4 = self.bbox.clip(min_=0, max_=self.size[1] - TO_REMOVE)[:, 3]
+    # TODO find solutions for 
+    # 'Tensor' object does not support item assignment
+    # 'Tensor' does not support & (and) operation
+    # the clip operation was first applied to the entire bbox and then being 
+    # indexed, don't know if the other way around is faster or not
+    bb1 = self.bbox[:,0].clip(min_=0, max_=self.size[0] - TO_REMOVE)
+    bb2 = self.bbox[:,1].clip(min_=0, max_=self.size[1] - TO_REMOVE)
+    bb3 = self.bbox[:,2].clip(min_=0, max_=self.size[0] - TO_REMOVE)
+    bb4 = self.bbox[:,3].clip(min_=0, max_=self.size[1] - TO_REMOVE)
+    # bb1 = self.bbox.clip(min_=0, max_=self.size[0] - TO_REMOVE)[:,0]
+    # bb2 = self.bbox.clip(min_=0, max_=self.size[1] - TO_REMOVE)[:,1]
+    # bb3 = self.bbox.clip(min_=0, max_=self.size[0] - TO_REMOVE)[:,2]
+    # bb4 = self.bbox.clip(min_=0, max_=self.size[1] - TO_REMOVE)[:,3]
     self.bbox = Tensor.stack((bb1, bb2, bb3, bb4), dim=1)
     if remove_empty:
-      box = self.bbox
+      box = self.bbox.numpy()
       keep = (box[:, 3] > box[:, 1]) & (box[:, 2] > box[:, 0])
       return self[keep]
     return self
 
   def __getitem__(self, item):
+    # print("item", item)
+    # print(self.bbox)
     if isinstance(item, list):
       if len(item) == 0:
         return []
       if sum(item) == len(item) and isinstance(item[0], bool):
         return self
-    bbox = BoxList(tensor_gather(self.bbox, item), self.size, self.mode)
+    # bbox = BoxList(tensor_gather(self.bbox, item), self.size, self.mode
+    bbox = BoxList(Tensor(self.bbox.numpy()[item]), self.size, self.mode)
     for k, v in self.extra_fields.items():
-      bbox.add_field(k, tensor_gather(v, item))
+      if not isinstance(v, Tensor):
+        bbox.add_field(k, v[item])
+      else:
+        bbox.add_field(k, Tensor(v.numpy()[item]))
     return bbox
 
   def __len__(self):
@@ -315,12 +330,45 @@ class Polygons(object):
       idx = 1
 
     for poly in self.polygons:
-      p = poly.clone()
+      p = poly.numpy().copy()
       TO_REMOVE = 1
-      p[idx::2] = dim - poly[idx::2] - TO_REMOVE
+      p[idx::2] = dim - poly.numpy()[idx::2] - TO_REMOVE
       flipped_polygons.append(p)
 
     return Polygons(flipped_polygons, size=self.size, mode=self.mode)
+
+  def crop(self, box):
+    w, h = box[2] - box[0], box[3] - box[1]
+
+    # TODO chck if necessary
+    w = max(w, 1)
+    h = max(h, 1)
+
+    cropped_polygons = []
+    for poly in self.polygons:
+      p = poly.clone()
+      p[0::2] = p[0::2] - box[0]  # .clamp(min=0, max=w)
+      p[1::2] = p[1::2] - box[1]  # .clamp(min=0, max=h)
+      cropped_polygons.append(p)
+
+    return Polygons(cropped_polygons, size=(w, h), mode=self.mode)
+
+  def resize(self, size, *args, **kwargs):
+    ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(size, self.size))
+    if ratios[0] == ratios[1]:
+      ratio = ratios[0]
+      scaled_polys = [p * ratio for p in self.polygons]
+      return Polygons(scaled_polys, size, mode=self.mode)
+
+    ratio_w, ratio_h = ratios
+    scaled_polygons = []
+    for poly in self.polygons:
+      p = poly.numpy().copy()
+      p[0::2] *= ratio_w
+      p[1::2] *= ratio_h
+      scaled_polygons.append(p)
+
+    return Polygons(scaled_polygons, size=size, mode=self.mode)
 
   def convert(self, mode):
     width, height = self.size
