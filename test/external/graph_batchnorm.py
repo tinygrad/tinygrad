@@ -1,11 +1,12 @@
 import unittest
+from tinygrad.state import get_parameters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d, BatchNorm2d, optim
 
 def model_step(lm):
   Tensor.training = True
   x = Tensor.ones(8,12,128,256, requires_grad=False)
-  optimizer = optim.SGD(optim.get_parameters(lm), lr=0.001)
+  optimizer = optim.SGD(get_parameters(lm), lr=0.001)
   loss = lm.forward(x).sum()
   optimizer.zero_grad()
   loss.backward()

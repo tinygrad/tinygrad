@@ -144,7 +144,7 @@ def get_run_onnx(onnx_model: ModelProto):
       elif n.op_type == "Resize":
         # TODO: this is handcoded for YOLOv8
         scales = safe_numpy(inp[2])
-        assert all([int(x) == x and x >= 1 for x in scales])
+        assert all(int(x) == x and x >= 1 for x in scales)
         ret = inp[0].reshape([val for pair in zip(inp[0].shape, [1] * len(scales)) for val in pair])
         ret = ret.expand([val for pair in zip(inp[0].shape, [int(x) for x in scales]) for val in pair])
         ret = ret.reshape([x*y for x,y in zip(inp[0].shape, [int(x) for x in scales])])
@@ -157,7 +157,7 @@ def get_run_onnx(onnx_model: ModelProto):
         ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
         ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
       elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
-        if all([isinstance(x, Tensor) for x in inp]) and (len(inp[0].shape) != len(inp[1].shape)) and (prod(inp[0].shape) == prod(inp[1].shape)):
+        if all(isinstance(x, Tensor) for x in inp) and (len(inp[0].shape) != len(inp[1].shape)) and (prod(inp[0].shape) == prod(inp[1].shape)):
           inp[1] = inp[1].reshape(inp[0].shape)
         # TODO: is this right?
         if 'broadcast' in opt: inp[1] = inp[1].reshape([-1 if i == opt['broadcast'] else 1 for i in range(len(inp[0].shape))])
