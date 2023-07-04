@@ -81,7 +81,7 @@ class WebGpuCodegen(Linearizer):
               kk(f"for(var {var.expr}: i32 = 0; {var.expr} <= {var.max}; {var.expr}++) {{")
         depth += 1
       elif uop == UOps.ENDLOOP:
-        if args[1] == "local":
+        if args[1] == "local" and LOCAL_GROUPS:
           kk("workgroupBarrier();")
           kk(f"if ({Variable.sum(args[0]).render(render_cl)} == 0) {{")
           pend_close = "}"*(len(args[0])+1) + f" // {args[1]}"
