@@ -558,9 +558,9 @@ class Tensor:
     if x.__class__ is not Tensor and not reverse:
       # simple pow identities
       if x < 0: return (1.0/self).pow(-x)
-      if x == 2.0: return a*a
-      if x == 1.0: return a
-      if x == 0.5: return a.sqrt()
+      if x == 2.0: return self*self
+      if x == 1.0: return self
+      if x == 0.5: return self.sqrt()
     return self.log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(log(x)).exp()
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
