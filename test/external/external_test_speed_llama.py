@@ -3,7 +3,6 @@ import unittest, time
 from examples.llama import Transformer, args_7B
 from test.test_net_speed import start_profile, stop_profile
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
 from tinygrad.lazy import Device
 from tinygrad.state import get_state_dict
 from tinygrad.ops import Compiled
@@ -30,10 +29,11 @@ class TestLLaMASpeed(unittest.TestCase):
       #print(f"clearing {len(Device['fake'].method_cache)} from method cache")
       if empty_method_cache: Device['fake'].method_cache.clear()
       tms = [time.perf_counter()]
-      for i in range(5):
+      for i in range(10):
         model(Tensor([[2]]), i).realize()
         tms.append(time.perf_counter())
-      print(f"{st:15s} runtime in ms:", ', '.join("%.2f"%((tms[i+1]-tms[i])*1000) for i in range(len(tms)-1)))
+      timings = [(tms[i+1]-tms[i])*1000 for i in range(len(tms)-1)]
+      print(f"{st:15s} mean runtime: {sum(timings)/len(timings):7.2f}ms, runs: ", ", ".join(f'{x:7.2f}' for x in timings))
 
     run_llama("codegen")
     run_llama("methodcache", False)

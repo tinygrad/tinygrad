@@ -32,8 +32,10 @@ def iterate(bs=32, val=True, shuffle=True):
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
+  from multiprocessing import Pool
+  p = Pool(16)
   for i in range(0, len(files), bs):
-    X = [image_load(files[i]) for i in order[i:i+bs]]
+    X = p.map(image_load, [files[i] for i in order[i:i+bs]])
     Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
     yield (np.array(X), np.array(Y))
 

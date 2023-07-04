@@ -26,7 +26,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_ge_divides(self):
     expr = (Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512
-    self.helper_test_variable(expr, 0, 1, "(((idx*4)+FLOAT4_INDEX)<512)")
+    self.helper_test_variable(expr, 0, 1, "((idx*4)<512)")
     self.helper_test_variable(expr//4, 0, 1, "(idx<128)")
 
   def test_ge_divides_and(self):
@@ -36,6 +36,10 @@ class TestSymbolic(unittest.TestCase):
     expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
                           (Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7)) < 512])
     self.helper_test_variable(expr//4, 0, 1, "((((FLOAT8_INDEX//4)+idx2)<128) and (idx1<128))")
+
+  def test_lt_factors(self):
+    expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256)) < 512])
+    self.helper_test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)")
 
   def test_div_becomes_num(self):
     assert isinstance(Variable("a", 2, 3)//2, NumNode)

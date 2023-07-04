@@ -85,7 +85,9 @@ class TestOps(unittest.TestCase):
 
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
-
+    helper_test_op([], lambda: torch.arange(5, 10, 3), lambda: Tensor.arange(10, 5, 3), forward_only=True)
+    helper_test_op([], lambda: torch.arange(10, 5, -3), lambda: Tensor.arange(5, 10, -3), forward_only=True)
+    helper_test_op([], lambda: torch.arange(11, 5, -3), lambda: Tensor.arange(5, 11, -3), forward_only=True)
   def test_where(self):
     helper_test_op(
       [(100,)],
@@ -127,9 +129,14 @@ class TestOps(unittest.TestCase):
     tt2 = Tensor.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (tt1 < tt2).sum().backward)
 
-
-  def test_floor(self): helper_test_op([(45,65)], lambda x: torch.floor(x), lambda x: x.floor(), forward_only=True)
-  def test_ceil(self): helper_test_op([(45,65)], lambda x: torch.ceil(x), lambda x:x.ceil(), forward_only=True)
+  def test_floor(self):
+    helper_test_op([(45,65)], lambda x: torch.floor(x), lambda x: x.floor(), forward_only=True)
+    a, b = Tensor([1.0, 2.1, 0.0, -5.0, -2.5]), torch.tensor([1.0, 2.1, 0.0, -5.0, -2.5])
+    helper_test_op([], lambda: torch.floor(b), lambda: Tensor.floor(a), forward_only=True)
+  def test_ceil(self):
+    helper_test_op([(45,65)], lambda x: torch.ceil(x), lambda x: x.ceil(), forward_only=True)
+    a, b = Tensor([1.0, 2.1, 0.0, -5.0, -2.5]), torch.tensor([1.0, 2.1, 0.0, -5.0, -2.5])
+    helper_test_op([], lambda: torch.ceil(b), lambda: Tensor.ceil(a), forward_only=True)
   def test_tril(self):
     helper_test_op([(3,3)], lambda x: x.tril(), lambda x: x.tril())
     helper_test_op([(3,3)], lambda x: x.tril(1), lambda x: x.tril(1))
@@ -150,7 +157,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], torch.minimum, Tensor.minimum)
     helper_test_op([(), ()], torch.minimum, Tensor.minimum)
   def test_add(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add)
+    helper_test_op([(45,68), (45,68)], lambda x,y: x+y, Tensor.add)
   def test_add_number(self):
     helper_test_op([(), ()], lambda x,y: x+y, Tensor.add)
   def test_add3(self):
@@ -170,6 +177,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: -x)
   def test_mul(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x*y, Tensor.mul)
+  def test_mul_number(self):
     helper_test_op([(), ()], lambda x,y: x*y, Tensor.mul)
   def test_mul_const(self):
     helper_test_op([(45,65)], lambda x: x*2,  lambda x: x*2)
@@ -297,7 +305,7 @@ class TestOps(unittest.TestCase):
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
     helper_test_op([(32,45,65), (32,65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises(AssertionError):
       a = Tensor(3.14)
       a.matmul(a)
 
@@ -324,7 +332,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(256,256), (256,256)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   def test_broadcastdot(self):
     helper_test_op([(10,45,65), (65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises(AssertionError):
       a = Tensor(3.14)
       b = Tensor.ones(3,3)
       a @ b

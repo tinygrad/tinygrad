@@ -151,7 +151,7 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
 
   @staticmethod
-  def arange(stop, start=0, step=1, **kwargs): return Tensor.full(((stop-start)//step,), step, **kwargs).cumsum() + (start - step)
+  def arange(stop, start=0, step=1, **kwargs): return Tensor.full((ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
 
   @staticmethod
   def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
@@ -234,8 +234,8 @@ class Tensor:
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))]))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
-  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Pad.apply(self, arg=arg) if any([x != (0,0) for x in arg]) else self
-  def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any([x != (0,s) for x,s in zip(arg, self.shape)]) else self
+  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Pad.apply(self, arg=arg) if any(x != (0,0) for x in arg) else self
+  def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
 
   # ***** movement hlops *****
 
@@ -314,7 +314,7 @@ class Tensor:
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
-    assert all([len(y.shape) == len(self.shape) and all([y.shape[i] == s for i,s in enumerate(self.shape) if i != dim]) for y in args])
+    assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
     catargs = [self] + list(args)
     assert all(len(t.shape) != 0 for t in catargs), "zero-dimensional tensor cannot be concatenated"
     shape_cumsum = [0, *accumulate([y.shape[dim] for y in catargs])]
@@ -438,7 +438,7 @@ class Tensor:
     HW, trailing = weight.shape[2:], list(range(3, len(weight.shape)+1))
     x, w = self, weight.reshape(groups, weight.shape[0]//groups, weight.shape[1], *weight.shape[2:]).permute(0,2,1,*trailing).flip(trailing)
     stride = make_pair(stride, len(HW))
-    if any([s>1 for s in stride]):
+    if any(s>1 for s in stride):
       x = x.reshape(*x.shape[:2], *flatten((k,1) for k in x.shape[2:]))
       x = x.pad(((0,0), (0,0), *flatten(((0,0),(0,s-1)) for s in stride)))
       x = x.reshape(*x.shape[:2], *[k*s for k,s in zip(x.shape[2::2], stride)])
@@ -464,11 +464,12 @@ class Tensor:
     #x = x.reshape(bs, groups, cin, rcout, oy, ox, H, W).permute(0,1,3,4,5,2,6,7)
 
     # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
-    ret = (x * weight.reshape(1, groups, rcout, *[1 for _ in range(len(oyx))], cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
-    return ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))
+    ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
+    return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
 
   def dot(self, w:Tensor) -> Tensor:
-    if (n1:=len(self.shape))*(n2:=len(w.shape)) == 0: raise RuntimeError(f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D")
+    n1, n2 = len(self.shape), len(w.shape)
+    assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
     x = self.reshape(*self.shape[0:-1], *[1]*min(n1-1, n2-1, 1), self.shape[-1])
     w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
     return (x*w).sum(-1)
@@ -495,9 +496,11 @@ class Tensor:
 
   # ***** math functions (unary) *****
   def ceil(self: Tensor) -> Tensor:
-    b = self.cast(dtypes.int32).contiguous()
-    return (self > 0).where(b+1, b)
-  def floor(self: Tensor) -> Tensor: return self.ceil() - 1
+    b = self.cast(dtypes.int32).contiguous().cast(self.dtype)
+    return (self > b).where(b+1, b)
+  def floor(self: Tensor) -> Tensor:
+    b = self.cast(dtypes.int32).contiguous().cast(self.dtype)
+    return (self < b).where(b-1, b)
 
   def __neg__(self): return 0.0-self
   def sqrt(self): return self.pow(0.5)

@@ -63,7 +63,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
   local_size = []
   pend_close = None
 
-  bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(bufs)]
+  bufnames = [b.name if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(bufs)]
 
   depth = 0
   def kk(s): kernel.append("  "*depth+s)
@@ -88,10 +88,11 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
           else:
             kk(f"for (int {var.expr} = {var.min}; {var.expr} <= {var.max}; ++{var.expr}) {{")
       depth += 1
+    elif uop == UOps.BARRIER:
+      kk(lang.barrier)
     elif uop == UOps.ENDLOOP:
       if args[1] == "local" and len(lang.lid):
         # TODO: this is a bit of a hack. the local loop isn't real on the GPU
-        kk(lang.barrier)
         kk(f"if ({Variable.sum(args[0]).render(render_cl)} == 0) {{")
         pend_close = "}"*(len(args[0])+1) + f" /* {args[1]} */"
       else:
@@ -124,19 +125,19 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
         else: val = f"{x}" +  ("f" if not dtypes.is_int(bufs[args.i].dtype) else "")
       elif isinstance(bufs[args.i].dtype, ImageDType):
-        assert newvar.dtype == dtypes._float4, "image must be float4"
+        assert newvar.dtype == dtypes._float4, f"image must be float4 {newvar}"
         prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
         idx, idy = to_image_idx(bufs[args.i].dtype.shape, args.idx, args.valid)
         val = f"read_imagef({bufnames[args.i]}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}))"
       else:
         if lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
           if newvar.dtype == dtypes._float4:
-            val = f"vload_half4({(args.idx//4).render(render_cl)}, {bufnames[args.i]})"
+            val = f"vload_half4(0, {bufnames[args.i]}+{(args.idx).render(render_cl)})"
           else:
             val = f"vload_half({args.idx.render(render_cl)}, {bufnames[args.i]})"
         else:
           if newvar.dtype == dtypes._float4:
-            val = f"({newvar.dtype.name})((({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}])"
+            val = f"({newvar.dtype.name})(*(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*)({bufnames[args.i]}+{args.idx.render(render_cl)})))"
           else:
             val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
@@ -158,8 +159,10 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       if isinstance(bufs[args[0]].dtype, ImageDType):
         idx, idy = to_image_idx(bufs[args.i].dtype.shape, args[1], args[2])
         kk(f"write_imagef({bufnames[args.i]}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {vin[0].render()});")
+      elif lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
+        kk(f"vstore_half4({vin[0].render()}, {args.idx.render(render_cl)}, {bufnames[args.i]});")
       else:
-        kk(f"(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}] = {vin[0].render()};")
+        kk(f"*(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*)({bufnames[args.i]}+{args.idx.render(render_cl)})) = ({bufs[args.i].dtype.name}4){vin[0].render()};")
     elif uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
     else:
