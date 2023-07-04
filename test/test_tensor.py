@@ -105,8 +105,7 @@ class TestTinygrad(unittest.TestCase):
     expected = n * (1 - rate)
     np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
 
-  #@unittest.skipUnless(Device.DEFAULT == Device.CPU, "float64 not supported on GPU")
-  @unittest.skip("float64 support broken")
+  @unittest.skip("TODO: fix")
   def test_jacobian(self):
     W = np.random.RandomState(1337).random((10, 5))
     x = np.random.RandomState(7331).random((1, 10)) - 0.5
@@ -125,8 +124,7 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_allclose(PJ, J, atol = 1e-5)
     np.testing.assert_allclose(PJ, NJ, atol = 1e-5)
 
-  #@unittest.skipUnless(Device.DEFAULT == Device.CPU, "float64 not supported on GPU")
-  @unittest.skip("float64 support broken")
+  @unittest.skip("TODO: fix")
   def test_gradcheck(self):
     W = np.random.RandomState(1337).random((10, 5))
     x = np.random.RandomState(7331).random((1, 10)) - 0.5

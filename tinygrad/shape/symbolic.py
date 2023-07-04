@@ -16,6 +16,7 @@ class Node:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
+  def vars(self): return []
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
   @functools.cached_property
@@ -108,7 +109,7 @@ class Node:
   def ands(nodes:List[Node]) -> Node:
     if not nodes: return NumNode(1)
     if len(nodes) == 1: return nodes[0]
-    if any([x.min == x.max == 0 for x in nodes]): return NumNode(0)
+    if any(x.min == x.max == 0 for x in nodes): return NumNode(0)
 
     # filter 1s
     nodes = [x for x in nodes if x.min != x.max]
@@ -124,6 +125,7 @@ class Variable(Node):
 
   def __init__(self, expr:Optional[str], nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
+  def vars(self): return [self]
 
 class NumNode(Node):
   def __init__(self, num:int):
@@ -138,6 +140,7 @@ class OpNode(Node):
   def __init__(self, a:Node, b:int):
     self.a, self.b = a, b
     self.min, self.max = self.get_bounds()
+  def vars(self): return self.a.vars()
   @abstractmethod
   def get_bounds(self) -> Tuple[int, int]: pass
 
@@ -174,6 +177,7 @@ class ModNode(OpNode):
 
 class RedNode(Node):
   def __init__(self, nodes:List[Node]): self.nodes = nodes
+  def vars(self): return functools.reduce(lambda l,x: l+x.vars(), self.nodes, [])
 
 class SumNode(RedNode):
   def __mul__(self, b: int): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
@@ -192,7 +196,7 @@ class SumNode(RedNode):
       factor_term = [x.a * x.b//b if isinstance(x, MulNode) else NumNode(x.b//b) for x in factors]
       if nofactor_mul and not nofactor_nonmul:
         gcds = [gcd(x.b, b) for x in nofactor_mul]
-        if (t := min(gcds)) > 1 and all([x.b%t == 0 for x in nofactor_mul]):
+        if (t := min(gcds)) > 1 and all(x.b%t == 0 for x in nofactor_mul):
           nofactor_term = [Node.sum([x.a * x.b//t for x in nofactor_mul if isinstance(x, MulNode)])//(b//t)]  # mypy wants the isinstance
         else:
           nofactor_term = [Node.sum(nofactor_mul)//b] if nofactor_mul else []

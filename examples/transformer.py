@@ -6,7 +6,7 @@ from tinygrad.nn.optim import Adam, get_parameters
 from extra.training import train, evaluate
 from models.transformer import Transformer
 
-# dataset idea from https://github.com/karpathy/minGPT/blob/master/play_math.ipynb
+# dataset idea from https://github.com/karpathy/minGPT/blob/master/projects/adder/adder.py
 def make_dataset():
   ds = []
   for i in range(100):
