@@ -14,8 +14,6 @@ class FileWriter:
     self.writer.add_event(event)
   def add_summary(self, summary, global_step=None, walltime=None):
     self.add_event(event_pb2.Event(summary=summary), global_step, walltime)
-  def add_summaries(self, *summaries, global_step=None, walltime=None):
-    for summary in summaries: self.add_summary(summary, global_step, walltime)
   def flush(self): self.writer.flush()
   def close(self): self.writer.close()
   def get_logdir(self): return self.writer.get_logdir()
