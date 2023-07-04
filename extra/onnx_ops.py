@@ -81,8 +81,6 @@ def _auto_pad(X, auto_pad, strides, kernel_shape, dilations):
   strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
   dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
   pad_shape = [(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(X.shape[-len(strides):], strides, kernel_shape, dilations)]
-  print(pad_shape)
-  if dilations == (2,2): print(pad_shape)
   if auto_pad == "SAME_UPPER": return [pad_shape[0]//2, pad_shape[1]//2, pad_shape[0]-pad_shape[0]//2, pad_shape[1]-pad_shape[1]//2]
   elif auto_pad == "SAME_LOWER": return [pad_shape[0]-pad_shape[0]//2, pad_shape[1]-pad_shape[1]//2, pad_shape[0]//2,  pad_shape[1]//2]
   else: raise NotImplementedError(f"auto_pad={auto_pad} not implemented, yet") # could be "VALUE"?
@@ -142,7 +140,8 @@ def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_p
 
 def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
   if ceil_mode: auto_pad = "SAME_UPPER"
-  ret = _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-2:], strides=strides, kernel_shape=kernel_shape, dilations=dilations).max_pool2d(kernel_shape, stride=strides, dilation=dilations)
+  ret = _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-len(kernel_shape):], strides=strides, kernel_shape=kernel_shape, dilations=dilations)
+  ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations)
   return ret # (ret, indices)
 
 def MaxUnpool(xT, xI, kernel_shape, outshape=None, pads=None, strides=None):
