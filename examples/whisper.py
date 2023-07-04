@@ -236,7 +236,7 @@ if __name__ == "__main__":
   if getenv("TEST"):
     diff = difflib.Differ()
     lens = []
-    for c in ci[::-1]:
+    for c in ci:
       fn = BASEDIR / c["files"][0]["fname"]
       print("-" * 128, f"{fn.stem}\n", sep="\n")
       predicted = transcribe_file(fn)
