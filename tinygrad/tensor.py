@@ -554,15 +554,15 @@ class Tensor:
   def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if x.__class__ is Tensor or x or reverse else self
   def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse) if x.__class__ is Tensor or x != 1.0 else self
   def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ is Tensor or reverse or not x else self.mul(1/x)
-  def pow(self, x:Union[Tensor, float]) -> Tensor:
-    if x.__class__ is not Tensor:
+  def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+    a = self
+    if x.__class__ is not Tensor and not reverse:
       # simple pow identities
-      if x == 2.0: return self*self
-      if x == 1.0: return self
-      if x == -1.0: return 1/self
-      if x == 0.5: return self.sqrt()
-      if x == -0.5: return self.rsqrt()
-    return self.log().mul(x).exp()
+      if x < 0: return (1.0/self).pow(-x)
+      if x == 2.0: return a*a
+      if x == 1.0: return a
+      if x == 0.5: return a.sqrt()
+    return self.log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(log(x)).exp()
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)
@@ -582,7 +582,7 @@ class Tensor:
   def __radd__(self, x) -> Tensor: return self.add(x, True)
   def __rsub__(self, x) -> Tensor: return self.sub(x, True)
   def __rmul__(self, x) -> Tensor: return self.mul(x, True)
-  def __rpow__(self, x) -> Tensor: return Tensor(x, requires_grad=False).pow(self)
+  def __rpow__(self, x) -> Tensor: return self.pow(x, True)
   def __rtruediv__(self, x) -> Tensor: return self.div(x, True)
   def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
 
