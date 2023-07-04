@@ -116,7 +116,6 @@ def _reshape(view: View, new_shape: Tuple[int, ...]) -> Tuple[View, bool]:
   else:
     if (merged_view := merge_views(view, new_view)) is not None: return merged_view, False
     else:
-      print(shape, new_shape, new_view)
       if DEBUG >= 4: print(f"WARNING: creating new view with reshape {view} -> {new_shape}")
       return new_view, True
 
@@ -165,7 +164,6 @@ class ShapeTracker:
         ret[idxs.index(this_dim.a)] = this_dim.b
       elif isinstance(this_dim, Variable):
         ret[idxs.index(this_dim)] = 1
-
     idx_vars, valid_vars = idx.vars(), valid.vars()
     for i,tidx in enumerate(idxs):
       if tidx in valid_vars and not ignore_valid: ret[i] = None
