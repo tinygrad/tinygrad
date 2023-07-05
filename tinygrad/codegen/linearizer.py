@@ -7,7 +7,7 @@ from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mn
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
-from tinygrad.runtime.lib import RawConst
+from tinygrad.runtime.lib import RawBuffer, RawConst
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
 from tinygrad.shape.symbolic import Variable, NumNode
 VariableOrNum = Union[Variable, NumNode]
@@ -101,20 +101,45 @@ class Linearizer:
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
 
-    # get the output buffers
-    self.bufs = [output_buffer] + dedup(ast.buffers)
+    # organize the input/output buffers
+    self.bufs: List[Union[LazyBuffer,LocalBuffer]] = []
+    self.bufmap: List[int] = []  # map from buf to index into raw_input_bufs, only for global buffers
+    self.raw_bufs: List[Union[LocalBuffer,RawBuffer,RawConst]] = []  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
+    for buf in [output_buffer] + dedup(ast.buffers):
+      self.add_buf(buf)
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
     self.key = (ast.map_buffers({x:i for i,x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
 
+  def add_buf(self, buf:Union[LazyBuffer,LocalBuffer]):
+    self.bufs.append(buf)
+
+    # dedup by python object comparison of RawBuffer -- this is OK since we expect all non-output non-local buffers to be realized here.
+    # this helps in the case where different views of the same rawbuffer are passed as arguments.
+    if isinstance(buf, LazyBuffer):
+      raw_buf = buf.realized
+      assert(raw_buf is not None)
+    else:
+      raw_buf = buf
+    if raw_buf in self.raw_bufs:
+      self.bufmap.append(self.raw_bufs.index(raw_buf))
+    else:
+      self.raw_bufs.append(raw_buf)
+      self.bufmap.append(len(self.raw_bufs) - 1)
+
+  # the bufs we want to pass in at kernel execution time; ie realized LazyBuffers and not RawConst or LocalBuffer
+  @property
+  def raw_input_bufs(self) -> List[RawBuffer]:
+    return [buf for buf in self.raw_bufs if buf.__class__ not in [RawConst, LocalBuffer]]
+
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
-    self.mem_estimate: int = sum(x.dtype.itemsize*(x.realized.size if x.realized is not None else prod(x.shape)) for x in self.bufs if x is not None)
+    self.mem_estimate: int = sum(x.dtype.itemsize*x.size for x in self.raw_bufs)
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
@@ -185,7 +210,7 @@ class Linearizer:
         localtype = dtypes.float
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.bufmap[i], idx, valid)) if const is None else \
                      self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
       ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b) if localtype == dtypes._float4 else cache[key])
     return ret
@@ -212,7 +237,7 @@ class Linearizer:
       store_offset = store_offset_new
 
     for idx, var in store_offset.items():
-      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idx)))
+      self.uop(UOps.STORE, None, [var], MemOp(self.bufmap[i], *self.sts[i].expr_idxs(idx)))
 
   def linearize(self):
     # uops
@@ -222,7 +247,7 @@ class Linearizer:
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
-      self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
+      self.add_buf(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
     # print

@@ -1,10 +1,10 @@
-from typing import Final, Dict, Callable, Any, List, Optional
+from typing import Final, Dict, Callable, Any, List, Optional, Union
 import functools
 from llvmlite import ir  # type: ignore
-from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token
+from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps, UOp, Token
 from tinygrad.helpers import dtypes
 from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, FusedOps
-from tinygrad.lazy import LazyBuffer
+from tinygrad.runtime.lib import RawBuffer, RawConst
 
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 def int_const(x): return ir.Constant(ir.IntType(64), x)
@@ -32,7 +32,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   FusedOps.MULACC: lambda builder,x,y,z: builder.fadd(builder.fmul(x,y, flags=('fast',)), z, flags=('fast',)),
 }
 
-def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
+def uops_to_llvm_ir(uops:List[UOp], bufs:List[Union[LocalBuffer,RawBuffer,RawConst]]) -> str:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 
@@ -114,4 +114,4 @@ class LLVMIRCodegen(Linearizer):
     self.process()
     # no optimize, this doesn't support local
     self.linearize()
-    return ASTRunner('exec', uops_to_llvm_ir(self.uops, self.bufs), op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name)
+    return ASTRunner('exec', uops_to_llvm_ir(self.uops, self.raw_bufs), op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name)

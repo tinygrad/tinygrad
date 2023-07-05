@@ -3,9 +3,8 @@ import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
 from tinygrad.helpers import partition, ImageDType, DEBUG, dtypes, colored
-from tinygrad.runtime.lib import RawConst
+from tinygrad.runtime.lib import RawBuffer, RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
-from tinygrad.lazy import LazyBuffer
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -56,7 +55,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", FusedOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})"
 }
 
-def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
+def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,RawBuffer,RawConst]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
   prekernel: Set[str] = set()
   kernel = []
   global_size = []
@@ -118,9 +117,9 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk(f"{newvar.render(True)} = {code_for_op[args](*[x.render() for x in vin])};")
     elif uop == UOps.LOAD and newvar is not None:
       # TODO: merge with CONST?
-      if bufs[args.i] is not None and isinstance(bufs[args.i].realized, RawConst):
+      if bufs[args.i] is not None and isinstance(bufs[args.i], RawConst):
         assert newvar.dtype == dtypes.float, "const can't be float4"
-        x = bufs[args.i].realized._buf
+        x = bufs[args.i]._buf
         if math.isnan(x): val = "NAN"
         elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
         else: val = f"{x}" +  ("f" if not dtypes.is_int(bufs[args.i].dtype) else "")
@@ -170,7 +169,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else
                ("const " if i > 0 else "")+lang.buffer_prefix+x.dtype.name+"*"+lang.buffer_suffix) for i,x in enumerate(bufs)
-               if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]
+               if not isinstance(x, LocalBuffer) and not isinstance(x, RawConst)]
   prg = ''.join([f"{lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
     [', '.join([f'{t} {bufnames[i]}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
@@ -194,7 +193,7 @@ class CStyleCodegen(Linearizer):
     self.limit_global_dims(len(self.lang.gid))
     self.linearize()
 
-    prg, global_size, local_size = uops_to_cstyle(self.uops, self.bufs, self.lang)
+    prg, global_size, local_size = uops_to_cstyle(self.uops, self.raw_bufs, self.lang)
 
     # painfully name the function something unique
     if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]
