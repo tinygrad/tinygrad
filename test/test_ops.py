@@ -212,6 +212,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: float("nan")/x,    lambda x: float("nan")/x)
   def test_pow(self):
     # TODO: why is a=0 for these tests?
+    # Issue is this line: "helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, a=0)"
+    # The problem is if x is negative, and taken to a power < 1.0. You can't take inverse
+    # powers of negative numbers. Those are non-existent or nan
+    # Eg, -2^0.5 = sqrt(-2) = nan
+    # If a=-0.5 (func, default), then x & y range = [-1.5, 1.5). X can be neg, and abs(y) < 1.0 *Bad
+    # If a=0 (test_pow setting), then x * y range = [0, 1.0). X is never negative *Good
     helper_test_op([(45,65)], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
     helper_test_op([(45,65)], lambda x: x**3, lambda x: Tensor.pow(x,3), a=0)
     helper_test_op([(45,65)], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
