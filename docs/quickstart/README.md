@@ -1,5 +1,4 @@
 ---
-description: When you are ready to get their hands dirty.
 layout:
   title:
     visible: true
