@@ -1,10 +1,6 @@
----
-description: >-
-  File-specific environment variables control the behavior of a specific
-  tinygrad file.
----
-
 # File-Specific Variables
+
+File-specific environment variables control the behavior of a specific tinygrad file.
 
 File-specific environment variables usually don't affect the library itself. Most of the time these will never be used, but they are here for completeness.
 

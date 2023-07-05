@@ -1,9 +1,3 @@
----
-description: >-
-  Environment variables control the runtime behavior of tinygrad and its
-  examples.
----
-
 # Environment Variables
 
 Most environment variables are self-explanatory and are usually used to set an option at runtime.

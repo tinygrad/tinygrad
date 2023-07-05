@@ -1,26 +1,10 @@
----
-layout:
-  title:
-    visible: true
-  description:
-    visible: false
-  tableOfContents:
-    visible: true
-  outline:
-    visible: true
-  pagination:
-    visible: true
----
-
 # Abstraction Stack
 
 This file will take you on a whirlwind journey from a tensor all the way down. Tinygrad has been aggressively refactored in the 2.5 years it has been worked on. What you see here is a refined library, with more refining still to come!
 
 The whole tinygrad is \~2300 lines, so while it's readable in an evening or two, this documentation will help with entry points and understanding the abstraction stack.
 
-{% hint style="info" %}
-If you only read one file, read [tinygrad/mlops.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/mlops.py). It's also worth reading [tinygrad/tensor.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/tensor.py). It's pretty beautiful.
-{% endhint %}
+> If you only read one file, read [tinygrad/mlops.py](/tinygrad/mlops.py). It's also worth reading [tinygrad/tensor.py](/tinygrad/tensor.py). It's pretty beautiful.
 
 #### Boilerplate imports for typing
 
@@ -53,7 +37,7 @@ print(f"{a.numpy()} + {b.numpy()} = {result.numpy()}")
 assert result.numpy()[0] == 5.
 ```
 
-#### Tensor (in [tinygrad/tensor.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/tensor.py), code 8/10)
+#### Tensor (in [tinygrad/tensor.py](/tinygrad/tensor.py), code 8/10)
 
 ```python
 import tinygrad.mlops as mlops
@@ -80,7 +64,7 @@ class Tensor:
   def log(self): return mlops.Log.apply(self)
 ```
 
-All the definitions of the derivatives are subclasses of Function (like mlops.Log). There's only 18 mlops for derivatives for everything (in [tinygrad/mlops.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/mlops.py), code 9/10). If you read one file, read mlops.py. If you read two files, also read [tinygrad/tensor.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/tensor.py). You can differentiate the world using the chain rule.
+All the definitions of the derivatives are subclasses of Function (like mlops.Log). There's only 18 mlops for derivatives for everything (in [tinygrad/mlops.py](/tinygrad/mlops.py), code 9/10). If you read one file, read mlops.py. If you read two files, also read [tinygrad/tensor.py](/tinygrad/tensor.py). You can differentiate the world using the chain rule.
 
 ```python
 class Function:
@@ -89,7 +73,7 @@ class Function:
   def backward(self, x:LazyBuffer) -> LazyBuffer: pass
 ```
 
-#### LazyBuffer (in [tinygrad/lazy.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/lazy.py), code 5/10)
+#### LazyBuffer (in [tinygrad/lazy.py](/tinygrad/lazy.py), code 5/10)
 
 ```python
 from tinygrad.helpers import DType
@@ -119,7 +103,7 @@ class LazyBuffer:
   op: Optional[LazyOp]
 ```
 
-LazyOp (in [tinygrad/ops.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/ops.py), code 4/10). In a tree they form an Abstract Syntax Tree for a single GPU kernel.
+LazyOp (in [tinygrad/ops.py](/tinygrad/ops.py), code 4/10). In a tree they form an Abstract Syntax Tree for a single GPU kernel.
 
 ```python
 class LazyOp:
@@ -143,7 +127,7 @@ class LoadOps(Enum):     EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = a
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, FusedOps, LoadOps]
 ```
 
-Most of [tinygrad/lazy.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/lazy.py) is concerned with fusing Ops into LazyOps ASTs that map to GPUKernels. It's beyond the scope of this tutorial, but you can read the file if interested.
+Most of [tinygrad/lazy.py](/tinygrad/lazy.py) is concerned with fusing Ops into LazyOps ASTs that map to GPUKernels. It's beyond the scope of this tutorial, but you can read the file if interested.
 
 #### Example: LazyBuffer for 2+3
 
@@ -152,7 +136,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import LazyOp, BinaryOps, LoadOps
 ```
 
-The 2+3 from before.&#x20;
+The 2+3 from before.
 
 ```python
 result = Tensor([2]) + Tensor([3])
@@ -200,7 +184,7 @@ Getting ahead of ourselves, but we can copy the DeviceBuffer toCPU.
 assert result.lazydata.realized.toCPU()[0] == 5, "when put in numpy with toCPU, it's 5"
 ```
 
-#### Union\[Interpreted, Compiled] (in [tinygrad/ops.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/ops.py), code 5/10)
+#### Union\[Interpreted, Compiled] (in [tinygrad/ops.py](/tinygrad/ops.py), code 5/10)
 
 Now you have a choice, you can either write an "Interpreted" backend or a "Compiled" backend.
 
@@ -242,7 +226,7 @@ class Runtime(ABC):
   def __call__(self, global_size:Optional[List[int]], local_size:Optional[List[int]], *bufs:List[RawBuffer]): pass
 ```
 
-#### RawBuffer (in [tinygrad/runtime/lib.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/runtime/lib.py), code 5/10)
+#### RawBuffer (in [tinygrad/runtime/lib.py](/tinygrad/runtime/lib.py), code 5/10)
 
 ```python
 import numpy as np
@@ -278,13 +262,13 @@ class RawNumpyBuffer(RawBuffer):
 
 #### Example: 2+3 in raw clang
 
-RawMallocBuffer is the simplest concrete version of RawBuffer (in [tinygrad/ops.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/ops.py)). It is used for the CLANG and LLVM backends. It is just `malloc(size * dtype.itemsize)`.
+RawMallocBuffer is the simplest concrete version of RawBuffer (in [tinygrad/ops.py](/tinygrad/ops.py)). It is used for the CLANG and LLVM backends. It is just `malloc(size * dtype.itemsize)`.
 
 ```python
 from tinygrad.runtime.lib import RawMallocBuffer
 ```
 
-ClangProgram is the simplest runtime (in [tinygrad/runtime/ops\_clang.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/runtime/ops\_clang.py), code 7/10).
+ClangProgram is the simplest runtime (in [tinygrad/runtime/ops_clang.py](/tinygrad/runtime/ops_clang.py), code 7/10).
 
 `__init__` calls clang, and `__call__` calls the function in the `*.so` outputted by clang.
 
@@ -325,9 +309,9 @@ assert output.toCPU()[0] == 5, "it's still 5"
 np.testing.assert_allclose(output.toCPU(), numpy_a+numpy_b)
 ```
 
-#### ATSKernel (in tinygrad/codegen/ast.py, code 2/10)
+#### ASTKernel (in [tinygrad/codegen/\*](/tinygrad/codegen), code 2/10)
 
-We are nowhere near done! We wrote the code above by hand. We need the LazyOp ASTs to be automatically turned into code. The current class looks roughly like this, but this will change and we will update the docs. This stuff is in the terrible 528 lines of ([tinygrad/codegen/\*](https://github.com/geohot/tinygrad/tree/master/tinygrad/codegen), code 2/10 aka turd quality).
+We are nowhere near done! We wrote the code above by hand. We need the LazyOp ASTs to be automatically turned into code. The current class looks roughly like this, but this will change and we will update the docs. This stuff is in the terrible 528 lines of ([tinygrad/codegen/\*](/tinygrad/codegen), code 2/10 aka turd quality).
 
 Create the kernel with the AST.
 
@@ -391,7 +375,7 @@ void E_1(float* data0) {
 """
 ```
 
-#### Example: ShapeTracker (in [tinygrad/shape/shapetracker.py](https://github.com/geohot/tinygrad/blob/master/tinygrad/shape/shapetracker.py), code 7/10)
+#### Example: ShapeTracker (in [tinygrad/shape/shapetracker.py](/tinygrad/shape/shapetracker.py), code 7/10)
 
 Remember how we said you don't have to write the MovementOps for CompiledBuffers? That's all thanks to ShapeTracker! ShapeTracker tracks the indices into the RawBuffer.
 
@@ -472,7 +456,7 @@ It is even contiguous!
 assert a.contiguous == True
 ```
 
-#### Example: Variable (in [tinygrad/shape/symbolic.py](https://github.com/geohot/tinygrad/blob/master/tinygrad/shape/symbolic.py), code 6/10)
+#### Example: Variable (in [tinygrad/shape/symbolic.py](/tinygrad/shape/symbolic.py), code 6/10)
 
 Under the hood, ShapeTracker is powered by a small symbolic algebra library.
 
