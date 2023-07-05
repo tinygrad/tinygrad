@@ -321,5 +321,3 @@ You may also need to install pydot
 ```sh
 python3 -m pip install pydot
 ```
-{% endtab %}
-{% endtabs %}

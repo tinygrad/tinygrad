@@ -11,3 +11,7 @@ The columns are:
 * Description.
 
 A `#` means that the variable can take any integer value.
+
+Global Environment Variables control core tinygrad behavior and are found [here](/docs/global_variables.md).
+
+File-Specific Environment Variables control the behavior of a specific tinygrad file. They are rarely used, but can be found [here](/docs/file_specific_variables.md).
