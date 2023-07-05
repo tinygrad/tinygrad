@@ -111,7 +111,7 @@ class Linearizer:
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
-    self.key = (ast.map_buffers({x:i for x,i in zip(self.bufs, self.bufmap)}).key, tuple([x.key for x in self.bufs]))
+    self.key = (ast.map_buffers({x:i for x,i in zip(self.bufs, self.bufmap)}).key, tuple([cast(LazyBuffer, x).key for x in self.bufs]))
 
   def add_buf(self, buf:Union[LazyBuffer,LocalBuffer]):
     self.bufs.append(buf)
@@ -128,7 +128,7 @@ class Linearizer:
 
   # the bufs we want to pass in at kernel execution time; ie realized LazyBuffers and not RawConst or LocalBuffer
   @property
-  def raw_input_bufs(self) -> List[RawBuffer]: return [buf for buf in self.raw_bufs if Linearizer.rawbuf_is_input(buf)]
+  def raw_input_bufs(self) -> List[RawBuffer]: return [cast(RawBuffer, buf) for buf in self.raw_bufs if Linearizer.rawbuf_is_input(buf)]
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
