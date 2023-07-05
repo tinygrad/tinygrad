@@ -117,12 +117,13 @@ class Linearizer:
     self.mem_estimate: int = sum(x.dtype.itemsize*(x.realized.size if x.realized is not None else prod(x.shape)) for x in self.bufs if x is not None)
 
     # there's only allowed to be one reduceop
-    reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
-    assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
-    self.reduceop = reduceops[0] if reduceops else None
+    self.reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
 
     # get earlybufs, before the one reduce op
-    self.earlybufs = dedup(self.reduceop.buffers) if self.reduceop else []
+    self.earlybufs = list(itertools.chain.from_iterable([dedup(reduceop.buffers) for reduceop in self.reduceops]))
+
+    #TODO: this is really bad.
+    self.earlybufs_per_reduce = [dedup(reduceop.buffers) for reduceop in self.reduceops] if self.reduceops else []
 
     # create new shapetrackers inside this kernel, we will permute them
     self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]
@@ -229,12 +230,13 @@ class Linearizer:
     if DEBUG >= 3: self.printbufs()
 
     # kernel name (before late upcast)
-    self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) for x in self.full_shape])
-    self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
+    self.function_name = (f"r{len(self.reduceops)}_" if self.reduceops else "E_") + '_'.join([str(x) for x in self.full_shape])
+    self.display_name = (f"r{len(self.reduceops)}_" if self.reduceops else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
     # parse AST
     loaded_buffers = {}
     acc = []
+    accs : List[List[Token]] = [] # one acc for each reduce
 
     # ssa
     _ssa:DefaultDict[str,int] = defaultdict(int)
@@ -256,68 +258,72 @@ class Linearizer:
 
     # reduce op
     fake_reduce_idxs = []
-    if self.reduceop is not None:
-      # define indexes
-      reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
-      fake_reduce_idxs = [x*0 for x in reduce_idxs]
+    if self.reduceops is not None:
+      for reduce_idx,reduceop in enumerate(self.reduceops):
+        # define indexes
+        reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
+        fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
-      # define accumulator
-      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+        # define accumulator
+        acc = self.global_load(reduce_idx, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, reduceop.op)])
+        accs.append(acc)
 
-      # reduce loop
-      self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
+        # reduce loop
+        self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
-      # load earlybufs
-      loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
+        # load earlybufs
+        loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs_per_reduce[reduce_idx] and i != 0})
 
-      # run early AST (with reduce)
-      self.ast_parse(self.reduceop, [acc[off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True)
+        # run early AST (with reduce)
+        self.ast_parse(reduceop, [accs[-1][off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True)
 
-      # end the reduce loop
-      self.uop(UOps.ENDLOOP, None, [], (reduce_idxs, "reduce"))
+        # end the reduce loop
+        self.uop(UOps.ENDLOOP, None, [], (reduce_idxs, "reduce"))
 
-      # end the local loop, do the local reduce
-      if self.group_for_reduce:
-        fake_global_idxs = [x*0 for x in global_idxs]
-        self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc, ssa)  # store accumulators
-        self.uop(UOps.BARRIER, None, [], ())
-        self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
+        # end the local loop, do the local reduce
+        if self.group_for_reduce:
+          # TODO: Work needed here.
+          # assert False
+          fake_global_idxs = [x*0 for x in global_idxs]
+          self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc, ssa)  # store accumulators
+          self.uop(UOps.BARRIER, None, [], ())
+          self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
 
-        # local indexs are over, 0 them out
-        local_idxs = [x*0 for x in local_idxs]
+          # local indexs are over, 0 them out
+          local_idxs = [x*0 for x in local_idxs]
 
-        # if any group_for_reduce items aren't reduces, upcast them here
-        for j in self.upcast_in_mid_reduce_axes:
-          self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
-          self.upcast()
-          self.group_for_reduce.pop()
-          local_idxs = local_idxs[:-1]
-          # regenerate upcast_idxs
-          upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
+          # if any group_for_reduce items aren't reduces, upcast them here
+          for j in self.upcast_in_mid_reduce_axes:
+            self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
+            self.upcast()
+            self.group_for_reduce.pop()
+            local_idxs = local_idxs[:-1]
+            # regenerate upcast_idxs
+            upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
 
-        # NOTE: this structure is the same as the reduce op above
+          # NOTE: this structure is the same as the reduce op above
 
-        # define late accumulator
-        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+          # define late accumulator
+          acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, reduceop.op)])
 
-        # late reduce loop
-        end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
-        self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
+          # late reduce loop
+          end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
+          self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
-        # load localbufs
-        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs)
+          # load localbufs
+          loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs)
 
-        # there's no AST here (and there's no shape for the reduce LazyOp)
-        self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True) # type: ignore
+          # there's no AST here (and there's no shape for the reduce LazyOp)
+          self.ast_parse(LazyOp(reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True) # type: ignore
 
-        # end the late reduce loop
-        self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
+          # end the late reduce loop
+          self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})
 
     # run late AST
-    val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
+    val = self.ast_parse(self.ast, accs, loaded_buffers, ssa)
 
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa)
@@ -335,10 +341,10 @@ class Linearizer:
     if DEBUG >= 4: print(self.uops[-1])
     return out
 
-  def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
+  def ast_parse(self, x, accs, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
     if x.__class__ is not LazyOp: return loaded_buffers[x]
-    if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa)  # cast isn't an ALU op
-    if x.op in ReduceOps and not do_reduce: return acc
+    if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], accs, loaded_buffers, ssa)  # cast isn't an ALU op
+    if x.op in ReduceOps and not do_reduce: return accs[self.reduceops.index(x)]
     # MULACC fusion. TODO: this is copied from Interpreted
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
       x = LazyOp(FusedOps.MULACC, x.src[0].src, x.arg)
@@ -348,9 +354,9 @@ class Linearizer:
       # Reorder sources to put constants first so get_grouped_maybe_float4 can fold the op
       srcs = sorted(x.src, key=lambda x: (x.realized.__class__ != RawConst) if x.__class__ == LazyBuffer else 0)
       x.src = tuple(srcs)
-    values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
+    values = [self.ast_parse(v, accs, loaded_buffers, ssa) for v in x.src]
     if x.op.__class__ in {ReduceOps, FusedOps}:
-      ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
+      ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, accs, grouping_allowed=self.supports_float4_alu)]
     else:
       ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])

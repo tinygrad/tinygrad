@@ -21,7 +21,7 @@ LAZYCACHE = getenv("LAZYCACHE", 1)
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
-MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS, SIMPLIFY_SUM_RESHAPE_EXPAND_SUM = OPT>=2, OPT>=2, OPT>=2   # shuffle pad ops is fine now since we only push to merge binops
+MERGE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS, SIMPLIFY_SUM_RESHAPE_EXPAND_SUM = OPT>=2, OPT>=2, OPT>=2   # shuffle pad ops is fine now since we only push to merge binops
 PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
 
 def _simplify_sum_reshape_expand_sum(self:LazyBuffer, src: Any, prev_src: Any) -> Optional[LazyOp]:
@@ -67,17 +67,21 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
   psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and not x.realized and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape: Tuple[int, ...] = self.shape
-  if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and len(psrcs) >= 1:
-    psrc = psrcs[0] # NOTE: right now we can't handle multiple, as we'd have to check for loop
-    if psrc[1].optype == ReduceOps:
+  if MERGE_REDUCE_INTO_ELEMENTWISE and len(psrcs) >= 1:
+    for psrc in psrcs: # NOTE: right now we can't handle multiple, as we'd have to check for loop
+      # print(f"DBG psrc={psrc} <= {psrcs}")
+      assert psrc[1].optype == ReduceOps
       top = _ast_reduceops(psrc[1])
-    real_srcs[psrc[0]] = top
-    real_srcs.update({x:x for x in top.buffers})  # the reduce op buffers are not modified
+      real_srcs[psrc[0]] = top
+      real_srcs.update({x:x for x in top.buffers})  # the reduce op buffers are not modified
 
-    # if the ReduceOp is followed by a reshape, we push this reshape before all the ElementwiseOp inputs
-    if psrc[0].shape != psrc[1].shape:
-      intermediate_shape = psrc[1].shape
-      assert psrc[0].shape == self.shape, f"shape mismatch {psrc[0].shape} != {self.shape}"
+      # if the ReduceOp is followed by a reshape, we push this reshape before all the ElementwiseOp inputs
+      if psrc[0].shape != psrc[1].shape:
+        intermediate_shape = psrc[1].shape
+        assert psrc[0].shape == self.shape, f"shape mismatch {psrc[0].shape} != {self.shape}"
+
+      if getenv("ONEREDUCE"):
+        break
 
   # reshape all the late ops into the output shape
   # NOTE: these RESHAPEs will return self if they don't change the shape
