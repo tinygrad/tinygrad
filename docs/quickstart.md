@@ -173,7 +173,7 @@ As we can see in this implementation of cross-entropy loss, there are certain op
 
 For our optimizer, we will be using the traditional stochastic gradient descent optimizer with a learning rate of 3e-4.
 
-```
+```python
 from tinygrad.nn.optim import SGD
 
 opt = SGD([net.l1.weight, net.l2.weight], lr=3e-4)
@@ -183,7 +183,7 @@ We can see that we are passing in the parameters of our neural network to the op
 
 Now that we have our network, loss function, and optimizer defined all we are missing is the data to train on! There are a couple of dataset loaders in tinygrad located in [/datasets](https://github.com/geohot/tinygrad/blob/master/datasets). We will be using the MNIST dataset loader.
 
-```
+```python
 from datasets import fetch_mnist
 ```
 
