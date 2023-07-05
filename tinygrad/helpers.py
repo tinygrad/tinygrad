@@ -23,7 +23,7 @@ def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
 def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if not fxn(x)]
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterator): return [item for sublist in l for item in sublist]
-def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
+def mnum(i) -> str: return "" if i is None else str(i) if i >= 0 else f"m{-i}"
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 
 @functools.lru_cache(maxsize=None)

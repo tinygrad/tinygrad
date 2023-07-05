@@ -169,7 +169,7 @@ class Linearizer:
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == amt]
 
-  def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
+  def global_load(self, i, idxs:Sequence[VariableOrNum], const=None, reduceid=None) -> List[Token]:
     upcast_dim = self.get_upcast_dim(i)
     cache: Dict[str, Token] = {}
     ret = []
@@ -186,8 +186,8 @@ class Linearizer:
         localtype = dtypes.float
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
-                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(reduceid)}_{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
+                     self.uop(UOps.CONST, Token(f"acc{mnum(reduceid)}_{mnum(i)}_{len(cache)}", localtype), [], const)
       ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b) if localtype == dtypes._float4 else cache[key])
     return ret
 
@@ -265,14 +265,14 @@ class Linearizer:
         fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
         # define accumulator
-        acc = self.global_load(reduce_idx, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, reduceop.op)])
+        acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, reduceop.op)], reduceid=reduce_idx)
         accs.append(acc)
 
         # reduce loop
         self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
         # load earlybufs
-        loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs_per_reduce[reduce_idx] and i != 0})
+        loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs, reduceid=reduce_idx) for i,b in enumerate(self.bufs) if b in self.earlybufs_per_reduce[reduce_idx] and i != 0})
 
         # run early AST (with reduce)
         self.ast_parse(reduceop, [accs[-1][off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True)
@@ -305,6 +305,7 @@ class Linearizer:
 
           # define late accumulator
           acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, reduceop.op)])
+          accs = [acc]
 
           # late reduce loop
           end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
@@ -344,7 +345,7 @@ class Linearizer:
   def ast_parse(self, x, accs, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
     if x.__class__ is not LazyOp: return loaded_buffers[x]
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], accs, loaded_buffers, ssa)  # cast isn't an ALU op
-    if x.op in ReduceOps and not do_reduce: return accs[self.reduceops.index(x)]
+    if x.op in ReduceOps and not do_reduce: return accs[0] if self.group_for_reduce else accs[self.reduceops.index(x)]
     # MULACC fusion. TODO: this is copied from Interpreted
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
       x = LazyOp(FusedOps.MULACC, x.src[0].src, x.arg)
@@ -500,22 +501,24 @@ class Linearizer:
     # simplify
     self.simplify_ones()
 
-    # are we grouping? (requires local shape support)
-    if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
-      # TODO: use 1024 if it's allowed in a smarter way
-      for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
-        if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
-          self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
-          self.group_for_reduce.append(sz)
-          break
+    # TODO: Bring this back
+    if len(self.reduceops) <= 1:
+      # are we grouping? (requires local shape support)
+      if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+        # TODO: use 1024 if it's allowed in a smarter way
+        for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
+          if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
+            self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
+            self.group_for_reduce.append(sz)
+            break
 
-    # are we upcasting in mid reduce? (only for images)
-    if self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
-      axes = self.sts[0].unit_stride_axes()
-      assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
-      if self.sts[0].shape[axes[0]]%4 == 0:
-        self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
-        self.group_for_reduce.append(4)
+      # are we upcasting in mid reduce? (only for images)
+      if self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
+        axes = self.sts[0].unit_stride_axes()
+        assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
+        if self.sts[0].shape[axes[0]]%4 == 0:
+          self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
+          self.group_for_reduce.append(4)
 
     # now do everything required
     self.required_optimizations()
