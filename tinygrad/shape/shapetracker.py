@@ -21,15 +21,11 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tup
   return ret
 
 @functools.lru_cache(maxsize=None)
-def is_contiguous(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> bool: return all([s1 == s2 or s == 1 for s,s1,s2 in zip(shape, strides, strides_for_shape(shape))])
+def is_contiguous(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> bool: return all(s1 == s2 or s == 1 for s,s1,s2 in zip(shape, strides, strides_for_shape(shape)))
 
 @functools.lru_cache(maxsize=None)
 def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
-  new_strides = []
-  for stride, shp in zip(strides, shape):
-    if shp != 1: new_strides.append(stride)
-    else: new_strides.append(0)
-  return tuple(new_strides)
+  return tuple(stride if shp != 1 else 0 for stride, shp in zip(strides, shape))
 
 class View:
   __slots__ = "shape", "strides", "offset", "mask", "shape_strides", "contiguous"
@@ -108,7 +104,7 @@ def _reshape(view: View, new_shape: Tuple[int, ...]) -> Tuple[View, bool]:
     if mask:
       for x,y in zip(shape, mask):
         if x == 1 and y != (0, 1):
-          new_mask_tuple = tuple([(0,0) for _ in new_shape])
+          new_mask_tuple = ((0,0),) * len(new_shape)
           break
       else:
         new_mask: List[Tuple[int, int]] = [y for x,y in zip(shape, mask) if x != 1]
@@ -162,16 +158,16 @@ class ShapeTracker:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx, valid = self.expr_idxs(idxs)
-    ret: List[Optional[int]] = [None for _ in self.views[-1].shape]
+    ret: List[Optional[int]] = [None] * len(self.views[-1].shape)
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
       if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
         ret[idxs.index(this_dim.a)] = this_dim.b
       elif isinstance(this_dim, Variable):
         ret[idxs.index(this_dim)] = 1
-    render_idx, render_valid = idx.render(), valid.render()
-    for i in range(len(self.shape)):
-      if f'idx{i}' in render_valid and not ignore_valid: ret[i] = None
-      elif f'idx{i}' not in render_idx: ret[i] = 0
+    idx_vars, valid_vars = idx.vars(), valid.vars()
+    for i,tidx in enumerate(idxs):
+      if tidx in valid_vars and not ignore_valid: ret[i] = None
+      elif tidx not in idx_vars: ret[i] = 0
     return tuple(ret)
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
@@ -200,7 +196,7 @@ class ShapeTracker:
     return self._expr_idx(self.views[-1].expr_node(idx), self.views[-1].expr_node_mask(idx))
 
   def needs_valid(self) -> bool:
-    return any([v.mask is not None for v in self.views])
+    return any(v.mask is not None for v in self.views)
 
   # *** under this line are the movement ops ***
 
@@ -215,7 +211,7 @@ class ShapeTracker:
 
   def pad(self, arg: Tuple[Tuple[int, int], ...]):
     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
-    if any([b or e for b, e in arg]):
+    if any(b or e for b, e in arg):
       zvarg, mask = get_pad_args(self.shape, arg)
       self.__unsafe_resize(zvarg, mask=mask)
     return self

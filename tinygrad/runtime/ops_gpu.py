@@ -3,7 +3,7 @@ import pathlib, os
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
-from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, dtypes, fromimport
+from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawBufferTransfer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
@@ -34,7 +34,6 @@ CL.post_init() if not os.environ.get("DELAYED_RUNTIME_INIT", False) else None
 
 class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device='0'):
-    assert not OSX or dtype != dtypes.float64, "OpenCL on Mac doesn't support float64"
     if isinstance(dtype, ImageDType):
       fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
       buf = cl.Image(CL.cl_ctxs[int(device)], cl.mem_flags.READ_WRITE, fmt, shape=(dtype.shape[1], dtype.shape[0]))
