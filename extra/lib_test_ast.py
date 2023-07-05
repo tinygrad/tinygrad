@@ -1,6 +1,6 @@
 import sys
 import numpy as np
-from typing import Dict, Type
+from typing import List, Dict, Type
 from tinygrad.codegen.ast import ASTKernel
 from tinygrad.runtime.ops_cpu import CPUBuffer
 from tinygrad.ops import DeviceBuffer, map_buffers
@@ -14,10 +14,11 @@ def test_ast(k:ASTKernel, device:Type[DeviceBuffer]=CPUBuffer):
   print("testing AST", test_cnt)
   test_cnt += 1
   # TODO: this should only copy the base buffer and retain the shapetracker (requires CPU shapetracker implementation)
-  cpubufs : Dict[DeviceBuffer, DeviceBuffer] = {x:device.fromCPU(x.toCPU()) for x in k.bufs}
-  real_out = cpubufs[k.bufs[0]].toCPU()
+  cpubufs : List[DeviceBuffer] = [device.fromCPU(x.toCPU()) for x in k.raw_bufs]
+  cpubufmap : Dict[DeviceBuffer, DeviceBuffer] = {x: cpubufs[i] for x, i in zip(k.bufs, k.bufmap)}
+  real_out = cpubufs[0].toCPU()
   assert hasattr(device, 'exec_ast')
-  test_out = device.exec_ast(map_buffers(cpubufs, k.ast)).toCPU()
+  test_out = device.exec_ast(map_buffers(cpubufmap, k.ast)).toCPU()
   if not np.allclose(real_out, test_out, atol=1e-4, rtol=1e-4):
     print("MISMATCH")
     print(k.print())
