@@ -255,7 +255,7 @@ class Linearizer:
     self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
     # parse AST
-    loaded_buffers = {}
+    loaded_buffers: Dict[Union[LazyBuffer,str],List[Token]] = {}
     acc = []
 
     # ssa
@@ -541,7 +541,7 @@ class Linearizer:
 
     # use more opencl indexing if the output buffer is an image and we have room
     if self.bufs[0].dtype.name.startswith('image') and self.first_reduce+len(self.group_for_reduce) < 3:
-      base_shape = self.bufs[0].dtype.shape
+      base_shape = cast(ImageDType, self.bufs[0].dtype).shape
       if (base_shape[0]*base_shape[1]) % self.sts[0].shape[0] == 0 and self.sts[0].shape[0]//base_shape[0] != 0:
         if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
