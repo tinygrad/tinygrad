@@ -22,6 +22,7 @@ N_FFT = 400
 HOP_LENGTH = 160
 CHUNK_LENGTH = 30
 N_SAMPLES = CHUNK_LENGTH * RATE
+N_FRAMES = N_SAMPLES // HOP_LENGTH
 N_MELS = 80
 
 # TODO: you have written this fifteen times
@@ -168,6 +169,7 @@ class GreedyDecoder:
     # NOTE: logprobs.shape[-1] is off by 1
     logprobs, next_tokens = logits.reshape(1, -1).log_softmax(-1).numpy(), logits.numpy().argmax(-1)
     sum_logprobs += logprobs[np.arange(0, logprobs.shape[0]), next_tokens]
+    # TODO: this is failing
     next_tokens[tokens[:, -1] == self.eot] = self.eot
     tokens = np.concatenate([tokens, next_tokens[:, None]], axis=-1)
     completed = (tokens[:, -1] == self.eot).all()
@@ -210,8 +212,13 @@ def listener(q):
     q.put(waveform)
   print("done listening")
 
-# TODO: implement this
-def pad_or_trim(array, length=N_SAMPLES, *, axis=-1):
+def pad_or_trim(array, length=N_SAMPLES, axis=-1):
+  if array.shape[axis] > length:
+    array = array.take(indices=range(length), axis=axis)
+  if array.shape[axis] < length:
+    pad_widths = [(0, 0)] * array.ndim
+    pad_widths[axis] = (0, length - array.shape[axis])
+    array = np.pad(array, pad_widths)
   return array
 
 def remove_specials(sentence):
@@ -240,20 +247,27 @@ if __name__ == "__main__":
   load_state_dict(model, state['model_state_dict'])
   enc = get_encoding(state['dims']['n_vocab'])
 
-  def transcribe_wav(fn):
+  def transcribe_wav(fn, sample_len=224):
     mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
-    mel_segment = pad_or_trim(mel)
+    content_frames = mel.shape[-1] - N_FRAMES
     decoder = GreedyDecoder(eot=enc.eot_token)
-    lst = [enc._special_tokens["<|startoftranscript|>"]]
-    dat = model.encoder(Tensor(mel_segment)).realize()
-    # TODO: decode properly
-    for _ in range(50):  # TODO: use sample_len
-      n_batch = dat.shape[0]
+    # NOTE: we are missing a language token
+    lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|transcribe|>"]]
+    seek = 0
+    while seek < content_frames:
+      mel_segment = mel[:, seek:seek+N_FRAMES]
+      mel_segment = np.expand_dims(pad_or_trim(mel, N_FRAMES), axis=0)
+      audio_features = model.encoder(Tensor(mel_segment)).realize()
+      tokens = Tensor(lst).repeat((mel_segment.shape[0], 1))
+      n_batch = audio_features.shape[0]
       sum_logprobs = [np.nan] * n_batch
-      out = model.decoder(Tensor([lst]), dat)
-      out.realize()
-      decoder.update(dat, out, sum_logprobs)
-      lst.append(idx)
+      for _ in range(sample_len):
+        # logits
+        logits = model.decoder(Tensor([lst]), audio_features)
+        logits.realize()
+        tokens_ = tokens[:, -1:] if tokens.shape[-1] > 1 else tokens
+        tokens, completed = decoder.update(tokens_, logits, sum_logprobs)
+        if completed: break
     predicted = remove_repeated(remove_specials("".join(enc.decode(lst[2:-1]))[1:].lower()))
     predicted = predicted.translate(str.maketrans("", "", string.punctuation))
     predicted = "".join(x for x in predicted if not x.isdigit())
