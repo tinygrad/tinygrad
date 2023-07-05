@@ -1,5 +1,6 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
-import sys, math, string, difflib, base64, functools, itertools, soundfile, multiprocessing
+import sys, math, string, difflib, base64, functools, itertools, multiprocessing
+import subprocess as sp
 from pathlib import Path
 from typing import Optional
 import librosa
@@ -11,6 +12,17 @@ from tinygrad.tensor import Tensor
 from extra.utils import download_file
 from datasets.librispeech import ci, BASEDIR
 from examples.mlperf.metrics import word_error_rate
+
+# audio hyperparameters
+RATE = 16000
+CHUNK = 1600
+RECORD_SECONDS = 10
+MAX_ITERS = 100
+N_FFT = 400
+HOP_LENGTH = 160
+CHUNK_LENGTH = 30
+N_SAMPLES = CHUNK_LENGTH * RATE
+N_MELS = 80
 
 # TODO: you have written this fifteen times
 class MultiHeadAttention:
@@ -86,7 +98,7 @@ class TextDecoder:
     x = self.token_embedding(x) + self.positional_embedding[offset:offset+x.shape[-1]]
 
     seqlen, start_pos = x.shape[1], 0
-    # TODO: Tensor.triu is broken, # 942
+    # NOTE: Tensor.triu is broken, # 942
     #mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf")).triu(k=start_pos+1)
     mask = Tensor(np.triu(np.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=np.float32), k=start_pos+1))
 
@@ -101,23 +113,6 @@ class Whisper:
 
   def __call__(self, mel:Tensor, tokens:Tensor):
     return self.decoder(tokens, self.encoder(mel))
-
-@functools.lru_cache(None)
-def get_filters(sample_rate, n_fft, n_mels): return librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels)
-@functools.lru_cache(None)
-def get_window(n_fft): return (1 - np.cos(2 * math.pi * np.arange(n_fft) / n_fft)) / 2
-
-def prep_audio(waveform, sample_rate) -> Tensor:
-  N_FFT = 400
-  HOP_LENGTH = 160
-  N_MELS = 80
-  stft = librosa.stft(waveform, n_fft=N_FFT, hop_length=HOP_LENGTH, window=get_window(N_FFT))
-  magnitudes = np.abs(stft[..., :-1]) ** 2
-  mel_spec = get_filters(sample_rate, N_FFT, N_MELS) @ magnitudes
-  log_spec = np.log10(np.clip(mel_spec, a_min=1e-10, a_max=None))
-  log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
-  log_spec = (log_spec + 4.0) / 4.0
-  return log_spec
 
 LANGUAGES = {
   "en": "english", "zh": "chinese", "de": "german", "es": "spanish", "ru": "russian", "ko": "korean", "fr": "french", "ja": "japanese", "pt": "portuguese", "tr": "turkish",
@@ -182,10 +177,20 @@ class GreedyDecoder:
     tokens = tokens.pad((0, 1), value=self.eot)
     return tokens, sum_logprobs.tolist()
 
-RATE = 16000
-CHUNK = 1600
-RECORD_SECONDS = 10
-MAX_ITERS = 100
+@functools.lru_cache(None)
+def get_filters(sample_rate, n_fft, n_mels): return librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels)
+@functools.lru_cache(None)
+def get_window(n_fft): return (1 - np.cos(2 * math.pi * np.arange(n_fft) / n_fft)) / 2
+
+def prep_audio(audio, padding) -> Tensor:
+  if padding > 0: audio = np.pad(audio, (0, padding))
+  stft = librosa.stft(audio, n_fft=N_FFT, hop_length=HOP_LENGTH, window=get_window(N_FFT))
+  magnitudes = np.abs(stft[..., :-1]) ** 2
+  mel_spec = get_filters(RATE, N_FFT, N_MELS) @ magnitudes
+  log_spec = np.log10(np.clip(mel_spec, a_min=1e-10, a_max=None))
+  log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
+  log_spec = (log_spec + 4.0) / 4.0
+  return log_spec
 
 def listener(q):
   prep_audio(np.zeros(300), RATE)
@@ -200,10 +205,10 @@ def listener(q):
   print("done listening")
 
 def load_wav(file):
-  sample, rate = soundfile.read(file)
-  sample = sample.astype(np.float32)
-  sample = np.expand_dims(sample, axis=0)
-  return sample, rate
+  cmd = ["ffmpeg", "-nostdin", "-threads", "0", "-i", file, "-f", "s16le", "-ac", "1", "-acodec", "pcm_s16le", "-ar", str(RATE), "-"]
+  try: out = sp.run(cmd, capture_output=True, check=True).stdout
+  except sp.CalledProcessError as e: raise RuntimeError(f"Failed to load audio {e.stderr.decode()}") from e
+  return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
 
 def remove_specials(sentence):
   while "<" in sentence and ">" in sentence:
@@ -232,24 +237,19 @@ if __name__ == "__main__":
   enc = get_encoding(state['dims']['n_vocab'])
 
   def transcribe_wav(fn):
-    waveform, sample_rate = load_wav(fn)
-    log_spec = prep_audio(waveform, sample_rate)
+    log_spec = prep_audio(load_wav(fn), padding=N_SAMPLES)
+    # TODO: implement pad_or_trim
     decoder = GreedyDecoder(eot=enc.eot_token)
     lst = [enc._special_tokens["<|startoftranscript|>"]]
     dat = model.encoder(Tensor(log_spec)).realize()
     # TODO: decode properly
-    seek, content_frames = 0, 100
-    while seek < content_frames:
-      for _ in range(50):  # TODO: use sample_len
-        n_batch = dat.shape[0]
-        sum_logprobs = [np.nan] * n_batch
-        # TODO: tokens should be a [1, 1500, 512] tensor, we have [1, 330, 384]
-        out = model.decoder(Tensor([lst]), dat)
-        out.realize()
-        decoder.update(dat, out, sum_logprobs)
-        lst.append(idx)
-        iters += 1
-      seek += 1
+    for _ in range(50):  # TODO: use sample_len
+      n_batch = dat.shape[0]
+      sum_logprobs = [np.nan] * n_batch
+      out = model.decoder(Tensor([lst]), dat)
+      out.realize()
+      decoder.update(dat, out, sum_logprobs)
+      lst.append(idx)
     predicted = remove_repeated(remove_specials("".join(enc.decode(lst[2:-1]))[1:].lower()))
     predicted = predicted.translate(str.maketrans("", "", string.punctuation))
     predicted = "".join(x for x in predicted if not x.isdigit())
@@ -285,7 +285,7 @@ if __name__ == "__main__":
         did_read = True
       if did_read:
         last_total = total.shape[1]
-        log_spec = prep_audio(total, RATE)
+        log_spec = prep_audio(total)
         encoded_audio = model.encoder(Tensor(log_spec)).realize()
       out = model.decoder(Tensor([lst]), encoded_audio).realize()
       idx = out[0,-1].numpy().argmax()
