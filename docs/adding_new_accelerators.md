@@ -4,7 +4,7 @@ It's pretty easy to add a new accelerator to tinygrad. All you need to do is imp
 
 ## llops
 
-These are the ops that you must implement for your accelerator of choice. Compiled Accelerators do not need to implement movement\_ops, as they are handled by the ShapeTracker.
+These are the ops that you must implement for your accelerator of choice. Compiled accelerators do not need to implement movement\_ops, as they are handled by the ShapeTracker.
 
 ```
 Buffer                                                       # class of memory on this device

@@ -16,7 +16,6 @@ A `#` means that the variable can take any integer value.
 
 Global Environment Variables control core tinygrad behavior and are found [here](/docs/environment_variables/global_variables.md).
 
-
 ### File-Specific Environment Variables
 
 File-Specific Environment Variables control the behavior of a specific tinygrad file. They are rarely used, but can be found [here](/docs/environment_variables/file_specific_variables.md).
