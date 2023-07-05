@@ -33,6 +33,7 @@ def recv_lb() -> LazyBuffer:
     s.unlink()
   return tensor.lazydata
 
+# these aren't true lazyop adding functions
 class Send(Function):
   def forward(self, x:LazyBuffer, target_rank, **kwargs) -> LazyBuffer:
     self.target_rank, self.kwargs = target_rank, kwargs
