@@ -624,6 +624,10 @@ class Linearizer:
         self.alias_buffer(1, [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2))
         self.alias_buffer(2, [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2))
 
+        # very late upcast to run group at the same time
+        #self.shift_to(s0, 4, insert_before=self.first_reduce-self.local_dims)
+        #self.local_dims += 1
+
         # early exit
         return
 

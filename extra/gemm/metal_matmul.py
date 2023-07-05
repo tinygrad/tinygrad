@@ -85,7 +85,7 @@ def timeit(fxn):
   et = fxn()
   # NOTE: et doesn't contain the launch overhead
   return time.perf_counter() - st
-tm = min([timeit(lambda: prog([32, N//(8*4), N//(8*4)], [32, 1, 4], a, b, c, wait=True)) for _ in range(20)])
+tm = min([timeit(lambda: prog([1, N//(8*4), N//(8*4*4)], [32, 1, 4], a, b, c, wait=True)) for _ in range(20)])
 na = a.toCPU().reshape(N,N)
 comp = nb@nc
 if N <= 32:
