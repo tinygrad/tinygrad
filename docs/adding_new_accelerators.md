@@ -1,17 +1,3 @@
----
-layout:
-  title:
-    visible: true
-  description:
-    visible: false
-  tableOfContents:
-    visible: true
-  outline:
-    visible: true
-  pagination:
-    visible: true
----
-
 # Adding New Accelerators
 
 It's pretty easy to add a new accelerator to tinygrad. All you need to do is implement a total of 26 (optionally 27) low level ops. Then tinygrad takes care of the rest, handling derivatives and syntactic sugar.
@@ -41,10 +27,10 @@ Maximum, Add, Sub, Mul, Pow, Div, Equal        # binary ops (no broadcasting, us
 Expand, Reshape, Permute, Pad, Shrink, Flip    # movement ops
 ```
 
-These are implemented in [mlops.py](https://github.com/geohot/tinygrad/blob/master/tinygrad/mlops.py).
+These are implemented in [mlops.py](/tinygrad/mlops.py).
 
 ## hlops
 
 These are the syntax sugar. They are built on top of the mlops and support most of the things that you could expect from a tensor library.
 
-These are implemented in [tensor.py](https://github.com/geohot/tinygrad/blob/master/tinygrad/tensor.py).
+These are implemented in [tensor.py](/tinygrad/tensor.py).

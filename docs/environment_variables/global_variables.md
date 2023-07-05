@@ -1,10 +1,6 @@
----
-description: >-
-  Global environment variables control core tinygrad behavior even when used as
-  a library.
----
-
 # Global Variables
+
+Global environment variables control core tinygrad behavior even when used as a library.
 
 | Variable              | Possible Value(s) | Description                                                                                                                                                            |
 | --------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
