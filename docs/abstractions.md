@@ -28,7 +28,7 @@ If you only read one file, read [tinygrad/mlops.py](https://github.com/geohot/ti
 from __future__ import annotations
 from typing import Optional, Tuple, Union, Any, Dict, Callable, Type, List, ClassVar
 from enum import Enum, auto
-from abc import ABCon
+from abc import ABC
 ```
 
 ### Example: Tensor 2+3
