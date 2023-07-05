@@ -8,7 +8,7 @@ description: >-
 
 ## Getting Started
 
-Read the quick start guide [here](quickstart/).
+Read the quick start guide [here](quickstart.md).
 
 Or if you want to jump right into how tinygrad works, you can read the [abstraction stack ](abstractions.md)documentation.
 

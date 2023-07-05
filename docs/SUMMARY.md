@@ -1,9 +1,7 @@
 # Table of contents
 
 * [Welcome to the tinygrad documentation!](README.md)
-* [Quick Start Guide](quickstart/README.md)
-  * [Basic Quick Start](quickstart/basic\_quickstart.md)
-  * [Extras](quickstart/extras.md)
+* [Quick Start Guide](quickstart.md)
 * [Abstraction Stack](abstractions.md)
 * [Showcase](showcase.md)
 * [Environment Variables](environment\_variables/README.md)

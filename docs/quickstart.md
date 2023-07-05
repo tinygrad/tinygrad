@@ -12,7 +12,11 @@ layout:
     visible: true
 ---
 
-# Basic Quick Start
+# Quick Start Guide
+
+This guide assumes no prior knowledge of PyTorch or any other deep learning framework but does assume some basic knowledge of neural networks. It is intended to be a very quick overview of the high-level API that tinygrad provides.
+
+This guide is also structured as a tutorial. At the end of it, you will have a working model that can classify handwritten digits.
 
 ## Install tinygrad
 
@@ -247,6 +251,90 @@ print(f"Time: {time.perf_counter() - st}")
 
 ### And that's it
 
-We highly recommend you check out [examples](broken-reference) for more examples of using tinygrad. Reading the source code of tinygrad is also a great way to learn how it works. Specifically the tests in [test/](https://github.com/geohot/tinygrad/blob/master/test) are a great place to see how to use and the semantics of the different operations. There are also a bunch of models implemented in [models/](https://github.com/geohot/tinygrad/blob/master/models) that you can use as a reference.
+We highly recommend you check out [examples/](https://github.com/geohot/tinygrad/tree/master/examples) folder for more examples of using tinygrad. Reading the source code of tinygrad is also a great way to learn how it works. Specifically the tests in [test/](https://github.com/geohot/tinygrad/blob/master/test) are a great place to see how to use and the semantics of the different operations. There are also a bunch of models implemented in [models/](https://github.com/geohot/tinygrad/blob/master/models) that you can use as a reference.
 
 Additionally, feel free to ask questions in the `#learn-tinygrad` channel on the [discord](https://discord.gg/beYbxwxVdx). Don't ask to ask, just ask!
+
+### Extras
+
+#### JIT
+
+It is possible to speed up the computation of certain neural networks by using the JIT. Currently, this does not support models with varying input sizes and non-tinygrad operations.
+
+To use the JIT we just need to add a function decorator to the forward pass of our neural network and ensure that the input and output are realized tensors. Or in this case, we will create a wrapper function and decorate the wrapper function to speed up the evaluation of our neural network.
+
+```python
+from tinygrad.jit import TinyJit
+
+@TinyJit
+def jit(x):
+  return net(x).realize()
+
+st = time.perf_counter()
+avg_acc = 0
+for step in range(1000):
+  # random sample a batch
+  samp = np.random.randint(0, X_test.shape[0], size=(64))
+  batch = Tensor(X_test[samp], requires_grad=False)
+  # get the corresponding labels
+  labels = Y_test[samp]
+
+  # forward pass with jit
+  out = jit(batch)
+
+  # calculate accuracy
+  pred = np.argmax(out.numpy(), axis=-1)
+  avg_acc += (pred == labels).mean()
+print(f"Test Accuracy: {avg_acc / 1000}")
+print(f"Time: {time.perf_counter() - st}")
+```
+
+You will find that the evaluation time is much faster than before and that your accelerator utilization is much higher.
+
+#### Saving and Loading Models
+
+The standard weight format for tinygrad is [safetensors](https://github.com/huggingface/safetensors). This means that you can load the weights of any model also using safetensors into tinygrad. There are functions in [state.py](https://github.com/geohot/tinygrad/blob/master/tinygrad/state.py) to save and load models to and from this format.
+
+```python
+from tinygrad.state import safe_save, safe_load, get_state_dict, load_state_dict
+
+# first we need the state dict of our model
+state_dict = get_state_dict(net)
+
+# then we can just save it to a file
+safe_save(state_dict, "model.safetensors")
+
+# and load it back in
+state_dict = safe_load("model.safetensors")
+load_state_dict(net, state_dict)
+```
+
+Many of the models in the [models/](https://github.com/geohot/tinygrad/blob/master/models) folder have a `load_from_pretrained` method that will download and load the weights for you. These usually are PyTorch weights meaning that you would need PyTorch installed to load them.
+
+#### Environment Variables
+
+There exist a bunch of environment variables that control the runtime behavior of tinygrad. Some of the commons ones are `DEBUG` and the different backend enablement variables.
+
+You can find a full list and their descriptions [here](environment\_variables/).
+
+#### Visualizing the Computation Graph
+
+It is possible to visualize the computation graph of a neural network using [graphviz](https://graphviz.org/).
+
+This is easily done by running a single pass (forward or backward!) of the neural network with the environment variable `GRAPH` set to `1`. The graph will be saved to `/tmp/net.svg` by default.
+
+To install graphviz:
+
+{% tabs %}
+{% tab title="MacOS" %}
+```bash
+brew install graphviz
+```
+
+You may also need to install pydot
+
+```bash
+python3 -m pip install pydot
+```
+{% endtab %}
+{% endtabs %}
