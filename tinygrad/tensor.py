@@ -215,6 +215,7 @@ class Tensor:
 
     for t0 in reversed(self.deepwalk()):
       if not t0.requires_grad:
+        del t0._ctx # TODO: does it help to delete this here ever?
         continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
