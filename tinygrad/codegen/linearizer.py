@@ -10,7 +10,7 @@ from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode
-VariableOrNum = Union[Variable, NumNode]
+VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
 class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
@@ -88,7 +88,7 @@ def expand_node(idx:Node) -> List[Node]:
   elif isinstance(idx, MulNode):
     return [x*idx.b for x in expand_node(idx.a)]
   elif isinstance(idx, SumNode):
-    return [Variable.sum(it) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
+    return [Variable.sum(list(it)) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
   else:
     raise NotImplementedError(idx)
 
@@ -157,6 +157,7 @@ class Linearizer:
     self.upcasted: int = 0
     self.local_dims: int = 0
     self.local_alias: Dict[int, LocalBuffer] = {}
+    self.use_tensor_cores: bool = False
 
     # group simplifies
     self.simplify_ones()
@@ -292,7 +293,7 @@ class Linearizer:
       for i in self.local_alias:
         strides = self.sts[i].real_strides()
         extra_locals = [lidx for lidx,st in zip(local_idxs, strides[len(global_idxs):self.first_reduce]) if st == 0]
-        this_upcast_idxs = []
+        this_upcast_idxs: List[Node] = []
         for j,v in enumerate(full_upcast_idxs):
           if strides[len(global_idxs)+len(local_idxs)+len(reduce_idxs)+j] == 0:
             if DEBUG >= 4: print("upcasting stride 0")
@@ -320,12 +321,12 @@ class Linearizer:
         locals_to_store.append((self.bufs.index(self.local_alias[i]), idxs, ll))
 
       # copy in any global buffers
-      if getenv("TC"):
+      if getenv("TC") and self.use_tensor_cores:
         i = 0
-        for y in range(4):
-          for x in range(4):
-            self.uop(UOps.WMMA, None, [f"val1_{x*2}", f"val1_{x*2+1}"]+[f"val2_{y*2}", f"val2_{y*2+1}"]+[f"acc0_{i*2}", f"acc0_{i*2+1}"], ())
-            i += 1
+        for y0,y1 in zip(locals_to_store[1][2][::2], locals_to_store[1][2][1::2]):
+          for x0,x1 in zip(locals_to_store[0][2][::2], locals_to_store[0][2][1::2]):
+            self.uop(UOps.WMMA, None, [x0, x1, y0, y1, acc[i], acc[i+1]], ())
+            i += 2
       else:
         if locals_to_store:
           self.uop(UOps.BARRIER, None, [], ())
@@ -467,7 +468,6 @@ class Linearizer:
     colors += ["magenta" if self.full_shape[i] != self.sts[0].shape[i] else "yellow" for i in range(self.shape_len-self.upcasted, self.shape_len)]
     assert len(colors) == self.shape_len, "colors size mismatch"
     return colors
-  def colored_shape(self) -> str: return ' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors()))
 
   def colored_shape(self) -> str: return ' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors()))
   def printbufs(self, prefix=""):
@@ -577,39 +577,41 @@ class Linearizer:
     # simplify
     self.simplify_ones()
 
-    if self.bufs[0].shape != (2048, 2048, 1) and self.bufs[0].shape != (256, 256, 1) and self.bufs[0].shape != (64, 64, 1) and self.bufs[0].shape != (8, 8, 1): return
+    # use tensor cores
+    if len(self.bufs[0].shape) == 3 and self.bufs[0].shape[0] == self.bufs[0].shape[1] and self.bufs[0].shape[2] == 1:
+      self.use_tensor_cores = True
 
-    # upcast first
-    if self.full_shape[self.first_reduce] > 8: self.shift_to(self.first_reduce, 8)
-    self.upcast()
+      # upcast first
+      if self.full_shape[self.first_reduce] > 8: self.shift_to(self.first_reduce, 8)
+      self.upcast()
 
-    # locals
-    self.shift_to(0, 8, insert_before=self.first_reduce)
-    self.shift_to(1, 8, insert_before=self.first_reduce)
+      # locals
+      self.shift_to(0, 8, insert_before=self.first_reduce)
+      self.shift_to(1, 8, insert_before=self.first_reduce)
 
-    # permuted for tensor cores
-    self.shift_to(2, 2, insert_before=self.first_reduce)
-    self.shift_to(2, 2, insert_before=self.first_reduce)
-    self.shift_to(3, 4, insert_before=self.first_reduce)
-    self.reshape_and_permute(None, [0,1,2,3,5,4] + list(range(6, self.shape_len)))
-    self.reshape_and_permute(lambda x: x[0:4] + tuple([x[4]*x[5],]) + x[6:], None)
+      # permuted for tensor cores
+      self.shift_to(2, 2, insert_before=self.first_reduce)
+      self.shift_to(2, 2, insert_before=self.first_reduce)
+      self.shift_to(3, 4, insert_before=self.first_reduce)
+      self.reshape_and_permute(None, [0,1,2,3,5,4] + list(range(6, self.shape_len)))
+      self.reshape_and_permute(lambda x: x[0:4] + tuple([x[4]*x[5],]) + x[6:], None)
 
-    # small 2 upcast
-    self.shift_to(self.first_reduce-1, 2)
-    self.upcast()
+      # small 2 upcast
+      self.shift_to(self.first_reduce-1, 2)
+      self.upcast()
 
-    # final 2x2 upcast
-    self.shift_to(0, 4)
-    self.upcast()
-    self.shift_to(1, 4)
-    self.upcast()
+      # final 2x2 upcast
+      self.shift_to(0, 4)
+      self.upcast()
+      self.shift_to(1, 4)
+      self.upcast()
 
-    # TODO: we have put the index aliasing stuff here
-    self.local_dims = self.first_reduce - 2
-    self.alias_buffer(1, [0, 0] + [2] * self.local_dims + ([0] if self.shape_len-self.first_reduce > 1 else []) + [1]*(self.upcasted-2) + [3,3]) #, invert_strides=True)
-    self.alias_buffer(2, [0, 0] + [2] * self.local_dims + ([0] if self.shape_len-self.first_reduce > 1 else []) + [1]*(self.upcasted-2) + [3,3])
+      # TODO: we have put the index aliasing stuff here
+      self.local_dims = self.first_reduce - 2
+      self.alias_buffer(1, [0, 0] + [2] * self.local_dims + ([0] if self.shape_len-self.first_reduce > 1 else []) + [1]*(self.upcasted-2) + [3,3]) #, invert_strides=True)
+      self.alias_buffer(2, [0, 0] + [2] * self.local_dims + ([0] if self.shape_len-self.first_reduce > 1 else []) + [1]*(self.upcasted-2) + [3,3])
 
-    return
+      return
 
     # are we grouping? (requires local shape support)
     if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
