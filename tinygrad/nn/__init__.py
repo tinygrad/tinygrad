@@ -47,7 +47,7 @@ class Conv:
 
     self.weight: Tensor = Tensor.kaiming_uniform(out_channels, in_channels // groups, *self.kernel_size, a=math.sqrt(5))
     self.bound: float = 1 / math.sqrt(prod(self.weight.shape[1:]))
-    self.bias: Tensor | None = Tensor.uniform(out_channels, low=-self.bound, high=self.bound) if bias else None
+    self.bias: Union[Tensor, None] = Tensor.uniform(out_channels, low=-self.bound, high=self.bound) if bias else None
 
 # TODO: fix Conv1D
 class Conv1d(Conv):
@@ -73,7 +73,7 @@ class Linear:
     self.out_features: int = out_features
     self.weight: Tensor = Tensor.kaiming_uniform(out_features, in_features, a=math.sqrt(5))
     self.bound: float = 1 / math.sqrt(self.weight.shape[1])
-    self.bias: Tensor | None = Tensor.uniform(out_features, low=-self.bound, high=self.bound) if bias else None
+    self.bias: Union[Tensor, None] = Tensor.uniform(out_features, low=-self.bound, high=self.bound) if bias else None
 
   def __call__(self, x:Tensor) -> Tensor:
     return x.linear(self.weight.transpose(), self.bias)
