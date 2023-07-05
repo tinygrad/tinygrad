@@ -19,7 +19,7 @@ This file will take you on a whirlwind journey from a tensor all the way down. T
 The whole tinygrad is \~2300 lines, so while it's readable in an evening or two, this documentation will help with entry points and understanding the abstraction stack.
 
 {% hint style="info" %}
-If you only read one file, real [tinygrad/mlops.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/mlops.py). It's also worth reading [tinygrad/tensor.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/tensor.py). It's pretty beautiful.
+If you only read one file, read [tinygrad/mlops.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/mlops.py). It's also worth reading [tinygrad/tensor.py](https://github.com/geohot/tinygrad/blob/2f968f8547cfd77a2ebe68e0f8e3c2d58f94f77a/tinygrad/tensor.py). It's pretty beautiful.
 {% endhint %}
 
 #### Boilerplate imports for typing
