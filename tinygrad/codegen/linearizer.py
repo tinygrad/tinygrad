@@ -118,25 +118,17 @@ class Linearizer:
 
     # dedup by python object comparison of RawBuffer -- this is OK since we expect all non-output non-local buffers to be realized here.
     # this helps in the case where different views of the same rawbuffer are passed as arguments.
-    if isinstance(buf, LazyBuffer):
-      raw_buf = buf.realized
-      assert(raw_buf is not None)
-    else:
-      raw_buf = buf
-    if raw_buf in self.raw_bufs:
-      self.bufmap.append(self.raw_bufs.index(raw_buf))
-    else:
-      self.raw_bufs.append(raw_buf)
-      self.bufmap.append(len(self.raw_bufs) - 1)
+    raw_buf = buf.realized if isinstance(buf, LazyBuffer) else buf
+    assert raw_buf is not None
+    if raw_buf not in self.raw_bufs: self.raw_bufs.append(raw_buf)
+    self.bufmap.append(self.raw_bufs.index(raw_buf) if raw_buf in self.raw_bufs else len(self.raw_bufs) - 1)
 
   @staticmethod
-  def rawbuf_is_input(buf: Union[LocalBuffer,RawBuffer]) -> bool:
-    return buf.__class__ not in [RawConst, LocalBuffer]
+  def rawbuf_is_input(buf: Union[LocalBuffer,RawBuffer]) -> bool: return buf.__class__ not in [RawConst, LocalBuffer]
 
   # the bufs we want to pass in at kernel execution time; ie realized LazyBuffers and not RawConst or LocalBuffer
   @property
-  def raw_input_bufs(self) -> List[RawBuffer]:
-    return [buf for buf in self.raw_bufs if Linearizer.rawbuf_is_input(buf)]
+  def raw_input_bufs(self) -> List[RawBuffer]: return [buf for buf in self.raw_bufs if Linearizer.rawbuf_is_input(buf)]
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
