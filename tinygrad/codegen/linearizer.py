@@ -242,7 +242,9 @@ class Linearizer:
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      # LocalBuffer has an entry in self.raw_bufs and self.bufmap, but not in self.bufs or self.sts
       self.raw_bufs.append(LocalBuffer("temp", self.sts[-1].size()))
+      self.bufmap.append(len(self.raw_bufs) - 1)
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
     # print
@@ -324,7 +326,7 @@ class Linearizer:
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
         self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
-        # load localbufs
+        # load localbufs -- -1 should point to the last LazyBuffer in self.sts and the LocalBuffer in self.raw_bufs
         loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
