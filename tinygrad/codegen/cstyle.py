@@ -169,7 +169,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,RawBuffer]], lang
 
   buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else
                ("const " if i > 0 else "")+lang.buffer_prefix+x.dtype.name+"*"+lang.buffer_suffix) for i,x in enumerate(bufs)
-               if not isinstance(x, LocalBuffer) and not isinstance(x, RawConst)]
+               if Linearizer.rawbuf_is_input(x)]
   prg = ''.join([f"{lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
     [', '.join([f'{t} {bufnames[i]}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])

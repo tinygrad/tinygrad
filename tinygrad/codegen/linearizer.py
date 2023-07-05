@@ -129,10 +129,14 @@ class Linearizer:
       self.raw_bufs.append(raw_buf)
       self.bufmap.append(len(self.raw_bufs) - 1)
 
+  @staticmethod
+  def rawbuf_is_input(buf: Union[LocalBuffer,RawBuffer]) -> bool:
+    return buf.__class__ not in [RawConst, LocalBuffer]
+
   # the bufs we want to pass in at kernel execution time; ie realized LazyBuffers and not RawConst or LocalBuffer
   @property
   def raw_input_bufs(self) -> List[RawBuffer]:
-    return [buf for buf in self.raw_bufs if buf.__class__ not in [RawConst, LocalBuffer]]
+    return [buf for buf in self.raw_bufs if Linearizer.rawbuf_is_input(buf)]
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
