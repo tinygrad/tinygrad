@@ -166,7 +166,7 @@ print(type(result.lazydata), result.lazydata)
 
 You'll see it has a LazyOp. The op type is BinaryOps.ADD and it has two sources, the 2 and the 3.
 
-```
+```python
 lazyop: LazyOp = result.lazydata.op
 assert lazyop.op == BinaryOps.ADD
 assert len(lazyop.src) == 2
