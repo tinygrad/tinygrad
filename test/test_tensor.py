@@ -106,8 +106,8 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
 
   def test_jacobian(self):
-    W = np.random.RandomState(1337).random((10, 5)).astype(np.float32)
-    x = np.random.RandomState(7331).random((1, 10)).astype(np.float32) - 0.5
+    W = np.random.RandomState(42069).random((10, 5)).astype(np.float32)
+    x = np.random.RandomState(69420).random((1, 10)).astype(np.float32)
 
     torch_x = torch.tensor(x, requires_grad=True)
     torch_W = torch.tensor(W, requires_grad=True)
@@ -118,24 +118,23 @@ class TestTinygrad(unittest.TestCase):
     tiny_W = Tensor(W, requires_grad=True)
     tiny_func = lambda x: x.dot(tiny_W).relu().log_softmax()
     J = jacobian(tiny_func, tiny_x)
-    # NJ = numerical_jacobian(tiny_func, tiny_x)
+    NJ = numerical_jacobian(tiny_func, tiny_x)
 
     np.testing.assert_allclose(PJ, J, atol = 1e-5)
-    # np.testing.assert_allclose(PJ, NJ, atol = 1e-5)
+    np.testing.assert_allclose(PJ, NJ, atol = 1e-3)
 
-  @unittest.skip("Numerical jacobian is not accurate enough")
   def test_gradcheck(self):
     W = np.random.RandomState(1337).random((10, 5)).astype(np.float32)
-    x = np.random.RandomState(7331).random((1, 10)).astype(np.float32) - 0.5
+    x = np.random.RandomState(7331).random((1, 10)).astype(np.float32)
 
     tiny_x = Tensor(x, requires_grad=True)
     tiny_W = Tensor(W, requires_grad=True)
     tiny_func = lambda x: x.dot(tiny_W).relu().log_softmax()
 
-    self.assertTrue(gradcheck(tiny_func, tiny_x))
+    self.assertTrue(gradcheck(tiny_func, tiny_x, eps = 1e-3))
 
     # coarse approx. since a "big" eps and the non-linearities of the model
-    self.assertFalse(gradcheck(tiny_func, tiny_x, eps = 0.1))
+    self.assertFalse(gradcheck(tiny_func, tiny_x, eps = 1e-5))
 
   def test_random_fns_are_deterministic_with_seed(self):
     for random_fn in [Tensor.randn, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform]:
