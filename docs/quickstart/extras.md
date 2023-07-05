@@ -62,7 +62,7 @@ Many of the models in the [models/](https://github.com/geohot/tinygrad/blob/mast
 
 There exist a bunch of environment variables that control the runtime behavior of tinygrad. Some of the commons ones are `DEBUG` and the different backend enablement variables.
 
-You can find a full list and their descriptions [here](../environment-variables/).
+You can find a full list and their descriptions [here](../environment\_variables/).
 
 ## Visualizing the Computation Graph
 

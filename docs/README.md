@@ -8,9 +8,9 @@ description: >-
 
 ## Getting Started
 
-Read the quick start guide [here](quick-start-guide/).
+Read the quick start guide [here](quickstart/).
 
-Or if you want to jump right into how tinygrad works, you can read the [abstraction stack ](abstraction-stack.md)documentation.
+Or if you want to jump right into how tinygrad works, you can read the [abstraction stack ](abstractions.md)documentation.
 
 Or if you want to see some examples, you can look [here](https://github.com/geohot/tinygrad/tree/master/examples).
 
@@ -22,9 +22,9 @@ This is currently a big work in progress.
 
 ## Resources
 
-#### [Environment Variables](environment-variables/)
+#### [Environment Variables](environment\_variables/)
 
-#### [Adding New Accelerators](adding-new-accelerators.md)
+#### [Adding New Accelerators](adding\_new\_accelerators.md)
 
 #### Community
 
