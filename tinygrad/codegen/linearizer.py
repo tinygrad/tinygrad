@@ -102,7 +102,7 @@ class Linearizer:
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
 
     # organize the input/output buffers
-    self.bufs: List[Union[LazyBuffer,LocalBuffer]] = []
+    self.bufs: List[Union[LazyBuffer]] = []
     self.bufmap: List[int] = []  # map from buf to index into raw_input_bufs, only for global buffers
     self.raw_bufs: List[Union[LocalBuffer,RawBuffer]] = []  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
     for buf in [output_buffer] + dedup(ast.buffers):
@@ -111,17 +111,16 @@ class Linearizer:
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
-    self.key = (ast.map_buffers({x:i for x,i in zip(self.bufs, self.bufmap)}).key, tuple([cast(LazyBuffer, x).key for x in self.bufs]))
+    self.key = (ast.map_buffers({x:i for x,i in zip(self.bufs, self.bufmap)}).key, tuple([x.key for x in self.bufs]))
 
-  def add_buf(self, buf:Union[LazyBuffer,LocalBuffer]):
+  def add_buf(self, buf:LazyBuffer):
     self.bufs.append(buf)
 
     # dedup by python object comparison of RawBuffer -- this is OK since we expect all non-output non-local buffers to be realized here.
     # this helps in the case where different views of the same rawbuffer are passed as arguments.
-    raw_buf = buf.realized if isinstance(buf, LazyBuffer) else buf
-    assert raw_buf is not None
-    if raw_buf not in self.raw_bufs: self.raw_bufs.append(raw_buf)
-    self.bufmap.append(self.raw_bufs.index(raw_buf) if raw_buf in self.raw_bufs else len(self.raw_bufs) - 1)
+    assert buf.realized is not None
+    if buf.realized not in self.raw_bufs: self.raw_bufs.append(buf.realized)
+    self.bufmap.append(self.raw_bufs.index(buf.realized) if buf.realized in self.raw_bufs else len(self.raw_bufs) - 1)
 
   @staticmethod
   def rawbuf_is_input(buf: Union[LocalBuffer,RawBuffer]) -> bool: return buf.__class__ not in [RawConst, LocalBuffer]
@@ -243,7 +242,7 @@ class Linearizer:
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
-      self.add_buf(LocalBuffer("temp", self.sts[-1].size()))
+      self.raw_bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
     # print
@@ -335,7 +334,7 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})
+    loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0})
 
     # run late AST
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
