@@ -104,7 +104,7 @@ class Linearizer:
     # organize the input/output buffers
     self.bufs: List[Union[LazyBuffer,LocalBuffer]] = []
     self.bufmap: List[int] = []  # map from buf to index into raw_input_bufs, only for global buffers
-    self.raw_bufs: List[Union[LocalBuffer,RawBuffer,RawConst]] = []  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
+    self.raw_bufs: List[Union[LocalBuffer,RawBuffer]] = []  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
     for buf in [output_buffer] + dedup(ast.buffers):
       self.add_buf(buf)
 

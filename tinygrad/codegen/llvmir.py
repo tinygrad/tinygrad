@@ -32,7 +32,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   FusedOps.MULACC: lambda builder,x,y,z: builder.fadd(builder.fmul(x,y, flags=('fast',)), z, flags=('fast',)),
 }
 
-def uops_to_llvm_ir(uops:List[UOp], bufs:List[Union[LocalBuffer,RawBuffer,RawConst]]) -> str:
+def uops_to_llvm_ir(uops:List[UOp], bufs:List[Union[LocalBuffer,RawBuffer]]) -> str:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 

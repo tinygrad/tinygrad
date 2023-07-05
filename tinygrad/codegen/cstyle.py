@@ -55,7 +55,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", FusedOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})"
 }
 
-def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,RawBuffer,RawConst]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
+def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,RawBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
   prekernel: Set[str] = set()
   kernel = []
   global_size = []
