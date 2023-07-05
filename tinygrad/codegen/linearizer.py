@@ -265,14 +265,14 @@ class Linearizer:
         fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
         # define accumulator
-        acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, reduceop.op)], reduceid=reduce_idx)
+        acc = self.global_load(reduce_idx, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, reduceop.op)])
         accs.append(acc)
 
         # reduce loop
         self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
         # load earlybufs
-        loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs, reduceid=reduce_idx) for i,b in enumerate(self.bufs) if b in self.earlybufs_per_reduce[reduce_idx] and i != 0})
+        loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs_per_reduce[reduce_idx] and i != 0})
 
         # run early AST (with reduce)
         self.ast_parse(reduceop, [accs[-1][off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True)
