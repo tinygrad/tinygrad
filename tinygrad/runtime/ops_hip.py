@@ -22,13 +22,6 @@ class RawHIPBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype):
     self.buf_sz = size * dtype.itemsize
     super().__init__(size, dtype, hip.hipMalloc(self.buf_sz))
-  def _copyin(self, x:np.ndarray): hip.hipMemcpyAsync_htod(self._buf, x.ctypes.data_as(ctypes.c_void_p), self.buf_sz, ctypes.c_void_p(0))
-  def _copyout(self, x:np.ndarray): hip.hipMemcpyAsync_dtoh(x.ctypes.data_as(ctypes.c_void_p), self._buf, self.buf_sz, ctypes.c_void_p(0))
-
-class RawHIPBufferCPU(RawBufferCopyInOut):
-  def __init__(self, size, dtype):
-    self.buf_sz = size * dtype.itemsize
-    super().__init__(size, dtype, hip.hipMalloc(self.buf_sz))
   def __del__(self): hip.hipFree(self._buf)
   # hipMemcpyAsync_htod/hipMemcpyAsync_dtoh will crash on HIP CPU, so we use synchronized versions of hipMemcpy instead.
   def _copyin(self, x:np.ndarray): hip.hipMemcpy(self._buf, x.ctypes.data_as(ctypes.c_void_p), self.buf_sz, hip.hipMemcpyHostToDevice)
@@ -115,13 +108,8 @@ def build_kernel_launcher(bufnames, buftypes):
   hipLaunchKernelGGL(KERNEL_NAME_PLACEHOLDER, dim3(grid_dim_x, grid_dim_y, grid_dim_z), dim3(block_dim_x, block_dim_y, block_dim_z), shared_mem_bytes, stream,
 """] + [', '.join([f'{bufnames[i]}' for i,t in buftypes])] + [');\nhipStreamSynchronize(stream);\n}']
 
-class HIPCodegen(CStyleCodegen):
-  lang = CStyleLanguage(
-    kernel_prefix = r"""
-#include <hip/hip_common.h>
-#include <hip/hip_math_constants.h>
-#define INFINITY (__builtin_inff())
-#define NAN HIP_NAN_F
+
+common_kernel_prefix = r"""
 __device__ float4 max(float4 x, float4 y) {
   return float4(fmax(x.x, y.x), fmax(x.y, y.y), fmax(x.z, y.z), fmax(x.w, y.w));
 }
@@ -134,13 +122,13 @@ __device__ float4 pow(float4 x, float4 y) {
   return float4(pow(x.x, y.x), pow(x.y, y.y), pow(x.z, y.z), pow(x.w, y.w));
 }
 __device__ float4 log2(float4 x) {
+
   return float4(log2(x.x), log2(x.y), log2(x.z), log2(x.w));
 }
-extern "C" __global__""",
-    smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
-    half_prekernel = r"""
-#include <hip/hip_fp16.h>
-using half4 = HIP_vector_type<half, 4>;
+extern "C" __global__
+"""
+
+common_half_prekernel = r"""
 __device__ float vload_half(size_t offset, const half *p) {
   return (float)*(p + offset);
 }
@@ -148,10 +136,25 @@ __device__ float vload_half(size_t offset, const half *p) {
 __device__ float4 vload_half4(size_t offset, const half * p) {
   return make_float4((float)*(p + offset *4), (float)*(p + offset *4 + 1), (float)*(p + offset *4 + 2), (float)*(p + offset *4 +3));
 }
+
 __device__ void vstore_half(float data, size_t offset, half *p) {
   *(p + offset) = (half)data;
 }
-    """,
+"""
+
+class HIPCodegen(CStyleCodegen):
+  lang = CStyleLanguage(
+    kernel_prefix = r"""
+#include <hip/hip_common.h>
+#include <hip/hip_math_constants.h>
+#define INFINITY (__builtin_inff())
+#define NAN HIP_NAN_F
+""" + common_kernel_prefix,
+    smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
+    half_prekernel = r"""
+#include <hip/hip_fp16.h>
+using half4 = HIP_vector_type<half, 4>;
+""" + common_half_prekernel,
     uses_vload=True,
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
@@ -161,46 +164,18 @@ class HIPCodegenCPU(CStyleCodegen):
     kernel_prefix = r"""
 #include <math.h>
 typedef unsigned char uchar;
-using half_float::half;
-MAKE_VECTOR_TYPE(half, half)
-
 inline float max(float x, float y) {
   return fmax(x, y);
 }
-
-inline float4 max(float4 x, float4 y) {
-  return float4(fmax(x.x, y.x), fmax(x.y, y.y), fmax(x.z, y.z), fmax(x.w, y.w));
-}
-
-inline float4 pow(float x, float4 y) {
-  return float4(pow(x, y.x), pow(x, y.y), pow(x, y.z), pow(x, y.w));
-}
-
-inline float4 pow(float4 x, float4 y) {
-  return float4(pow(x.x, y.x), pow(x.y, y.y), pow(x.z, y.z), pow(x.w, y.w));
-}
-
-inline float4 log2(float4 x) {
-  return float4(log2(x.x), log2(x.y), log2(x.z), log2(x.w));
-}
-
-inline float vload_half(size_t offset, const half *p) {
-  return (float)*(p + offset);
-}
-
-inline float4 vload_half4(size_t offset, const half * p) {
-  return make_float4((float)*(p + offset *4), (float)*(p + offset *4 + 1), (float)*(p + offset *4 + 2), (float)*(p + offset *4 +3));
-}
-inline void vstore_half(float data, size_t offset, half *p) {
-  *(p + offset) = (half)data;
-}
-extern "C" __global__
-""",
+""" + common_kernel_prefix,
     smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4", uses_vload=True,
-    half_prekernel = "",
+    half_prekernel = r"""
+using half_float::half;
+MAKE_VECTOR_TYPE(half, half)
+""" + common_half_prekernel,
     need_kernel_launcher = True,
     build_kernel_launcher = build_kernel_launcher,
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 
-HIPBuffer = Compiled(RawHIPBufferCPU if HIP_CPU else RawHIPBuffer, HIPCodegenCPU if HIP_CPU else HIPCodegen, HIPProgramCPU if HIP_CPU else HIPProgram, hip.hipDeviceSynchronize)
+HIPBuffer = Compiled(RawHIPBuffer, HIPCodegenCPU if HIP_CPU else HIPCodegen, HIPProgramCPU if HIP_CPU else HIPProgram, hip.hipDeviceSynchronize)

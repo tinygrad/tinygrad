@@ -108,6 +108,10 @@ _libhip.hipMemcpy.restype = int
 _libhip.hipMemcpy.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
 
 
+def hipMemcpy(dst, src, count, t):
+  status = _libhip.hipMemcpy(dst, src, ctypes.c_size_t(count), t)
+  hipCheckStatus(status)
+
 def hipMemcpy_htod(dst, src, count):
   status = _libhip.hipMemcpy(dst, src, ctypes.c_size_t(count), hipMemcpyHostToDevice)
   hipCheckStatus(status)
