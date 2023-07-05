@@ -581,15 +581,15 @@ class Linearizer:
 
     # should use tensor cores?
     # first, confirm it's a straightforward mulacc
-    if self.reduceop and self.reduceop.op == ReduceOps.SUM and self.reduceop.src[0].op == BinaryOps.MUL and \
+    if self.reduceop and self.reduceop.op == ReduceOps.SUM and isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
        isinstance(self.reduceop.src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[1], LazyBuffer):
       buf0 = self.bufs.index(self.reduceop.src[0].src[0])
       buf1 = self.bufs.index(self.reduceop.src[0].src[1])
       buf0_strides = self.sts[buf0].real_strides()
       buf1_strides = self.sts[buf1].real_strides()
-      axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0]
-      axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0]
-      if len(axis_buf0) and len(axis_buf1):
+      axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%8 == 0]
+      axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%8 == 0]
+      if len(axis_buf0) and len(axis_buf1) and self.full_shape[self.first_reduce]%8 == 0:
         if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1)
         self.use_tensor_cores = True
 
@@ -611,16 +611,18 @@ class Linearizer:
         self.shift_to(self.first_reduce-1, 2)
         self.upcast()
 
-        # final global 2x2 upcast
-        self.shift_to(s1, 4)
-        self.upcast()
-        self.shift_to(s0, 4)
-        self.upcast()
+        # final global upcast
+        for ax in [s1, s0]:
+          for upc in [4,3,2]:
+            if self.full_shape[ax]%upc == 0:
+              self.shift_to(ax, upc)
+              self.upcast()
+              break
 
         # alias buffer
         self.local_dims = self.first_reduce - global_count
-        self.alias_buffer(1, [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1,3,3])
-        self.alias_buffer(2, [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1,3,3])
+        self.alias_buffer(1, [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2))
+        self.alias_buffer(2, [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2))
 
         # early exit
         return
