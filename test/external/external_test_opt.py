@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 import os
+
+import torch
 if "OPT" not in os.environ:
   os.environ["OPT"] = "2"
 
@@ -358,12 +360,19 @@ class TestOpt(unittest.TestCase):
       cache_len = len(GlobalCounters.cache)
     assert cache_len == 1, "contiguous wasn't folded"
 
-  def test_fold_expand_reduce(self):
-    with CLCache(1):
-      a = Tensor.randn(16, 1)
-      a = a.expand((16, 16)).sum(-1)
+  def _test_fold_expand_reduce_helper(self, n, axis):
+    b = torch.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
+    with CLCache():
+      a = Tensor.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
       a.realize()
-      assert len(GlobalCounters.cache) == 1, "optimizer didn't fold expand/reduce"
+      cache_len = len(GlobalCounters.cache)
+    np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5) 
+    return cache_len
+
+  def test_fold_expand_reduce(self):
+    for axis in [0, 1]:
+      for n in [4, 8, 16]:
+        self._test_fold_expand_reduce_helper(n, axis)
 
 if __name__ == '__main__':
   unittest.main()

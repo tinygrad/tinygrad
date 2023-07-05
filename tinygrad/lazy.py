@@ -24,22 +24,35 @@ REMOVE_MOVEMENT_NOPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS, MERGE
 MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS, SIMPLIFY_SUM_RESHAPE_EXPAND_SUM = OPT>=2, OPT>=2, OPT>=2   # shuffle pad ops is fine now since we only push to merge binops
 PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
 
+def _simplify_sum_reshape_expand_sum(self:LazyBuffer, src: Any, prev_src: Any) -> Optional[LazyOp]:
+  if prev_src.op.op == MovementOps.EXPAND:
+    if src.op.op == ReduceOps.SUM:
+      if src.shape == self.shape:
+        dim_difference = [i for i, (a, b) in enumerate(zip(prev_src.shape, self.shape)) if a != b]
+        # NOTE: we can probably also handle the case where more than one dimension is different with more thought
+        if len(dim_difference) == 1:
+          expansion_index = dim_difference[0]
+          expansion_size = prev_src.shape[expansion_index]
+          return LazyOp(BinaryOps.MUL, (src, LazyBuffer.const_like(src, expansion_size)))
+  return None
+  
 # **** realize functions ****
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
   # NOTE: mypy doesn't know that if src.realized, then src.op must be a LazyOp so we have to ignore a bunch of warnings
   src = self.op.src[0]
   if not src.realized:
-    # When a tensor is reduced, reshaped, expanded back, then reduced along the same axis, 
+    # When a tensor is reduced, reshaped/expanded back and then reduced again along the same axis, 
     # it's equivalent to performing the initial reduction and multiplying the result 
     # by the size of the expanded dimension.
     if SIMPLIFY_SUM_RESHAPE_EXPAND_SUM and src.op.op == MovementOps.EXPAND: # type: ignore
-      src = src.op.src[0] # type: ignore
-      if not src.realized and src.op.op == MovementOps.RESHAPE: # type: ignore
-        src = src.op.src[0] # type: ignore
-        if not src.realized and src.op.op == ReduceOps.SUM and src.op.arg == self.op.arg: # type: ignore
-          expansion_size = src.shape[self.op.arg[0]]
-          return LazyOp(BinaryOps.MUL, (src, LazyBuffer.const_like(src, expansion_size))) # type: ignore
+      expanded = src.op.src[0] # type: ignore
+      if expanded.op.op == MovementOps.RESHAPE: # type: ignore
+        reshaped = expanded.op.src[0] # type: ignore
+        simplified = _simplify_sum_reshape_expand_sum(self, reshaped, src)
+      else:
+        simplified = _simplify_sum_reshape_expand_sum(self, expanded, src)
+      if simplified: return simplified
     if MERGE_ELEMENTWISE_INTO_REDUCE and src.optype is BinaryOps and len(src.children) <= 1:
       # If we did remove an expand above, we might stumble back into a case where the reduction is not necessary
       if src.shape == self.shape:
