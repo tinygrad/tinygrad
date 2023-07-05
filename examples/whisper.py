@@ -30,7 +30,7 @@ class MultiHeadAttention:
     return self.out(wv)
 
   def qkv_attention(self, q, k, v, mask=None):
-    n_batch, n_ctx, n_state = q.shape
+    _, n_ctx, n_state = q.shape
     scale = (n_state // self.n_head) ** -0.25
     q = q.reshape(*q.shape[:2], self.n_head, -1).permute(0, 2, 1, 3) * scale
     k = k.reshape(*k.shape[:2], self.n_head, -1).permute(0, 2, 3, 1) * scale
@@ -83,7 +83,7 @@ class TextDecoder:
 
   def __call__(self, x, xa):
     offset = 0
-    x = self.token_embedding(x) + self.positional_embedding[offset : offset + x.shape[-1]]
+    x = self.token_embedding(x) + self.positional_embedding[offset:offset+x.shape[-1]]
 
     seqlen, start_pos = x.shape[1], 0
     # TODO: Tensor.triu is broken, # 942
@@ -166,6 +166,22 @@ def img(x):
   plt.imshow(x.numpy())
   plt.show()
 
+class GreedyDecoder:
+  def __init__(self, eot): self.eot = eot
+
+  def update(self, tokens, logits, sum_logprobs):
+    # NOTE: logprobs.shape[-1] is off by 1
+    logprobs, next_tokens = logits.reshape(1, -1).log_softmax(-1).numpy(), logits.numpy().argmax(-1)
+    sum_logprobs += logprobs[np.arange(0, logprobs.shape[0]), next_tokens]
+    next_tokens[tokens[:, -1] == self.eot] = self.eot
+    tokens = np.concatenate([tokens, next_tokens[:, None]], axis=-1)
+    completed = (tokens[:, -1] == self.eot).all()
+    return tokens, completed
+
+  def finalize(self, tokens, sum_logprobs):
+    tokens = tokens.pad((0, 1), value=self.eot)
+    return tokens, sum_logprobs.tolist()
+
 RATE = 16000
 CHUNK = 1600
 RECORD_SECONDS = 10
@@ -218,15 +234,22 @@ if __name__ == "__main__":
   def transcribe_wav(fn):
     waveform, sample_rate = load_wav(fn)
     log_spec = prep_audio(waveform, sample_rate)
+    decoder = GreedyDecoder(eot=enc.eot_token)
     lst = [enc._special_tokens["<|startoftranscript|>"]]
     dat = model.encoder(Tensor(log_spec)).realize()
-    iters = 0
-    while lst[-1] != enc._special_tokens["<|endoftext|>"] and iters < MAX_ITERS:
-      out = model.decoder(Tensor([lst]), dat)
-      out.realize()
-      idx = out[0,-1].numpy().argmax()
-      lst.append(idx)
-      iters += 1
+    # TODO: decode properly
+    seek, content_frames = 0, 100
+    while seek < content_frames:
+      for _ in range(50):  # TODO: use sample_len
+        n_batch = dat.shape[0]
+        sum_logprobs = [np.nan] * n_batch
+        # TODO: tokens should be a [1, 1500, 512] tensor, we have [1, 330, 384]
+        out = model.decoder(Tensor([lst]), dat)
+        out.realize()
+        decoder.update(dat, out, sum_logprobs)
+        lst.append(idx)
+        iters += 1
+      seek += 1
     predicted = remove_repeated(remove_specials("".join(enc.decode(lst[2:-1]))[1:].lower()))
     predicted = predicted.translate(str.maketrans("", "", string.punctuation))
     predicted = "".join(x for x in predicted if not x.isdigit())
