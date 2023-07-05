@@ -112,7 +112,6 @@ class TestOptBinOp(unittest.TestCase):
   #def test_no_binop_rerun_reduce(self): return self._test_no_binop_rerun(lambda a,b: (a*b).sum(), lambda a,b: (a*b).reshape(16, 16, 1).sum())
   #def test_no_binop_rerun_reduce_alt(self): return self._test_no_binop_rerun(lambda a,b: a.sum(1)+b[0], lambda a,b: a.sum(1).reshape(1,16)+b[0])
 
-@unittest.skip("elementwise with >1 reduce inputs currently don't fuse")
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOptReduceLoop(unittest.TestCase):
   def test_loop_left(self):
@@ -358,6 +357,13 @@ class TestOpt(unittest.TestCase):
       c.realize()
       cache_len = len(GlobalCounters.cache)
     assert cache_len == 1, "contiguous wasn't folded"
+
+  def test_fold_expand_reduce(self):
+    with CLCache(1):
+      a = Tensor.randn(16, 1)
+      a = a.expand((16, 16)).sum(-1)
+      a.realize()
+      assert len(GlobalCounters.cache) == 1, "optimizer didn't fold expand/reduce"
 
 if __name__ == '__main__':
   unittest.main()
