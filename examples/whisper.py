@@ -177,6 +177,12 @@ class GreedyDecoder:
     tokens = tokens.pad((0, 1), value=self.eot)
     return tokens, sum_logprobs.tolist()
 
+def load_wav(file):
+  cmd = ["ffmpeg", "-nostdin", "-threads", "0", "-i", file, "-f", "s16le", "-ac", "1", "-acodec", "pcm_s16le", "-ar", str(RATE), "-"]
+  try: out = sp.run(cmd, capture_output=True, check=True).stdout
+  except sp.CalledProcessError as e: raise RuntimeError(f"Failed to load audio {e.stderr.decode()}") from e
+  return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
+
 @functools.lru_cache(None)
 def get_filters(sample_rate, n_fft, n_mels): return librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels)
 @functools.lru_cache(None)
@@ -204,11 +210,9 @@ def listener(q):
     q.put(waveform)
   print("done listening")
 
-def load_wav(file):
-  cmd = ["ffmpeg", "-nostdin", "-threads", "0", "-i", file, "-f", "s16le", "-ac", "1", "-acodec", "pcm_s16le", "-ar", str(RATE), "-"]
-  try: out = sp.run(cmd, capture_output=True, check=True).stdout
-  except sp.CalledProcessError as e: raise RuntimeError(f"Failed to load audio {e.stderr.decode()}") from e
-  return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
+# TODO: implement this
+def pad_or_trim(array, length=N_SAMPLES, *, axis=-1):
+  return array
 
 def remove_specials(sentence):
   while "<" in sentence and ">" in sentence:
@@ -237,11 +241,11 @@ if __name__ == "__main__":
   enc = get_encoding(state['dims']['n_vocab'])
 
   def transcribe_wav(fn):
-    log_spec = prep_audio(load_wav(fn), padding=N_SAMPLES)
-    # TODO: implement pad_or_trim
+    mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
+    mel_segment = pad_or_trim(mel)
     decoder = GreedyDecoder(eot=enc.eot_token)
     lst = [enc._special_tokens["<|startoftranscript|>"]]
-    dat = model.encoder(Tensor(log_spec)).realize()
+    dat = model.encoder(Tensor(mel_segment)).realize()
     # TODO: decode properly
     for _ in range(50):  # TODO: use sample_len
       n_batch = dat.shape[0]
