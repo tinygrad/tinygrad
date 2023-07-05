@@ -82,15 +82,15 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
             kk(f"{{ int {var.expr} = {lang.gid[len(args[0])-1-i]};  /* {var.max+1} */")
             global_size.append(var.max+1)
           elif args[1] == "local" and lang.lid:
-            # for tensor core stuff, support > 3 dims
+            # for M1 tensor core stuff, support > 3 dims
             if len(args[0]) > len(lang.lid) and i < len(args[0])-len(lang.lid)+1:
-              full_local_size = prod(x.max+1 for x in args[0][0:-len(lang.lid)+1])
               if len(local_size) == 0: local_size.append(1)
               local_size[0] *= var.max+1
-              div = full_local_size//local_size[0]
-              kk(f"{{ int {var.expr} = ({lang.lid[-1]}/{div})%{var.max+1};  /* {var.max+1} */")
+              lidz = Variable(lang.lid[-1], 0, prod(x.max+1 for x in args[0][0:-len(lang.lid)+1])-1)
+              lidz = (lidz//((lidz.max+1)//local_size[0]))%(var.max+1)
+              assert lidz.max == var.max and lidz.min == var.min
+              kk(f"{{ int {var.expr} = {lidz.render(render_cl)};  /* {var.max+1} */")
             else:
-              #assert len(args[0]) <= len(lang.lid)
               kk(f"{{ int {var.expr} = {lang.lid[len(args[0])-1-i]};  /* {var.max+1} */")
               local_size.append(var.max+1)
           else:

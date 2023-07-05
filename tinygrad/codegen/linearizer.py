@@ -585,14 +585,16 @@ class Linearizer:
        isinstance(self.reduceop.src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[1], LazyBuffer):
       buf0 = self.bufs.index(self.reduceop.src[0].src[0])
       buf1 = self.bufs.index(self.reduceop.src[0].src[1])
-      stride_buf0 = [i for i,s in enumerate(self.sts[buf0].real_strides()) if s == 0]
-      stride_buf1 = [i for i,s in enumerate(self.sts[buf1].real_strides()) if s == 0]
-      if len(stride_buf0) and len(stride_buf1):
-        print("TENSOR CORES", stride_buf0, stride_buf1)
+      buf0_strides = self.sts[buf0].real_strides()
+      buf1_strides = self.sts[buf1].real_strides()
+      axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0]
+      axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0]
+      if len(axis_buf0) and len(axis_buf1):
+        if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1)
         self.use_tensor_cores = True
 
-        # TODO: select stride in smart way
-        s0, s1 = stride_buf0[-1], stride_buf1[-1]
+        # TODO: select axis in smart way
+        s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
         global_count = self.first_reduce
 
         # upcast first
@@ -603,16 +605,13 @@ class Linearizer:
         self.shift_to(s1, 8, insert_before=self.first_reduce)  # axis 2
         self.shift_to(s0, 8, insert_before=self.first_reduce)  # axis 3
 
-        # permuted for tensor cores
-        self.shift_to(global_count, 2, insert_before=self.first_reduce)
-        self.shift_to(global_count, 2, insert_before=self.first_reduce-1)
+        # permuted+upcast for tensor cores
+        self.shift_to(global_count, 4, insert_before=self.first_reduce)
         self.shift_to(global_count+1, 4, insert_before=self.first_reduce)
-
-        # small 2 upcast
         self.shift_to(self.first_reduce-1, 2)
         self.upcast()
 
-        # final 2x2 upcast
+        # final global 2x2 upcast
         self.shift_to(s1, 4)
         self.upcast()
         self.shift_to(s0, 4)
