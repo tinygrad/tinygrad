@@ -135,8 +135,7 @@ class Linearizer:
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
-    # does not consider duplicated rawbufs
-    self.mem_estimate: int = sum(x.dtype.itemsize * (x.realized.size if x.realized is not None else prod(x.shape)) for x in self.bufs if x is not None)
+    self.mem_estimate: int = sum(x.dtype.itemsize*x.size for x in self.raw_bufs)
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
