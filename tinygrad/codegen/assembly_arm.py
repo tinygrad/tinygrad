@@ -11,7 +11,7 @@ class ARMCodegen(AssemblyCodegen):
     ins = [] 
     #NOTE: MACOS needs lm func to start with _, linux doesn't need it 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
-           BinaryOps.MOD: "", BinaryOps.CMPLT: "cmp", BinaryOps.CMPEQ: "cmp",
+           BinaryOps.MOD: "", BinaryOps.CMPLT: "subs", BinaryOps.CMPEQ: "subs",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "bl _sin", UnaryOps.LOG2: "bl _log2", UnaryOps.EXP2: "bl _exp2",
            FusedOps.MULACC: "fmadd"}
     reg_map = {}
@@ -62,6 +62,11 @@ class ARMCodegen(AssemblyCodegen):
           ins.append(f"sxtw x0, w0")
           ins.append(f"str x0, {reg_map[out.nm]}")
       elif uop == UOps.ALU:
+        if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
+          ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
+          ins.append(f"ldr x1, {reg_map[vin[1].nm]}")
+          ins.append(f"mul x0, x0, x1;")
+          ins.append(f"subs x0, x0, #0;")
         if arg == FusedOps.MULACC and out == vin[2]:
           ins.append(f"ldr s0, {reg_map[vin[0].nm]}")
           ins.append(f"ldr s1, {reg_map[vin[1].nm]}")
@@ -82,7 +87,10 @@ class ARMCodegen(AssemblyCodegen):
           reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
           ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
           ins.append(f"{f'mov {reg}1, #' + str(vin[1]) if vin[1].__class__ is int else f'ldr {reg}1, ' + reg_map[vin[1].nm]}")
-          ins.append(f"{'f' if reg == 's' else ''}{alu[arg]} {reg}0, {reg}1")
+          if reg == 's': ins.append(f"fcmp {reg}0, {reg}1")
+          else:
+            ins.append(f"{alu[arg]} {reg}0, {reg}0, {reg}1")
+            ins.append(f"str {reg}0, {reg_map[out.nm]}")
         elif arg == BinaryOps.MOD:
           ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
           ins.append(f"{'mov x1, #' + str(vin[1]) if vin[1].__class__ is int else 'ldr x1, ' + reg_map[vin[1].nm]}")
@@ -103,7 +111,7 @@ class ARMCodegen(AssemblyCodegen):
       elif uop == UOps.STORE:
         reg = 's0' if dtypes.is_float(vin[1][1]) else 'x0'
         #TODO: ugly refactor this
-        #NOTE: this supports tensor.cast 
+        #NOTE: this support cast refactor this
         if buf_map["buf0"] == dtypes.int32 and buf_map["buf1"] == dtypes.float and len(buf_map) == 2: 
           ins.append(f"ldr s0, {reg_map[vin[1].nm]}")
           ins.append(f"fcvtzs w0, s0")
@@ -117,7 +125,7 @@ class ARMCodegen(AssemblyCodegen):
         ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
         ins.append(f"str {reg}, [x1, #{arg[0]}]")
       elif uop == UOps.COND_BRANCH:
-        ins.append(f"{'b.ne' if arg[1] else 'beq'} {arg[0][1:]}")
+        ins.append(f"{'b.ne' if arg[1] else 'b.eq'} {arg[0][1:]}")
       elif uop == UOps.LABEL:
         ins.append(f"{arg[1:]}:")
     return "test", "\n".join([".arch armv8-a",".text", ".global _test",".p2align 2"] + ["_test:"] + ["mov x19, sp",f"sub sp, sp, #{var_size}"] + ins  + [f"add sp, sp, #{var_size}"]+ ["ret;"])
