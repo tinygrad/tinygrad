@@ -166,29 +166,30 @@ def generate_json(dataset):
 					transcript_data[line[0]] = line[1]
 
 		for wav_file in wav_files:
-			file_info = sox.file_info.info(str(wav_file))
 			relative_path = str(wav_file.relative_to(
 				BASEDIR / "LibriSpeech"
 			))
-			transcript = transcript_data[wav_file.name.replace(".wav", "")]
+			transcript = transcript_data[wav_file.name.replace(".wav", "")].lower().strip()
 
+			# sox.file_info.bitrate() is broken so hard coding this to 16 for now.
+			# sox.file_info.encoding() includes whitespaces.
 			json_data.append(
 				{
 					"files": [
 						{
-							"channels": file_info["channels"],
-							"sample_rate": file_info["sample_rate"],
-							"bitrate": file_info["bitrate"],
-							"duration": file_info["duration"],
-							"num_samples": file_info["num_samples"],
-							"encoding": file_info["encoding"],
-							"silent": file_info["silent"],
+							"channels": sox.file_info.channels(str(wav_file)),
+							"sample_rate": sox.file_info.sample_rate(str(wav_file)),
+							"bitrate": 16,
+							"duration": sox.file_info.duration(str(wav_file)),
+							"num_samples": sox.file_info.num_samples(str(wav_file)),
+							"encoding": sox.file_info.encoding(str(wav_file)).strip(),
+							"silent": sox.file_info.silent(str(wav_file)),
 							"fname": relative_path,
 							"speed": 1,
 						}
 					],
-					"original_duration": file_info["duration"],
-					"original_num_samples": file_info["num_samples"],
+					"original_duration": sox.file_info.duration(str(wav_file)),
+					"original_num_samples": sox.file_info.num_samples(str(wav_file)),
 					"transcript": transcript,
 				}
 			)
@@ -309,7 +310,7 @@ def iterate(bs=1, start=0, val=True):
 
 if __name__ == "__main__":
 	for dataset, info in DATASETS.items():
-		# dataset_download(dataset, info["url"], info["md5"], NUM_THREADS)
+		dataset_download(dataset, info["url"], info["md5"], NUM_THREADS)
 		dataset_preprocess(dataset, NUM_THREADS)
 
 	# with open(BASEDIR / "LibriSpeech" / "dev-clean-wav.json", encoding="utf-8") as f:
