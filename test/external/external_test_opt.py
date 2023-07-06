@@ -360,19 +360,36 @@ class TestOpt(unittest.TestCase):
       cache_len = len(GlobalCounters.cache)
     assert cache_len == 1, "contiguous wasn't folded"
 
-  def _test_fold_expand_reduce_helper(self, n, axis):
-    b = torch.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
-    with CLCache():
-      a = Tensor.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
+  def _test_fold_expand_reduce_helper(self, n, m, axis, allowed):
+    b = torch.ones(n, m).sum(axis).reshape(n, 1).expand(n, m).sum(axis)
+    with CLCache(allowed=allowed):
+      a = Tensor.ones(n, m).sum(axis).reshape(n, 1).expand(n, m).sum(axis)
       a.realize()
       cache_len = len(GlobalCounters.cache)
     np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5) 
     return cache_len
 
-  def test_fold_expand_reduce(self):
+  def test_expand_reduce_is_folded_on_same_axis(self):
     for axis in [0, 1]:
       for n in [4, 8, 16]:
-        self._test_fold_expand_reduce_helper(n, axis)
+        b = torch.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
+        with CLCache(allowed=2):
+          a = Tensor.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
+          a.realize()
+          cache_len = len(GlobalCounters.cache)
+        np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5) 
+        return cache_len
+  
+  def test_expand_reduce_is_not_folded_on_different_axes(self):
+    axis1, axis2 = 0, 1
+    for n in [4, 8, 16]:
+      b = torch.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
+      with CLCache(allowed=3):
+        a = Tensor.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
+        a.realize()
+        cache_len = len(GlobalCounters.cache)
+      np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5) 
+      return cache_len
 
 if __name__ == '__main__':
   unittest.main()

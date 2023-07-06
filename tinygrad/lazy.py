@@ -39,11 +39,11 @@ def _simplify_sum_reshape_expand_sum(self:LazyBuffer, src: Any, prev_src: Any) -
 # **** realize functions ****
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
-  # NOTE: mypy doesn't know that if src.realized, then src.op must be a LazyOp so we have to ignore a bunch of warnings
+  # NOTE: mypy doesn't know that if not src.realized, then src.op must be a LazyOp so we have to ignore a bunch of warnings
   src = self.op.src[0]
   if not src.realized:
-    # When a tensor is reduced, reshaped/expanded back and then reduced again along the same axis, 
-    # it's equivalent to performing the initial reduction and multiplying the result 
+    # When a tensor is reduced, reshaped/expanded back and then reduced again along the same axis,
+    # it's equivalent to performing the initial reduction and multiplying the result
     # by the size of the expanded dimension.
     if SIMPLIFY_SUM_RESHAPE_EXPAND_SUM and src.op.op == MovementOps.EXPAND: # type: ignore
       expanded = src.op.src[0] # type: ignore
