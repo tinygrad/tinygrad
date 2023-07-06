@@ -1,6 +1,7 @@
 import subprocess
 from typing import Optional
 import time
+import re
 import numpy as np
 import re
 from pycuda.compiler import compile as cuda_compile # type: ignore
@@ -10,16 +11,14 @@ from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
 def pretty_ptx(s):
-  s = re.sub("(//.*\\n)", "", s)
-  s = re.sub("\\n\\s+", "\\n", s)
-  s0, s1 = s.split(".visible .entry ")
-  s1 = '\n'.join([t[0] + " "*(8 - (len(t[0]) + 1) % 8) + " ".join(t[1:]) if t[-1][-1] in [";",":"] else " ".join(t) for t in [x.split() for x in s1.splitlines()]])
-  s1 = re.sub("\\n\\.reg", "\\n"+" "*8+".reg", s1)
-  s1 = re.sub("^(\\w+)(?=(?:\\.\\w+)+\\s)|ret|bra", lambda m:" "*8+colored(m[0], "yellow"), s1, flags=re.MULTILINE)
-  s1 = re.sub("\\b(([0-9]+\\.?[0-9]*)|(\\.[0-9]+)|(0[f|F|d|D][0-9a-fA-F]+))\\b", lambda m:colored(m[1], "yellow"), s1)
-  s1 = re.sub("((?:[_$%][a-zA-Z0-9_$]+))", lambda m:colored(m[1], "blue"), s1)
-  s1 = re.sub("(.(?:b|s|u|f)(?:8|16|32|64)|.pred)(?=[.\\s])", lambda m:colored(m[1], "green"), s1)
-  return s0 + ".visible .entry " + s1
+  # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
+  s = re.sub(r'([!@<\[\s,\+\-;\n])((?:[_%$][\w%\$_]+(?:\.[xyz])?\:?)|(?:buf\d+))([<>\]\s,\+\-;\n\)])', lambda m:m[1]+colored(m[2], "blue")+m[3], s, flags=re.M) # identifiers
+  s = re.sub(r'(.)((?:b|s|u|f)(?:8|16|32|64)|pred)([\.\s])', lambda m:m[1]+colored(m[2], "green")+m[3], s, flags=re.M) # types
+  s = re.sub(r'^(\s*)([\w]+)(.*?;$)', lambda m:m[1]+colored(m[2], "yellow")+m[3], s, flags=re.M) # instructions
+  s = re.sub(r'([<>\[\]\s,\+\-;])((?:0[fF][0-9a-fA-F]{8})|(?:[0-9]+)|(?:0[xX][0-9a-fA-F]+))([<>\[\]\s,\+\-;])', lambda m:m[1]+colored(m[2], "yellow")+m[3], s, flags=re.M) # numbers
+  s = re.sub(r'(\.)(param|reg|global)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # space
+  s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
+  return s
 
 if getenv("CUDACPU", 0) == 1:
   import ctypes, ctypes.util
