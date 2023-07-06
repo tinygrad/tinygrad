@@ -100,7 +100,7 @@ class TextDecoder:
 
     seqlen, start_pos = x.shape[1], 0
     # NOTE: Tensor.triu is broken, # 942
-    #mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf")).triu(k=start_pos+1)
+    # mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf")).triu(k=start_pos+1)
     mask = Tensor(np.triu(np.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=np.float32), k=start_pos+1))
 
     for block in self.blocks: x = block(x, xa, mask)
@@ -162,25 +162,6 @@ def img(x):
   plt.imshow(x.numpy())
   plt.show()
 
-class GreedyDecoder:
-  def __init__(self, eot): self.eot = eot
-
-  def update(self, tokens, logits, sum_logprobs):
-    # NOTE: sum_logprobs.shape[-1] is off by 1, and assume temperature == 0 for now
-    tokens = tokens.numpy()
-    next_tokens = logits.numpy().argmax(-1)
-    logprobs = logits.reshape(1, -1).log_softmax(-1).numpy()
-    current_logprobs = logprobs[np.arange(0, logprobs.shape[0]), next_tokens]
-    sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)
-    next_tokens[tokens[:, -1] == self.eot] = self.eot
-    tokens = np.concatenate([tokens, next_tokens[:, None]], axis=-1)
-    completed = (tokens[:, -1] == self.eot).all()
-    return Tensor(tokens.astype(np.float32)), completed
-
-  def finalize(self, tokens, sum_logprobs):
-    tokens = tokens.pad((0, 1), value=self.eot)
-    return tokens, sum_logprobs.tolist()
-
 def load_wav(file):
   cmd = ["ffmpeg", "-nostdin", "-threads", "0", "-i", file, "-f", "s16le", "-ac", "1", "-acodec", "pcm_s16le", "-ar", str(RATE), "-"]
   try: out = sp.run(cmd, capture_output=True, check=True).stdout
@@ -223,6 +204,39 @@ def pad_or_trim(array, length=N_SAMPLES, axis=-1):
     array = np.pad(array, pad_widths)
   return array
 
+class GreedyDecoder:
+  def __init__(self, eot): self.eot = eot
+
+  def update(self, tokens, logits, sum_logprobs):
+    # NOTE: sum_logprobs.shape[-1] is off by 1, and assume temperature == 0 for now
+    tokens = tokens.numpy()
+    next_tokens = logits.numpy().argmax(-1)
+    logprobs = logits.reshape(1, -1).log_softmax(-1).numpy()
+    current_logprobs = logprobs[np.arange(0, logprobs.shape[0]), next_tokens]
+    sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)
+    next_tokens[tokens[:, -1] == self.eot] = self.eot
+    tokens = np.concatenate([tokens, next_tokens[:, None]], axis=-1)
+    completed = (tokens[:, -1] == self.eot).all()
+    return Tensor(tokens.astype(np.float32)), completed
+
+  def finalize(self, tokens, sum_logprobs):
+    tokens = np.pad(tokens.numpy(), (0, 1), constant_values=self.eot)
+    return tokens, sum_logprobs.numpy().tolist()
+
+class MaximumLikelihoodRanker:
+  def __init__(self, length_penalty): self.length_penalty = length_penalty
+
+  def rank(self, tokens, sum_logprobs):
+    def scores(logprobs, lengths):
+      result = []
+      for logprob, length in zip(logprobs, lengths):
+        if self.length_penalty is None: penalty = length
+        else: penalty = ((5 + length) / 6) ** self.length_penalty
+        result.append(logprob / penalty)
+      return result
+    lengths = [[len(t) for t in s] for s in tokens]
+    return [np.argmax(scores(p, l) for p, l in zip(sum_logprobs, lengths))]
+
 def remove_specials(sentence):
   # TODO: this is very bad
   while "<" in sentence and ">" in sentence:
@@ -232,6 +246,7 @@ def remove_specials(sentence):
   return sentence
 
 def remove_repeated(sentence):
+  # TODO: also very bad
   eos_idx = [-2] + [i for i, c in enumerate(sentence) if c in (".", "?", "!", '"')]
   for i in range(len(eos_idx) - 2):
     low, mid, high = eos_idx[i:i+3]
@@ -253,10 +268,13 @@ if __name__ == "__main__":
 
   def transcribe_wav(fn, sample_len=224):
     mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
+    n_audio, n_group = 1, 1
     content_frames = mel.shape[-1] - N_FRAMES
-    decoder = GreedyDecoder(eot=enc.eot_token)
-    # NOTE: we are missing a language token
+    # TODO: add a language token in index 1
     lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|transcribe|>"]]
+    sample_begin = len(lst)
+    decoder = GreedyDecoder(eot=enc.eot_token)
+    sequence_ranker = MaximumLikelihoodRanker(None)
     seek = 0
     while seek < content_frames:
       mel_segment = mel[:, seek:seek+N_FRAMES]
@@ -271,10 +289,17 @@ if __name__ == "__main__":
         logits = logits[:, -1]
         tokens, completed = decoder.update(tokens, logits, sum_logprobs)
         if completed: break
-    predicted = remove_repeated(remove_specials("".join(enc.decode(lst[2:-1]))[1:].lower()))
-    predicted = predicted.translate(str.maketrans("", "", string.punctuation))
-    predicted = "".join(x for x in predicted if not x.isdigit())
-    return predicted
+      break # TODO: increment seek
+    print(tokens.shape, n_audio, n_group)
+    tokens = tokens.reshape(n_audio, n_group, -1)
+    sum_logprobs = sum_logprobs.reshape(n_audio, n_group)
+    tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
+    # TODO: fix index
+    tokens = [[t[sample_begin:(t==enc.eot_token).nonzero()[0, 0]] for t in s] for s in tokens]
+    selected = sequence_ranker.rank(tokens, sum_logprobs)
+    tokens = [t[i].tolist() for i, t in zip(selected, tokens)] 
+    texts = [enc.decode(t).strip() for t in tokens]
+    return texts
 
   if getenv("TEST"):
     diff = difflib.Differ()
@@ -284,9 +309,10 @@ if __name__ == "__main__":
       print("-" * 128, f"{fn.stem}\n", sep="\n")
       predicted = transcribe_wav(fn)
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
-      lens.append(len(transcript.split(" ")))
-      sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
-      print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
+      #lens.append(len(transcript.split(" ")))
+      print(predicted.shape[-1], len(transcript.split(" ")))
+      #sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
+      #print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
   elif len(sys.argv) > 1:
     print(transcribe_wav(sys.argv[1]))
   else:
@@ -306,7 +332,7 @@ if __name__ == "__main__":
         did_read = True
       if did_read:
         last_total = total.shape[1]
-        log_spec = prep_audio(total)
+        log_spec = prep_audio(total, 0)
         encoded_audio = model.encoder(Tensor(log_spec)).realize()
       out = model.decoder(Tensor([lst]), encoded_audio).realize()
       idx = out[0,-1].numpy().argmax()
