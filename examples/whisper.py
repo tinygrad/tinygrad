@@ -167,15 +167,15 @@ class GreedyDecoder:
 
   def update(self, tokens, logits, sum_logprobs):
     # NOTE: sum_logprobs.shape[-1] is off by 1, and assume temperature == 0 for now
-    logprobs = logits.reshape(1, -1).log_softmax(-1).numpy()
+    tokens = tokens.numpy()
     next_tokens = logits.numpy().argmax(-1)
+    logprobs = logits.reshape(1, -1).log_softmax(-1).numpy()
     current_logprobs = logprobs[np.arange(0, logprobs.shape[0]), next_tokens]
     sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)
-    # TODO: next_tokens always adds 13
     next_tokens[tokens[:, -1] == self.eot] = self.eot
     tokens = np.concatenate([tokens, next_tokens[:, None]], axis=-1)
     completed = (tokens[:, -1] == self.eot).all()
-    return tokens, completed
+    return Tensor(tokens.astype(np.float32)), completed
 
   def finalize(self, tokens, sum_logprobs):
     tokens = tokens.pad((0, 1), value=self.eot)
@@ -262,11 +262,11 @@ if __name__ == "__main__":
       mel_segment = mel[:, seek:seek+N_FRAMES]
       mel_segment = np.expand_dims(pad_or_trim(mel, N_FRAMES), axis=0)
       audio_features = model.encoder(Tensor(mel_segment)).realize()
-      tokens = np.expand_dims(np.array(lst).repeat((mel_segment.shape[0], 1)), axis=0)
+      tokens = Tensor([lst]).repeat((mel_segment.shape[0], 1))
       sum_logprobs = Tensor.zeros(audio_features.shape[0])
       for _ in range(sample_len):
         # TODO: no_speech_probs?
-        logits = model.decoder(Tensor([lst]), audio_features)
+        logits = model.decoder(tokens, audio_features)
         logits.realize()
         logits = logits[:, -1]
         tokens, completed = decoder.update(tokens, logits, sum_logprobs)
