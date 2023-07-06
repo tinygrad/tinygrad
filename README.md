@@ -6,7 +6,7 @@ tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) an
 
 <h3>
 
-[Homepage](https://github.com/geohot/tinygrad) | [Documentation](/docs) | [Examples](/examples) | [Showcase](/docs/showcase.md) | [Discord](https://discord.gg/ZjZadyC7PK)
+[Homepage](https://github.com/geohot/tinygrad) | [Documentation](/docs) | [Quickstart](/docs/quickstart.md) | [Examples](/examples) | [Showcase](/docs/showcase.md) | [Discord](https://discord.gg/ZjZadyC7PK)
 
 </h3>
 
@@ -140,10 +140,11 @@ print(y.grad.numpy())  # dz/dy
 There has been a lot of interest in tinygrad lately. Here are some basic guidelines for contributing:
 
 - Bug fixes are the best and always welcome! Like [this one](https://github.com/geohot/tinygrad/pull/421/files).
+- Completing [bounties](https://docs.google.com/spreadsheets/d/1WKHbT-7KOgjEawq5h5Ic1qUWzpfAzuD_J06N1JwOCGs/edit#gid=0) is a great way to help improve tinygrad!
 - If you don't understand the code you are changing, don't change it!
 - All code golf PRs will be closed, but [conceptual cleanups](https://github.com/geohot/tinygrad/pull/372/files) are great.
 - Features are welcome. Though if you are adding a feature, you need to include tests.
-- Improving test coverage is great, with reliable non-brittle tests.
+- Improving [test coverage](test/models/) is great, with reliable non-brittle tests.
 
 Additional guidelines can be found in [CONTRIBUTING.md](/CONTRIBUTING.md).
 

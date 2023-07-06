@@ -53,6 +53,8 @@ python3 examples/stable_diffusion.py
 
 You will need to download and put the weights into the `weights/LLaMA` directory, which may need to be created.
 
+[LLaMA Official](https://ai.facebook.com/blog/large-language-model-llama-meta-ai/)
+
 Then you can have a chat with Stacy:
 ```sh
 python3 examples/llama.py
