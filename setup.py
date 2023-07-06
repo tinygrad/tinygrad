@@ -43,6 +43,7 @@ setup(name='tinygrad',
             "safetensors",
             "types-PyYAML",
             "cloudpickle",
+            "tensorboard",
         ],
       },
       include_package_data=True)
