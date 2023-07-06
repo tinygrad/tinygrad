@@ -308,9 +308,17 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer, arg:Optional
         new_srcs.append(x)
     return elementwise_op(op, *new_srcs, arg=arg).contiguous()
 
+  num_buffers = sum([len(x.buffers) for x in srcs])
   if MERGE_ELEMENTWISE_OPS:
-    # remove the buffers from any (childless) BinaryOps that feed into this
-    srcs = tuple([x.op if x.optype == BinaryOps and len(x.children) == 0 and not x.realized else x for x in srcs])  # type: ignore
+    merged_srcs = []
+    for x in srcs:
+      # remove the buffers from any (childless) BinaryOps that feed into this unless the merged kernel will have too many buffers
+      if x.optype == BinaryOps and not x.children and not x.realized and (MAX_NUM_BUFS <= 0 or num_buffers + len(x.op.buffers) < MAX_NUM_BUFS):
+        merged_srcs.append(x.op)
+        num_buffers += len(x.op.buffers)
+      else:
+        merged_srcs.append(x)
+    srcs = tuple(merged_srcs)
 
   return create_lazybuffer(out_device, ShapeTracker(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype)
 
@@ -331,6 +339,7 @@ class _Device:
       except Exception: pass
     return "CPU"
 Device = _Device()
+MAX_NUM_BUFS = getenv("MAX_NUM_BUFS", 30 if Device._default_device() == "METAL" else 256)
 
 def _realize_contiguous(buffer: LazyBuffer) -> None:
   realized = buffer.op.src[0].realize().realized
