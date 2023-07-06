@@ -27,6 +27,7 @@ class FileWriter:
 
 class TinySummaryWriter:
   def __init__(self, log_dir=None, max_queue=10, flush_secs=120, filename_suffix=""):
+    self.log_dir, self.max_queue, self.flush_secs, self.filename_suffix = log_dir, max_queue, flush_secs, filename_suffix
     self.writer = FileWriter(log_dir, max_queue, flush_secs, filename_suffix)
   def __enter__(self): return self
   def __exit__(self, exc_type, exc_val, exc_tb): self.close()
@@ -40,6 +41,13 @@ class TinySummaryWriter:
       for k, v in metric_dict.items(): w_hp.add_scalar(k, v)
   def add_scalar(self, tag, value, global_step=None, walltime=None):
     self.writer.add_summary(scalar(tag, value), global_step, walltime)
+  def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
+    writers = {}
+    for tag, scalar_value in tag_scalar_dict.items():
+      fw_tag = f"{self.writer.get_logdir()}/{main_tag.replace('/', '_')}_{tag}"
+      if fw_tag not in writers: writers[fw_tag] = FileWriter(fw_tag, self.max_queue, self.flush_secs, self.filename_suffix)
+      writers[fw_tag].add_summary(scalar(main_tag, scalar_value), global_step, walltime or time.time())
+    for writer in writers.values(): writer.close()
   def add_histogram(self, name, values, bins, max_bins=None, global_step=None, walltime=None):
     self.writer.add_summary(histogram(name, values, bins, max_bins), global_step, walltime)
   def add_image(self, tag, img_tensor, global_step=None, walltime=None, dataformats="CHW"):

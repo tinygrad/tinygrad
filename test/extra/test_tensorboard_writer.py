@@ -1,4 +1,4 @@
-import glob, os, unittest, numpy as np
+import numpy as np, os, shutil, unittest
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from extra.tensorboard.writer import TinySummaryWriter
 from tinygrad.ops import LazyOp, BinaryOps, ReduceOps
@@ -13,7 +13,7 @@ class TestTinySummaryWriter(unittest.TestCase):
     self.writer, self.accumulator = TinySummaryWriter(self.log_dir), EventAccumulator(self.log_dir)
   def tearDown(self):
     self.writer.close()
-    [os.remove(f) for f in glob.glob(os.path.join(self.log_dir, '*'))]
+    shutil.rmtree(self.log_dir)
   def write_and_reload(self, func, *args, **kwargs):
     func(*args, **kwargs)
     self.writer.flush()
@@ -28,6 +28,16 @@ class TestTinySummaryWriter(unittest.TestCase):
   def test_scalar_tiny_tensor(self): self.base_test_scalar(Tensor(1.0))
   def test_scalar_np_array(self): self.base_test_scalar(np.array(1.0))
   def test_scalar_float(self): self.base_test_scalar(1.0)
+
+  def test_scalars(self):
+    main_tag, tag_scalar_dict = 'test_scalars', {'tag1': 1.0, 'tag2': 2.0, 'tag3': 3.0}
+    self.write_and_reload(self.writer.add_scalars, main_tag, tag_scalar_dict)
+    for tag, test_value in tag_scalar_dict.items():
+      tag_accumulator = EventAccumulator(os.path.join(self.log_dir, f"{main_tag.replace('/', '_')}_{tag}"))
+      tag_accumulator.Reload()
+      scalar_events = tag_accumulator.Scalars(main_tag)
+      self.assertEqual(len(scalar_events), 1)
+      self.assertEqual(scalar_events[0].value, test_value)
 
   def base_test_h_gram(self, bins, test_values, expected_bucket):
     self.write_and_reload(self.writer.add_histogram, 'test_histogram', test_values, bins=bins)
