@@ -220,7 +220,7 @@ class GreedyDecoder:
     return Tensor(tokens.astype(np.float32)), completed
 
   def finalize(self, tokens, sum_logprobs):
-    tokens = np.pad(tokens.numpy(), (0, 1), constant_values=self.eot)
+    tokens = np.pad(tokens.numpy(), [(0, 0), (0, 0), (0, 1)], constant_values=self.eot)
     return tokens, sum_logprobs.numpy().tolist()
 
 class MaximumLikelihoodRanker:
@@ -290,12 +290,11 @@ if __name__ == "__main__":
         tokens, completed = decoder.update(tokens, logits, sum_logprobs)
         if completed: break
       break # TODO: increment seek
-    print(tokens.shape, n_audio, n_group)
+    # TODO: tokens should be positive integers
     tokens = tokens.reshape(n_audio, n_group, -1)
     sum_logprobs = sum_logprobs.reshape(n_audio, n_group)
     tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
-    # TODO: fix index
-    tokens = [[t[sample_begin:(t==enc.eot_token).nonzero()[0, 0]] for t in s] for s in tokens]
+    tokens = [[t[sample_begin:(t==enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
     selected = sequence_ranker.rank(tokens, sum_logprobs)
     tokens = [t[i].tolist() for i, t in zip(selected, tokens)] 
     texts = [enc.decode(t).strip() for t in tokens]
