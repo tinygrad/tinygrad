@@ -58,7 +58,7 @@ jobs:
   
   testwebgpu:
     name: WebGPU Tests
-    runs-on: macos-13
+    runs-on: windows-latest
 
     steps:
     - name: Checkout Code
