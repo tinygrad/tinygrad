@@ -35,7 +35,7 @@ class SGD(Optimizer):
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g).realize()  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
-      t.assign(t.detach() - g * self.lr)
+      t.assign(t.detach() - g * (self.lr * t.lr_mult))
     self.realize(self.b)
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
@@ -65,5 +65,5 @@ class LAMB(Optimizer):
         r = Tensor.where(r1 > 0, Tensor.where(r2 > 0, r1 / r2, 1.0), 1.0)
       else:
         r = 1.0
-      t.assign(t.detach() - self.lr * r * up)
+      t.assign(t.detach() - (self.lr * t.lr_mult) * r * up)
     self.realize([self.t] + self.m + self.v)
