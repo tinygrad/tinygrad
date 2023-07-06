@@ -46,7 +46,7 @@ And we can change `DEBUG` to `4` to see the generated code.
 
 ### Neural networks
 
-As it turns out, 90% of what you need for neural networks are a decent autograd/tensor library.
+As it turns out, 90% of what you need for neural networks is a decent autograd/tensor library.
 Throw in an optimizer, a data loader, and some compute, and you have all you need.
 
 #### Neural network example (from test/models/test_mnist.py)
@@ -106,9 +106,9 @@ Don't forget the `.` at the end!
 
 ## Documentation
 
-Documentation along with a quick start guide can be found in the [docs/](/docs) directory.
+Documentation, along with the Quick Start Guide, can be found in the [docs/](/docs) directory.
 
-### Quick example comparing to PyTorch
+### Quick comparison to PyTorch
 
 ```py
 from tinygrad.tensor import Tensor
@@ -142,8 +142,8 @@ There has been a lot of interest in tinygrad lately. Here are some basic guideli
 - Bug fixes are the best and always welcome! Like [this one](https://github.com/geohot/tinygrad/pull/421/files).
 - If you don't understand the code you are changing, don't change it!
 - All code golf PRs will be closed, but [conceptual cleanups](https://github.com/geohot/tinygrad/pull/372/files) are great.
-- Features are welcome. Though if you are adding a feature, you need to include tests.
-- Improving test coverage is great, with reliable non-brittle tests.
+- Features are welcome. Though, if you are adding a feature, you must include tests.
+- Improving test coverage with reliable, non-brittle tests is great.
 
 Additional guidelines can be found in [CONTRIBUTING.md](/CONTRIBUTING.md).
 
