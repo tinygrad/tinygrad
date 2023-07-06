@@ -102,39 +102,39 @@ class Linearizer:
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
 
     # organize the input/output buffers
-    self.bufs: List[Union[LazyBuffer]] = []
+    self.leaf_bufs: List[Union[LazyBuffer]] = []
     self.bufmap: List[int] = []  # map from buf to index into raw_input_bufs, only for global buffers
-    self.raw_bufs: List[Union[LocalBuffer,RawBuffer]] = []  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
+    self.bufs: List[Union[LocalBuffer,RawBuffer]] = []  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
     for buf in [output_buffer] + dedup(ast.buffers):
       self.add_buf(buf)
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
-    self.key = (ast.map_buffers({x:i for x,i in zip(self.bufs, self.bufmap)}).key, tuple([x.key for x in self.bufs]))
+    self.key = (ast.map_buffers({x:i for x,i in zip(self.leaf_bufs, self.bufmap)}).key, tuple([x.key for x in self.leaf_bufs]))
 
   def add_buf(self, buf:LazyBuffer):
-    self.bufs.append(buf)
+    self.leaf_bufs.append(buf)
 
     # dedup by python object comparison of RawBuffer -- this is OK since we expect all non-output non-local buffers to be realized here.
     # this helps in the case where different views of the same rawbuffer are passed as arguments.
     assert buf.realized is not None
-    if buf.realized not in self.raw_bufs: self.raw_bufs.append(buf.realized)
-    self.bufmap.append(self.raw_bufs.index(buf.realized) if buf.realized in self.raw_bufs else len(self.raw_bufs) - 1)
+    if buf.realized not in self.bufs: self.bufs.append(buf.realized)
+    self.bufmap.append(self.bufs.index(buf.realized) if buf.realized in self.bufs else len(self.bufs) - 1)
 
   @staticmethod
   def rawbuf_is_input(buf: Union[LocalBuffer,RawBuffer]) -> bool: return buf.__class__ not in [RawConst, LocalBuffer]
 
   # the bufs we want to pass in at kernel execution time; ie realized LazyBuffers and not RawConst or LocalBuffer
   @property
-  def raw_input_bufs(self) -> List[RawBuffer]: return [cast(RawBuffer, buf) for buf in self.raw_bufs if Linearizer.rawbuf_is_input(buf)]
+  def raw_input_bufs(self) -> List[RawBuffer]: return [cast(RawBuffer, buf) for buf in self.bufs if Linearizer.rawbuf_is_input(buf)]
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
-    self.mem_estimate: int = sum(x.dtype.itemsize*x.size for x in self.raw_bufs)
+    self.mem_estimate: int = sum(x.dtype.itemsize*x.size for x in self.bufs)
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
@@ -145,12 +145,12 @@ class Linearizer:
     self.earlybufs = dedup(self.reduceop.buffers) if self.reduceop else []
 
     # create new shapetrackers inside this kernel, we will permute them
-    self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]
+    self.sts: List[ShapeTracker] = [x.st.copy() for x in self.leaf_bufs]
     for st in self.sts: st.simplify()
 
     # make the output buffer shape correct in here
     self.sts[0].reshape(self.info.shape)
-    self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
+    self.full_buf_index: int = self.leaf_bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
@@ -185,7 +185,7 @@ class Linearizer:
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
   def get_upcast_dim(self, i, amt=4):
-    should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
+    should_upcast = self.supports_float4 and (self.leaf_bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.leaf_bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == amt]
 
   def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
@@ -243,8 +243,8 @@ class Linearizer:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       # LocalBuffer has an entry in self.raw_bufs and self.bufmap, but not in self.bufs or self.sts
-      self.raw_bufs.append(LocalBuffer("temp", self.sts[-1].size()))
-      self.bufmap.append(len(self.raw_bufs) - 1)
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
+      self.bufmap.append(len(self.bufs) - 1)
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
     # print
@@ -290,7 +290,7 @@ class Linearizer:
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
       # load earlybufs
-      loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
+      loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.leaf_bufs) if b in self.earlybufs and i != 0})
 
       # run early AST (with reduce)
       self.ast_parse(self.reduceop, [acc[off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True)
@@ -336,7 +336,7 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0})
+    loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.leaf_bufs) if b not in self.earlybufs and i != 0})
 
     # run late AST
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
@@ -428,7 +428,7 @@ class Linearizer:
   def colored_shape(self) -> str: return ' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors()))
   def printbufs(self, prefix=""):
     for i in range(len(self.sts)):
-      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i].realized is not None else str(self.bufs[i]):47s}", self.sts[i].views)
+      print(prefix, f"{i:3d} {str(self.leaf_bufs[i].realized) if self.leaf_bufs[i].realized is not None else str(self.leaf_bufs[i]):47s}", self.sts[i].views)
     print(self.colored_shape())
 
   # ******************** base simplifiers ********************
@@ -492,10 +492,10 @@ class Linearizer:
   # ******************** GPU simplifiers ********************
 
   def required_optimizations(self, early_only=False):
-    for buf_index,buf in enumerate(self.bufs):
+    for buf_index,buf in enumerate(self.leaf_bufs):
       unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes(ignore_valid=True) if self.sts[buf_index].shape[i]%4 == 0]
-      if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype.__class__ is ImageDType:
-        assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
+      if (not early_only or buf in self.earlybufs) and self.leaf_bufs[buf_index].dtype.__class__ is ImageDType:
+        assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.leaf_bufs[buf_index]}"
         if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
           self.shift_to(unit_stride_axes_mul_4[0], 4)
           self.upcast()
@@ -526,7 +526,7 @@ class Linearizer:
           break
 
     # are we upcasting in mid reduce? (only for images)
-    if self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
+    if self.leaf_bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
       axes = self.sts[0].unit_stride_axes()
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
       if self.sts[0].shape[axes[0]]%4 == 0:
@@ -540,8 +540,8 @@ class Linearizer:
     self.simplify_ones()
 
     # use more opencl indexing if the output buffer is an image and we have room
-    if self.bufs[0].dtype.name.startswith('image') and self.first_reduce+len(self.group_for_reduce) < 3:
-      base_shape = cast(ImageDType, self.bufs[0].dtype).shape
+    if self.leaf_bufs[0].dtype.name.startswith('image') and self.first_reduce+len(self.group_for_reduce) < 3:
+      base_shape = cast(ImageDType, self.leaf_bufs[0].dtype).shape
       if (base_shape[0]*base_shape[1]) % self.sts[0].shape[0] == 0 and self.sts[0].shape[0]//base_shape[0] != 0:
         if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)

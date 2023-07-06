@@ -114,4 +114,4 @@ class LLVMIRCodegen(Linearizer):
     self.process()
     # no optimize, this doesn't support local
     self.linearize()
-    return ASTRunner('exec', uops_to_llvm_ir(self.uops, self.raw_bufs), op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name)
+    return ASTRunner('exec', uops_to_llvm_ir(self.uops, self.bufs), op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name)
