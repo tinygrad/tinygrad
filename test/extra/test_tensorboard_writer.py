@@ -1,7 +1,11 @@
 import glob, os, unittest, numpy as np
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from extra.tensorboard.writer import TinySummaryWriter
+from tinygrad.ops import LazyOp, BinaryOps, ReduceOps
+from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.tensor import Tensor
+
+def buf(*shp): return Tensor.ones(*shp, device="CPU").lazydata
 
 class TestTinySummaryWriter(unittest.TestCase):
   def setUp(self):
@@ -52,5 +56,13 @@ class TestTinySummaryWriter(unittest.TestCase):
   def test_image_C1_H2_W1(self): self.base_test_image(Tensor.ones(1, 2, 1))
   def test_image_C1_H1_W2(self): self.base_test_image(Tensor.ones(1, 1, 2))
   def test_image_C3_H6_W9(self): self.base_test_image(Tensor.ones(3, 6, 9))
+
+  def test_graph(self):
+    a,b = buf(4,4), buf(1,1)
+    op0 = LazyOp(MovementOps.RESHAPE, (b,), (4, 4))
+    op1 = LazyOp(BinaryOps.ADD, (a,op0))
+    ast = LazyOp(ReduceOps.SUM, (op1,), (1,1))
+    self.writer.add_graph(ret=buf(1,1), ast=ast)
+    self.writer.flush()
 
 if __name__ == '__main__': unittest.main()

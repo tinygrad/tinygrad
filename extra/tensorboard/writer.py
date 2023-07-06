@@ -3,6 +3,9 @@ import time
 from tensorboard.compat.proto import event_pb2
 from tensorboard.summary.writer.event_file_writer import EventFileWriter
 from extra.tensorboard.summary import histogram, scalar, image, hparams
+from extra.tensorboard.graph import op_to_graph
+from tinygrad.lazy import LazyBuffer
+from tinygrad.ops import LazyOp
 
 
 class FileWriter:
@@ -14,6 +17,10 @@ class FileWriter:
     self.writer.add_event(event)
   def add_summary(self, summary, global_step=None, walltime=None):
     self.add_event(event_pb2.Event(summary=summary), global_step, walltime)
+  def add_graph(self, graph_profile, walltime=None):
+    graph, stepstats = graph_profile
+    self.add_event(event_pb2.Event(graph_def=graph.SerializeToString()), None, walltime)
+    self.add_event(event_pb2.Event(tagged_run_metadata=event_pb2.TaggedRunMetadata(tag="step1", run_metadata=stepstats.SerializeToString())), None, walltime)
   def flush(self): self.writer.flush()
   def close(self): self.writer.close()
   def get_logdir(self): return self.writer.get_logdir()
@@ -39,5 +46,7 @@ class TinySummaryWriter:
     self.writer.add_summary(image(tag, img_tensor, dataformats=dataformats), global_step, walltime)
   def add_images(self, tag, img_tensor, global_step=None, walltime=None, dataformats="NCHW"):
     self.add_image(tag, img_tensor, global_step, walltime, dataformats)
+  def add_graph(self, ret: LazyBuffer, ast: LazyOp):
+    self.writer.add_graph(op_to_graph(ret, ast))
   def flush(self): self.writer.flush()
   def close(self): self.writer.close()
