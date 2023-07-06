@@ -93,5 +93,33 @@ class TestOptim(unittest.TestCase):
 
       np.testing.assert_allclose(losses[0], losses[1], atol=1e-4, rtol=0)
 
+  def test_lr_mult(self):
+    for Opt in [Adam, AdamW, SGD]:
+      lr_losses = []
+      lr_damp = []
+      w = Tensor(x_init.copy())
+      opt = Opt([w], lr=0.1)
+
+      loss = None
+      for _ in range(3):
+        loss = w.sum()
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+      lr_losses.append(loss.numpy())
+
+      w = Tensor(x_init.copy())
+      w.lr_mult = 0.01
+      opt = Opt([w], lr=0.1)
+
+      loss = None
+      for _ in range(3):
+        loss = w.sum()
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+      lr_damp.append(loss.numpy())
+      np.testing.assert_array_less(lr_losses, lr_damp)
+
 if __name__ == '__main__':
   unittest.main()
