@@ -25,6 +25,7 @@ BASEDIR.mkdir(exist_ok=True)
 
 def create_dict(key_row, val_row, rows): return {row[key_row]:row[val_row] for row in rows}
 
+# Download data and annotations
 if not pathlib.Path(BASEDIR/'train2017').is_dir():
   fn = BASEDIR/'train2017.zip'
   download_file('http://images.cocodataset.org/zips/train2017.zip',fn)
@@ -48,7 +49,6 @@ if not pathlib.Path(BASEDIR/'annotations').is_dir():
 
 # Training
 min_keypoints_per_image = 10
-
 def _count_visible_keypoints(anno):
   return sum(sum(1 for v in ann["keypoints"][2::3] if v > 0) for ann in anno)
 
@@ -72,6 +72,8 @@ def has_valid_annotation(anno):
     return True
   return False
 
+# TODO remove the dependency on torch, for now, try to just use numpy when it
+# require indexing and then convert back
 class COCODataset(torchvision.datasets.coco.CocoDetection):
   def __init__(self, root=pathlib.Path(BASEDIR/'train2017'),
                      ann_file=pathlib.Path(BASEDIR/'annotations/instances_train2017.json'), 

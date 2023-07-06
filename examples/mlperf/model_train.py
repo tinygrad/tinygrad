@@ -31,16 +31,16 @@ def train_maskrcnn():
   resnet = ResNet(50, num_classes=None, stride_in_1x1=True)
   model = MaskRCNN(backbone=resnet)
   model.load_from_pretrained()
-  
-  # For training, you must also adjust the learning rate and schedule length 
-  # according to the linear scaling rule. See for example:
-  # https://github.com/facebookresearch/Detectron/blob/master/configs/getting_started/tutorial_1gpu_e2e_faster_rcnn_R-50-FPN.yaml#L14
-  optimizer = optim.SGD(optim.get_parameters(model), lr=0.0025, weight_decay=0.0005, momentum=0.9)
-  # scheduler = make_lr_scheduler(cfg, optimizer)
-
+ 
   dataset = COCODataset()
   print(dataset[0:10])
 
+  # For training, you must also adjust the learning rate and schedule length 
+  # according to the linear scaling rule. See for example:
+  # https://github.com/facebookresearch/Detectron/blob/master/configs/getting_started/tutorial_1gpu_e2e_faster_rcnn_R-50-FPN.yaml#L14
+  # optimizer = optim.SGD(optim.get_parameters(model), lr=0.0025, weight_decay=0.0005, momentum=0.9)
+
+  # scheduler = make_lr_scheduler(cfg, optimizer)
   # data_loader, iters_per_epoch = make_data_loader(
       # cfg,
       # is_train=True,
