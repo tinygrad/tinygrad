@@ -67,7 +67,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   depth = 0
   def kk(s): kernel.append("  "*depth+s)
-  casts = {dtypes._float4: ("", f"{lang.float4}(0.0f, 0.0f, 0.0f, 0.0f)"), dtypes.half: ("(half)", "(half)(0.0f)"), dtypes.float: ("(float)", "0.0f"), dtypes.float64: ("(double)", "(double)(0.0f)")}
+  casts = {dtypes._float4: ("", f"{lang.float4}(0.0f, 0.0f, 0.0f, 0.0f)"), dtypes.half: ("(half)", "(half)(0.0f)"), dtypes.float: ("(float)", "0.0f")}
 
   for uop,newvar,vin,args in uops:
     if uop == UOps.LOOP:

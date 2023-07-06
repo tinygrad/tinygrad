@@ -2,14 +2,11 @@ import struct
 from tinygrad.codegen.assembly import AssemblyCodegen
 from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
 from tinygrad.codegen.linearizer import UOps
-from tinygrad.helpers import dtypes, DEBUG
-import numpy as np
+from tinygrad.helpers import dtypes
 
-dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "f16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32", dtypes.uint8: 'u8', dtypes.float64: 'f64', dtypes.int8: 's8'}
-dtype_to_nvtypes = {dtypes.float32: "f32", dtypes.float16: "b16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32", dtypes.uint8: 'u8', dtypes.float64: 'f64', dtypes.int8: 's8'}
+dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "f16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32", dtypes.uint8: 'u8', dtypes.int8: 's8'}
+dtype_to_nvtypes = {dtypes.float32: "f32", dtypes.float16: "b16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32", dtypes.uint8: 'u8', dtypes.int8: 's8'}
 def float_to_hex(x): return "0F%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
-def half_to_hex(x): return "0H" + hex(np.float16(x).view('e'))[2:].zfill(4)
-def double_to_hex(x): return "0D" + struct.pack('d', np.float64(x)).hex()[2:].zfill(16)
 
 # https://docs.nvidia.com/cuda/parallel-thread-execution/#
 class PTXCodegen(AssemblyCodegen):
@@ -22,7 +19,6 @@ class PTXCodegen(AssemblyCodegen):
            BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.eq",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
            FusedOps.MULACC: "fma.rn"}
-    app = False
     for uop, out, vin, arg in asm:
       if uop == UOps.DEFINE_REGISTER:
         ins.append(f".reg .{dtype_to_nvtype[arg[0][0]]} %{arg[1]}<{arg[2]}>;",)
@@ -52,6 +48,7 @@ class PTXCodegen(AssemblyCodegen):
           ins.append(f"selp.{dtype_to_nvtype[out.dtype]} {out}, 0f3F800000, 0f00000000, {vin[0]};")
         else:
           if   out.dtype == dtypes.float16 and vin[0].dtype == dtypes.float: mod = "rn." #f2f
+          elif dtypes.is_integer(vin[0].dtype) and dtypes.is_integer(out.dtype): mod = ""
           elif vin[0].dtype.itemsize == 1: mod = "rn."
           elif vin[0].dtype.itemsize == 8: mod = "rz."
           elif dtypes.is_float(vin[0].dtype) ^ dtypes.is_float(out.dtype): mod = "rzi." # s2f
@@ -61,7 +58,7 @@ class PTXCodegen(AssemblyCodegen):
           # ins.append(f"cvt.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
       elif uop == UOps.CONST:
         # print("++++++++++++++= CONST UOPPPPp")
-        ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {float_to_hex(arg) if dtypes.is_float(out.dtype) else arg};")
+        ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {float_to_hex(arg) if dtypes.is_float(out.dtype) else int(arg)};")
       elif uop == UOps.LABEL:
         ins.append(f"{arg}:")
       elif uop == UOps.COND_BRANCH:
