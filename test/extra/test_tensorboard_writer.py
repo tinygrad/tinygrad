@@ -1,6 +1,7 @@
 import numpy as np, os, shutil, unittest
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from extra.tensorboard.writer import TinySummaryWriter
+from extra.utils import temp
 from tinygrad.ops import LazyOp, BinaryOps, ReduceOps
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.tensor import Tensor
@@ -9,7 +10,7 @@ def buf(*shp): return Tensor.ones(*shp, device="CPU").lazydata
 
 class TestTinySummaryWriter(unittest.TestCase):
   def setUp(self):
-    self.log_dir = './logs'
+    self.log_dir = temp('tensorboard/logs')
     self.writer, self.accumulator = TinySummaryWriter(self.log_dir), EventAccumulator(self.log_dir)
   def tearDown(self):
     self.writer.close()
