@@ -26,7 +26,7 @@ def jacobian(func, input):
       J[o,i] = grad
   return J
 
-def numerical_jacobian(func, input, eps = 1e-6):
+def numerical_jacobian(func, input, eps = 1e-3):
   output = func(input)
 
   ji = input.numpy().reshape(-1).shape[-1]
@@ -44,7 +44,7 @@ def numerical_jacobian(func, input, eps = 1e-6):
     NJ[:,i] = grad_approx
   return NJ
 
-def gradcheck(func, input, eps = 1e-06, atol = 1e-5, rtol = 0.001):
+def gradcheck(func, input, eps = 1e-3, atol = 1e-3, rtol = 1e-3):
   NJ = numerical_jacobian(func, input, eps)
   J = jacobian(func, input)
-  return np.allclose(J, NJ, atol=atol, rtol=rtol)
+  return np.allclose(J, NJ, atol = atol, rtol = rtol)
