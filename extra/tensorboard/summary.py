@@ -9,7 +9,6 @@ from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
 
 from tinygrad.tensor import Tensor
 
-
 def to_np(x):
   if isinstance(x, np.ndarray):return x
   if np.isscalar(x): return np.array([x])
@@ -41,16 +40,12 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete: Dict[str
     if k in hparam_domain_discrete:
       domain_discrete = []
       for d in hparam_domain_discrete[k]:
-        if isinstance(d, (int, float)):
-          domain_discrete.append(struct_pb2.Value(number_value=d))
-        elif isinstance(d, str):
-          domain_discrete.append(struct_pb2.Value(string_value=d))
-        else:
-          domain_discrete.append(struct_pb2.Value(bool_value=d))
+        if isinstance(d, (int, float)): domain_discrete.append(struct_pb2.Value(number_value=d))
+        elif isinstance(d, str): domain_discrete.append(struct_pb2.Value(string_value=d))
+        else: domain_discrete.append(struct_pb2.Value(bool_value=d))
       return struct_pb2.ListValue(values=domain_discrete)
     else:
-      domain_discrete = None
-      hps.append(HParamInfo(name=k, type=DataType.Value(type_map[type(v)]), domain_discrete=domain_discrete))
+      hps.append(HParamInfo(name=k, type=DataType.Value(type_map[type(v)]), domain_discrete=None))
   def get_summary(content, tag):
     smd = SummaryMetadata(plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME, content=content.SerializeToString()))
     return Summary(value=[Summary.Value(tag=tag, metadata=smd)])
