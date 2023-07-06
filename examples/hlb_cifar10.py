@@ -30,12 +30,12 @@ class ConvGroup:
 
   def __call__(self, x):
     x = self.conv[0](x).max_pool2d(2)
-    x = (self.norm[0](x)).gelu()
+    x = self.norm[0](x).relu()
     if self.short: return x
     residual = x
-    mult = self.se2((self.se1(residual.mean((2,3)))).gelu()).sigmoid().reshape(x.shape[0], x.shape[1], 1, 1) if self.se else 1.0
-    x = self.norm[1](self.conv[1](x)).gelu()
-    x = self.norm[2](self.conv[2](x) * mult).gelu()
+    mult = self.se2((self.se1(residual.mean((2,3)))).relu()).sigmoid().reshape(x.shape[0], x.shape[1], 1, 1) if self.se else 1.0
+    x = self.norm[1](self.conv[1](x)).relu()
+    x = self.norm[2](self.conv[2](x) * mult).relu()
     return x + residual
 
 class SpeedyResNet:
@@ -44,7 +44,7 @@ class SpeedyResNet:
     self.net = [
       nn.Conv2d(3, 64, kernel_size=1),
       nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
-      lambda x: x.gelu(),
+      lambda x: x.relu(),
       ConvGroup(64, 128, short=False),
       ConvGroup(128, 256, short=True),
       ConvGroup(256, 512, short=False),
@@ -77,7 +77,7 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
     if not is_train: break
     seed += 1
 
-def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.25, momentum=0.8, wd=0.15, label_smoothing=0., mixup_alpha=0.025, seed=6):
+def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.015, pct_start=0.25, momentum=0.75, wd=0.15, label_smoothing=0.15, mixup_alpha=0.025, seed=6):
   set_seed(seed)
   Tensor.training = True
 
