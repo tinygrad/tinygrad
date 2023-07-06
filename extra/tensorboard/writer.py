@@ -2,7 +2,7 @@ import os
 import time
 from tensorboard.compat.proto import event_pb2
 from tensorboard.summary.writer.event_file_writer import EventFileWriter
-from extra.tensorboard.summary import histogram, scalar, image, hparams
+from extra.tensorboard.summary import histogram, scalar, image, hparams, text
 from extra.tensorboard.graph import op_to_graph
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LazyOp
@@ -56,5 +56,7 @@ class TinySummaryWriter:
     self.add_image(tag, img_tensor, global_step, walltime, dataformats)
   def add_graph(self, ret: LazyBuffer, ast: LazyOp):
     self.writer.add_graph(op_to_graph(ret, ast))
+  def add_text(self, tag, text_string, global_step=None, walltime=None):
+    self.writer.add_summary(text(tag, text_string), global_step, walltime)
   def flush(self): self.writer.flush()
   def close(self): self.writer.close()

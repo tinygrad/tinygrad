@@ -6,6 +6,9 @@ from tensorboard.compat.proto import struct_pb2
 from tensorboard.compat.proto.summary_pb2 import HistogramProto
 from tensorboard.compat.proto.summary_pb2 import Summary
 from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
+from tensorboard.compat.proto.tensor_pb2 import TensorProto
+from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
+from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
 
 from tinygrad.tensor import Tensor
 
@@ -114,3 +117,8 @@ def convert_to_HWC(tensor, input_format):  # tensor: numpy array
     2: lambda t, f: np.stack([t.transpose([f.find(c) for c in "HW"])]*3, 2)
   }
   return format_len_to_func[len(input_format)](tensor, input_format)
+
+def text(tag, text_string):
+  PluginData = SummaryMetadata.PluginData(plugin_name='text', content=TextPluginData(version=0).SerializeToString())
+  tensor = TensorProto(dtype='DT_STRING', string_val=[text_string.encode(encoding='utf_8')], tensor_shape=TensorShapeProto(dim=[TensorShapeProto.Dim(size=1)]))
+  return Summary(value=[Summary.Value(tag=tag + '/text_summary', metadata=SummaryMetadata(plugin_data=PluginData), tensor=tensor)])

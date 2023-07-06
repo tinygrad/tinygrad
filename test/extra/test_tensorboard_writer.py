@@ -75,4 +75,12 @@ class TestTinySummaryWriter(unittest.TestCase):
     self.writer.add_graph(ret=buf(1,1), ast=ast)
     self.writer.flush()
 
+  def test_text(self):
+    tag, value = 'test_text', 'test_value'
+    self.write_and_reload(self.writer.add_text, tag, value)
+    text_events = self.accumulator.Tensors(f'{tag}/text_summary')
+    self.assertEqual(1, len(text_events))
+    self.assertEqual(0, text_events[0].step)
+    self.assertEqual([value.encode(encoding='utf_8')], text_events[0].tensor_proto.string_val)
+
 if __name__ == '__main__': unittest.main()

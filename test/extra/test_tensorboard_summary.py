@@ -45,4 +45,10 @@ class TestTensorboardSummary(unittest.TestCase):
   def test_hparams(self):
     self.base_test_hparams({'lr': 0.1, 'bsize': 1}, {'hparam/accuracy': 10, 'hparam/loss': 10})
 
+  def base_test_text(self, tag, text_string):
+    self.assertEqual(torch_summary.text(tag, text_string),
+                     tiny_summary.text(tag, text_string))
+  def test_text(self):
+    self.base_test_text("test_text", "hello world")
+
 if __name__ == '__main__': unittest.main()
