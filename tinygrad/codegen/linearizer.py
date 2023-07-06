@@ -584,9 +584,9 @@ class Linearizer:
     self.simplify_ones()
 
     # should use tensor cores?
-    # first, confirm it's a straightforward mulacc
+    # first, confirm it's a straightforward mulacc on a device with real locals
     if self.reduceop and self.reduceop.op == ReduceOps.SUM and isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
-       isinstance(self.reduceop.src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[1], LazyBuffer):
+       isinstance(self.reduceop.src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[1], LazyBuffer) and hasattr(self, 'lang') and len(self.lang.lid):
       buf0 = self.bufs.index(self.reduceop.src[0].src[0])
       buf1 = self.bufs.index(self.reduceop.src[0].src[1])
       buf0_strides = self.sts[buf0].real_strides()
@@ -628,7 +628,7 @@ class Linearizer:
         self.alias_buffer(1, [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2))
         self.alias_buffer(2, [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2))
 
-        # very late upcast to run group at the same time. only if actually using tensor cores, otherwise local isn't a simdgroup
+        # very late upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
         if self.use_tensor_cores:
           self.shift_to(s0, 2, insert_before=self.first_reduce-self.local_dims)
           self.local_dims += 1
