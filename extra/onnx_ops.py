@@ -1,4 +1,5 @@
 from tinygrad.nn import Conv2d
+from tinygrad.nn.optim import Adam as Adam_
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, dtypes
 from extra.onnx import safe_numpy
@@ -138,14 +139,32 @@ def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_p
     div = _padding(Tensor.ones(*X.shape), pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations).avg_pool2d(kernel_shape, stride=strides)
     return padding_included / div
 
+def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
+  reshape_arg = [1]*input.ndim + [input.shape[-1]]
+  return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]))*input).sum(indices.ndim)
+
 def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
   if ceil_mode: auto_pad = "SAME_UPPER"
   ret = _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-len(kernel_shape):], strides=strides, kernel_shape=kernel_shape, dilations=dilations)
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations)
-  return ret # (ret, indices)
+  # X_len = prod(X.shape)
+  # ret_len = prod(ret.shape)
+  # lol = (ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)).sum(0)
+  # can't run this....... need other way
+  indices = None
+  return ret, indices # (ret, indices)
 
-def MaxUnpool(xT, xI, kernel_shape, outshape=None, pads=None, strides=None):
-  return
+def MaxUnpool(xT, xI, outshape=None, kernel_shape=None, pads=None, strides=None):
+  xI = xI.flatten()
+  if outshape: outlength = int(prod(safe_numpy(outshape)))
+  else: outlength = int(safe_numpy(xI.max()))
+  zeros = Tensor.zeros(outlength)
+  arange = Tensor.arange(outlength)
+  haha = xI.unsqueeze(1).expand(prod(xT.shape), outlength)
+  lol = arange.reshape(1, outlength).expand(haha.shape)
+  ok = (haha == lol).sum(0)
+  # wtf to do after this......
+  return None
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
   if auto_pad != "NOTSET": padding = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
@@ -156,9 +175,12 @@ def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_
   if auto_pad != "NOTSET":
     if not kernel_shape: kernel_shape = W.shape[-len(strides):]
     pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
-  # if output_shape: pads = [(output_shape[0]-X.shape[-2])//2, (output_shape[1]-X.shape[-1])//2, math.ceil((output_shape[0]-X.shape[-2])/2), math.ceil((output_shape[1]-X.shape[-1])/2)]
-  print(pads)
-  return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0, output_padding=output_padding)
+  ret = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding) 
+  # super stupid HACK. Need smarter way of determining ret shape and output_shape
+  if output_shape and not output_padding: 
+    output_padding = [os - rs for os, rs in zip(output_shape, ret.shape[-2:])]
+    ret = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding) 
+  return ret 
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
 def Dropout(data, ratio=0.5, training_mode=False, seed=None):
@@ -272,6 +294,9 @@ def Or(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.ones(*x.shape)).cast(
 def Xor(x:Tensor, y:Tensor): return Where((x==y), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
 def Not(x:Tensor): return Where((x==1), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
 
+def Floor(x:Tensor): return x.floor()
+def Ceil(x:Tensor): return x.ceil()
+
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1): 
   k = int(k.numpy().item()) if k != 0 else 0 # onnx passes k as a tensor int64 with one element, default is 0
   return x.triu(k).cast(x.dtype) if upper else x.tril(k).cast(x.dtype)
@@ -316,6 +341,11 @@ def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, red
   elif reduction == "sum": return loss.sum()
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
 
+def SoftmaxCrossEntropyLoss(input, target, weights=None, ignore_index=None, reduction="mean"):
+  # rng = np.random.RandomState(seed)
+  N, C, i_shape = input.shape[0], input.shape[1], input.shape
+  ...
+
 def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
   reshape_arg = [1]*input.ndim + [input.shape[-1]]
   return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]))*input).sum(indices.ndim)
@@ -344,6 +374,7 @@ def Gather(input, indices, axis=0):
   return ret.reshape(*reshape_arg)
 
 def GatherElements(input, indices, axis):
+  indices = (indices < 0).where(indices+input.shape[axis], indices)
   indices = indices.transpose(ax1=axis, ax2=0)
   permute_args = list(range(input.ndim))
   permute_args[0], permute_args[axis] = permute_args[axis], permute_args[0]
@@ -355,10 +386,10 @@ def ArrayFeatureExtractor(input, indices):
   ret = Gather(input, indices, input.ndim-1)
   return ret
 
-def _round(x:Tensor, n:float, eq_is_down = True) -> Tensor:
+def _round(x:Tensor, n:float, case_eq_round_down = True) -> Tensor:
   assert n <= 1, f"n:{n} is larger than 1"
   b = x.cast(dtypes.int32).contiguous().cast(x.dtype) + n
-  return (x > b).where(b+1-n, b-n) if eq_is_down else (x >= b).where(b+1-n, b-n)
+  return (x > b).where(b+1-n, b-n) if case_eq_round_down else (x >= b).where(b+1-n, b-n)
 
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
   def _nearest_gather(X: Tensor, indices: Tensor, output_shape): # MAYBE USE SOMETHING ELSE OTHER THAN GATHER like reshape -> expand -> reshape -> [shrink]? bad gather many kernel bad, OR TRY NOT FLATTEN()?
@@ -496,5 +527,3 @@ def OneHot(indices, depth, values, axis=-1):
   cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
   return cond.where(values[1], values[0]).cast(values.dtype) 
 
-def Floor(x:Tensor): return x.floor()
-def Ceil(x:Tensor): return x.ceil()

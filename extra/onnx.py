@@ -33,7 +33,11 @@ def get_run_onnx(onnx_model: ModelProto):
     while True: # NEED BETTER PARSER :D
       attr = type_proto.WhichOneof('value')
       if attr == 'tensor_type': return tuple(x.dim_value for x in getattr(type_proto, attr).shape.dim)
-      elif attr == 'sequence_type': raise NotImplementedError(f"sequence type is not implemented: {type_proto}") 
+      elif attr == 'sequence_type': 
+        type_proto = getattr(type_proto, attr).elem_type
+        attr = type_proto.WhichOneof('value')
+        t_shape = [x.dim_value for x in getattr(type_proto, attr).shape.dim]
+        return (1, *t_shape)
       elif attr == 'map_type': raise NotImplementedError(f"map_type is not implemented: {type_proto}")
       elif attr == 'opaque_type': raise NotImplementedError(f"opaque_type is not implemented: {type_proto}")
       elif attr == 'sparse_tensor_type': raise NotImplementedError(f"sparse_tensor_type is not implemented: {type_proto}")
@@ -41,7 +45,7 @@ def get_run_onnx(onnx_model: ModelProto):
       else: raise Exception(f"unknown attr: {attr}, {type_proto}")
         
   def buffer_parse(inp: TensorProto) -> Tensor:
-    if inp.data_type in (1,10,6,7,11):
+    if inp.data_type in (1,10,6,7):
       # TODO: this is shared with below
       if len(inp.float_data) > 0:
         ret = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
@@ -107,6 +111,9 @@ def get_run_onnx(onnx_model: ModelProto):
       if inp.name in inputs:
         if isinstance(inputs[inp.name], Tensor):
           input_tensors[inp.name] = inputs[inp.name]
+        elif isinstance(inputs[inp.name], list):
+          print('fuck')
+          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         input_shape = input_tensors[inp.name].shape
