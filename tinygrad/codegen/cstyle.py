@@ -83,15 +83,16 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
             global_size.append(var.max+1)
           elif args[1] == "local" and lang.lid:
             # for M1 tensor core stuff, support > 3 dims
-            if len(args[0]) > len(lang.lid) and i < len(args[0])-len(lang.lid)+1:
-              if len(local_size) == 0: local_size.append(1)
-              local_size[0] *= var.max+1
-              lidz = Variable(lang.lid[-1], 0, prod(x.max+1 for x in args[0][0:-len(lang.lid)+1])-1)
-              lidz = (lidz//((lidz.max+1)//local_size[0]))%(var.max+1)
-              assert lidz.max == var.max and lidz.min == var.min
-              kk(f"{{ int {var.expr} = {lidz.render(render_cl)};  /* {var.max+1} */")
+            if i >= 2 and len(args[0]) > len(lang.lid):
+              # do this on the x dim for warps
+              if len(local_size) == 2: local_size.append(1)
+              local_size[-1] *= var.max+1
+              lidx = Variable(lang.lid[0], 0, prod(x.max+1 for x in args[0][2:])-1)
+              lidx = (lidx//((lidx.max+1)//local_size[-1]))%(var.max+1)
+              assert lidx.max == var.max and lidx.min == var.min
+              kk(f"{{ int {var.expr} = {lidx.render(render_cl)};  /* {var.max+1} */")
             else:
-              kk(f"{{ int {var.expr} = {lang.lid[len(args[0])-1-i]};  /* {var.max+1} */")
+              kk(f"{{ int {var.expr} = {lang.lid[min(len(lang.lid), len(args[0]))-1-i]};  /* {var.max+1} */")
               local_size.append(var.max+1)
           else:
             if getenv("NOUNROLL"): kk("#pragma unroll(1)")   # prevent loop unrolling

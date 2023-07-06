@@ -158,6 +158,7 @@ class Linearizer:
     self.local_dims: int = 0
     self.local_alias: Dict[int, LocalBuffer] = {}
     self.use_tensor_cores: bool = False
+    self.exclude_local_upcast: int = 0
 
     # group simplifies
     self.simplify_ones()
@@ -288,11 +289,14 @@ class Linearizer:
       # reduce loop
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
+      # barrier for fast GEMM
+      if self.use_tensor_cores: self.uop(UOps.BARRIER, None, [], ())
+
       # compute local aliases
       locals_to_store = []
       for i in self.local_alias:
         strides = self.sts[i].real_strides()
-        extra_locals = [lidx for lidx,st in zip(local_idxs, strides[len(global_idxs):self.first_reduce]) if st == 0]
+        extra_locals = [lidx for lidx,st in zip(local_idxs[self.exclude_local_upcast:], strides[len(global_idxs)+self.exclude_local_upcast:self.first_reduce]) if st == 0]
         this_upcast_idxs: List[Node] = []
         for j,v in enumerate(full_upcast_idxs):
           if strides[len(global_idxs)+len(local_idxs)+len(reduce_idxs)+j] == 0:
@@ -321,7 +325,7 @@ class Linearizer:
         locals_to_store.append((self.bufs.index(self.local_alias[i]), idxs, ll))
 
       # copy in any global buffers
-      if getenv("TC") and self.use_tensor_cores:
+      if self.use_tensor_cores:
         i = 0
         for y0,y1 in zip(locals_to_store[1][2][::2], locals_to_store[1][2][1::2]):
           for x0,x1 in zip(locals_to_store[0][2][::2], locals_to_store[0][2][1::2]):
@@ -591,7 +595,7 @@ class Linearizer:
       axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%8 == 0]
       if len(axis_buf0) and len(axis_buf1) and self.full_shape[self.first_reduce]%8 == 0:
         if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1)
-        self.use_tensor_cores = True
+        self.use_tensor_cores = getenv("TC", 1) == 1 and self.bufs[0].device == "METAL"
 
         # TODO: select axis in smart way
         s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
@@ -624,9 +628,11 @@ class Linearizer:
         self.alias_buffer(1, [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2))
         self.alias_buffer(2, [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2))
 
-        # very late upcast to run group at the same time
-        #self.shift_to(s0, 4, insert_before=self.first_reduce-self.local_dims)
-        #self.local_dims += 1
+        # very late upcast to run group at the same time. only if actually using tensor cores, otherwise local isn't a simdgroup
+        if self.use_tensor_cores:
+          self.shift_to(s0, 2, insert_before=self.first_reduce-self.local_dims)
+          self.local_dims += 1
+          self.exclude_local_upcast += 1
 
         # early exit
         return
