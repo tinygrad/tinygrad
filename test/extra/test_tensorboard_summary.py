@@ -39,11 +39,13 @@ class TestTensorboardSummary(unittest.TestCase):
     self.base_test_image((2, 1), 1, dataformats="HW")
     self.base_test_image((2, 1), 2, dataformats="HW")
 
-  def base_test_hparams(self, hparam_dict, metric_dict):
-    self.assertEqual(torch_summary.hparams(hparam_dict, metric_dict),
-                     tiny_summary.hparams(hparam_dict, metric_dict))
+  def base_test_hparams(self, hparam_dict, metric_dict, hparam_domain_discrete):
+    self.assertEqual(torch_summary.hparams(hparam_dict, metric_dict, hparam_domain_discrete),
+                     tiny_summary.hparams(hparam_dict, metric_dict, hparam_domain_discrete))
   def test_hparams(self):
-    self.base_test_hparams({'lr': 0.1, 'bsize': 1}, {'hparam/accuracy': 10, 'hparam/loss': 10})
+    self.base_test_hparams({'lr': 0.1, 'bsize': 1}, {'hparam/accuracy': 10, 'hparam/loss': 10}, None)
+    self.base_test_hparams({'lr': 0.1, 'bsize': 1}, {'hparam/accuracy': 10, 'hparam/loss': 10}, {'lr': [0.1, 0.2], 'bsize': [1, 2]})
+    self.base_test_hparams({'opt': 'SGD'}, {}, {'opt': ['SGD', 'Adam']})
 
   def base_test_text(self, tag, text_string):
     self.assertEqual(torch_summary.text(tag, text_string),

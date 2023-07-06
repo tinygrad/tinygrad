@@ -2,7 +2,7 @@ import itertools
 import numpy as np
 from typing import Dict, List, Any
 
-from tensorboard.compat.proto import struct_pb2
+from google.protobuf import struct_pb2
 from tensorboard.compat.proto.summary_pb2 import HistogramProto
 from tensorboard.compat.proto.summary_pb2 import Summary
 from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
@@ -34,8 +34,8 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete: Dict[str
       raise TypeError(f"parameter: hparam_domain_discrete[{k}] should be a list of same type as hparam_dict[{k}].")
   hps, ssi = [], SessionStartInfo()
   for k, v in hparam_dict.items():
-    if v is None or isinstance(v, Tensor):
-      continue
+    if v is None: continue
+    if isinstance(v, Tensor): v = to_np(v)[0]
     type_map = {int: "DATA_TYPE_FLOAT64", float: "DATA_TYPE_FLOAT64", str: "DATA_TYPE_STRING", bool: "DATA_TYPE_BOOL"}
     if isinstance(v, (int, float)): ssi.hparams[k].number_value = v
     elif isinstance(v, str): ssi.hparams[k].string_value = v
@@ -46,9 +46,10 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete: Dict[str
         if isinstance(d, (int, float)): domain_discrete.append(struct_pb2.Value(number_value=d))
         elif isinstance(d, str): domain_discrete.append(struct_pb2.Value(string_value=d))
         else: domain_discrete.append(struct_pb2.Value(bool_value=d))
-      return struct_pb2.ListValue(values=domain_discrete)
+      domain_discrete = struct_pb2.ListValue(values=domain_discrete)
     else:
-      hps.append(HParamInfo(name=k, type=DataType.Value(type_map[type(v)]), domain_discrete=None))
+      domain_discrete = None
+    hps.append(HParamInfo(name=k, type=DataType.Value(type_map[type(v)]), domain_discrete=domain_discrete))
   def get_summary(content, tag):
     smd = SummaryMetadata(plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME, content=content.SerializeToString()))
     return Summary(value=[Summary.Value(tag=tag, metadata=smd)])
@@ -87,16 +88,13 @@ def image(tag, tensor, rescale=1, dataformats="NCHW"):
   tensor = (tensor.astype(np.float32) * scale_factor).clip(0, 255).astype(np.uint8)
   return Summary(value=[Summary.Value(tag=tag, image=make_image(tensor, rescale))])
 def make_image(tensor, rescale=1):
-  height, width, channel = tensor.shape
+  h, w, channel = tensor.shape
   from PIL import Image
   import io
-  with io.BytesIO() as output:
-    Image.fromarray(tensor).resize(
-      (int(width * rescale), int(height * rescale)),
-      getattr(Image.Resampling, 'LANCZOS', Image.ANTIALIAS)
-    ).save(output, format="PNG")
-    image_string = output.getvalue()
-  return Summary.Image(height=height, width=width, colorspace=channel, encoded_image_string=image_string)
+  with io.BytesIO() as out:
+    Image.fromarray(tensor).resize((int(w*rescale), int(h*rescale)), Image.LANCZOS).save(out, format="PNG")
+    image_string = out.getvalue()
+  return Summary.Image(height=h, width=w, colorspace=channel, encoded_image_string=image_string)
 def make_grid(I, n_col=8):
   assert isinstance(I, np.ndarray), "plugin error, should pass numpy array here"
   if I.shape[1] == 1: I = np.repeat(I, 3, axis=1)
@@ -104,11 +102,10 @@ def make_grid(I, n_col=8):
   n_img, _, H, W = I.shape
   n_col = min(n_img, n_col)
   n_row = int(np.ceil(float(n_img) / n_col))
-  canvas, positions = np.zeros((3, H * n_row, W * n_col), dtype=I.dtype), list(itertools.product(range(n_row), range(n_col)))
-  for i, (y, x) in enumerate(positions[:n_img]): canvas[:, y * H : (y + 1) * H, x * W : (x + 1) * W] = I[i]
+  canvas, pos = np.zeros((3, H * n_row, W * n_col), dtype=I.dtype), list(itertools.product(range(n_row), range(n_col)))
+  for i, (y, x) in enumerate(pos[:n_img]): canvas[:, y * H : (y + 1) * H, x * W : (x + 1) * W] = I[i]
   return canvas
 def convert_to_HWC(tensor, input_format):  # tensor: numpy array
-  input_format = input_format.upper()
   assert len(set(input_format)) == len(input_format), f"Duplicated dimension shorthand in input_format: {input_format}"
   assert len(tensor.shape) == len(input_format), f"Size of input tensor and input_format are different. tensor shape: {tensor.shape}, input_format: {input_format}"
   format_len_to_func = {
@@ -116,7 +113,7 @@ def convert_to_HWC(tensor, input_format):  # tensor: numpy array
     3: lambda t, f: t if (t := t.transpose([f.find(c) for c in "HWC"])).shape[2] != 1 else np.concatenate([t, t, t], 2),
     2: lambda t, f: np.stack([t.transpose([f.find(c) for c in "HW"])]*3, 2)
   }
-  return format_len_to_func[len(input_format)](tensor, input_format)
+  return format_len_to_func[len(input_format)](tensor, input_format.upper())
 
 def text(tag, text_string):
   PluginData = SummaryMetadata.PluginData(plugin_name='text', content=TextPluginData(version=0).SerializeToString())
