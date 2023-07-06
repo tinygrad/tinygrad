@@ -168,6 +168,7 @@ def load_wav(file):
   except sp.CalledProcessError as e: raise RuntimeError(f"Failed to load audio {e.stderr.decode()}") from e
   return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
 
+"""
 @functools.lru_cache(None)
 def get_filters(sample_rate, n_fft, n_mels): return librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels)
 @functools.lru_cache(None)
@@ -182,7 +183,25 @@ def prep_audio(audio, padding) -> Tensor:
   log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
   return log_spec
+"""
+import torch
+import torch.nn.functional as F
 
+@functools.lru_cache(None)
+def get_filters(sample_rate, n_fft, n_mels):return torch.tensor(librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels))
+
+def prep_audio(audio, padding):
+  audio = torch.from_numpy(audio)
+  if padding > 0: audio = F.pad(audio, (0, padding))
+  window = torch.hann_window(N_FFT)
+  stft = torch.stft(audio, N_FFT, HOP_LENGTH, window=window, return_complex=True)
+  magnitudes = stft[..., :-1].abs() ** 2
+  mel_spec = get_filters(RATE, N_FFT, N_MELS) @ magnitudes
+  log_spec = np.log10(np.clip(mel_spec, a_min=1e-10, a_max=None))
+  log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
+  log_spec = (log_spec + 4.0) / 4.0
+  return log_spec.numpy()
+  
 def listener(q):
   prep_audio(np.zeros(300), RATE)
   import pyaudio
@@ -208,16 +227,15 @@ class GreedyDecoder:
   def __init__(self, eot): self.eot = eot
 
   def update(self, tokens, logits, sum_logprobs):
-    # NOTE: sum_logprobs.shape[-1] is off by 1, and assume temperature == 0 for now
     tokens = tokens.numpy()
     next_tokens = logits.numpy().argmax(-1)
     logprobs = logits.log_softmax(-1).numpy()
     current_logprobs = logprobs[np.arange(0, logprobs.shape[0]), next_tokens]
     sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)
     next_tokens[tokens[:, -1] == self.eot] = self.eot
-    tokens = np.concatenate([tokens, next_tokens[:, None]], axis=-1)
+    tokens = np.concatenate([tokens, next_tokens[:, None].astype(np.float32)], axis=-1)
     completed = (tokens[:, -1] == self.eot).all()
-    return Tensor(tokens.astype(np.uint8)), completed
+    return Tensor(tokens), completed
 
   def finalize(self, tokens, sum_logprobs):
     tokens = np.pad(tokens.numpy(), [(0, 0), (0, 0), (0, 1)], constant_values=self.eot)
@@ -272,8 +290,7 @@ if __name__ == "__main__":
     content_frames = mel.shape[-1] - N_FRAMES
     seek = 0
     while seek < content_frames:
-      # TODO: add a language token in index 1
-      initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|transcribe|>"]]
+      initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|en|>"], enc._special_tokens["<|transcribe|>"]]
       sample_begin = len(initial_tokens)
       decoder = GreedyDecoder(eot=enc.eot_token)
       sequence_ranker = MaximumLikelihoodRanker(None)
@@ -282,10 +299,8 @@ if __name__ == "__main__":
       audio_features = model.encoder(Tensor(mel_segment)).realize()
       tokens = Tensor([initial_tokens]).repeat((mel_segment.shape[0], 1))
       sum_logprobs = Tensor.zeros(audio_features.shape[0])
-      for _ in range(min(sample_len, 25)):
-        # TODO: no_speech_probs
+      for _ in range(sample_len):
         logits = model.decoder(tokens[:, -1:] if tokens.shape[-1] > sample_begin else tokens, audio_features)
-        logits.realize()
         logits = logits[:, -1]
         tokens, completed = decoder.update(tokens, logits, sum_logprobs)
         if completed: break
@@ -294,6 +309,7 @@ if __name__ == "__main__":
       tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
       tokens = [[t[sample_begin:(t==enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
       selected = sequence_ranker.rank(tokens, sum_logprobs)
+      tokens = np.round(tokens).astype(np.int8)
       tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
       texts = [enc.decode(t).strip() for t in tokens]
       return texts
@@ -307,7 +323,7 @@ if __name__ == "__main__":
       predicted = transcribe_wav(fn)
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
       #lens.append(len(transcript.split(" ")))
-      print(predicted.shape[-1], len(transcript.split(" ")))
+      print(predicted)
       #sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
       #print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
   elif len(sys.argv) > 1:
