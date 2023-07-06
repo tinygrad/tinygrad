@@ -102,12 +102,25 @@ class Linearizer:
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
 
     # organize the input/output buffers
-    self.leaf_bufs: List[Union[LazyBuffer]] = [output_buffer] + dedup(ast.buffers)
+    self.leaf_bufs: List[Union[LazyBuffer]] = []
+    self.bufmap: List[int] = []  # map from buf to index into raw_input_bufs, only for global buffers
+    self.bufs: List[Union[LocalBuffer,RawBuffer]] = []  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
+    for buf in [output_buffer] + dedup(ast.buffers):
+      self.add_buf(buf)
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
     self.key = (ast.map_buffers({x:i for x,i in zip(self.leaf_bufs, self.bufmap)}).key, tuple([x.key for x in self.leaf_bufs]))
+
+  def add_buf(self, buf:LazyBuffer):
+    self.leaf_bufs.append(buf)
+
+    # dedup by python object comparison of RawBuffer -- this is OK since we expect all non-output non-local buffers to be realized here.
+    # this helps in the case where different views of the same rawbuffer are passed as arguments.
+    assert buf.realized is not None
+    if buf.realized not in self.bufs: self.bufs.append(buf.realized)
+    self.bufmap.append(self.bufs.index(buf.realized) if buf.realized in self.bufs else len(self.bufs) - 1)
 
   @staticmethod
   def rawbuf_is_input(buf: Union[LocalBuffer,RawBuffer]) -> bool: return buf.__class__ not in [RawConst, LocalBuffer]
@@ -118,14 +131,6 @@ class Linearizer:
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
-
-    self.bufmap: List[int] = []  # map from buf to index into raw_input_bufs, only for global buffers
-    self.bufs: List[Union[LocalBuffer,RawBuffer]] = []  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
-    for buf in self.leaf_bufs:
-      # dedup by python object comparison of RawBuffer -- this is OK since we expect all non-output non-local buffers to be realized here.
-      # this helps in the case where different views of the same rawbuffer are passed as arguments.
-      if buf.realized not in self.bufs: self.bufs.append(buf.realized)
-      self.bufmap.append(self.bufs.index(buf.realized) if buf.realized in self.bufs else len(self.bufs) - 1)
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
