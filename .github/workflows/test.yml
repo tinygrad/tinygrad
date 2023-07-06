@@ -69,8 +69,10 @@ jobs:
         python-version: 3.8
     - name: Install Dependencies
       run: pip install -e '.[testing,webgpu]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Set Env
+      run: printf "WEBGPU=1" >> $GITHUB_ENV
     - name: Run Pytest
-      run: WEBGPU=1 python -m pytest -s -v -n=auto test/test_ops.py test/test_nn.py test/test_dtype.py test/test_jit.py test/test_assign.py test/test_dtype.py test/test_conv.py
+      run: python -m pytest -s -v -n=auto test/test_ops.py test/test_nn.py test/test_dtype.py test/test_jit.py test/test_assign.py test/test_dtype.py test/test_conv.py
 
   testimagenet:
     name: ImageNet to C Compile Test
