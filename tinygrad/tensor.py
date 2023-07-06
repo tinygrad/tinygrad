@@ -620,7 +620,7 @@ class Tensor:
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training: return self
     mask = (Tensor.rand(*self.shape, requires_grad=False) >= p).cast(dtypes.bool)
-    return self * mask * (1/(1.0 - p))
+    return self.mul(mask).div(1.0 - p)
 
   # ***** cast ops *****
 
