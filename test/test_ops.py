@@ -4,7 +4,7 @@ import math
 import numpy as np
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, IMAGE
+from tinygrad.helpers import getenv, IMAGE, DEBUG
 from tinygrad.lazy import Device
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
@@ -36,6 +36,10 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     except Exception:
       raise Exception(f"{s} failed shape {x.shape}")
 
+  if DEBUG >= 4:
+    np.set_printoptions(linewidth=200, suppress=True)
+    print(ret.numpy())
+    print(out.detach().numpy())
   compare("forward pass", ret.numpy(), out.detach().numpy(), atol=atol, rtol=rtol)
 
   torch_fbp, tinygrad_fbp = np.nan, np.nan
@@ -267,15 +271,20 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: torch.nn.functional.softsign(x), Tensor.softsign)
   def test_sigmoid(self):
     helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid)
+    helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid, a=100)
+    helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid, a=-100)
     helper_test_op([()], lambda x: x.sigmoid(), Tensor.sigmoid, forward_only=True)
   def test_softplus(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.softplus(x), Tensor.softplus, atol=1e-6, grad_atol=1e-6)
     helper_test_op([()], lambda x: torch.nn.functional.softplus(x), Tensor.softplus, atol=1e-6, grad_atol=1e-6)
-  @unittest.skip("not supported in older pytorch")
   def test_gelu(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu)
+    #helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, a=100)
+    helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, a=-100)
   def test_quick_gelu(self):
     helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu)
+    helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu, a=100)
+    helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu, a=-100)
     helper_test_op([()], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu)
   def test_elu(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.elu(x), Tensor.elu)
@@ -323,6 +332,10 @@ class TestOps(unittest.TestCase):
   @unittest.skipIf(IMAGE>0, "no batched matmul on images")
   def test_matmul_batched_vector(self):
     helper_test_op([(4,3), (1,3,3,5)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+  def test_small_gemm(self):
+    helper_test_op([(8,8), (8,8)], lambda x,y: x.matmul(y), lambda x,y: x@y, atol=1e-3)
+  def test_small_gemm_eye(self):
+    helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, atol=1e-3, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   def test_big_gemm(self):
@@ -396,6 +409,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,10,10)], lambda x: x.log_softmax(2), lambda x: x.log_softmax(2), atol=1e-7, grad_atol=1e-7)
   def test_tanh(self):
     helper_test_op([(45,65)], lambda x: x.tanh(), Tensor.tanh, atol=1e-6, grad_atol=1e-6)
+    helper_test_op([(45,65)], lambda x: x.tanh(), Tensor.tanh, atol=1e-6, grad_atol=1e-6, a=-100)
     helper_test_op([()], lambda x: x.tanh(), Tensor.tanh, atol=1e-6, grad_atol=1e-6)
   def test_hardtanh(self):
     for val in range(10, 30, 5):

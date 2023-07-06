@@ -17,8 +17,10 @@ class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = aut
 
 class LocalBuffer(NamedTuple):
   name: str
+  size: int
   dtype: DType = dtypes.float32
   realized: None = None
+  def __str__(self): return f"localbuffer<{self.name}[{self.size}]>"
 
 class Token(NamedTuple):
   name: str
@@ -55,7 +57,7 @@ def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
 
 def to_float4(x:List[Token]) -> Optional[Token]:
   if all_same(x): return x[0]
-  if all_same([y.name for y in x]) and all([y.dtype == dtypes._float4 and y.offset == i for i,y in enumerate(x)]):
+  if all_same([y.name for y in x]) and all(y.dtype == dtypes._float4 and y.offset == i for i,y in enumerate(x)):
     return Token(x[0].name, dtypes._float4)
   return None
 
@@ -68,7 +70,7 @@ def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
     new_values = []
     for i in range(0, len(idxs), 4):
       nv = [to_float4([v[j] for j in idxs[i:i+4]]) for v in values]
-      if any([x is None for x in nv]): break
+      if any(x is None for x in nv): break
       new_idxs.append(idxs[i:i+4])
       new_values.append(nv)
     if len(new_values) == len(idxs)//4:
@@ -246,9 +248,9 @@ class Linearizer:
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
-      self.bufs.append(LocalBuffer("temp"))
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
     # print
@@ -439,10 +441,11 @@ class Linearizer:
     assert len(colors) == self.shape_len, "colors size mismatch"
     return colors
 
+  def colored_shape(self) -> str: return ' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors()))
   def printbufs(self, prefix=""):
     for i in range(len(self.sts)):
-      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i] is not None else 'FAKE':47s}", self.sts[i].views)
-    print(' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors())))
+      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i].realized is not None else str(self.bufs[i]):47s}", self.sts[i].views)
+    print(self.colored_shape())
 
   # ******************** base simplifiers ********************
 
@@ -475,7 +478,7 @@ class Linearizer:
     # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride
     if self.shape_len == 0: return
-    all_ones = [all([st.shape[i]==1 for st in self.sts]) for i in range(self.shape_len)]
+    all_ones = [all(st.shape[i]==1 for st in self.sts) for i in range(self.shape_len)]
     # keep at least 1 one
     if all(all_ones): all_ones[-1] = False
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
@@ -533,7 +536,7 @@ class Linearizer:
     if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
-        if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
+        if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
           self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
           self.group_for_reduce.append(sz)
           break

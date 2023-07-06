@@ -62,7 +62,7 @@ class RDNACodegen(AssemblyCodegen):
       return rtor[x]
     for uop, out, vin, arg in asm:
       if uop == UOps.DEFINE_REGISTER:
-        if arg[0][0] in [dtypes.uint32, dtypes.uint64, dtypes.int64, dtypes.int32, dtypes.float32, dtypes.float64, dtypes._float4]:
+        if arg[0][0] in [dtypes.uint32, dtypes.uint64, dtypes.int64, dtypes.int32, dtypes.float32, dtypes._float4]:
           for i in range(arg[2]):
             # TODO: Re-use gaps created by this to avoid wasting registers
             align = int(arg[0][0].itemsize / 4)
