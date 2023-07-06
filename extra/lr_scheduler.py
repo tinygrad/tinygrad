@@ -64,13 +64,17 @@ class CosineAnnealingLR(LR_Scheduler):
     return Tensor([self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter.numpy()[0]/self.T_max) * math.pi))])
 
 class OneCycleLR(LR_Scheduler):
-  def __init__(self, optimizer: Optimizer, max_lr: float, initial_div_factor: float, final_div_factor: float, total_steps: int, pct_start: float):
-    self.initial_lr = Tensor([max_lr / initial_div_factor])
+  def __init__(self, optimizer: Optimizer, max_lr: float, div_factor: float, final_div_factor: float, total_steps: int, pct_start: float,
+               anneal_strategy: str = 'linear', cycle_momentum: bool = False):
+    self.initial_lr = Tensor([max_lr / div_factor])
     self.max_lr = Tensor([max_lr])
     self.min_lr = self.initial_lr/final_div_factor
     super().__init__(optimizer)
     self.total_steps = total_steps
     self.pct_start = pct_start
+    assert anneal_strategy == 'linear', 'only linear annealing supported'
+    assert not cycle_momentum, 'cycle momentum not supported'
+    self.optimizer.lr.assign(self.get_lr()).realize() # update the initial LR 
 
   @staticmethod
   def _annealing_linear(start: Tensor, end: Tensor, pct: Tensor) -> Tensor: return ((end - start) * pct + start)
