@@ -211,13 +211,13 @@ class GreedyDecoder:
     # NOTE: sum_logprobs.shape[-1] is off by 1, and assume temperature == 0 for now
     tokens = tokens.numpy()
     next_tokens = logits.numpy().argmax(-1)
-    logprobs = logits.reshape(1, -1).log_softmax(-1).numpy()
+    logprobs = logits.log_softmax(-1).numpy()
     current_logprobs = logprobs[np.arange(0, logprobs.shape[0]), next_tokens]
     sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)
     next_tokens[tokens[:, -1] == self.eot] = self.eot
     tokens = np.concatenate([tokens, next_tokens[:, None]], axis=-1)
     completed = (tokens[:, -1] == self.eot).all()
-    return Tensor(tokens.astype(np.float32)), completed
+    return Tensor(tokens.astype(np.uint8)), completed
 
   def finalize(self, tokens, sum_logprobs):
     tokens = np.pad(tokens.numpy(), [(0, 0), (0, 0), (0, 1)], constant_values=self.eot)
@@ -270,35 +270,33 @@ if __name__ == "__main__":
     mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
     n_audio, n_group = 1, 1
     content_frames = mel.shape[-1] - N_FRAMES
-    # TODO: add a language token in index 1
-    lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|transcribe|>"]]
-    sample_begin = len(lst)
-    decoder = GreedyDecoder(eot=enc.eot_token)
-    sequence_ranker = MaximumLikelihoodRanker(None)
     seek = 0
     while seek < content_frames:
+      # TODO: add a language token in index 1
+      initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|transcribe|>"]]
+      sample_begin = len(initial_tokens)
+      decoder = GreedyDecoder(eot=enc.eot_token)
+      sequence_ranker = MaximumLikelihoodRanker(None)
       mel_segment = mel[:, seek:seek+N_FRAMES]
       mel_segment = np.expand_dims(pad_or_trim(mel, N_FRAMES), axis=0)
       audio_features = model.encoder(Tensor(mel_segment)).realize()
-      tokens = Tensor([lst]).repeat((mel_segment.shape[0], 1))
+      tokens = Tensor([initial_tokens]).repeat((mel_segment.shape[0], 1))
       sum_logprobs = Tensor.zeros(audio_features.shape[0])
-      for _ in range(sample_len):
-        # TODO: no_speech_probs?
-        logits = model.decoder(tokens, audio_features)
+      for _ in range(min(sample_len, 25)):
+        # TODO: no_speech_probs
+        logits = model.decoder(tokens[:, -1:] if tokens.shape[-1] > sample_begin else tokens, audio_features)
         logits.realize()
         logits = logits[:, -1]
         tokens, completed = decoder.update(tokens, logits, sum_logprobs)
         if completed: break
-      break # TODO: increment seek
-    # TODO: tokens should be positive integers
-    tokens = tokens.reshape(n_audio, n_group, -1)
-    sum_logprobs = sum_logprobs.reshape(n_audio, n_group)
-    tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
-    tokens = [[t[sample_begin:(t==enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
-    selected = sequence_ranker.rank(tokens, sum_logprobs)
-    tokens = [t[i].tolist() for i, t in zip(selected, tokens)] 
-    texts = [enc.decode(t).strip() for t in tokens]
-    return texts
+      tokens = tokens.reshape(n_audio, n_group, -1)
+      sum_logprobs = sum_logprobs.reshape(n_audio, n_group)
+      tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
+      tokens = [[t[sample_begin:(t==enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
+      selected = sequence_ranker.rank(tokens, sum_logprobs)
+      tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
+      texts = [enc.decode(t).strip() for t in tokens]
+      return texts
 
   if getenv("TEST"):
     diff = difflib.Differ()
