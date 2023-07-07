@@ -15,7 +15,7 @@ for file in $(find * | grep flac); do ffmpeg -i $file -ar 16k "$(dirname $file)/
 
 Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recognition/rnnt/dev-clean-wav.json) has to also be put in `datasets/librispeech`.
 """
-BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/librispeech"
+BASEDIR = pathlib.Path(__file__).parent.parent / "extra/datasets/librispeech"
 with open(BASEDIR / "dev-clean-wav.json") as f:
   ci = json.load(f)
 

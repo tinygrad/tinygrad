@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 from tinygrad.tensor import Tensor
 
-BASEDIR = Path(__file__).parent.parent.resolve() / "datasets" / "kits19" / "data"
+BASEDIR = Path(__file__).parent.parent.resolve() / "extra" / "datasets" / "kits19" / "data"
 
 """
 To download the dataset:

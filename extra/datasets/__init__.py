@@ -25,5 +25,5 @@ def fetch_cifar(train=True):
     db = [pickle.load(tt.extractfile('cifar-10-batches-py/test_batch'), encoding="bytes")]
   X = np.concatenate([x[b'data'].reshape((-1, 3, 32, 32)) for x in db], axis=0)
   Y = np.concatenate([np.array(x[b'labels']) for x in db], axis=0)
-  X = (X - cifar10_mean) / cifar10_std
+  X = (X - cifar10_mean) / cifar10_std  
   return X, Y
