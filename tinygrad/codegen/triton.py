@@ -59,7 +59,7 @@ class TritonCodegen(Linearizer):
       BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})",
       BinaryOps.POW: lambda x,y: f"tl.math.pow({x}, {y})", BinaryOps.MAX: lambda x,y: f"tl.maximum({x},{y})", # axis?
       BinaryOps.CMPEQ: lambda x,y: f"({x}=={y})",
-      ReduceOps.SUM: lambda x: f"tl.expand_dims(tl.sum({x}, axis=2), axis=2)"
+      ReduceOps.SUM: lambda x: f"tl.sum({x})"
     }
     bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(self.bufs)]
 
@@ -83,14 +83,14 @@ class TritonCodegen(Linearizer):
               kk(f"for {var.expr} in range({var.min}, {var.max+1}):")
               depth += 1
       elif uop == UOps.ENDLOOP:
-        if args[1] not in ["global", "local"]:
+        if args[1] not in ["global", "local"] and len(args[0]):
           depth -= 1
           kk(f"# end {args[1]}")
       elif uop == UOps.CONST:
         assert newvar is not None
         if args == -math.inf: ld = "-math.inf"
         else: ld = args
-        if full_local_shape: ld = f"tl.full({full_local_shape[:-len(self.group_for_reduce)] + (1,)*len(self.group_for_reduce) if len(self.group_for_reduce) else full_local_shape}, {ld}, tl.float32)"
+        if full_local_shape and len(self.group_for_reduce) != len(full_local_shape): ld = f"tl.full({full_local_shape[:-len(self.group_for_reduce)] + (1,)*len(self.group_for_reduce) if len(self.group_for_reduce) else full_local_shape}, {ld}, tl.float32)"
         kk(f"{newvar.render()} = {ld}")
       elif uop == UOps.ALU:
         assert newvar is not None
