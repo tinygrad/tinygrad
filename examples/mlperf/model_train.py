@@ -36,12 +36,12 @@ def train_maskrcnn():
 
   transforms = Compose(
     [
-      # Resize(800, 1333),
-      # RandomHorizontalFlip(0.5),
-      # Normalize(
-        # mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
-      # ),
+      Resize(800, 1333),
       ToTensor(),
+      RandomHorizontalFlip(0.5),
+      Normalize(
+        mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
+      ),
     ]
   )
 

@@ -72,7 +72,6 @@ class COCODataset(torchvision.datasets.coco.CocoDetection):
     img, anno = super(COCODataset, self).__getitem__(idx)
     print(img.size)
     print(np.shape(np.array(img)))
-    # img = np.array(img)
     # Raw image before any opration in case I need to check my sanity
     # import matplotlib.pyplot as plt
     # plt.imshow(np.array(img))
@@ -103,7 +102,11 @@ class COCODataset(torchvision.datasets.coco.CocoDetection):
     target = target.clip_to_image(remove_empty=True)
 
     if self._transforms is not None:
+      # TODO get rid of numpy eventually
+      # Note, all the transforms done in numpy but data are converted to Tensor
+      # at the end
       img, target = self._transforms(img, target)
+      # img, target = self._transforms(np.array(img), target)
 
     return img, target, idx
 

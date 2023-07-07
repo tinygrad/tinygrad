@@ -25,7 +25,8 @@ class Compose(object):
 # TODO remove the dependence from torch here
 class ToTensor(object):
   def __call__(self, image, target):
-    return Tensor(image), target
+    print(image)
+    return Ft.to_tensor(image), target
 
 class Resize:
   def __init__(self, min_size, max_size):
@@ -60,6 +61,7 @@ class Resize:
   def __call__(self, image, target=None):
     size = self.get_size(image.size)
     image = Ft.resize(image, size)
+    print(image)
     if target:
       target = target.resize(image.size)
       return image, target
@@ -72,15 +74,16 @@ class RandomHorizontalFlip(object):
   
   # TODO remove dependence from torchvision
   def __call__(self, image, target):
-    import matplotlib.pyplot as plt
-    plt.imshow(image)
-    plt.savefig('/home/iris/yg5d6/Workspace/before_flip.png')
-    plt.imshow(np.fliplr(image))
-    plt.savefig('/home/iris/yg5d6/Workspace/before_after.png')
+    # import matplotlib.pyplot as plt
+    # plt.imshow(image)
+    # plt.savefig('/home/iris/yg5d6/Workspace/before_flip.png')
+    # plt.imshow(np.fliplr(image))
+    # plt.savefig('/home/iris/yg5d6/Workspace/before_after.png')
 
     if random.random() < self.prob:
       image = Ft.hflip(image)
       target = target.transpose(0)
+    print(image.shape)
     return image, target
 
 class Normalize:
