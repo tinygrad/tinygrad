@@ -224,8 +224,9 @@ class Linearizer:
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
+      # LocalBuffer has an entry in self.raw_bufs and self.sts, but not in self.bufs
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
-      self.raw_bufs.append(LocalBuffer("temp", self.sts[-1].size()))  # LocalBuffer has an entry in self.raw_bufs and self.sts, but not in self.bufs
+      self.raw_bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
     # print
