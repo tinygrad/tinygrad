@@ -188,7 +188,7 @@ Variable | Possible Value(s) | Description
 ---|---|---
 BS | [8, 16, 32, 64, 128] | batch size to use
 
-### datasets/imagenet_download.py
+### extra/datasets/imagenet_download.py
 
 Variable | Possible Value(s) | Description
 ---|---|---

@@ -4,9 +4,9 @@ import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.state import get_parameters
 from tinygrad.nn.optim import Adam
-from extra.lr_scheduler import MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR
+from extra.lr_scheduler import MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR, OneCycleLR
 from extra.training import train, evaluate
-from datasets import fetch_mnist
+from extra.datasets import fetch_mnist
 
 np.random.seed(1337)
 Tensor.manual_seed(1337)
@@ -39,12 +39,16 @@ def lr_scheduler_training(sched_fn=None, args=None):
 
 def current_lr(optim): return optim.param_groups[0]['lr'] if hasattr(optim, 'param_groups') else optim.lr
 def get_lrs(optim, sched, epochs, steps=1, accs=None):
-  lrs = [current_lr(optim)]
+  lr = current_lr(optim)
+  if not isinstance(lr, float): lr = lr.numpy()[0]
+  lrs = [lr]
   for e in range(epochs):
     for _ in range(steps):
       optim.step()
     sched.step() if accs is None else sched.step(accs[e])
-    lrs.append(current_lr(optim))
+    lr = current_lr(optim)
+    if not isinstance(lr, float): lr = lr.numpy()[0]
+    lrs.append(lr)
   return lrs
 
 class TestLrScheduler(unittest.TestCase):
@@ -66,6 +70,9 @@ class TestLrScheduler(unittest.TestCase):
   def _test_cosineannealinglr(self, epochs, opts, atol, rtol):
     opts['T_max'] = epochs
     self._test_lr_scheduler(CosineAnnealingLR, torch.optim.lr_scheduler.CosineAnnealingLR, epochs, opts, atol, rtol)
+  def _test_onecyclelr(self, epochs, opts, atol, rtol):
+    opts['total_steps'] = epochs
+    self._test_lr_scheduler(OneCycleLR, torch.optim.lr_scheduler.OneCycleLR, epochs, opts, atol, rtol)
 
   def test_multisteplr(self): self._test_multisteplr(10, {'milestones': [1, 2, 7]}, 1e-6, 1e-6)
   def test_multisteplr_gamma(self): self._test_multisteplr(10, {'milestones': [1, 2, 7], 'gamma': 0.1337}, 1e-6, 1e-6)
@@ -80,11 +87,15 @@ class TestLrScheduler(unittest.TestCase):
   def test_cosineannealinglr(self): self._test_cosineannealinglr(100, {}, 1e-6, 1e-6)
   def test_cosineannealinglr_eta_min(self): self._test_cosineannealinglr(100, {'eta_min': 0.001}, 1e-6, 1e-6)
 
+  def test_onecyclelr(self): self._test_onecyclelr(1000, {'pct_start': 0.3, 'anneal_strategy': 'linear',
+                                                         'cycle_momentum': False, 'div_factor': 25.0,
+                                                         'final_div_factor': 10000.0, 'max_lr':1e-5}, 1e-6, 1e-6)
   @unittest.skip("slow")
   def test_training(self):
     without = lr_scheduler_training()
-    sched_fns = [MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR]
-    argss = [{'milestones': [5, 7, 10, 15], 'gamma': 0.5}, {'factor': 0.5, 'patience': 2}, {'T_max': 25, 'eta_min': 0.001}]
+    sched_fns = [MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR, OneCycleLR]
+    argss = [{'milestones': [5, 7, 10, 15], 'gamma': 0.5}, {'factor': 0.5, 'patience': 2}, {'T_max': 25, 'eta_min': 0.001},
+             {'pct_start': 0.3, 'anneal_strategy': 'linear', 'cycle_momentum': False, 'div_factor': 25.0, 'final_div_factor': 10000.0, 'max_lr':1e-5, 'total_steps': 25}]
     for sched_fn, args in zip(sched_fns, argss):
       with_sched = lr_scheduler_training(sched_fn, args)
       assert with_sched > without

@@ -4,7 +4,7 @@
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import colored
-from extra.helpers import Timing
+from tinygrad.helpers import Timing
 from tinygrad.runtime.ops_gpu import CL
 
 # TODO: support multidevice in cuda
