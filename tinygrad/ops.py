@@ -18,8 +18,8 @@ class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class TrinaryOps(Enum): MULACC = auto() # noqa: E702
 class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto() # noqa: E702
 
-Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps]
-OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[FusedOps]]
+Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TrinaryOps]
+OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TrinaryOps]]
 
 class LazyOp:
   # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
