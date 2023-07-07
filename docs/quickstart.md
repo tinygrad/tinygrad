@@ -169,11 +169,11 @@ There is a simpler way to do this just by using `get_parameters(net)` from `tiny
 The parameters are just listed out explicitly here for clarity.
 
 Now that we have our network, loss function, and optimizer defined all we are missing is the data to train on!
-There are a couple of dataset loaders in tinygrad located in [/datasets](/datasets).
+There are a couple of dataset loaders in tinygrad located in [/extra/datasets](/extra/datasets).
 We will be using the MNIST dataset loader.
 
 ```python
-from datasets import fetch_mnist
+from extra.datasets import fetch_mnist
 ```
 
 Now we have everything we need to start training our neural network.
