@@ -285,22 +285,23 @@ if __name__ == "__main__":
   enc = get_encoding(state['dims']['n_vocab'])
 
   def transcribe_wav(fn, sample_len=224):
+    from tinygrad.helpers import dtypes
     mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
     n_audio, n_group = 1, 1
     content_frames = mel.shape[-1] - N_FRAMES
     seek = 0
     while seek < content_frames:
-      initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|en|>"], enc._special_tokens["<|transcribe|>"]]
-      sample_begin = len(initial_tokens)
+      tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|en|>"], enc._special_tokens["<|transcribe|>"]]
+      sample_begin = len(tokens)
       decoder = GreedyDecoder(eot=enc.eot_token)
       sequence_ranker = MaximumLikelihoodRanker(None)
       mel_segment = mel[:, seek:seek+N_FRAMES]
       mel_segment = np.expand_dims(pad_or_trim(mel, N_FRAMES), axis=0)
       audio_features = model.encoder(Tensor(mel_segment)).realize()
-      tokens = Tensor([initial_tokens]).repeat((mel_segment.shape[0], 1))
+      tokens = Tensor([tokens], dtype=dtypes.int8).repeat((mel_segment.shape[0], 1))
       sum_logprobs = Tensor.zeros(audio_features.shape[0])
       for _ in range(sample_len):
-        logits = model.decoder(tokens[:, -1:] if tokens.shape[-1] > sample_begin else tokens, audio_features)
+        logits = model.decoder(tokens, audio_features)
         logits = logits[:, -1]
         tokens, completed = decoder.update(tokens, logits, sum_logprobs)
         if completed: break
@@ -309,10 +310,9 @@ if __name__ == "__main__":
       tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
       tokens = [[t[sample_begin:(t==enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
       selected = sequence_ranker.rank(tokens, sum_logprobs)
-      tokens = np.round(tokens).astype(np.int8)
-      tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
-      texts = [enc.decode(t).strip() for t in tokens]
-      return texts
+      tokens = [t[i].astype(np.uint8).tolist() for i, t in zip(selected, tokens)]
+      text = [enc.decode(t).strip() for t in tokens]
+      return text
 
   if getenv("TEST"):
     diff = difflib.Differ()
