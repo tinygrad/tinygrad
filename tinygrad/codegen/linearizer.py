@@ -596,7 +596,7 @@ class Linearizer:
       axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%8 == 0]
       if len(axis_buf0) and len(axis_buf1) and self.full_shape[self.first_reduce]%8 == 0:
         if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1)
-        self.use_tensor_cores = self.bufs[0].device == "METAL"
+        self.use_tensor_cores = self.bufs[0].device == "METAL" and not getenv("CI")
 
         # TODO: select axis in smart way
         s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
