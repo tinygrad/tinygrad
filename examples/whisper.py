@@ -310,20 +310,19 @@ if __name__ == "__main__":
       tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
       tokens = [[t[sample_begin:(t==enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
       selected = sequence_ranker.rank(tokens, sum_logprobs)
-      tokens = [t[i].astype(np.uint8).tolist() for i, t in zip(selected, tokens)]
+      tokens = [t[i].astype(np.int32).tolist() for i, t in zip(selected, tokens)]
       text = [enc.decode(t).strip() for t in tokens]
       return text
 
   if getenv("TEST"):
     diff = difflib.Differ()
-    lens = []
     for c in ci:
       fn = BASEDIR / c["files"][0]["fname"]
       print("-" * 128, f"{fn.stem}\n", sep="\n")
-      predicted = transcribe_wav(fn)
+      predicted = "".join(transcribe_wav(fn))
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
-      #lens.append(len(transcript.split(" ")))
       print(predicted)
+      print(transcript)
       #sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
       #print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
   elif len(sys.argv) > 1:
