@@ -902,6 +902,12 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
       lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
 
+  def test_padding_add(self):
+    helper_test_op([(64,64), (60,60)],
+      lambda x,w: x+torch.nn.functional.pad(w, (2,2,2,2)),
+      lambda x,w: x+w.pad2d((2,2,2,2)),
+    )
+
   def test_dilated_conv2d(self):
     bs = 4
     cin = 3
