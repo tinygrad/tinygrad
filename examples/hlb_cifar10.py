@@ -4,7 +4,7 @@
 # https://siboehm.com/articles/22/CUDA-MMM
 import time
 import numpy as np
-extra.datasets import fetch_cifar
+from extra.datasets import fetch_cifar
 from tinygrad import nn
 from tinygrad.state import get_parameters
 from tinygrad.nn import optim
