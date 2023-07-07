@@ -11,7 +11,7 @@ from tqdm import tqdm
 import pandas as pd
 import concurrent.futures
 
-BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/open-images-v6-mlperf"
+BASEDIR = pathlib.Path(__file__).parent.parent / "datasets" / "open-images-v6-mlperf"
 BUCKET_NAME = "open-images-dataset"
 BBOX_ANNOTATIONS_URL = "https://storage.googleapis.com/openimages/v5/validation-annotations-bbox.csv"
 MAP_CLASSES_URL = "https://storage.googleapis.com/openimages/v5/class-descriptions-boxable.csv"
@@ -56,7 +56,7 @@ MLPERF_CLASSES = ['Airplane', 'Antelope', 'Apple', 'Backpack', 'Balloon', 'Banan
 ]
 
 def openimages():
-  ann_file = BASEDIR / "validation/labels/openimages-mlperf.json"
+  ann_file = BASEDIR / "validation" / "labels" / "openimages-mlperf.json"
   if not ann_file.is_file():
     fetch_openimages(ann_file)
   return ann_file
@@ -109,7 +109,7 @@ def download_image(bucket, image_id, data_dir):
 def fetch_openimages(output_fn):
   bucket = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED)).Bucket(BUCKET_NAME)
 
-  annotations_dir, data_dir = BASEDIR / "annotations", BASEDIR / "validation/data"
+  annotations_dir, data_dir = BASEDIR / "annotations", BASEDIR / "validation" / "data"
   annotations_dir.mkdir(parents=True, exist_ok=True)
   data_dir.mkdir(parents=True, exist_ok=True)
 
