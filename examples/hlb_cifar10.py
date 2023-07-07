@@ -130,6 +130,8 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   i = 0
   left_batcher, right_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True), fetch_batches(X_train, Y_train, BS=BS, seed=seed+1, is_train=True)
   while i <= STEPS:
+    (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
+    mixup_prob = Tensor(np.random.beta(MIXUP_ALPHA, MIXUP_ALPHA, (1, )).astype(np.float32)) if MIXUP_ALPHA > 0 else Tensor.ones(Xr.shape[0], 1, 1, 1)
     if i%50 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
@@ -145,8 +147,6 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
         best_eval = acc
         print(f"eval {sum(corrects)}/{len(corrects)} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
     if STEPS == 0 or i==STEPS: break
-    (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
-    mixup_prob = Tensor(np.random.beta(MIXUP_ALPHA, MIXUP_ALPHA, (1, )).astype(np.float32)) if MIXUP_ALPHA > 0 else Tensor.ones(Xr.shape[0], 1, 1, 1)
     GlobalCounters.reset()
     st = time.monotonic()
     loss = train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
