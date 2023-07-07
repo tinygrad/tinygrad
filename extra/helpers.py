@@ -7,7 +7,7 @@ def _early_exec_process(qin, qout):
     path, inp = qin.get()
     try:
       qout.put(subprocess.check_output(path, input=inp))
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
       qout.put(e)
 
 def enable_early_exec():
