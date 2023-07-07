@@ -139,7 +139,6 @@ class ASTRunner:
     return self(rawbufs)
 
   def __call__(self, rawbufs:List[RawBuffer], jit=False, force_wait=False) -> Optional[float]:
-    print('ASTRunner', rawbufs)
     if et := self.clprg((self.global_size + [1]*(3-len(self.global_size))) if self.global_size is not None else None,
                         (self.local_size + [1]*(3-len(self.local_size))) if self.local_size is not None else None,
                         *rawbufs, wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
