@@ -896,6 +896,12 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
       lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
 
+  def test_padded_conv2d_1x1(self):
+    bs,cin,H,W,padding = 4, 3, 1, 1, 2
+    helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
+      lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
+
   def test_padded_conv2d_bs1(self):
     bs,cin,H,W,padding = 1, 3, 3, 3, 1
     helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
