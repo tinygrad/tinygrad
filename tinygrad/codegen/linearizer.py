@@ -566,7 +566,7 @@ class Linearizer:
     for splits in [4]:
       if self.upcasted == 0 and len(self.full_unupcasted_shape) > 0 and self.full_unupcasted_shape[-1] % splits == 0:
         self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
-        self.upcast()
+        if self.bufs[0].dtype.name.startswith('image') and self.first_reduce > 0 and self.first_reduce < (self.shape_len-self.upcasted): self.upcast()
 
     # **** local groups ****
 
