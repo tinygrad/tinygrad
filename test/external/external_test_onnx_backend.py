@@ -72,7 +72,7 @@ backend_test.exclude('test_reduce_log_sum_exp*') # dependent on float64
 backend_test.exclude('test_operator_add*') # dependent on float64
 
 # we don't support rounding
-backend_test.exclude('test_round_*') # In case of halfs, the rule is to round them to the nearest even integer...
+backend_test.exclude('test_round_*') # I have _round() but this rounds halves to even numbers...????
 
 # we don't support indexes
 backend_test.exclude('test_argmax_*')

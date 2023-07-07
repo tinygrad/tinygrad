@@ -24,10 +24,16 @@ def Gemm(A, B, C=None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=0):
   if C is not None: ret += beta * (C if broadcast == 0 else C.reshape([-1 if i <  len(C.shape) else 1 for i in range(len(ret.shape))][::-1]))
   return ret
 
+def _batchnorm(self:Tensor, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor): # works with 3D Tensors and 5D Tensors
+  shape = [1, -1] + [1] * (self.ndim-2)
+  x = (self - mean.reshape(shape=shape))
+  if weight: x = x * weight.reshape(shape=shape)
+  ret = x.mul(invstd.reshape(shape=shape) if len(invstd.shape) == 1 else invstd)
+  return (ret + bias.reshape(shape=shape)) if bias else ret
+
 # TODO: this is copied from tinygrad/nn/__init__.py
 # spatial is from opset 7 and has since been removed
 def BatchNormalization(X, scale, B, input_mean, input_var, epsilon=1e-05, momentum=0.9, training_mode=0, spatial=1, is_test=0):
-  X: Tensor
   if training_mode:
     x_detached = X.detach()
     current_mean = x_detached.mean(axis=(0,2,3))
@@ -38,10 +44,10 @@ def BatchNormalization(X, scale, B, input_mean, input_var, epsilon=1e-05, moment
     running_mean = input_mean * momentum + current_mean * (1 - momentum)
     running_var = input_var * momentum + current_var * (1 - momentum)
 
-    return X.batchnorm(scale, B, current_mean, current_invstd), running_mean, running_var
+    return _batchnorm(X, scale, B, current_mean, current_invstd), running_mean, running_var
   else:
     invstd = (input_var + epsilon)**-0.5
-    return X.batchnorm(scale, B, input_mean, invstd)
+    return _batchnorm(X, scale, B, input_mean, invstd)
 
 def InstanceNormalization(x: Tensor, scale: Tensor, bias: Tensor, epsilon=1e-05):
   axis = tuple(range(2, len(x.shape)))
@@ -164,6 +170,7 @@ def MaxUnpool(xT, xI, outshape=None, kernel_shape=None, pads=None, strides=None)
   lol = arange.reshape(1, outlength).expand(haha.shape)
   ok = (haha == lol).sum(0)
   # wtf to do after this......
+  # maybe convtranspose??
   return None
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
@@ -502,10 +509,16 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     return Tensor([((A * (ratio + 1) - 5 * A) * (ratio + 1) + 8 * A) * (ratio + 1) - 4 * A, ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1, ((A + 2) * (1 - ratio) - (A + 3)) * (1 - ratio) * (1 - ratio) + 1, ((A * ((1 - ratio) + 1) - 5 * A) * ((1 - ratio) + 1) + 8 * A) * ((1 - ratio) + 1) - 4 * A,])
 
 def Gradient(a, b, xs, y):
+  # parse what the operations are from node
+  # add_node = onnx.helper.make_node("Add", ["a", "b"], ["c"], name="my_add")
+  # mul_node = onnx.helper.make_node("Mul", ["c", "a"], ["d"], name="my_mul")
   print(a, "a")
   print(b, "b")
   print(xs, "xs")
   print(y, "y")
+  da = None 
+  db = None
+  return da, db
   
 
 def CenterCropPad(input, shape, axes=None):
