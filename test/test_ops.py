@@ -36,7 +36,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     except Exception:
       raise Exception(f"{s} failed shape {x.shape}")
 
-  if DEBUG >= 4:
+  if DEBUG >= 6:
     np.set_printoptions(linewidth=200, suppress=True)
     print(ret.numpy())
     print(out.detach().numpy())
@@ -878,21 +878,26 @@ class TestOps(unittest.TestCase):
               lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w).relu(),
               lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), atol=1e-4)
 
-  def test_padded_conv2d(self):
-    bs = 4
-    cin = 3
-    H,W = 3,3
-    for p in [2, (2,1), (2,2)]:
-      with self.subTest(padding := p):
-        helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
-          lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
-          lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
+  def test_padded_conv2d_p2(self):
+    bs,cin,H,W,padding = 4, 3, 3, 3, 2
+    helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
+      lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
+
+  def test_padded_conv2d_p21(self):
+    bs,cin,H,W,padding = 4, 3, 3, 3, (2,1)
+    helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
+      lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
+
+  def test_padded_conv2d_p22(self):
+    bs,cin,H,W,padding = 4, 3, 3, 3, (2,2)
+    helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
+      lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
 
   def test_padded_conv2d_bs1(self):
-    bs = 1
-    cin = 3
-    H,W = 3,3
-    padding = 1
+    bs,cin,H,W,padding = 1, 3, 3, 3, 1
     helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
       lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
       lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
