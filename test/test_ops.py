@@ -1022,6 +1022,13 @@ class TestOps(unittest.TestCase):
     n = (x < 0).where(x, 1).numpy()
     assert np.all(n == 1.)
 
+  def test_many_buffers(self):
+    x = [Tensor.randn(1024) for i in range(1024)]
+    expected = np.sum([y.numpy() for y in x], 0)
+    while len(x) > 1:
+      x = [x[2*i] + x[2*i+1] for i in range(len(x) // 2)]
+    np.testing.assert_allclose(x[0].numpy(), expected, atol=1e-6, rtol=1e-3)
+
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)
