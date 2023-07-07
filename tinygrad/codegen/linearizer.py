@@ -437,12 +437,8 @@ class Linearizer:
   # ******************** complex simplifiers ********************
 
   def simplify_ones(self):
-    # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride
-    if self.shape_len == 0: return
     all_ones = [all(st.shape[i]==1 for st in self.sts) for i in range(self.shape_len)]
-    # keep at least 1 one
-    if all(all_ones): all_ones[-1] = False
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
 
   def simplify_merge_adjacent(self):
