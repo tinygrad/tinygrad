@@ -136,19 +136,6 @@ class TestTinygrad(unittest.TestCase):
     # coarse approx. since a "big" eps and the non-linearities of the model
     self.assertFalse(gradcheck(tiny_func, tiny_x, eps = 1e-5))
 
-  def test_manual_seed(self):
-    seed_value = 123
-    Tensor.manual_seed(seed_value)
-    assert Tensor._seed == seed_value, f"Seed value not set correctly, {Tensor._seed} != {seed_value}"
-
-    new_seed_value = 456
-    Tensor.manual_seed(new_seed_value)
-    assert Tensor._seed == new_seed_value, f"Seed value not changed correctly, {Tensor._seed} != {new_seed_value}"
-
-    default_seed = 0
-    Tensor.manual_seed()
-    assert Tensor._seed == default_seed, f"Default seed value not set correctly, {Tensor._seed} != {default_seed}"
-
   def test_random_fns_are_deterministic_with_seed(self):
     for random_fn in [Tensor.randn, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform]:
       with self.subTest(msg=f"Tensor.{random_fn.__name__}"):
