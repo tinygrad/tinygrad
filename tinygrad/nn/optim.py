@@ -4,13 +4,14 @@ from tinygrad.helpers import dedup
 from tinygrad.tensor import Tensor
 
 class Optimizer:
-  def __init__(self, params: List[Tensor]):
+  def __init__(self, params: List[Tensor], lr: float):
     # if it's None, but being put into an optimizer, set it to True
     for x in params:
       if x.requires_grad is None: x.requires_grad = True
 
     self.params: List[Tensor] = dedup([x for x in params if x.requires_grad])
     self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
+    self.lr = Tensor([lr], requires_grad=False)
 
   def zero_grad(self):
     for param in self.params: param.grad = None
@@ -23,8 +24,8 @@ class Optimizer:
 
 class SGD(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
-    super().__init__(params)
-    self.lr, self.momentum, self.wd, self.nesterov = lr, momentum, weight_decay, nesterov
+    super().__init__(params, lr)
+    self.momentum, self.wd, self.nesterov = momentum, weight_decay, nesterov
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
 
   # https://pytorch.org/docs/stable/generated/torch.optim.SGD.html
@@ -44,8 +45,8 @@ def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8): return LAM
 
 class LAMB(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
-    super().__init__(params)
-    self.lr, self.b1, self.b2, self.eps, self.wd, self.adam, self.t = lr, b1, b2, eps, wd, adam, Tensor([0], requires_grad=False).realize()
+    super().__init__(params, lr)
+    self.b1, self.b2, self.eps, self.wd, self.adam, self.t = b1, b2, eps, wd, adam, Tensor([0], requires_grad=False).realize()
     self.m = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
     self.v = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
 
