@@ -595,7 +595,7 @@ class Linearizer:
       buf1_strides = self.sts[buf1].real_strides()
       axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%8 == 0]
       axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%8 == 0]
-      if len(axis_buf0) and len(axis_buf1) and self.full_shape[self.first_reduce]%8 == 0:
+      if len(axis_buf0) and len(axis_buf1) and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce) == 1:
         if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1)
         self.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
 

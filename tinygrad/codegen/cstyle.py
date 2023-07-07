@@ -57,6 +57,20 @@ code_for_op: Final[Dict[Op, Callable]] = {
   BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", FusedOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})"
 }
 
+def add_gl_dimension(args, i, var, local_size, xid):
+  # for M1 tensor core stuff, support > 3 dims
+  if i >= 2 and len(args[0]) > len(xid):
+    # do this on the x dim for warps
+    if len(local_size) == 2: local_size.append(1)
+    local_size[-1] *= var.max+1
+    lidx = Variable(xid[0], 0, prod(x.max+1 for x in args[0][2:])-1)
+    lidx = (lidx//((lidx.max+1)//local_size[-1]))%(var.max+1)
+    assert lidx.max == var.max and lidx.min == var.min
+    return f"{{ int {var.expr} = {lidx.render(render_cl)};  /* {var.max+1} */"
+  else:
+    local_size.append(var.max+1)
+    return f"{{ int {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
+
 def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
   prekernel: Set[str] = set()
   kernel = []
@@ -79,22 +93,9 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
           kk("{")
         else:
           if args[1] == "global" and lang.gid:
-            assert len(args[0]) <= len(lang.gid), f"too many global dimensions, has {len(args[0])} and {len(lang.gid)} are supported"
-            kk(f"{{ int {var.expr} = {lang.gid[len(args[0])-1-i]};  /* {var.max+1} */")
-            global_size.append(var.max+1)
+            kk(add_gl_dimension(args, i, var, global_size, lang.gid))
           elif args[1] == "local" and lang.lid:
-            # for M1 tensor core stuff, support > 3 dims
-            if i >= 2 and len(args[0]) > len(lang.lid):
-              # do this on the x dim for warps
-              if len(local_size) == 2: local_size.append(1)
-              local_size[-1] *= var.max+1
-              lidx = Variable(lang.lid[0], 0, prod(x.max+1 for x in args[0][2:])-1)
-              lidx = (lidx//((lidx.max+1)//local_size[-1]))%(var.max+1)
-              assert lidx.max == var.max and lidx.min == var.min
-              kk(f"{{ int {var.expr} = {lidx.render(render_cl)};  /* {var.max+1} */")
-            else:
-              kk(f"{{ int {var.expr} = {lang.lid[min(len(lang.lid), len(args[0]))-1-i]};  /* {var.max+1} */")
-              local_size.append(var.max+1)
+            kk(add_gl_dimension(args, i, var, local_size, lang.lid))
           else:
             if getenv("NOUNROLL"): kk("#pragma unroll(1)")   # prevent loop unrolling
             kk(f"for (int {var.expr} = {var.min}; {var.expr} <= {var.max}; ++{var.expr}) {{")
@@ -211,7 +212,7 @@ class CStyleCodegen(Linearizer):
   def codegen(self):
     self.process()
     self.hand_coded_optimizations()
-    self.limit_global_dims(len(self.lang.gid))
+    #self.limit_global_dims(len(self.lang.gid))
     self.linearize()
 
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.bufs, self.lang)
