@@ -14,9 +14,9 @@ def test_ast(k:ASTKernel, device:Type[DeviceBuffer]=CPUBuffer):
   print("testing AST", test_cnt)
   test_cnt += 1
   # TODO: this should only copy the base buffer and retain the shapetracker (requires CPU shapetracker implementation)
-  cpubufs : List[DeviceBuffer] = [device.fromCPU(x.toCPU()) for x in k.raw_bufs]
-  cpubufmap : Dict[DeviceBuffer, DeviceBuffer] = {x: cpubufs[k.raw_bufs.index(x.realized)] for x in k.bufs}
-  real_out = cpubufs[0].toCPU()
+  cpubufs : List[DeviceBuffer] = list(dict([(x.realized, device.fromCPU(x.toCPU())) for x in k.bufs]).values())
+  cpubufmap : Dict[DeviceBuffer, DeviceBuffer] = {x: cpubufs[x.realized] for x in k.bufs}
+  real_out = cpubufs[k.bufs[0].realized].toCPU()
   assert hasattr(device, 'exec_ast')
   test_out = device.exec_ast(map_buffers(cpubufmap, k.ast)).toCPU()
   if not np.allclose(real_out, test_out, atol=1e-4, rtol=1e-4):
