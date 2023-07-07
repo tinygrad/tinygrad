@@ -42,7 +42,6 @@ def cross_process(itermaker, maxsize=16):
   q: multiprocessing.Queue = multiprocessing.Queue(maxsize)
   # multiprocessing uses pickle which cannot dump lambdas, so use cloudpickle.
   p = multiprocessing.Process(target=proc, args=(_CloudpickleFunctionWrapper(itermaker), q))
-  p.daemon = True
   p.start()
   while True:
     ret = q.get()
