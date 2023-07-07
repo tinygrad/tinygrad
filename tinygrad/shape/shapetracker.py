@@ -86,11 +86,25 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
-  if vm2.mask: return None  # this isn't supported yet
+  if vm2.mask: 
+    print("\nmerge check")
+    masks = list()
+    if vm1.mask: masks.append(vm1.mask)
+    print(masks)
+    for m in vm2.mask:
+      print(m)
+      print(vm2.strides)
+      ravel = m[0]*vm2.strides[0]+m[1]*vm2.strides[1]
+      print(ravel)
+      unravel = (ravel//vm1.strides[0], ravel%vm1.strides[0])
+      print(unravel)
+      if not unravel in masks: masks.append(unravel)
+    # basically equvalivent to numpy ravel and then unravel
+    # return None  # this isn't supported yet
   mst = ShapeTracker(vm1.shape, [vm2, vm1])
   strides = mst.real_strides()
   if None in strides: return None
-  return View(vm1.shape, cast(Tuple[int, ...], strides), mst.real_offset(), vm1.mask)
+  return View(vm1.shape, cast(Tuple[int, ...], strides), mst.real_offset(), tuple(masks))
 
 @functools.lru_cache(maxsize=None)
 def _reshape(view: View, new_shape: Tuple[int, ...]) -> Tuple[View, bool]:
