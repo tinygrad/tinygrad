@@ -86,7 +86,7 @@ def run_and_time(k,cnt=3,local_override=None):
   for i in range(cnt):
     t1 = time.monotonic_ns()
     if local_override: prog.local_work_size = local_override
-    e = prog(*k.raw_input_bufs)
+    e = prog(*k.bufs)
     e.wait()
     t4 = time.monotonic_ns()
     t2, t3 = e.profile.start * OSX_TIMING_RATIO, e.profile.end * OSX_TIMING_RATIO
@@ -178,7 +178,7 @@ def search(ast, start_interventions=[], depth=10):
   for i in range(3):
     k = CLASTKernel(ast)
     for w in winning_interventions: apply_intervention(k, *w)
-    k.codegen()(*k.raw_input_bufs)
+    k.codegen()(*k.bufs)
   #k.print()
   if not getenv("NOTEST"): test_ast(k)
   print(f"improved from {baseline/1e6:.2f} ms to {best_time/1e6:.2f} ms, a {baseline/best_time:.2f}x speedup @ {k.info.flops/best_time:.2f} GFLOPS")
@@ -189,7 +189,7 @@ def test_correctness(ast):
   from extra.lib_test_ast import test_ast
   k = CLASTKernel(ast)
   ints = get_interventions(k)
-  k.codegen()(*k.raw_input_bufs)
+  k.codegen()(*k.bufs)
   test_ast(k)
   print("correct at baseline")
   for int in ints:
@@ -198,7 +198,7 @@ def test_correctness(ast):
     k.printbufs("old:")
     apply_intervention(k, *int)
     k.printbufs("new:")
-    k.codegen()(*k.raw_input_bufs)
+    k.codegen()(*k.bufs)
     print("***** TESTING INTERVENTION", int)
     test_ast(k)
 
