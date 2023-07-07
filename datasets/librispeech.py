@@ -5,6 +5,8 @@ import sox
 import requests
 import hashlib
 import tarfile
+import random
+import subprocess
 
 from pathlib import Path
 from tqdm import tqdm
@@ -206,6 +208,9 @@ def generate_json(dataset):
 def feature_extract(x, x_lens):
 	x_lens = np.ceil((x_lens / 160) / 3).astype(np.int32)
 
+	# add random noise
+	x += np.random.normal(0,1, np.shape(x))
+
 	# pre-emphasis
 	x = np.concatenate(
 		(np.expand_dims(x[:, 0], 1), x[:, 1:] - 0.97 * x[:, :-1]), axis=1
@@ -254,12 +259,32 @@ def feature_extract(x, x_lens):
 	return features.transpose(2, 0, 1), x_lens.astype(np.float32)
 
 
-def load_wav(file):
-	sample = soundfile.read(file)[0].astype(np.float32)
+def load_wav(file, training=False):
+	if training: 
+		sr = random.randint(13800, 18400)
+	sr = sr or 16000
+	sample = soundfile.read(file, samplerate=sr)[0].astype(np.float32)
 	return sample, sample.shape[0]
 
+def remove_silence(path):
+    '''
+    This function is a python wrapper to run the ffmpeg command in python and remove the silence below a 60dB 
+    threshold.
+    
+    path= Audio file path
+    
+    '''
+    command="ffmpeg -i " + path + " -af silenceremove=stop_periods=-1:stop_duration=1:stop_threshold=-60dB -f null -"
+    out = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    stdout, stderr = out.communicate()
+    s=stdout.decode("utf-8")
+    k=s.split('[silenceremove @')
+    if len(k) == 1:
+	    print(stderr)
 
-def iterate(bs=1, start=0, val=True):
+def iterate(dataset, bs=1, start=0, val=True):
+	with open(BASEDIR / f"{dataset}.json") as f:
+		ci = json.load(f)
 	if val:
 		print(f"Number of samples in the dataset: {len(ci)}")
 		for i in range(start, len(ci), bs):
