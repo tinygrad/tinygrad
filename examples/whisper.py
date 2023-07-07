@@ -168,7 +168,6 @@ def load_wav(file):
   except sp.CalledProcessError as e: raise RuntimeError(f"Failed to load audio {e.stderr.decode()}") from e
   return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
 
-"""
 @functools.lru_cache(None)
 def get_filters(sample_rate, n_fft, n_mels): return librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels)
 @functools.lru_cache(None)
@@ -183,24 +182,6 @@ def prep_audio(audio, padding) -> Tensor:
   log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
   return log_spec
-"""
-import torch
-import torch.nn.functional as F
-
-@functools.lru_cache(None)
-def get_filters(sample_rate, n_fft, n_mels):return torch.tensor(librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels))
-
-def prep_audio(audio, padding):
-  audio = torch.from_numpy(audio)
-  if padding > 0: audio = F.pad(audio, (0, padding))
-  window = torch.hann_window(N_FFT)
-  stft = torch.stft(audio, N_FFT, HOP_LENGTH, window=window, return_complex=True)
-  magnitudes = stft[..., :-1].abs() ** 2
-  mel_spec = get_filters(RATE, N_FFT, N_MELS) @ magnitudes
-  log_spec = np.log10(np.clip(mel_spec, a_min=1e-10, a_max=None))
-  log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
-  log_spec = (log_spec + 4.0) / 4.0
-  return log_spec.numpy()
   
 def listener(q):
   prep_audio(np.zeros(300), RATE)
@@ -255,23 +236,6 @@ class MaximumLikelihoodRanker:
     lengths = [[len(t) for t in s] for s in tokens]
     return [np.argmax(scores(p, l) for p, l in zip(sum_logprobs, lengths))]
 
-def remove_specials(sentence):
-  # TODO: this is very bad
-  while "<" in sentence and ">" in sentence:
-    start, end = sentence.index("<"), sentence.index(">")
-    if start < end: sentence = sentence[:start] + sentence[end+1:]
-    else: break
-  return sentence
-
-def remove_repeated(sentence):
-  # TODO: also very bad
-  eos_idx = [-2] + [i for i, c in enumerate(sentence) if c in (".", "?", "!", '"')]
-  for i in range(len(eos_idx) - 2):
-    low, mid, high = eos_idx[i:i+3]
-    offset = 5 if mid - low > 5 and high - mid > 5 else min(mid-low, high-mid)
-    if sentence[low+offset:mid].strip() == sentence[mid+offset:high].strip(): return sentence[:mid+1]
-  else: return sentence
-
 if __name__ == "__main__":
   if getenv("SMALL"):
     fn = BASE / "whisper-small.en.pt"
@@ -311,7 +275,7 @@ if __name__ == "__main__":
       tokens = [[t[sample_begin:(t==enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
       selected = sequence_ranker.rank(tokens, sum_logprobs)
       tokens = [t[i].astype(np.int32).tolist() for i, t in zip(selected, tokens)]
-      text = [enc.decode(t).strip() for t in tokens]
+      text = [enc.decode(list(filter(lambda x: x < len(enc._mergeable_ranks), t))).strip() for t in tokens]
       return text
 
   if getenv("TEST"):
@@ -319,12 +283,10 @@ if __name__ == "__main__":
     for c in ci:
       fn = BASEDIR / c["files"][0]["fname"]
       print("-" * 128, f"{fn.stem}\n", sep="\n")
-      predicted = "".join(transcribe_wav(fn))
+      predicted = "".join(transcribe_wav(fn)).translate(str.maketrans("", "", string.punctuation)).lower()
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
-      print(predicted)
-      print(transcript)
-      #sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
-      #print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
+      sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
+      print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
   elif len(sys.argv) > 1:
     print(transcribe_wav(sys.argv[1]))
   else:
