@@ -225,7 +225,7 @@ class Linearizer:
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
-      # LocalBuffer has an entry in self.raw_bufs, but not in self.bufs or self.sts
+      # LocalBuffer has an entry in self.raw_bufs, but not in self.bufs
       self.raw_bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
@@ -409,8 +409,8 @@ class Linearizer:
 
   def colored_shape(self) -> str: return ' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors()))
   def printbufs(self, prefix=""):
-    for i in range(len(self.sts)):
-      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i].realized is not None else str(self.bufs[i]):47s}", self.sts[i].views)
+    for i in range(len(self.raw_bufs)):
+      print(prefix, f"{i:3d} {str(self.raw_bufs[i]):47s}", self.sts[i].views)
     print(self.colored_shape())
 
   # ******************** base simplifiers ********************
