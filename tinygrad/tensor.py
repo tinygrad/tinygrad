@@ -451,7 +451,7 @@ class Tensor:
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
     if isinstance(padding, (tuple, list)): assert len(padding) == 2 * len(HW) or len(padding) == len(HW), f"Expected padding of length {2 * len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {self.shape}"
     padding_ = [padding] * 2 * len(HW) if isinstance(padding, int) else (list(padding) if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
-    if not all(x == 3 for x in HW) or any(x < 4 for x in self.shape[-2:]):
+    if not all(x == 3 for x in HW) or any(x < 4 for x in self.shape[-2:]) or stride != 1:
 
       if True:
         # conv2d is a pooling op (with padding)
@@ -473,14 +473,13 @@ class Tensor:
       # todo: padding edge cases
       end_shrink = []
       for i, dim in enumerate(self.shape[-2:]):
-        if dim % 2 != 0:
+        if (dim + sum(padding_[i * 2:(i + 1) * 2])) % 2 != 0:
           padding_[i * 2 + 1] = padding_[i * 2 + 1] + 1
           end_shrink.append(1)
         else:
           end_shrink.append(0)
       HW4 = (4, 4)  # F(2x2,3x3) winograd kernel granularity
       assert len(HW) == len(HW4)  # only support 2d winograd for now
-      # todo: even pooling
       x = self.pad2d(padding_)._pool(HW4, stride * 2 if isinstance(stride, int) else [s * 2 for s in stride], dilation)  # double stride for winograd kernel granularity
       rcout, oyx4 = cout // groups, x.shape[2:-len(HW4)]
       x = x.reshape(bs, groups, cin, 1, *oyx4, *HW4).expand(bs, groups, cin, rcout, *oyx4, *HW4).permute(0, 1, 3, *[4 + i for i in range(len(oyx4))], 2, *[4 + len(oyx4) + i for i in range(len(HW4))])
