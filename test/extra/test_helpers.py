@@ -2,8 +2,7 @@
 import os, cloudpickle, tempfile, unittest, subprocess
 from extra.helpers import enable_early_exec, cross_process, _CloudpickleFunctionWrapper
 
-class TestCrossProcess(unittest.TestCase):
-
+class TestEarlyExec(unittest.TestCase):
   def setUp(self) -> None:
     self.early_exec = enable_early_exec()
 
@@ -32,6 +31,8 @@ class TestCrossProcess(unittest.TestCase):
   def test_enable_early_exec_type_exception(self):
     with self.assertRaises(TypeError):
       self.early_exec((["python"], "print('Hello, world!')"))
+
+class TestCrossProcess(unittest.TestCase):
 
   def test_cross_process(self):
     def _iterate():
