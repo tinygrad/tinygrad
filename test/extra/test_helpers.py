@@ -2,6 +2,8 @@
 import os, cloudpickle, tempfile, unittest, subprocess
 from extra.helpers import enable_early_exec, cross_process, _CloudpickleFunctionWrapper
 
+def normalize_line_endings(s): return s.replace(b'\r\n', b'\n')
+
 class TestEarlyExec(unittest.TestCase):
   def setUp(self) -> None:
     self.early_exec = enable_early_exec()
@@ -18,11 +20,11 @@ class TestEarlyExec(unittest.TestCase):
 
   def test_enable_early_exec(self):
     output = self.early_exec_py_file(b'print("Hello, world!")', [])
-    self.assertEqual(b"Hello, world!\n", output)
+    self.assertEqual(b"Hello, world!\n", normalize_line_endings(output))
 
   def test_enable_early_exec_with_arg(self):
     output = self.early_exec_py_file(b'import sys\nprint("Hello, " + sys.argv[1] + "!")', ["world"])
-    self.assertEqual(b"Hello, world!\n", output)
+    self.assertEqual(b"Hello, world!\n", normalize_line_endings(output))
 
   def test_enable_early_exec_process_exception(self):
     with self.assertRaises(subprocess.CalledProcessError):
