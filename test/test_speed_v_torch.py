@@ -156,6 +156,12 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a.reshape(int(4096//R), int(4096*R)).sum(axis=1)
     helper_test_generic_square('partial_sum', 4096, f, f, onearg=True)
 
+  def test_cumsum(self):
+    def f0(a,b): return a.cumsum(axis=0)
+    def f1(a,b): return a.cumsum(axis=1)
+    helper_test_generic_square('cumsum_0', 1024, f0, f0, onearg=True)
+    helper_test_generic_square('cumsum_1', 1024, f1, f1, onearg=True)
+
   def test_array_packing(self):
     N = 2048
     def f(a, b): return a.reshape(N, N // 32, 32).permute(1,0,2).contiguous()
