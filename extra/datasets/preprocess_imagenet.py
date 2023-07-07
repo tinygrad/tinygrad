@@ -1,6 +1,6 @@
 from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
-from tinydatasets.imagenet import iterate, get_val_files
+extra.datasets.imagenet import iterate, get_val_files
 
 if __name__ == "__main__":
   #sz = len(get_val_files())

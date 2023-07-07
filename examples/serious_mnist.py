@@ -6,7 +6,7 @@ from tinygrad.state import get_parameters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d, optim
 from tinygrad.helpers import getenv
-from tinydatasets import fetch_mnist
+extra.datasets import fetch_mnist
 from extra.augment import augment_img
 from extra.training import train, evaluate, sparse_categorical_crossentropy
 GPU = getenv("GPU")

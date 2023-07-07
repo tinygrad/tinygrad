@@ -5,7 +5,7 @@ import platform
 from torch import nn
 from torch import optim
 
-from tinydatasets import fetch_cifar
+extra.datasets import fetch_cifar
 from tinygrad.helpers import getenv
 
 # allow TF32

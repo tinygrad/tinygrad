@@ -5,7 +5,7 @@ from transformers import BertTokenizer
 import numpy as np
 from extra.utils import download_file
 
-BASEDIR = Path(__file__).parent.parent / "tinydatasets/squad"
+BASEDIR = Path(__file__).parent.parent / "extra/datasets/squad"
 def init_dataset():
   os.makedirs(BASEDIR, exist_ok=True)
   download_file("https://rajpurkar.github.io/SQuAD-explorer/dataset/dev-v1.1.json", BASEDIR / "dev-v1.1.json")
