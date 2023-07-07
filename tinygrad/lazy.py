@@ -309,18 +309,15 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer, arg:Optional
     return elementwise_op(op, *new_srcs, arg=arg).contiguous()
 
   num_buffers = sum([len(x.buffers) for x in srcs])
+  merged_srcs: List[Union[LazyOp, LazyBuffer]] = [x for x in srcs]
   if MERGE_ELEMENTWISE_OPS:
-    merged_srcs = []
-    for x in srcs:
+    for i, src in enumerate(srcs):
       # remove the buffers from any (childless) BinaryOps that feed into this unless the merged kernel will have too many buffers
-      if x.optype == BinaryOps and not x.children and not x.realized and (MAX_NUM_BUFS <= 0 or num_buffers + len(x.op.buffers) < MAX_NUM_BUFS):
-        merged_srcs.append(x.op)
-        num_buffers += len(x.op.buffers)
-      else:
-        merged_srcs.append(x)
-    srcs = tuple(merged_srcs)
+      if src.optype == BinaryOps and not src.children and not src.realized and (MAX_NUM_BUFS <= 0 or num_buffers + len(src.op.buffers) < MAX_NUM_BUFS):
+        merged_srcs[i] = src.op
+        num_buffers += len(src.op.buffers)
 
-  return create_lazybuffer(out_device, ShapeTracker(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype)
+  return create_lazybuffer(out_device, ShapeTracker(out_shape), BinaryOps, LazyOp(op, tuple(merged_srcs), arg), out_dtype)
 
 class _Device:
   def __init__(self) -> None:
