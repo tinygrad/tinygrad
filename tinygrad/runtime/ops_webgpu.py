@@ -33,4 +33,4 @@ class RawWebGPUBuffer(RawBufferCopyIn):
   def _copyin(self, x:np.ndarray): device.queue.write_buffer(self._buf, 0, np.ascontiguousarray(x))
   def toCPU(self) -> np.ndarray: return np.frombuffer(device.queue.read_buffer(self._buf, 0), dtype=np.dtype(self.dtype.np, metadata={"backing": self})) # type: ignore
 
-WebGpuBuffer = Compiled(RawWebGPUBuffer, WebGpuCodegen, WebGPUProgram)
+WebGpuBuffer = Compiled(RawWebGPUBuffer, WGSLCodegen, WebGPUProgram)
