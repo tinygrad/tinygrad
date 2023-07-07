@@ -18,7 +18,7 @@ code_for_op: Dict[Op, Callable] = {
 class WGSLCodegen(Linearizer):
   supports_float4 = False
   supports_constant_folding = True
-  def float_const(self, x: float) -> str: return f"{x}f" if not math.isinf(x) else ("-" if x < 0 else "") + "0x1.fffffep+127f"
+  def float_const(self, x: float) -> str: return f"{x}f" if not math.isinf(x) else ("-" if x < 0 else "") + "0x1.fffffep+127f" # TODO: Replace with inf when its added to the spec
 
   def codegen(self):
     self.process()

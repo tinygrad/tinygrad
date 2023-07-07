@@ -4,13 +4,12 @@ import numpy as np
 from extra.utils import WINDOWS
 from tinygrad.helpers import getenv
 from tinygrad.jit import TinyJit
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm
 import torch
 
 class TestNN(unittest.TestCase):
 
-  @unittest.skipIf(getenv("CI", "") != "" and Device.DEFAULT == "WEBGPU", "segfault in CI")
   def test_batchnorm2d(self, training=False):
     szs = [4, 8, 16, 32]
     for sz in szs:
