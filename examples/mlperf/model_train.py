@@ -24,16 +24,42 @@ def train_bert():
   pass
 
 def train_maskrcnn():
+  
   from datasets.coco import COCODataset
+  from datasets.transforms import Compose, Resize, RandomHorizontalFlip, ToTensor, Normalize
   from models.mask_rcnn import MaskRCNN
   from models.resnet import ResNet
 
   resnet = ResNet(50, num_classes=None, stride_in_1x1=True)
   model = MaskRCNN(backbone=resnet)
   model.load_from_pretrained()
- 
-  dataset = COCODataset()
-  print(dataset[0:10])
+
+  transforms = Compose(
+    [
+      # Resize(800, 1333),
+      # RandomHorizontalFlip(0.5),
+      # Normalize(
+        # mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
+      # ),
+      ToTensor(),
+    ]
+  )
+
+  dataset = COCODataset(root='datasets/COCO/train2017',
+                        ann_file='datasets/COCO/annotations/instances_train2017.json', 
+                        remove_images_without_annotations=1, 
+                        transforms=transforms)
+
+  # Sanity test while refactoring the COCO dataset code base
+  print("Data")
+  print(dataset[0][0])
+  print("Bounding box")
+  print(dataset[0][1].bbox)
+  print("Label")
+  print(dataset[0][1].get_field('labels'))
+  print("Segmentation mask")
+  for p in dataset[0][1].get_field('masks').polygons:
+    print(p.polygons)
 
   # For training, you must also adjust the learning rate and schedule length 
   # according to the linear scaling rule. See for example:

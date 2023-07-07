@@ -1,7 +1,7 @@
 import random
+import numpy as np
 from tinygrad.tensor import Tensor
 
-import torch
 from torchvision import transforms as T
 from torchvision.transforms import functional as Ft
 
@@ -22,9 +22,10 @@ class Compose(object):
     format_string += "\n)"
     return format_string
 
+# TODO remove the dependence from torch here
 class ToTensor(object):
   def __call__(self, image, target):
-    return Ft.to_tensor(image), target
+    return Tensor(image), target
 
 class Resize:
   def __init__(self, min_size, max_size):
@@ -68,8 +69,15 @@ class Resize:
 class RandomHorizontalFlip(object):
   def __init__(self, prob=0.5):
     self.prob = prob
-
+  
+  # TODO remove dependence from torchvision
   def __call__(self, image, target):
+    import matplotlib.pyplot as plt
+    plt.imshow(image)
+    plt.savefig('/home/iris/yg5d6/Workspace/before_flip.png')
+    plt.imshow(np.fliplr(image))
+    plt.savefig('/home/iris/yg5d6/Workspace/before_after.png')
+
     if random.random() < self.prob:
       image = Ft.hflip(image)
       target = target.transpose(0)
@@ -105,17 +113,6 @@ class Normalize:
     else:
       return image
 
-transforms_train = Compose(
-  [
-    Resize(800, 1333),
-    RandomHorizontalFlip(0.5),
-    ToTensor(),
-    Normalize(
-      mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
-    ),
-  ]
-)
-
 transforms = lambda size_scale: T.Compose(
   [
     Resize(int(800*size_scale), int(1333*size_scale)),
@@ -125,20 +122,3 @@ transforms = lambda size_scale: T.Compose(
     ),
   ]
 )
-
-def expand_boxes(boxes, scale):
-  w_half = (boxes[:, 2] - boxes[:, 0]) * .5
-  h_half = (boxes[:, 3] - boxes[:, 1]) * .5
-  x_c = (boxes[:, 2] + boxes[:, 0]) * .5
-  y_c = (boxes[:, 3] + boxes[:, 1]) * .5
-
-  w_half *= scale
-  h_half *= scale
-
-  boxes_exp = torch.zeros_like(boxes)
-  boxes_exp[:, 0] = x_c - w_half
-  boxes_exp[:, 2] = x_c + w_half
-  boxes_exp[:, 1] = y_c - h_half
-  boxes_exp[:, 3] = y_c + h_half
-  return boxes_exp
-
