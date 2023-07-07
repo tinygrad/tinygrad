@@ -585,7 +585,8 @@ class Linearizer:
 
     # should use tensor cores?
     # first, confirm it's a straightforward mulacc on a device with real locals
-    if self.reduceop and self.reduceop.op == ReduceOps.SUM and isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
+    if getenv("TC", 1) == 1 and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
+       isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
        isinstance(self.reduceop.src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[1], LazyBuffer) and hasattr(self, 'lang') and len(self.lang.lid):
       buf0 = self.bufs.index(self.reduceop.src[0].src[0])
       buf1 = self.bufs.index(self.reduceop.src[0].src[1])
@@ -595,7 +596,7 @@ class Linearizer:
       axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%8 == 0]
       if len(axis_buf0) and len(axis_buf1) and self.full_shape[self.first_reduce]%8 == 0:
         if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1)
-        self.use_tensor_cores = getenv("TC", 1) == 1 and self.bufs[0].device == "METAL"
+        self.use_tensor_cores = self.bufs[0].device == "METAL"
 
         # TODO: select axis in smart way
         s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
@@ -625,8 +626,9 @@ class Linearizer:
 
         # alias buffer
         self.local_dims = self.first_reduce - global_count
-        self.alias_buffer(1, [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2))
-        self.alias_buffer(2, [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2))
+        alias_pattern = [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2)
+        self.alias_buffer(buf0, alias_pattern)
+        self.alias_buffer(buf1, alias_pattern)
 
         # very late upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
         if self.use_tensor_cores:
