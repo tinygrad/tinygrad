@@ -108,7 +108,7 @@ class Linearizer:
     if hasattr(self, "sts"): return   # already processed
 
     # dedup buffers and calculate key
-    self.raw_bufs: List[Union[LocalBuffer,RawBuffer]] = ASTRunner.dedup_bufs(self.bufs)  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
+    self.raw_bufs: List[Union[LocalBuffer,RawBuffer]] = dedup([x.realized for x in self.bufs])  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
@@ -117,7 +117,7 @@ class Linearizer:
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
-    self.mem_estimate: int = sum(x.dtype.itemsize*x.size for x in self.raw_bufs)
+    self.mem_estimate: int = sum(x.dtype.itemsize*prod(x.shape) for x in self.bufs)
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
@@ -225,7 +225,7 @@ class Linearizer:
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
-      # LocalBuffer has an entry in self.raw_bufs and self.bufmap, but not in self.bufs or self.sts
+      # LocalBuffer has an entry in self.raw_bufs, but not in self.bufs or self.sts
       self.raw_bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
