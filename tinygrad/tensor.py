@@ -133,7 +133,7 @@ class Tensor:
 
   _seed: int = int(time.time())
   @staticmethod
-  def manual_seed(seed=None): Tensor._seed = seed
+  def manual_seed(seed=0): Tensor._seed = seed
 
   @staticmethod
   def rand(*shape, **kwargs):
