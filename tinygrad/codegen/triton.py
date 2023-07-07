@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Final
+from typing import Any, Callable, Dict, Final, Tuple
 from triton.compiler import compile as triton_compile # type: ignore
 import hashlib
 import math
@@ -50,6 +50,9 @@ class TritonCodegen(Linearizer):
     kk("def fxn("+','.join(f"data{i}" for i in range(len(self.bufs)))+"):")
     depth += 1
 
+    full_local_shape: Tuple[Any, ...] = ()
+    acc_local_shape = 1
+
     gid = [f"tl.program_id({i})" for i in range(3)]
     code_for_op: Final[Dict[Op, Callable]] = {
       UnaryOps.EXP2: lambda x: f"tl.math.exp2({x})",
@@ -59,12 +62,10 @@ class TritonCodegen(Linearizer):
       BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})",
       BinaryOps.POW: lambda x,y: f"tl.math.pow({x}, {y})", BinaryOps.MAX: lambda x,y: f"tl.maximum({x},{y})", # axis?
       BinaryOps.CMPEQ: lambda x,y: f"({x}=={y})",
-      ReduceOps.SUM: lambda x: f"tl.sum({x})"
+      ReduceOps.SUM: lambda x: f"tl.expand_dims(tl.sum({x}, axis={len(full_local_shape)-len(self.group_for_reduce)}), axis={len(full_local_shape)-len(self.group_for_reduce)})" if len(self.group_for_reduce) != len(full_local_shape) else f"tl.sum({x}, axis={len(full_local_shape)-len(self.group_for_reduce)})",
     }
     bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(self.bufs)]
 
-    full_local_shape = None
-    acc_local_shape = 1
 
     for uop,newvar,vin,args in self.uops:
       if uop == UOps.LOOP:
@@ -99,7 +100,7 @@ class TritonCodegen(Linearizer):
         assert newvar is not None
         val = f"{bufnames[args.i]} + {args.idx.render()}" # defaults to render_python
         triton_dtype = {dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64"}[newvar.dtype]
-        if args.valid.min == 1: kk(f"{newvar.render()} = tl.load({val}).to({triton_dtype})")#; kk(f"if ridx2 == 0: tl.device_print('test', {newvar.render()})")
+        if args.valid.min == 1: kk(f"{newvar.render()} = tl.load({val}).to({triton_dtype})")
         else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({val}, mask={args.valid.render()}), 0.0).to({triton_dtype})")
       elif uop == UOps.STORE:
         assert vin[0].dtype == dtypes.float, "unimplemented: float4 store"
@@ -114,7 +115,7 @@ class TritonCodegen(Linearizer):
     if DEBUG >= 4: print(prg)
 
     # write out python to compile
-    prg = "import triton\nimport triton.language as tl\n" + prg
+    prg = "import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n" + prg
     fn = f"/tmp/{hashlib.md5(prg.encode('utf-8')).hexdigest()}.py"
     with open(fn, "w") as f: f.write(prg)
     codeobj = compile(prg, fn, "exec")
