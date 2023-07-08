@@ -9,7 +9,7 @@ from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Seque
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
 from math import ceil, pi, prod, sqrt, log
 from tinygrad.lazy import Device, LazyBuffer
-from tinygrad.ops import LoadOps, TrinaryOps
+from tinygrad.ops import LoadOps
 
 # An instantiation of the Function is the Context
 class Function:
