@@ -177,7 +177,7 @@ class Tensor:
   def randn(*shape, dtype:Optional[DType]=None, **kwargs) -> Tensor:
     # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
     src = Tensor.rand(2, *shape, **kwargs)
-    return src[0].mul(2*pi).cos().mul(((1 - src[1])).log().mul(-2).sqrt()).cast(Tensor.default_type if dtype is None else dtype)
+    return src[0].mul(2*pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(Tensor.default_type if dtype is None else dtype)
 
   @staticmethod
   def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor: return ((high-low) * Tensor.rand(*shape, **kwargs)) + low
