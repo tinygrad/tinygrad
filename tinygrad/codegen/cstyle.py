@@ -157,7 +157,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
             val = f"vload_half({args.idx.render(render_cl)}, {bufnames[args.i]})"
         else:
           if newvar.dtype in [dtypes._float4, dtypes._float2]:
-            val = f"({newvar.dtype.name})(*(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}{newvar.dtype.sz}*)({bufnames[args.i]}+{args.idx.render(render_cl)})))"
+            val = f"({newvar.dtype.name})(*(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}{newvar.dtype.sz}*)({bufnames[args.i]}+{args.idx.render(render_cl, strip_parens=True)})))"
           else:
             val = f"*({bufnames[args.i]}+{args.idx.render(render_cl, strip_parens=True)})"
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
@@ -182,7 +182,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       elif lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
         kk(f"vstore_half4({vin[0].render()}, {args.idx.render(render_cl)}, {bufnames[args.i]});")
       else:
-        kk(f"*(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}{vin[0].dtype.sz}*)({bufnames[args.i]}+{args.idx.render(render_cl)})) = ({bufs[args.i].dtype.name}{vin[0].dtype.sz}){vin[0].render()};")
+        kk(f"*(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}{vin[0].dtype.sz}*)({bufnames[args.i]}+{args.idx.render(render_cl, strip_parens=True)})) = ({bufs[args.i].dtype.name}{vin[0].dtype.sz}){vin[0].render()};")
     elif uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
     else:
