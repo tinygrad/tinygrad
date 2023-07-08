@@ -92,7 +92,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if None in strides: return None
   return View(vm1.shape, cast(Tuple[int, ...], strides), mst.real_offset(), merge_masks(vm1.mask, vm2.mask))
 
-# def merge_masks(mask1, mask2): return [m1 or m2 for m1, m2 in zip(mask1, mask2)] if mask1 and mask2 else mask1 or mask2
+@functools.lru_cache(maxsize=None)
 def merge_masks(mask1, mask2):
     if not mask1 or not mask2:
         return mask1 or mask2
