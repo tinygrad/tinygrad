@@ -187,14 +187,14 @@ jobs:
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test openpilot model compile and size
       run: |
-        DEBUG=4 ALLOWED_KERNEL_COUNT=199 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+        DEBUG=2 ALLOWED_KERNEL_COUNT=199 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
         python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
     - name: Test GPU IMAGE ops
       run: |
         GPU=1 IMAGE=1 python3 test/test_ops.py
         FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 test/test_ops.py
     - name: Test openpilot model correctness (float32)
-      run: DEBUG=2 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+      run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
 
   testmetal:
     name: Metal Tests

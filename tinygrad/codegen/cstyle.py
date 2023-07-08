@@ -132,7 +132,8 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       kk(f"{newvar.render(True)} = {val};")
     elif uop == UOps.STORE:
       assert args.valid.min == 1, "store must be valid"
-      kk(lang.render_store(bufnames[args.i], bufs[args.i].dtype, vin[0].render(), vin[0].dtype, args.idx, isinstance(bufs[args.i], LocalBuffer)))
+      # TODO: instead of dtypes.float, a base type
+      kk(lang.render_store(bufnames[args.i], bufs[args.i].dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, isinstance(bufs[args.i], LocalBuffer)))
     elif uop == UOps.CAST and newvar is not None and newvar.dtype == dtypes._float4:
       kk(f"{newvar.render(True)} = {lang.float4}({','.join([x.render() for x in vin])});")
     elif uop == UOps.DEFINE_LOCAL:
