@@ -6,6 +6,7 @@ import itertools
 from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
+from tinygrad.ops import LoadOps
 
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)
@@ -184,6 +185,13 @@ class TestTinygrad(unittest.TestCase):
   def test_element_size(self):
     for _, dtype in dtypes.fields().items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
+
+  def test_constant_fold(self):
+    a = Tensor(3)
+    b = Tensor([3])
+    # will only be constant-folded if is a const loadop
+    assert(a.lazydata.op.op == LoadOps.CONST)
+    assert(b.lazydata.op.op == LoadOps.CONST)
 
 if __name__ == '__main__':
   unittest.main()
