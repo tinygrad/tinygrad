@@ -131,11 +131,11 @@ assert lazyop.op == BinaryOps.ADD
 assert len(lazyop.src) == 2
 
 # the first source is the 2, it comes from the CPU
-# the source is a LazyBuffer that is a "CPU" Tensor
+# the source is a LazyBuffer that is a "CLANG" Tensor
 # again, a LazyOp AST is like a GPU kernel. you have to copy the data on the device first
-assert lazyop.src[0].op.op == LoadOps.FROM
-assert lazyop.src[0].op.src[0].device == "CPU"
-assert lazyop.src[0].op.src[0].realized._buf[0] == 2, "the src of the FROM LazyOP is a LazyBuffer on the CPU holding [2.]"
+assert lazyop.src[0].op.src[0].op.op == LoadOps.CONST, "[2] gets folded into 2"
+assert lazyop.src[0].op.src[0].device == Device.DEFAULT
+assert lazyop.src[0].op.src[0].op.arg == 2, "the src of the CONST LazyOP is a LazyBuffer on holding 2"
 assert result.lazydata.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer
