@@ -102,7 +102,7 @@ class Linearizer:
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
 
     # get the output buffers
-    # after process, this is will be deduped by RawBuffer.
+    # after process, this is will be deduped by key=buf.realized
     self.bufs = [output_buffer] + dedup(ast.buffers)
 
   def process(self) -> None:
@@ -238,7 +238,7 @@ class Linearizer:
     self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
     # parse AST
-    loaded_buffers: Dict[Union[LazyBuffer,str],List[Token]] = {}
+    loaded_buffers = {}
     acc = []
 
     # ssa
@@ -319,7 +319,7 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0})
+    loaded_buffers.update({b: self.global_load(i, global_idxs + local_idxs + fake_reduce_idxs + upcast_idxs) for i, b in enumerate(self.bufs) if b not in self.earlybufs and i != 0})
 
     # run late AST
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
