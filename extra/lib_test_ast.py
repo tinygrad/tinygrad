@@ -1,6 +1,6 @@
 import sys
 import numpy as np
-from typing import List, Dict, Type
+from typing import Dict, Type
 from tinygrad.codegen.ast import ASTKernel
 from tinygrad.runtime.ops_cpu import CPUBuffer
 from tinygrad.ops import DeviceBuffer, map_buffers
