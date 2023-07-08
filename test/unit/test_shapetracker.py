@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import prod, all_same
-from tinygrad.shape.shapetracker import ShapeTracker, View, merge_views, get_contraction
+from tinygrad.shape.shapetracker import ShapeTracker, View, merge_views, merge_masks, get_contraction
 from tinygrad.codegen.cstyle import to_image_idx
 
 def shapetracker_getitem(st, val):
@@ -532,6 +532,69 @@ class TestGetContraction(unittest.TestCase):
 
     r = get_contraction((1,2,3,4), (1,2,6,2))
     self.assertEqual(r, None)
+
+class TestMergeMasks(unittest.TestCase):
+  def test_merge_masks_all_true(self):
+    mask1 = ((1, 0), (0, 1))
+    mask2 = ((0, 1), (1, 0))
+    merged_mask = merge_masks(mask1, mask2)
+    self.assertEqual(merged_mask, ((1, 1), (1, 1)))
+
+  def test_merge_masks_one_empty(self):
+    mask1 = ((1, 0), (0, 1))
+    mask2 = None
+    merged_mask = merge_masks(mask1, mask2)
+    self.assertEqual(merged_mask, ((1, 0), (0, 1)))
+
+  def test_merge_masks_both_empty(self):
+    mask1 = None
+    mask2 = None
+    merged_mask = merge_masks(mask1, mask2)
+    self.assertIsNone(merged_mask)
+
+
+class TestMergeViews(unittest.TestCase):
+  def test_merge_views_different_sizes(self):
+    vm1 = View((3, 3), (3, 1), 0, None)
+    vm2 = View((2, 2), (2, 1), 0, None)
+    merged_view = merge_views(vm2, vm1)
+    self.assertIsNone(merged_view)
+
+  def test_merge_views_different_offsets(self):
+    vm1 = View((2, 2), (2, 1), 1, None)
+    vm2 = View((2, 2), (2, 1), 0, None)
+    merged_view = merge_views(vm2, vm1)
+    self.assertIsNone(merged_view)
+
+  def test_merge_views_none_view(self):
+    vm1 = None
+    vm2 = View((2, 2), (2, 1), 0, None)
+    merged_view = merge_views(vm2, vm1)
+    self.assertIsNone(merged_view)
+
+  def test_merge_views_different_masks(self):
+    vm1 = View((2, 2), (2, 1), 0, ((0, 1),))
+    vm2 = View((2, 2), (2, 1), 0, ((1, 0),))
+    merged_view = merge_views(vm2, vm1)
+    self.assertEqual(merged_view.mask, (((1, 1),)))
+
+  def test_merge_views_same_masks(self):
+    vm1 = View((2, 2), (2, 1), 0, ((1, 0),))
+    vm2 = View((2, 2), (2, 1), 0, ((1, 0),))
+    merged_view = merge_views(vm2, vm1)
+    self.assertEqual(merged_view.mask, ((1, 0),))
+
+  def test_merge_views_empty_masks(self):
+    vm1 = View((2, 2), (2, 1), 0, None)
+    vm2 = View((2, 2), (2, 1), 0, None)
+    merged_view = merge_views(vm2, vm1)
+    self.assertIsNone(merged_view.mask)
+
+  def test_merge_views_one_empty_mask(self):
+    vm1 = View((2, 2), (2, 1), 0, ((1, 0),))
+    vm2 = View((2, 2), (2, 1), 0, None)
+    merged_view = merge_views(vm2, vm1)
+    self.assertEqual(merged_view.mask, ((1, 0),))
 
 if __name__ == '__main__':
   unittest.main()
