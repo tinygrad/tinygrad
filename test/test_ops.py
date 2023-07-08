@@ -6,6 +6,7 @@ import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, IMAGE, DEBUG
 from tinygrad.lazy import Device
+from tinygrad.ops import GlobalCounters
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
@@ -1018,6 +1019,18 @@ class TestOps(unittest.TestCase):
     x = Tensor.full((3, 3), float("inf"))
     n = (x < 0).where(x, 1).numpy()
     assert np.all(n == 1.)
+
+  @unittest.skipUnless(Device.DEFAULT == "GPU", "Only GPU supports cache")
+  def test_multiview(self):
+    a, b = Tensor.randn(4), Tensor.randn(4)
+    np_a, np_b = a.numpy(), b.numpy()
+    GlobalCounters.cache = []
+    c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),)))).realize()
+    rawbufs = GlobalCounters.cache[0][1]
+    GlobalCounters.cache = None
+    assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.realized, b.lazydata.realized}
+    np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
+    assert (np_c == c.numpy()).all()
 
 if __name__ == '__main__':
   np.random.seed(1337)
