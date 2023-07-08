@@ -4,6 +4,7 @@ from llvmlite import ir  # type: ignore
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps, UOp, Token
 from tinygrad.helpers import dtypes
 from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, FusedOps
+from tinygrad.lazy import LazyBuffer
 
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 def int_const(x): return ir.Constant(ir.IntType(64), x)
