@@ -58,20 +58,20 @@ class Tensor:
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
 
-    if data.__class__ is list:
-      data = np.array(data, dtype=(dtype or Tensor.default_type).np)
-
     if isinstance(data, (int, float)):
       self.lazydata = LazyBuffer.loadop(LoadOps.CONST, cast(np.ndarray, data).shape if data.__class__ is np.ndarray else tuple(), dtype or Tensor.default_type, device, data)
       return
 
+    if data.__class__ is list:
+      data = np.array(data, dtype=(dtype or Tensor.default_type).np)
+
     if data.__class__ is np.ndarray:
       data = cast(np.ndarray, data)
-      dims, sz = data.ndim, data.size
+      sz = data.size
       data = LazyBuffer.fromCPU(data)
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
-      if dims > 0 and sz == 1:
-        self.lazydata = self.lazydata.const_like(data.toCPU()[0])
+      if sz == 1:
+        self.lazydata = self.lazydata.const_like(data.toCPU().sum())
       return
 
     raise RuntimeError(f"can't create Tensor from {data}")
