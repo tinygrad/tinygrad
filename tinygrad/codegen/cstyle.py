@@ -29,7 +29,7 @@ class CStyleLanguage(NamedTuple):
   def render_const(self, x:Union[float,int], var_dtype=dtypes.float) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    else: val = f"{x}" + ("f" if isinstance(x, float) else "")
+    else: val = f"{x}" + ("" if dtypes.is_int(var_dtype) else "f")
     return f"{self.float4}({val}, {val}, {val}, {val})" if var_dtype == dtypes._float4 else val
 
   # returns a str expression of the loaded value with the output type
