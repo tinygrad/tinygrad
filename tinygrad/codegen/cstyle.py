@@ -49,7 +49,7 @@ class CStyleLanguage(NamedTuple):
     if isinstance(buf_dtype, ImageDType):
       assert var_dtype == dtypes._float4, "images must be float4"
       return f"write_imagef({buf_name}, (int2)({idx[0].render(render_cl)}, {idx[1].render(render_cl)}), {var_name});"
-    if self.uses_vload and buf_dtype == dtypes.float16:
+    elif self.uses_vload and buf_dtype == dtypes.float16:
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}(0, {buf_name}+{idx.render(render_cl)})"
     elif var_dtype.sz > 1:
       return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx.render(render_cl)})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
@@ -128,7 +128,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         val = lang.render_const(bufs[args.i].realized._buf, newvar.dtype)
       else:
         val = lang.render_load(newvar.dtype, bufnames[args.i], bufs[args.i].dtype, args.idx, isinstance(bufs[args.i], LocalBuffer))
-      if args.valid.min == 0 and args.valid.max == 1: val = f"({args.valid.render(render_cl)}) ? ({val}) : ({lang.render_const(0.0, newvar.dtype)});"
+      if args.valid.min == 0 and args.valid.max == 1: val = f"({args.valid.render(render_cl)}) ? ({val}) : ({lang.render_const(0.0, newvar.dtype)})"
       kk(f"{newvar.render(True)} = {val};")
     elif uop == UOps.STORE:
       assert args.valid.min == 1, "store must be valid"
