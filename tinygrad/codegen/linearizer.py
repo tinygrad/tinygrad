@@ -102,6 +102,7 @@ class Linearizer:
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
 
     # organize the input/output buffers
+    # after process, this is will be deduped by RawBuffer.
     self.bufs: List[LazyBuffer] = [output_buffer] + dedup(ast.buffers)
 
   def process(self) -> None:
@@ -332,6 +333,9 @@ class Linearizer:
     else:
       # end the global loop
       self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
+
+    # keep only the first buf for each RawBuffer -- these will be the inputs to the kernel
+    self.bufs = dedup([x.realized for x in self.bufs], self.bufs)
 
   _OT = TypeVar("_OT")
   def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None) -> _OT:
