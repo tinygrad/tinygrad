@@ -102,11 +102,8 @@ class Linearizer:
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
 
     # get the output buffers
-    # after process, this is will be deduped by key=buf.realized
+    # after linearize, this is will be deduped by key=buf.realized
     self.bufs = [output_buffer] + dedup(ast.buffers)
-
-  def process(self) -> None:
-    if hasattr(self, "sts"): return   # already processed
 
     # calculate mapping from to unique RawBuffer index
     self.bufmap = [dedup([x.realized for x in self.bufs]).index(buf.realized) for buf in self.bufs]
@@ -115,6 +112,9 @@ class Linearizer:
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
     self.key = (self.ast.map_buffers({x:self.bufmap[i] for i, x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
+
+  def process(self) -> None:
+    if hasattr(self, "sts"): return   # already processed
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
