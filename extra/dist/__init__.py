@@ -10,22 +10,23 @@ def preinit():
   mp.set_start_method("spawn")
 
 class _OOB:
-  def __init__(self, queues):
-    self.queues = queues
+  def __init__(self, pipes):
+    self.pipes = pipes
   def send(self, data, target_rank):
-    self.queues[target_rank].put(data)
-  def recv(self):
-    return self.queues[RANK].get()
+    self.pipes[target_rank * (WORLD_SIZE - 1) + RANK][1].send(data)
+  def recv(self, target_rank):
+    return self.pipes[RANK * (WORLD_SIZE - 1) + target_rank][0].recv()
 OOB = None
 
 def init_oob(world_size):
-  return [mp.Queue() for _ in range(world_size)]
+  return [mp.Pipe(False) for _ in range(world_size * (world_size - 1))]
 
 RANK = -1
+WORLD_SIZE = -1
 def _process_wrap(rank, world_size, device, oob, fn, args=()):
   # setup the rank
-  global RANK
-  RANK = rank
+  global RANK, WORLD_SIZE
+  RANK, WORLD_SIZE = rank, world_size
 
   # setup out of band communication
   global OOB
