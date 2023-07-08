@@ -210,10 +210,10 @@ class LazyBuffer:
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
     srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
-        
-    differences = [a != b for a,b in zip(self.shape, new_shape)]
-    if sum(differences) > 1:
-      last_difference = len(differences) - 1 - differences[::-1].index(True)
+
+    shape_differences = [a != b for a,b in zip(self.shape, new_shape)]
+    if sum(shape_differences) > 1:
+      last_difference = len(shape_differences) - 1 - shape_differences[::-1].index(True)
       intermediate_shape = tuple(new if i == last_difference else old for i, (new, old) in enumerate(zip(new_shape, self.shape)))
       return create_lazybuffer(self.device, ShapeTracker(intermediate_shape), ReduceOps, LazyOp(op, srcs, intermediate_shape), self.dtype).reduce_op(op, new_shape)
 
