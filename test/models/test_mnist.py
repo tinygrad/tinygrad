@@ -5,7 +5,7 @@ from tinygrad.state import get_parameters
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import optim, BatchNorm2d
 from extra.training import train, evaluate
-from datasets import fetch_mnist
+from extra.datasets import fetch_mnist
 
 # load the mnist dataset
 X_train, Y_train, X_test, Y_test = fetch_mnist()

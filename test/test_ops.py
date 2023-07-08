@@ -230,6 +230,9 @@ class TestOps(unittest.TestCase):
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, a=0)
     helper_test_op([()], lambda x: x.sqrt(), Tensor.sqrt, a=0)
+  def test_rsqrt(self):
+    helper_test_op([(45,65)], lambda x: torch.rsqrt(x), Tensor.rsqrt, a=0)
+    helper_test_op([()], lambda x: torch.rsqrt(x), Tensor.rsqrt, a=0)
 
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin(), Tensor.sin, a=0)

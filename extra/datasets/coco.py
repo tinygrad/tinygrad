@@ -12,7 +12,7 @@ iou         = _mask.iou
 merge       = _mask.merge
 frPyObjects = _mask.frPyObjects
 
-BASEDIR = pathlib.Path(__file__).parent.parent / "datasets" / "COCO"
+BASEDIR = pathlib.Path(__file__).parent / "COCO"
 BASEDIR.mkdir(exist_ok=True)
 
 def create_dict(key_row, val_row, rows): return {row[key_row]:row[val_row] for row in rows}
