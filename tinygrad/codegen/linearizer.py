@@ -3,7 +3,7 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, getenv
+from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
@@ -15,6 +15,26 @@ VariableOrNum = Union[Variable, NumNode, Node]
 # bottom ones are asm only
 class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
+
+def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
+  idy = (idxy//(4*base_shape[1]))
+  if validhacks and valid.min == 0:
+    idx = (idxy//4) + (idy*-base_shape[1])
+    # find the ones in idx that didn't factorize and remove them (TODO: this is not universal)
+    if isinstance(idx, SumNode):
+      unfactored, idx_nodes = partition(idx.nodes, lambda x: isinstance(x, MulNode) and x.b == -base_shape[1])
+      assert len(unfactored) <= 1
+      idx = Variable.sum(idx_nodes)
+      unfactored = (Variable.sum(unfactored) // base_shape[1])
+      idy += unfactored
+      # ugh really...handtuned garbage
+      if idx.min >= (base_shape[1]*3)//4:
+        idx -= base_shape[1]
+        idy += 1
+  else:
+    idx = (idxy//4)%base_shape[1]
+  if DEBUG >= 5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
+  return idx, idy
 
 class LocalBuffer(NamedTuple):
   name: str
@@ -204,6 +224,7 @@ class Linearizer:
         localtype = dtypes.float
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
+        if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
                      self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
@@ -235,7 +256,9 @@ class Linearizer:
       store_offset = store_offset_new
 
     for idx, var in store_offset.items():
-      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idx)))
+      idx, valid = self.sts[i].expr_idxs(idx)
+      if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+      self.uop(UOps.STORE, None, [var], MemOp(i, idx, valid))
 
   def linearize(self):
     # uops
