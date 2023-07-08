@@ -10,7 +10,7 @@ from tinygrad.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
 from extra.utils import download_file
-from datasets.librispeech import ci, BASEDIR
+from extra.datasets.librispeech import ci, BASEDIR
 from examples.mlperf.metrics import word_error_rate
 
 # audio hyperparameters
