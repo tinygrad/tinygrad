@@ -209,11 +209,12 @@ class Linearizer:
     return ret
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
-    store_offset = dict(zip(expand_idxs(idxs), store))
+    expanded_nodes = [expand_node(idx) for idx in idxs]
+    store_offset = dict(zip([x[::-1] for x in itertools.product(*expanded_nodes[::-1])], store))
 
     # float4 grouping
     upcast_dim = self.get_upcast_dim(i)
-    if len(upcast_dim) == 1:
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (Variable.num(0),) + k[upcast_dim[0]+1:]

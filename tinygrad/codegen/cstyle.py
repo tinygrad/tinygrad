@@ -174,6 +174,9 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk(f"*({bufnames[args.i]}+{args.idx.render(render_cl, strip_parens=True)}) = {vin[0].render()};")
     elif uop == UOps.CAST and newvar is not None and newvar.dtype == dtypes._float4:
       kk(f"{newvar.render(True)} = {lang.float4}({','.join([x.render() for x in vin])});")
+    elif uop == UOps.CAST and newvar is not None and newvar.dtype == dtypes._float2:
+      assert lang.float4 is not None
+      kk(f"{newvar.render(True)} = {lang.float4.replace('float4', 'float2')}({','.join([x.render() for x in vin])});")
     elif uop == UOps.STORE and len(vin) != 0 and vin[0].dtype in [dtypes._float4, dtypes._float2] and vin[0].offset is None:
       assert args.valid.min == 1, "store must be valid"
       if isinstance(bufs[args[0]].dtype, ImageDType):
