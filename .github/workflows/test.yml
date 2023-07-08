@@ -22,8 +22,9 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
+        cache: 'pip'
     - name: Install dependencies
-      run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[linting,testing]' -r requirements.txt
     - name: Repo line count
       run: python3 sz.py
     - name: Lint with pylint
