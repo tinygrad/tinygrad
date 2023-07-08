@@ -319,7 +319,7 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    loaded_buffers.update({b: self.global_load(i, global_idxs + local_idxs + fake_reduce_idxs + upcast_idxs) for i, b in enumerate(self.bufs) if b not in self.earlybufs and i != 0})
+    loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i, b in enumerate(self.bufs) if b not in self.earlybufs and i != 0})
 
     # run late AST
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
