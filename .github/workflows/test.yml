@@ -13,6 +13,7 @@ jobs:
   linter:
     name: Linters
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -41,6 +42,7 @@ jobs:
   testcpu:
     name: CPU Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -61,6 +63,7 @@ jobs:
   testimagenet:
     name: ImageNet to C Compile Test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -81,6 +84,7 @@ jobs:
   testllvm:
     name: LLVM Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -118,6 +122,7 @@ jobs:
   testtorch:
     name: Torch Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -136,6 +141,7 @@ jobs:
   testgpu:
     name: GPU Tests
     runs-on: ubuntu-20.04
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -164,6 +170,7 @@ jobs:
   testopencl:
     name: openpilot (OpenCL) Test
     runs-on: ubuntu-20.04
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -196,6 +203,8 @@ jobs:
   testmetal:
     name: Metal Tests
     runs-on: macos-13
+    timeout-minutes: 20
+
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
@@ -230,6 +239,8 @@ jobs:
   testcuda:
     name: (emulated) cuda test
     runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
