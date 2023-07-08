@@ -1,10 +1,11 @@
 from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Set, Union
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer
-from tinygrad.ops import ASTRunner, LazyBuffer, Op, UnaryOps, BinaryOps, FusedOps
+from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
 from tinygrad.helpers import partition, ImageDType, DEBUG, dtypes, colored
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
+from tinygrad.lazy import LazyBuffer
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -117,7 +118,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk(f"{newvar.render(True)} = {code_for_op[args](*[x.render() for x in vin])};")
     elif uop == UOps.LOAD and newvar is not None:
       # TODO: merge with CONST?
-      if bufs[args.i] is not None and isinstance(bufs[args.i], RawConst):
+      if bufs[args.i] is not None and isinstance(bufs[args.i].realized, RawConst):
         assert newvar.dtype == dtypes.float, "const can't be float4"
         x = bufs[args.i].realized._buf
         if math.isnan(x): val = "NAN"
@@ -169,7 +170,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else
                ("const " if i > 0 else "")+lang.buffer_prefix+x.dtype.name+"*"+lang.buffer_suffix) for i,x in enumerate(bufs)
-               if x.__class__ not in [LocalBuffer, RawConst]]
+               if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]
   prg = ''.join([f"{lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
     [', '.join([f'{t} {bufnames[i]}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
