@@ -3,7 +3,6 @@ import unittest
 import numpy as np
 from tinygrad.helpers import prod, all_same
 from tinygrad.shape.shapetracker import ShapeTracker, View, merge_masks, merge_views, get_contraction
-from tinygrad.codegen.cstyle import to_image_idx
 
 def shapetracker_getitem(st, val):
   locals = {"idx": val, "valid": 1}
@@ -544,7 +543,7 @@ class TestMergeMasks(unittest.TestCase):
     mask1 = ((1, 0), (0, 1))
     mask2 = None
     merged_mask = merge_masks(mask1, mask2)
-    self.assertEqual(merged_mask, ((1, 0), (0, 1)))
+    self.assertIsNone(merged_mask)
 
   def test_merge_masks_both_empty(self):
     mask1 = None
@@ -562,12 +561,6 @@ class TestMergeViews(unittest.TestCase):
 
   def test_merge_views_different_offsets(self):
     vm1 = View((2, 2), (2, 1), 1, None)
-    vm2 = View((2, 2), (2, 1), 0, None)
-    merged_view = merge_views(vm2, vm1)
-    self.assertIsNone(merged_view)
-
-  def test_merge_views_none_view(self):
-    vm1 = None
     vm2 = View((2, 2), (2, 1), 0, None)
     merged_view = merge_views(vm2, vm1)
     self.assertIsNone(merged_view)
@@ -594,7 +587,7 @@ class TestMergeViews(unittest.TestCase):
     vm1 = View((2, 2), (2, 1), 0, ((1, 0),))
     vm2 = View((2, 2), (2, 1), 0, None)
     merged_view = merge_views(vm2, vm1)
-    self.assertEqual(merged_view.mask, ((1, 0),))
+    self.assertIsNone(merged_view.mask)
 
 if __name__ == '__main__':
   unittest.main()

@@ -86,7 +86,6 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
-  if vm1 is None or vm2 is None: return None
   mst = ShapeTracker(vm1.shape, [vm2, vm1])
   strides = mst.real_strides()
   if None in strides: return None
@@ -94,10 +93,10 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
 
 @functools.lru_cache(maxsize=None)
 def merge_masks(mask1, mask2):
-    if not mask1 or not mask2:
-        return mask1 or mask2
-    else:
-        return tuple(tuple(m1 or m2 for m1, m2 in zip(t1, t2)) for t1, t2 in zip(mask1, mask2))
+  if mask1 is None or mask2 is None:
+    return None
+  else:
+    return tuple(tuple(m1 or m2 for m1, m2 in zip(t1, t2)) for t1, t2 in zip(mask1, mask2))
 
 @functools.lru_cache(maxsize=None)
 def _reshape(view: View, new_shape: Tuple[int, ...]) -> Tuple[View, bool]:
