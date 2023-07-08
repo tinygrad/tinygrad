@@ -145,7 +145,8 @@ class TestTinygrad(unittest.TestCase):
         b = random_fn(10,10).realize()
         np.testing.assert_allclose(a.numpy(), b.numpy())
 
-  def test_randn_isnt_inf(self):
+  def test_randn_isnt_inf_on_zero(self):
+    # simulate failure case of rand handing a zero to randn
     original_rand, Tensor.rand = Tensor.rand, Tensor.zeros
     try: self.assertNotIn(np.inf, Tensor.randn(16).numpy())
     except: raise
