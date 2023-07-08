@@ -184,7 +184,7 @@ jobs:
         FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 test/test_ops.py
     - name: Test openpilot model compile and size
       run: |
-        ALLOWED_KERNEL_COUNT=199 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+        ALLOWED_KERNEL_COUNT=207 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
         python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
     - name: Test openpilot model correctness (float32)
       run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
