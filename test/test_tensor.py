@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import unittest
 import itertools
+from tinygrad.ops import LoadOps
 from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
@@ -184,6 +185,17 @@ class TestTinygrad(unittest.TestCase):
   def test_element_size(self):
     for _, dtype in dtypes.fields().items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
+
+  def test_constant_fold(self):
+    a = Tensor(3)
+    b = Tensor([4])
+    c = Tensor([[5]])
+    assert a.lazydata.op.op == LoadOps.CONST
+    assert a.lazydata.op.arg == 3.0
+    assert b.lazydata.op.src[0].op.op == LoadOps.CONST
+    assert b.lazydata.op.src[0].op.arg == 4.0
+    assert c.lazydata.op.src[0].op.op == LoadOps.CONST
+    assert c.lazydata.op.src[0].op.arg == 5.0
 
 if __name__ == '__main__':
   unittest.main()
