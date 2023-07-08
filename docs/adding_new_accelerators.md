@@ -12,7 +12,7 @@ reduce_op (SUM, MAX)                                         # A -> B (smaller s
 binary_op (ADD, SUB, MUL, DIV, CMPEQ, MAX)                   # A + A -> A (all the same size)
 movement_op (EXPAND, RESHAPE, PERMUTE, PAD, SHRINK, STRIDE)  # A -> B (different size)
 load_op   (EMPTY, RAND, CONST, FROM, CONTIGUOUS, CUSTOM)     # -> A   (initialize data on device)
-fused_op [[optional]] (MULACC)                               # A * A -> B
+trinary_op [[optional]] (MULACC, WHERE)                      # f(A, B, C) -> D
 ```
 
 ## mlops

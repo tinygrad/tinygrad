@@ -1016,7 +1016,6 @@ class TestOps(unittest.TestCase):
     n = Tensor([1, float("nan")]).max().numpy()
     assert math.isnan(n.item()), f"{n.item()} is not nan"
 
-  @unittest.skip("this test is broken #942")
   def test_inf_where(self):
     x = Tensor.full((3, 3), float("inf"))
     n = (x < 0).where(x, 1).numpy()

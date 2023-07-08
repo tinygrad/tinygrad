@@ -9,7 +9,7 @@ from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten,
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.shape.shapetracker import MovementOps, ShapeTracker, View, get_contraction
-from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, LoadOps, OpType, LazyOp
+from tinygrad.ops import Compiled, Interpreted, TrinaryOps, UnaryOps, BinaryOps, ReduceOps, LoadOps, OpType, LazyOp
 from tinygrad.runtime.lib import RawBufferMapped, RawConst, RawBuffer
 
 # lazy can recurse a lot
@@ -192,6 +192,7 @@ class LazyBuffer:
   def cast(self:LazyBuffer, arg:DType) -> LazyBuffer: return elementwise_op(UnaryOps.CAST, self, arg=arg) if self.dtype != arg else self
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
+  def trinary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer, z:LazyBuffer) -> LazyBuffer: return create_lazybuffer(self.device, ShapeTracker(self.shape), TrinaryOps, LazyOp(TrinaryOps.WHERE, (self, y, z,), None), y.dtype)
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
     return create_lazybuffer(self.device, ShapeTracker(self.shape), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype)

@@ -1,7 +1,7 @@
 from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Set, Union
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer
-from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
+from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, TrinaryOps
 from tinygrad.helpers import partition, ImageDType, DEBUG, dtypes, colored
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
@@ -54,7 +54,9 @@ code_for_op: Final[Dict[Op, Callable]] = {
   BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
   BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
   BinaryOps.MAX: lambda a,b: f"max({a},{b})",
-  BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", FusedOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})"
+  BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})",
+  TrinaryOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})",
+  TrinaryOps.WHERE: lambda a,b,c: f"(({a}!=0)?{b}:{c})"
 }
 
 def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:

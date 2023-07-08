@@ -3,11 +3,12 @@ import functools
 from llvmlite import ir  # type: ignore
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token
 from tinygrad.helpers import dtypes
-from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, FusedOps
+from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, TrinaryOps
 from tinygrad.lazy import LazyBuffer
 
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 def int_const(x): return ir.Constant(ir.IntType(64), x)
+def fp_const(x): return ir.Constant(ir.FloatType(), x)
 render_llvm = {
   NumNode: lambda self,ops,ctx: int_const(self.b),
   MulNode: lambda self,ops,ctx: ctx.mul(self.a.render(ops,ctx), int_const(self.b)),
@@ -29,7 +30,8 @@ code_for_op: Final[Dict[Op, Callable]] = {
   BinaryOps.DIV: lambda builder,x,y: builder.fdiv(x,y, flags=('fast',)),
   BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y, flags=('fast',)), ir.FloatType()),
   BinaryOps.MAX: lambda builder,x,y: builder.select(builder.fcmp_unordered(">", x, y, flags=('fast',)), x, y, flags=('fast',)),
-  FusedOps.MULACC: lambda builder,x,y,z: builder.fadd(builder.fmul(x,y, flags=('fast',)), z, flags=('fast',)),
+  TrinaryOps.MULACC: lambda builder,x,y,z: builder.fadd(builder.fmul(x,y, flags=('fast',)), z, flags=('fast',)),
+  TrinaryOps.WHERE: lambda builder,x,y,z: builder.select(builder.fcmp_ordered("!=", x, fp_const(0), flags=('fast',)), y, z, flags=('fast',)),
 }
 
 def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:

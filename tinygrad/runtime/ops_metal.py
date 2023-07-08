@@ -12,7 +12,7 @@ METAL_XCODE = getenv("METAL_XCODE")
 class _METAL:
   def __init__(self):
     self.mtl_buffers_in_flight: List[Any] = []
-    self.device = Metal.MTLCreateSystemDefaultDevice()
+    self.device = [x for x in Metal.MTLCopyAllDevices() if x.name() not in getenv('CL_EXCLUDE', '').split(',')][0]
     self.mtl_queue = self.device.newCommandQueue()
   # TODO: is there a better way to do this?
   def synchronize(self):

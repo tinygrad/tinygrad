@@ -1,6 +1,6 @@
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort, ShapeType
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps
+from tinygrad.ops import TrinaryOps, UnaryOps, BinaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 import math
@@ -217,3 +217,16 @@ class Flip(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.stride(self.arg)
+
+# ************* trinary ops *************
+
+class Where(Function):
+  __slots__ = "cond"
+  def forward(self, cond:LazyBuffer, input_:LazyBuffer, other:LazyBuffer) -> LazyBuffer:
+    self.cond = cond
+    return cond.trinary_op(TrinaryOps.WHERE, input_, other)
+
+  def backward(self, grad_output:LazyBuffer):
+    return None, \
+           self.cond.trinary_op(TrinaryOps.WHERE, grad_output, self.cond.const_like(0)) if self.needs_input_grad[1] else None, \
+           self.cond.trinary_op(TrinaryOps.WHERE, self.cond.const_like(0), grad_output) if self.needs_input_grad[2] else None
