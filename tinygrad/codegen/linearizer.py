@@ -334,7 +334,7 @@ class Linearizer:
       # end the global loop
       self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
-    # keep only the first buf for each RawBuffer -- these will be the inputs to the kernel
+    # keep only the last buf for each RawBuffer -- these will be the inputs to the kernel
     self.bufs = dedup([x.realized for x in self.bufs], self.bufs)
 
   _OT = TypeVar("_OT")
