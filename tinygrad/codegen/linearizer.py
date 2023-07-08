@@ -102,7 +102,6 @@ class Linearizer:
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
 
     # get the output buffers
-    # after linearize, this is will be deduped by key=buf.realized
     self.bufs = [output_buffer] + dedup(ast.buffers)
 
     # calculate mapping from to unique RawBuffer index
