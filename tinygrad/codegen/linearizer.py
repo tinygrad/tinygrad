@@ -3,7 +3,7 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, unwrap
+from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
@@ -101,9 +101,9 @@ class Linearizer:
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
 
-    # organize the input/output buffers
+    # get the output buffers
     # after process, this is will be deduped by RawBuffer.
-    self.bufs: List[LazyBuffer] = [output_buffer] + dedup(ast.buffers)
+    self.bufs = [output_buffer] + dedup(ast.buffers)
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
@@ -114,7 +114,7 @@ class Linearizer:
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
-    self.key = (self.ast.map_buffers({x:self.raw_bufs.index(unwrap(x.realized)) for x in self.bufs}).key, tuple([x.key for x in self.bufs]))
+    self.key = (self.ast.map_buffers({x:self.raw_bufs.index(x.realized) for x in self.bufs}).key, tuple([x.key for x in self.bufs]))
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
@@ -227,6 +227,7 @@ class Linearizer:
       # TODO: the strides of this can be controlled
       # LocalBuffer has an entry in self.raw_bufs and self.sts, but not in self.bufs
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.raw_bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
