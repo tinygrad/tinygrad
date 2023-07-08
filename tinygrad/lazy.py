@@ -1,16 +1,17 @@
 from __future__ import annotations
 import operator
 from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast
-import sys, importlib, inspect, functools, pathlib
+import sys, importlib, inspect, functools, pathlib, time
 from weakref import ref
 
 import numpy as np
 from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, LightWeakSet, LightWeakValueDictionary
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
+from tinygrad.runtime.ops_shm import RawShmBuffer
 from tinygrad.shape.shapetracker import MovementOps, ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, LoadOps, OpType, LazyOp
-from tinygrad.runtime.lib import RawBufferMapped, RawConst, RawBuffer, RawBufferTransfer
+from tinygrad.runtime.lib import RawBufferCopyInOut, RawBufferMapped, RawConst, RawBuffer, RawBufferTransfer
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -321,6 +322,10 @@ def _realize_from(buffer: LazyBuffer) -> None:
   if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
     buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
     rawbuf.realized.readinto(cast(RawBufferMapped, buffer.realized)._buffer())
+  # TODO: make this generic as well
+  elif isinstance(rawbuf.realized, RawBufferCopyInOut) and Device[buffer.device].buffer is RawShmBuffer:
+    buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
+    rawbuf.realized._copyout(cast(RawBufferMapped, buffer.realized)._buffer())
   elif isinstance(rawbuf.realized, RawBufferTransfer) and issubclass(Device[buffer.device].buffer, RawBufferTransfer):
     buffer.realized = cast(RawBufferTransfer, Device[buffer.device].buffer).transfer(rawbuf.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
   else:
