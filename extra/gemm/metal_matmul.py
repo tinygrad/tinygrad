@@ -6,6 +6,7 @@ from tinygrad.helpers import dtypes, getenv
 from tinygrad.runtime.ops_metal import RawMetalBuffer, MetalProgram
 
 N = getenv("N", 2048)
+LID = 2
 
 a = RawMetalBuffer(N*N, dtypes.float32)
 
@@ -21,10 +22,10 @@ prog = MetalProgram("test", f"""
 #include <metal_stdlib>
 #include <metal_simdgroup_matrix>  // Available from Metal version 2.3 released with OS X 11.0+
 using namespace metal;
-kernel void test(device float *a, device const float *data1, device const float *data2, uint3 gid [[thread_position_in_grid]], uint3 xid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]], uint sidx [[simdgroup_index_in_threadgroup]]) {{
-  a += gid.y * 32 * {N} + gid.z * 32;
-  data1 += gid.y * 32 * {N};
-  data2 += gid.z * 32;
+kernel void test(device float *a, device const float *data1, device const float *data2, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {{
+  a += gid.x * 32 * {N} + (gid.y * {LID} + lid.y) * 32;
+  data1 += gid.x * 32 * {N};
+  data2 += (gid.y * {LID} + lid.y) * 32;
 
   simdgroup_float8x8 acc[4][4];
   for (uint i = 0; i < 4; i++) {{
@@ -85,7 +86,7 @@ def timeit(fxn):
   et = fxn()
   # NOTE: et doesn't contain the launch overhead
   return time.perf_counter() - st
-tm = min([timeit(lambda: prog([32, N//(8*4), N//(8*4)], [32, 1, 4], a, b, c, wait=True)) for _ in range(20)])
+tm = min([timeit(lambda: prog([N//(8*4), N//(8*4*LID), 1], [32, LID, 1], a, b, c, wait=True)) for _ in range(20)])
 na = a.toCPU().reshape(N,N)
 comp = nb@nc
 if N <= 32:
