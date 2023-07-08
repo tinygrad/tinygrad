@@ -98,7 +98,7 @@ class LazyOp:
   src: Tuple[Union[LazyOp, LazyBuffer], ...]   # the sources
   arg: Optional[Any] = None                    # and an optional static argument
 
-# there's currently 27 Ops you have to implement for an accelerator.
+# there's currently 28 Ops you have to implement for an accelerator.
 class UnaryOps(Enum):    NOOP = auto(); EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto();   SQRT = auto()
 class BinaryOps(Enum):   ADD = auto();  SUB = auto();  MUL = auto();  DIV = auto();  CMPEQ = auto(); MAX = auto()
 class ReduceOps(Enum):   SUM = auto();  MAX = auto()
