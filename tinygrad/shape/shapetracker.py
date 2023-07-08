@@ -43,6 +43,8 @@ class View:
     expr = [valid] if valid is not None else []
     if self.mask is not None:
       acc = 1
+      print(self.shape)
+      print(self.mask)
       for ns,(x,y) in reversed(list(zip(self.shape, self.mask))):
         base = ((idx//acc) % ns)
         expr += [base >= x, base < y]
@@ -87,10 +89,7 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if vm2.mask: 
-    print("\nmerge check")
     masks = list()
-    if vm1.mask: masks.append(vm1.mask)
-    print(masks)
     for m in vm2.mask:
       print(m)
       print(vm2.strides)
@@ -102,6 +101,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
     # basically equvalivent to numpy ravel and then unravel
     # return None  # this isn't supported yet
   mst = ShapeTracker(vm1.shape, [vm2, vm1])
+  print(mst)
   strides = mst.real_strides()
   if None in strides: return None
   return View(vm1.shape, cast(Tuple[int, ...], strides), mst.real_offset(), tuple(masks))
