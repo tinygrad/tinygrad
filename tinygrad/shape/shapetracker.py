@@ -95,7 +95,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
       # print(ravel)
       unravel = (ravel//vm1.strides[0], ravel%vm1.strides[0])
       # print(unravel)
-      if not unravel in masks: masks.append(unravel)
+      if unravel not in masks: masks.append(unravel)
     # basically equvalivent to numpy ravel and then unravel
     # return None  # this isn't supported yet
   mst = ShapeTracker(vm1.shape, [vm2, vm1])
