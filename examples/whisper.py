@@ -251,12 +251,12 @@ if __name__ == "__main__":
   def transcribe_wav(fn, sample_len=224, n_audio=1, n_group=1, logprob_threshold=-1.0, no_speech_threshold=0.6):
     mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
     content_frames = mel.shape[-1] - N_FRAMES
+    decoder = GreedyDecoder(eot=enc.eot_token)
+    sequence_ranker = MaximumLikelihoodRanker(None)
     seek, texts = 0, []
     while seek < content_frames:
-      initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|en|>"], enc._special_tokens["<|transcribe|>"]]
+      initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|transcribe|>"]]
       sample_begin = len(initial_tokens)
-      decoder = GreedyDecoder(eot=enc.eot_token)
-      sequence_ranker = MaximumLikelihoodRanker(None)
       mel_segment = mel[:, seek:seek+N_FRAMES]
       mel_segment = np.expand_dims(pad_or_trim(mel, N_FRAMES), axis=0)
       segment_size = min(N_FRAMES, content_frames - seek)
@@ -266,7 +266,7 @@ if __name__ == "__main__":
       no_speech_probs = [np.nan] * tokens.shape[0]
       for i in range(sample_len):
         logits = model.decoder(tokens, audio_features)
-        probs_at_sot = logits[:, 0].softmax(-1) # 0 is the index of sot token
+        probs_at_sot = logits[:, initial_tokens.index(enc._special_tokens["<|startoftranscript|>"])].softmax(axis=-1)
         no_speech_probs = probs_at_sot[:, enc._special_tokens["<|nospeech|>"]].numpy().tolist()
         logits = logits[:, -1]
         tokens, completed = decoder.update(tokens, logits, sum_logprobs)
