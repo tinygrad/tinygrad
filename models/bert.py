@@ -1,7 +1,5 @@
 from tinygrad.tensor import Tensor
-from tinygrad.jit import TinyJit
 from tinygrad.nn import Linear, LayerNorm, Embedding
-import numpy as np
 from extra.utils import download_file, get_child
 from pathlib import Path
 

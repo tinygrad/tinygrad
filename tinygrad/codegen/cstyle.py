@@ -50,9 +50,10 @@ code_for_op: Final[Dict[Op, Callable]] = {
   UnaryOps.EXP2: lambda x: f"exp2({x})",
   UnaryOps.LOG2: lambda x: f"log2({x})",
   UnaryOps.SIN: lambda x: f"sin({x})",
+  UnaryOps.SQRT: lambda x: f"sqrt({x})",
   BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
   BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
-  BinaryOps.POW: lambda a,b: f"pow({a},{b})", BinaryOps.MAX: lambda a,b: f"max({a},{b})",
+  BinaryOps.MAX: lambda a,b: f"max({a},{b})",
   BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", FusedOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})"
 }
 
@@ -63,7 +64,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
   local_size = []
   pend_close = None
 
-  bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(bufs)]
+  bufnames = [b.name if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(bufs)]
 
   depth = 0
   def kk(s): kernel.append("  "*depth+s)
@@ -88,10 +89,11 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
           else:
             kk(f"for (int {var.expr} = {var.min}; {var.expr} <= {var.max}; ++{var.expr}) {{")
       depth += 1
+    elif uop == UOps.BARRIER:
+      kk(lang.barrier)
     elif uop == UOps.ENDLOOP:
       if args[1] == "local" and len(lang.lid):
         # TODO: this is a bit of a hack. the local loop isn't real on the GPU
-        kk(lang.barrier)
         kk(f"if ({Variable.sum(args[0]).render(render_cl)} == 0) {{")
         pend_close = "}"*(len(args[0])+1) + f" /* {args[1]} */"
       else:
@@ -124,19 +126,19 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
         else: val = f"{x}" +  ("f" if not dtypes.is_int(bufs[args.i].dtype) else "")
       elif isinstance(bufs[args.i].dtype, ImageDType):
-        assert newvar.dtype == dtypes._float4, "image must be float4"
+        assert newvar.dtype == dtypes._float4, f"image must be float4 {newvar}"
         prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
         idx, idy = to_image_idx(bufs[args.i].dtype.shape, args.idx, args.valid)
         val = f"read_imagef({bufnames[args.i]}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}))"
       else:
         if lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
           if newvar.dtype == dtypes._float4:
-            val = f"vload_half4({(args.idx//4).render(render_cl)}, {bufnames[args.i]})"
+            val = f"vload_half4(0, {bufnames[args.i]}+{(args.idx).render(render_cl)})"
           else:
             val = f"vload_half({args.idx.render(render_cl)}, {bufnames[args.i]})"
         else:
           if newvar.dtype == dtypes._float4:
-            val = f"({newvar.dtype.name})((({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}])"
+            val = f"({newvar.dtype.name})(*(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*)({bufnames[args.i]}+{args.idx.render(render_cl)})))"
           else:
             val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
@@ -158,8 +160,10 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       if isinstance(bufs[args[0]].dtype, ImageDType):
         idx, idy = to_image_idx(bufs[args.i].dtype.shape, args[1], args[2])
         kk(f"write_imagef({bufnames[args.i]}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {vin[0].render()});")
+      elif lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
+        kk(f"vstore_half4({vin[0].render()}, {args.idx.render(render_cl)}, {bufnames[args.i]});")
       else:
-        kk(f"(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}] = {vin[0].render()};")
+        kk(f"*(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*)({bufnames[args.i]}+{args.idx.render(render_cl)})) = ({bufs[args.i].dtype.name}4){vin[0].render()};")
     elif uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
     else:
@@ -173,7 +177,6 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
   if lang.half_prekernel and any(x.dtype == dtypes.float16 for x in bufs): prg = ''.join([f"{lang.half_prekernel}", "\n", prg])
-  if lang.double_prekernel and any(x.dtype == dtypes.float64 for x in bufs): prg = ''.join([f"{lang.double_prekernel}", "\n", prg])
   return prg, global_size, local_size
 
 class CStyleCodegen(Linearizer):
@@ -194,16 +197,13 @@ class CStyleCodegen(Linearizer):
 
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.bufs, self.lang)
 
-    # if we have local_sizes, we have to correct the global_size
-    for i,s in enumerate(local_size): global_size[i] *= s
-
     # painfully name the function something unique
     if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]
     else:
       CStyleCodegen.kernel_cnt[self.function_name] += 1
       suffix = f"{'n'+str(CStyleCodegen.kernel_cnt[self.function_name]-1)}" if CStyleCodegen.kernel_cnt[self.function_name] > 1 else ""
-      CStyleCodegen.kernel_name_cache[prg] = function_name, display_name = self.function_name+suffix, self.display_name+colored(suffix, 'black', bright=True)
+      CStyleCodegen.kernel_name_cache[prg] = function_name, display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
 
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
-      global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,
+      global_size[::-1], local_size[::-1],
       op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=display_name)

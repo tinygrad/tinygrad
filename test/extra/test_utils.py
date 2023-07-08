@@ -1,8 +1,12 @@
 #!/usr/bin/env python
-import io
-import unittest
-from tinygrad.helpers import getenv
-from extra.utils import fetch
+import io, unittest
+import os
+from unittest.mock import patch, MagicMock
+
+import torch
+import numpy as np
+from tinygrad.helpers import getenv 
+from extra.utils import fetch, temp, download_file
 from tinygrad.state import torch_load
 from PIL import Image
 
@@ -21,11 +25,33 @@ class TestFetch(unittest.TestCase):
     pimg = Image.open(io.BytesIO(img))
     assert pimg.size == (705, 1024)
 
+
+class TestDownloadFile(unittest.TestCase):
+  def setUp(self):
+    from pathlib import Path
+    self.test_file = Path(temp("test_download_file/test_file.txt"))
+
+  def tearDown(self):
+    os.remove(self.test_file)
+    os.removedirs(self.test_file.parent)
+
+  @patch('requests.get')
+  def test_download_file_with_mkdir(self, mock_requests):
+    mock_response = MagicMock()
+    mock_response.iter_content.return_value = [b'1234', b'5678']
+    mock_response.status_code = 200
+    mock_response.headers = {'content-length': '8'}
+    mock_requests.return_value = mock_response
+    self.assertFalse(os.path.exists(self.test_file.parent))
+    download_file("https://www.mock.com/fake.txt", self.test_file, skip_if_exists=False)
+    self.assertTrue(os.path.exists(self.test_file.parent))
+    self.assertTrue(os.path.isfile(self.test_file))
+    self.assertEqual('12345678', self.test_file.read_text())
+
 class TestUtils(unittest.TestCase):
-  def test_fake_torch_load_zipped(self):
-    import torch
-    import numpy as np
-    import tempfile
+  def test_fake_torch_load_zipped(self): self._test_fake_torch_load_zipped()
+  def test_fake_torch_load_zipped_float16(self): self._test_fake_torch_load_zipped(isfloat16=True)
+  def _test_fake_torch_load_zipped(self, isfloat16=False):
     class LayerWithOffset(torch.nn.Module):
       def __init__(self):
         super(LayerWithOffset, self).__init__()
@@ -37,25 +63,22 @@ class TestUtils(unittest.TestCase):
           d.as_strided([2, 2], [1, 2], storage_offset=4)
         )
 
-    for isfloat16 in [True, False]:
-      model = torch.nn.Sequential(
-        torch.nn.Linear(4, 8),
-        torch.nn.Linear(8, 3),
-        LayerWithOffset()
-      )
-      if isfloat16: model = model.half()
+    model = torch.nn.Sequential(
+      torch.nn.Linear(4, 8),
+      torch.nn.Linear(8, 3),
+      LayerWithOffset()
+    )
+    if isfloat16: model = model.half()
 
-      with tempfile.TemporaryDirectory() as tmpdirname:
-        path = tmpdirname + '/testloadmodel.pth'
-        torch.save(model.state_dict(), path)
-        model2 = torch_load(path)
+    path = temp(f"test_load_{isfloat16}.pt") 
+    torch.save(model.state_dict(), path)
+    model2 = torch_load(path)
 
-      for name, a in model.state_dict().items():
-        b = model2[name]
-        a, b = a.numpy(), b.numpy()
-        assert a.shape == b.shape
-        assert a.dtype == b.dtype
-        assert np.array_equal(a, b)
-
+    for name, a in model.state_dict().items():
+      b = model2[name]
+      a, b = a.numpy(), b.numpy()
+      assert a.shape == b.shape
+      assert a.dtype == b.dtype
+      assert np.array_equal(a, b)
 if __name__ == '__main__':
   unittest.main()

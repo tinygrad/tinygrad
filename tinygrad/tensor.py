@@ -7,16 +7,17 @@ import operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
-from math import ceil, pi, prod, sqrt
+from math import ceil, pi, prod, sqrt, log
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
 
 # An instantiation of the Function is the Context
 class Function:
   def __init__(self, device:str, *tensors:Tensor):
-    self.device, self.parents = device, tensors
-    self.needs_input_grad = [t.requires_grad for t in self.parents]
+    self.device = device
+    self.needs_input_grad = [t.requires_grad for t in tensors]
     self.requires_grad = True if any(self.needs_input_grad) else None if None in self.needs_input_grad else False
+    if self.requires_grad: self.parents = tensors
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
   def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
@@ -39,7 +40,7 @@ class Tensor:
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
-  def __init__(self, data:Union[int, float, list, tuple, LazyBuffer, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+  def __init__(self, data:Union[int, float, list, tuple, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     device = Device.canonicalize(device)
     # tensors have gradients, buffers do not
@@ -124,7 +125,7 @@ class Tensor:
   # ***** creation llop entrypoint *****
 
   @staticmethod
-  def _loadop(op, sz, device=Device.DEFAULT, dtype:Optional[DType]=None, arg=None, **kwargs):
+  def _loadop(op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
     return Tensor(LazyBuffer.loadop(op, [sz], Tensor.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
 
   @staticmethod
@@ -132,7 +133,7 @@ class Tensor:
 
   _seed: int = int(time.time())
   @staticmethod
-  def manual_seed(seed=None): Tensor._seed = seed
+  def manual_seed(seed=0): Tensor._seed = seed
 
   @staticmethod
   def rand(*shape, **kwargs):
@@ -151,7 +152,7 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
 
   @staticmethod
-  def arange(stop, start=0, step=1, **kwargs): return Tensor.full(((stop-start)//step,), step, **kwargs).cumsum() + (start - step)
+  def arange(stop, start=0, step=1, **kwargs): return Tensor.full((ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
 
   @staticmethod
   def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
@@ -213,8 +214,8 @@ class Tensor:
     self.grad = Tensor(1, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
-      if not any(x.requires_grad for x in t0._ctx.parents):
-        del t0._ctx  # TODO: does it help to delete this here ever?
+      if not t0.requires_grad:
+        del t0._ctx # TODO: does it help to delete this here ever?
         continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
@@ -234,8 +235,8 @@ class Tensor:
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))]))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
-  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Pad.apply(self, arg=arg) if any([x != (0,0) for x in arg]) else self
-  def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any([x != (0,s) for x,s in zip(arg, self.shape)]) else self
+  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Pad.apply(self, arg=arg) if any(x != (0,0) for x in arg) else self
+  def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
 
   # ***** movement hlops *****
 
@@ -314,7 +315,7 @@ class Tensor:
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
-    assert all([len(y.shape) == len(self.shape) and all([y.shape[i] == s for i,s in enumerate(self.shape) if i != dim]) for y in args])
+    assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
     catargs = [self] + list(args)
     assert all(len(t.shape) != 0 for t in catargs), "zero-dimensional tensor cannot be concatenated"
     shape_cumsum = [0, *accumulate([y.shape[dim] for y in catargs])]
@@ -438,7 +439,7 @@ class Tensor:
     HW, trailing = weight.shape[2:], list(range(3, len(weight.shape)+1))
     x, w = self, weight.reshape(groups, weight.shape[0]//groups, weight.shape[1], *weight.shape[2:]).permute(0,2,1,*trailing).flip(trailing)
     stride = make_pair(stride, len(HW))
-    if any([s>1 for s in stride]):
+    if any(s>1 for s in stride):
       x = x.reshape(*x.shape[:2], *flatten((k,1) for k in x.shape[2:]))
       x = x.pad(((0,0), (0,0), *flatten(((0,0),(0,s-1)) for s in stride)))
       x = x.reshape(*x.shape[:2], *[k*s for k,s in zip(x.shape[2::2], stride)])
@@ -464,15 +465,15 @@ class Tensor:
     #x = x.reshape(bs, groups, cin, rcout, oy, ox, H, W).permute(0,1,3,4,5,2,6,7)
 
     # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
-    ret = (x * weight.reshape(1, groups, rcout, *[1 for _ in range(len(oyx))], cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
-    return ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))
+    ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
+    return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
 
   def dot(self, w:Tensor) -> Tensor:
-    if (n1:=len(self.shape))*(n2:=len(w.shape)) == 0: raise RuntimeError(f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D")
-    x = self.reshape(*self.shape[0:-1], 1, self.shape[-1])
-    w = w.reshape(*w.shape[0:-2], 1, w.shape[-2], w.shape[-1]).transpose(-1, -2)
-    r = (x*w).sum(-1)
-    return r.reshape((*r.shape[:-2], r.shape[-1])) if len(self.shape) == 1 else r
+    n1, n2 = len(self.shape), len(w.shape)
+    assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
+    x = self.reshape(*self.shape[0:-1], *[1]*min(n1-1, n2-1, 1), self.shape[-1])
+    w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
+    return (x*w).sum(-1)
 
   def cumsum(self, axis=0):
     x = self.permute(*(i for i in range(self.ndim) if i != axis), axis)
@@ -482,9 +483,13 @@ class Tensor:
 
   def contiguous(self): return mlops.Contiguous.apply(self)
   def log(self): return mlops.Log.apply(self)
+  def log2(self): return mlops.Log.apply(self)/log(2)
   def exp(self): return mlops.Exp.apply(self)
   def relu(self): return mlops.Relu.apply(self)
+  def sigmoid(self): return mlops.Sigmoid.apply(self)
   def sin(self): return mlops.Sin.apply(self)
+  def sqrt(self): return mlops.Sqrt.apply(self)
+  def rsqrt(self): return (1/self).sqrt()
   def cos(self): return ((pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
 
@@ -495,13 +500,13 @@ class Tensor:
 
   # ***** math functions (unary) *****
   def ceil(self: Tensor) -> Tensor:
-    b = self.cast(dtypes.int32).contiguous()
-    return (self > 0).where(b+1, b)
-  def floor(self: Tensor) -> Tensor: return self.ceil() - 1
+    b = self.cast(dtypes.int32).contiguous().cast(self.dtype)
+    return (self > b).where(b+1, b)
+  def floor(self: Tensor) -> Tensor:
+    b = self.cast(dtypes.int32).contiguous().cast(self.dtype)
+    return (self < b).where(b-1, b)
 
   def __neg__(self): return 0.0-self
-  def sqrt(self): return self.pow(0.5)
-  def rsqrt(self): return self.pow(-0.5)
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
   def abs(self): return self.relu() + (-self).relu()
@@ -509,8 +514,6 @@ class Tensor:
   def reciprocal(self): return 1.0/self
 
   # ***** activation functions (unary) *****
-
-  def sigmoid(self): return (1.0 + (-self).exp()).reciprocal()
   def elu(self, alpha=1.0): return self.relu() - alpha*(1-self.exp()).relu()
   def celu(self, alpha=1.0): return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
   def swish(self): return self * self.sigmoid()
@@ -550,13 +553,15 @@ class Tensor:
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ is Tensor or x else self
   def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if x.__class__ is Tensor or x or reverse else self
   def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse) if x.__class__ is Tensor or x != 1.0 else self
+  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ is Tensor or reverse or not x else self.mul(1/x)
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     if x.__class__ is not Tensor and not reverse:
       # simple pow identities
+      if x < 0: return (1.0/self).pow(-x)
       if x == 2.0: return self*self
-      if x == -1.0: return 1/self
-    return self._broadcasted(mlops.Pow, x, reverse) if x.__class__ is Tensor or x != 1.0 or reverse else self
-  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ is Tensor or reverse or not x else self.mul(1/x)
+      if x == 1.0: return self
+      if x == 0.5: return self.sqrt()
+    return self.log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(log(x)).exp()
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)

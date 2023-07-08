@@ -7,9 +7,9 @@ It's pretty easy to add a new accelerator to tinygrad. All you need to do is imp
 These are the ops that you must implement for your accelerator of choice. Compiled Accelerators do not need to implement movement_ops, as they are handled by the ShapeTracker.
 ```
 Buffer                                                       # class of memory on this device
-unary_op  (NOOP, EXP2, LOG2, CAST, SIN)                      # A -> A
+unary_op  (NOOP, EXP2, LOG2, CAST, SIN, SQRT)                # A -> A
 reduce_op (SUM, MAX)                                         # A -> B (smaller size, B has 1 in shape)
-binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ, MAX)              # A + A -> A (all the same size)
+binary_op (ADD, SUB, MUL, DIV, CMPEQ, MAX)                   # A + A -> A (all the same size)
 movement_op (EXPAND, RESHAPE, PERMUTE, PAD, SHRINK, STRIDE)  # A -> B (different size)
 load_op   (EMPTY, RAND, CONST, FROM, CONTIGUOUS, CUSTOM)     # -> A   (initialize data on device)
 fused_op [[optional]] (MULACC)                               # A * A -> B

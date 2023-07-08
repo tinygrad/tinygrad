@@ -83,7 +83,7 @@ class GroupNorm:
 
     if self.weight is None or self.bias is None: return x
     # elementwise_affine on channels
-    return x * self.weight.reshape(1, -1, *[1 for _ in range(len(x.shape)-2)]) + self.bias.reshape(1, -1, *[1 for _ in range(len(x.shape)-2)])
+    return x * self.weight.reshape(1, -1, *[1] * (len(x.shape)-2)) + self.bias.reshape(1, -1, *[1] * (len(x.shape)-2))
 
 class InstanceNorm:
   def __init__(self, num_features:int, eps:float=1e-5, affine:bool=True):
@@ -94,7 +94,7 @@ class InstanceNorm:
   def __call__(self, x:Tensor):
     x = x.reshape(x.shape[0], self.num_features, -1).layernorm(eps=self.eps).reshape(x.shape)
     if self.weight is None or self.bias is None: return x
-    return x * self.weight.reshape(1, -1, *[1 for _ in range(len(x.shape)-2)]) + self.bias.reshape(1, -1, *[1 for _ in range(len(x.shape)-2)])
+    return x * self.weight.reshape(1, -1, *[1] * (len(x.shape)-2)) + self.bias.reshape(1, -1, *[1] * (len(x.shape)-2))
 
 class LayerNorm:
   def __init__(self, normalized_shape:Union[int, Tuple[int, ...]], eps:float=1e-5, elementwise_affine:bool=True):

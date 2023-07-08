@@ -2,19 +2,20 @@ import torch
 from torch import nn
 import unittest
 import numpy as np
+from tinygrad.state import get_parameters, get_state_dict
 from tinygrad.nn import optim, Linear, Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
-from datasets import fetch_mnist
+from extra.datasets import fetch_mnist
 
 def compare_tiny_torch(model, model_torch, X, Y):
   Tensor.training = True
   model_torch.train()
-  model_state_dict = optim.get_state_dict(model)
+  model_state_dict = get_state_dict(model)
   for k,v in model_torch.named_parameters():
     print(f"initting {k} from torch")
     model_state_dict[k].assign(Tensor(v.detach().numpy())).realize()
 
-  optimizer = optim.SGD(optim.get_parameters(model), lr=0.01)
+  optimizer = optim.SGD(get_parameters(model), lr=0.01)
   optimizer_torch = torch.optim.SGD(model_torch.parameters(), lr=0.01)
 
   Xt = torch.Tensor(X.numpy())
