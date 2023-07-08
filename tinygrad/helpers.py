@@ -103,6 +103,7 @@ class dtypes:
 
   # NOTE: these are internal dtypes, should probably check for that
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
+  _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
