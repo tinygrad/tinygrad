@@ -145,6 +145,13 @@ class TestTinygrad(unittest.TestCase):
         b = random_fn(10,10).realize()
         np.testing.assert_allclose(a.numpy(), b.numpy())
 
+  def test_randn_isnt_inf(self):
+    tensor_rand = Tensor.rand
+    Tensor.rand = Tensor.zeros
+    try: self.assertNotIn(np.inf, Tensor.randn(16).numpy())
+    except: raise
+    finally: Tensor.rand = tensor_rand
+
   def test_zeros_like_has_same_dtype(self):
     for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
       a = Tensor([1, 2, 3], dtype=datatype)
