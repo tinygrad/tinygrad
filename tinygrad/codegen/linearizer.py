@@ -109,16 +109,16 @@ class Linearizer:
     if hasattr(self, "sts"): return   # already processed
 
     # dedup buffers and calculate key
-    self.raw_bufs: List[Union[LocalBuffer,RawBuffer]] = dedup([x.realized for x in self.bufs])  # the raw buffers we want to pass into the codegen, including RawConsts and LocalBuffers
+    self.bufmap = [dedup([x.realized for x in self.bufs]).index(buf.realized) for buf in self.bufs]
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
-    self.key = (self.ast.map_buffers({x:self.raw_bufs.index(x.realized) for x in self.bufs}).key, tuple([x.key for x in self.bufs]))
+    self.key = (self.ast.map_buffers({x:self.bufmap[i] for i, x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
-    self.mem_estimate: int = sum(x.dtype.itemsize*x.size for x in self.raw_bufs)
+    self.mem_estimate: int = sum(x.dtype.itemsize*(x.realized.size if x.realized is not None else prod(x.shape)) for x in self.bufs if x is not None)
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
@@ -189,7 +189,7 @@ class Linearizer:
         localtype = dtypes.float
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.raw_bufs.index(self.bufs[i].realized) if i != -1 else len(self.raw_bufs) - 1, idx, valid)) if const is None else \
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.bufmap[i], idx, valid)) if const is None else \
                      self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
       ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b) if localtype == dtypes._float4 else cache[key])
     return ret
@@ -216,7 +216,7 @@ class Linearizer:
       store_offset = store_offset_new
 
     for idx, var in store_offset.items():
-      self.uop(UOps.STORE, None, [var], MemOp(self.raw_bufs.index(self.bufs[i].realized) if i != -1 else len(self.raw_bufs) - 1, *self.sts[i].expr_idxs(idx)))
+      self.uop(UOps.STORE, None, [var], MemOp(self.bufmap[i], *self.sts[i].expr_idxs(idx)))
 
   def linearize(self):
     # uops
@@ -225,10 +225,9 @@ class Linearizer:
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
-      # LocalBuffer has an entry in self.raw_bufs and self.sts, but not in self.bufs
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
-      self.raw_bufs.append(LocalBuffer("temp", self.sts[-1].size()))
+      self.bufmap.append(max(self.bufmap) + 1)
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
     # print
@@ -310,7 +309,7 @@ class Linearizer:
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
         self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
-        # load localbufs -- -1 should point to the LocalBuffer in self.sts and self.raw_bufs
+        # load localbufs
         loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
@@ -414,8 +413,8 @@ class Linearizer:
 
   def colored_shape(self) -> str: return ' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors()))
   def printbufs(self, prefix=""):
-    for i in range(len(self.raw_bufs)):
-      print(prefix, f"{i:3d} {str(self.raw_bufs[i]):47s}", self.sts[i].views)
+    for i in range(len(self.bufs)):
+      print(prefix, f"{i:3d} {str(self.bufs[i]):47s}", self.sts[i].views)
     print(self.colored_shape())
 
   # ******************** base simplifiers ********************
