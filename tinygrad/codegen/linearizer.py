@@ -182,16 +182,17 @@ class Linearizer:
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
   def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
-    upcast_dim = self.get_upcast_dim(i)
     expanded_nodes = [expand_node(idx) for idx in idxs]
+    _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
+    upcast_dim = self.get_upcast_dim(i)
+
     amt = 1
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     cache: Dict[str, Token] = {}
     ret = []
-    for x in itertools.product(*expanded_nodes[::-1]):
-      _idx = x[::-1]
+    for _idx in _idxs:
       if amt > 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
         localtype = dtypes._float4 if amt == 4 else dtypes._float2
@@ -210,10 +211,12 @@ class Linearizer:
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
     expanded_nodes = [expand_node(idx) for idx in idxs]
-    store_offset = dict(zip([x[::-1] for x in itertools.product(*expanded_nodes[::-1])], store))
+    _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
+    upcast_dim = self.get_upcast_dim(i)
+
+    store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    upcast_dim = self.get_upcast_dim(i)
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
