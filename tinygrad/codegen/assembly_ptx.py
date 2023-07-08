@@ -1,6 +1,6 @@
 import struct
 from tinygrad.codegen.assembly import AssemblyCodegen
-from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
+from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.codegen.linearizer import UOps
 from tinygrad.helpers import dtypes
 
@@ -18,7 +18,7 @@ class PTXCodegen(AssemblyCodegen):
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.eq",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
-           FusedOps.MULACC: "fma.rn"}
+           TernaryOps.MULACC: "fma.rn"}
 
     for uop, out, vin, arg in asm:
       if uop == UOps.DEFINE_REGISTER:
