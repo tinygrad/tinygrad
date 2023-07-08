@@ -26,7 +26,7 @@ class CStyleLanguage(NamedTuple):
   uses_vload: bool = False
 
   # returns a str expression of the const with the given type
-  def render_const(self, x:Union[float,int], var_dtype=dtypes.float) -> str:
+  def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     else: val = f"{x}" + ("" if dtypes.is_int(var_dtype) else "f")
@@ -115,7 +115,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk("}"*len(args[0]) + f" /* {args[1]} */")
     elif uop == UOps.CONST:
       assert newvar is not None
-      kk(f"{newvar.render(True)} = {lang.render_const(args)};")
+      kk(f"{newvar.render(True)} = {lang.render_const(args, newvar.dtype)};")
     elif uop == UOps.ALU:
       assert newvar is not None
       kk(f"{newvar.render(newvar not in vin)} = {code_for_op[args](*[x.render() for x in vin])};")
@@ -128,7 +128,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         val = lang.render_const(bufs[args.i].realized._buf, newvar.dtype)
       else:
         val = lang.render_load(newvar.dtype, bufnames[args.i], bufs[args.i].dtype, args.idx, isinstance(bufs[args.i], LocalBuffer))
-      if args.valid.min == 0 and args.valid.max == 1: val = f"({args.valid.render(render_cl)}) ? ({val}) : ({lang.render_const(0.0, newvar.dtype)})"
+      if args.valid.min == 0 and args.valid.max == 1: val = f"({args.valid.render(render_cl)}) ? ({val}) : {lang.render_const(0.0, newvar.dtype)}"
       kk(f"{newvar.render(True)} = {val};")
     elif uop == UOps.STORE:
       assert args.valid.min == 1, "store must be valid"
