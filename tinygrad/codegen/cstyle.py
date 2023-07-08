@@ -23,7 +23,6 @@ class CStyleLanguage(NamedTuple):
   extra_args: List[str] = []
   float4: Optional[str] = None
   half_prekernel: Optional[str] = None
-  double_prekernel: Optional[str] = None
   uses_vload: bool = False
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
