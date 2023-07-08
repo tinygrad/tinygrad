@@ -120,7 +120,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import LazyOp, BinaryOps, LoadOps
 
 # the 2+3 from before
-result = Tensor([2, 3]) + Tensor([3, 4])
+result = Tensor([2]) + Tensor([3])
 print(type(result.lazydata), result.lazydata)  # let's look at the lazydata of result
 
 # you'll see it has a LazyOp
