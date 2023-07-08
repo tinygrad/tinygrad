@@ -164,8 +164,16 @@ class Div(Function):
 # ************* ternary ops *************
 
 class Where(Function):
+  __slots__ = "x", "y", "z", "ret"
   def forward(self, x:LazyBuffer, y:LazyBuffer, z:LazyBuffer) -> LazyBuffer:
+    self.x, self.y, self.z = x, y, z
     return x.ternary_op(TernaryOps.WHERE, y, z)
+
+  def backward(self, grad_output:LazyBuffer):
+    mask = self.x.binary_op(BinaryOps.CMPEQ, self.x.const_like(0))
+    return grad_output if self.needs_input_grad[0] else None, \
+           mask.ternary_op(TernaryOps.WHERE, mask.const_like(0), grad_output) if self.needs_input_grad[1] else None, \
+           mask.ternary_op(TernaryOps.WHERE, grad_output, mask.const_like(0)) if self.needs_input_grad[2] else None
 
 # ************* movement ops *************
 
