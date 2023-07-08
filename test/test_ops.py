@@ -36,7 +36,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     except Exception:
       raise Exception(f"{s} failed shape {x.shape}")
 
-  if DEBUG >= 4:
+  if DEBUG >= 6:
     np.set_printoptions(linewidth=200, suppress=True)
     print(ret.numpy())
     print(out.detach().numpy())

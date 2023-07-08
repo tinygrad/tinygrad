@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from tinygrad.helpers import prod, all_same
 from tinygrad.shape.shapetracker import ShapeTracker, View, merge_views, get_contraction
-from tinygrad.codegen.cstyle import to_image_idx
+from tinygrad.codegen.linearizer import to_image_idx
 
 def shapetracker_getitem(st, val):
   locals = {"idx": val, "valid": 1}
