@@ -170,9 +170,7 @@ class Tensor:
   @staticmethod
   def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
 
-  def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
-    cond = (self != 0.0)
-    return cond * input_ + (1.0 - cond) * other
+  def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]): return self._broadcasted(mlops.Where, input_, other)
 
   # ***** rng hlops *****
 
