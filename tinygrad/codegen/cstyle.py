@@ -24,6 +24,10 @@ class CStyleLanguage(NamedTuple):
   float4: Optional[str] = None
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
+  def render_const(self, x:Union[float,int]) -> str:
+    if math.isnan(x): return "NAN"
+    elif math.isinf(x): return ("-" if x < 0 else "") + "INFINITY"
+    else: return f"{x}" + ("f" if isinstance(x, float) else "")
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
@@ -104,12 +108,11 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk("}"*len(args[0]) + f" /* {args[1]} */")
     elif uop == UOps.CONST:
       assert newvar is not None
-      if args == -math.inf:
-        kk(f"{newvar.render(True)} = -INFINITY;")
-      elif newvar.dtype == dtypes._float4:
-        kk(f"{newvar.render(True)} = {{ {args}f, {args}f, {args}f, {args}f }};")
+      val = lang.render_const(args)
+      if newvar.dtype == dtypes._float4:
+        kk(f"{newvar.render(True)} = {{ {val}, {val}, {val}, {val} }};")
       else:
-        kk(f"{newvar.render(True)} = {args}f;")
+        kk(f"{newvar.render(True)} = {val};")
     elif uop == UOps.ALU:
       assert newvar is not None
       if newvar in vin:
@@ -120,10 +123,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       # TODO: merge with CONST?
       if bufs[args.i] is not None and isinstance(bufs[args.i].realized, RawConst):
         assert newvar.dtype == dtypes.float, "const can't be float4"
-        x = bufs[args.i].realized._buf
-        if math.isnan(x): val = "NAN"
-        elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-        else: val = f"{x}" +  ("f" if not dtypes.is_int(bufs[args.i].dtype) else "")
+        val = lang.render_const(bufs[args.i].realized._buf)
       elif isinstance(bufs[args.i].dtype, ImageDType):
         assert newvar.dtype == dtypes._float4, f"image must be float4 {newvar}"
         prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
