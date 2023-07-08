@@ -214,7 +214,7 @@ class GreedyDecoder:
     current_logprobs = logprobs[np.arange(0, logprobs.shape[0]), next_tokens]
     sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)
     next_tokens[tokens[:, -1] == self.eot] = self.eot
-    tokens = np.concatenate([tokens, next_tokens[:, None].astype(np.float32)], axis=-1)
+    tokens = np.concatenate([tokens, next_tokens[:, None]], axis=-1)
     completed = (tokens[:, -1] == self.eot).all()
     return Tensor(tokens), completed
 
@@ -262,7 +262,7 @@ if __name__ == "__main__":
       mel_segment = mel[:, seek:seek+N_FRAMES]
       mel_segment = np.expand_dims(pad_or_trim(mel, N_FRAMES), axis=0)
       audio_features = model.encoder(Tensor(mel_segment)).realize()
-      tokens = Tensor([tokens], dtype=dtypes.int8).repeat((mel_segment.shape[0], 1))
+      tokens = Tensor([tokens], dtype=dtypes.int64).repeat((mel_segment.shape[0], 1))
       sum_logprobs = Tensor.zeros(audio_features.shape[0])
       for _ in range(sample_len):
         logits = model.decoder(tokens, audio_features)
@@ -274,9 +274,9 @@ if __name__ == "__main__":
       tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
       tokens = [[t[sample_begin:(t==enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
       selected = sequence_ranker.rank(tokens, sum_logprobs)
-      tokens = [t[i].astype(np.int32).tolist() for i, t in zip(selected, tokens)]
-      text = [enc.decode(list(filter(lambda x: x < len(enc._mergeable_ranks), t))).strip() for t in tokens]
-      return text
+      tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
+      text = [enc.decode(t).strip() for t in tokens]
+      return text[0]
 
   if getenv("TEST"):
     diff = difflib.Differ()
