@@ -25,7 +25,7 @@ def eval_resnet():
   mdljit = TinyJit(mdlrun)
 
   # evaluation on the mlperf classes of the validation set from imagenet
-  from datasets.imagenet import iterate
+  from extra.datasets.imagenet import iterate
   from extra.helpers import cross_process
 
   BS = 64
@@ -56,7 +56,7 @@ def eval_resnet():
 def eval_unet3d():
   # UNet3D
   from models.unet3d import UNet3D
-  from datasets.kits19 import iterate, sliding_window_inference
+  from extra.datasets.kits19 import iterate, sliding_window_inference
   from examples.mlperf.metrics import get_dice_score
   mdl = UNet3D()
   mdl.load_from_pretrained()
@@ -86,7 +86,7 @@ def eval_retinanet():
     x /= input_std
     return x
 
-  from datasets.openimages import openimages, iterate
+  from extra.datasets.openimages import openimages, iterate
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
   from contextlib import redirect_stdout
@@ -135,7 +135,7 @@ def eval_rnnt():
   mdl = RNNT()
   mdl.load_from_pretrained()
 
-  from datasets.librispeech import iterate
+  from extra.datasets.librispeech import iterate
   from examples.mlperf.metrics import word_error_rate
 
   LABELS = [" ", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "'"]
@@ -168,7 +168,7 @@ def eval_bert():
   def run(input_ids, input_mask, segment_ids):
     return mdl(input_ids, input_mask, segment_ids).realize()
 
-  from datasets.squad import iterate
+  from extra.datasets.squad import iterate
   from examples.mlperf.helpers import get_bert_qa_prediction
   from examples.mlperf.metrics import f1_score
   from transformers import BertTokenizer
@@ -198,7 +198,7 @@ def eval_mrcnn():
   from tqdm import tqdm
   from models.mask_rcnn import MaskRCNN
   from models.resnet import ResNet
-  from datasets.coco import BASEDIR, images, convert_prediction_to_coco_bbox, convert_prediction_to_coco_mask, accumulate_predictions_for_coco, evaluate_predictions_on_coco, iterate
+  from extra.datasets.coco import BASEDIR, images, convert_prediction_to_coco_bbox, convert_prediction_to_coco_mask, accumulate_predictions_for_coco, evaluate_predictions_on_coco, iterate
   from examples.mask_rcnn import compute_prediction_batched, Image
   mdl = MaskRCNN(ResNet(50, num_classes=None, stride_in_1x1=True))
   mdl.load_from_pretrained()

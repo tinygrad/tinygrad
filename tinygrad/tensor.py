@@ -14,9 +14,10 @@ from tinygrad.ops import LoadOps
 # An instantiation of the Function is the Context
 class Function:
   def __init__(self, device:str, *tensors:Tensor):
-    self.device, self.parents = device, tensors
-    self.needs_input_grad = [t.requires_grad for t in self.parents]
+    self.device = device
+    self.needs_input_grad = [t.requires_grad for t in tensors]
     self.requires_grad = True if any(self.needs_input_grad) else None if None in self.needs_input_grad else False
+    if self.requires_grad: self.parents = tensors
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
   def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
@@ -132,7 +133,7 @@ class Tensor:
 
   _seed: int = int(time.time())
   @staticmethod
-  def manual_seed(seed=None): Tensor._seed = seed
+  def manual_seed(seed=0): Tensor._seed = seed
 
   @staticmethod
   def rand(*shape, **kwargs):
@@ -213,8 +214,8 @@ class Tensor:
     self.grad = Tensor(1, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
-      if not any(x.requires_grad for x in t0._ctx.parents):
-        del t0._ctx  # TODO: does it help to delete this here ever?
+      if not t0.requires_grad:
+        del t0._ctx # TODO: does it help to delete this here ever?
         continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
@@ -487,6 +488,8 @@ class Tensor:
   def relu(self): return mlops.Relu.apply(self)
   def sigmoid(self): return mlops.Sigmoid.apply(self)
   def sin(self): return mlops.Sin.apply(self)
+  def sqrt(self): return mlops.Sqrt.apply(self)
+  def rsqrt(self): return (1/self).sqrt()
   def cos(self): return ((pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
 
@@ -504,8 +507,6 @@ class Tensor:
     return (self < b).where(b-1, b)
 
   def __neg__(self): return 0.0-self
-  def sqrt(self): return self.pow(0.5)
-  def rsqrt(self): return self.pow(-0.5)
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
   def abs(self): return self.relu() + (-self).relu()
@@ -552,13 +553,15 @@ class Tensor:
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ is Tensor or x else self
   def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if x.__class__ is Tensor or x or reverse else self
   def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse) if x.__class__ is Tensor or x != 1.0 else self
+  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ is Tensor or reverse or not x else self.mul(1/x)
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     if x.__class__ is not Tensor and not reverse:
       # simple pow identities
+      if x < 0: return (1.0/self).pow(-x)
       if x == 2.0: return self*self
-      if x == -1.0: return 1/self
-    return self._broadcasted(mlops.Pow, x, reverse) if x.__class__ is Tensor or x != 1.0 or reverse else self
-  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ is Tensor or reverse or not x else self.mul(1/x)
+      if x == 1.0: return self
+      if x == 0.5: return self.sqrt()
+    return self.log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(log(x)).exp()
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)
