@@ -36,15 +36,13 @@ class CStyleLanguage(NamedTuple):
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
       assert output_dtype == dtypes._float4, "images must be float4"
-      val = f"read_imagef({buf_name}, smp, (int2)({idx[0].render(render_cl)}, {idx[1].render(render_cl)}))"
+      return f"read_imagef({buf_name}, smp, (int2)({idx[0].render(render_cl)}, {idx[1].render(render_cl)}))"
     elif self.uses_vload and buf_dtype == dtypes.float16:
-      val = f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx.render(render_cl)})"
+      return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx.render(render_cl)})"
+    elif output_dtype == dtypes._float4:
+      return f"({output_dtype.name})(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx.render(render_cl)})))"
     else:
-      if output_dtype == dtypes._float4:
-        val = f"({output_dtype.name})(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx.render(render_cl)})))"
-      else:
-        val = f"{buf_name}[{idx.render(render_cl)}]"
-    return val
+      return f"{buf_name}[{idx.render(render_cl)}]"
 
   # returns a str statement that does the store
   def render_store(self, buf_name, buf_dtype, var_name, var_dtype, idx, local=False) -> str:
