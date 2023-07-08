@@ -134,7 +134,7 @@ class ASTRunner:
     return self
 
   def exec(self, bufs) -> Optional[float]:
-    rawbufs = dedup([x.realized for x in bufs if x.realized.__class__ is not RawConst])
+    rawbufs = dedup([x.realized for x in bufs if x.realized is not None and x.realized.__class__ is not RawConst])
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs)
 
