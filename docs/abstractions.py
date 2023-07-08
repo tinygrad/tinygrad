@@ -98,7 +98,7 @@ class LazyOp:
   src: Tuple[Union[LazyOp, LazyBuffer], ...]   # the sources
   arg: Optional[Any] = None                    # and an optional static argument
 
-# there's currently 27 Ops you have to implement for an accelerator.
+# there's currently 28 Ops you have to implement for an accelerator.
 class UnaryOps(Enum):    NOOP = auto(); EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto();   SQRT = auto()
 class BinaryOps(Enum):   ADD = auto();  SUB = auto();  MUL = auto();  DIV = auto();  CMPEQ = auto(); MAX = auto()
 class ReduceOps(Enum):   SUM = auto();  MAX = auto()
@@ -108,7 +108,7 @@ class LoadOps(Enum):     EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = a
 # NOTE: if you have a CompiledBuffer(DeviceBuffer)
 #       you do not need to implement the MovementOps
 #       as they are handled by the ShapeTracker(in tinygrad/shape/shapetracker.py, code 7/10)
-Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, FusedOps, LoadOps]
+Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, TernaryOps, LoadOps]
 
 # most of tinygrad/lazy.py is concerned with fusing Ops into LazyOps ASTs that map to GPUKernels
 # it's beyond the scope of this tutorial, but you can read the file if interested
