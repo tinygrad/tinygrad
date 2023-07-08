@@ -520,6 +520,21 @@ class Linearizer:
           self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
           self.group_for_reduce.append(4)
 
+      if not self.group_for_reduce:
+        # Trying more agressive
+        # reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
+        warp_size = 32
+        fxd_range = range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)
+        for i in fxd_range:
+          if self.full_shape[i] <= 512: continue # fine for inner loop for now, but should be fixed based on threadgroup size...
+          for sz in range(min(256, self.full_shape[i] // 2 + 1), 1, -1):
+            if all(st.shape[i] % sz == 0 or st.shape[i] == 1 for st in self.sts):
+              # print("group for reduce")
+              self.shift_to(i, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
+              self.group_for_reduce.append(sz)
+              fxd_range = []
+              break
+
     # now do everything required
     self.required_optimizations()
 
