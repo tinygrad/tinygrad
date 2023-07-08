@@ -7,7 +7,7 @@ import librosa
 import numpy as np
 from tinygrad import nn
 from tinygrad.state import torch_load, load_state_dict
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, dtypes
 from tinygrad.tensor import Tensor
 from extra.utils import download_file
 from extra.datasets.librispeech import ci, BASEDIR
@@ -248,24 +248,26 @@ if __name__ == "__main__":
   load_state_dict(model, state['model_state_dict'])
   enc = get_encoding(state['dims']['n_vocab'])
 
-  def transcribe_wav(fn, sample_len=224):
-    from tinygrad.helpers import dtypes
+  def transcribe_wav(fn, sample_len=224, n_audio=1, n_group=1, logprob_threshold=-1.0, no_speech_threshold=0.6):
     mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
-    n_audio, n_group = 1, 1
     content_frames = mel.shape[-1] - N_FRAMES
-    seek = 0
+    seek, texts = 0, []
     while seek < content_frames:
-      tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|en|>"], enc._special_tokens["<|transcribe|>"]]
-      sample_begin = len(tokens)
+      initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|en|>"], enc._special_tokens["<|transcribe|>"]]
+      sample_begin = len(initial_tokens)
       decoder = GreedyDecoder(eot=enc.eot_token)
       sequence_ranker = MaximumLikelihoodRanker(None)
       mel_segment = mel[:, seek:seek+N_FRAMES]
       mel_segment = np.expand_dims(pad_or_trim(mel, N_FRAMES), axis=0)
+      segment_size = min(N_FRAMES, content_frames - seek)
       audio_features = model.encoder(Tensor(mel_segment)).realize()
-      tokens = Tensor([tokens], dtype=dtypes.int64).repeat((mel_segment.shape[0], 1))
+      tokens = Tensor([initial_tokens], dtype=dtypes.int64).repeat((mel_segment.shape[0], 1))
       sum_logprobs = Tensor.zeros(audio_features.shape[0])
-      for _ in range(sample_len):
+      no_speech_probs = [np.nan] * tokens.shape[0]
+      for i in range(sample_len):
         logits = model.decoder(tokens, audio_features)
+        probs_at_sot = logits[:, 0].softmax(-1) # 0 is the index of sot token
+        no_speech_probs = probs_at_sot[:, enc._special_tokens["<|nospeech|>"]].numpy().tolist()
         logits = logits[:, -1]
         tokens, completed = decoder.update(tokens, logits, sum_logprobs)
         if completed: break
@@ -275,8 +277,12 @@ if __name__ == "__main__":
       tokens = [[t[sample_begin:(t==enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
       selected = sequence_ranker.rank(tokens, sum_logprobs)
       tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
-      text = [enc.decode(t).strip() for t in tokens]
-      return text[0]
+      texts.extend([enc.decode(t).strip() for t in tokens])
+      sum_logprobs = [lp[i] for i, lp in zip(selected, sum_logprobs)]
+      avg_logprobs = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
+      #if no_speech_probs[0] > no_speech_threshold and avg_logprob <= logprob_threshold:
+      seek += segment_size
+    return texts
 
   if getenv("TEST"):
     diff = difflib.Differ()
