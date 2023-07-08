@@ -13,7 +13,8 @@ from tinygrad.shape.symbolic import Variable, NumNode
 VariableOrNum = Union[Variable, NumNode]
 
 class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); \
-                  SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
+                  SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto(); \
+                  ATOMIC_ADD = auto(); ATOMIC_MAX = auto() # TODO: wanna make this optional.
 
 class LocalBuffer(NamedTuple):
   name: str
@@ -142,6 +143,7 @@ class Linearizer:
     self.group_for_reduce: List[int] = []
     self.upcasted: int = 0
     self.local_dims: int = 0
+    self.forced_global_dims: int = 0
 
     # group simplifies
     self.simplify_ones()
@@ -215,6 +217,11 @@ class Linearizer:
     for idx, var in store_offset.items():
       self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idx)))
 
+  def atomic_add(self, i, idxs:List[VariableOrNum], store:List[Token], args=[]) -> None:
+    store_offset = dict(zip(expand_idxs(idxs), store))
+    for idx, var in store_offset.items():
+      self.uop(UOps.ATOMIC_ADD, None, [var], [MemOp(i, *self.sts[i].expr_idxs(idx))] + args)
+
   def linearize(self):
     # uops
     self.uops: List[UOp] = []
@@ -222,7 +229,7 @@ class Linearizer:
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
-      self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      self.sts.append(ShapeTracker(tuple([1] * self.forced_global_dims + [1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.forced_global_dims - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
@@ -245,11 +252,11 @@ class Linearizer:
       return Token(f"{name}{_ssa[name]-1}", ltype)
 
     # global loop
-    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
+    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims+self.forced_global_dims)]
     self.uop(UOps.LOOP, None, [], (global_idxs, "global"))
 
     # local loop
-    local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce-self.local_dims, self.first_reduce+len(self.group_for_reduce))]
+    local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce-self.local_dims+self.forced_global_dims, self.first_reduce+len(self.group_for_reduce)+self.forced_global_dims)]
     self.uop(UOps.LOOP, None, [], (local_idxs, "local"))
 
     # upcast indexes
@@ -261,7 +268,7 @@ class Linearizer:
     if self.reduceops is not None:
       for reduce_idx,reduceop in enumerate(self.reduceops):
         # define indexes
-        reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
+        reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce)+self.forced_global_dims, self.shape_len-self.upcasted)]
         fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
         # define accumulator
@@ -308,7 +315,7 @@ class Linearizer:
           accs = [acc]
 
           # late reduce loop
-          end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
+          end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce+self.forced_global_dims else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce)+self.forced_global_dims)]
           self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
           # load localbufs
@@ -327,7 +334,13 @@ class Linearizer:
     val = self.ast_parse(self.ast, accs, loaded_buffers, ssa)
 
     # store
-    self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa)
+    # TODO: We should not allow this kind of optimization when we have any operation on acc
+    # which cannot match with SUM/MAX operation.
+    if self.forced_global_dims:
+      cll = {ReduceOps.SUM: self.atomic_add, ReduceOps.MAX: self.atomic_add}[cast(ReduceOps, reduceop.op)]
+      cll(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
+    else:
+      self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa)
 
     if not self.group_for_reduce:
       # end the global+local loop
@@ -384,7 +397,7 @@ class Linearizer:
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
   @property
-  def upcast_in_mid_reduce_axes(self) -> List[int]: return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)) if self.full_shape[j] == self.sts[0].shape[j]]
+  def upcast_in_mid_reduce_axes(self) -> List[int]: return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)+self.forced_global_dims) if self.full_shape[j] == self.sts[0].shape[j]]
 
   # there's seven chunks of the shape
   # blue   -- global dims
@@ -398,13 +411,13 @@ class Linearizer:
   # yellow -- normal upcasted dimensions
   def colors(self) -> List[str]:
     # up to first_reduce, they are all global (blue)
-    colors = ["blue"] * (self.first_reduce-self.local_dims)
+    colors = ["blue"] * (self.first_reduce-self.local_dims+self.forced_global_dims)
     # except the local_dims, these are non-reduce locals (cyan)
     colors += ["cyan"] * (self.local_dims)
     # between first_reduce and first_reduce + group_for_reduce, they are either local (cyan), or late upcasted (green)
     colors += ["white" if i in self.upcast_in_mid_reduce_axes else "green" for i in range(self.first_reduce, self.first_reduce + len(self.group_for_reduce))]
     # between first_reduce + group_for_reduce and upcasted, they are reduce (red)
-    colors += ["red"] * ((self.shape_len-self.upcasted) - (self.first_reduce + len(self.group_for_reduce)))
+    colors += ["red"] * ((self.shape_len-self.upcasted) - (self.first_reduce + len(self.group_for_reduce) +self.forced_global_dims))
     # upcasted dimensions are reduce (magenta) or normal (yellow)
     colors += ["magenta" if self.full_shape[i] != self.sts[0].shape[i] else "yellow" for i in range(self.shape_len-self.upcasted, self.shape_len)]
     assert len(colors) == self.shape_len, "colors size mismatch"
@@ -520,7 +533,17 @@ class Linearizer:
           self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
           self.group_for_reduce.append(4)
 
-      if not self.group_for_reduce:
+      # If has group but global dims is 1, upcast it and use atomics.
+      # TODO: determine which device support atomics before applying this.
+      if self.group_for_reduce and prod(self.sts[0].shape[:self.first_reduce]) <= 64: # TODO: Better const than 64.
+        for sz in [1024, 512, 256, 64, 32, 16]:
+          # print(self.sts, self.first_reduce + len(self.group_for_reduce))
+          if all(st.shape[self.first_reduce + len(self.group_for_reduce)] % sz == 0 or st.shape[self.first_reduce + len(self.group_for_reduce)] == 1 for st in self.sts):
+            self.shift_to(self.first_reduce + len(self.group_for_reduce), sz, top=True, insert_before=0)
+            self.forced_global_dims = 1
+            break
+
+      if not self.float4_axis(0) and self.group_for_reduce and not self.group_for_reduce:
         # Trying more agressive
         # reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
         warp_size = 32

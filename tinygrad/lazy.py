@@ -80,7 +80,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
         intermediate_shape = psrc[1].shape
         assert psrc[0].shape == self.shape, f"shape mismatch {psrc[0].shape} != {self.shape}"
 
-      if getenv("ONEREDUCE"):
+      if getenv("ONEREDUCE", 1):
         break
 
   # reshape all the late ops into the output shape

@@ -78,6 +78,8 @@ class MetalCodegen(CStyleCodegen):
     kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel", buffer_prefix = "device ", smem_prefix = "threadgroup ",
     barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);", float4 = "float4",
     gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
+    atomic_prefix = "device atomic_",
+    atomic_add = "atomic_fetch_add_explicit({0}, {1}, memory_order_relaxed)",
     extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
 
 MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram, METAL.synchronize)

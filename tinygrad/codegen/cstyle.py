@@ -18,6 +18,8 @@ class CStyleLanguage(NamedTuple):
   buffer_suffix: str = ""
   smem_prefix: str = ""
   barrier: str = ""
+  atomic_prefix: str = ""
+  atomic_add: str = ""
   gid: List[str] = []
   lid: List[str] = []
   extra_args: List[str] = []
@@ -68,6 +70,8 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   depth = 0
   def kk(s): kernel.append("  "*depth+s)
+
+  atomic_on_bufs = set()
 
   for uop,newvar,vin,args in uops:
     if uop == UOps.LOOP:
@@ -164,12 +168,16 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk(f"vstore_half4({vin[0].render()}, {args.idx.render(render_cl)}, {bufnames[args.i]});")
       else:
         kk(f"*(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*)({bufnames[args.i]}+{args.idx.render(render_cl)})) = ({bufs[args.i].dtype.name}4){vin[0].render()};")
+    elif uop == UOps.ATOMIC_ADD:
+      atomic_on_bufs.add(args[0].i)
+      kk(lang.atomic_add.format(f"{bufnames[args[0].i]}", vin[0].render()) + ";")
     elif uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
     else:
       raise RuntimeError(f"failed to render {uop}")
 
   buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else
+               ("const " if i > 0 else "")+lang.atomic_prefix+x.dtype.name+"*" if i in atomic_on_bufs else
                ("const " if i > 0 else "")+lang.buffer_prefix+x.dtype.name+"*"+lang.buffer_suffix) for i,x in enumerate(bufs)
                if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]
   prg = ''.join([f"{lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
