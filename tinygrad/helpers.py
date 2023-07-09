@@ -94,25 +94,37 @@ class dtypes:
   def get_vector_type(x: DType):
     if x.name == 'half': return dtypes._half4 
     if x.name == 'int': return dtypes._int4 
+    if x.name == 'char': return dtypes._char4 
+    if x.name == 'long': return dtypes._long4 
     if x.is_vector_type: return x
     return dtypes._float4 
+  def get_normal_type(x: DType):
+    if x.name == 'half4': return dtypes.half 
+    if x.name == 'int4': return dtypes.int32
+    if x.name == 'char4': return dtypes.int8
+    if x.name == 'long4': return dtypes.int64
+    if not x.is_vector_type: return x
+    return dtypes.float 
   bool: Final[DType] = DType(0, 1, "bool", bool)
-  float16: Final[DType] = DType(0, 2, "half", np.float16)
+  float16: Final[DType] = DType(1, 2, "half", np.float16)
   half = float16
   float32: Final[DType] = DType(4, 4, "float", np.float32)
   float = float32
   int8: Final[DType] = DType(0, 1, "char", np.int8)
-  int32: Final[DType] = DType(1, 4, "int", np.int32)
-  int64: Final[DType] = DType(2, 8, "long", np.int64)
+  int32: Final[DType] = DType(2, 4, "int", np.int32)
+  int64: Final[DType] = DType(3, 8, "long", np.int64)
   uint8: Final[DType] = DType(0, 1, "unsigned char", np.uint8)
-  uint32: Final[DType] = DType(1, 4, "unsigned int", np.uint32)
-  uint64: Final[DType] = DType(2, 8, "unsigned long", np.uint64)
+  uint32: Final[DType] = DType(2, 4, "unsigned int", np.uint32)
+  uint64: Final[DType] = DType(3, 8, "unsigned long", np.uint64)
 
   # NOTE: these are internal dtypes, should probably check for that
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4, is_vector_type=True)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4, is_vector_type=True)
-  _int4: Final[DType] = DType(1, 4*4, "int4", None, 4, is_vector_type=True)
+  _char4: Final[DType] = DType(0, 4*1, "char4", None, 4, is_vector_type=True)
+  _long4: Final[DType] = DType(3, 4*8, "long4", None, 4, is_vector_type=True)
+  _int4: Final[DType] = DType(2, 4*4, "int4", None, 4, is_vector_type=True)
   _float2: Final[DType] = DType(4, 4*2, "float2", None, 2, is_vector_type=True)
+
 
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class

@@ -134,7 +134,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       assert args.valid.min == 1, "store must be valid"
       # TODO: instead of dtypes.float, a base type
       kk(lang.render_store(bufnames[args.i], bufs[args.i].dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, isinstance(bufs[args.i], LocalBuffer)))
-    elif uop == UOps.CAST and newvar is not None and newvar.dtype.is_vector_type:
+    elif uop == UOps.CAST and newvar is not None:
       kk(f"{newvar.render(True)} = ({lang.make_vector_prefix}{newvar.dtype.name})({','.join([x.render() for x in vin])});")
     elif uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")

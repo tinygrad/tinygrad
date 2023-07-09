@@ -51,7 +51,7 @@ class Token(NamedTuple):
       assert self.offset is None
       return f"{self.dtype.name} {self.name}"
     if self.offset is None: return self.name
-    assert self.dtype.is_vector_type
+    assert self.dtype.is_vector_type, self
     return self.name+"."+"xyzw"[int(self.offset)]
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
@@ -185,7 +185,7 @@ class Linearizer:
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
   def get_upcast_dim(self, i, amt=4):
-    should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
+    should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16, dtypes.int8, dtypes.int32, dtypes.int64] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == amt]
 
   def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
@@ -356,6 +356,17 @@ class Linearizer:
     self.uops.append(UOp(uop, cast(Optional[Token], out), vin, arg))
     if DEBUG >= 4: print(self.uops[-1])
     return out
+  
+  @staticmethod
+  def ungroup(token_is_grouped, size=4):
+    token, is_grouped = token_is_grouped
+    # assert token.dtype.is_vector_type
+    if isinstance(token, Token) and is_grouped:
+      new_tokens = []
+      for idx in range(size):
+        new_tokens.append(Token(token.name, token.dtype, idx if token.dtype.is_vector_type else None))
+      return new_tokens
+    return token
 
   def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
     if x.__class__ is not LazyOp: return loaded_buffers[x]
@@ -371,11 +382,43 @@ class Linearizer:
       srcs = sorted(x.src, key=lambda x: (x.realized.__class__ != RawConst) if x.__class__ == LazyBuffer else 0)
       x.src = tuple(srcs)
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
-    print(values[0][0], values[1][0])
+
+    cast_dtype = None
+    highest_priority = -1
+    for val in values:
+      for v in val:
+        if v.dtype.priority > highest_priority:
+          highest_priority = v.dtype.priority
+          cast_dtype = v.dtype if v.offset is None else dtypes.get_normal_type(v.dtype) 
+
+    def maybe_cast(val, cast_dtype):
+      if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2]:
+        if len(val) < 4: cast_dtype = dtypes.float
+        else: cast_dtype = dtypes._float4
+      
+      if len(val) >= 4:
+        cast_dtype = dtypes.get_vector_type(cast_dtype)
+        if dtypes.get_vector_type(val[0].dtype) != cast_dtype:
+          return self.uop(UOps.CAST, ssa("casted", cast_dtype), val), True
+      else:
+        casted = []
+        for v in val:
+          if v.dtype != cast_dtype and dtypes.get_vector_type(v.dtype) != cast_dtype and ((v.offset is not None and (dtypes.get_vector_type(cast_dtype) != v.dtype)) or v.offset is None):
+            casted.append(self.uop(UOps.CAST, ssa("casted", cast_dtype), [v]))
+          else:
+            casted.append(v)
+        return casted, True
+      return val, False
+    
+    casted_values = [self.ungroup(maybe_cast(val, cast_dtype), size=len(val)) for val in values]
+    casted_values = list(get_grouped_maybe_vector4(*casted_values, grouping_allowed=self.supports_float4 and x.op != BinaryOps.CMPEQ))
+    ret = []
     if x.op.__class__ in {ReduceOps, FusedOps}:
-      ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_vector4(*values, acc, grouping_allowed=self.supports_float4_alu)]
+      for idx, val in get_grouped_maybe_vector4(*values, acc, grouping_allowed=self.supports_float4_alu):
+        ret.append((idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])))
     else:
-      ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes.get_vector_type(val[0].dtype)) if any(x.dtype.is_vector_type and x.offset is None for x in val) else ssa('alu', dtypes.get_vector_type(val[0].dtype)), list(val), x.op)) for idx, val in get_grouped_maybe_vector4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
+        for idx, val in casted_values:
+          ret.append((idx, self.uop(UOps.ALU, ssa('alu', dtypes.get_vector_type(val[0].dtype)) if any(x.dtype.is_vector_type and x.offset is None for x in val) else ssa('alu', dtypes.get_vector_type(val[0].dtype)), list(val), x.op)))
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
