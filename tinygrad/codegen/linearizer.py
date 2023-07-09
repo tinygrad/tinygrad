@@ -225,7 +225,7 @@ class Linearizer:
         idx, valid = self.sts[i].expr_idxs(k)
         assert idx.render() == ((idx//4)*4).render(), "float4 stores are always aligned"
         assert valid.min == 1, "stores are always valid"
-        if all_same([x.name for x in out_tokens]) and tuple(range(4)) == tuple(x.offset for x in out_tokens):
+        if all_same([x.name for x in out_tokens]) and tuple(range(4)) == tuple(x.offset for x in out_tokens) and self.bufs[i].dtype == out_tokens[0].dtype:
           store_offset_new[k] = Token(out_tokens[0].name, dtypes.get_vector_type(self.bufs[i].dtype))
         else:
           store_offset_new[k] = self.uop(UOps.CAST, ssa("alu", dtypes.get_vector_type(self.bufs[i].dtype)), out_tokens)
