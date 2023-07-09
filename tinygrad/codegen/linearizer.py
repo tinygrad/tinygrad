@@ -40,7 +40,6 @@ class LocalBuffer(NamedTuple):
   name: str
   size: int
   dtype: DType = dtypes.float32
-  alias: Optional[LazyBuffer] = None
   realized: None = None
   def __str__(self): return f"localbuffer<{self.name}[{self.size}]>"
 
@@ -598,7 +597,7 @@ class Linearizer:
           bst *= shp[j]
 
     self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
-    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size(), alias=self.bufs[i]))
+    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
 
