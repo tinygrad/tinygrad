@@ -5,7 +5,7 @@ import librosa
 import soundfile
 
 """
-The dataset has to be downloaded manually from https://www.openslr.org/12/ and put in `datasets/librispeech`.
+The dataset has to be downloaded manually from https://www.openslr.org/12/ and put in `extra/datasets/librispeech`.
 For mlperf validation the dev-clean dataset is used.
 
 Then all the flacs have to be converted to wav using something like:
@@ -13,9 +13,9 @@ Then all the flacs have to be converted to wav using something like:
 for file in $(find * | grep flac); do ffmpeg -i $file -ar 16k "$(dirname $file)/$(basename $file .flac).wav"; done
 ```
 
-Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recognition/rnnt/dev-clean-wav.json) has to also be put in `datasets/librispeech`.
+Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recognition/rnnt/dev-clean-wav.json) has to also be put in `extra/datasets/librispeech`.
 """
-BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/librispeech"
+BASEDIR = pathlib.Path(__file__).parent / "librispeech"
 with open(BASEDIR / "dev-clean-wav.json") as f:
   ci = json.load(f)
 

@@ -2,13 +2,24 @@ import pathlib
 import zipfile
 import numpy as np
 import torchvision
-import pycocotools._mask as _mask
+import pycocotools.mask as _mask
 
+<<<<<<< HEAD:datasets/coco.py
 from tinygrad.tensor import Tensor
 from extra.utils import download_file
 from models.mask_rcnn import BoxList
 from models.mask_rcnn import SegmentationMask
 from models.mask_rcnn import PersonKeypoints
+=======
+iou         = _mask.iou
+merge       = _mask.merge
+frPyObjects = _mask.frPyObjects
+
+BASEDIR = pathlib.Path(__file__).parent / "COCO"
+BASEDIR.mkdir(exist_ok=True)
+
+def create_dict(key_row, val_row, rows): return {row[key_row]:row[val_row] for row in rows}
+>>>>>>> 67e34b356a55dd043ed523457b48cff9e7a41dba:extra/datasets/coco.py
 
 
 min_keypoints_per_image = 10

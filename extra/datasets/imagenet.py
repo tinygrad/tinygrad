@@ -5,7 +5,7 @@ import numpy as np
 from PIL import Image
 import functools, pathlib
 
-BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/imagenet"
+BASEDIR = pathlib.Path(__file__).parent / "imagenet"
 ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
 cir = {v[0]: int(k) for k,v in ci.items()}
 
