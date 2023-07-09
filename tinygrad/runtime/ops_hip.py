@@ -53,7 +53,7 @@ class HIPProgram:
 
 class HIPCodegen(CStyleCodegen):
   lang = CStyleLanguage(
-    kernel_prefix = "#define INFINITY (__builtin_inff())\nextern \"C\" __global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
+    kernel_prefix = "#define INFINITY (__builtin_inff())\nextern \"C\" __global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", make_vector_prefix = "make_",
     half_prekernel = "",
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])

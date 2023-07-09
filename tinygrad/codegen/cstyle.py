@@ -21,7 +21,7 @@ class CStyleLanguage(NamedTuple):
   gid: List[str] = []
   lid: List[str] = []
   extra_args: List[str] = []
-  float4: Optional[str] = None
+  make_vector_prefix: Optional[str] = ''
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
 
@@ -30,7 +30,7 @@ class CStyleLanguage(NamedTuple):
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     else: val = f"{x}" + ("" if dtypes.is_int(var_dtype) else "f")
-    return f"{self.float4}({val}, {val}, {val}, {val})" if var_dtype == dtypes._float4 else val
+    return f"({self.make_vector_prefix}{var_dtype})({val}, {val}, {val}, {val})" if var_dtype.is_vector_type else val
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
@@ -135,7 +135,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       # TODO: instead of dtypes.float, a base type
       kk(lang.render_store(bufnames[args.i], bufs[args.i].dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, isinstance(bufs[args.i], LocalBuffer)))
     elif uop == UOps.CAST and newvar is not None and newvar.dtype.is_vector_type:
-      kk(f"{newvar.render(True)} = ({newvar.dtype.name})({','.join([x.render() for x in vin])});")
+      kk(f"{newvar.render(True)} = ({lang.make_vector_prefix}{newvar.dtype.name})({','.join([x.render() for x in vin])});")
     elif uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
     else:

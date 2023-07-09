@@ -88,7 +88,7 @@ class CLCodegen(CStyleCodegen):
   lang = CStyleLanguage(
     kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
     half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
-    barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
+    barrier = "barrier(CLK_LOCAL_MEM_FENCE);",
     gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=False)
 
 GPUBuffer = Compiled(CLBuffer, fromimport("tinygrad.codegen.assembly_rdna", "RDNACodegen") if getenv("RDNA") else CLCodegen, CLProgram, CL.synchronize)
