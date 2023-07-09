@@ -58,9 +58,10 @@ class TritonCodegen(Linearizer):
       UnaryOps.EXP2: lambda x: f"tl.math.exp2({x})",
       UnaryOps.LOG2: lambda x: f"tl.math.log2({x})", # TODO: is fast_log2f ok?
       UnaryOps.SIN: lambda x: f"tl.sin({x})",
+      UnaryOps.SQRT: lambda x: f"tl.sqrt({x})",
       BinaryOps.ADD: lambda x,y: f"({x}+{y})", BinaryOps.SUB: lambda x,y: f"({x}-{y})",
       BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})",
-      BinaryOps.POW: lambda x,y: f"tl.math.pow({x}, {y})", BinaryOps.MAX: lambda x,y: f"tl.maximum({x},{y})", # axis?
+      BinaryOps.MAX: lambda x,y: f"tl.maximum({x},{y})", # axis?
       BinaryOps.CMPEQ: lambda x,y: f"({x}=={y})",
       ReduceOps.SUM: lambda x: f"tl.expand_dims(tl.sum({x}, axis={len(full_local_shape)-len(self.group_for_reduce)}), axis={len(full_local_shape)-len(self.group_for_reduce)})" if len(self.group_for_reduce) != len(full_local_shape) else f"tl.sum({x}, axis={len(full_local_shape)-len(self.group_for_reduce)})",
     }
