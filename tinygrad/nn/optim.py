@@ -6,11 +6,10 @@ from tinygrad.tensor import Tensor
 class Optimizer:
   def __init__(self, params: List[Union[Dict, Tensor]],  lr: float):
     self.param_groups = []
-    
     param_groups = list(params)
-    if not isinstance(param_groups[0], dict): param_groups = [{'params': param_groups}]
+    param_groups = [{'params': param_groups}] if not isinstance(param_groups[0], dict) else param_groups
     for param_group in param_groups: self.add_param_group(param_group)
-    
+
     self.lr = Tensor([lr], requires_grad=False)
 
   def zero_grad(self):
