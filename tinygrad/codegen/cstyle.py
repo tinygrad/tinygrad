@@ -25,12 +25,20 @@ class CStyleLanguage(NamedTuple):
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
 
+  # returns a str expression of the casted xs with the given type
+  def render_cast(self, x:List[str], var_dtype) -> str:
+    assert len(x) == var_dtype.sz, "cast is wrong size"
+    assert self.float4 is not None, "cast is not supported on this platform"
+    if var_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
+    elif var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
+    raise NotImplementedError(f"no cast for {var_dtype}")
+
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     else: val = f"{x}" + ("" if dtypes.is_int(var_dtype) else "f")
-    return f"{self.float4}({val}, {val}, {val}, {val})" if var_dtype == dtypes._float4 else val
+    return self.render_cast([val]*4, var_dtype) if var_dtype.sz > 1 else val
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
@@ -153,8 +161,8 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       assert args.valid.min == 1, "store must be valid"
       # TODO: instead of dtypes.float, a base type
       kk(lang.render_store(bufnames[args.i], bufs[args.i].dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, isinstance(bufs[args.i], LocalBuffer)))
-    elif uop == UOps.CAST and newvar is not None and newvar.dtype == dtypes._float4:
-      kk(f"{newvar.render(True)} = {lang.float4}({','.join([x.render() for x in vin])});")
+    elif uop == UOps.CAST and newvar is not None and newvar.dtype.sz > 1:
+      kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
     elif uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
     else:
