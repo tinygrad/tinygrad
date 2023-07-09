@@ -51,12 +51,12 @@ class Token(NamedTuple):
       assert self.offset is None
       return f"{self.dtype.name} {self.name}"
     if self.offset is None: return self.name
-    assert self.dtype == dtypes._float4
+    assert self.dtype.is_vector_type
     return self.name+"."+"xyzw"[int(self.offset)]
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
 # TODO: the next three functions are poorly written
-def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
+def get_grouped_vector4_idxs(acc:List[Token]) -> Optional[List[int]]:
   idxs: Optional[List[int]] = []
   for i,a in enumerate(acc):
     if idxs is None: break
@@ -75,21 +75,21 @@ def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
       idxs = None
   return idxs
 
-def to_float4(x:List[Token]) -> Optional[Token]:
+def to_vector4(x:List[Token]) -> Optional[Token]:
   if all_same(x): return x[0]
-  if all_same([y.name for y in x]) and all(y.dtype == dtypes._float4 and y.offset == i for i,y in enumerate(x)):
-    return Token(x[0].name, dtypes._float4)
+  if all_same([y.name for y in x]) and all(y.dtype.is_vector_type and y.offset == i for i,y in enumerate(x)):
+    return Token(x[0].name, dtypes.get_vector_type(x[0].dtype))
   return None
 
-def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
+def get_grouped_maybe_vector4(*values:List[Token], grouping_allowed=True):
   assert all_same([len(x) for x in values]), f"all values are not the same length {values}"
   # these use accumulators, we can only fold if the acc is a float4
-  idxs = get_grouped_float4_idxs(values[-1]) if grouping_allowed else None
+  idxs = get_grouped_vector4_idxs(values[-1]) if grouping_allowed else None
   if idxs is not None:
     new_idxs = []
     new_values = []
     for i in range(0, len(idxs), 4):
-      nv = [to_float4([v[j] for j in idxs[i:i+4]]) for v in values]
+      nv = [to_vector4([v[j] for j in idxs[i:i+4]]) for v in values]
       if any(x is None for x in nv): break
       new_idxs.append(idxs[i:i+4])
       new_values.append(nv)
@@ -195,25 +195,24 @@ class Linearizer:
     for _idx in expand_idxs(idxs):
       if len(upcast_dim) == 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:upcast_dim[0]] + (Variable.num(0),) + _idx[upcast_dim[0]+1:]))
-        localtype = dtypes._float4
+        localtype = dtypes.get_vector_type(self.bufs[i].dtype)
         # disallow unaligned access, fall back to float
         if idx.render() != ((idx//4)*4).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
-          localtype = dtypes.float
+          localtype = self.bufs[i].dtype
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
-        localtype = dtypes.float
+        localtype = self.bufs[i].dtype
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
                      self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
-      ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b) if localtype == dtypes._float4 else cache[key])
+      ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b) if localtype.is_vector_type else cache[key])
     return ret
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
     store_offset = dict(zip(expand_idxs(idxs), store))
-
     # float4 grouping
     upcast_dim = self.get_upcast_dim(i)
     if len(upcast_dim) == 1:
@@ -227,9 +226,9 @@ class Linearizer:
         assert idx.render() == ((idx//4)*4).render(), "float4 stores are always aligned"
         assert valid.min == 1, "stores are always valid"
         if all_same([x.name for x in out_tokens]) and tuple(range(4)) == tuple(x.offset for x in out_tokens):
-          store_offset_new[k] = Token(out_tokens[0].name, dtypes._float4)
+          store_offset_new[k] = Token(out_tokens[0].name, dtypes.get_vector_type(self.bufs[i].dtype))
         else:
-          store_offset_new[k] = self.uop(UOps.CAST, ssa("alu", dtypes._float4), out_tokens)
+          store_offset_new[k] = self.uop(UOps.CAST, ssa("alu", dtypes.get_vector_type(self.bufs[i].dtype)), out_tokens)
       store_offset = store_offset_new
 
     for idx, var in store_offset.items():
@@ -373,14 +372,14 @@ class Linearizer:
       x.src = tuple(srcs)
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     if x.op.__class__ in {ReduceOps, FusedOps}:
-      ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
+      ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_vector4(*values, acc, grouping_allowed=self.supports_float4_alu)]
     else:
-      ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
+      ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes.get_vector_type(val[0].dtype)) if any(x.dtype.is_vector_type and x.offset is None for x in val) else ssa('alu', dtypes.get_vector_type(val[0].dtype)), list(val), x.op)) for idx, val in get_grouped_maybe_vector4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
       for o,k in enumerate(i):
-        ordered_ret[k] = Token(j.name, j.dtype, o) if j.dtype == dtypes._float4 else j
+        ordered_ret[k] = Token(j.name, j.dtype, o) if j.dtype.is_vector_type else j
     assert all(isinstance(x, Token) for x in ordered_ret), "some tokens didn't get scattered?"
     return cast(List[Token], ordered_ret)
 

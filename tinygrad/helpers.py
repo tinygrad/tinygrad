@@ -65,6 +65,7 @@ class DType(NamedTuple):
   name: str
   np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
   sz: int = 1
+  is_vector_type: Optional[bool] = False
   def __repr__(self): return f"dtypes.{self.name}"
   @property
   def key(self): return (self.name)
@@ -89,6 +90,12 @@ class dtypes:
   def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
+  @staticmethod
+  def get_vector_type(x: DType):
+    if x.name == 'half': return dtypes._half4 
+    if x.name == 'int': return dtypes._int4 
+    if x.is_vector_type: return x
+    return dtypes._float4 
   bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   half = float16
@@ -102,8 +109,9 @@ class dtypes:
   uint64: Final[DType] = DType(2, 8, "unsigned long", np.uint64)
 
   # NOTE: these are internal dtypes, should probably check for that
-  _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
-  _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
+  _half4: Final[DType] = DType(0, 2*4, "half4", None, 4, is_vector_type=True)
+  _float4: Final[DType] = DType(4, 4*4, "float4", None, 4, is_vector_type=True)
+  _int4: Final[DType] = DType(1, 4*4, "int4", None, 4, is_vector_type=True)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}
