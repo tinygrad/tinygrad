@@ -10,7 +10,7 @@ class Optimizer:
     self.param_groups = []
     param_groups = list(params)
     if not param_groups: param_groups = [{'params': []}]
-    if not isinstance(param_groups[0], dict): param_groups = [{'params': param_groups}]
+    elif not isinstance(param_groups[0], dict): param_groups = [{'params': param_groups}]
     for param_group in param_groups: self.add_param_group(param_group)
 
   def zero_grad(self):
