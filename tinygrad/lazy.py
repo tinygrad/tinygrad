@@ -211,10 +211,9 @@ class LazyBuffer:
     if self.shape == tuple(new_shape): return self
     srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
 
-    shape_differences = [a != b for a,b in zip(self.shape, new_shape)]
-    if sum(shape_differences) > 1:
-      last_difference = len(shape_differences) - 1 - shape_differences[::-1].index(True)
-      intermediate_shape = tuple(new if i == last_difference else old for i, (new, old) in enumerate(zip(new_shape, self.shape)))
+    # Split multi-axis reduction into two kernels on Metal for perf
+    if sum(shape_differences := [new != old for new, old in zip(new_shape, self.shape)]) > 1 and self.device == "METAL":
+      intermediate_shape = tuple(old if i == shape_differences.index(True) else new for i, (new, old) in enumerate(zip(new_shape, self.shape)))
       return create_lazybuffer(self.device, ShapeTracker(intermediate_shape), ReduceOps, LazyOp(op, srcs, intermediate_shape), self.dtype).reduce_op(op, new_shape)
 
     return create_lazybuffer(self.device, ShapeTracker(new_shape), ReduceOps, LazyOp(op, srcs, new_shape), self.dtype)
