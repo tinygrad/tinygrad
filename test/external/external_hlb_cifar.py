@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from examples.hlb_cifar10 import SpeedyResNet, fetch_batch
 from examples.hlb_cifar10_torch import SpeedyResNet as SpeedyResNetTorch
-from datasets import fetch_cifar
+from extra.datasets import fetch_cifar
 from test.models.test_end2end import compare_tiny_torch
 
 if __name__ == "__main__":
