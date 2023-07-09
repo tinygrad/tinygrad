@@ -91,12 +91,13 @@ class dtypes:
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   @staticmethod
-  def get_vector_type(x: DType):
-    if x.name == 'half': return dtypes._half4 
-    if x.name == 'int': return dtypes._int4 
-    if x.name == 'char': return dtypes._char4 
-    if x.name == 'long': return dtypes._long4 
+  def get_vector_type(x: DType, amt: int = 4):
+    if x.name == 'half' and amt == 4: return dtypes._half4 
+    if x.name == 'int' and amt == 4: return dtypes._int4 
+    if x.name == 'char' and amt == 4: return dtypes._char4 
+    if x.name == 'long' and amt == 4: return dtypes._long4 
     if x.is_vector_type: return x
+    if amt == 2: return dtypes._float2 
     return dtypes._float4 
   def get_normal_type(x: DType):
     if x.name == 'half4': return dtypes.half 
