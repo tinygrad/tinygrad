@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import unittest
 import itertools
+from tinygrad.lazy import LazyBuffer
 from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
@@ -20,6 +21,19 @@ class TestTinygrad(unittest.TestCase):
 
     self.assertEqual(a.shape, ())
     self.assertEqual(b.shape, ())
+
+  def test_init(self):
+    assert isinstance(Tensor(1).lazydata.op.arg, (int,))
+    assert isinstance(Tensor(1.0).lazydata.op.arg, (float,))
+    assert Tensor([1]).lazydata.toCPU().__class__ == np.ndarray
+    assert Tensor((1,)).lazydata.toCPU().__class__ == np.ndarray
+    assert Tensor(LazyBuffer.fromCPU(np.array([1]))).lazydata.toCPU().__class__ == np.ndarray
+    assert Tensor(np.array([1])).lazydata.toCPU().__class__ == np.ndarray
+    try:
+      Tensor(set([1]))
+      assert False, "should have raised a RuntimeError"
+    except RuntimeError: pass
+    except: assert False, "should have raised a RuntimeError"
 
   def test_plus_equals(self):
     a = Tensor.randn(10,10)

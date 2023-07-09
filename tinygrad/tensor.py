@@ -42,6 +42,7 @@ class Tensor:
 
   def __init__(self, data:Union[int, float, list, tuple, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
+    if not isinstance(data, (int, float)) and data.__class__ not in (list, tuple, LazyBuffer, np.ndarray): raise RuntimeError(f"can't create Tensor from {data}")
     device = Device.canonicalize(device)
     # tensors have gradients, buffers do not
     self.grad: Optional[Tensor] = None
@@ -56,22 +57,14 @@ class Tensor:
       data = cast(LazyBuffer, data) # NOTE: this is a noop, it makes mypy happy
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
-      return
 
-    if isinstance(data, (int, float)):
+    elif isinstance(data, (int, float)):
       self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
-      return
-
-    if data.__class__ is list:
-      data = np.array(data, dtype=(dtype or Tensor.default_type).np)
-
-    if data.__class__ is np.ndarray:
-      data = cast(np.ndarray, data)
+    
+    else:
+      data = cast(np.ndarray, data if data.__class__ is np.ndarray else np.array(data, dtype=(dtype or Tensor.default_type).np))
       data = LazyBuffer.fromCPU(data)
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
-      return
-
-    raise RuntimeError(f"can't create Tensor from {data}")
 
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
