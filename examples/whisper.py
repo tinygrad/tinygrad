@@ -191,7 +191,7 @@ def listener(q):
   print("listening")
   for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
     data = stream.read(CHUNK)
-    waveform = ((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3).reshape(1, -1)
+    waveform = ((np.frombuffer(data, np.int16) / 32768).astype(np.float32) * 3).reshape(1, -1)
     q.put(waveform)
   print("done listening")
 
@@ -274,13 +274,13 @@ if __name__ == "__main__":
       tokens = tokens.reshape(n_audio, n_group, -1)
       sum_logprobs = sum_logprobs.reshape(n_audio, n_group)
       tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
-      tokens = [[t[sample_begin:(t==enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
+      tokens = [[t[sample_begin:(t == enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
       selected = sequence_ranker.rank(tokens, sum_logprobs)
       tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
       texts.extend([enc.decode(t).strip() for t in tokens])
       sum_logprobs = [lp[i] for i, lp in zip(selected, sum_logprobs)]
       avg_logprobs = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
-      #if no_speech_probs[0] > no_speech_threshold and avg_logprob <= logprob_threshold:
+      #if no_speech_probs[0] > no_speech_threshold and avg_logprob[0] <= logprob_threshold:
       seek += segment_size
     return texts
 
@@ -289,7 +289,7 @@ if __name__ == "__main__":
     for c in ci:
       fn = BASEDIR / c["files"][0]["fname"]
       print("-" * 128, f"{fn.stem}\n", sep="\n")
-      predicted = "".join(transcribe_wav(fn)).translate(str.maketrans("", "", string.punctuation)).lower()
+      predicted = "".join(transcribe_wav(fn)).translate(str.maketrans("", "", string.punctuation)).lower().strip()
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
       sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
       print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
