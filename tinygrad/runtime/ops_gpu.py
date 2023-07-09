@@ -46,14 +46,16 @@ class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
 
   def _copyin(self, x: np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
-    CL.events_in_flight.append(cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False))
+    # CL.events_in_flight.append(cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False))
+    cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False)
   def _copyout(self, x:np.ndarray):
-    CL.synchronize()
+    # CL.synchronize()
     assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
     cl.enqueue_copy(CL.cl_queue[self._buf.device], x, self._buf, is_blocking=True)
   def _transfer(self, x):
     if "gfx" in CL.cl_ctxs[x._buf.device].devices[0].name: # TODO: only on amd
-      cl.enqueue_copy_buffer_p2p_amd(CL.cl_platform, CL.cl_queue[x._buf.device], x._buf, self._buf, x.size * x.dtype.itemsize)
+      e = cl.enqueue_copy_buffer_p2p_amd(CL.cl_platform, CL.cl_queue[x._buf.device], x._buf, self._buf, x.size * x.dtype.itemsize)
+      e.wait()
 
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
