@@ -67,11 +67,12 @@ class Tensor:
 
     if data.__class__ is np.ndarray:
       data = cast(np.ndarray, data)
-      data = LazyBuffer.fromCPU(data)
-      self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
-      if all(x == 1 for x in data.shape): self.lazydata = self.lazydata.const_like(data.toCPU().sum())
+      if data.shape == () or data.size == 1:
+        self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtypes.from_np(data.dtype), device, arg=data.sum()).reshape(data.shape)
+      else:
+        data = LazyBuffer.fromCPU(data)
+        self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
-
     raise RuntimeError(f"can't create Tensor from {data}")
 
   def __repr__(self):
