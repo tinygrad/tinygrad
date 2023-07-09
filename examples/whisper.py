@@ -255,7 +255,7 @@ if __name__ == "__main__":
     sequence_ranker = MaximumLikelihoodRanker(None)
     seek, texts = 0, []
     while seek < content_frames:
-      initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|transcribe|>"]]
+      initial_tokens = [enc._special_tokens["<|startoftranscript|>"]]
       sample_begin = len(initial_tokens)
       mel_segment = mel[:, seek:seek+N_FRAMES]
       mel_segment = np.expand_dims(pad_or_trim(mel, N_FRAMES), axis=0)
@@ -277,19 +277,19 @@ if __name__ == "__main__":
       tokens = [[t[sample_begin:(t == enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
       selected = sequence_ranker.rank(tokens, sum_logprobs)
       tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
-      texts.extend([enc.decode(t).strip() for t in tokens])
+      texts.extend([enc.decode(t[1:]).strip() for t in tokens])
       sum_logprobs = [lp[i] for i, lp in zip(selected, sum_logprobs)]
       avg_logprobs = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
       #if no_speech_probs[0] > no_speech_threshold and avg_logprob[0] <= logprob_threshold:
       seek += segment_size
-    return texts
+    return texts[0] if mel.ndim == 2 else texts
 
   if getenv("TEST"):
     diff = difflib.Differ()
     for c in ci:
       fn = BASEDIR / c["files"][0]["fname"]
       print("-" * 128, f"{fn.stem}\n", sep="\n")
-      predicted = "".join(transcribe_wav(fn)).translate(str.maketrans("", "", string.punctuation)).lower().strip()
+      predicted = "".join(transcribe_wav(fn)).translate(str.maketrans("", "", string.punctuation)).lower()
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
       sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
       print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
