@@ -358,27 +358,35 @@ def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
   return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]))*input).sum(indices.ndim)
 
 def Gather(input, indices, axis=0):
-  indices = (indices < 0).where(indices+input.shape[axis], indices)
-  indices_shape = list(indices.shape)
-  indices = indices.flatten()
-  input = input.transpose(ax1=0, ax2=axis)
-  if input.ndim > 1:
-    rem_shape = list(input.shape)[1:]
-    input = input.reshape(input.shape[0], -1).T
-    repeat_arg = [1]*(input.ndim-1) + [input.shape[-2]]
-    indices = indices.unsqueeze(indices.ndim).repeat(repeat_arg)
-    ret = _gather(input, indices)
-    if rem_shape: ret = ret.reshape(*[indices.shape[0]] + rem_shape)
-  else:
-    ret = _gather(input, indices)
-  reshape_arg = []
-  ret = ret.transpose(ax1=axis, ax2=0)
-  for idx, shape in enumerate(ret.shape):
-    if idx == axis:
-      reshape_arg.extend(indices_shape)
+  if indices.ndim < 6: # shrinking and cating hits a weird recursion limit with VERY LARGE indices (only 1 test)
+    input_sh = list(input.shape)
+    ret_shape = input_sh[:axis] + list(indices.shape) + input_sh[axis+1:]
+    if indices.ndim > 1: indices = indices.flatten()
+    indices = [input_sh[axis]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
+    args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(input_sh)] for i in indices]
+    return input.shrink(arg=tuple(args[0])).cat(*[input.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
+  else: # previous implementation that uses too many kernels TODO improve this
+    indices = (indices < 0).where(indices+input.shape[axis], indices)
+    indices_shape = list(indices.shape)
+    indices = indices.flatten()
+    input = input.transpose(ax1=0, ax2=axis)
+    if input.ndim > 1:
+      rem_shape = list(input.shape)[1:]
+      input = input.reshape(input.shape[0], -1).T
+      repeat_arg = [1]*(input.ndim-1) + [input.shape[-2]]
+      indices = indices.unsqueeze(indices.ndim).repeat(repeat_arg)
+      ret = _gather(input, indices)
+      if rem_shape: ret = ret.reshape(*[indices.shape[0]] + rem_shape)
     else:
-      reshape_arg.append(shape)
-  return ret.reshape(*reshape_arg)
+      ret = _gather(input, indices)
+    reshape_arg = []
+    ret = ret.transpose(ax1=axis, ax2=0)
+    for idx, shape in enumerate(ret.shape):
+      if idx == axis:
+        reshape_arg.extend(indices_shape)
+      else:
+        reshape_arg.append(shape)
+    return ret.reshape(*reshape_arg)
 
 def GatherElements(input, indices, axis):
   indices = (indices < 0).where(indices+input.shape[axis], indices)
