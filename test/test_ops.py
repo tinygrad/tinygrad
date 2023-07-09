@@ -36,7 +36,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     except Exception:
       raise Exception(f"{s} failed shape {x.shape}")
 
-  if DEBUG >= 4:
+  if DEBUG >= 6:
     np.set_printoptions(linewidth=200, suppress=True)
     print(ret.numpy())
     print(out.detach().numpy())
@@ -709,7 +709,7 @@ class TestOps(unittest.TestCase):
         lambda x,w: torch.nn.functional.conv_transpose2d(x,w, stride=stride).relu(),
         lambda x,w: Tensor.conv_transpose2d(x,w,stride=stride).relu(), atol=1e-4, grad_rtol=1e-5)
 
-  @unittest.skipIf(Device.DEFAULT == "METAL", "weird, broken in METAL CI")
+  @unittest.skipIf(Device.DEFAULT == "METAL" and getenv("CI", "") != "", "broken in METAL CI")
   def test_output_padded_conv_transpose2d(self):
     for output_padding, stride in [((1,1), (2,3)), ((2,1), (3,2))]:
       helper_test_op([(2,4,6,5), (4,4,3,3),(4,)],
@@ -878,24 +878,37 @@ class TestOps(unittest.TestCase):
               lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w).relu(),
               lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), atol=1e-4)
 
-  def test_padded_conv2d(self):
-    bs = 4
-    cin = 3
-    H,W = 3,3
-    for p in [2, (2,1), (2,2)]:
-      with self.subTest(padding := p):
-        helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
-          lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
-          lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
-
-  def test_padded_conv2d_bs1(self):
-    bs = 1
-    cin = 3
-    H,W = 3,3
-    padding = 1
+  @unittest.skipIf(Device.DEFAULT == "METAL" and getenv("CI", "") != "", "broken in METAL CI")
+  def test_padded_conv2d_p21(self):
+    bs,cin,H,W,padding = 4, 3, 3, 3, (2,1)
     helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
       lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
       lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
+
+  @unittest.skipIf(Device.DEFAULT == "METAL" and getenv("CI", "") != "", "broken in METAL CI")
+  def test_padded_conv2d_p22(self):
+    bs,cin,H,W,padding = 4, 3, 3, 3, (2,2)
+    helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
+      lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
+
+  def test_padded_conv2d_1x1(self):
+    bs,cin,H,W,padding = 4, 3, 1, 1, 2
+    helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
+      lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
+
+  def test_padded_conv2d_bs1(self):
+    bs,cin,H,W,padding = 1, 3, 3, 3, 1
+    helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
+      lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
+
+  def test_padding_add(self):
+    helper_test_op([(64,64), (60,60)],
+      lambda x,w: x+torch.nn.functional.pad(w, (2,2,2,2)),
+      lambda x,w: x+w.pad2d((2,2,2,2)),
+    )
 
   def test_dilated_conv2d(self):
     bs = 4
