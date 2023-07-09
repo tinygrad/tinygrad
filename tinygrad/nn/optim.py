@@ -5,12 +5,13 @@ from tinygrad.tensor import Tensor
 
 class Optimizer:
   def __init__(self, params: List[Union[Dict, Tensor]],  lr: float):
+    self.lr = Tensor([lr], requires_grad=False)
+
     self.param_groups = []
     param_groups = list(params)
+    if not param_groups: param_groups = [{'params': []}]
     if not isinstance(param_groups[0], dict): param_groups = [{'params': param_groups}]
     for param_group in param_groups: self.add_param_group(param_group)
-
-    self.lr = Tensor([lr], requires_grad=False)
 
   def zero_grad(self):
     for param_group in self.param_groups:
@@ -21,8 +22,9 @@ class Optimizer:
     for x in param_group['params']:
       if x.requires_grad is None: x.requires_grad = True
 
-    param_group['params']: List[Tensor] = dedup([x for x in param_group['params'] if x.requires_grad])
-    param_group['buffers']: List[Tensor] = dedup([x for x in param_group['params'] if not x.requires_grad])
+    param_group['params'] = dedup([x for x in param_group['params'] if x.requires_grad]) if param_group.get('params') else []
+    param_group['buffers'] = dedup([x for x in param_group['params'] if not x.requires_grad]) if param_group.get('params') else []
+    param_group['lr'] = self.lr
     self.param_groups.append(param_group)
 
   def realize(self, params):
@@ -33,7 +35,7 @@ class Optimizer:
 class SGD(Optimizer):
   def __init__(self, params: List[Union[Dict, Tensor]], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
     super().__init__(params, lr)
-    self.lr, self.momentum, self.wd, self.nesterov = lr, momentum, weight_decay, nesterov
+    self.momentum, self.wd, self.nesterov = momentum, weight_decay, nesterov
     for param_group in self.param_groups:
       param_group['b'] = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in param_group['params']] if param_group.get('momentum', self.momentum) else []
 
@@ -52,7 +54,7 @@ class SGD(Optimizer):
 class LAMB(Optimizer):
   def __init__(self, params: List[Union[Dict, Tensor]], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
     super().__init__(params, lr)
-    self.lr, self.b1, self.b2, self.eps, self.wd, self.adam, self.t = lr, b1, b2, eps, wd, adam, Tensor([0], requires_grad=False).realize()
+    self.b1, self.b2, self.eps, self.wd, self.adam, self.t = b1, b2, eps, wd, adam, Tensor([0], requires_grad=False).realize()
     for param_group in self.param_groups:
       param_group['m'] = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in param_group['params']]
       param_group['v'] = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in param_group['params']]
