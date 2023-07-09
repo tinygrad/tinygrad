@@ -112,6 +112,8 @@ class dtypes:
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4, is_vector_type=True)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4, is_vector_type=True)
   _int4: Final[DType] = DType(1, 4*4, "int4", None, 4, is_vector_type=True)
+  _float2: Final[DType] = DType(4, 4*2, "float2", None, 2, is_vector_type=True)
+
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}
