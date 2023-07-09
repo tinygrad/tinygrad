@@ -7,7 +7,7 @@ class Optimizer:
   def __init__(self, params: List[Union[Dict, Tensor]],  lr: float):
     self.lr = Tensor([lr], requires_grad=False)
 
-    self.param_groups = []
+    self.param_groups: List[Dict] = []
     param_groups = list(params)
     if not param_groups: param_groups = [{'params': []}]
     elif not isinstance(param_groups[0], dict): param_groups = [{'params': param_groups}]
