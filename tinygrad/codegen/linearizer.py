@@ -240,7 +240,7 @@ class Linearizer:
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
-        _idx = k[:upcast_dim[0]] + (Variable.num(0),) + k[upcast_dim[0]+1:]
+        _idx = k[:upcast_dim[0]] + (expanded_nodes[upcast_dim[0]][0],) + k[upcast_dim[0]+1:]
         grouped_store_offset[_idx].append(store_offset[k])
       store_offset_new = {}
       for k,out_tokens in grouped_store_offset.items():
