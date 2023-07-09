@@ -493,8 +493,8 @@ class Linearizer:
         for idx, val in get_grouped_maybe_vector4(*values, acc, grouping_allowed=self.supports_float4_alu):
           ret.append((idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])))
       else:
-          for idx, val in casted_values:
-            ret.append((idx, self.uop(UOps.ALU, ssa('alu', dtypes.get_vector_type(val[0].dtype)) if any(x.dtype.is_vector_type and x.offset is None for x in val) else ssa('alu', dtypes.get_vector_type(val[0].dtype)), list(val), x.op)))
+        for idx, val in casted_values:
+          ret.append((idx, self.uop(UOps.ALU, ssa('alu', dtypes.get_vector_type(val[0].dtype)) if any(x.dtype.is_vector_type and x.offset is None for x in val) else ssa('alu', dtypes.get_vector_type(val[0].dtype)), list(val), x.op)))
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
       # scatter
       for i,j in ret:

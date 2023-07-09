@@ -99,6 +99,7 @@ class dtypes:
     if x.is_vector_type: return x
     if amt == 2: return dtypes._float2 
     return dtypes._float4 
+  @staticmethod
   def get_normal_type(x: DType):
     if x.name == 'half4': return dtypes.half 
     if x.name == 'int4': return dtypes.int32
