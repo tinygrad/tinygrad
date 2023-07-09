@@ -25,8 +25,8 @@ def train_bert():
 
 def train_maskrcnn():
   
-  from datasets.coco import COCODataset
-  from datasets.transforms import Compose, Resize, RandomHorizontalFlip, ToTensor, Normalize
+  from extra.datasets.coco import COCODataset
+  from extra.datasets.transforms import Compose, Resize, RandomHorizontalFlip, ToTensor, Normalize
   from models.mask_rcnn import MaskRCNN
   from models.resnet import ResNet
 
@@ -45,8 +45,8 @@ def train_maskrcnn():
     ]
   )
 
-  dataset = COCODataset(root='datasets/COCO/train2017',
-                        ann_file='datasets/COCO/annotations/instances_train2017.json', 
+  dataset = COCODataset(root='extra/datasets/COCO/train2017',
+                        ann_file='extra/datasets/COCO/annotations/instances_train2017.json', 
                         remove_images_without_annotations=1, 
                         transforms=transforms)
 
