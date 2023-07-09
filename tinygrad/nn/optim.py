@@ -9,10 +9,10 @@ class Optimizer:
 
     param_groups = list(params)
 
-    if not isinstance(param_groups[0], dict):
-      param_groups = [{'params': param_groups}] #default lr
+    if not isinstance(param_groups[0], dict): 
+      param_groups = [{'params': param_groups}]
     
-    for param_group in param_groups:
+    for param_group in param_groups: 
       self.add_param_group(param_group)
     
     self.lr = Tensor([lr], requires_grad=False)
@@ -22,20 +22,18 @@ class Optimizer:
       for param in param_group['params']: param.grad = None
 
   def add_param_group(self, param_group):
+    # if it's None, but being put into an optimizer, set it to True
     for x in param_group['params']:
       if x.requires_grad is None: x.requires_grad = True
 
     param_group['params']: List[Tensor] = dedup([x for x in param_group['params'] if x.requires_grad])
     param_group['buffers']: List[Tensor] = dedup([x for x in param_group['params'] if not x.requires_grad])
-
     self.param_groups.append(param_group)
 
-  def realize(self, param_group=None, extra=None):
-    self.realize_group(param_group, extra) if param_group else (self.realize_group(param_group, extra) for param_group in self.param_groups)
-
-  def realize_group(self, param_group, extra=None):
-    for p in extra + param_group['params'] + param_group['buffers'] if extra is not None else param_group['params'] + param_group['buffers']:
-      p.realize()
+  def realize(self, params):
+    # TODO: corealize
+    # NOTE: in extra is too late for most of the params due to issues with assign
+    for p in params: p.realize()
 
 class SGD(Optimizer):
   def __init__(self, params: List[Union[Dict, Tensor]], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
@@ -54,7 +52,7 @@ class SGD(Optimizer):
           param_group['b'][i].assign(self.momentum * param_group['b'][i] + g).realize()  # NOTE: param_group['b'][i] is zero on the first run, no if required
           g = (g + param_group.get('momentum', self.momentum) * param_group['b'][i]) if param_group.get('nesterov', self.nesterov) else param_group['b'][i]
         t.assign(t.detach() - g * param_group.get('lr', self.lr))
-      self.realize(param_group, param_group['b'])
+      self.realize(param_group['params'] + param_group['buffers'] + param_group['b'])
 
 class LAMB(Optimizer):
   def __init__(self, params: List[Union[Dict, Tensor]], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
@@ -82,7 +80,7 @@ class LAMB(Optimizer):
         else:
           r = 1.0
         t.assign(t.detach() - param_group.get('lr', self.lr) * r * up)
-      self.realize(param_group, [self.t] + param_group['m'] + param_group['v'])
+      self.realize(param_group['params'] + param_group['buffers'] + [self.t] + param_group['m'] + param_group['v'])
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
 def AdamW(params: List[Union[Dict, Tensor]], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01): return LAMB(params, lr, b1, b2, eps, wd, adam=True)
