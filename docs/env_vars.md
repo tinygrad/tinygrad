@@ -24,6 +24,7 @@ METAL               | [1]        | enable Metal backend (for Mac M1 and after)
 METAL_XCODE         | [1]        | enable Metal using macOS Xcode SDK
 TORCH               | [1]        | enable PyTorch backend
 CLANG               | [1]        | enable Clang backend
+OMP_NUM_THREADS     | [# > 0]    | number of threads used by openmp in clang backend
 LLVM                | [1]        | enable LLVM backend
 LLVMOPT             | [1]        | enable slightly more expensive LLVM optimizations
 LAZY                | [1]        | enable lazy operations (this is the default)

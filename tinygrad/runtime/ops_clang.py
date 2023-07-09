@@ -15,18 +15,18 @@ class ClangProgram:
     # TODO: is there a way to not write this to disk?
     fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
     if not os.path.exists(fn):
-      subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+fn+'.tmp').split(), input=prg.encode('utf-8'))
+      subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c -fopenmp=libomp '+args['cflags']+' - -o '+fn+'.tmp').split(), input=prg.encode('utf-8'))
       os.rename(fn+'.tmp', fn)
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
 
   def __call__(self, global_size, local_size, *args, wait=False):
-    if wait: st = time.monotonic()
+    if wait: st = time.perf_counter()
     self.fxn(*[x._buf for x in args])
-    if wait: return time.monotonic()-st
+    if wait: return time.perf_counter()-st
 
 class ClangCodegen(CStyleCodegen):
-  lang = CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict")
+  lang = CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict", loop_pragma="#pragma omp parallel for collapse(1)")
   supports_float4: bool = False
 
 ClangBuffer = Compiled(RawMallocBuffer, ClangCodegen, ClangProgram)
