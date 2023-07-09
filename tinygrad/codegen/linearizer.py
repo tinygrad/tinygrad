@@ -240,6 +240,7 @@ class Linearizer:
   def linearize(self):
     # uops
     self.uops: List[UOp] = []
+    self.saved_exprs: Dict[LazyOp, List[Token]] = dict()
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
@@ -371,6 +372,8 @@ class Linearizer:
       # Reorder sources to put constants first so get_grouped_maybe_float4 can fold the op
       srcs = sorted(x.src, key=lambda x: (x.realized.__class__ != RawConst) if x.__class__ == LazyBuffer else 0)
       x.src = tuple(srcs)
+    if x in self.saved_exprs:
+      return self.saved_exprs[x]
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     if x.op.__class__ in {ReduceOps, FusedOps}:
       ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
@@ -382,6 +385,7 @@ class Linearizer:
       for o,k in enumerate(i):
         ordered_ret[k] = Token(j.name, j.dtype, o) if j.dtype == dtypes._float4 else j
     assert all(isinstance(x, Token) for x in ordered_ret), "some tokens didn't get scattered?"
+    self.saved_exprs[x] = cast(List[Token], ordered_ret)
     return cast(List[Token], ordered_ret)
 
   @property
