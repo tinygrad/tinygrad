@@ -42,17 +42,17 @@ class SGD(Optimizer):
     super().__init__(params, lr)
     self.lr, self.momentum, self.wd, self.nesterov = lr, momentum, weight_decay, nesterov
     for param_group in self.param_groups:
-      param_group['b'] = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in param_group['params']] if self.momentum else []
+      param_group['b'] = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in param_group['params']] if param_group.get('momentum', self.momentum) else []
 
   # https://pytorch.org/docs/stable/generated/torch.optim.SGD.html
   def step(self) -> None:
     for param_group in self.param_groups:
       for i, t in enumerate(param_group['params']):
         assert t.grad is not None
-        g = t.grad.realize() + self.wd * t.detach()
-        if self.momentum:
+        g = t.grad.realize() + param_group.get('wd', self.wd) * t.detach()
+        if param_group.get('momentum', self.momentum):
           param_group['b'][i].assign(self.momentum * param_group['b'][i] + g).realize()  # NOTE: param_group['b'][i] is zero on the first run, no if required
-          g = (g + self.momentum * param_group['b'][i]) if self.nesterov else param_group['b'][i]
+          g = (g + param_group.get('momentum', self.momentum) * param_group['b'][i]) if param_group.get('nesterov', self.nesterov) else param_group['b'][i]
         t.assign(t.detach() - g * param_group.get('lr', self.lr))
       self.realize(param_group, param_group['b'])
 
@@ -70,11 +70,11 @@ class LAMB(Optimizer):
       for i, t in enumerate(param_group['params']):
         assert t.grad is not None
         g = t.grad.realize()
-        param_group['m'][i].assign(self.b1 * param_group['m'][i] + (1.0 - self.b1) * g).realize()
-        param_group['v'][i].assign(self.b2 * param_group['v'][i] + (1.0 - self.b2) * (g * g)).realize()
-        m_hat = param_group['m'][i] / (1.0 - self.b1**self.t)
-        v_hat = param_group['v'][i] / (1.0 - self.b2**self.t)
-        up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
+        param_group['m'][i].assign(param_group.get('b1', self.b1) * param_group['m'][i] + (1.0 - param_group.get('b1', self.b1)) * g).realize()
+        param_group['v'][i].assign(param_group.get('b2', self.b2) * param_group['v'][i] + (1.0 - param_group.get('b2', self.b2)) * (g * g)).realize()
+        m_hat = param_group['m'][i] / (1.0 - param_group.get('b1', self.b1)**self.t)
+        v_hat = param_group['v'][i] / (1.0 - param_group.get('b2', self.b2)**self.t)
+        up = (m_hat / (v_hat.sqrt() + param_group.get('eps', self.eps))) + param_group.get('wd', self.wd) * t.detach()
         if not self.adam:
           r1 = t.detach().square().sum().sqrt()
           r2 = up.square().sum().sqrt()
