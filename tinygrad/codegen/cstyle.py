@@ -30,7 +30,7 @@ class CStyleLanguage(NamedTuple):
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     else: val = f"{x}" + ("" if dtypes.is_int(var_dtype) else "f")
-    return f"({self.make_vector_prefix}{var_dtype})({val}, {val}, {val}, {val})" if var_dtype.is_vector_type else val
+    return f"({self.make_vector_prefix}{var_dtype.name})({val}, {val}, {val}, {val})" if var_dtype.is_vector_type else val
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
