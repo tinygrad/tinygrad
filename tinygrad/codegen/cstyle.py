@@ -1,7 +1,7 @@
-from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Set, Union
+from typing import Final, Dict, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Union
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer
-from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
+from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, FusedOps
 from tinygrad.helpers import ImageDType, dtypes, colored, getenv, prod, DType
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable

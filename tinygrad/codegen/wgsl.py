@@ -1,29 +1,27 @@
 from tinygrad.lazy import LazyBuffer
-from tinygrad.shape.symbolic import NumNode, Variable
 from tinygrad.codegen.cstyle import render_cl
 from tinygrad.helpers import dtypes, DType
-from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
+from tinygrad.codegen.linearizer import LocalBuffer
 from tinygrad.codegen.cstyle import CStyleLanguage
-from typing import Dict, Callable, List, Union
+from typing import List, Union
 from tinygrad.runtime.lib import RawConst
-from tinygrad.ops import UnaryOps, Op, BinaryOps, ASTRunner, FusedOps
+from tinygrad.ops import UnaryOps, BinaryOps, FusedOps
 import math
 
-type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
-code_for_op: Dict[Op, Callable] = {
+type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"} 
+class WGSLLanguage(CStyleLanguage):
+  gid = [f"i32(gindex.{'xyz'[x]})" for x in range(3)]
+  lid = [f"i32(lindex.{'xyz'[x]})" for x in range(3)]
+  size_prefix = "let"
+  barrier="workgroupBarrier();"
+  generic_var_prefix = "var "
+  external_local_bufs = True
+  code_for_op = {
     UnaryOps.EXP2: lambda x: f"exp2({x})", UnaryOps.LOG2: lambda x: f"log2({x})", UnaryOps.SIN: lambda x: f"sin({x})", UnaryOps.SQRT: lambda x: f"sqrt({x})",
     BinaryOps.ADD: lambda x,y: f"({x}+{y})", BinaryOps.SUB: lambda x,y: f"({x}-{y})", BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})",
     BinaryOps.MAX: lambda x,y: f"max({x},{y})", BinaryOps.CMPEQ: lambda x,y: f"f32({x}=={y})",
     FusedOps.MULACC: lambda x,y,z: f"fma({x},{y},{z})",
   }
-class WGSLLanguage(CStyleLanguage):
-  gid = [f"i32(gindex.{'xyz'[x]})" for x in range(3)]
-  lid = [f"i32(lindex.{'xyz'[x]})" for x in range(3)]
-  size_prefix = "let"
-  code_for_op = code_for_op
-  barrier="workgroupBarrier();"
-  generic_var_prefix = "var "
-  external_local_bufs = True
 
   def render_local(self, name: str, size: int):
     return f"var<workgroup> {name}: array<f32,{size}>;"
@@ -39,12 +37,16 @@ class WGSLLanguage(CStyleLanguage):
     prg = "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) var<storage,read_write> data{i}: array<{type_map[x.dtype]}>;" for i,x in enumerate(bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)])
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn KERNEL_NAME_PLACEHOLDER(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
     return prg
+  
   def render_for(self, expr: str, min: int, max: int) -> str:
     return f"for(var {expr} = {min}; {expr} <= {max}; {expr}++) {{"
+  
   def render_conditional(self, cond: str, x: str, y: str) -> str:
     return f"select(f32({y}), {x}, bool({cond}))"
+  
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
     return f"f32({super().render_load(output_dtype, buf_name, buf_dtype, idx, local)})"
+  
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
     if buf_dtype != var_dtype:
       var_name = f"{type_map[buf_dtype]}({var_name})"
