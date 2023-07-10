@@ -4,7 +4,7 @@ from tinygrad.runtime.lib import RawBufferCopyIn
 from tinygrad.helpers import dtypes, DType
 from tinygrad.ops import Compiled
 from tinygrad.codegen.cstyle import CStyleCodegen
-from tinygrad.codegen.wgsl import WGSLLanguage#, WGSLCodegen
+from tinygrad.codegen.wgsl import WGSLLanguage
 import wgpu
 
 device = get_default_device()
