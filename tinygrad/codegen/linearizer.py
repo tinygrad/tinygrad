@@ -500,6 +500,7 @@ class Linearizer:
       ret = []
       if x.op.__class__ in {ReduceOps, FusedOps}:
         for idx, val in get_grouped_maybe_vector4(*casted_values, acc, grouping_allowed=self.supports_float4_alu):
+          print('convert reduce op to binary op')
           ret.append((idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])))
       else:
         for idx, val in get_grouped_maybe_vector4(*casted_values, grouping_allowed=self.supports_float4_alu and x.op != BinaryOps.CMPEQ):
