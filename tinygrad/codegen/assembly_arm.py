@@ -6,6 +6,10 @@ from tinygrad.codegen.linearizer import UOps
 from tinygrad.helpers import dtypes
 
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
+def decompose_value(x): 
+  lower = x & 0xffff
+  upper = (x >> 16) & 0xffff
+  return lower, upper
 class ARMCodegen(AssemblyCodegen):
   def specialize(self, asm):
     ins = [] 
@@ -88,8 +92,7 @@ class ARMCodegen(AssemblyCodegen):
           ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
           #TODO: Can i do better?
           if vin[1].__class__ is int and vin[1] > 65535:
-            lower = vin[1] & 0xffff
-            upper = (vin[1] >> 16) & 0xffff
+            lower, upper = decompose_value(vin[1]) 
             ins.append(f"mov w2, #{lower}")
             ins.append(f"movk w2, #{upper}, lsl #16")
             ins.append(f"sxtw x1, w2")
@@ -115,7 +118,12 @@ class ARMCodegen(AssemblyCodegen):
       elif uop == UOps.LOAD:
         reg = 's0' if dtypes.is_float(out[1]) else 'x0'
         ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
-        ins.append(f"ldr {reg}, [x1, #{arg[0]}]")
+        if arg[0] < -255:
+          ins.append(f"mov x2, #{abs(arg[0])}")
+          ins.append(f"sub x1, x1, x2")
+          ins.append(f"ldr {reg}, [x1]")
+        else:
+          ins.append(f"ldr {reg}, [x1, #{arg[0]}]")
         ins.append(f"str {reg}, {reg_map[out.nm]}")
       elif uop == UOps.STORE:
         reg = 's0' if dtypes.is_float(vin[1][1]) else 'x0'
