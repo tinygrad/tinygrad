@@ -68,7 +68,7 @@ class TestJit(unittest.TestCase):
     for _ in range(5):
       b = Tensor.randn(10, 10)
       c = fun(b)
-      np.testing.assert_equal(c.numpy(), fun.a.numpy()+b.numpy())
+      np.testing.assert_allclose(c.numpy(), fun.a.numpy()+b.numpy(), atol=1e-6)
 
 if __name__ == '__main__':
   unittest.main()

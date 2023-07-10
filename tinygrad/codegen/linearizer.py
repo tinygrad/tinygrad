@@ -488,7 +488,7 @@ class Linearizer:
           for value in values: # cast one at a time
             if value.dtype != cast_dtype and dtypes.get_vector_type(value.dtype) != cast_dtype and (
               (value.offset is not None and (dtypes.get_vector_type(cast_dtype) != value.dtype)) or value.offset is None):
-                casted.extend(self.ungroup(self.uop(UOps.CAST, ssa("casted", cast_dtype), [value]), size=1))
+              casted.extend(self.ungroup(self.uop(UOps.CAST, ssa("casted", cast_dtype), [value]), size=1))
             else: casted.append(value)
           return casted
       casted_values = [maybe_cast(val, cast_dtype) for val in values]
