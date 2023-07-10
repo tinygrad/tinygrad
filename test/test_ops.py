@@ -317,7 +317,8 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(AssertionError):
       a = Tensor(3.14)
       a.matmul(a)
-
+  def test_simple_cumsum(self):
+    helper_test_op([(1024)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
   def test_cumsum(self):
     helper_test_op([(20)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
     helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
