@@ -12,10 +12,12 @@ class Node:
   b: int
   min: int
   max: int
-  def render(self, ops=None, ctx=None) -> str:
+  def render(self, ops=None, ctx=None, strip_parens=False) -> str:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
-    return ops[type(self)](self, ops, ctx)
+    ret = ops[type(self)](self, ops, ctx)
+    if strip_parens and ret[0] == '(' and ret[-1] == ')': ret = ret[1:-1]
+    return ret
   def vars(self): return []
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
