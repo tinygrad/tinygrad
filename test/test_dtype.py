@@ -116,7 +116,6 @@ class TestInt32Dtype(unittest.TestCase):
   def test_int32_mul_upcast_int64(self): _test_mul_upcast(Tensor([1,2,3,4], dtype=dtypes.int32), Tensor([1,2,3,4], dtype=dtypes.int64), dtypes.int64, [1,4,9,16])
   def test_int32_matmul_upcast_int64(self): _test_matmul_upcast(Tensor([[1,2],[3,4]], dtype=dtypes.int32), Tensor.eye(2, dtype=dtypes.int64), dtypes.int64, [[1,2],[3,4]])
 
-"""
 class TestTypeMatching(unittest.TestCase):
   def test_type_matching_same(self):
     a_float = np.array([1,2,3]).astype(np.float32)
@@ -126,15 +125,14 @@ class TestTypeMatching(unittest.TestCase):
     assert a_match.dtype == np.float32
     assert b_match.dtype == np.float32
 
-  def test_type_matching_int_and_float(self):
-    a_float = np.array([1,2,3]).astype(np.float32)
-    b_int = np.array([1,2,3]).astype(np.int32)
-
-    a_match, b_match = match_types(a_float, b_int)
-
-    assert a_match.dtype == np.float32
-    assert b_match.dtype == np.float32
-"""
+  #def test_type_matching_int_and_float(self):
+  #  a_float = np.array([1,2,3]).astype(np.float32)
+  #  b_int = np.array([1,2,3]).astype(np.int32)
+#
+  #  a_match, b_match = match_types(a_float, b_int)
+#
+  #  assert a_match.dtype == np.float32
+  #  assert b_match.dtype == np.float32
 
 if __name__ == '__main__':
   unittest.main()
