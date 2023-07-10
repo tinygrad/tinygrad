@@ -1,5 +1,5 @@
 import torch
-from typing import Dict, Callable, Optional
+from typing import Callable, Optional
 from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, FusedOps, Op, Interpreted
 from tinygrad.helpers import getenv, dtypes, prod, DType
 from tinygrad.runtime.ops_cpu import base_fxn_for_op, einsum_mulacc
@@ -9,7 +9,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if geten
 type_map = {torch.float16: dtypes.float16, torch.float32: dtypes.float32, torch.int8: dtypes.int8, torch.int32: dtypes.int32, torch.int64: dtypes.int64, torch.uint8: dtypes.uint8, torch.bool: dtypes.bool}
 inverse_type_map = {v:k for k,v in type_map.items()}
 
-torch_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
+torch_fxn_for_op: dict[Op, Callable] = {**base_fxn_for_op, **{
   UnaryOps.NOOP: lambda x: x.contiguous(), UnaryOps.SQRT: lambda x: x.sqrt(), UnaryOps.EXP2: lambda x: x.exp2(), UnaryOps.LOG2: lambda x: x.log2(), UnaryOps.CAST: lambda x,y: x.type(next(k for k,v in type_map.items() if v==y)), UnaryOps.SIN: torch.sin,
   BinaryOps.MAX: torch.maximum, BinaryOps.CMPEQ: lambda x,y: (x==y).type(torch.promote_types(x.dtype, y.dtype)),
   MovementOps.PAD: lambda x, padding: torch.nn.functional.pad(x, [item for sublist in padding[::-1] for item in sublist]),

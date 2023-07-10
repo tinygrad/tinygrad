@@ -1,6 +1,6 @@
 import os, json, pathlib, zipfile, pickle
 from tqdm import tqdm
-from typing import Dict, Union, List
+from typing import Union
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters
 from tinygrad.shape.shapetracker import strides_for_shape
@@ -8,13 +8,13 @@ from tinygrad.shape.shapetracker import strides_for_shape
 safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
-def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
+def safe_load(fn:Union[Tensor,str]) -> dict[str, Tensor]:
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
   json_len = t[0:1].cast(dtypes.int64).numpy()[0]
   metadata = json.loads(t[8:8+json_len].numpy().tobytes())
   return {k:t[8+json_len+v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']])[:prod(v['shape'])].reshape(v['shape']) for k,v in metadata.items() if k != "__metadata__"}
 
-def safe_save(tensors:Dict[str, Tensor], fn:str):
+def safe_save(tensors:dict[str, Tensor], fn:str):
   metadata, offset = {}, 0
   for k,v in tensors.items():
     metadata[k] = {'dtype': inverse_safe_dtypes[v.dtype], 'shape': list(v.shape), 'data_offsets':[offset, offset+v.nbytes()]}
@@ -30,7 +30,7 @@ def safe_save(tensors:Dict[str, Tensor], fn:str):
 # state dict
 
 from collections import OrderedDict
-def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> Dict[str, Tensor]:
+def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> dict[str, Tensor]:
   if isinstance(obj, tensor_type): return {prefix.strip('.'):obj}
   if hasattr(obj, '_asdict'): return get_state_dict(obj._asdict(), prefix, tensor_type)  # namedtuple
   if isinstance(obj, OrderedDict): return get_state_dict(dict(obj), prefix, tensor_type)
@@ -41,7 +41,7 @@ def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> Dict[str, Tensor]:
   elif isinstance(obj, dict):
     for k,v in obj.items(): state_dict.update(get_state_dict(v, f"{prefix}{str(k)}.", tensor_type))
   return state_dict
-def get_parameters(obj) -> List[Tensor]: return list(get_state_dict(obj).values())
+def get_parameters(obj) -> list[Tensor]: return list(get_state_dict(obj).values())
 
 def load_state_dict(model, state_dict, strict=True):
   with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
@@ -59,8 +59,8 @@ def load_state_dict(model, state_dict, strict=True):
 def torch_load(fn:str):
   t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
 
-  offsets: Dict[str, int] = {}
-  lens: Dict[str, int] = {}
+  offsets: dict[str, int] = {}
+  lens: dict[str, int] = {}
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None):
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize

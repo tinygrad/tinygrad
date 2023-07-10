@@ -1,15 +1,15 @@
 import numpy as np
 import operator
-from typing import Callable, Dict, Tuple, Optional
+from typing import Callable, Optional
 from tinygrad.helpers import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, FusedOps, Op, Interpreted
 from tinygrad.runtime.lib import RawBuffer
 
-def shape_to_axis(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Tuple[int, ...]:
+def shape_to_axis(old_shape:tuple[int, ...], new_shape:tuple[int, ...]) -> tuple[int, ...]:
   assert len(old_shape) == len(new_shape), "reduce shapes must have same dimensions"
   return tuple(i for i,(a,b) in enumerate(zip(old_shape, new_shape)) if a != b)
 
-base_fxn_for_op: Dict[Op, Callable] = {
+base_fxn_for_op: dict[Op, Callable] = {
   BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul, BinaryOps.DIV: operator.truediv,
   ReduceOps.SUM: lambda x, new_shape: x.sum(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:],
   ReduceOps.MAX: lambda x, new_shape: (x.amax if hasattr(x, 'amax') else x.max)(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:],
@@ -30,7 +30,7 @@ def match_types(x, y):
   up = x.dtype if dtypes.from_np(x.dtype).priority > dtypes.from_np(y.dtype).priority else y.dtype
   return x.astype(up), y.astype(up)
 
-numpy_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
+numpy_fxn_for_op: dict[Op, Callable] = {**base_fxn_for_op, **{
   UnaryOps.NOOP: lambda x: np.require(x, requirements='C'), UnaryOps.EXP2: np.exp2, UnaryOps.LOG2: np.log2, UnaryOps.CAST: lambda x,y: x.astype(y.np), UnaryOps.SIN: np.sin,
   BinaryOps.MAX: np.maximum, BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.promote_types(x.dtype,y.dtype)), BinaryOps.MUL: lambda x, y: np.multiply(*match_types(x, y)), UnaryOps.SQRT: np.sqrt,
   MovementOps.PERMUTE: lambda x, order: x.transpose(order), MovementOps.PAD: np.pad, MovementOps.EXPAND: np.broadcast_to,

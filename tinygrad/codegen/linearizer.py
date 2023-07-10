@@ -1,4 +1,4 @@
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict, Iterator, Union, Sequence
+from typing import Any, Optional, cast, NamedTuple, TypeVar, Iterator, Union, Sequence
 import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
@@ -16,7 +16,7 @@ VariableOrNum = Union[Variable, NumNode, Node]
 class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
 
-def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
+def to_image_idx(base_shape:tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
   if validhacks and valid.min == 0:
     idx = (idxy//4) + (idy*-base_shape[1])
@@ -57,14 +57,14 @@ class Token(NamedTuple):
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
 # TODO: the next three functions are poorly written
-def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
-  idxs: Optional[List[int]] = []
+def get_grouped_float4_idxs(acc:list[Token]) -> Optional[list[int]]:
+  idxs: Optional[list[int]] = []
   for i,a in enumerate(acc):
     if idxs is None: break
     if i in idxs: continue
     if a.dtype.sz > 1 and a.offset == 0:
       idxs.append(i)
-      friends: List[int] = []
+      friends: list[int] = []
       for j,b in enumerate(acc):
         if len(friends) == 3: break
         if j in idxs: continue
@@ -76,13 +76,13 @@ def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
       idxs = None
   return idxs
 
-def to_float4(x:List[Token]) -> Optional[Token]:
+def to_float4(x:list[Token]) -> Optional[Token]:
   if all_same(x): return x[0]
   if all_same([y.name for y in x]) and all(y.dtype == dtypes._float4 and y.offset == i for i,y in enumerate(x)):
     return Token(x[0].name, dtypes._float4)
   return None
 
-def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
+def get_grouped_maybe_float4(*values:list[Token], grouping_allowed=True):
   assert all_same([len(x) for x in values]), f"all values are not the same length {values}"
   # these use accumulators, we can only fold if the acc is a float4
   idxs = get_grouped_float4_idxs(values[-1]) if grouping_allowed else None
@@ -99,14 +99,14 @@ def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
   return zip([[i] for i in range(len(values[0]))], zip(*values))
 
 # TODO: generic visitor pattern?
-def expand_node(idx:Node) -> List[Node]:
+def expand_node(idx:Node) -> list[Node]:
   if isinstance(idx, Variable):  return [idx] if idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)]
   elif isinstance(idx, NumNode): return [idx]
   elif isinstance(idx, MulNode): return [x*idx.b for x in expand_node(idx.a)]
   elif isinstance(idx, SumNode): return [Variable.sum(list(it)) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
   else: raise NotImplementedError(idx)
 
-def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
+def expand_idxs(idxs:Sequence[Node]) -> Iterator[tuple[Node, ...]]:
   for x in itertools.product(*[expand_node(idx) for idx in idxs[::-1]]):
     yield x[::-1]
 
@@ -118,7 +118,7 @@ class MemOp(NamedTuple):
 class UOp(NamedTuple):
   uop: UOps
   out: Optional[Token]
-  vin: List[Token]
+  vin: list[Token]
   arg: Any
   def __repr__(self): return f"{str(self.uop):20s}: {str(self.out) if self.out is not None else '':25s} {str(self.vin):32s} {self.arg}"
 
@@ -154,7 +154,7 @@ class Linearizer:
     self.earlybufs = dedup(self.reduceop.buffers) if self.reduceop else []
 
     # create new shapetrackers inside this kernel, we will permute them
-    self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]
+    self.sts: list[ShapeTracker] = [x.st.copy() for x in self.bufs]
     for st in self.sts: st.simplify()
 
     # make the output buffer shape correct in here
@@ -167,10 +167,10 @@ class Linearizer:
     self.reshape_and_permute(None, permute)
 
     # parameters
-    self.group_for_reduce: List[int] = []
+    self.group_for_reduce: list[int] = []
     self.upcasted: int = 0
     self.local_dims: int = 0
-    self.local_alias: Dict[int, LocalBuffer] = {}
+    self.local_alias: dict[int, LocalBuffer] = {}
     self.use_tensor_cores: bool = False
     self.exclude_local_upcast: int = 0
 
@@ -196,11 +196,11 @@ class Linearizer:
     acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
-  def get_upcast_dim(self, i) -> List[int]:
+  def get_upcast_dim(self, i) -> list[int]:
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
-  def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
+  def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> list[Token]:
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
@@ -209,7 +209,7 @@ class Linearizer:
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
-    cache: Dict[str, Token] = {}
+    cache: dict[str, Token] = {}
     ret = []
     for _idx in _idxs:
       if amt > 1:
@@ -229,7 +229,7 @@ class Linearizer:
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return ret
 
-  def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
+  def global_store(self, i, idxs:list[VariableOrNum], store:list[Token], ssa) -> None:
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
@@ -261,8 +261,8 @@ class Linearizer:
 
   def linearize(self):
     # uops
-    self.uops: List[UOp] = []
-    self.saved_exprs: Dict[LazyOp, List[Token]] = dict()
+    self.uops: list[UOp] = []
+    self.saved_exprs: dict[LazyOp, list[Token]] = dict()
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
@@ -287,7 +287,7 @@ class Linearizer:
     acc = []
 
     # ssa
-    _ssa:DefaultDict[str,int] = defaultdict(int)
+    _ssa:defaultdict[str,int] = defaultdict(int)
     def ssa(name, ltype=dtypes.float) -> Token:
       _ssa[name] += 1
       return Token(f"{name}{_ssa[name]-1}", ltype)
@@ -325,7 +325,7 @@ class Linearizer:
       for i in self.local_alias:
         strides = self.sts[i].real_strides()
         extra_locals = [lidx for lidx,st in zip(local_idxs[self.exclude_local_upcast:], strides[len(global_idxs)+self.exclude_local_upcast:self.first_reduce]) if st == 0]
-        this_upcast_idxs: List[Node] = []
+        this_upcast_idxs: list[Node] = []
         for j,v in enumerate(full_upcast_idxs):
           if strides[len(global_idxs)+len(local_idxs)+len(reduce_idxs)+j] == 0:
             if DEBUG >= 4: print("upcasting stride 0")
@@ -428,12 +428,12 @@ class Linearizer:
       self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
   _OT = TypeVar("_OT")
-  def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None) -> _OT:
+  def uop(self, uop:UOps, out:_OT, vin:list[Token], arg:Any=None) -> _OT:
     self.uops.append(UOp(uop, cast(Optional[Token], out), vin, arg))
     if DEBUG >= 4: print(self.uops[-1])
     return out
 
-  def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
+  def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> list[Token]:
     if x.__class__ is not LazyOp: return loaded_buffers[x]
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
@@ -452,32 +452,32 @@ class Linearizer:
         ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
       else:
         ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
-      ordered_ret: List[Optional[Token]] = [None]*len(values[0])
+      ordered_ret: list[Optional[Token]] = [None]*len(values[0])
       # scatter
       for i,j in ret:
         for o,k in enumerate(i):
           ordered_ret[k] = Token(j.name, j.dtype, o) if j.dtype == dtypes._float4 else j
       assert all(isinstance(x, Token) for x in ordered_ret), "some tokens didn't get scattered?"
-      self.saved_exprs[x] = cast(List[Token], ordered_ret)
+      self.saved_exprs[x] = cast(list[Token], ordered_ret)
     return self.saved_exprs[x]
 
   @property
   def first_reduce(self) -> int: return [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True)
 
   @property
-  def output_shape(self) -> Tuple[int, ...]: return self.sts[0].shape
+  def output_shape(self) -> tuple[int, ...]: return self.sts[0].shape
 
   @property
-  def full_shape(self) -> Tuple[int, ...]: return self.sts[self.full_buf_index].shape
+  def full_shape(self) -> tuple[int, ...]: return self.sts[self.full_buf_index].shape
 
   @property
-  def full_unupcasted_shape(self) -> Tuple[int, ...]: return self.full_shape[:self.shape_len-self.upcasted]
+  def full_unupcasted_shape(self) -> tuple[int, ...]: return self.full_shape[:self.shape_len-self.upcasted]
 
   @property
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
   @property
-  def upcast_in_mid_reduce_axes(self) -> List[int]: return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)) if self.full_shape[j] == self.sts[0].shape[j]]
+  def upcast_in_mid_reduce_axes(self) -> list[int]: return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)) if self.full_shape[j] == self.sts[0].shape[j]]
 
   # there's seven chunks of the shape
   # blue   -- global dims
@@ -489,7 +489,7 @@ class Linearizer:
   #  *** self.upcasted
   # purple -- reduce upcasted
   # yellow -- normal upcasted dimensions
-  def colors(self) -> List[str]:
+  def colors(self) -> list[str]:
     # up to first_reduce, they are all global (blue)
     colors = ["blue"] * (self.first_reduce-self.local_dims)
     # except the local_dims, these are non-reduce locals (cyan)

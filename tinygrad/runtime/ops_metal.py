@@ -1,7 +1,7 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib
 import Metal, Cocoa, libdispatch # type: ignore
-from typing import List, Any
+from typing import Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType
 from tinygrad.ops import Compiled
@@ -11,7 +11,7 @@ METAL_XCODE = getenv("METAL_XCODE")
 
 class _METAL:
   def __init__(self):
-    self.mtl_buffers_in_flight: List[Any] = []
+    self.mtl_buffers_in_flight: list[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueue()
   # TODO: is there a better way to do this?

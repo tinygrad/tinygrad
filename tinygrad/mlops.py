@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Optional
 from tinygrad.helpers import argsort, ShapeType
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps
 from tinygrad.tensor import Function
@@ -129,7 +129,7 @@ class Add(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     return x.binary_op(BinaryOps.ADD, y)
 
-  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
+  def backward(self, grad_output:LazyBuffer) -> tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output if self.needs_input_grad[0] else None, \
            grad_output if self.needs_input_grad[1] else None
 
@@ -137,7 +137,7 @@ class Sub(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     return x.binary_op(BinaryOps.SUB, y)
 
-  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
+  def backward(self, grad_output:LazyBuffer) -> tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output if self.needs_input_grad[0] else None, \
            grad_output.const_like(0).binary_op(BinaryOps.SUB, grad_output) if self.needs_input_grad[1] else None
 
@@ -147,7 +147,7 @@ class Mul(Function):
     self.x, self.y = x, y
     return x.binary_op(BinaryOps.MUL, y)
 
-  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
+  def backward(self, grad_output:LazyBuffer) -> tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return self.y.binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[0] else None, \
            self.x.binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[1] else None
 
@@ -157,7 +157,7 @@ class Div(Function):
     self.x, self.y = x, y
     return x.binary_op(BinaryOps.DIV, y)
 
-  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
+  def backward(self, grad_output:LazyBuffer) -> tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output.binary_op(BinaryOps.DIV, self.y) if self.needs_input_grad[0] else None, \
            grad_output.const_like(0).binary_op(BinaryOps.SUB, grad_output).binary_op(BinaryOps.MUL, self.x).binary_op(BinaryOps.DIV, self.y.binary_op(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None
 
@@ -184,7 +184,7 @@ class Reshape(Function):
 
 class Permute(Function):
   __slots__ = 'input_order'
-  def forward(self, x:LazyBuffer, order:Tuple[int, ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, order:tuple[int, ...]) -> LazyBuffer:
     self.input_order = order
     return x.permute(order)
 
@@ -193,7 +193,7 @@ class Permute(Function):
 
 class Pad(Function):
   __slots__ = 'narg'
-  def forward(self, x:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, arg:tuple[tuple[int, int], ...]) -> LazyBuffer:
     self.narg = tuple([(p[0], s+p[0]) for s,p in zip(x.shape, arg)])
     return x.pad(arg)
 
@@ -202,7 +202,7 @@ class Pad(Function):
 
 class Shrink(Function):
   __slots__ = 'narg'
-  def forward(self, x:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, arg:tuple[tuple[int, int], ...]) -> LazyBuffer:
     self.narg = tuple([(p[0], s-p[1]) for s,p in zip(x.shape, arg)])
     return x.shrink(arg)
 
@@ -211,7 +211,7 @@ class Shrink(Function):
 
 class Flip(Function):
   __slots__ = 'arg'
-  def forward(self, x:LazyBuffer, axis:Tuple[int, ...]):
+  def forward(self, x:LazyBuffer, axis:tuple[int, ...]):
     self.arg = tuple([-1 if i in set(axis) else 1 for i in range(len(x.shape))])
     return x.stride(self.arg)
 

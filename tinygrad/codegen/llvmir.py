@@ -1,4 +1,4 @@
-from typing import Final, Dict, Callable, Any, List, Optional
+from typing import Final, Callable, Any, List, Optional
 import functools
 from llvmlite import ir  # type: ignore
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token
@@ -18,7 +18,7 @@ render_llvm = {
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.and_(a,b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx))
 }
 
-code_for_op: Final[Dict[Op, Callable]] = {
+code_for_op: Final[dict[Op, Callable]] = {
   UnaryOps.EXP2: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.exp2', [ir.FloatType()]), [x], fastmath=('fast',)),
   UnaryOps.LOG2: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.log2', [ir.FloatType()]), [x], fastmath=('fast',)),
   UnaryOps.SIN: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.sin', [ir.FloatType()]), [x], fastmath=('fast',)),
@@ -32,7 +32,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   FusedOps.MULACC: lambda builder,x,y,z: builder.fadd(builder.fmul(x,y, flags=('fast',)), z, flags=('fast',)),
 }
 
-def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
+def uops_to_llvm_ir(uops:list[UOp], bufs:list[LazyBuffer]) -> str:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 
@@ -48,7 +48,7 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
   loop_blocks = []
   reduce_phis: List = []
   # TODO: newvar probably shouldn't be optional
-  lvars: Dict[Optional[Token], Any] = {}  # this Any is an llvm type
+  lvars: dict[Optional[Token], Any] = {}  # this Any is an llvm type
   render_llvm[Variable] = lambda self,ops,ctx: lvars[self.expr]
 
   for uop,newvar,vin,args in uops:

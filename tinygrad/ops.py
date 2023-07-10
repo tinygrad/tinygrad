@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, time
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
+from typing import TYPE_CHECKING, Union, Any, Optional, Callable, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer, RawConst
@@ -19,17 +19,17 @@ class FusedOps(Enum): MULACC = auto() # noqa: E702
 class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto() # noqa: E702
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps]
-OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[FusedOps]]
+OpType = Union[type[UnaryOps], type[BinaryOps], type[ReduceOps], type[MovementOps], type[LoadOps], type[FusedOps]]
 
 class LazyOp:
   # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
   __slots__ = "op", "src", "arg", "buffers", "__weakref__"
   op: Op
-  src: Tuple[Union[LazyOp, LazyBuffer], ...]
+  src: tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Any
-  buffers: Tuple[LazyBuffer, ...]
+  buffers: tuple[LazyBuffer, ...]
 
-  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None):
+  def __init__(self, op: Op, src: tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None):
     self.op = op
     self.src = src
     self.arg = arg
@@ -49,10 +49,10 @@ class LazyOp:
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
   # Any == Union[LazyBuffer, DeviceBuffer]
-  def map_buffers(self, real_srcs: Dict[Any, Any]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
-  def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
+  def map_buffers(self, real_srcs: dict[Any, Any]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
+  def get_lazyops(self) -> list[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
-  def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
+  def replace_with_movement_ops(self:LazyOp, ops:list[tuple[MovementOps, tuple[Any, ...]]]) -> 'LazyBuffer':
     from tinygrad.lazy import elementwise_op
     assert self.op in BinaryOps or self.op in UnaryOps
     return elementwise_op(self.op, *[z.replace_with_movement_ops(ops) for z in self.src], arg=self.arg)   # type: ignore
@@ -80,7 +80,7 @@ class LazyOp:
 # **************** for Interpreted Buffers ****************
 
 class Interpreted:
-  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_lazybuffer=lambda x: x.realized, to_underlying=lambda x: x._buf, from_underlying=None):
+  def __init__(self, buffer, fxn_for_op: dict[Op, Callable], from_lazybuffer=lambda x: x.realized, to_underlying=lambda x: x._buf, from_underlying=None):
     self.buffer = buffer
     self.fxn_for_op = fxn_for_op
     self.from_lazybuffer = from_lazybuffer
@@ -108,12 +108,12 @@ class Interpreted:
       return ret
 
 class FlopCounter:
-  def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops, self._buf = *tup, self
+  def __init__(self, tup:tuple[tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops, self._buf = *tup, self
   def consume_flops(self):
     self.flops, ret = 0, self.flops
     return ret
 from tinygrad.shape.shapetracker import ShapeTracker
-shape_fxn_for_op: Dict[Op, Callable] = {
+shape_fxn_for_op: dict[Op, Callable] = {
   UnaryOps.CAST: lambda self,dtype: (self.shape, dtype, self.consume_flops()),   # cast uses no flops
   **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op != UnaryOps.CAST},
   **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
@@ -125,7 +125,7 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 # **************** for Compiled Buffers ****************
 
 class ASTRunner:
-  def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
+  def __init__(self, name, prg, global_size:Optional[list[int]]=None, local_size:Optional[list[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
     if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args): print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
@@ -138,7 +138,7 @@ class ASTRunner:
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs)
 
-  def __call__(self, rawbufs:List[RawBuffer], jit=False, force_wait=False) -> Optional[float]:
+  def __call__(self, rawbufs:list[RawBuffer], jit=False, force_wait=False) -> Optional[float]:
     if et := self.clprg((self.global_size + [1]*(3-len(self.global_size))) if self.global_size is not None else None,
                         (self.local_size + [1]*(3-len(self.local_size))) if self.local_size is not None else None,
                         *rawbufs, wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
@@ -152,9 +152,9 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], codegen, runtime, synchronize=lambda: None):
+  def __init__(self, buffer: type[RawBuffer], codegen, runtime, synchronize=lambda: None):
     self.buffer, self.codegen, self.runtime, self.synchronize = buffer, codegen, runtime, synchronize
-    self.method_cache: Dict[str, ASTRunner] = {}
+    self.method_cache: dict[str, ASTRunner] = {}
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):
     # all movementops do nothing in a Compiled buffer!

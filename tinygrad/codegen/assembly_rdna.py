@@ -1,5 +1,4 @@
 import yaml
-from typing import Tuple, Set, Dict
 from tinygrad.helpers import dtypes
 from tinygrad.codegen.assembly import AssemblyCodegen, Register
 from tinygrad.codegen.linearizer import UOps
@@ -34,7 +33,7 @@ class RDNACodegen(AssemblyCodegen):
   sin_is_sin2pi: bool = True
   no_div: bool = True
 
-  def specialize(self, asm) -> Tuple[str, str]:
+  def specialize(self, asm) -> tuple[str, str]:
     args = []
     for i,b in enumerate(self.bufs): args.append({'.address_space': 'global', '.name': f'buf_{i}', '.offset': i*8, '.size': 8, '.type_name': b.dtype.name+"*", '.value_kind': 'global_buffer'})
     ins = []
@@ -48,8 +47,8 @@ class RDNACodegen(AssemblyCodegen):
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin", UnaryOps.LOG2: "log", UnaryOps.EXP2: "exp",
            BinaryOps.CMPEQ: "cmp_eq", BinaryOps.CMPLT: "cmp_lt"}
 
-    pend_regs:Set[Register] = set()
-    rtor:Dict[Register, str] = {}
+    pend_regs:set[Register] = set()
+    rtor:dict[Register, str] = {}
     def reg_in(x):
       nonlocal pend_regs
       #print("reg_in", x, rtor[x], pend_regs)

@@ -5,7 +5,7 @@ from functools import partialmethod, reduce
 from itertools import accumulate, filterfalse
 import operator
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
+from typing import Callable, Optional, ClassVar, Union, Sequence, cast
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
 from math import ceil, pi, prod, sqrt, log, cos, copysign
 from tinygrad.lazy import Device, LazyBuffer
@@ -23,7 +23,7 @@ class Function:
   def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
 
   @classmethod
-  def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
+  def apply(fxn:type[Function], *x:Tensor, **kwargs) -> Tensor:
     ctx = fxn(x[0].device, *x)
     ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
     if ctx.requires_grad and not Tensor.no_grad: ret._ctx = ctx    # used by autograd engine
@@ -83,7 +83,7 @@ class Tensor:
   def device(self) -> str: return self.lazydata.device
 
   @property
-  def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
+  def shape(self) -> tuple[int, ...]: return self.lazydata.shape
 
   @property
   def dtype(self) -> DType: return self.lazydata.dtype
@@ -143,7 +143,7 @@ class Tensor:
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(shape:Tuple[int, ...], fill_value, **kwargs): return Tensor(fill_value, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape)
+  def full(shape:tuple[int, ...], fill_value, **kwargs): return Tensor(fill_value, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape)
 
   @staticmethod
   def zeros(*shape, **kwargs): return Tensor.full(argfix(*shape), 0, **kwargs)
@@ -235,13 +235,13 @@ class Tensor:
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))]))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
-  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Pad.apply(self, arg=arg) if any(x != (0,0) for x in arg) else self
-  def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
+  def pad(self, arg:tuple[tuple[int, int], ...]) -> Tensor: return mlops.Pad.apply(self, arg=arg) if any(x != (0,0) for x in arg) else self
+  def shrink(self, arg:tuple[tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
 
   # ***** movement hlops *****
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
-  def slice(self, arg:Sequence[Optional[Tuple[int, int]]]) -> Tensor:
+  def slice(self, arg:Sequence[Optional[tuple[int, int]]]) -> Tensor:
     arg_ = tuple([a if a is not None else (0,s) for s,a in zip(self.shape, arg)])
     padding = tuple([(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_)])
     return self.pad(padding).shrink(tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)]))
@@ -352,7 +352,7 @@ class Tensor:
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
   # (padding_left, padding_right, padding_top, padding_bottom)
-  def pad2d(self, padding:Union[List[int], Tuple[int, ...]]):
+  def pad2d(self, padding:Union[list[int], tuple[int, ...]]):
     slc = [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], self.shape[::-1])][::-1]
     return self.slice([(0,s) for s in self.shape[:-(len(padding)//2)]] + slc)
 
@@ -366,8 +366,8 @@ class Tensor:
 
   # ***** reduce ops *****
 
-  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False):
-    axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if axis.__class__ is int else list(axis)) # type: ignore
+  def _reduce(self, fxn:type[Function], axis:Optional[Union[int, tuple[int, ...]]]=None, keepdim=False):
+    axis_: list[int] = list(range(len(self.shape))) if axis is None else ([axis] if axis.__class__ is int else list(axis)) # type: ignore
     axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
     shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis_]
     ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else self.shape[i] for i in range(len(self.shape))]))
@@ -398,7 +398,7 @@ class Tensor:
 
   # ***** processing ops *****
 
-  def _pool(self, k_:Tuple[int, ...], stride:Union[Tuple[int, ...], int]=1, dilation:Union[Tuple[int, ...], int]=1, _insert_dims=tuple()) -> Tensor:
+  def _pool(self, k_:tuple[int, ...], stride:Union[tuple[int, ...], int]=1, dilation:Union[tuple[int, ...], int]=1, _insert_dims=tuple()) -> Tensor:
     assert len(self.shape) >= len(k_), f"can't pool {self.shape} with {k_}"
     s_, d_ = make_pair(stride, len(k_)), make_pair(dilation, len(k_))
     assert len(k_) == len(s_) and len(k_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
@@ -531,7 +531,7 @@ class Tensor:
 
   # ***** broadcasted binary mlops *****
 
-  def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
+  def _broadcasted(self, fxn:type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
     dtype = self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
     x: Tensor = self
     y: Tensor = Tensor(cast(float, other), device=self.device, requires_grad=False, dtype=dtype) if other.__class__ is not Tensor else cast(Tensor, other)
@@ -610,7 +610,7 @@ class Tensor:
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
     return x.add(bias) if bias is not None else x
 
-  def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return reduce(lambda x,f: f(x), ll, self)
+  def sequential(self, ll:list[Callable[[Tensor], Tensor]]): return reduce(lambda x,f: f(x), ll, self)
 
   def layernorm(self, axis=-1, eps:float=1e-5) -> Tensor:
     y = (self - self.mean(axis, keepdim=True))

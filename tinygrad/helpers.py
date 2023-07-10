@@ -3,10 +3,10 @@ import os, functools, platform, time, re
 from weakref import KeyedRef, ref
 from _weakref import _remove_dead_weakref # type: ignore
 import numpy as np
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
+from typing import Union, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 from math import prod # noqa: F401 # pylint:disable=unused-import
 
-ShapeType = Tuple[int, ...]
+ShapeType = tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
 
@@ -21,7 +21,7 @@ def all_same(items): return all(x == items[0] for x in items)
 def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
 def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
 def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if not fxn(x)]
-def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
+def make_pair(x:Union[int, tuple[int, ...]], cnt=2) -> tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterator): return [item for sublist in l for item in sublist]
 def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
@@ -35,7 +35,7 @@ class Context:
   def __exit__(self, *args): ContextVar.ctx_stack.pop()
 
 class ContextVar:
-  ctx_stack: ClassVar[List[dict[str, Any]]] = [{}]
+  ctx_stack: ClassVar[list[dict[str, Any]]] = [{}]
   def __init__(self, key, default_value):
     self.key, self.initial_value = key, getenv(key, default_value)
     if key not in ContextVar.ctx_stack[-1]: ContextVar.ctx_stack[-1][key] = self.initial_value
@@ -74,7 +74,7 @@ class ImageDType(DType):
   def __new__(cls, priority, itemsize, name, np, shape):
     return super().__new__(cls, priority, itemsize, name, np)
   def __init__(self, priority, itemsize, name, np, shape):
-    self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
+    self.shape: tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
     super().__init__()
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
@@ -88,7 +88,7 @@ class dtypes:
   @staticmethod
   def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
-  def fields() -> Dict[str, DType]: return DTYPES_DICT
+  def fields() -> dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   half = float16
@@ -115,7 +115,7 @@ class GlobalCounters:
   time_sum_s: ClassVar[float] = 0.0
   kernel_count: ClassVar[int] = 0
   mem_used: ClassVar[int] = 0   # NOTE: this is not reset
-  cache: ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
+  cache: ClassVar[Optional[list[tuple[Callable, Any]]]] = None
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
 

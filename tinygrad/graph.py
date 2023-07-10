@@ -4,7 +4,7 @@ try:
 except ImportError:
   nx = None # graph won't work
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import Optional
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps, Op, OpType, LazyOp
 from tinygrad.tensor import LazyBuffer
 from tinygrad.helpers import GRAPH, GRAPHPATH, PRUNEGRAPH, DEBUG, GlobalCounters
@@ -13,7 +13,7 @@ from tinygrad.runtime.lib import RawConst
 # **** debugging and graphing ****
 
 G = nx.DiGraph() if nx is not None else None
-cnts: Dict[OpType, int] = defaultdict(int)
+cnts: dict[OpType, int] = defaultdict(int)
 if DEBUG >= 2:
   def print_globalcounters():
     if GlobalCounters.time_sum_s == 0: return
@@ -38,7 +38,7 @@ def nm(x):
     node_count += 1
   return x.node_id
 
-def get_sop(op: List[Op]):
+def get_sop(op: list[Op]):
   if len(op) <= 2: return '.'.join([str(y).split(".")[1] for y in op][::-1])
   if len(op) <= 4: return '.'.join([str(y).split(".")[1][0:3] for y in op][::-1])
   return str(len(op))
@@ -50,8 +50,8 @@ def str_dtype(dtyp):
 def log_op(ret: LazyBuffer, ast: LazyOp, show_graph: Optional[bool] = None, phantom=False):
   if show_graph is None: show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
-  op: List[Op] = [x.op for x in ast.get_lazyops()]
-  inp: List[LazyBuffer] = [x for x in ast.buffers if not isinstance(x.realized, RawConst) or GRAPH > 1]
+  op: list[Op] = [x.op for x in ast.get_lazyops()]
+  inp: list[LazyBuffer] = [x for x in ast.buffers if not isinstance(x.realized, RawConst) or GRAPH > 1]
   oporder = [LoadOps, FusedOps, ReduceOps, BinaryOps, UnaryOps, MovementOps]
   optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1

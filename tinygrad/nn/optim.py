@@ -1,16 +1,15 @@
 # sorted in order of increasing complexity
-from typing import List
 from tinygrad.helpers import dedup
 from tinygrad.tensor import Tensor
 
 class Optimizer:
-  def __init__(self, params: List[Tensor], lr: float):
+  def __init__(self, params: list[Tensor], lr: float):
     # if it's None, but being put into an optimizer, set it to True
     for x in params:
       if x.requires_grad is None: x.requires_grad = True
 
-    self.params: List[Tensor] = dedup([x for x in params if x.requires_grad])
-    self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
+    self.params: list[Tensor] = dedup([x for x in params if x.requires_grad])
+    self.buffers: list[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
     self.lr = Tensor([lr], requires_grad=False)
 
   def zero_grad(self):
@@ -23,7 +22,7 @@ class Optimizer:
       p.realize()
 
 class SGD(Optimizer):
-  def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
+  def __init__(self, params: list[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
     super().__init__(params, lr)
     self.momentum, self.wd, self.nesterov = momentum, weight_decay, nesterov
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
@@ -40,11 +39,11 @@ class SGD(Optimizer):
     self.realize(self.b)
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
-def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01): return LAMB(params, lr, b1, b2, eps, wd, adam=True)
-def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8): return LAMB(params, lr, b1, b2, eps, 0.0, adam=True)
+def AdamW(params: list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01): return LAMB(params, lr, b1, b2, eps, wd, adam=True)
+def Adam(params: list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8): return LAMB(params, lr, b1, b2, eps, 0.0, adam=True)
 
 class LAMB(Optimizer):
-  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
+  def __init__(self, params: list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
     super().__init__(params, lr)
     self.b1, self.b2, self.eps, self.wd, self.adam, self.t = b1, b2, eps, wd, adam, Tensor([0], requires_grad=False).realize()
     self.m = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]

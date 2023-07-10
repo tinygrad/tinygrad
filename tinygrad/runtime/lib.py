@@ -1,6 +1,6 @@
 import ctypes
 import numpy as np
-from typing import TypeVar, Type, Any
+from typing import TypeVar, Any
 from tinygrad.helpers import DType, dtypes, prod, GlobalCounters
 
 _T = TypeVar("_T")
@@ -19,7 +19,7 @@ class RawBuffer:  # pylint: disable=abstract-method
 
   # NOTE: this interface allows for 0 copy
   @classmethod
-  def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
+  def fromCPU(cls:type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
   def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
 
 class RawBufferCopyIn(RawBuffer):

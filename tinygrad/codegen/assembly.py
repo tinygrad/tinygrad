@@ -1,4 +1,4 @@
-from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
+from typing import NamedTuple, Any, Optional, Union
 from tinygrad.codegen.linearizer import Linearizer, UOps, Token
 from tinygrad.ops import ASTRunner, BinaryOps, UnaryOps
 from tinygrad.helpers import DType, dtypes, DEBUG
@@ -23,7 +23,7 @@ class Register(NamedTuple):
 class AssemblyInstruction(NamedTuple):
   op: UOps
   out: Optional[Register]
-  vin: List[Union[Register, int, float]]
+  vin: list[Union[Register, int, float]]
   arg: Any = None
 
 # warp size of 32, s registers are shared across the warp, v are 32-wide vectors
@@ -32,7 +32,7 @@ class AssemblyCodegen(Linearizer):
   sin_is_sin2pi: bool = False
   no_div: bool = False
 
-  def specialize(self, asm:List[AssemblyInstruction]) -> Tuple[str, str]:
+  def specialize(self, asm:list[AssemblyInstruction]) -> tuple[str, str]:
     raise NotImplementedError("must be implemented")
 
   # s registers are the addresses and non local indexes
@@ -42,8 +42,8 @@ class AssemblyCodegen(Linearizer):
     self.limit_global_dims(3)  # all GPU asms have 3 (for now)
     self.linearize()
 
-    cnts:DefaultDict[Tuple[DType, bool], int] = defaultdict(int)
-    tor: Dict[Any, Register] = {}
+    cnts:defaultdict[tuple[DType, bool], int] = defaultdict(int)
+    tor: dict[Any, Register] = {}
     def newreg(tok, dtype=dtypes.float32, scalar=False):
       nonlocal cnts, tor
       if isinstance(tok, Token): dtype = tok.dtype  # this

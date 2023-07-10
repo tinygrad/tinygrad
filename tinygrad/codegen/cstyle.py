@@ -1,4 +1,4 @@
-from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Set, Union
+from typing import Final, Callable, ClassVar, Optional, NamedTuple, Union
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
@@ -18,15 +18,15 @@ class CStyleLanguage(NamedTuple):
   buffer_suffix: str = ""
   smem_prefix: str = ""
   barrier: str = ""
-  gid: List[str] = []
-  lid: List[str] = []
-  extra_args: List[str] = []
+  gid: list[str] = []
+  lid: list[str] = []
+  extra_args: list[str] = []
   float4: Optional[str] = None
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
 
   # returns a str expression of the casted xs with the given type
-  def render_cast(self, x:List[str], var_dtype) -> str:
+  def render_cast(self, x:list[str], var_dtype) -> str:
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "cast is not supported on this platform"
     if var_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
@@ -64,7 +64,7 @@ class CStyleLanguage(NamedTuple):
     else:
       return f"{buf_name}[{idx.render(render_cl)}] = {var_name};"
 
-code_for_op: Final[Dict[Op, Callable]] = {
+code_for_op: Final[dict[Op, Callable]] = {
   UnaryOps.EXP2: lambda x: f"exp2({x})",
   UnaryOps.LOG2: lambda x: f"log2({x})",
   UnaryOps.SIN: lambda x: f"sin({x})",
@@ -89,8 +89,8 @@ def add_gl_dimension(args, i, var, local_size, xid):
     local_size.append(var.max+1)
     return f"{{ int {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
-def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
-  prekernel: Set[str] = set()
+def uops_to_cstyle(uops:list[UOp], bufs:list[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> tuple[str, list[int], list[int]]:
+  prekernel: set[str] = set()
   kernel = []
   global_size = []
   local_size = []
@@ -186,8 +186,8 @@ class CStyleCodegen(Linearizer):
   supports_float4_alu: bool = True
 
   # for renaming
-  kernel_cnt: Final[DefaultDict[str, int]] = collections.defaultdict(int)
-  kernel_name_cache: Final[Dict[str, Tuple[str, str]]] = {}
+  kernel_cnt: Final[collections.defaultdict[str, int]] = collections.defaultdict(int)
+  kernel_name_cache: Final[dict[str, tuple[str, str]]] = {}
 
   def codegen(self):
     self.process()

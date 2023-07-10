@@ -1,4 +1,4 @@
-from typing import Callable, List, Tuple, Any, Dict, cast, Union
+from typing import Callable, Any, cast, Union
 import functools, itertools
 from tinygrad.helpers import DEBUG, DType
 
@@ -10,9 +10,9 @@ class TinyJit:
   def __init__(self, fxn:Callable):
     self.fxn: Callable = fxn
     self.cnt: int = 0
-    self.jit_cache: List[Tuple[Callable, Any]] = []  # TODO: Any should be List[RawBuffer], but this fails
+    self.jit_cache: list[tuple[Callable, Any]] = []  # TODO: Any should be list[RawBuffer], but this fails
     self.ret: Any = None
-    self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], int, DType]]= {}   # (kernel_number, buffer_number) -> (input_name, expected_size, expected_type)
+    self.input_replace: dict[tuple[int, int], tuple[Union[int, str], int, DType]]= {}   # (kernel_number, buffer_number) -> (input_name, expected_size, expected_type)
 
   # add support for instance methods
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
@@ -20,7 +20,7 @@ class TinyJit:
   def __call__(self, *args, **kwargs) -> Any:
     if Device.DEFAULT not in ["GPU", "CLANG", "METAL", "CUDA", "HIP"]: return self.fxn(*args, **kwargs)  # only jit on the GPU codegen
     # NOTE: this cast is needed since although we know realize will create a ".realized" DeviceBuffer, the type checker doesn't
-    input_rawbuffers: Dict[Union[int, str], RawBuffer] = {cast(Union[int, str], k):cast(RawBuffer, v.realize().lazydata.realized) for k,v in itertools.chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
+    input_rawbuffers: dict[Union[int, str], RawBuffer] = {cast(Union[int, str], k):cast(RawBuffer, v.realize().lazydata.realized) for k,v in itertools.chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
     if self.cnt >= 2:

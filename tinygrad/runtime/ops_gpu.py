@@ -2,7 +2,7 @@ from __future__ import annotations
 import pathlib
 import numpy as np
 import pyopencl as cl  # type: ignore
-from typing import Optional, List
+from typing import Optional
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
@@ -18,11 +18,11 @@ if DEBUG >= 5:
 
 class _CL:
   def __init__(self):
-    platforms: List[List[cl.Device]] = [y for y in ([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()] + [x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()]) if len(y)]
-    devices: List[cl.Device] = [x for x in platforms[getenv('CL_PLATFORM', 0)] if x.name not in getenv('CL_EXCLUDE', '').split(',')]
+    platforms: list[list[cl.Device]] = [y for y in ([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()] + [x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()]) if len(y)]
+    devices: list[cl.Device] = [x for x in platforms[getenv('CL_PLATFORM', 0)] if x.name not in getenv('CL_EXCLUDE', '').split(',')]
     if DEBUG >= 1: print(f"using devices: {[d.hashable_model_and_version_identifier for d in devices]}")
     self.cl_ctx: cl.Context = cl.Context(devices=devices)
-    self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(self.cl_ctx, device=device, properties=cl.command_queue_properties.PROFILING_ENABLE) for device in self.cl_ctx.devices]
+    self.cl_queue: list[cl.CommandQueue] = [cl.CommandQueue(self.cl_ctx, device=device, properties=cl.command_queue_properties.PROFILING_ENABLE) for device in self.cl_ctx.devices]
 
   def synchronize(self):
     for q in self.cl_queue: q.finish()
