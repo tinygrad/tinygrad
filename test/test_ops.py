@@ -218,6 +218,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, a=0)
     helper_test_op([()], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
     helper_test_op([()], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
+    # Regression tests for https://github.com/tinygrad/tinygrad/issues/1151
+    helper_test_op([(45,65)], lambda x: x**3, lambda x: Tensor.pow(x,3), a=-10)
+    helper_test_op([()], lambda x: x**3, lambda x: Tensor.pow(x,3), a=-10)
   def test_pow_const(self):
     helper_test_op([(45,65)], lambda x: x**1.0, lambda x: x**1.0)
     helper_test_op([(45,65)], lambda x: x**-1.0, lambda x: x**-1.0)
@@ -317,7 +320,8 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(AssertionError):
       a = Tensor(3.14)
       a.matmul(a)
-
+  def test_simple_cumsum(self):
+    helper_test_op([(1024)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
   def test_cumsum(self):
     helper_test_op([(20)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
     helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
