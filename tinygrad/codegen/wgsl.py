@@ -30,6 +30,8 @@ class WGSLLanguage(CStyleLanguage):
     prg = "\n".join([f"@group(0) @binding({next(bind_it)}) var<storage,read_write> data{i}: array<{type_map[x.dtype]}>;" for i,x in enumerate(bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)])
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn KERNEL_NAME_PLACEHOLDER(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
     return prg
+  def render_for(self, expr: str, min: int, max: int) -> str:
+    return f"for(var {expr} = {min}; {expr} <= {max}; {expr}++) {{"
   def render_conditional(self, cond: str, x: str, y: str) -> str:
     return f"select({x}, f32({y}), bool({cond}))"
 
