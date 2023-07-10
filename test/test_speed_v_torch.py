@@ -76,8 +76,8 @@ def helper_test_speed(f1, *args):
 
 def helper_test_generic_square(name, N, f1, f2, onearg=False):
   torch.manual_seed(0)
-  torch_a = ((torch.rand(N, N, dtype=torch.float16 if HALF else torch.float) - 0.5) / N).to(torch_device)
-  torch_b = ((torch.rand(N, N, dtype=torch.float16 if HALF else torch.float) - 0.5) / N).to(torch_device) if not onearg else None
+  torch_a = ((torch.rand(N, N, dtype=torch.float16 if HALF else torch.float) - 0.5) / (N*N)).to(torch_device)
+  torch_b = ((torch.rand(N, N, dtype=torch.float16 if HALF else torch.float) - 0.5) / (N*N)).to(torch_device) if not onearg else None
 
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
