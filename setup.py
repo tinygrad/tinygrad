@@ -24,7 +24,7 @@ setup(name='tinygrad',
       extras_require={
         'llvm': ["llvmlite"],
         'cuda': ["pycuda"],
-        'triton': ["triton-nightly", "torch"],
+        'triton': ["triton-nightly", "torch", "pycuda"],
         'metal': ["pyobjc-framework-Metal", "pyobjc-framework-Cocoa", "pyobjc-framework-libdispatch"],
         'linting': [
             "flake8",
