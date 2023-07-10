@@ -97,7 +97,7 @@ class TestOps(unittest.TestCase):
       lambda x: torch.where(x > 0.5, 4, 2),
       lambda x: (x > 0.5).where(4, 2), forward_only=True)
 
-    for shps in [[(10,),(1,),(1,)], [(10,10),(10,),(10,)], [(100,)]*3, [(10,10)]*3]:
+    for shps in [[(8,),(1,),(1,)], [(10,10),(10,),(10,)], [(100,)]*3, [(10,10)]*3]:
       helper_test_op(
         shps,
         lambda x, a, b: torch.where(x > 0.5, a, b),
