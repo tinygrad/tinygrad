@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from tinygrad.helpers import prod, all_same
 from tinygrad.shape.shapetracker import ShapeTracker, View, merge_views, get_contraction
-from tinygrad.codegen.cstyle import to_image_idx
+from tinygrad.codegen.linearizer import to_image_idx
 
 def shapetracker_getitem(st, val):
   locals = {"idx": val, "valid": 1}
@@ -67,6 +67,12 @@ class CheckingShapeTracker:
     assert self.st.shape == self.shape
     assert x == y, f"mismatch shapetracker:{x} real:{y}"
 
+class TestRealIssues(unittest.TestCase):
+  def test_reshape_doesnt_multiview(self):
+    self.st = ShapeTracker((256, 256, 2, 2, 2, 2, 2, 256, 8, 2), views=[View((256, 256, 2, 2, 2, 2, 2, 256, 8, 2), (0, 8, 0, 4, 0, 0, 2, 16384, 2048, 1), 0, None)])
+    self.st.reshape((128, 2, 256, 2, 2, 2, 2, 2, 256, 8, 2))
+    assert len(self.st.views) == 1
+
 class TestRealDoesntSimplify(unittest.TestCase):
   def tearDown(self):
     st = self.st.real_strides()
@@ -87,6 +93,15 @@ class TestRealDoesntSimplify(unittest.TestCase):
       View((4, 4, 3, 3), (36, 9, 3, 1), 0, None)])
     assert self.st.real_strides() == (None, 18, -3, -1)
 
+class TestRealStrides(unittest.TestCase):
+  def test_1(self):
+    self.st = ShapeTracker((16, 32, 4), views=[
+      View((2048,), (1,), 0, ((0, 512),)),
+      View((16, 32, 4), (128, 4, 1), 0, None)])
+    st = self.st.real_strides()
+    print(self.st, st)
+    assert st == (None, 4, 1)
+
 class TestRealSimplifies(unittest.TestCase):
   def tearDown(self):
     st = self.st.real_strides()
@@ -104,7 +119,6 @@ class TestRealSimplifies(unittest.TestCase):
     self.st = ShapeTracker((8, 1, 6, 10, 28, 3, 2, 1), views=[
       View((8, 3, 3, 11, 2, 28), (924, 308, 0, 28, 0, 1), 0, None),
       View((8, 1, 6, 10, 28, 3, 2, 1), (5544, 0, 0, 56, 1, 1848, 672, 0), 0, None)])
-
 
 class TestSimplifyingShapeTracker(unittest.TestCase):
   def setUp(self):

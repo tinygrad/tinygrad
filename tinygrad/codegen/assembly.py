@@ -125,7 +125,7 @@ class AssemblyCodegen(Linearizer):
               ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32, scalar=True), [], 0))
               ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
       elif uop == UOps.ENDLOOP:
-        if args[1] not in ["global", "local"]:
+        if args[1] not in ["global", "local", "global+local"]:
           for var in reversed(args[0]):
             if not isinstance(var, NumNode):  # TODO: why is this coming through?
               ins.append(AssemblyInstruction(UOps.ALU, tor[var], [tor[var], 1], BinaryOps.ADD))
@@ -143,13 +143,6 @@ class AssemblyCodegen(Linearizer):
           pred_reg = newreg((newvar, 'pred'), dtype=dtypes.bool)
           ins.append(AssemblyInstruction(UOps.ALU, pred_reg, [tor[x] for x in vin], args))
           ins.append(AssemblyInstruction(UOps.CAST, out, [pred_reg], args))
-        elif args == BinaryOps.POW:
-          # TODO: add UnaryOps.SQRT
-          tmp = newreg((newvar, "exp_a"))
-          tmp2 = newreg((newvar, "exp_a_times_b"))
-          ins.append(AssemblyInstruction(UOps.ALU, tmp, [tor[vin[0]]], UnaryOps.LOG2))
-          ins.append(AssemblyInstruction(UOps.ALU, tmp2, [tmp, tor[vin[1]]], BinaryOps.MUL))
-          ins.append(AssemblyInstruction(UOps.ALU, out, [tmp2], UnaryOps.EXP2))
         elif args == BinaryOps.DIV and self.no_div:
           tmp = newreg((newvar, "rcp"))
           ins.append(AssemblyInstruction(UOps.ALU, tmp, [tor[vin[1]]], UnaryOps.RECIP))

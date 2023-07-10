@@ -2,12 +2,11 @@ import pathlib
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.state import safe_load, safe_save, get_state_dict
+from tinygrad.state import safe_load, safe_save, torch_load, get_state_dict
 from tinygrad.helpers import dtypes
 from tinygrad.runtime.ops_disk import RawDiskBuffer
-from extra.helpers import Timing
+from tinygrad.helpers import Timing
 from extra.utils import fetch_as_file, temp
-from tinygrad.state import torch_load, get_state_dict
 
 def compare_weights_both(url):
   import torch

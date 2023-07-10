@@ -6,23 +6,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  # OMG THIS TEST IS DISABLED, PLZ MAKE TINYGRAD TINY AGAIN
-  lines:
-    name: Less than 1000 lines
-    runs-on: ubuntu-latest
-    if: ${{ false }}
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Install SLOCCount
-      run: sudo apt-get install sloccount
-    - name: Check <1000 lines
-      run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
-
   linter:
     name: Linters
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -43,10 +30,15 @@ jobs:
       run: pylint tinygrad/
     - name: Run mypy
       run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
+    - name: Install SLOCCount
+      run: sudo apt-get install sloccount
+    - name: Check <5000 lines
+      run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
 
   testcpu:
     name: CPU Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -59,12 +51,15 @@ jobs:
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test Docs
       run: python docs/abstractions.py
+    - name: Test Quickstart
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
     - name: Run Pytest
       run: python -m pytest -s -v -n=auto test/
 
   testimagenet:
     name: ImageNet to C Compile Test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -85,6 +80,7 @@ jobs:
   testllvm:
     name: LLVM Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -122,6 +118,7 @@ jobs:
   testtorch:
     name: Torch Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -140,6 +137,7 @@ jobs:
   testgpu:
     name: GPU Tests
     runs-on: ubuntu-20.04
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -168,6 +166,7 @@ jobs:
   testopencl:
     name: openpilot (OpenCL) Test
     runs-on: ubuntu-20.04
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -186,20 +185,24 @@ jobs:
         python-version: 3.8
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Test openpilot model compile and size
+      run: |
+        DEBUG=2 ALLOWED_KERNEL_COUNT=199 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+        python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
     - name: Test GPU IMAGE ops
       run: |
         GPU=1 IMAGE=1 python3 test/test_ops.py
         FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 test/test_ops.py
-    - name: Test openpilot model
-      run: |
-        ALLOWED_KERNEL_COUNT=199 FLOAT16=1 VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
-        python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
-        DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
-        VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+    - name: Test openpilot model correctness (float32)
+      run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+    - name: Test tensor core ops
+      run: GPU=1 TC=2 python3 test/test_ops.py
 
   testmetal:
     name: Metal Tests
     runs-on: macos-13
+    timeout-minutes: 20
+
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
@@ -234,6 +237,8 @@ jobs:
   testcuda:
     name: (emulated) cuda test
     runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
