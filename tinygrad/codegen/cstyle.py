@@ -74,7 +74,7 @@ class CStyleLanguage(NamedTuple):
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
 
-  def render_kernel(self, kernel:List[str], bufs:List[Union[LocalBuffer,LazyBuffer]], bufnames:List[str], local_size: List[int]) -> str:
+  def render_kernel(self, kernel:List[str], bufs:List[Union[LocalBuffer,LazyBuffer]], bufnames:List[str], local_size: List[int], prekernel: List[str]) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(x.dtype, ImageDType) for x in bufs) else ""
     buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else
                 ("const " if i > 0 else "")+self.buffer_prefix+x.dtype.name+"*"+self.buffer_suffix) for i,x in enumerate(bufs)
@@ -112,7 +112,7 @@ def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:Li
     return f"{{ {prefix} {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
 def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
-  kernel,global_size,local_size,ext_bufs = [],[],[],[]
+  kernel,global_size,local_size,prekernel = [],[],[],[]
   pend_close = None
   bufnames = [b.name if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(bufs)]
   depth = 0
@@ -182,14 +182,14 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
     elif uop == UOps.DEFINE_LOCAL:
       if lang.external_local_bufs:
-        ext_bufs.append(lang.render_local(args[0], args[1]))
+        prekernel.append(lang.render_local(args[0], args[1]))
       else:
         kk(lang.render_local(args[0], args[1]))
     else:
       raise RuntimeError(f"failed to render {uop}")
 
   local_size = local_size[::-1]
-  return lang.render_kernel(kernel, bufs+ext_bufs, bufnames, local_size), global_size[::-1], local_size
+  return lang.render_kernel(kernel, bufs, bufnames, local_size, prekernel), global_size[::-1], local_size
 
 class CStyleCodegen(Linearizer):
   lang: ClassVar[CStyleLanguage] = CStyleLanguage()

@@ -23,17 +23,23 @@ class WGSLLanguage(CStyleLanguage):
   code_for_op = code_for_op
   barrier="workgroupBarrier();"
   generic_var_prefix = "var "
+  external_local_bufs = True
 
-  def render_kernel(self, kernel: List[str], bufs: List[LocalBuffer | LazyBuffer], bufnames: List[str], local_size) -> str:
+  def render_local(self, name: str, size: int):
+    return f"var<workgroup> {name}: array<f32,{size}>;"
+  
+  def render_kernel(self, kernel: List[str], bufs: List[LocalBuffer | LazyBuffer], bufnames: List[str], local_size: List[int], prekernel: List[str]) -> str:
     local_size = local_size if len(local_size) else [1]
     bind_it = iter(range(len(bufs)))
-    prg = "\n".join([f"@group(0) @binding({next(bind_it)}) var<storage,read_write> data{i}: array<{type_map[x.dtype]}>;" for i,x in enumerate(bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)])
+    prg = "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) var<storage,read_write> data{i}: array<{type_map[x.dtype]}>;" for i,x in enumerate(bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)])
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn KERNEL_NAME_PLACEHOLDER(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
     return prg
   def render_for(self, expr: str, min: int, max: int) -> str:
     return f"for(var {expr} = {min}; {expr} <= {max}; {expr}++) {{"
   def render_conditional(self, cond: str, x: str, y: str) -> str:
     return f"select({x}, f32({y}), bool({cond}))"
+  def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
+    return f"f32({super().render_load(output_dtype, buf_name, buf_dtype, idx, local)})"
 
 class WGSLCodegen(Linearizer):
   supports_float4 = False
