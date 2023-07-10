@@ -118,13 +118,6 @@ class TestInt32Dtype(unittest.TestCase):
 
 """
 class TestTypeMatching(unittest.TestCase):
-  def test_type_matching_same(self):
-    a_float = np.array([1,2,3]).astype(np.float32)
-    b_float = np.array([1,2,3]).astype(np.float32)
-    a_match, b_match = match_types(a_float, b_float)
-
-    assert a_match.dtype == np.float32
-    assert b_match.dtype == np.float32
 """
 
 if __name__ == '__main__':
