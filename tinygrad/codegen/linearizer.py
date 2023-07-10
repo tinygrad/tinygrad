@@ -469,10 +469,10 @@ class Linearizer:
 
       def maybe_cast(val, cast_dtype):
         if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2]:
-          if len(val) < 4: cast_dtype = dtypes.float
-          else: cast_dtype = dtypes._float4
+          if len(val) >= 4 and self.supports_float4: cast_dtype = dtypes._float4
+          else: cast_dtype = dtypes.float
         
-        if len(val) >= 4:
+        if len(val) >= 4 and self.supports_float4:
           cast_dtype = dtypes.get_vector_type(cast_dtype)
           if dtypes.get_vector_type(val[0].dtype) != cast_dtype:
             return self.uop(UOps.CAST, ssa("casted", cast_dtype), val), True
@@ -487,14 +487,14 @@ class Linearizer:
         return val, False
       
       casted_values = [self.ungroup(maybe_cast(val, cast_dtype), size=len(val)) for val in values]
-      casted_values = list(get_grouped_maybe_vector4(*casted_values, grouping_allowed=self.supports_float4 and x.op != BinaryOps.CMPEQ))
       ret = []
       if x.op.__class__ in {ReduceOps, FusedOps}:
-        for idx, val in get_grouped_maybe_vector4(*values, acc, grouping_allowed=self.supports_float4_alu):
+        print('here')
+        for idx, val in get_grouped_maybe_vector4(*casted_values, acc, grouping_allowed=self.supports_float4_alu):
           ret.append((idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])))
       else:
-        for idx, val in casted_values:
-          ret.append((idx, self.uop(UOps.ALU, ssa('alu', dtypes.get_vector_type(val[0].dtype)) if any(x.dtype.is_vector_type and x.offset is None for x in val) else ssa('alu', dtypes.get_vector_type(val[0].dtype)), list(val), x.op)))
+        for idx, val in get_grouped_maybe_vector4(*casted_values, grouping_allowed=self.supports_float4_alu and x.op != BinaryOps.CMPEQ):
+          ret.append((idx, self.uop(UOps.ALU, ssa('alu', dtypes.get_vector_type(val[0].dtype) if any(x.dtype.is_vector_type and x.offset is None for x in val) else val[0].dtype), list(val), x.op)))
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
       # scatter
       for i,j in ret:
