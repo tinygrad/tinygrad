@@ -170,8 +170,6 @@ class Tensor:
   @staticmethod
   def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
 
-  def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]): return self._broadcasted(mlops.Where, input_, other)
-
   # ***** rng hlops *****
 
   @staticmethod
@@ -529,27 +527,31 @@ class Tensor:
   def softplus(self, beta=1): return (1/beta) * (1 + (self*beta).exp()).log()
   def softsign(self): return self / (1 + self.abs())
 
-  # ***** broadcasted non-unary mlops *****
+  # ***** broadcasted binary mlops *****
 
-  def _broadcasted(self, fxn:Type[Function], *other:Union[Tensor, float], reverse:bool=False) -> Tensor:
+  def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
     dtype = self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
-    x: List[Tensor] = [self] + [Tensor(cast(float, y), device=self.device, requires_grad=False, dtype=dtype) if y.__class__ is not Tensor else cast(Tensor, y) for y in other]
-    if reverse: x = list(reversed(x))
-    if len(set(y.shape for y in x)) == 1: return fxn.apply(*x)
+    x: Tensor = self
+    y: Tensor = Tensor(cast(float, other), device=self.device, requires_grad=False, dtype=dtype) if other.__class__ is not Tensor else cast(Tensor, other)
+    if reverse: x, y = y, x
+    if x.shape == y.shape: return fxn.apply(x, y)
 
-    max_shape = max(len(y.shape) for y in x)
+    len_x_shape, len_y_shape = len(x.shape), len(y.shape)
+    max_shape = max(len_x_shape, len_y_shape)
 
-    x = [y.reshape((1,) * (max_shape - len(y.shape)) + y.shape) if len(y.shape) != max_shape else y for y in x]
+    if len_x_shape != max_shape: x = x.reshape((1,) * (max_shape - len_x_shape) + x.shape)
+    if len_y_shape != max_shape: y = y.reshape((1,) * (max_shape - len_y_shape) + y.shape)
 
-    shape_ret = tuple([max(y) for y in zip(*[z.shape for z in x])])
-    x = [y.expand(shape_ret) if y.shape != shape_ret else y for y in x]
+    shape_ret = tuple([max(x, y) for x, y in zip(x.shape, y.shape)])
+    if x.shape != shape_ret: x = x.expand(shape_ret)
+    if y.shape != shape_ret: y = y.expand(shape_ret)
 
-    return fxn.apply(*x)
+    return fxn.apply(x, y)
 
-  def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse=reverse) if x.__class__ is Tensor or x else self
-  def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse=reverse) if x.__class__ is Tensor or x or reverse else self
-  def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse=reverse) if x.__class__ is Tensor or x != 1.0 else self
-  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse=reverse) if x.__class__ is Tensor or reverse or not x else self.mul(1/x)
+  def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ is Tensor or x else self
+  def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if x.__class__ is Tensor or x or reverse else self
+  def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse) if x.__class__ is Tensor or x != 1.0 else self
+  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ is Tensor or reverse or not x else self.mul(1/x)
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     if x.__class__ is not Tensor and not reverse:
       # simple pow identities
@@ -567,7 +569,32 @@ class Tensor:
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)
   def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
-  def eq(self, x) -> Tensor: return self._broadcasted(mlops.Equal, x, reverse=False)
+  def eq(self, x) -> Tensor: return self._broadcasted(mlops.Equal, x, False)
+
+  # ***** broadcasted trinary mlops *****
+
+  def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
+    # TODO: ensure self is non-differentiable, could mess with ceil/float though
+    dtype = self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
+    x: Tensor = self
+    y: Tensor = Tensor(cast(float, input_), device=self.device, requires_grad=False, dtype=dtype) if input_.__class__ is not Tensor else cast(Tensor, input_)
+    z: Tensor = Tensor(cast(float, other), device=self.device, requires_grad=False, dtype=dtype) if other.__class__ is not Tensor else cast(Tensor, other)
+    if x.shape == y.shape and y.shape == z.shape: return mlops.Where.apply(x, y, z)
+
+    # TODO refactor this code along with the binary version above
+    len_x_shape, len_y_shape, len_z_shape = len(x.shape), len(y.shape), len(z.shape)
+    max_shape = max(len_x_shape, len_y_shape, len_z_shape)
+
+    if len_x_shape != max_shape: x = x.reshape((1,) * (max_shape - len_x_shape) + x.shape)
+    if len_y_shape != max_shape: y = y.reshape((1,) * (max_shape - len_y_shape) + y.shape)
+    if len_z_shape != max_shape: z = z.reshape((1,) * (max_shape - len_z_shape) + z.shape)
+
+    shape_ret = tuple([max(x, y, z) for x, y, z in zip(x.shape, y.shape, z.shape)])
+    if x.shape != shape_ret: x = x.expand(shape_ret)
+    if y.shape != shape_ret: y = y.expand(shape_ret)
+    if z.shape != shape_ret: z = z.expand(shape_ret)
+
+    return mlops.Where.apply(x, y, z)
 
   # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
 
