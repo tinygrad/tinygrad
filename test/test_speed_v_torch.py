@@ -14,10 +14,11 @@ from tinygrad.lazy import Device
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
-from tinygrad.helpers import colored, getenv, DEBUG
+from tinygrad.helpers import colored, getenv, DEBUG, dtypes
 from tinygrad.jit import TinyJit
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
+HALF = getenv('HALF', 0) == 1
 
 torch_device = torch.device('mps' if getenv("MPS", 0) else ('cuda' if getenv("TORCHCUDA", 0) else 'cpu'))
 if str(torch_device) == "mps":
@@ -75,8 +76,8 @@ def helper_test_speed(f1, *args):
 
 def helper_test_generic_square(name, N, f1, f2, onearg=False):
   torch.manual_seed(0)
-  torch_a = (torch.rand(N, N) - 0.5).to(torch_device)
-  torch_b = (torch.rand(N, N) - 0.5).to(torch_device) if not onearg else None
+  torch_a = ((torch.rand(N, N, dtype=torch.float16 if HALF else torch.float) - 0.5) / N).to(torch_device)
+  torch_b = ((torch.rand(N, N, dtype=torch.float16 if HALF else torch.float) - 0.5) / N).to(torch_device) if not onearg else None
 
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
@@ -95,12 +96,12 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
   mem = save_mem*1e-6
   print(f"{prefix}{name:42s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")
   prefix = " "
-  np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
+  np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-1 if HALF else 1e-4, rtol=1e-1 if HALF else 1e-3)
 
 def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_x):
   torch.manual_seed(0)
-  torch_dat = torch.rand(bs, in_chans, img_size_y, img_size_x).to(torch_device)
-  torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None).to(torch_device)
+  torch_dat = torch.rand(bs, in_chans, img_size_y, img_size_x, dtype=torch.float16 if HALF else torch.float).to(torch_device)
+  torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None, dtype=torch.float16 if HALF else torch.float).to(torch_device)
 
   tiny_dat = Tensor(torch_dat.cpu().numpy())
   tiny_conv = Conv2d(in_chans, out_chans, kernel_size, bias=None)
