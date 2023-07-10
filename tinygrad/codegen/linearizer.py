@@ -83,7 +83,7 @@ def to_vector4(x:List[Token]) -> Optional[Token]:
   return None
 
 def get_grouped_maybe_vector4(*values:List[Token], grouping_allowed=True):
-  assert all_same([len(x) for x in values]), f"all values are not the same length {values}"
+  assert all_same([len(x) for x in values]), f"all values are not the same length {[len(x) for x in values]}"
   # these use accumulators, we can only fold if the acc is a float4
   idxs = get_grouped_vector4_idxs(values[-1]) if grouping_allowed else None
   if idxs is not None:
@@ -434,10 +434,9 @@ class Linearizer:
     return out
   
   @staticmethod
-  def ungroup(token_is_grouped, size=4):
-    token, is_grouped = token_is_grouped
+  def ungroup(token, size=4):
     # assert token.dtype.is_vector_type
-    if isinstance(token, Token) and is_grouped:
+    if isinstance(token, Token):
       new_tokens = []
       for idx in range(size):
         new_tokens.append(Token(token.name, token.dtype, idx if token.dtype.is_vector_type else None))
@@ -459,6 +458,8 @@ class Linearizer:
       x.src = tuple(srcs)
     if x not in self.saved_exprs:
       values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
+
+      # Cast all to highest priority dtype
       cast_dtype = None
       highest_priority = -1
       for val in values:
@@ -467,26 +468,30 @@ class Linearizer:
             highest_priority = v.dtype.priority
             cast_dtype = v.dtype if v.offset is None else dtypes.get_normal_type(v.dtype) 
 
-      def maybe_cast(val, cast_dtype):
+      # Takes care of different data type interactions 
+      def maybe_cast(values, cast_dtype):
+        # These ops always need to be done in float32
         if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2]:
-          if len(val) >= 4 and self.supports_float4: cast_dtype = dtypes._float4
+          if len(values) >= 4 and self.supports_float4: cast_dtype = dtypes._float4
           else: cast_dtype = dtypes.float
         
-        if len(val) >= 4 and self.supports_float4:
+        casted = []
+        if len(values) >= 4 and self.supports_float4: # Use vector types
           cast_dtype = dtypes.get_vector_type(cast_dtype)
-          if dtypes.get_vector_type(val[0].dtype) != cast_dtype:
-            return self.uop(UOps.CAST, ssa("casted", cast_dtype), val), True
+          if dtypes.get_vector_type(values[0].dtype) != cast_dtype:
+            for val_start_idx in range(0, len(values), 4):
+              value = values[val_start_idx:val_start_idx+4]
+              casted.extend(self.ungroup(self.uop(UOps.CAST, ssa("casted", cast_dtype), value), size=len(value)))
+            return casted
+          return values
         else:
-          casted = []
-          for v in val:
-            if v.dtype != cast_dtype and dtypes.get_vector_type(v.dtype) != cast_dtype and ((v.offset is not None and (dtypes.get_vector_type(cast_dtype) != v.dtype)) or v.offset is None):
-              casted.append(self.uop(UOps.CAST, ssa("casted", cast_dtype), [v]))
-            else:
-              casted.append(v)
-          return casted, True
-        return val, False
-      
-      casted_values = [self.ungroup(maybe_cast(val, cast_dtype), size=len(val)) for val in values]
+          for value in values: # cast one at a time
+            if value.dtype != cast_dtype and dtypes.get_vector_type(value.dtype) != cast_dtype and (
+              (value.offset is not None and (dtypes.get_vector_type(cast_dtype) != value.dtype)) or value.offset is None):
+                casted.extend(self.ungroup(self.uop(UOps.CAST, ssa("casted", cast_dtype), [value]), size=1))
+            else: casted.append(value)
+          return casted
+      casted_values = [maybe_cast(val, cast_dtype) for val in values]
       ret = []
       if x.op.__class__ in {ReduceOps, FusedOps}:
         for idx, val in get_grouped_maybe_vector4(*casted_values, acc, grouping_allowed=self.supports_float4_alu):
