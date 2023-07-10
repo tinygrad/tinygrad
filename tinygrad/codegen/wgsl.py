@@ -38,8 +38,8 @@ class WGSLLanguage(CStyleLanguage):
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn KERNEL_NAME_PLACEHOLDER(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
     return prg
   
-  def render_for(self, expr: str, min: int, max: int) -> str:
-    return f"for(var {expr} = {min}; {expr} <= {max}; {expr}++) {{"
+  def render_for(self, expr: str, _min: int, _max: int) -> str:
+    return f"for(var {expr} = {_min}; {expr} <= {_max}; {expr}++) {{"
   
   def render_conditional(self, cond: str, x: str, y: str) -> str:
     return f"select(f32({y}), {x}, bool({cond}))"
