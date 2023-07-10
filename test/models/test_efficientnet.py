@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 
 from tinygrad.helpers import getenv
-from tinygrad.tensor import Tensor 
+from tinygrad.tensor import Tensor
 from models.efficientnet import EfficientNet
 from models.vit import ViT
 from models.resnet import ResNet50
