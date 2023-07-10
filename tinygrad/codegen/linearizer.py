@@ -471,12 +471,12 @@ class Linearizer:
       # Takes care of different data type interactions 
       def maybe_cast(values, cast_dtype):
         # These ops always need to be done in float32
-        if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2]:
-          if len(values) >= 4 and self.supports_float4: cast_dtype = dtypes._float4
+        if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX]:
+          if len(values) >= 4 and len(values) % 4 == 0 and self.supports_float4: cast_dtype = dtypes._float4
           else: cast_dtype = dtypes.float
         
         casted = []
-        if len(values) >= 4 and self.supports_float4: # Use vector types
+        if len(values) >= 4 and len(values) % 4 == 0 and self.supports_float4: # Use vector types
           cast_dtype = dtypes.get_vector_type(cast_dtype)
           if dtypes.get_vector_type(values[0].dtype) != cast_dtype:
             for val_start_idx in range(0, len(values), 4):

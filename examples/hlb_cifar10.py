@@ -9,7 +9,7 @@ from tinygrad import nn
 from tinygrad.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, dtypes
 from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
@@ -21,12 +21,19 @@ def set_seed(seed):
 
 num_classes = 10
 
+def make_half(layer):
+  for attr, value in layer.__dict__.items():
+    if isinstance(value, Tensor):
+      layer.__dict__[attr] = value.half().realize()
+  return layer
+
+
 class ConvGroup:
   def __init__(self, channels_in, channels_out, short, se=True):
     self.short, self.se = short, se and not short
-    self.conv = [nn.Conv2d(channels_in if i == 0 else channels_out, channels_out, kernel_size=3, padding=1, bias=False) for i in range(1 if short else 3)]
-    self.norm = [nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.8) for _ in range(1 if short else 3)]
-    if self.se: self.se1, self.se2 = nn.Linear(channels_out, channels_out//16), nn.Linear(channels_out//16, channels_out)
+    self.conv = [make_half(nn.Conv2d(channels_in if i == 0 else channels_out, channels_out, kernel_size=3, padding=1, bias=False)) for i in range(1 if short else 3)]
+    self.norm = [make_half(nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.8)) for _ in range(1 if short else 3)]
+    if self.se: self.se1, self.se2 = make_half(nn.Linear(channels_out, channels_out//16)), make_half(nn.Linear(channels_out//16, channels_out))
 
   def __call__(self, x):
     x = self.conv[0](x).max_pool2d(2)
@@ -42,14 +49,14 @@ class SpeedyResNet:
   def __init__(self):
     # TODO: add whitening
     self.net = [
-      nn.Conv2d(3, 64, kernel_size=1),
-      nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
+      make_half(nn.Conv2d(3, 64, kernel_size=1)),
+      make_half(nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8)),
       lambda x: x.relu(),
       ConvGroup(64, 128, short=False),
       ConvGroup(128, 256, short=True),
       ConvGroup(256, 512, short=False),
       lambda x: x.max((2,3)),
-      nn.Linear(512, num_classes, bias=False)
+      make_half(nn.Linear(512, num_classes, bias=False))
     ]
 
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
@@ -69,13 +76,14 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
     all_X, all_Y = _shuffle(all_X, all_Y)
     for batch_start in range(0, all_Y.shape[0], BS):
       batch_end = min(batch_start+BS, all_Y.shape[0])
-      X = Tensor(all_X[batch_end-BS:batch_end]) # batch_end-BS for padding
-      Y = np.zeros((BS, num_classes), np.float32)
+      X = Tensor(all_X[batch_end-BS:batch_end], dtype=dtypes.float16) # batch_end-BS for padding
+      Y = np.zeros((BS, num_classes), np.float16)
       Y[range(BS),all_Y[batch_end-BS:batch_end]] = -1.0*num_classes
-      Y = Tensor(Y.reshape(BS, num_classes))
+      Y = Tensor(Y.reshape(BS, num_classes), dtype=dtypes.float16)
       yield X, Y
     if not is_train: break
     seed += 1
+
 
 def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.0546875, momentum=0.8, wd=0.15, label_smoothing=0., mixup_alpha=0.025, seed=6):
   set_seed(seed)
@@ -102,7 +110,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   @TinyJit
   def train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
     X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
-    X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < 0.5, X[..., ::-1], X) # flip augmentation 
+    X = Tensor.where(Tensor.rand(X.shape[0],1,1,1).half() < 0.5, X[..., ::-1], X) # flip augmentation 
     out = model(X)
     loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
     if not getenv("DISABLE_BACKWARD"):
@@ -131,7 +139,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   left_batcher, right_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True), fetch_batches(X_train, Y_train, BS=BS, seed=seed+1, is_train=True)
   while i <= STEPS:
     (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
-    mixup_prob = Tensor(np.random.beta(MIXUP_ALPHA, MIXUP_ALPHA, (1, )).astype(np.float32)) if MIXUP_ALPHA > 0 else Tensor.ones(Xr.shape[0], 1, 1, 1)
+    mixup_prob = Tensor(np.random.beta(MIXUP_ALPHA, MIXUP_ALPHA, (1, )).astype(np.float16)) if MIXUP_ALPHA > 0 else Tensor.ones(Xr.shape[0], 1, 1, 1, dtype=dtypes.float16)
     if i%50 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
