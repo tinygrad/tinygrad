@@ -82,7 +82,7 @@ def helper_test_generic_square(name, N, f1, f2, onearg=False):
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
 
-  if torch_device == 'cpu' and HALF:
+  if str(torch_device) == 'cpu' and HALF:
     # CPU doesn't support half
     torch_a = torch_a.to(torch.float)
     torch_b = torch_b.to(torch.float)
