@@ -16,7 +16,7 @@ base_fxn_for_op: Dict[Op, Callable] = {
   MovementOps.RESHAPE: lambda x, arg: x.reshape(arg), MovementOps.SHRINK: lambda x, arg: x[tuple(slice(p[0], p[1], None) for p in arg)],
 }
 
-def match_types(x: np.ndarray, y: np.ndarray):
+def match_types(x, y):
   up = x.dtype if dtypes.from_np(x.dtype).priority > dtypes.from_np(y.dtype).priority else y.dtype
   return x.astype(up), y.astype(up)
 
@@ -24,7 +24,6 @@ def einsum_mulacc(einsum, get_strides, expand):
   def einscripts(x): return ''.join(["abcdefghijklmnopqrstuvwxyz"[i] for i in x])
   def axes_slice(strides): return [i for i in range(len(strides)) if strides[i] != 0], tuple(slice(None) if strides[i] != 0 else 0 for i in range(len(strides)))
   def mulacc(a, b, new_shape):
-    a, b = match_types(a, b)
     (a_axes, a_slices), (b_axes, b_slices) = axes_slice(get_strides(a)), axes_slice(get_strides(b))
     out = [i for i in range(len(new_shape)) if a.shape[i] == new_shape[i] and (i in a_axes or i in b_axes)]
     ret = einsum(f"{einscripts(a_axes)}, {einscripts(b_axes)} -> {einscripts(out)}", a[a_slices], b[b_slices])
@@ -38,7 +37,7 @@ numpy_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
   BinaryOps.MUL: lambda x, y: np.multiply(*match_types(x, y)), BinaryOps.DIV: lambda x, y: np.divide(*match_types(x, y)), UnaryOps.SQRT: np.sqrt,
   MovementOps.PERMUTE: lambda x, order: x.transpose(order), MovementOps.PAD: np.pad, MovementOps.EXPAND: np.broadcast_to,
   MovementOps.STRIDE: lambda x, arg: x[tuple(slice(None, None, i) for i in arg)],
-  FusedOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy()), lambda x: x.strides, np.broadcast_to),
+  FusedOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, *match_types(a.copy(), b.copy())), lambda x: x.strides, np.broadcast_to),
 }}
 
 class RawNumpyBuffer(RawBuffer):
