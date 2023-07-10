@@ -289,7 +289,6 @@ class TestOps(unittest.TestCase):
   def test_hardswish(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.hardswish(x), Tensor.hardswish, atol=1e-6, grad_atol=1e-6)
     helper_test_op([()], lambda x: torch.nn.functional.hardswish(x), Tensor.hardswish, atol=1e-6, grad_atol=1e-6)
-  #@unittest.skipIf(ARM64>0,"segs fault in arm64, needs fixing")
   def test_mish(self):
     def _mish_pytorch(x):
       return x*torch.tanh(torch.nn.functional.softplus(x))

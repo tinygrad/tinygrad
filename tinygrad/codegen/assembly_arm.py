@@ -32,7 +32,7 @@ class ARMCodegen(AssemblyCodegen):
       elif uop == UOps.SPECIAL:
         buf_map[arg] = out[1] 
         if arg.startswith('buf'):
-          if arg in ['buf8', 'buf9', 'buf10']: 
+          if int(arg[3:]) >= 8: 
             ins.append(f"ldr x1, [x19, #{(int(arg[3:]) - 8) * 8}]")
             #NOTE: Cast arg to float32, explore better options
             if out[1] == dtypes.int32:
