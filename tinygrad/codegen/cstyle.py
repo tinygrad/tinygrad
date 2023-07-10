@@ -170,7 +170,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk(f"*(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*)({bufnames[args.i]}+{args.idx.render(render_cl)})) = ({bufs[args.i].dtype.name}4){vin[0].render()};")
     elif uop == UOps.ATOMIC_ADD:
       atomic_on_bufs.add(args[0].i)
-      kk(lang.atomic_add.format(f"{bufnames[args[0].i]}", vin[0].render()) + ";")
+      kk(lang.atomic_add.format(f"&{bufnames[args[0].i]}[{args[0].idx.render(render_cl)}]", vin[0].render()) + ";")
     elif uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
     else:

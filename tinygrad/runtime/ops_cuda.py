@@ -83,6 +83,7 @@ class CUDACodegen(CStyleCodegen):
     kernel_prefix = "typedef unsigned char uchar;\ntypedef unsigned int uint;\ntypedef unsigned long ulong;\n__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
+    atomic_add = "atomicAdd({0}, {1})",
     half_prekernel = """
       #include <cuda_fp16.h>
       struct __align__(8) half4 {
