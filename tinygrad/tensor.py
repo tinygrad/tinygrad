@@ -7,7 +7,7 @@ import operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
-from math import ceil, pi, prod, sqrt, log
+from math import ceil, pi, prod, sqrt, log, cos, copysign
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
 
@@ -561,7 +561,12 @@ class Tensor:
       if x == 2.0: return self*self
       if x == 1.0: return self
       if x == 0.5: return self.sqrt()
-    return self.log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(log(x)).exp()
+    ar = self.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(log(abs(x))).exp()
+    # correct sign of negative numbers raised to a power (cos has a period of 2pi so we use it here to get the oddness of the power)
+    sign = (x * pi).cos() if isinstance(x, Tensor) else cos(x * pi) if not reverse else (self * pi).cos()
+    # we only need to correct the sign if the base is negative
+    base_sign = ((self.sign() if not reverse else x.sign() if isinstance(x, Tensor) else copysign(1, x)) - 1) / -2
+    return ar.mul(sign * base_sign + (1 - base_sign))
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)
