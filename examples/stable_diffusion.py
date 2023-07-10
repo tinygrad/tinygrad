@@ -519,7 +519,7 @@ class ClipTokenizer:
     self.encoder = dict(zip(vocab, range(len(vocab))))
     self.bpe_ranks = dict(zip(merges, range(len(merges))))
     self.cache = {'<|startoftext|>': '<|startoftext|>', '<|endoftext|>': '<|endoftext|>'}
-    self.pat = self.pat = re.compile(r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[^\s]+""", re.IGNORECASE)
+    self.pat = re.compile(r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[^\s]+""", re.IGNORECASE)
 
   def bpe(self, token):
     if token in self.cache:
