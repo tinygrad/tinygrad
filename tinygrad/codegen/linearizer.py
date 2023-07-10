@@ -6,7 +6,7 @@ from enum import Enum, auto
 from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
-from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
+from tinygrad.ops import ASTRunner, MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
 from tinygrad.shape.symbolic import Variable, NumNode
@@ -104,8 +104,9 @@ class Linearizer:
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)
 
-    # calculate mapping from to unique RawBuffer index
-    self.bufmap = [dedup([x.realized for x in self.bufs]).index(buf.realized) for buf in self.bufs]
+    # calculate mapping from buf to input
+    self.input_bufs = ASTRunner.dedup_kernel_inputs(self.bufs)
+    self.bufmap = [self.input_bufs.index(buf.realized) if buf.realized in self.input_bufs else None for buf in self.bufs]
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
@@ -188,7 +189,7 @@ class Linearizer:
         localtype = dtypes.float
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.bufmap[i], idx, valid)) if const is None else \
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
                      self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
       ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b) if localtype == dtypes._float4 else cache[key])
     return ret
@@ -215,7 +216,7 @@ class Linearizer:
       store_offset = store_offset_new
 
     for idx, var in store_offset.items():
-      self.uop(UOps.STORE, None, [var], MemOp(self.bufmap[i], *self.sts[i].expr_idxs(idx)))
+      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idx)))
 
   def linearize(self):
     # uops
@@ -226,7 +227,7 @@ class Linearizer:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
-      self.bufmap.append(max(self.bufmap) + 1)
+      self.bufmap.append(-1)
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
     # print
@@ -333,8 +334,6 @@ class Linearizer:
       # end the global loop
       self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
-    # keep only the last buf for each RawBuffer -- these will be the inputs to the kernel
-    self.bufs = dedup([x.realized for x in self.bufs], self.bufs)
 
   _OT = TypeVar("_OT")
   def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None) -> _OT:

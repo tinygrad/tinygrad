@@ -6,7 +6,7 @@ import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, IMAGE, DEBUG
 from tinygrad.lazy import Device
-from tinygrad.ops import GlobalCounters
+from tinygrad.ops import GlobalCounters, Compiled
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
@@ -1023,7 +1023,7 @@ class TestOps(unittest.TestCase):
     n = (x < 0).where(x, 1).numpy()
     assert np.all(n == 1.)
 
-  @unittest.skipUnless(Device.DEFAULT == "GPU", "Only GPU supports cache")
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT], Compiled), "Only Compiled supports cache")
   def test_multiview(self):
     a, b = Tensor.randn(4), Tensor.randn(4)
     np_a, np_b = a.numpy(), b.numpy()
