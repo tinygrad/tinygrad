@@ -3,7 +3,8 @@ from wgpu.utils._device import get_default_device
 from tinygrad.runtime.lib import RawBufferCopyIn
 from tinygrad.helpers import dtypes, DType
 from tinygrad.ops import Compiled
-from tinygrad.codegen.wgsl import WGSLCodegen
+from tinygrad.codegen.cstyle import CStyleCodegen
+from tinygrad.codegen.wgsl import WGSLLanguage#, WGSLCodegen
 import wgpu
 
 device = get_default_device()
@@ -25,6 +26,9 @@ class WebGPUProgram:
     compute_pass.end()
     device.queue.submit([command_encoder.finish()])
 
+class WGSLCodegen(CStyleCodegen):
+  lang = WGSLLanguage()
+  supports_float4: bool = False
 
 class RawWebGPUBuffer(RawBufferCopyIn):
   def __init__(self, size:int, dtype:DType):
