@@ -50,11 +50,11 @@ class Buffer:
 
     self.buffer_counter = 0
 
-    self.state_buffer = np.zeros((self.buffer_capacity, num_states))
-    self.action_buffer = np.zeros((self.buffer_capacity, num_actions))
-    self.reward_buffer = np.zeros((self.buffer_capacity, 1))
-    self.next_state_buffer = np.zeros((self.buffer_capacity, num_states))
-    self.done_buffer = np.zeros((self.buffer_capacity, 1))
+    self.state_buffer = np.zeros((self.buffer_capacity, num_states), np.float32)
+    self.action_buffer = np.zeros((self.buffer_capacity, num_actions), np.float32)
+    self.reward_buffer = np.zeros((self.buffer_capacity, 1), np.float32)
+    self.next_state_buffer = np.zeros((self.buffer_capacity, num_states), np.float32)
+    self.done_buffer = np.zeros((self.buffer_capacity, 1), np.float32)
 
   def record(
     self, observations: Tuple[Tensor, NDArray, float, NDArray, bool]
