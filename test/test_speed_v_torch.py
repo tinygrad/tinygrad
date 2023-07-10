@@ -80,7 +80,6 @@ def helper_test_generic_square(name, N, f1, f2, onearg=False):
   torch_b = ((torch.rand(N, N, dtype=torch.float16 if HALF else torch.float) - 0.5) / (N*N*100)).to(torch_device) if not onearg else None
   
   print(torch_a.max(), torch_a.min())
-  print((torch_a @ torch_b).min(), (torch_a @ torch_b).max())
 
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
@@ -89,6 +88,8 @@ def helper_test_generic_square(name, N, f1, f2, onearg=False):
     # CPU doesn't support half
     torch_a = torch_a.to(torch.float)
     torch_b = torch_b.to(torch.float)
+
+  print((torch_a @ torch_b).min(), (torch_a @ torch_b).max())
 
   helper_test_generic(f"{name:30s} {N:5d}x{N:5d}", f1, (torch_a, torch_b), TinyJit(lambda a,b:f2(a,b).realize()), (tiny_a, tiny_b))
 
