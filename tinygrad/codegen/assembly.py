@@ -1,7 +1,7 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
 from tinygrad.codegen.linearizer import Linearizer, UOps, Token
 from tinygrad.ops import ASTRunner, BinaryOps, UnaryOps
-from tinygrad.helpers import DType, dtypes, DEBUG
+from tinygrad.helpers import DType, dtypes, DEBUG, getenv
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 import functools
 import math
@@ -39,7 +39,7 @@ class AssemblyCodegen(Linearizer):
   # s registers are the addresses and non local indexes
   def codegen(self):
     self.process()
-    self.hand_coded_optimizations()
+    if not getenv('ARM'): self.hand_coded_optimizations()
     self.limit_global_dims(3)  # all GPU asms have 3 (for now)
     self.linearize()
 
