@@ -45,7 +45,7 @@ class ARMCodegen(AssemblyCodegen):
                 ins.append(f"str s0, [x{arg[3:]}, #{i*4}]")
             ins.append(f"str x{arg[3:]}, {reg_map[out.nm]}")
       elif uop == UOps.CONST:
-        if arg.__class__ is float:
+        if arg.__class__ is float or dtypes.is_float(out.dtype):
           ins.append(f"mov x0, 0x{float_to_hex(arg)}")
           ins.append(f"fmov s0, w0")
           ins.append(f"str s0, {reg_map[out.nm]}")
@@ -65,9 +65,9 @@ class ARMCodegen(AssemblyCodegen):
         if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
           ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
           ins.append(f"ldr x1, {reg_map[vin[1].nm]}")
-          ins.append(f"mul x0, x0, x1;")
-          ins.append(f"subs x0, x0, #0;")
-        if arg == FusedOps.MULACC and out == vin[2]:
+          ins.append(f"ands x0, x0, x1;")
+          ins.append(f"str x0, {reg_map[out.nm]}")
+        elif arg == FusedOps.MULACC and out == vin[2]:
           ins.append(f"ldr s0, {reg_map[vin[0].nm]}")
           ins.append(f"ldr s1, {reg_map[vin[1].nm]}")
           ins.append(f"ldr s2, {reg_map[vin[2].nm]}")
@@ -87,6 +87,7 @@ class ARMCodegen(AssemblyCodegen):
           reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
           ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
           ins.append(f"{f'mov {reg}1, #' + str(vin[1]) if vin[1].__class__ is int else f'ldr {reg}1, ' + reg_map[vin[1].nm]}")
+          #TODO: Do fcmp output need saving?
           if reg == 's': ins.append(f"fcmp {reg}0, {reg}1")
           else:
             ins.append(f"{alu[arg]} {reg}0, {reg}0, {reg}1")
@@ -125,7 +126,7 @@ class ARMCodegen(AssemblyCodegen):
         ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
         ins.append(f"str {reg}, [x1, #{arg[0]}]")
       elif uop == UOps.COND_BRANCH:
-        ins.append(f"{'b.ne' if arg[1] else 'b.eq'} {arg[0][1:]}")
+        ins.append(f"b.{'lt' if arg[1]==True else 'ge'} {arg[0][1:]}")
       elif uop == UOps.LABEL:
         ins.append(f"{arg[1:]}:")
     return "test", "\n".join([".arch armv8-a",".text", ".global _test",".p2align 2"] + ["_test:"] + ["mov x19, sp",f"sub sp, sp, #{var_size}"] + ins  + [f"add sp, sp, #{var_size}"]+ ["ret;"])
