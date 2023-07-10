@@ -4,6 +4,7 @@ import functools
 from math import gcd
 from tinygrad.helpers import partition
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional
+from collections import defaultdict
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
@@ -186,27 +187,15 @@ class SumNode(RedNode):
   def __floordiv__(self, b: int, factoring_allowed=True):
     if b == 1: return self
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
-    factors: List[Node] = []
-    nofactor_mul: List[Node] = []
-    nofactor_nonmul: List[Node] = []
+    factored: defaultdict[int, List[Node]] = defaultdict(list) # {denominator: numerator nodes}
     for x in self.flat_components:
-      if x.__class__ is NumNode and x.b%b == 0: factors.append(x)
-      elif x.__class__ is MulNode: factors.append(x) if x.b%b == 0 else  nofactor_mul.append(x)
-      else: nofactor_nonmul.append(x)
-
-    if factors:  # factor out largest possible gcd
-      factor_term = [x.a * x.b//b if isinstance(x, MulNode) else NumNode(x.b//b) for x in factors]
-      if nofactor_mul and not nofactor_nonmul:
-        gcds = [gcd(x.b, b) for x in nofactor_mul]
-        if (t := min(gcds)) > 1 and all(x.b%t == 0 for x in nofactor_mul):
-          nofactor_term = [Node.sum([x.a * x.b//t for x in nofactor_mul if isinstance(x, MulNode)])//(b//t)]  # mypy wants the isinstance
-        else:
-          nofactor_term = [Node.sum(nofactor_mul)//b] if nofactor_mul else []
-      else:
-        nofactor_term = [Node.sum(nofactor_mul+nofactor_nonmul)//b] if nofactor_mul + nofactor_nonmul else []
-      return Node.sum(factor_term + nofactor_term)
-    for m in nofactor_mul:
-      if m.b > 1 and b%m.b == 0: return (self//m.b)//(b//m.b)
+      if x.__class__ is NumNode and x.b%b == 0: factored[1].append(NumNode(x.b//b))
+      elif x.__class__ is MulNode and x.b%b == 0: factored[1].append(x//b)
+      else: factored[b].append(x)
+    if 1 in factored: # a node was fully factored
+      return Node.sum([Node.sum(v).__floordiv__(k, False) for k, v in factored.items()])
+    for node in factored[b]: # check for potential partial factor
+      if node.__class__ is MulNode and node.b > 1 and b%node.b == 0: return (self//node.b)//(b//node.b)
     return Node.__floordiv__(self, b, factoring_allowed)
 
   def __mod__(self, b: int):
