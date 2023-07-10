@@ -358,9 +358,9 @@ def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
   return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]))*input).sum(indices.ndim)
 
 def Gather(input, indices, axis=0):
+  input_sh = list(input.shape)
+  ret_shape = input_sh[:axis] + list(indices.shape) + input_sh[axis+1:]
   if indices.ndim < 6: # shrinking and cating hits a weird recursion limit with VERY LARGE indices (only 1 test)
-    input_sh = list(input.shape)
-    ret_shape = input_sh[:axis] + list(indices.shape) + input_sh[axis+1:]
     if indices.ndim > 1: indices = indices.flatten()
     indices = [input_sh[axis]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
     args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(input_sh)] for i in indices]
@@ -401,17 +401,36 @@ def ArrayFeatureExtractor(input, indices):
   ret = Gather(input, indices, input.ndim-1)
   return ret
 
-def _round(x:Tensor, n:float, case_eq_round_down = True) -> Tensor:
-  assert n <= 1, f"n:{n} is larger than 1"
-  b = x.cast(dtypes.int32).contiguous().cast(x.dtype) + n
-  return (x > b).where(b+1-n, b-n) if case_eq_round_down else (x >= b).where(b+1-n, b-n)
+def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
+  def _or(cond1, cond2):
+    or_cond = cond1 + cond2
+    return (or_cond == 2).where(or_cond-1, or_cond)
+  def _and(cond1, cond2):
+    and_cond = cond1 + cond2
+    return (and_cond == 2).where(1, 0)
+  assert n <= 1, f"n:{n} shouldn't be larger than 1"
+  b = x.cast(dtypes.int32).contiguous().cast(x.dtype)
+  b = (b >= 0).where(b+n, b-n)
+  if equidistant_case == "round_down":
+    return (x > b).where(b+1-n, b-n) 
+  elif equidistant_case == "round_up":
+    return (x >= b).where(b+1-n, b-n)
+  elif equidistant_case == "round_to_even":
+    x_ceil_fraction = x.ceil()/2
+    cond_ceil_even = x_ceil_fraction.ceil() == x_ceil_fraction
+    x = (_and(x == b, cond_ceil_even)).where(x+1-n, x)
+    x = (x > b).where(b+1-n, b-n)
+    return x
+
+def Round(X:Tensor):
+  return _round(X, 0.5, "round_to_even")
 
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
   def _nearest_gather(X: Tensor, indices: Tensor, output_shape): # MAYBE USE SOMETHING ELSE OTHER THAN GATHER like reshape -> expand -> reshape -> [shrink]? bad gather many kernel bad, OR TRY NOT FLATTEN()?
     return _gather(X.flatten(), indices).reshape(output_shape)
   def _nearest_mode(x_resized: Tensor, nearest_mode: str, x_len):
-    if nearest_mode == "round_prefer_floor": ret = _round(x_resized, 0.5, True)
-    elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, 0.5, False)
+    if nearest_mode == "round_prefer_floor": ret = _round(x_resized, 0.5, "round_down")
+    elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, 0.5, "round_up")
     elif nearest_mode == "floor": ret = x_resized.floor()
     elif nearest_mode == "ceil": ret = x_resized.ceil()
     return ret.clip(0, x_len-1)
@@ -464,11 +483,11 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     else: scales = [si/xs for xs, si in zip(X.shape, sizes)]
     if keep_aspect_ratio_policy == "not_larger":
       scale = min(scales)
-      sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, False)
+      sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, "round_up")
       sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
     elif keep_aspect_ratio_policy == "not_smaller":
       scale = max(scales)
-      sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, False)
+      sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, "round_up")
       sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
 
   output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)] 
