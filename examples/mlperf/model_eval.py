@@ -220,6 +220,7 @@ def eval_maskrcnn():
       img = Image.open(BASEDIR/f'val2017/{image_name}').convert("RGB")
       batch_imgs.append(img)
     batch_result = compute_prediction_batched(batch_imgs, mdl)
+    
     for image_row, result in zip(batch, batch_result):
       image_name = image_row['file_name']
       box_pred = convert_prediction_to_coco_bbox(image_name, result)

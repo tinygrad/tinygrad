@@ -3,6 +3,7 @@ from models.resnet import ResNet
 from models.mask_rcnn import BoxList
 import random
 from tinygrad.tensor import Tensor
+from torch.nn import functional as F
 from PIL import Image
 from extra.datasets.transforms import Compose, Resize, ToTensor, Normalize
 import numpy as np
@@ -14,9 +15,9 @@ transforms = lambda size_scale: Compose(
   [
     Resize(int(800*size_scale), int(1333*size_scale)),
     ToTensor(),
-    # Normalize(
-    #   mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
-    # ),
+    Normalize(
+      mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
+    ),
   ]
 )
 
@@ -139,12 +140,8 @@ def compute_prediction(original_image, model, confidence_threshold, size_scale=1
 def compute_prediction_batched(batch, model, size_scale=1.0):
   imgs = []
   for img in batch:
-    print(transforms(size_scale)(img))
     imgs.append(transforms(size_scale)(img))
-  print(imgs)
-  # image = [Tensor(image, requires_grad=False) for image in imgs]
   predictions = model(imgs)
-  del image
   return predictions
 
 palette = np.array([2 ** 25 - 1, 2 ** 15 - 1, 2 ** 21 - 1])

@@ -9,14 +9,16 @@ class Compose(object):
     self.transforms = transforms
 
   def __call__(self, image, target=None):
-    print("compose")
     for t in self.transforms:
       if target:
         image, target = t(image, target)
-        return image, target
       else:
         image = t(image)
-        return image
+
+    if target:
+      return image, target
+    else: 
+      return image
 
   def __repr__(self):
     format_string = self.__class__.__name__ + "("
@@ -28,9 +30,11 @@ class Compose(object):
 
 # TODO remove the dependence from torch here
 class ToTensor(object):
-  def __call__(self, image, target):
-    print("Tensor")
-    return F.to_tensor(image), target
+  def __call__(self, image, target=None):
+    if target:
+      return F.to_tensor(image), target
+    else: 
+      return F.to_tensor(image)
 
 class Resize:
   # Note
@@ -66,7 +70,6 @@ class Resize:
       return (oh, ow)
 
   def __call__(self, image, target=None):
-    print("resize")
     size = self.get_size(image.size)
     image = F.resize(image, size)
     if target:
@@ -106,12 +109,10 @@ class Normalize:
     # `_C.INPUT.PIXEL_STD = [1., 1., 1.]
     # ` Convert image to BGR format (for Caffe2 models), in range 0-255
     # `_C.INPUT.TO_BGR255 = True
-    print("normalize")
     if self.to_bgr255:
       image = image[[2, 1, 0]] * 255
     image = Tensor(F.normalize(image, mean=self.mean, std=self.std).numpy())
     if target:
       return image, target
     else:
-      print(image)
       return image
