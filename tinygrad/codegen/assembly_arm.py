@@ -86,7 +86,15 @@ class ARMCodegen(AssemblyCodegen):
         elif arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
           reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
           ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
-          ins.append(f"{f'mov {reg}1, #' + str(vin[1]) if vin[1].__class__ is int else f'ldr {reg}1, ' + reg_map[vin[1].nm]}")
+          #TODO: Can i do better?
+          if vin[1].__class__ is int and vin[1] > 65535:
+            lower = vin[1] & 0xffff
+            upper = (vin[1] >> 16) & 0xffff
+            ins.append(f"mov w2, #{lower}")
+            ins.append(f"movk w2, #{upper}, lsl #16")
+            ins.append(f"sxtw x1, w2")
+          else:
+            ins.append(f"{f'mov {reg}1, #' + str(vin[1]) if vin[1].__class__ is int else f'ldr {reg}1, ' + reg_map[vin[1].nm]}")
           #TODO: Do fcmp output need saving?
           if reg == 's': ins.append(f"fcmp {reg}0, {reg}1")
           else:
