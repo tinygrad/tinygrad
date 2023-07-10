@@ -125,15 +125,6 @@ class TestTypeMatching(unittest.TestCase):
 
     assert a_match.dtype == np.float32
     assert b_match.dtype == np.float32
-
-  def test_type_matching_int_and_float(self):
-    a_float = np.array([1,2,3]).astype(np.float32)
-    b_int = np.array([1,2,3]).astype(np.int32)
-
-    a_match, b_match = match_types(a_float, b_int)
-
-    assert a_match.dtype == np.float32
-    assert b_match.dtype == np.float32
 """
 
 if __name__ == '__main__':
