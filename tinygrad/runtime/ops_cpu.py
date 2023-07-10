@@ -16,7 +16,7 @@ base_fxn_for_op: Dict[Op, Callable] = {
   MovementOps.RESHAPE: lambda x, arg: x.reshape(arg), MovementOps.SHRINK: lambda x, arg: x[tuple(slice(p[0], p[1], None) for p in arg)],
 }
 
-def match_types(x, y):
+def match_types(x: np.ndarray, y: np.ndarray):
   up = x.dtype if dtypes.from_np(x.dtype).priority > dtypes.from_np(y.dtype).priority else y.dtype
   return x.astype(up), y.astype(up)
 

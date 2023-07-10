@@ -3,6 +3,7 @@ import numpy as np
 from tinygrad.helpers import getenv, DType, DEBUG
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor, dtypes
+from tinygrad.runtime.ops_cpu import match_types
 from extra.utils import OSX
 
 def _test_to_np(a:Tensor, np_dtype, target):
@@ -106,15 +107,31 @@ class TestInt32Dtype(unittest.TestCase):
   def test_int32_mul(self): _test_mul(Tensor([1,2,3,4], dtype=dtypes.int32), Tensor([1,2,3,4], dtype=dtypes.int32), dtypes.int32, [1,4,9,16])
   def test_int32_matmul(self): _test_matmul(Tensor([[1,2],[3,4]], dtype=dtypes.int32), Tensor.eye(2, dtype=dtypes.int32), dtypes.int32, [[1,2],[3,4]])
 
-  # Upcast tests for to float
   def test_int32_add_upcast_float(self): _test_add_upcast(Tensor([1,2,3,4], dtype=dtypes.int32), Tensor([1,2,3,4], dtype=dtypes.float32), dtypes.float32, [2,4,6,8])
   def test_int32_mul_upcast_float(self): _test_mul_upcast(Tensor([1,2,3,4], dtype=dtypes.int32), Tensor([1,2,3,4], dtype=dtypes.float32), dtypes.float32, [1,4,9,16])
   def test_int32_matmul_upcast_float(self): _test_matmul_upcast(Tensor([[1,2],[3,4]], dtype=dtypes.int32), Tensor.eye(2, dtype=dtypes.float32), dtypes.float32, [[1,2],[3,4]])
 
-  # Upcast tests for to int64
   def test_int32_add_upcast_int64(self): _test_add_upcast(Tensor([1,2,3,4], dtype=dtypes.int32), Tensor([1,2,3,4], dtype=dtypes.int64), dtypes.int64, [2,4,6,8])
   def test_int32_mul_upcast_int64(self): _test_mul_upcast(Tensor([1,2,3,4], dtype=dtypes.int32), Tensor([1,2,3,4], dtype=dtypes.int64), dtypes.int64, [1,4,9,16])
   def test_int32_matmul_upcast_int64(self): _test_matmul_upcast(Tensor([[1,2],[3,4]], dtype=dtypes.int32), Tensor.eye(2, dtype=dtypes.int64), dtypes.int64, [[1,2],[3,4]])
+
+class TestCPUTypeMatching(unittest.TestCase):
+  def test_type_matching_same(self):
+    a_float = np.array([1,2,3]).astype(np.float32)
+    b_float = np.array([1,2,3]).astype(np.float32)
+    a_match, b_match = match_types(a_float, b_float)
+
+    assert a_match.dtype == np.float32
+    assert b_match.dtype == np.float32
+
+  def test_type_matching_int_and_float(self):
+    a_float = np.array([1,2,3]).astype(np.float32)
+    b_int = np.array([1,2,3]).astype(np.int32)
+
+    a_match, b_match = match_types(a_float, b_int)
+
+    assert a_match.dtype == np.float32
+    assert b_match.dtype == np.float32
 
 if __name__ == '__main__':
   unittest.main()
