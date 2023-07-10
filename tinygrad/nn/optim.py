@@ -1,6 +1,6 @@
 # sorted in order of increasing complexity
 from typing import List
-from tinygrad.helpers import dedup
+from tinygrad.helpers import dedup, dtypes
 from tinygrad.tensor import Tensor
 
 class Optimizer:
@@ -11,7 +11,7 @@ class Optimizer:
 
     self.params: List[Tensor] = dedup([x for x in params if x.requires_grad])
     self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
-    self.lr = Tensor([lr], requires_grad=False)
+    self.lr = Tensor([lr], requires_grad=False, dtype=dtypes.float16)
 
   def zero_grad(self):
     for param in self.params: param.grad = None
@@ -26,7 +26,7 @@ class SGD(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
     super().__init__(params, lr)
     self.momentum, self.wd, self.nesterov = momentum, weight_decay, nesterov
-    self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
+    self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False, dtype=t.dtype) for t in self.params] if self.momentum else []
 
   # https://pytorch.org/docs/stable/generated/torch.optim.SGD.html
   def step(self) -> None:

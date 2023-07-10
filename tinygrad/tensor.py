@@ -211,7 +211,7 @@ class Tensor:
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
     # this is "implicit gradient creation"
-    self.grad = Tensor(1, device=self.device, requires_grad=False)
+    self.grad = Tensor(1, device=self.device, requires_grad=False, dtype=self.dtype)
 
     for t0 in reversed(self.deepwalk()):
       if not t0.requires_grad:
