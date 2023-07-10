@@ -153,12 +153,12 @@ def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=N
   if ceil_mode: auto_pad = "SAME_UPPER"
   ret = _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-len(kernel_shape):], strides=strides, kernel_shape=kernel_shape, dilations=dilations)
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations)
-  # X_len = prod(X.shape)
-  # ret_len = prod(ret.shape)
-  # lol = (ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)).sum(0)
-  # can't run this....... need other way
-  indices = None
-  return ret, indices # (ret, indices)
+  ret_shape = ret.shape
+  ret_len = prod(ret.shape)
+  X_len = prod(X.shape)
+  indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)) * Tensor.arange(X_len).reshape(1, X_len).expand(ret_len, X_len)).sum(1).reshape(ret_shape).cast(dtypes.int64)
+  if storage_order: indices = indices.transpose(indices.ndim-2, indices.ndim-1)
+  return ret, indices
 
 def MaxUnpool(xT, xI, outshape=None, kernel_shape=None, pads=None, strides=None):
   xI = xI.flatten()
@@ -170,7 +170,7 @@ def MaxUnpool(xT, xI, outshape=None, kernel_shape=None, pads=None, strides=None)
   lol = arange.reshape(1, outlength).expand(haha.shape)
   ok = (haha == lol).sum(0)
   # wtf to do after this......
-  # maybe convtranspose??
+  # This shit is basically a scatter. Have to implement scatter.
   return None
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
@@ -402,9 +402,6 @@ def ArrayFeatureExtractor(input, indices):
   return ret
 
 def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
-  def _or(cond1, cond2):
-    or_cond = cond1 + cond2
-    return (or_cond == 2).where(or_cond-1, or_cond)
   def _and(cond1, cond2):
     and_cond = cond1 + cond2
     return (and_cond == 2).where(1, 0)
