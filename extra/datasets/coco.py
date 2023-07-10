@@ -16,11 +16,8 @@ merge       = _mask.merge
 frPyObjects = _mask.frPyObjects
 
 BASEDIR = pathlib.Path(__file__).parent / "COCO"
-BASEDIR.mkdir(exist_ok=True)
-
-def create_dict(key_row, val_row, rows): return {row[key_row]:row[val_row] for row in rows}
-
-
+BASEDIR.mkdir(exist_ok=True) 
+ 
 min_keypoints_per_image = 10
 
 def _count_visible_keypoints(anno):
@@ -47,8 +44,8 @@ def has_valid_annotation(anno):
   return False
 
 # Note:
-# torch does image and target transform inside VisionDataset base class while 
-# here it is done outside of the class
+# CocoDetection class load image into PIL format
+# currently it is converted to numpy before applying the transform
 class COCODataset(torchvision.datasets.coco.CocoDetection):
   def __init__(self, root='COCO/train2017',
                      ann_file='COCO/annotations/instances_train2017.json', 
@@ -80,8 +77,6 @@ class COCODataset(torchvision.datasets.coco.CocoDetection):
 
   def __getitem__(self, idx):
     img, anno = super(COCODataset, self).__getitem__(idx)
-    print(img.size)
-    print(np.shape(np.array(img)))
     # Raw image before any opration in case I need to check my sanity
     # import matplotlib.pyplot as plt
     # plt.imshow(np.array(img))
@@ -113,10 +108,15 @@ class COCODataset(torchvision.datasets.coco.CocoDetection):
 
     if self._transforms is not None:
       # TODO get rid of numpy eventually
-      # Note, all the transforms done in numpy but data are converted to Tensor
-      # at the end
+      # Original sequence
+      # Resize -> PIL 
+      # ToTensor -> torch.Tensor
+      # RandomHorizontalFlip -> torch.Tensor
+      # Normalize -> torch.Tensor -> tinygrad Tensor
+      #
+      # numpy convert PIL into (800, 1066, 3)
+      # torch convert PIL into (3, 800, 1066)
       img, target = self._transforms(img, target)
-      # img, target = self._transforms(np.array(img), target)
 
     return img, target, idx
 
@@ -126,10 +126,7 @@ class COCODataset(torchvision.datasets.coco.CocoDetection):
     return img_data
 
 if __name__=="__main__":
-  
-  BASEDIR = pathlib.Path(__file__).parent.parent / "datasets" / "COCO"
-  BASEDIR.mkdir(exist_ok=True)
-
+ 
   # Download data and annotations
   if not pathlib.Path(BASEDIR/'train2017').is_dir():
     fn = BASEDIR/'train2017.zip'

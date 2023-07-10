@@ -34,11 +34,11 @@ def train_maskrcnn():
   model = MaskRCNN(backbone=resnet)
   model.load_from_pretrained()
 
-  transforms = Compose(
+  transform = Compose(
     [
       Resize(800, 1333),
-      ToTensor(),
       RandomHorizontalFlip(0.5),
+      ToTensor(),
       Normalize(
         mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
       ),
@@ -48,7 +48,7 @@ def train_maskrcnn():
   dataset = COCODataset(root='extra/datasets/COCO/train2017',
                         ann_file='extra/datasets/COCO/annotations/instances_train2017.json', 
                         remove_images_without_annotations=1, 
-                        transforms=transforms)
+                        transforms=transform)
 
   # Sanity test while refactoring the COCO dataset code base
   print("Data")

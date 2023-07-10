@@ -194,11 +194,11 @@ def eval_bert():
 
     st = time.perf_counter()
 
-def eval_mrcnn():
+def eval_maskrcnn():
   from tqdm import tqdm
   from models.mask_rcnn import MaskRCNN
   from models.resnet import ResNet
-  from extra.datasets.coco import BASEDIR, images, convert_prediction_to_coco_bbox, convert_prediction_to_coco_mask, accumulate_predictions_for_coco, evaluate_predictions_on_coco, iterate
+  from extra.datasets.coco_eval import BASEDIR, images, convert_prediction_to_coco_bbox, convert_prediction_to_coco_mask, accumulate_predictions_for_coco, evaluate_predictions_on_coco, iterate
   from examples.mask_rcnn import compute_prediction_batched, Image
   mdl = MaskRCNN(ResNet(50, num_classes=None, stride_in_1x1=True))
   mdl.load_from_pretrained()
@@ -237,7 +237,7 @@ if __name__ == "__main__":
   Tensor.training = False
   Tensor.no_grad = True
 
-  models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,mrcnn").split(",")
+  models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(",")
   for m in models:
     nm = f"eval_{m}"
     if nm in globals():

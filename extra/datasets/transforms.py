@@ -1,18 +1,22 @@
 import random
-import numpy as np
 from tinygrad.tensor import Tensor
 
-from torchvision import transforms as T
-from torchvision.transforms import functional as Ft
+import numpy as np
+from torchvision.transforms import functional as F
 
 class Compose(object):
   def __init__(self, transforms):
     self.transforms = transforms
 
-  def __call__(self, image, target):
+  def __call__(self, image, target=None):
+    print("compose")
     for t in self.transforms:
-      image, target = t(image, target)
-    return image, target
+      if target:
+        image, target = t(image, target)
+        return image, target
+      else:
+        image = t(image)
+        return image
 
   def __repr__(self):
     format_string = self.__class__.__name__ + "("
@@ -25,10 +29,13 @@ class Compose(object):
 # TODO remove the dependence from torch here
 class ToTensor(object):
   def __call__(self, image, target):
-    print(image)
-    return Ft.to_tensor(image), target
+    print("Tensor")
+    return F.to_tensor(image), target
 
 class Resize:
+  # Note
+  # torch gives different output depends on whether the input images are PIL or
+  # torch.tensor
   def __init__(self, min_size, max_size):
     if not isinstance(min_size, (list, tuple)):
       min_size = (min_size,)
@@ -59,9 +66,9 @@ class Resize:
       return (oh, ow)
 
   def __call__(self, image, target=None):
+    print("resize")
     size = self.get_size(image.size)
-    image = Ft.resize(image, size)
-    print(image)
+    image = F.resize(image, size)
     if target:
       target = target.resize(image.size)
       return image, target
@@ -74,16 +81,10 @@ class RandomHorizontalFlip(object):
   
   # TODO remove dependence from torchvision
   def __call__(self, image, target):
-    # import matplotlib.pyplot as plt
-    # plt.imshow(image)
-    # plt.savefig('/home/iris/yg5d6/Workspace/before_flip.png')
-    # plt.imshow(np.fliplr(image))
-    # plt.savefig('/home/iris/yg5d6/Workspace/before_after.png')
 
     if random.random() < self.prob:
-      image = Ft.hflip(image)
+      image = F.hflip(image)
       target = target.transpose(0)
-    print(image.shape)
     return image, target
 
 class Normalize:
@@ -105,23 +106,12 @@ class Normalize:
     # `_C.INPUT.PIXEL_STD = [1., 1., 1.]
     # ` Convert image to BGR format (for Caffe2 models), in range 0-255
     # `_C.INPUT.TO_BGR255 = True
-
+    print("normalize")
     if self.to_bgr255:
       image = image[[2, 1, 0]] * 255
-    else:
-      image = image[[0, 1, 2]] * 255
-    image = Tensor(Ft.normalize(image, mean=self.mean, std=self.std).numpy())
+    image = Tensor(F.normalize(image, mean=self.mean, std=self.std).numpy())
     if target:
       return image, target
     else:
+      print(image)
       return image
-
-transforms = lambda size_scale: T.Compose(
-  [
-    Resize(int(800*size_scale), int(1333*size_scale)),
-    T.ToTensor(),
-    Normalize(
-      mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
-    ),
-  ]
-)
