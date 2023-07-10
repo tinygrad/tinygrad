@@ -20,11 +20,13 @@ def set_seed(seed):
   np.random.seed(getenv('SEED', seed))
 
 num_classes = 10
+HALF = getenv('HALF', 1) == 1
 
 def make_half(layer):
-  for attr, value in layer.__dict__.items():
-    if isinstance(value, Tensor):
-      layer.__dict__[attr] = value.half().realize()
+  if HALF:
+    for attr, value in layer.__dict__.items():
+      if isinstance(value, Tensor):
+        layer.__dict__[attr] = value.half().realize()
   return layer
 
 
@@ -76,10 +78,10 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
     all_X, all_Y = _shuffle(all_X, all_Y)
     for batch_start in range(0, all_Y.shape[0], BS):
       batch_end = min(batch_start+BS, all_Y.shape[0])
-      X = Tensor(all_X[batch_end-BS:batch_end], dtype=dtypes.float16) # batch_end-BS for padding
-      Y = np.zeros((BS, num_classes), np.float16)
+      X = Tensor(all_X[batch_end-BS:batch_end].astype(np.float16 if HALF else np.float32)) # batch_end-BS for padding
+      Y = np.zeros((BS, num_classes), np.float16 if HALF else np.float32)
       Y[range(BS),all_Y[batch_end-BS:batch_end]] = -1.0*num_classes
-      Y = Tensor(Y.reshape(BS, num_classes), dtype=dtypes.float16)
+      Y = Tensor(Y.reshape(BS, num_classes))
       yield X, Y
     if not is_train: break
     seed += 1
@@ -139,7 +141,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   left_batcher, right_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True), fetch_batches(X_train, Y_train, BS=BS, seed=seed+1, is_train=True)
   while i <= STEPS:
     (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
-    mixup_prob = Tensor(np.random.beta(MIXUP_ALPHA, MIXUP_ALPHA, (1, )).astype(np.float16)) if MIXUP_ALPHA > 0 else Tensor.ones(Xr.shape[0], 1, 1, 1, dtype=dtypes.float16)
+    mixup_prob = Tensor(np.random.beta(MIXUP_ALPHA, MIXUP_ALPHA, (1, )).astype(np.float16 if HALF else np.float32)) if MIXUP_ALPHA > 0 else Tensor.ones(Xr.shape[0], 1, 1, 1, dtype=dtypes.float16 if HALF else dtypes.float32)
     if i%50 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
@@ -161,7 +163,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     et = time.monotonic()
     loss_cpu = loss.numpy()
     cl = time.monotonic()
-    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {loss.dtype} dtype, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
 
 if __name__ == "__main__":
