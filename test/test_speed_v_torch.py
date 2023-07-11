@@ -112,6 +112,10 @@ def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_
   tiny_conv = Conv2d(in_chans, out_chans, kernel_size, bias=None)
   tiny_conv.weight = Tensor(torch_conv.weight.detach().cpu().numpy())
 
+  if str(torch_device) == 'cpu' and HALF:
+    # CPU doesn't support half
+    torch_dat = torch_dat.to(torch.float)
+
   def f1(torch_dat): return torch_conv(torch_dat)
   def f2(tiny_dat): return tiny_conv(tiny_dat).realize()
   helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d} k:{kernel_size}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
