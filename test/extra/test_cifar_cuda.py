@@ -9,11 +9,11 @@ from tinygrad.state import get_parameters
 class Net:
     def __init__(self):
         self.conv = nn.Conv2d(3, 64, kernel_size=1)
-        self.linear= nn.Linear(32, 10, bias=False)        
+        self.linear= nn.Linear(64*32*32, 10, bias=False)        
 
     def __call__(self, x):
         x = self.conv(x)
-        print(x)
+        x = x.reshape((256, 64*32*32))
         x = self.linear(x)
         return x.log_softmax()
     
