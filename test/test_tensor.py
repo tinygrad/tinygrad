@@ -192,5 +192,14 @@ class TestTinygrad(unittest.TestCase):
     for _, dtype in dtypes.fields().items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
 
+  def test_argfix(self):
+    self.assertEqual(Tensor.zeros().shape, ())
+    self.assertEqual(Tensor.zeros(tuple()).shape, ())
+    self.assertEqual(Tensor.zeros(1).shape, (1,))
+    self.assertEqual(Tensor.zeros((1,)).shape, (1,))
+    self.assertEqual(Tensor.zeros(1, 2, 3).shape, (1, 2, 3))
+    self.assertEqual(Tensor.zeros((1, 2, 3)).shape, (1, 2, 3))
+    self.assertEqual(Tensor.zeros([1, 2, 3]).shape, (1, 2, 3))
+
 if __name__ == '__main__':
   unittest.main()
