@@ -4,12 +4,12 @@
 import unittest
 import numpy as np
 from typing import Optional, Tuple
-from tinygrad.helpers import prod, dtypes
+from tinygrad.dtypes import dtypes
+from tinygrad.helpers import prod
 
 # *** first, we implement the atan2 op at the lowest level ***
 # `atan2_gpu` for GPUBuffers and `atan2_cpu` for CPUBuffers
 from tinygrad.lazy import LazyBuffer, create_lazybuffer, Device
-from tinygrad.ops import ASTRunner
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # we don't always have GPU support, so the type signature is the abstract CompiledBuffer instead of GPUBuffer

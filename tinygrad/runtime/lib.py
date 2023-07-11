@@ -1,10 +1,13 @@
 import ctypes
 import numpy as np
 from typing import TypeVar, Type, Any
-from tinygrad.helpers import DType, dtypes, prod, GlobalCounters
+from tinygrad.helpers import prod
+from tinygrad.DType import DType
+from tinygrad.GlobalCounters import GlobalCounters
 
 _T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method
+
   def __init__(self, size:int, dtype:DType, buf:Any=None):
     self.size: int = size
     self.dtype: DType = dtype

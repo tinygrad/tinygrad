@@ -7,7 +7,9 @@ from collections import defaultdict
 from typing import Dict, List, Optional
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps, Op, OpType, LazyOp
 from tinygrad.tensor import LazyBuffer
-from tinygrad.helpers import GRAPH, GRAPHPATH, PRUNEGRAPH, DEBUG, GlobalCounters
+from tinygrad.GRAPH_MACROS import GRAPH, GRAPHPATH, PRUNEGRAPH
+from tinygrad.helpers import DEBUG
+from tinygrad.GlobalCounters import GlobalCounters
 from tinygrad.runtime.lib import RawConst
 
 # **** debugging and graphing ****

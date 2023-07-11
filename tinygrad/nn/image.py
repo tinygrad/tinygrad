@@ -1,6 +1,8 @@
 import numpy as np
-from tinygrad.helpers import prod, IMAGE, ImageDType, getenv, dtypes
+from tinygrad.helpers import prod, IMAGE, getenv
 from tinygrad.lazy import get_single_root
+from tinygrad.ImageDType import ImageDType
+from tinygrad.dtypes import dtypes
 
 FLOAT16 = getenv("FLOAT16", 0)
 base_image_type = (100, 2, "imageh", np.float16) if FLOAT16 else (100, 4, "imagef", np.float32)

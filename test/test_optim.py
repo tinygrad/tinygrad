@@ -1,5 +1,5 @@
 import numpy as np
-from tinygrad.helpers import dtypes
+from tinygrad.dtypes import dtypes
 from tinygrad.nn import Linear
 import torch
 import unittest

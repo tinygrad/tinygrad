@@ -5,12 +5,18 @@ import sys, importlib, inspect, functools, pathlib
 from weakref import ref
 
 import numpy as np
-from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, LightWeakSet, LightWeakValueDictionary
+from tinygrad.helpers import DEBUG, prod, flatten
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.shape.shapetracker import MovementOps, ShapeTracker, View, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, LoadOps, OpType, LazyOp
 from tinygrad.runtime.lib import RawBufferMapped, RawConst, RawBuffer
+from tinygrad.LightWeakValueDictionary import LightWeakValueDictionary
+from tinygrad.DType import DType
+from tinygrad.dtypes import dtypes
+from tinygrad.LightWeakSet import LightWeakSet
+from tinygrad.ImageDType import ImageDType
+from tinygrad.GRAPH_MACROS import GRAPH, getenv
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -107,6 +113,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dty
   return ret
 
 class LazyBuffer:
+
   __slots__ = 'st', 'device', 'shape', 'optype', 'dtype', 'op', 'realized', 'output_buffer', 'children', 'node_id', '__weakref__'
   __deletable__ = ('op',)
   def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, src:Optional[RawBuffer]=None):

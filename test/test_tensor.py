@@ -3,7 +3,7 @@ import torch
 import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, OpType
-from tinygrad.helpers import dtypes
+from tinygrad.dtypes import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)

@@ -3,7 +3,8 @@ import numpy as np
 from tqdm import tqdm
 import tempfile, platform, os
 from collections import defaultdict
-from tinygrad.helpers import prod, getenv, DEBUG, dtypes
+from tinygrad.helpers import prod, getenv, DEBUG
+from tinygrad.dtypes import dtypes
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import Device

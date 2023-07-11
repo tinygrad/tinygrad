@@ -2,9 +2,11 @@ from __future__ import annotations
 import functools, time
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, colored
+from tinygrad.GlobalCounters import GlobalCounters
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer, RawConst
+from tinygrad.DType import DType
 if TYPE_CHECKING:
   from tinygrad.lazy import LazyBuffer
 

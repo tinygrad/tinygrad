@@ -6,10 +6,13 @@ from itertools import accumulate, filterfalse
 import operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
-from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
 from math import ceil, pi, prod, sqrt, log, cos, copysign
+from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
+from tinygrad.dtypes import dtypes
+from tinygrad.DType import DType
+from tinygrad.ImageDType import ImageDType
 
 # An instantiation of the Function is the Context
 class Function:

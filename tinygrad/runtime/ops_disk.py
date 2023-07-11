@@ -1,9 +1,10 @@
 import os, mmap
 from typing import Optional
 from typing import Callable, Dict
-from tinygrad.helpers import prod, DType
+from tinygrad.helpers import prod
 from tinygrad.runtime.lib import RawBufferMapped
 from tinygrad.ops import Interpreted, Op, MovementOps, UnaryOps
+from tinygrad.DType import DType
 
 class RawDiskBuffer(RawBufferMapped):
   def __init__(self, size, dtype:DType, device:Optional[str]=None, buf=None, shape=None, offset=0):  # pylint: disable=super-init-not-called

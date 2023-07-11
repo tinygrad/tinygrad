@@ -3,8 +3,6 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LAZY
-from tinygrad.ops import GlobalCounters
-from tinygrad.graph import nm
 
 N = 200  # has to be bigger than the cache to fail
 
