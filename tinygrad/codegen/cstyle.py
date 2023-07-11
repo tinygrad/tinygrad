@@ -89,14 +89,14 @@ def add_gl_dimension(args, i, var, local_size, xid):
     local_size.append(var.max+1)
     return f"{{ int {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
-def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], input_bufs: List[RawBuffer], bufmap:List[int], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
+def uops_to_cstyle(uops:List[UOp], input_bufs: List[RawBuffer], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
   prekernel: Set[str] = set()
   kernel = []
   global_size = []
   local_size = []
   pend_close = None
 
-  bufnames = [b.name if isinstance(b, LocalBuffer) else f"data{bufmap[i]}" for i,b in enumerate(bufs)]
+  bufnames = [b.name if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(input_bufs)]
 
   depth = 0
   def kk(s): kernel.append("  "*depth+s)
@@ -151,16 +151,17 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], inp
       # valids are handled here
       if args.valid.max == 0:
         val = lang.render_const(0.0, newvar.dtype)
-      elif isinstance(bufs[args.i].realized, RawConst):
-        val = lang.render_const(bufs[args.i].realized._buf, newvar.dtype)
+      elif isinstance(input_bufs[args.i], RawConst):
+        assert False
+        val = lang.render_const(input_bufs[args.i]._buf, newvar.dtype)
       else:
-        val = lang.render_load(newvar.dtype, bufnames[args.i], bufs[args.i].dtype, args.idx, isinstance(bufs[args.i], LocalBuffer))
+        val = lang.render_load(newvar.dtype, bufnames[args.i], input_bufs[args.i].dtype, args.idx, isinstance(input_bufs[args.i], LocalBuffer))
       if args.valid.min == 0 and args.valid.max == 1: val = f"({args.valid.render(render_cl)}) ? ({val}) : {lang.render_const(0.0, newvar.dtype)}"
       kk(f"{newvar.render(True)} = {val};")
     elif uop == UOps.STORE:
       assert args.valid.min == 1, "store must be valid"
       # TODO: instead of dtypes.float, a base type
-      kk(lang.render_store(bufnames[args.i], bufs[args.i].dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, isinstance(bufs[args.i], LocalBuffer)))
+      kk(lang.render_store(bufnames[args.i], input_bufs[args.i].dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, isinstance(input_bufs[args.i], LocalBuffer)))
     elif uop == UOps.CAST and newvar is not None and newvar.dtype.sz > 1:
       kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
     elif uop == UOps.DEFINE_LOCAL:
@@ -168,19 +169,19 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], inp
     else:
       raise RuntimeError(f"failed to render {uop}")
 
-  if any(isinstance(x.dtype, ImageDType) for x in bufs): prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
+  if any(isinstance(x.dtype, ImageDType) for x in input_bufs): prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
   buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else
                ("const " if i > 0 else "")+lang.buffer_prefix+x.dtype.name+"*"+lang.buffer_suffix) for i,x in enumerate(input_bufs)]
   prg = ''.join([f"{lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
     [', '.join([f'{t} data{i}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
-  if lang.half_prekernel and any(x.dtype == dtypes.float16 for x in bufs): prg = ''.join([f"{lang.half_prekernel}", "\n", prg])
+  if lang.half_prekernel and any(x.dtype == dtypes.float16 for x in input_bufs): prg = ''.join([f"{lang.half_prekernel}", "\n", prg])
   return prg, global_size, local_size
 
 class CStyleCodegen(Linearizer):
   lang: ClassVar[CStyleLanguage] = CStyleLanguage()
-  supports_constant_folding: bool = True
+  #supports_constant_folding: bool = True
   supports_float4: bool = True
   supports_float4_alu: bool = True
 
@@ -194,7 +195,7 @@ class CStyleCodegen(Linearizer):
     self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
     self.linearize()
 
-    prg, global_size, local_size = uops_to_cstyle(self.uops, self.bufs, self.input_bufs, self.bufmap, self.lang)
+    prg, global_size, local_size = uops_to_cstyle(self.uops, self.input_bufs, self.lang)
 
     # painfully name the function something unique
     if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]

@@ -82,7 +82,7 @@ class AssemblyCodegen(Linearizer):
       AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: render_alu(BinaryOps.MUL, a, b.render(ops,ctx), dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
     def addr_w_offset(args):
-      idx = args.idx*self.bufs[args.i].dtype.itemsize
+      idx = args.idx*self.input_bufs[args.i].dtype.itemsize
       off = 0  # TODO: should this be None?
       if isinstance(idx, SumNode):
         nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
@@ -95,9 +95,9 @@ class AssemblyCodegen(Linearizer):
           new_reg = newreg((reg.nm, 'vec'), dtype=reg.dtype)
           ins.append(AssemblyInstruction(UOps.ALU, new_reg, [reg], UnaryOps.NOOP))
           reg = new_reg
-        return tor[f"buf{self.bufmap[args.i]}"], reg, off
+        return tor[f"buf{args.i}"], reg, off
       else:
-        reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{self.bufmap[args.i]}"], dtype=dtypes.uint64)
+        reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{args.i}"], dtype=dtypes.uint64)
         return reg, None, off
 
     ins = []
