@@ -47,18 +47,26 @@ class ConvGroup:
     x = self.norm[2](self.conv[2](x) * mult).relu()
     return x + residual
 
+def logging(func):
+  def add_logs(x):
+    print(func, 'in', x.sum().numpy(), x.min().numpy(), x.max().numpy())
+    out = func(x)
+    print(func, 'out', out.sum().numpy(), out.min().numpy(), out.max().numpy())
+    return out
+  return add_logs
+
 class SpeedyResNet:
   def __init__(self):
     # TODO: add whitening
     self.net = [
-      make_half(nn.Conv2d(3, 64, kernel_size=1)),
-      make_half(nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8)),
-      lambda x: x.relu(),
-      ConvGroup(64, 128, short=False),
-      ConvGroup(128, 256, short=True),
-      ConvGroup(256, 512, short=False),
-      lambda x: x.max((2,3)),
-      make_half(nn.Linear(512, num_classes, bias=False))
+      logging(make_half(nn.Conv2d(3, 64, kernel_size=1))),
+      logging(make_half(nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8))),
+      logging(lambda x: x.relu()),
+      logging(ConvGroup(64, 128, short=False)),
+      logging(ConvGroup(128, 256, short=True)),
+      logging(ConvGroup(256, 512, short=False)),
+      logging(lambda x: x.max((2,3))),
+      logging(make_half(nn.Linear(512, num_classes, bias=False)))
     ]
 
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
@@ -79,6 +87,13 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
     for batch_start in range(0, all_Y.shape[0], BS):
       batch_end = min(batch_start+BS, all_Y.shape[0])
       X = Tensor(all_X[batch_end-BS:batch_end].astype(np.float16 if HALF else np.float32)) # batch_end-BS for padding
+      print('numpy', all_X[batch_end-BS:batch_end])
+      print(all_X[batch_end-BS:batch_end].min(), all_X[batch_end-BS:batch_end].max())
+      print(all_X[batch_end-BS:batch_end].astype(np.float16).min(), all_X[batch_end-BS:batch_end].astype(np.float16).max())
+      print(X.min().numpy(), X.max().numpy())
+      print('tinygrad', X.numpy())
+
+
       Y = np.zeros((BS, num_classes), np.float16 if HALF else np.float32)
       Y[range(BS),all_Y[batch_end-BS:batch_end]] = -1.0*num_classes
       Y = Tensor(Y.reshape(BS, num_classes))
@@ -103,6 +118,8 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   else:
     X_train, Y_train = fetch_cifar(train=True)
     X_test, Y_test = fetch_cifar(train=False)
+  X_train = X_train.clip(-100, 100)
+  X_test = X_test.clip(-100, 100)
   model = SpeedyResNet()
   optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, 
