@@ -60,21 +60,26 @@ class ARMCodegen(AssemblyCodegen):
           ins.append(f"sxtw x0, w0")
           ins.append(f"str x0, {reg_map[out.nm]}")
       elif uop == UOps.ALU:
+        reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
+        ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
+        if len(vin) >= 2:
+          if vin[1].__class__ is int and vin[1] > 65535:
+            ins.append(f"mov w2, #{vin[1] & 0xffff}")
+            ins.append(f"movk w2, #{(vin[1] >> 16) & 0xffff}, lsl #16")
+            ins.append(f"sxtw x1, w2")
+          else:
+            ins.append(f"{f'mov {reg}1, #{str(vin[1])}' if vin[1].__class__ is int else f'ldr {reg}1, {reg_map[vin[1].nm]}'}")
+
         if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
-          ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
-          ins.append(f"ldr x1, {reg_map[vin[1].nm]}")
           ins.append(f"ands x0, x0, x1;")
           ins.append(f"str x0, {reg_map[out.nm]}")
         elif arg == FusedOps.MULACC and out == vin[2]:
-          ins.append(f"ldr s0, {reg_map[vin[0].nm]}")
-          ins.append(f"ldr s1, {reg_map[vin[1].nm]}")
           ins.append(f"ldr s2, {reg_map[vin[2].nm]}")
           ins.append(f"{alu[arg]} s0, s0, s1, s2")
           ins.append(f"str s0, {reg_map[out.nm]}")
         elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2]:
           ins.append(f"stp x29, x30, [sp, #0]!")
           ins.append(f"mov x29, sp")
-          ins.append(f"ldr s0, {reg_map[vin[0].nm]}")
           ins.append(f"fcvt d0, s0")
           ins.append(f"{alu[arg]}")
           ins.append(f"fcvt s0, d0")
@@ -82,31 +87,13 @@ class ARMCodegen(AssemblyCodegen):
           ins.append(f"mov sp, x29")
           ins.append(f"ldp x29, x30, [sp], #0")
         elif arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
-          reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
-          ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
-          if vin[1].__class__ is int and vin[1] > 65535:
-            ins.append(f"mov w2, #{vin[1] & 0xffff}")
-            ins.append(f"movk w2, #{(vin[1] >> 16) & 0xffff}, lsl #16")
-            ins.append(f"sxtw x1, w2")
-          else:
-            ins.append(f"{f'mov {reg}1, #{str(vin[1])}' if vin[1].__class__ is int else f'ldr {reg}1, {reg_map[vin[1].nm]}'}")
           ins.append(f"{alu[arg]} {reg}0, {reg}0, {reg}1" if reg == 'x' else f"fcmp {reg}0, {reg}1")
           ins.append(f"str {reg}0, {reg_map[out.nm]}")
         elif arg == BinaryOps.MOD:
-          ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
-          ins.append(f"{f'mov x1, #{str(vin[1])}' if vin[1].__class__ is int else f'ldr x1, {reg_map[vin[1].nm]}'}")
           ins.append(f"udiv x2, x0, x1")
           ins.append(f"msub x2, x2, x1, x0")
           ins.append(f"str x2, {reg_map[out.nm]}")
         else:
-          reg = 's' if dtypes.is_float(out[1]) else 'x'
-          ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
-          if vin[1].__class__ is int and vin[1] > 65535:
-            ins.append(f"mov w2, #{vin[1] & 0xffff}")
-            ins.append(f"movk w2, #{(vin[1] >> 16) & 0xffff}, lsl #16")
-            ins.append(f"sxtw x1, w2")
-          else:
-            ins.append(f"{f'mov {reg}1, #{str(vin[1])}' if vin[1].__class__ is int else f'ldr {reg}1, {reg_map[vin[1].nm]}'}")
           ins.append(f"{'f' if reg == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {reg}0, {reg}0, {reg}1")
           ins.append(f"str {reg}0, {reg_map[out.nm]}")
       elif uop == UOps.LOAD:
