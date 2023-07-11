@@ -4,6 +4,7 @@ from llvmlite import ir  # type: ignore
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token
 from tinygrad.helpers import dtypes
 from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, FusedOps
+from tinygrad.lazy import LazyBuffer
 
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 def int_const(x): return ir.Constant(ir.IntType(64), x)
@@ -31,7 +32,8 @@ code_for_op: Final[Dict[Op, Callable]] = {
   FusedOps.MULACC: lambda builder,x,y,z: builder.fadd(builder.fmul(x,y, flags=('fast',)), z, flags=('fast',)),
 }
 
-def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str: # all llvm stuff goes into a module
+def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
+  # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 
   # create llvm function
