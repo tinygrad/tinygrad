@@ -21,7 +21,7 @@ def set_seed(seed):
 
 num_classes = 10
 HALF = getenv('HALF', 1) == 1
-HALF_SCALE = 100
+HALF_SCALE = getenv('HALF_SCALE', 1000) 
 
 if HALF:
   Tensor.default_type = dtypes.float16
