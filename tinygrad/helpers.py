@@ -2,6 +2,7 @@ from __future__ import annotations
 import os, functools, platform, time, re
 from weakref import KeyedRef, ref
 from _weakref import _remove_dead_weakref # type: ignore
+import inspect
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 from math import prod # noqa: F401 # pylint:disable=unused-import
@@ -111,8 +112,8 @@ class dtypes:
   _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
 
-# HACK: staticmethods are not callable in 3.8 so we have to compare the class
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}
+
+DTYPES_DICT = {k: v for k, v in inspect.getmembers(dtypes()) if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0
