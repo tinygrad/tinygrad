@@ -97,12 +97,13 @@ class dtypes:
   int8: Final[DType] = DType(0, 1, "char", np.int8)
   int32: Final[DType] = DType(1, 4, "int", np.int32)
   int64: Final[DType] = DType(2, 8, "long", np.int64)
-  uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
-  uint32: Final[DType] = DType(1, 4, "uint", np.uint32)
-  uint64: Final[DType] = DType(2, 8, "ulong", np.uint64)
+  uint8: Final[DType] = DType(0, 1, "unsigned char", np.uint8)
+  uint32: Final[DType] = DType(1, 4, "unsigned int", np.uint32)
+  uint64: Final[DType] = DType(2, 8, "unsigned long", np.uint64)
 
   # NOTE: these are internal dtypes, should probably check for that
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
+  _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
