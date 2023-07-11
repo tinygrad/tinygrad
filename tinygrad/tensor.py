@@ -134,7 +134,7 @@ class Tensor:
   @staticmethod
   def empty(*shape, **kwargs): return Tensor._loadop(LoadOps.EMPTY, prod(shape), **kwargs).reshape(shape)
 
-  _seed: int = int(time.time())
+  _seed: ClassVar[int] = int(time.time())
   @staticmethod
   def manual_seed(seed=0): Tensor._seed = seed
 
