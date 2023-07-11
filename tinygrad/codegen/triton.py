@@ -5,7 +5,7 @@ import math
 
 from tinygrad.ops import BinaryOps, ASTRunner, Op, ReduceOps, UnaryOps
 from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps
-from tinygrad.helpers import DEBUG, ImageDType, dtypes
+from tinygrad.helpers import DEBUG, ImageDType, dtypes, getenv
 from tinygrad.shape.symbolic import NumNode
 
 class TritonCodegen(Linearizer):
@@ -121,7 +121,7 @@ class TritonCodegen(Linearizer):
     with open(fn, "w") as f: f.write(prg)
     codeobj = compile(prg, fn, "exec")
     exec(codeobj, globals()) # pylint: disable=W0122
-    triton_prg = triton_compile(globals()["fxn"], signature=','.join([{dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.int8: "*i8", dtypes.uint8: "*u8", dtypes.int32: "*i32", dtypes.int64: "*i64"}[buf.dtype] for buf in self.bufs]), device_type="cuda", debug=True)
+    triton_prg = triton_compile(globals()["fxn"], signature=','.join([{dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.int8: "*i8", dtypes.uint8: "*u8", dtypes.int32: "*i32", dtypes.int64: "*i64"}[buf.dtype] for buf in self.bufs]), device_type="cuda", debug=True, cc=86 if getenv("TRITONCPU", 0) else None)
     asm = triton_prg.asm['ptx']
     name = asm.split(".visible .entry ")[1].split("(")[0]
     local_size = [int(x) for x in asm.split(".maxntid ")[1].split("\n")[0].split(", ")]  # [128, 1, 1] is num_warps=4
