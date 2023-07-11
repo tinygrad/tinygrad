@@ -268,12 +268,12 @@ class Linearizer:
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
-      self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
-      self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size(), dtype=self.bufs[-1].dtype))
+      self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size(), self.bufs[-1].dtype))
 
     # define local buffers
     for lb in self.local_alias.values():
-      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size()))
+      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size(), self.bufs[-1].dtype))
 
     # print
     if DEBUG >= 3: self.printbufs()
@@ -649,7 +649,7 @@ class Linearizer:
           bst *= shp[j]
 
     self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
-    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
+    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size(), dtype=self.bufs[-1].dtype))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
 

@@ -162,7 +162,8 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
     elif uop == UOps.CAST and newvar is not None:
       kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
     elif uop == UOps.DEFINE_LOCAL:
-      kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
+      dtype = 'float' if len(args)==2 else args[2].name
+      kk(lang.smem_prefix + f"{dtype} {args[0]}[{args[1]}];")
     else:
       raise RuntimeError(f"failed to render {uop}")
 
