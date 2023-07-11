@@ -1,0 +1,657 @@
+import json, logging, math, os, re, sys, time
+from pathlib import Path
+
+import IPython.display as ipd
+import numpy as np
+from phonemizer import phonemize
+from unidecode import unidecode
+
+from tinygrad import nn
+from tinygrad.helpers import dtypes
+from tinygrad.nn import Embedding, Conv1d
+from tinygrad.state import torch_load
+from tinygrad.tensor import Tensor
+
+LRELU_SLOPE = 0.1
+
+class SynthesizerTrn:
+  def __init__(self, n_vocab, spec_channels, segment_size, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, n_speakers=0, gin_channels=0, use_sdp=True, **kwargs):
+    self.n_vocab, self.spec_channels, self.inter_channels, self.hidden_channels, self.filter_channels, self.n_heads, self.n_layers, self.kernel_size, self.p_dropout, self.resblock, self.resblock_kernel_sizes, self.resblock_dilation_sizes, self.upsample_rates, self.upsample_initial_channel, self.upsample_kernel_sizes, self.segment_size, self.n_speakers, self.gin_channels, self.use_sdp = n_vocab, spec_channels, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, segment_size, n_speakers, gin_channels, use_sdp
+    self.enc_p = TextEncoder(n_vocab, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout)
+    self.dec = Generator(inter_channels, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gin_channels=gin_channels)
+    self.enc_q = PosteriorEncoder(spec_channels, inter_channels, hidden_channels, 5, 1, 16, gin_channels=gin_channels)
+    self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, 4, gin_channels=gin_channels)
+    self.dp = StochasticDurationPredictor(hidden_channels, 192, 3, 0.5, 4, gin_channels=gin_channels) if use_sdp else DurationPredictor(hidden_channels, 256, 3, 0.5, gin_channels=gin_channels)
+    if n_speakers > 1: self.emb_g = Embedding(n_speakers, gin_channels)
+  def infer(self, x, x_lengths, sid=None, noise_scale=1.0, length_scale=1, noise_scale_w=1., max_len=None):
+    x, m_p, logs_p, x_mask = self.enc_p.forward(x, x_lengths)
+    g = self.emb_g(sid).unsqueeze(-1) if self.n_speakers > 0 else None
+    logw = self.dp.forward(x, x_mask, g=g, reverse=self.use_sdp, noise_scale=noise_scale_w if self.use_sdp else 1.0)
+    w_ceil = Tensor.ceil(logw.exp() * x_mask * length_scale)
+    y_lengths = Tensor.maximum(w_ceil.sum([1, 2]), 1).cast(dtypes.int64)
+    y_mask = sequence_mask(y_lengths, None).unsqueeze(1).cast(x_mask.dtype)
+    attn_mask = x_mask.unsqueeze(2) * y_mask.unsqueeze(-1)
+    attn = generate_path(w_ceil, attn_mask)
+    m_p = squeeze_tinygrad(attn, 1).matmul(m_p.transpose(1, 2)).transpose(1, 2)       # [b, t', t], [b, t, d] -> [b, d, t']
+    logs_p = squeeze_tinygrad(attn, 1).matmul(logs_p.transpose(1, 2)).transpose(1, 2) # [b, t', t], [b, t, d] -> [b, d, t']
+    z_p = m_p + Tensor.randn(*m_p.shape, dtype=m_p.dtype) * logs_p.exp() * noise_scale
+    y_mask = y_mask.cast(z_p.dtype)
+    z = self.flow.forward(z_p, y_mask, g=g, reverse=True)
+    o = self.dec.forward((z * y_mask)[:, :, :max_len], g=g)
+    return o, attn, y_mask, (z, z_p, m_p, logs_p)
+
+class StochasticDurationPredictor:
+  def __init__(self, in_channels, filter_channels, kernel_size, p_dropout, n_flows=4, gin_channels=0):
+    filter_channels = in_channels # it needs to be removed from future version.
+    self.in_channels, self.filter_channels, self.kernel_size, self.p_dropout, self.n_flows, self.gin_channels = in_channels, filter_channels, kernel_size, p_dropout, n_flows, gin_channels
+    self.log_flow, self.flows = Log(), [ElementwiseAffine(2)]
+    for _ in range(n_flows):
+      self.flows.append(ConvFlow(2, filter_channels, kernel_size, n_layers=3))
+      self.flows.append(Flip())
+    self.post_pre, self.post_proj = Conv1d(1, filter_channels, 1), Conv1d(filter_channels, filter_channels, 1)
+    self.post_convs = DDSConv(filter_channels, kernel_size, n_layers=3, p_dropout=p_dropout)
+    self.post_flows = [ElementwiseAffine(2)]
+    for _ in range(4):
+      self.post_flows.append(ConvFlow(2, filter_channels, kernel_size, n_layers=3))
+      self.post_flows.append(Flip())
+    self.pre, self.proj = Conv1d(in_channels, filter_channels, 1), Conv1d(filter_channels, filter_channels, 1)
+    self.convs = DDSConv(filter_channels, kernel_size, n_layers=3, p_dropout=p_dropout)
+    if gin_channels != 0: self.cond = Conv1d(gin_channels, filter_channels, 1)
+  def forward(self, x: Tensor, x_mask, w=None, g=None, reverse=False, noise_scale=1.0):
+    x = self.pre(x.detach())
+    if g is not None: x = x + self.cond(g.detach())
+    x = self.convs.forward(x, x_mask)
+    x = self.proj(x) * x_mask
+    if not reverse:
+      flows = self.flows
+      assert w is not None
+      log_det_tot_q = 0
+      h_w = self.post_proj(self.post_convs.forward(self.post_pre(w), x_mask)) * x_mask
+      e_q = Tensor.randn(w.size(0), 2, w.size(2), dtype=x.dtype).to(device=x.device) * x_mask
+      z_q = e_q
+      for flow in self.post_flows:
+        z_q, log_det_q = flow.forward(z_q, x_mask, g=(x + h_w))
+        log_det_tot_q += log_det_q
+      z_u, z1 = z_q.split([1, 1], 1)
+      u = z_u.sigmoid() * x_mask
+      z0 = (w - u) * x_mask
+      log_det_tot_q += Tensor.sum((z_u.logsigmoid() + (-z_u).logsigmoid()) * x_mask, [1,2])
+      log_q = Tensor.sum(-0.5 * (math.log(2*math.pi) + (e_q**2)) * x_mask, [1,2]) - log_det_tot_q
+      log_det_tot = 0
+      z0, log_det = self.log_flow.forward(z0, x_mask)
+      log_det_tot += log_det
+      z = z0.cat(z1, 1)
+      for flow in flows:
+        z, log_det = flow.forward(z, x_mask, g=x, reverse=reverse)
+        log_det_tot = log_det_tot + log_det
+      nll = Tensor.sum(0.5 * (math.log(2*math.pi) + (z**2)) * x_mask, [1,2]) - log_det_tot
+      return nll + log_q # [b]
+    else:
+      flows = list(reversed(self.flows))
+      flows = flows[:-2] + [flows[-1]] # remove a useless vflow
+      z = Tensor.randn(x.shape[0], 2, x.shape[2], dtype=x.dtype).to(device=x.device) * noise_scale
+      for flow in flows: z = flow.forward(z, x_mask, g=x, reverse=reverse)
+      z0, z1 = split_tinygrad(z,[1, 1], 1)
+      return z0
+
+class DurationPredictor:
+  def __init__(self, in_channels, filter_channels, kernel_size, p_dropout, gin_channels=0):
+    self.in_channels, self.filter_channels, self.kernel_size, self.p_dropout, self.gin_channels = in_channels, filter_channels, kernel_size, p_dropout, gin_channels
+    self.conv_1, self.norm_1 = Conv1d(in_channels, filter_channels, kernel_size, padding=kernel_size//2), LayerNorm(filter_channels)
+    self.conv_2, self.norm_2 = Conv1d(filter_channels, filter_channels, kernel_size, padding=kernel_size//2), LayerNorm(filter_channels)
+    self.proj = Conv1d(filter_channels, 1, 1)
+    if gin_channels != 0: self.cond = Conv1d(gin_channels, in_channels, 1)
+  def forward(self, x: Tensor, x_mask, g=None):
+    x = x.detach()
+    if g is not None: x = x + self.cond(g.detach())
+    x = self.conv_1(x * x_mask).relu()
+    x = self.norm_1(x).dropout(self.p_dropout)
+    x = self.conv_2(x * x_mask).relu(x)
+    x = self.norm_2(x).dropout(self.p_dropout)
+    return self.proj(x * x_mask) * x_mask
+
+class TextEncoder:
+  def __init__(self, n_vocab, out_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout):
+    self.n_vocab, self.out_channels, self.hidden_channels, self.filter_channels, self.n_heads, self.n_layers, self.kernel_size, self.p_dropout = n_vocab, out_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout
+    self.emb = Embedding(n_vocab, hidden_channels)
+    self.encoder = Encoder(hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout)
+    self.proj = Conv1d(hidden_channels, out_channels * 2, 1)
+
+  def forward(self, x: Tensor, x_lengths: Tensor):
+    x = self.emb(x)
+    x = (x * math.sqrt(self.hidden_channels)).transpose(1, -1)  # [b, t, h] -transpose-> [b, h, t]
+    x_mask = sequence_mask(x_lengths, x.shape[2]).unsqueeze(1).cast(x.dtype)  # TODO: verify this cast works
+    x = self.encoder.forward(x * x_mask, x_mask)
+    stats = self.proj(x) * x_mask
+    m, logs = split_tinygrad(stats, self.out_channels, dim=1)
+    return x, m, logs, x_mask
+
+class ResidualCouplingBlock:
+  def __init__(self, channels, hidden_channels, kernel_size, dilation_rate, n_layers, n_flows=4, gin_channels=0):
+    self.channels, self.hidden_channels, self.kernel_size, self.dilation_rate, self.n_layers, self.n_flows, self.gin_channels = channels, hidden_channels, kernel_size, dilation_rate, n_layers, n_flows, gin_channels
+    self.flows = []
+    for _ in range(n_flows):
+      self.flows.append(ResidualCouplingLayer(channels, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=gin_channels, mean_only=True))
+      self.flows.append(Flip())
+  def forward(self, x, x_mask, g=None, reverse=False):
+    for flow in reversed(self.flows) if reverse else self.flows: x = flow.forward(x, x_mask, g=g, reverse=reverse)
+    return x
+
+class PosteriorEncoder:
+  def __init__(self, in_channels, out_channels, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=0):
+    self.in_channels, self.out_channels, self.hidden_channels, self.kernel_size, self.dilation_rate, self.n_layers, self.gin_channels = in_channels, out_channels, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels
+    self.pre = Conv1d(in_channels, hidden_channels, 1)
+    self.enc = WN(hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=gin_channels)
+    self.proj = Conv1d(hidden_channels, out_channels * 2, 1)
+  def forward(self, x, x_lengths, g=None):
+    x_mask = sequence_mask(x_lengths, x.size(2)).unsqueeze(1).cast(x.dtype)
+    x = self.pre(x) * x_mask
+    x = self.enc.forward(x, x_mask, g=g)
+    stats = self.proj(x) * x_mask
+    m, logs = stats.split(self.out_channels, dim=1)
+    z = (m + Tensor.randn(m.shape, m.dtype) * logs.exp()) * x_mask
+    return z, m, logs, x_mask
+
+# TODO: verify this is correct, maybe add to tinygrad.nn
+def ConvTranspose1d(in_channels, out_channels, kernel_size, stride=1, padding=0, output_padding=0, dilation=1, groups=1, bias=True):
+  return nn.ConvTranspose2d(in_channels, out_channels, (kernel_size,), stride, padding, output_padding, dilation, groups, bias)
+
+class Generator:
+  def __init__(self, initial_channel, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gin_channels=0):
+    self.num_kernels = len(resblock_kernel_sizes)
+    self.num_upsamples = len(upsample_rates)
+    self.conv_pre = Conv1d(initial_channel, upsample_initial_channel, 7, 1, padding=3)
+    resblock = ResBlock1 if resblock == '1' else ResBlock2
+    self.ups = []
+    for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
+      self.ups.append(ConvTranspose1d(upsample_initial_channel//(2**i), upsample_initial_channel//(2**(i+1)),k, u, padding=(k-u)//2))
+    self.resblocks = []
+    for i in range(len(self.ups)):
+      ch = upsample_initial_channel // (2 ** (i + 1))
+      for _, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes)):
+        self.resblocks.append(resblock(ch, k, d))
+    self.conv_post = Conv1d(ch, 1, 7, 1, padding=3, bias=False)
+    if gin_channels != 0: self.cond = Conv1d(gin_channels, upsample_initial_channel, 1)
+  def forward(self, x: Tensor, g=None):
+    x = self.conv_pre(x)
+    if g is not None:  x = x + self.cond(g)
+    for i in range(self.num_upsamples):
+      x, xs = self.ups[i](x.leakyrelu(LRELU_SLOPE)), None
+      for j in range(self.num_kernels):
+        if xs is None: xs = self.resblocks[i * self.num_kernels + j].forward(x)
+        else: xs += self.resblocks[i * self.num_kernels + j].forward(x)
+      x = xs / self.num_kernels
+    return self.conv_post(x.leakyrelu()).tanh()
+
+class LayerNorm(nn.LayerNorm):
+  def __init__(self, channels, eps=1e-5): super().__init__(channels, eps, elementwise_affine=True)
+  def forward(self, x: Tensor): return self.__call__(x.transpose(1, -1)).transpose(1, -1)
+
+class WN:
+  def __init__(self, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=0, p_dropout=0):
+    assert (kernel_size % 2 == 1)
+    self.hidden_channels, self.kernel_size, self.dilation_rate, self.n_layers, self.gin_channels, self.p_dropout = hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels, p_dropout
+    self.in_layers, self.res_skip_layers = [], []
+    if gin_channels != 0: self.cond_layer = nn.Conv1d(gin_channels, 2 * hidden_channels * n_layers, 1)
+    for i in range(n_layers):
+      dilation = dilation_rate ** i
+      padding = int((kernel_size * dilation - dilation) / 2)
+      in_layer = nn.Conv1d(hidden_channels, 2 * hidden_channels, kernel_size, dilation=dilation, padding=padding)
+      self.in_layers.append(in_layer)
+      res_skip_channels = 2 * hidden_channels if i < n_layers - 1 else hidden_channels
+      res_skip_layer = nn.Conv1d(hidden_channels, res_skip_channels, 1)
+      self.res_skip_layers.append(res_skip_layer)
+  def forward(self, x, x_mask, g=None, **kwargs):
+    output, n_channels_tensor = Tensor.zeros_like(x), Tensor([self.hidden_channels], dtype=dtypes.int64)
+    if g is not None: g = self.cond_layer(g)
+    for i in range(self.n_layers):
+      x_in = self.in_layers[i](x)
+      if g is not None:
+        cond_offset = i * 2 * self.hidden_channels
+        g_l = g[:, cond_offset:cond_offset + 2 * self.hidden_channels, :]
+      else:
+        g_l = Tensor.zeros_like(x_in)
+      acts = fused_add_tanh_sigmoid_multiply(x_in, g_l, n_channels_tensor)
+      res_skip_acts = self.res_skip_layers[i](acts)
+      if i < self.n_layers - 1:
+        res_acts = res_skip_acts[:, :self.hidden_channels, :]
+        x = (x + res_acts) * x_mask
+        output = output + res_skip_acts[:, self.hidden_channels:, :]
+      else:
+        output = output + res_skip_acts
+    return output * x_mask
+
+class ResBlock1:
+  def __init__(self, channels, kernel_size=3, dilation=(1, 3, 5)):
+    self.convs1 = [nn.Conv1d(channels, channels, kernel_size, 1, dilation=dilation[i], padding=get_padding(kernel_size, dilation[i])) for i in range(3)]
+    self.convs2 = [nn.Conv1d(channels, channels, kernel_size, 1, dilation=1, padding=get_padding(kernel_size, 1)) for _ in range(3)]
+  def forward(self, x: Tensor, x_mask=None):
+    for c1, c2 in zip(self.convs1, self.convs2):
+      xt = x.leakyrelu(LRELU_SLOPE)
+      xt = c1(xt if x_mask is None else xt * x_mask).leakyrelu(LRELU_SLOPE)
+      x = c2(xt if x_mask is None else xt * x_mask) + x
+    return x if x_mask is None else x * x_mask
+
+class ResBlock2:
+  def __init__(self, channels, kernel_size=3, dilation=(1, 3)):
+    self.convs = [nn.Conv1d(channels, channels, kernel_size, 1, dilation=dilation[i], padding=get_padding(kernel_size, dilation[i])) for i in range(2)]
+  def forward(self, x, x_mask=None):
+    for c in self.convs:
+      xt = x.leaky_relu(LRELU_SLOPE)
+      xt = c(xt if x_mask is None else xt * x_mask)
+      x = xt + x
+    return x if x_mask is None else x * x_mask
+
+class DDSConv: # Dialted and Depth-Separable Convolution
+  def __init__(self, channels, kernel_size, n_layers, p_dropout=0.):
+    self.channels, self.kernel_size, self.n_layers, self.p_dropout = channels, kernel_size, n_layers, p_dropout
+    self.convs_sep, self.convs_1x1, self.norms_1, self.norms_2 = [], [], [], []
+    for i in range(n_layers):
+      dilation = kernel_size ** i
+      padding = (kernel_size * dilation - dilation) // 2
+      self.convs_sep.append(nn.Conv1d(channels, channels, kernel_size, groups=channels, dilation=dilation, padding=padding))
+      self.convs_1x1.append(nn.Conv1d(channels, channels, 1))
+      self.norms_1.append(LayerNorm(channels))
+      self.norms_2.append(LayerNorm(channels))
+  def forward(self, x, x_mask, g=None):
+    if g is not None: x = x + g
+    for i in range(self.n_layers):
+      y = self.convs_sep[i](x * x_mask)
+      y = self.norms_1[i].forward(y).gelu()
+      y = self.convs_1x1[i](y)
+      y = self.norms_2[i].forward(y).gelu()
+      x = x + y.dropout(self.p_dropout)
+    return x * x_mask
+
+class ConvFlow:
+  def __init__(self, in_channels, filter_channels, kernel_size, n_layers, num_bins=10, tail_bound=5.0):
+    self.in_channels, self.filter_channels, self.kernel_size, self.n_layers, self.num_bins, self.tail_bound = in_channels, filter_channels, kernel_size, n_layers, num_bins, tail_bound
+    self.half_channels = in_channels // 2
+    self.pre = nn.Conv1d(self.half_channels, filter_channels, 1)
+    self.convs = DDSConv(filter_channels, kernel_size, n_layers, p_dropout=0.)
+    self.proj = nn.Conv1d(filter_channels, self.half_channels * (num_bins * 3 - 1), 1)
+  def forward(self, x, x_mask, g=None, reverse=False):
+    x0, x1 = split_tinygrad(x, [self.half_channels]*2, 1)
+    h = self.proj(self.convs.forward(self.pre(x0), x_mask, g=g)) * x_mask
+    b, c, t = x0.shape
+    h = h.reshape(b, c, -1, t).permute(0, 1, 3, 2) # [b, cx?, t] -> [b, c, t, ?]
+    unnormalized_widths = h[..., :self.num_bins] / math.sqrt(self.filter_channels)
+    unnormalized_heights = h[..., self.num_bins:2*self.num_bins] / math.sqrt(self.filter_channels)
+    unnormalized_derivatives = h[..., 2 * self.num_bins:]
+    x1, logabsdet = piecewise_rational_quadratic_transform(x1, unnormalized_widths, unnormalized_heights, unnormalized_derivatives, inverse=reverse, tails='linear', tail_bound=self.tail_bound)
+    x = x0.cat(x1, dim=1) * x_mask
+    return x if reverse else (x, Tensor.sum(logabsdet * x_mask, [1,2]))
+
+class ResidualCouplingLayer:
+  def __init__(self, channels, hidden_channels, kernel_size, dilation_rate, n_layers, p_dropout=0, gin_channels=0, mean_only=False):
+    assert channels % 2 == 0, "channels should be divisible by 2"
+    self.channels, self.hidden_channels, self.kernel_size, self.dilation_rate, self.n_layers, self.mean_only = channels, hidden_channels, kernel_size, dilation_rate, n_layers, mean_only
+    self.half_channels = channels // 2
+    self.pre = Conv1d(self.half_channels, hidden_channels, 1)
+    self.enc = WN(hidden_channels, kernel_size, dilation_rate, n_layers, p_dropout=p_dropout, gin_channels=gin_channels)
+    self.post = Conv1d(hidden_channels, self.half_channels * (2 - mean_only), 1)
+  def forward(self, x, x_mask, g=None, reverse=False):
+    x0, x1 = split_tinygrad(x, [self.half_channels]*2, 1)
+    stats = self.post(self.enc.forward(self.pre(x0) * x_mask, x_mask, g=g)) * x_mask
+    if not self.mean_only:
+      m, logs = split_tinygrad(stats, [self.half_channels]*2, 1)
+    else:
+      m = stats
+      logs = Tensor.zeros_like(m)
+    if not reverse: return x0.cat((m + x1 * logs.exp() * x_mask), dim=1)
+    else: return x0.cat(((x1 - m) * (-logs).exp() * x_mask), dim=1)
+
+class Log:
+  def forward(self, x : Tensor, x_mask, reverse=False):
+    if not reverse:
+      y = x.maximum(1e-5).log() * x_mask
+      return y, (-y).sum([1, 2])
+    else: return x.exp() * x_mask
+
+class Flip:
+  def forward(self, x: Tensor, *args, reverse=False, **kwargs):
+    x = x.flip([1])
+    return x if reverse else (x, Tensor.zeros(x.shape[0], dtype=x.dtype).to(device=x.device))
+
+class ElementwiseAffine:
+  def __init__(self, channels): self.m, self.logs = Tensor.zeros(channels, 1), Tensor.zeros(channels, 1)
+  def forward(self, x, x_mask, reverse=False, **kwargs): # x if reverse else y, logdet
+    return (x - self.m) * Tensor.exp(-self.logs) * x_mask if reverse \
+      else ((self.m + Tensor.exp(self.logs) * x) * x_mask, Tensor.sum(self.logs * x_mask, [1, 2]))
+
+class MultiHeadAttention:
+  def __init__(self, channels, out_channels, n_heads, p_dropout=0., window_size=None, heads_share=True, block_length=None, proximal_bias=False, proximal_init=False):
+    assert channels % n_heads == 0
+    self.channels, self.out_channels, self.n_heads, self.p_dropout, self.window_size, self.heads_share, self.block_length, self.proximal_bias, self.proximal_init = channels, out_channels, n_heads, p_dropout, window_size, heads_share, block_length, proximal_bias, proximal_init
+    self.attn, self.k_channels  = None, channels // n_heads
+    self.conv_q, self.conv_k, self.conv_v = [Conv1d(channels, channels, 1) for _ in range(3)]
+    self.conv_o = Conv1d(channels, out_channels, 1)
+    if window_size is not None: self.emb_rel_k, self.emb_rel_v = [Tensor.randn(1 if heads_share else n_heads, window_size * 2 + 1, self.k_channels) * (self.k_channels ** -0.5)] * 2
+  def forward(self, x, c, attn_mask=None):
+    q, k, v = self.conv_q(x), self.conv_k(c), self.conv_v(c)
+    x, self.attn = self.attention(q, k, v, mask=attn_mask)
+    return self.conv_o(x)
+  def attention(self, query: Tensor, key: Tensor, value: Tensor, mask=None):# reshape [b, d, t] -> [b, n_h, t, d_k]
+    b, d, t_s, t_t = key.shape[0], key.shape[1], key.shape[2], query.shape[2]
+    query = query.reshape(b, self.n_heads, self.k_channels, t_t).transpose(2, 3)
+    key = key.reshape(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
+    value = value.reshape(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
+    scores : Tensor = (query / math.sqrt(self.k_channels)) @ key.transpose(-2, -1)
+    if self.window_size is not None:
+      assert t_s == t_t, "Relative attention is only available for self-attention."
+      key_relative_embeddings = self._get_relative_embeddings(self.emb_rel_k, t_s)
+      rel_logits = self._matmul_with_relative_keys(query / math.sqrt(self.k_channels), key_relative_embeddings)
+      scores_local = self._relative_position_to_absolute_position(rel_logits)
+      scores = scores + scores_local
+    if mask is not None:
+      scores = masked_fill_tinygrad(scores, mask == 0, -1e4)
+      if self.block_length is not None:
+        assert t_s == t_t, "Local attention is only available for self-attention."
+        scores = masked_fill_tinygrad(scores, Tensor.ones_like(scores).triu(-self.block_length).tril(self.block_length) == 0, -1e4)
+    p_attn = scores.softmax(axis=-1)  # [b, n_h, t_t, t_s]
+    output = p_attn.matmul(value)
+    if self.window_size is not None:
+      relative_weights = self._absolute_position_to_relative_position(p_attn)
+      value_relative_embeddings = self._get_relative_embeddings(self.emb_rel_v, t_s)
+      output = output + self._matmul_with_relative_values(relative_weights, value_relative_embeddings)
+    output = output.transpose(2, 3).contiguous().reshape(b, d, t_t)  # [b, n_h, t_t, d_k] -> [b, d, t_t]
+    return output, p_attn
+  def _matmul_with_relative_values(self, x, y): return x.matmul(y.unsqueeze(0))                 # x: [b, h, l, m], y: [h or 1, m, d], ret: [b, h, l, d]
+  def _matmul_with_relative_keys(self, x, y): return x.matmul(y.unsqueeze(0).transpose(-2, -1)) # x: [b, h, l, d], y: [h or 1, m, d], re, : [b, h, l, m]
+  def _get_relative_embeddings(self, relative_embeddings, length):
+    pad_length, slice_start_position = max(length - (self.window_size + 1), 0), max((self.window_size + 1) - length, 0)
+    padded_relative_embeddings = relative_embeddings if pad_length <= 0\
+      else relative_embeddings.pad(convert_pad_shape([[0, 0], [pad_length, pad_length], [0, 0]]))
+    return padded_relative_embeddings[:, slice_start_position:(slice_start_position + 2 * length - 1)] #used_relative_embeddings
+  def _relative_position_to_absolute_position(self, x: Tensor): # x: [b, h, l, 2*l-1] -> [b, h, l, l]
+    batch, heads, length, _ = x.shape
+    x = x.pad(convert_pad_shape([[0,0],[0,0],[0,0],[0,1]]))
+    x_flat = x.reshape([batch, heads, length * 2 * length])
+    x_flat = x_flat.pad(convert_pad_shape([[0,0],[0,0],[0,length-1]]))
+    x_final = x_flat.reshape([batch, heads, length+1, 2*length-1])[:, :, :length, length-1:]
+    return x_final
+  def _absolute_position_to_relative_position(self, x: Tensor): # x: [b, h, l, l] -> [b, h, l, 2*l-1]
+    batch, heads, length, _ = x.shape
+    x = x.pad(convert_pad_shape([[0, 0], [0, 0], [0, 0], [0, length-1]]))
+    x_flat = x.reshape([batch, heads, length**2 + length*(length -1)])
+    x_flat = x_flat.pad(convert_pad_shape([[0, 0], [0, 0], [length, 0]]))
+    x_final = x_flat.reshape([batch, heads, length, 2*length])[:,:,:,1:]
+    return x_final
+
+class FFN:
+  def __init__(self, in_channels, out_channels, filter_channels, kernel_size, p_dropout=0., activation=None, causal=False):
+    self.in_channels, self.out_channels, self.filter_channels, self.kernel_size, self.p_dropout, self.activation, self.causal = in_channels, out_channels, filter_channels, kernel_size, p_dropout, activation, causal
+    self.padding = self._causal_padding if causal else self._same_padding
+    self.conv_1, self.conv_2 = Conv1d(in_channels, filter_channels, kernel_size), Conv1d(filter_channels, out_channels, kernel_size)
+  def forward(self, x, x_mask):
+    x = self.conv_1(self.padding(x * x_mask))
+    x = x * (1.702 * x).sigmoid() if self.activation == "gelu" else x.relu()
+    x = self.conv_2(self.padding(x.dropout(self.p_dropout) * x_mask))
+    return x * x_mask
+  def _causal_padding(self, x):return x if self.kernel_size == 1 else x.pad(convert_pad_shape([[0, 0], [0, 0], [self.kernel_size - 1, 0]]))
+  def _same_padding(self, x): return x if self.kernel_size == 1 else x.pad(convert_pad_shape([[0, 0], [0, 0], [(self.kernel_size - 1) // 2, self.kernel_size // 2]]))
+
+class Encoder:
+  def __init__(self, hidden_channels, filter_channels, n_heads, n_layers, kernel_size=1, p_dropout=0., window_size=4, **kwargs):
+    self.hidden_channels, self.filter_channels, self.n_heads, self.n_layers, self.kernel_size, self.p_dropout, self.window_size = hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, window_size
+    self.attn_layers, self.norm_layers_1, self.ffn_layers, self.norm_layers_2 = [], [], [], []
+    for _ in range(n_layers):
+      self.attn_layers.append(MultiHeadAttention(hidden_channels, hidden_channels, n_heads, p_dropout=p_dropout, window_size=window_size))
+      self.norm_layers_1.append(LayerNorm(hidden_channels))
+      self.ffn_layers.append(FFN(hidden_channels, hidden_channels, filter_channels, kernel_size, p_dropout=p_dropout))
+      self.norm_layers_2.append(LayerNorm(hidden_channels))
+  def forward(self, x, x_mask):
+    attn_mask, x = x_mask.unsqueeze(2) * x_mask.unsqueeze(-1), x * x_mask
+    for i in range(self.n_layers):
+      y = self.attn_layers[i].forward(x, x, attn_mask).dropout(self.p_dropout)
+      x = self.norm_layers_1[i].forward(x + y)
+      y = self.ffn_layers[i].forward(x, x_mask).dropout(self.p_dropout)
+      x = self.norm_layers_2[i].forward(x + y)
+    return x * x_mask
+
+DEFAULT_MIN_BIN_WIDTH, DEFAULT_MIN_BIN_HEIGHT, DEFAULT_MIN_DERIVATIVE = 1e-3, 1e-3, 1e-3
+def piecewise_rational_quadratic_transform(inputs, unnormalized_widths, unnormalized_heights, unnormalized_derivatives, inverse=False, tails=None, tail_bound=1., min_bin_width=DEFAULT_MIN_BIN_WIDTH, min_bin_height=DEFAULT_MIN_BIN_HEIGHT, min_derivative=DEFAULT_MIN_DERIVATIVE):
+  # TODO: this all uses numpy atm
+  if tails is None:
+    spline_fn = rational_quadratic_spline
+    spline_kwargs = {}
+  else:
+    spline_fn = unconstrained_rational_quadratic_spline
+    spline_kwargs = {'tails': tails, 'tail_bound': tail_bound}
+  outputs, logabsdet = spline_fn( inputs=inputs, unnormalized_widths=unnormalized_widths, unnormalized_heights=unnormalized_heights, unnormalized_derivatives=unnormalized_derivatives, inverse=inverse, min_bin_width=min_bin_width, min_bin_height=min_bin_height, min_derivative=min_derivative, **spline_kwargs)
+  return outputs, logabsdet
+def searchsorted(bin_locations, inputs, eps=1e-6):
+  bin_locations[..., -1] += eps
+  return np.sum(inputs[..., None] >= bin_locations, axis=-1) - 1
+def unconstrained_rational_quadratic_spline(inputs, unnormalized_widths, unnormalized_heights, unnormalized_derivatives, inverse=False, tails='linear', tail_bound=1., min_bin_width=DEFAULT_MIN_BIN_WIDTH, min_bin_height=DEFAULT_MIN_BIN_HEIGHT, min_derivative=DEFAULT_MIN_DERIVATIVE):
+  inputs = inputs.numpy()
+  inside_interval_mask = (inputs >= -tail_bound) & (inputs <= tail_bound)
+  outside_interval_mask = ~inside_interval_mask
+  outputs = np.zeros_like(inputs)
+  logabsdet = np.zeros_like(inputs)
+  unnormalized_widths = unnormalized_widths.numpy()
+  unnormalized_heights = unnormalized_heights.numpy()
+  unnormalized_derivatives = unnormalized_derivatives.numpy()
+  if tails == 'linear':
+    unnormalized_derivatives = np.pad(unnormalized_derivatives, ((0, 0), (0, 0), (0, 0), (1, 1)))
+    constant = np.log(np.exp(1 - min_derivative) - 1)
+    unnormalized_derivatives[..., 0] = constant
+    unnormalized_derivatives[..., -1] = constant
+    outputs[outside_interval_mask] = inputs[outside_interval_mask]
+    logabsdet[outside_interval_mask] = 0
+  else:
+    raise RuntimeError('{} tails are not implemented.'.format(tails))
+  outputs[inside_interval_mask], logabsdet[inside_interval_mask] = rational_quadratic_spline( inputs=inputs[inside_interval_mask], unnormalized_widths=unnormalized_widths[inside_interval_mask, :], unnormalized_heights=unnormalized_heights[inside_interval_mask, :], unnormalized_derivatives=unnormalized_derivatives[inside_interval_mask, :], inverse=inverse, left=-tail_bound, right=tail_bound, bottom=-tail_bound, top=tail_bound, min_bin_width=min_bin_width, min_bin_height=min_bin_height, min_derivative=min_derivative )
+  return Tensor(outputs), Tensor(logabsdet)
+def softmax(arr, dim=-1): return np.exp(arr) / np.sum(np.exp(arr), axis=dim, keepdims=True)  # softmax
+def softplus(x): return np.log(1 + np.exp(x))
+def rational_quadratic_spline(inputs, unnormalized_widths, unnormalized_heights, unnormalized_derivatives, inverse=False, left=0., right=1., bottom=0., top=1., min_bin_width=DEFAULT_MIN_BIN_WIDTH, min_bin_height=DEFAULT_MIN_BIN_HEIGHT, min_derivative=DEFAULT_MIN_DERIVATIVE):
+  if np.min(inputs) < left or np.max(inputs) > right: raise ValueError('Input to a transform is not within its domain')
+  num_bins = unnormalized_widths.shape[-1]
+  if min_bin_width * num_bins > 1.0: raise ValueError('Minimal bin width too large for the number of bins')
+  if min_bin_height * num_bins > 1.0: raise ValueError('Minimal bin height too large for the number of bins')
+  widths = softmax(unnormalized_widths, dim=-1) # softmax
+  widths = min_bin_width + (1 - min_bin_width * num_bins) * widths
+  cumwidths = np.pad(widths.cumsum(axis=-1), pad_width=((0, 0), (1,0)), mode='constant', constant_values=0.0)
+  cumwidths = (right - left) * cumwidths + left
+  cumwidths[..., 0], cumwidths[..., -1] = left, right
+  widths = cumwidths[..., 1:] - cumwidths[..., :-1]
+  derivatives = min_derivative + np.log1p(np.exp(unnormalized_derivatives))
+  heights = softmax(unnormalized_heights, dim=-1)
+  heights = min_bin_height + (1 - min_bin_height * num_bins) * heights
+  cumheights = heights.cumsum(axis=-1)
+  cumheights = np.pad(cumheights, pad_width=((0, 0), (1,0)), mode='constant', constant_values=0.0)
+  cumheights = (top - bottom) * cumheights + bottom
+  cumheights[..., 0], cumheights[..., -1] = bottom, top
+  heights = cumheights[..., 1:] - cumheights[..., :-1]
+  bin_idx = searchsorted(cumheights if inverse else cumwidths, inputs)[..., None]
+  input_cumwidths = np.take_along_axis(cumwidths, bin_idx, axis=-1)[..., 0]
+  input_bin_widths = np.take_along_axis(widths, bin_idx, axis=-1)[..., 0]
+  input_cumheights = np.take_along_axis(cumheights, bin_idx, axis=-1)[..., 0]
+  delta = heights / widths
+  input_delta = np.take_along_axis(delta, bin_idx, axis=-1)[..., 0]
+  input_derivatives = np.take_along_axis(derivatives, bin_idx, axis=-1)[..., 0]
+  input_derivatives_plus_one = np.take_along_axis(derivatives[..., 1:], bin_idx, axis=-1)[..., 0]
+  input_heights = np.take_along_axis(heights, bin_idx, axis=-1)[..., 0]
+  if inverse:
+    a = ((inputs - input_cumheights) * (input_derivatives + input_derivatives_plus_one - 2 * input_delta) + input_heights * (input_delta - input_derivatives))
+    b = (input_heights * input_derivatives - (inputs - input_cumheights) * (input_derivatives + input_derivatives_plus_one - 2 * input_delta))
+    c = - input_delta * (inputs - input_cumheights)
+    discriminant = np.square(b) - 4 * a * c
+    assert (discriminant >= 0).all()
+    root = (2 * c) / (-b - np.sqrt(discriminant))
+    outputs = root * input_bin_widths + input_cumwidths
+    theta_one_minus_theta = root * (1 - root)
+    denominator = input_delta + ((input_derivatives + input_derivatives_plus_one - 2 * input_delta) * theta_one_minus_theta)
+    derivative_numerator = np.square(input_delta) * (input_derivatives_plus_one * np.square(root) + 2 * input_delta * theta_one_minus_theta + input_derivatives * np.square(1 - root))
+    logabsdet = np.log(derivative_numerator) - 2 * np.log(denominator)
+    return outputs, -logabsdet
+  else:
+    theta = (inputs - input_cumwidths) / input_bin_widths
+    theta_one_minus_theta = theta * (1 - theta)
+    numerator = input_heights * (input_delta * theta.pow(2) + input_derivatives * theta_one_minus_theta)
+    denominator = input_delta + ((input_derivatives + input_derivatives_plus_one - 2 * input_delta) * theta_one_minus_theta)
+    outputs = input_cumheights + numerator / denominator
+    derivative_numerator = input_delta.pow(2) * (input_derivatives_plus_one * theta.pow(2) + 2 * input_delta * theta_one_minus_theta + input_derivatives * (1 - theta).pow(2))
+    logabsdet = derivative_numerator.log() - 2 * denominator.log()
+    return outputs, logabsdet
+
+def norm_except_dim(v, dim):
+  if dim == -1: return np.linalg.norm(v)
+  elif dim == 0:
+    output_shape = [1] * v.ndim
+    output_shape[0] = v.shape[0]
+    return np.linalg.norm(v.reshape(v.shape[0], -1), axis=1).reshape(output_shape)
+  elif dim == v.ndim - 1:
+    output_shape = [1] * v.ndim
+    output_shape[-1] = v.shape[-1]
+    return np.linalg.norm(v.reshape(-1, v.shape[-1]), axis=0).reshape(output_shape)
+  else:
+    transposed_v = np.transpose(v, (dim,) + tuple(i for i in range(v.ndim) if i != dim))
+    return np.transpose(norm_except_dim(transposed_v, 0), (dim,) + tuple(i for i in range(v.ndim) if i != dim))
+
+def weight_norm_tinygrad(v, g, dim):
+  v, g = v.numpy(), g.numpy()
+  v_norm = norm_except_dim(v, dim)
+  w = v * (g / v_norm)
+  return Tensor(w)
+def masked_fill_tinygrad(tensor, mask, value): return tensor * (1 - mask) + value * mask
+def split_tinygrad(tensor, split_sizes, dim=0): # if split_sizes is an integer, convert it to a tuple of size split_sizes elements
+  if isinstance(split_sizes, int): split_sizes = (split_sizes,) * (tensor.shape[dim] // split_sizes)
+  assert sum(split_sizes) == tensor.shape[dim], "Sum of split_sizes must equal the dimension size of tensor along the given dimension."
+  start, slices = 0, []
+  for size in split_sizes:
+    slice_range = [(start, start + size) if j == dim else None for j in range(len(tensor.shape))]
+    slices.append(slice_range)
+    start += size
+  return [tensor.slice(s) for s in slices]
+def squeeze_tinygrad(tensor, axis=None):
+  if axis is None: new_shape = [dim for dim in tensor.shape if dim != 1]
+  else:
+    assert tensor.shape[axis] == 1, "Cannot squeeze dim {} with size {}".format(axis, tensor.shape[axis])
+    new_shape = list(tensor.shape)
+    new_shape.pop(axis)
+  return tensor.reshape(*new_shape)
+def sequence_mask(length: Tensor, max_length=None):
+  if max_length is None: max_length = length.numpy().max()
+  x = Tensor.arange(max_length, dtype=length.dtype, device=length.device)
+  return Tensor(x.unsqueeze(0).numpy() < length.unsqueeze(1).numpy())
+def convert_pad_shape(pad_shape): return tuple(tuple(x) for x in pad_shape)
+def generate_path(duration: Tensor, mask: Tensor): # duration: [b, 1, t_x], mask: [b, 1, t_y, t_x]
+  b, _, t_y, t_x = mask.shape
+  path = sequence_mask(duration.cumsum(axis = 2).reshape(b * t_x), t_y).cast(mask.dtype).reshape(b, t_x, t_y)
+  path = path - path.pad(convert_pad_shape([[0, 0], [1, 0], [0, 0]]))[:, :-1]
+  return path.unsqueeze(1).transpose(2, 3) * mask
+def fused_add_tanh_sigmoid_multiply(input_a: Tensor, input_b: Tensor, n_channels: Tensor):
+  n_channels_int, in_act = n_channels.numpy()[0], input_a + input_b
+  t_act, s_act = in_act[:, :n_channels_int, :].tanh(), in_act[:, n_channels_int:, :].sigmoid()
+  return t_act * s_act
+def get_padding(kernel_size, dilation=1): return int((kernel_size*dilation - dilation)/2)
+def get_hparams_from_file(config_path):
+  with open(config_path, "r") as f:
+    data = f.read()
+  return HParams(**json.loads(data))
+class HParams:
+  def __init__(self, **kwargs):
+    for k, v in kwargs.items(): self[k] = v if type(v) != dict else HParams(**v)
+  def keys(self): return self.__dict__.keys()
+  def items(self): return self.__dict__.items()
+  def values(self): return self.__dict__.values()
+  def __len__(self): return len(self.__dict__)
+  def __getitem__(self, key): return getattr(self, key)
+  def __setitem__(self, key, value): return setattr(self, key, value)
+  def __contains__(self, key): return key in self.__dict__
+  def __repr__(self): return self.__dict__.__repr__()
+
+def load_checkpoint(checkpoint_path, model: SynthesizerTrn, optimizer=None):
+  assert os.path.isfile(checkpoint_path)
+  start_time = time.time()
+  checkpoint_dict = torch_load(checkpoint_path)
+  iteration, learning_rate = checkpoint_dict['iteration'], checkpoint_dict['learning_rate']
+  if optimizer: optimizer.load_state_dict(checkpoint_dict['optimizer'])
+  saved_state_dict = checkpoint_dict['model']
+  weight_g, weight_v, parent = None, None, None
+  for key, v in saved_state_dict.items():
+    try:
+      obj, skip = model, False
+      for k in key.split('.'):
+        if k.isnumeric(): obj = obj[int(k)]
+        elif isinstance(obj, dict): obj = obj[k]
+        else:
+          if isinstance(obj, (LayerNorm, nn.LayerNorm)) and k in ["gamma", "beta"]:
+            k = "weight" if k == "gamma" else "bias"
+          elif k in ["weight_g", "weight_v"]:
+            parent, skip = obj, True
+            if k == "weight_g": weight_g = v
+            else: weight_v = v
+          if not skip: obj = getattr(obj, k)
+      if weight_g and weight_v:
+        setattr(obj, "weight_g", weight_g.numpy())
+        setattr(obj, "weight_v", weight_v.numpy())
+        obj, v = getattr(parent, "weight"), weight_norm_tinygrad(weight_v, weight_g, 0)
+        weight_g, weight_v, parent, skip = None, None, None, False
+      if not skip and obj.shape == v.shape: obj.assign(v.to(obj.device))
+      elif not skip: logger.error(f"MISMATCH SHAPE IN {key}, {obj.shape} {v.shape}")
+    except Exception as e: raise e
+  logger.info(f"Loaded checkpoint '{checkpoint_path}' (iteration {iteration}) in {time.time() - start_time:.4f}s")
+  return model, optimizer, learning_rate, iteration
+def load_model(config_path, weights_path): # TODO: auto download from drive https://drive.google.com/drive/folders/1ksarh-cJf3F5eKJjLVWY0X1j1qsQqiS2
+  hps = get_hparams_from_file(config_path)
+  net_g = SynthesizerTrn(len(symbols),  hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, **hps.model)
+  _ = load_checkpoint(weights_path, net_g, None)
+  return net_g, hps
+
+""" from https://github.com/keithito/tacotron """
+# Export all symbols: _pad + _punctuation + _letters + _letters_ipa
+symbols = ['_'] + list(';:,.!?¡¿—…"«»“” ') + list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz') + list("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ")
+SPACE_ID = symbols.index(" ")
+_symbol_to_id, _id_to_symbol = {s: i for i, s in enumerate(symbols)}, {i: s for i, s in enumerate(symbols)}
+_whitespace_re, _abbreviations = re.compile(r'\s+'), [(re.compile('\\b%s\\.' % x[0], re.IGNORECASE), x[1]) for x in [ ('mrs', 'misess'), ('mr', 'mister'), ('dr', 'doctor'), ('st', 'saint'), ('co', 'company'), ('jr', 'junior'), ('maj', 'major'), ('gen', 'general'), ('drs', 'doctors'), ('rev', 'reverend'), ('lt', 'lieutenant'), ('hon', 'honorable'), ('sgt', 'sergeant'), ('capt', 'captain'), ('esq', 'esquire'), ('ltd', 'limited'), ('col', 'colonel'), ('ft', 'fort'),]]
+def text_to_sequence(text, cleaner_names):
+  sequence = []
+  for name in cleaner_names:
+    cleaner =  globals().get(name)
+    if not cleaner: raise ModuleNotFoundError('Unknown cleaner: %s' % name)
+    text = cleaner(text)
+  for symbol in text: sequence += [_symbol_to_id[symbol]]
+  return sequence
+def expand_abbreviations(text):
+  for regex, replacement in _abbreviations: text = re.sub(regex, replacement, text)
+  return text
+def lowercase(text): return text.lower()
+def collapse_whitespace(text): return re.sub(_whitespace_re, ' ', text)
+def convert_to_ascii(text): return unidecode(text)
+def basic_cleaners(text): return collapse_whitespace(lowercase(text))
+def transliteration_cleaners(text): return collapse_whitespace(lowercase(convert_to_ascii(text)))
+def english_cleaners(text): return collapse_whitespace(phonemize(expand_abbreviations(lowercase(convert_to_ascii(text))), language='en-us', backend='espeak', strip=True))
+def english_cleaners2(text): return collapse_whitespace(phonemize(expand_abbreviations(lowercase(convert_to_ascii(text))), language='en-us', backend='espeak', strip=True, preserve_punctuation=True, with_stress=True))
+def intersperse(lst, item):
+  result = [item] * (len(lst) * 2 + 1)
+  result[1::2] = lst
+  return result
+def get_text(text, hps):
+  text_norm = text_to_sequence(text, hps.data.text_cleaners)
+  if hps.data.add_blank: text_norm = intersperse(text_norm, 0)
+  return Tensor(text_norm, dtype=dtypes.int64)
+
+VITS_PATH, OUT_PATH = Path(__file__).parent.parent / "weights/VITS/",  Path(__file__).parent.parent / "temp/tts_vits_test.wav"
+TEXT_TO_SYNTHESIZE = "Hello world!"
+# PAPER: https://arxiv.org/abs/2106.06103  CODE: https://github.com/jaywalnut310/vits/tree/main
+if __name__ == '__main__':
+  logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+  logger = logging
+  Tensor.no_grad, Tensor.Training = True, False
+  Tensor.manual_seed(1337)  # Deterministic
+  np.random.seed(1337)
+  net_g, hps = load_model(VITS_PATH / "ljs_base.json", VITS_PATH / "pretrained_ljs.pth")
+  stn_tst = get_text(TEXT_TO_SYNTHESIZE, hps)
+  logger.info(f"Converted input text to tensor \"{TEXT_TO_SYNTHESIZE}\" -> Tensor({stn_tst.shape}): {stn_tst.numpy()}")
+  x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
+  start_time = time.time()
+  out = net_g.infer(x_tst, x_tst_lengths, noise_scale=.667, noise_scale_w=0.8, length_scale=1)
+  logger.info(f"Inference took {(time.time() - start_time):.2f}s")
+  audio = out[0][0, 0].numpy()
+  audio = ipd.Audio(audio, rate=hps.data.sampling_rate, normalize=False)
+  with open(OUT_PATH, 'wb') as f:
+    f.write(audio.data)
+    logger.info(f"Saved audio output to {OUT_PATH}")
