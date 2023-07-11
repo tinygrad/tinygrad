@@ -209,5 +209,11 @@ class TestTinygrad(unittest.TestCase):
     except AssertionError:
       pass
 
+  def test_constant_fold_shape(self):
+    self.assertEqual(Tensor(3).shape, ())
+    self.assertEqual(Tensor([3]).shape, (1,))
+    self.assertEqual(Tensor([[3]]).shape, (1, 1))
+    self.assertEqual(Tensor([[[3]]]).shape, (1, 1, 1))
+
 if __name__ == '__main__':
   unittest.main()
