@@ -3,4 +3,5 @@ from tinygrad.helpers import getenv
 
 @pytest.fixture(autouse=getenv("CUDACPU", 0) and getenv("TRITON", 0))
 def mock_torch(monkeypatch):
-  monkeypatch.setattr("triton.runtime.jit.get_current_device", lambda: 0)
+  print("SANITY CHECK: MOCKING TRITON")
+  monkeypatch.setattr("triton.compiler.compiler.get_architecture_descriptor", lambda _: 86)
