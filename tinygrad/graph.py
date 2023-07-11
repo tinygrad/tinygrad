@@ -53,7 +53,7 @@ def log_op(ret: LazyBuffer, ast: LazyOp, show_graph: Optional[bool] = None, phan
   op: List[Op] = [x.op for x in ast.get_lazyops()]
   inp: List[LazyBuffer] = [x for x in ast.buffers if not isinstance(x.realized, RawConst) or GRAPH > 1]
   oporder = [LoadOps, FusedOps, ReduceOps, BinaryOps, UnaryOps, MovementOps]
-  optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
+  optype = min((type(x) for x in op), key=oporder.index)
   cnts[optype] += 1
   if DEBUG >= 6: print(f"{op} : {', '.join([f'{x.shape}-<{nm(x)}>' for x in inp])} -> {ret.shape}-<{nm(ret)}>")
   if show_graph:

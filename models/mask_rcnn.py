@@ -5,7 +5,7 @@ import numpy as np
 from pathlib import Path
 from tinygrad import nn
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import argsort, dtypes
 from extra.utils import get_child, download_file
 from tinygrad.state import torch_load
 from models.resnet import ResNet
@@ -1004,7 +1004,7 @@ class Pooler:
           all_idxs.extend(idx_in_level)
           results.append(pooler_output)
 
-      return tensor_gather(Tensor.cat(*results), [x[0] for x in sorted({i:idx for i, idx in enumerate(all_idxs)}.items(), key=lambda x: x[1])])
+      return tensor_gather(Tensor.cat(*results), argsort(all_idxs))
 
 
 class FPNPredictor:
