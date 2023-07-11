@@ -6,7 +6,7 @@ from itertools import accumulate, filterfalse
 import operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
-from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
+from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod
 from math import ceil, pi, prod, sqrt, log, cos, copysign
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
@@ -68,7 +68,9 @@ class Tensor:
     if data.__class__ is np.ndarray:
       data = cast(np.ndarray, data)
       data = LazyBuffer.fromCPU(data)
-      self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
+      if data.device == device: self.lazydata = data
+      elif data.realized and data.shape and prod(data.shape) == 1: self.lazydata = data.const_like(data.realized._buf[0])
+      else: self.lazydata = LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
 
     raise RuntimeError(f"can't create Tensor from {data}")

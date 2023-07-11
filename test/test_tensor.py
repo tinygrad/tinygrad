@@ -1,9 +1,8 @@
-import dataclasses
 import numpy as np
 import torch
 import unittest
-import itertools
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
+from tinygrad.ops import LoadOps, OpType
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
@@ -191,6 +190,24 @@ class TestTinygrad(unittest.TestCase):
   def test_element_size(self):
     for _, dtype in dtypes.fields().items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
+
+  def test_constant_fold(self):
+    def helper_assert_all_const(op: OpType):
+      if isinstance(op.op, LoadOps): assert op.op in (LoadOps.EMPTY, LoadOps.CONST)
+      else:
+        for buf in op.buffers: helper_assert_all_const(buf.op)
+    helper_assert_all_const(Tensor(2).lazydata.op)
+    helper_assert_all_const(Tensor(2).reshape([1, 1, 1]).lazydata.op)
+    helper_assert_all_const(Tensor([2]).lazydata.op)
+    helper_assert_all_const(Tensor([2]).reshape([1, 1, 1]).lazydata.op)
+    helper_assert_all_const((Tensor(2)+Tensor(3)).lazydata.op)
+    helper_assert_all_const((Tensor(2)+Tensor([3])).lazydata.op)
+    helper_assert_all_const((Tensor([[2]])+Tensor([3])).lazydata.op)
+    try:
+      helper_assert_all_const((Tensor([2, 0])+Tensor([3, 0])).lazydata.op)
+      assert False, "failed to catch non constant LoadOps"
+    except AssertionError:
+      pass
 
 if __name__ == '__main__':
   unittest.main()
