@@ -337,8 +337,6 @@ jobs:
         python-version: 3.8
         cache: 'pip'
         cache-dependency-path: setup.py
-    - name: Force install torch with CUDA
-      run: pip install pip install torch==2.0.0+cu117 --index-url https://download.pytorch.org/whl/cu117
     - name: Install tinygrad dependencies
       run: pip install -e '.[testing, triton]' --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run pytest
