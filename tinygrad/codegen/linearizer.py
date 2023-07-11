@@ -228,10 +228,10 @@ class Linearizer:
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        if self.bufmap[i] is None:
-          assert False
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.bufmap[i], idx, valid)) if const is None else \
-                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
+        prefix = "val" if const is None else "acc"
+        if self.bufs[i].realized.__class__ is RawConst: const = self.bufs[i].realized._buf
+        cache[key] = self.uop(UOps.LOAD, Token(f"{prefix}{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.bufmap[i], idx, valid)) if const is None else \
+                     self.uop(UOps.CONST, Token(f"{prefix}{mnum(i)}_{len(cache)}", localtype), [], const)
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return ret
 
@@ -263,8 +263,6 @@ class Linearizer:
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-      if self.bufmap[i] is None:
-        assert False
       self.uop(UOps.STORE, None, [var], MemOp(self.bufmap[i], idx, valid))
 
   def linearize(self):

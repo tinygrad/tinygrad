@@ -181,7 +181,7 @@ def uops_to_cstyle(uops:List[UOp], input_bufs: List[RawBuffer], lang:CStyleLangu
 
 class CStyleCodegen(Linearizer):
   lang: ClassVar[CStyleLanguage] = CStyleLanguage()
-  #supports_constant_folding: bool = True
+  supports_constant_folding: bool = True
   supports_float4: bool = True
   supports_float4_alu: bool = True
 
