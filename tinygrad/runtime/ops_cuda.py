@@ -25,7 +25,7 @@ if getenv("CUDACPU", 0) == 1:
     class module:
       def __init__(self, src): self.src = src
       def get_function(self, _): return self
-      def __call__(self, *args, block, grid, shared): lib.ptx_run(self.src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), *block, *grid)
+      def __call__(self, *args, block, grid, shared): lib.ptx_run(self.src.replace(b".target sm_86", b".target sm_35"), len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), *block, *grid)
     module_from_buffer = lambda src: cuda.module(src) # pylint: disable=unnecessary-lambda # noqa: E731
     class Event:
       def __init__(self): pass
