@@ -111,7 +111,7 @@ def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
     yield x[::-1]
 
 class MemOp(NamedTuple):
-  i: int
+  i: Union[int, str]
   idx: Variable
   valid: Variable
 
@@ -134,8 +134,8 @@ class Linearizer:
     self.bufs = [output_buffer] + dedup(ast.buffers)
 
     # calculate mapping from buf to input
-    self.input_bufs = ASTRunner.dedup_kernel_inputs(self.bufs)
-    self.bufmap = [self.input_bufs.index(buf.realized) if buf.realized in self.input_bufs else None for buf in self.bufs]
+    self.dedup_bufs = ASTRunner.dedup_kernel_inputs(self.bufs)
+    self.bufmap = [self.dedup_bufs.index(buf.realized) if buf.realized in self.dedup_bufs else None for buf in self.bufs]
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
@@ -228,10 +228,8 @@ class Linearizer:
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        prefix = "val" if const is None else "acc"
-        if self.bufs[i].realized.__class__ is RawConst: const = self.bufs[i].realized._buf
-        cache[key] = self.uop(UOps.LOAD, Token(f"{prefix}{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.bufmap[i], idx, valid)) if const is None else \
-                     self.uop(UOps.CONST, Token(f"{prefix}{mnum(i)}_{len(cache)}", localtype), [], const)
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.bufmap[i], idx, valid)) if const is None else \
+                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return ret
 
@@ -275,7 +273,9 @@ class Linearizer:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
-      self.bufmap.append(-1)
+      self.dedup_bufs.append(self.bufs[-1])
+      self.bufmap.append(len(self.dedup_bufs) - 1)
+      self.local_reduce_buf = len(self.bufs) - 1
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
     # define local buffers
@@ -384,7 +384,7 @@ class Linearizer:
       # end the local loop, do the local reduce
       if self.group_for_reduce:
         fake_global_idxs = [x*0 for x in global_idxs]
-        self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc, ssa)  # store accumulators
+        self.global_store(self.local_reduce_buf, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc, ssa)  # store accumulators
         self.uop(UOps.BARRIER, None, [], ())
         self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
 
@@ -403,17 +403,17 @@ class Linearizer:
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+        acc = self.global_load(self.local_reduce_buf, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
 
         # late reduce loop
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
         self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
         # load localbufs
-        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs)
+        loaded_buffers["LOCAL_BUFFER"] = self.global_load(self.local_reduce_buf, end_local_idxs+fake_reduce_idxs+upcast_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
-        self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True) # type: ignore
+        self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(self.local_reduce_buf)], loaded_buffers, ssa, do_reduce=True) # type: ignore
 
         # end the late reduce loop
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
@@ -608,6 +608,8 @@ class Linearizer:
 
     self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
     self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
+    self.dedup_bufs.append(self.bufs[-1])
+    self.bufmap.append(len(self.dedup_bufs) - 1)
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
 

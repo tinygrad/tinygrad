@@ -1,5 +1,5 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
-from tinygrad.codegen.linearizer import Linearizer, UOps, Token
+from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, UOps, Token
 from tinygrad.ops import ASTRunner, BinaryOps, UnaryOps
 from tinygrad.helpers import DType, dtypes, DEBUG
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
@@ -82,7 +82,7 @@ class AssemblyCodegen(Linearizer):
       AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: render_alu(BinaryOps.MUL, a, b.render(ops,ctx), dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
     def addr_w_offset(args):
-      idx = args.idx*self.input_bufs[args.i].dtype.itemsize
+      idx = args.idx*self.dedup_bufs[args.i].dtype.itemsize
       off = 0  # TODO: should this be None?
       if isinstance(idx, SumNode):
         nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
@@ -97,19 +97,18 @@ class AssemblyCodegen(Linearizer):
           reg = new_reg
         return tor[f"buf{args.i}"], reg, off
       else:
-        reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{args.i}"], dtype=dtypes.uint64)
+        reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{args.i}" if self.dedup_bufs[args.i].__class__ is LocalBuffer else self.dedup_bufs[args.i].name], dtype=dtypes.uint64)
         return reg, None, off
 
     ins = []
-    ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64, scalar=True), [], f"buf{i}") for i in range(len(self.input_bufs))]
+    ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64, scalar=True), [], f"buf{i}") for i in range(len(self.dedup_bufs)) if self.dedup_bufs[i].__class__ is not LocalBuffer]
     global_size, local_size = [], []
     skipload_branch = 0
     for uop,newvar,vin,args in self.uops:
       if uop == UOps.CONST and newvar is not None:
         ins.append(AssemblyInstruction(UOps.CONST, newreg(newvar, dtype=newvar.dtype), [], args))
       elif uop == UOps.DEFINE_LOCAL:
-        ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
-        ins.append(AssemblyInstruction(UOps.ALU, newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
+        ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, newreg(args[0], dtype=dtypes.float32), [], args))
       elif uop == UOps.LOOP:
         if args[1] == "global":
           for i,var in enumerate(args[0]):
@@ -163,13 +162,13 @@ class AssemblyCodegen(Linearizer):
             ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
         if args.valid.max == 1:
           # NOTE: you can't compute the index in here, because it assumes it's all available later
-          ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if args.i != -1 else 'shared')))
+          ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if self.dedup_bufs[args.i].__class__ is not LocalBuffer else 'shared')))
         if args.valid.min == 0 and args.valid.max == 1:
           ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
           skipload_branch += 1
       elif uop == UOps.STORE:
         idx, treg, off = addr_w_offset(args)
-        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if args.i != -1 else 'shared')))
+        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if self.dedup_bufs[args.i].__class__ is not LocalBuffer else 'shared')))
 
     # define registers
     ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)) for dtype,c in cnts.items()] + ins
