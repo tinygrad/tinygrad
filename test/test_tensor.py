@@ -193,7 +193,7 @@ class TestTinygrad(unittest.TestCase):
 
   def test_constant_fold(self):
     def helper_assert_all_const(op: OpType):
-      if isinstance(op.op, LoadOps): assert op.op in (LoadOps.EMPTY, LoadOps.CONST)
+      if isinstance(op.op, LoadOps): assert op.op == LoadOps.CONST
       else:
         for buf in op.buffers: helper_assert_all_const(buf.op)
     helper_assert_all_const(Tensor(2).lazydata.op)
@@ -203,11 +203,8 @@ class TestTinygrad(unittest.TestCase):
     helper_assert_all_const((Tensor(2)+Tensor(3)).lazydata.op)
     helper_assert_all_const((Tensor(2)+Tensor([3])).lazydata.op)
     helper_assert_all_const((Tensor([[2]])+Tensor([3])).lazydata.op)
-    try:
+    with self.assertRaises(AssertionError):
       helper_assert_all_const((Tensor([2, 0])+Tensor([3, 0])).lazydata.op)
-      assert False, "failed to catch non constant LoadOps"
-    except AssertionError:
-      pass
 
   def test_constant_fold_shape(self):
     self.assertEqual(Tensor(3).shape, ())
