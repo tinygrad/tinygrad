@@ -7,16 +7,17 @@ import operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
-from math import ceil, pi, prod, sqrt, log
+from math import ceil, pi, prod, sqrt, log, cos, copysign
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
 
 # An instantiation of the Function is the Context
 class Function:
   def __init__(self, device:str, *tensors:Tensor):
-    self.device, self.parents = device, tensors
-    self.needs_input_grad = [t.requires_grad for t in self.parents]
+    self.device = device
+    self.needs_input_grad = [t.requires_grad for t in tensors]
     self.requires_grad = True if any(self.needs_input_grad) else None if None in self.needs_input_grad else False
+    if self.requires_grad: self.parents = tensors
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
   def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
@@ -39,7 +40,7 @@ class Tensor:
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
-  def __init__(self, data:Union[int, float, list, tuple, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+  def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     device = Device.canonicalize(device)
     # tensors have gradients, buffers do not
@@ -66,8 +67,11 @@ class Tensor:
 
     if data.__class__ is np.ndarray:
       data = cast(np.ndarray, data)
-      data = LazyBuffer.fromCPU(data)
-      self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
+      if data.size == 1: # constant fold
+        self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtypes.from_np(data.dtype), device, data.flat[0]).reshape(data.shape)
+      else:
+        data = LazyBuffer.fromCPU(data)
+        self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
 
     raise RuntimeError(f"can't create Tensor from {data}")
@@ -132,7 +136,7 @@ class Tensor:
 
   _seed: int = int(time.time())
   @staticmethod
-  def manual_seed(seed=None): Tensor._seed = seed
+  def manual_seed(seed=0): Tensor._seed = seed
 
   @staticmethod
   def rand(*shape, **kwargs):
@@ -142,7 +146,7 @@ class Tensor:
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(shape:Tuple[int, ...], fill_value, **kwargs): return Tensor(fill_value, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape).contiguous()
+  def full(shape:Tuple[int, ...], fill_value, **kwargs): return Tensor(fill_value, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape)
 
   @staticmethod
   def zeros(*shape, **kwargs): return Tensor.full(argfix(*shape), 0, **kwargs)
@@ -176,7 +180,7 @@ class Tensor:
   def randn(*shape, dtype:Optional[DType]=None, **kwargs) -> Tensor:
     # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
     src = Tensor.rand(2, *shape, **kwargs)
-    return src[0].mul(2*pi).cos().mul(src[1].log().mul(-2).sqrt()).cast(Tensor.default_type if dtype is None else dtype)
+    return src[0].mul(2*pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(Tensor.default_type if dtype is None else dtype)
 
   @staticmethod
   def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor: return ((high-low) * Tensor.rand(*shape, **kwargs)) + low
@@ -213,8 +217,8 @@ class Tensor:
     self.grad = Tensor(1, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
-      if not any(x.requires_grad for x in t0._ctx.parents):
-        del t0._ctx  # TODO: does it help to delete this here ever?
+      if not t0.requires_grad:
+        del t0._ctx # TODO: does it help to delete this here ever?
         continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
@@ -485,7 +489,10 @@ class Tensor:
   def log2(self): return mlops.Log.apply(self)/log(2)
   def exp(self): return mlops.Exp.apply(self)
   def relu(self): return mlops.Relu.apply(self)
+  def sigmoid(self): return mlops.Sigmoid.apply(self)
   def sin(self): return mlops.Sin.apply(self)
+  def sqrt(self): return mlops.Sqrt.apply(self)
+  def rsqrt(self): return (1/self).sqrt()
   def cos(self): return ((pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
 
@@ -503,8 +510,6 @@ class Tensor:
     return (self < b).where(b-1, b)
 
   def __neg__(self): return 0.0-self
-  def sqrt(self): return self.pow(0.5)
-  def rsqrt(self): return self.pow(-0.5)
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
   def abs(self): return self.relu() + (-self).relu()
@@ -512,8 +517,6 @@ class Tensor:
   def reciprocal(self): return 1.0/self
 
   # ***** activation functions (unary) *****
-
-  def sigmoid(self): return (1.0 + (-self).exp()).reciprocal()
   def elu(self, alpha=1.0): return self.relu() - alpha*(1-self.exp()).relu()
   def celu(self, alpha=1.0): return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
   def swish(self): return self * self.sigmoid()
@@ -553,13 +556,20 @@ class Tensor:
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ is Tensor or x else self
   def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if x.__class__ is Tensor or x or reverse else self
   def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse) if x.__class__ is Tensor or x != 1.0 else self
+  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ is Tensor or reverse or not x else self.mul(1/x)
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     if x.__class__ is not Tensor and not reverse:
       # simple pow identities
+      if x < 0: return (1.0/self).pow(-x)
       if x == 2.0: return self*self
-      if x == -1.0: return 1/self
-    return self._broadcasted(mlops.Pow, x, reverse) if x.__class__ is Tensor or x != 1.0 or reverse else self
-  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ is Tensor or reverse or not x else self.mul(1/x)
+      if x == 1.0: return self
+      if x == 0.5: return self.sqrt()
+    ar = self.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(log(abs(x))).exp()
+    # correct sign of negative numbers raised to a power (cos has a period of 2pi so we use it here to get the oddness of the power)
+    sign = (x * pi).cos() if isinstance(x, Tensor) else cos(x * pi) if not reverse else (self * pi).cos()
+    # we only need to correct the sign if the base is negative
+    base_sign = ((self.sign() if not reverse else x.sign() if isinstance(x, Tensor) else copysign(1, x)) - 1) / -2
+    return ar.mul(sign * base_sign + (1 - base_sign))
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)

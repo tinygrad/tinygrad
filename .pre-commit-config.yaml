@@ -21,7 +21,7 @@ repos:
         pass_filenames: false
       - id: tests
         name: subset of (CPU) tests
-        entry: env CPU=1 EXCLUDE_DEVICES=GPU pytest test/unit/ test/test_ops.py
+        entry: env CPU=1 pytest test/unit/ test/test_ops.py test/test_dtype.py
         language: system
         always_run: true
         pass_filenames: false

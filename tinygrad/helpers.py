@@ -82,7 +82,7 @@ class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   def is_int(x: DType)-> bool: return x in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64)
   @staticmethod
-  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes.float64, dtypes._half4, dtypes._float4)
+  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes._half4, dtypes._float4)
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint32, dtypes.uint64)
   @staticmethod
@@ -94,16 +94,16 @@ class dtypes:
   half = float16
   float32: Final[DType] = DType(4, 4, "float", np.float32)
   float = float32
-  float64: Final[DType] = DType(5, 8, "double", np.float64)
   int8: Final[DType] = DType(0, 1, "char", np.int8)
   int32: Final[DType] = DType(1, 4, "int", np.int32)
   int64: Final[DType] = DType(2, 8, "long", np.int64)
-  uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
-  uint32: Final[DType] = DType(1, 4, "uint", np.uint32)
-  uint64: Final[DType] = DType(2, 8, "ulong", np.uint64)
+  uint8: Final[DType] = DType(0, 1, "unsigned char", np.uint8)
+  uint32: Final[DType] = DType(1, 4, "unsigned int", np.uint32)
+  uint64: Final[DType] = DType(2, 8, "unsigned long", np.uint64)
 
   # NOTE: these are internal dtypes, should probably check for that
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
+  _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class

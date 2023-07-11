@@ -4,7 +4,7 @@ import os
 import sys
 sys.path.append(os.getcwd())
 sys.path.append(os.path.join(os.getcwd(), 'test'))
-from datasets import fetch_mnist
+from extra.datasets import fetch_mnist
 from tqdm import trange
 
 def augment_img(X, rotate=10, px=3):
