@@ -6,10 +6,7 @@ from tinygrad.codegen.linearizer import UOps
 from tinygrad.helpers import dtypes
 
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
-def decompose_value(x): 
-  lower = x & 0xffff
-  upper = (x >> 16) & 0xffff
-  return lower, upper
+def decompose_value(x): return (x >> 16) & 0xffff, x & 0xffff
 class ARMCodegen(AssemblyCodegen):
   def specialize(self, asm):
     ins = [] 
@@ -32,24 +29,21 @@ class ARMCodegen(AssemblyCodegen):
       elif uop == UOps.SPECIAL:
         buf_map[arg] = out[1] 
         if arg.startswith('buf'):
-          if int(arg[3:]) >= 8: 
-            ins.append(f"ldr x1, [x19, #{(int(arg[3:]) - 8) * 8}]")
-            #NOTE: Cast arg to float32, explore better options
-            if out[1] == dtypes.int32:
-              for i in range(out.bufsize):
-                ins.append(f"ldr s0, [x1, #{i*4}]")
-                ins.append(f"scvtf s0, s0")
-                ins.append(f"str s0, [x1, #{i*4}]")
-            ins.append(f"str x1, {reg_map[out.nm]}")
-          else:
-            if out[1] == dtypes.int32 and arg != "buf0":
-              for i in range(out.bufsize):
-                ins.append(f"ldr s0, [x{arg[3:]}, #{i*4}]")
-                ins.append(f"scvtf s0, s0")
-                ins.append(f"str s0, [x{arg[3:]}, #{i*4}]")
-            ins.append(f"str x{arg[3:]}, {reg_map[out.nm]}")
+          if int(arg[3:]) >= 8: ins.append(f"ldr x1, [x19, #{(int(arg[3:]) - 8) * 8}]")
+          #NOTE: Cast arg to float32, explore better options
+          if out[1] == dtypes.int32 and arg != "buf0" :
+            for i in range(out.bufsize):
+              ins.append(f"ldr s0, [x{'1' if int(arg[3:]) >= 8 else arg[3:]}, #{i*4}]")
+              ins.append(f"scvtf s0, s0")
+              ins.append(f"str s0, [x{'1' if int(arg[3:]) >= 8 else arg[3:]}, #{i*4}]")
+          ins.append(f"str x{'1' if int(arg[3:]) >= 8 else arg[3:]}, {reg_map[out.nm]}")
       elif uop == UOps.CONST:
-        if arg.__class__ is float or dtypes.is_float(out.dtype):
+        if arg.__class__ is int and arg > 65535:
+          ins.append(f"mov w0, #{arg & 0xffff}")
+          ins.append(f"movk w0, #{(arg >> 16) & 0xffff}, lsl #16")
+          ins.append(f"sxtw x0, w0")
+          ins.append(f"str x0, {reg_map[out.nm]}")
+        elif arg.__class__ is float or dtypes.is_float(out.dtype):
           ins.append(f"mov x0, 0x{float_to_hex(arg)}")
           ins.append(f"fmov s0, w0")
           ins.append(f"str s0, {reg_map[out.nm]}")
@@ -90,30 +84,30 @@ class ARMCodegen(AssemblyCodegen):
         elif arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
           reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
           ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
-          #TODO: Can i do better?
           if vin[1].__class__ is int and vin[1] > 65535:
-            lower, upper = decompose_value(vin[1]) 
-            ins.append(f"mov w2, #{lower}")
-            ins.append(f"movk w2, #{upper}, lsl #16")
+            ins.append(f"mov w2, #{vin[1] & 0xffff}")
+            ins.append(f"movk w2, #{(vin[1] >> 16) & 0xffff}, lsl #16")
             ins.append(f"sxtw x1, w2")
           else:
-            ins.append(f"{f'mov {reg}1, #' + str(vin[1]) if vin[1].__class__ is int else f'ldr {reg}1, ' + reg_map[vin[1].nm]}")
-          #TODO: Do fcmp output need saving?
-          if reg == 's': ins.append(f"fcmp {reg}0, {reg}1")
-          else:
-            ins.append(f"{alu[arg]} {reg}0, {reg}0, {reg}1")
-            ins.append(f"str {reg}0, {reg_map[out.nm]}")
+            ins.append(f"{f'mov {reg}1, #{str(vin[1])}' if vin[1].__class__ is int else f'ldr {reg}1, {reg_map[vin[1].nm]}'}")
+          ins.append(f"{alu[arg]} {reg}0, {reg}0, {reg}1" if reg == 'x' else f"fcmp {reg}0, {reg}1")
+          ins.append(f"str {reg}0, {reg_map[out.nm]}")
         elif arg == BinaryOps.MOD:
           ins.append(f"ldr x0, {reg_map[vin[0].nm]}")
-          ins.append(f"{'mov x1, #' + str(vin[1]) if vin[1].__class__ is int else 'ldr x1, ' + reg_map[vin[1].nm]}")
+          ins.append(f"{f'mov x1, #{str(vin[1])}' if vin[1].__class__ is int else f'ldr x1, {reg_map[vin[1].nm]}'}")
           ins.append(f"udiv x2, x0, x1")
           ins.append(f"msub x2, x2, x1, x0")
           ins.append(f"str x2, {reg_map[out.nm]}")
         else:
           reg = 's' if dtypes.is_float(out[1]) else 'x'
           ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
-          ins.append(f"{f'mov {reg}1, #' + str(vin[1]) if vin[1].__class__ is int else f'ldr {reg}1, ' + reg_map[vin[1].nm]}")
-          ins.append(f"{'f' if reg == 's' else 's' if arg==BinaryOps.DIV else ''}{alu[arg]} {reg}0, {reg}0, {reg}1")
+          if vin[1].__class__ is int and vin[1] > 65535:
+            ins.append(f"mov w2, #{vin[1] & 0xffff}")
+            ins.append(f"movk w2, #{(vin[1] >> 16) & 0xffff}, lsl #16")
+            ins.append(f"sxtw x1, w2")
+          else:
+            ins.append(f"{f'mov {reg}1, #{str(vin[1])}' if vin[1].__class__ is int else f'ldr {reg}1, {reg_map[vin[1].nm]}'}")
+          ins.append(f"{'f' if reg == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {reg}0, {reg}0, {reg}1")
           ins.append(f"str {reg}0, {reg_map[out.nm]}")
       elif uop == UOps.LOAD:
         reg = 's0' if dtypes.is_float(out[1]) else 'x0'
