@@ -111,8 +111,6 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   else:
     X_train, Y_train = fetch_cifar(train=True)
     X_test, Y_test = fetch_cifar(train=False)
-  X_train = X_train.clip(-100, 100)
-  X_test = X_test.clip(-100, 100)
   model = SpeedyResNet()
   optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, 
