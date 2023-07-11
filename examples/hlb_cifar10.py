@@ -21,6 +21,7 @@ def set_seed(seed):
 
 num_classes = 10
 HALF = getenv('HALF', 1) == 1
+LOGGING = getenv('LOGGING', 0) == 1
 
 def make_half(layer):
   if HALF:
@@ -49,9 +50,9 @@ class ConvGroup:
 
 def logging(func):
   def add_logs(x):
-    print(func, 'in', x.sum().numpy(), x.min().numpy(), x.max().numpy())
+    if LOGGING: print(func, 'in', x.sum().numpy(), x.min().numpy(), x.max().numpy())
     out = func(x)
-    print(func, 'out', out.sum().numpy(), out.min().numpy(), out.max().numpy())
+    if LOGGING: print(func, 'out', out.sum().numpy(), out.min().numpy(), out.max().numpy())
     return out
   return add_logs
 

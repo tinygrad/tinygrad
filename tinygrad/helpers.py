@@ -108,7 +108,7 @@ class dtypes:
     if not x.is_vector_type: return x
     return dtypes.float 
   bool: Final[DType] = DType(0, 1, "bool", bool)
-  float16: Final[DType] = DType(0, 2, "half", np.float16)
+  float16: Final[DType] = DType(1, 2, "half", np.float16)
   half = float16
   float32: Final[DType] = DType(4, 4, "float", np.float32)
   float = float32

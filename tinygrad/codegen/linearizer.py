@@ -496,7 +496,7 @@ class Linearizer:
       acc = maybe_cast(acc, cast_dtype)
       ret = []
       if x.op.__class__ in {ReduceOps, FusedOps}:
-        for idx, val in get_grouped_maybe_vector4(*casted_values, maybe_cast(acc, cast_dtype), grouping_allowed=self.supports_float4_alu):
+        for idx, val in get_grouped_maybe_vector4(*casted_values, acc, grouping_allowed=self.supports_float4_alu):
           ret.append((idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])))
       else:
         for idx, val in get_grouped_maybe_vector4(*casted_values, grouping_allowed=self.supports_float4_alu and x.op != BinaryOps.CMPEQ):
