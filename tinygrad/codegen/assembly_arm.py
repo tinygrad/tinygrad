@@ -15,7 +15,7 @@ class ARMCodegen(AssemblyCodegen):
     ins = [] 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.MOD: "", BinaryOps.CMPLT: "subs", BinaryOps.CMPEQ: "subs",
-           UnaryOps.NOOP: "mov", UnaryOps.SIN: get_op('sin'), UnaryOps.LOG2: get_op("log2"), UnaryOps.EXP2: get_op("exp2"),
+           UnaryOps.SIN: get_op('sin'), UnaryOps.LOG2: get_op("log2"), UnaryOps.EXP2: get_op("exp2"), UnaryOps.SQRT: get_op("sqrt"),
            FusedOps.MULACC: "fmadd"}
     reg_map = {}
     buf_map = {}
@@ -66,11 +66,11 @@ class ARMCodegen(AssemblyCodegen):
         elif arg == FusedOps.MULACC and out == vin[2]:
           ins.append(f"ldr s2, {reg_map[vin[2].nm]}")
           ins.append(f"{alu[arg]} s0, s0, s1, s2")
-        elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2]:
+        elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
           ins.append("stp x29, x30, [sp, #0]!")
           ins.append("mov x29, sp")
           ins.append("fcvt d0, s0")
-          ins.append(f"{alu[arg]}")
+          ins.append(alu[arg])
           ins.append("fcvt s0, d0")
           ins.append("mov sp, x29")
           ins.append("ldp x29, x30, [sp], #0")
