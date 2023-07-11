@@ -74,7 +74,7 @@ jobs:
     - name: Run Pytest
       run: python -m pytest -s -v -n=auto test/test_ops.py test/test_speed_v_torch.py test/test_nn.py test/test_jit.py test/test_randomness.py test/test_tensor.py test/test_assign.py test/test_conv.py test/test_nn.py test/test_custom_function.py test/test_conv_shapetracker.py
     - name: Build WEBGPU Efficientnet
-      run: WEBGPU=1 python examples/webgpu/compile_webgpu.py
+      run: python examples/webgpu/compile_webgpu.py
     - name: Install Puppeteer
       run: npm install puppeteer
     - name: Run Efficientnet
