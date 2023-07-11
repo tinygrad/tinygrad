@@ -111,7 +111,7 @@ def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
     yield x[::-1]
 
 class MemOp(NamedTuple):
-  i: Union[int, str]
+  i: int
   idx: Variable
   valid: Variable
 

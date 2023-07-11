@@ -89,7 +89,7 @@ def add_gl_dimension(args, i, var, local_size, xid):
     local_size.append(var.max+1)
     return f"{{ int {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
-def uops_to_cstyle(uops:List[UOp], bufs: List[Union[LazyBuffer, LocalBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
+def uops_to_cstyle(uops:List[UOp], bufs: List[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
   prekernel: Set[str] = set()
   kernel = []
   global_size = []
@@ -154,13 +154,13 @@ def uops_to_cstyle(uops:List[UOp], bufs: List[Union[LazyBuffer, LocalBuffer]], l
       elif isinstance(bufs[args.i].realized, RawConst):
         val = lang.render_const(bufs[args.i].realized._buf, newvar.dtype)
       else:
-        val = lang.render_load(newvar.dtype, bufnames[args.i], bufs[args.i].dtype, args.idx, isinstance(bufs[args.i].realized, LocalBuffer))
+        val = lang.render_load(newvar.dtype, bufnames[args.i], bufs[args.i].dtype, args.idx, isinstance(bufs[args.i], LocalBuffer))
       if args.valid.min == 0 and args.valid.max == 1: val = f"({args.valid.render(render_cl)}) ? ({val}) : {lang.render_const(0.0, newvar.dtype)}"
       kk(f"{newvar.render(True)} = {val};")
     elif uop == UOps.STORE:
       assert args.valid.min == 1, "store must be valid"
       # TODO: instead of dtypes.float, a base type
-      kk(lang.render_store(bufnames[args.i], bufs[args.i].dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, isinstance(bufs[args.i].realized, LocalBuffer)))
+      kk(lang.render_store(bufnames[args.i], bufs[args.i].dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, isinstance(bufs[args.i], LocalBuffer)))
     elif uop == UOps.CAST and newvar is not None and newvar.dtype.sz > 1:
       kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
     elif uop == UOps.DEFINE_LOCAL:
@@ -180,7 +180,7 @@ def uops_to_cstyle(uops:List[UOp], bufs: List[Union[LazyBuffer, LocalBuffer]], l
 
 class CStyleCodegen(Linearizer):
   lang: ClassVar[CStyleLanguage] = CStyleLanguage()
-  #supports_constant_folding: bool = True
+  supports_constant_folding: bool = True
   supports_float4: bool = True
   supports_float4_alu: bool = True
 
