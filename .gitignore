@@ -33,3 +33,6 @@ extra/datasets/audio*
 venv
 examples/webgpu/net.js
 examples/webgpu/net.safetensors
+node_modules
+package.json
+package-lock.json
