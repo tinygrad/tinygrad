@@ -87,13 +87,6 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
     for batch_start in range(0, all_Y.shape[0], BS):
       batch_end = min(batch_start+BS, all_Y.shape[0])
       X = Tensor(all_X[batch_end-BS:batch_end].astype(np.float16 if HALF else np.float32)) # batch_end-BS for padding
-      print('numpy', all_X[batch_end-BS:batch_end])
-      print(all_X[batch_end-BS:batch_end].min(), all_X[batch_end-BS:batch_end].max())
-      print(all_X[batch_end-BS:batch_end].astype(np.float16).min(), all_X[batch_end-BS:batch_end].astype(np.float16).max())
-      print(X.min().numpy(), X.max().numpy())
-      print('tinygrad', X.numpy())
-
-
       Y = np.zeros((BS, num_classes), np.float16 if HALF else np.float32)
       Y[range(BS),all_Y[batch_end-BS:batch_end]] = -1.0*num_classes
       Y = Tensor(Y.reshape(BS, num_classes))
