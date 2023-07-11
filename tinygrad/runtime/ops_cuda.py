@@ -72,6 +72,9 @@ class CUDAProgram:
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
+    
+    if (local_size[0] == 256):
+      cuda.memset_d32(args[0]._buf, 0, args[0].size)
     self.prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size))
     if wait:
       end.record()

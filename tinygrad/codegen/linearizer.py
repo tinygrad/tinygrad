@@ -3,7 +3,7 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same
+from tinygrad.helpers import getenv, dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
@@ -14,7 +14,7 @@ VariableOrNum = Union[Variable, NumNode]
 
 class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); \
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto(); \
-                  ATOMIC_ADD = auto(); ATOMIC_MAX = auto() # TODO: wanna make this optional.
+                  ATOMIC_ADD = auto(); ATOMIC_MAX = auto(); CUDA_REDUCE = auto() # TODO: wanna make this optional.
 
 class LocalBuffer(NamedTuple):
   name: str
@@ -288,7 +288,10 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (reduce_idxs, "reduce"))
 
         # end the local loop, do the local reduce
-        if self.group_for_reduce:
+        if self.group_for_reduce and getenv("CUREDUCE", 1):
+          self.uop(UOps.BARRIER, None, [], ())
+          self.uop(UOps.CUDA_REDUCE, None, [], ())
+        elif self.group_for_reduce:
           # TODO: Work needed here.
           # assert False
           fake_global_idxs = [x*0 for x in global_idxs]
@@ -519,7 +522,7 @@ class Linearizer:
       # are we grouping? (requires local shape support)
       if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
         # TODO: use 1024 if it's allowed in a smarter way
-        for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
+        for sz in (([256]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
             self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
             self.group_for_reduce.append(sz)
@@ -536,27 +539,33 @@ class Linearizer:
       # If has group but global dims is 1, upcast it and use atomics.
       # TODO: determine which device support atomics before applying this.
       if self.group_for_reduce and prod(self.sts[0].shape[:self.first_reduce]) <= 64: # TODO: Better const than 64.
-        for sz in [1024, 512, 256, 64, 32, 16]:
+        for sz in [16384, 8192, 4096, 2048, 1024, 512, 256, 64, 32, 16]:
           # print(self.sts, self.first_reduce + len(self.group_for_reduce))
           if all(st.shape[self.first_reduce + len(self.group_for_reduce)] % sz == 0 or st.shape[self.first_reduce + len(self.group_for_reduce)] == 1 for st in self.sts):
             self.shift_to(self.first_reduce + len(self.group_for_reduce), sz, top=True, insert_before=0)
             self.forced_global_dims = 1
             break
 
-      if not self.float4_axis(0) and self.group_for_reduce and not self.group_for_reduce:
-        # Trying more agressive
-        # reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
-        warp_size = 32
-        fxd_range = range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)
-        for i in fxd_range:
-          if self.full_shape[i] <= 512: continue # fine for inner loop for now, but should be fixed based on threadgroup size...
-          for sz in range(min(256, self.full_shape[i] // 2 + 1), 1, -1):
-            if all(st.shape[i] % sz == 0 or st.shape[i] == 1 for st in self.sts):
-              # print("group for reduce")
-              self.shift_to(i, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
-              self.group_for_reduce.append(sz)
-              fxd_range = []
-              break
+        for splits in [2]:
+          if self.full_unupcasted_shape[-1]%splits == 0:
+            self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
+            self.upcast()
+            break
+
+      # if not self.float4_axis(0) and self.group_for_reduce and not self.group_for_reduce:
+      #   # Trying more agressive
+      #   # reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
+      #   warp_size = 32
+      #   fxd_range = range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)
+      #   for i in fxd_range:
+      #     if self.full_shape[i] <= 512: continue # fine for inner loop for now, but should be fixed based on threadgroup size...
+      #     for sz in range(min(256, self.full_shape[i] // 2 + 1), 1, -1):
+      #       if all(st.shape[i] % sz == 0 or st.shape[i] == 1 for st in self.sts):
+      #         # print("group for reduce")
+      #         self.shift_to(i, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
+      #         self.group_for_reduce.append(sz)
+      #         fxd_range = []
+      #         break
 
     # now do everything required
     self.required_optimizations()
@@ -579,7 +588,8 @@ class Linearizer:
 
     # potentially do more upcasts of non reduce axes based on a heuristic
     upcasted_axis = set()
-    while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
+    pref_size = 32 * 60
+    while prod(self.sts[0].shape[:self.first_reduce]) >= pref_size:
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
         # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
@@ -597,7 +607,7 @@ class Linearizer:
 
     # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
     if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
-      if (s:=self.full_unupcasted_shape[-1]) <= 32:
+      if (s:=self.full_unupcasted_shape[-1]) <= 8:
         self.upcast()
         # if it's small, upcast a second reduce dimension too
         if self.first_reduce < (self.shape_len-self.upcasted) and s <= 3 and self.full_unupcasted_shape[-1] <= 3: self.upcast()
@@ -618,11 +628,12 @@ class Linearizer:
     # **** local groups ****
 
     for axis in range(self.first_reduce - self.local_dims - 1, -1, -1):
+      global_size = prod(self.full_shape[:self.first_reduce-self.local_dims])
       local_size = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
       if self.full_shape[axis] == 1: continue
       last_try = self.local_dims == 0 and axis == 0
       if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))) or last_try:
-        for sz in [x for x in (([32] if last_try else []) + [16,8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 128]:
+        for sz in [x for x in (([512, 256, 128] if last_try else []) + [16,8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 512 and global_size//x >= 1024]:
           self.shift_to(axis, sz, insert_before=self.first_reduce-self.local_dims)
           self.local_dims += 1
           break

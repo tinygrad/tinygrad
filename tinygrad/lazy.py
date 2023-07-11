@@ -214,6 +214,17 @@ class LazyBuffer:
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
     srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
+    if sum(shape_differences := [new != old for new, old in zip(new_shape, self.shape)]) > 1:
+      # shape_differences := [new != old for new, old in zip(new_shape, self.shape)]
+      # self.shape[0] / 32
+      # self.shape[1]
+      # ishp = 
+      spl = max(32, 32 * 2048 // int((self.shape[0] * self.shape[1]) ** 0.5))
+      if self.shape[1] != spl:
+        return self.reshape((self.shape[0] * self.shape[1] // spl, spl)).reduce_op(op, new_shape)
+      intermediate_shape = tuple(old if i == shape_differences.index(True) else new for i, (new, old) in enumerate(zip(new_shape, self.shape)))
+      # print(intermediate_shape)
+      return create_lazybuffer(self.device, ShapeTracker(intermediate_shape), ReduceOps, LazyOp(op, srcs, intermediate_shape), self.dtype).reduce_op(op, new_shape)
     return create_lazybuffer(self.device, ShapeTracker(new_shape), ReduceOps, LazyOp(op, srcs, new_shape), self.dtype)
 
   def reshape(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:

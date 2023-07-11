@@ -170,9 +170,34 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk(f"*(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*)({bufnames[args.i]}+{args.idx.render(render_cl)})) = ({bufs[args.i].dtype.name}4){vin[0].render()};")
     elif uop == UOps.ATOMIC_ADD:
       atomic_on_bufs.add(args[0].i)
-      kk(lang.atomic_add.format(f"&{bufnames[args[0].i]}[{args[0].idx.render(render_cl)}]", vin[0].render()) + ";")
+      # TODO: Fix this.
+      # kk(lang.atomic_add.format(f"{bufnames[args[0].i]}", vin[0].render()) + ";")
+      kk("if (lidx1 == 0) {")
+      kk(lang.atomic_add.format(f"{bufnames[args[0].i]}", "val") + ";")
+      kk("}}")
     elif uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
+    elif uop == UOps.CUDA_REDUCE:
+      kk("""
+static __shared__ int tmpshared[32];
+const int max_lidx1 = 64;
+int lane = lidx1 % 32;
+int wid = lidx1 / 32;
+
+float val = acc_0_0;
+for (int offset = 32/2; offset > 0; offset /= 2) 
+  val += __shfl_down_sync(0xFFFFFFFF, val, offset);
+
+if (lane == 0)
+  tmpshared[wid]=val;
+
+__syncthreads();
+
+val = (lidx1 < max_lidx1 / 32) ? tmpshared[lane] : 0;
+
+if (wid == 0)
+  for (int offset = 32/2; offset > 0; offset /= 2) 
+    val += __shfl_down_sync(0xFFFFFFFF, val, offset);""")
     else:
       raise RuntimeError(f"failed to render {uop}")
 
