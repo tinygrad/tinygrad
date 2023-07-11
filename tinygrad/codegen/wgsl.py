@@ -31,17 +31,17 @@ class WGSLLanguage(CStyleLanguage):
     else: val = f"{x}" + ("" if dtypes.is_int(var_dtype) else "f")
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
   
-  def render_kernel(self, kernel: List[str], bufs: List[Union[LocalBuffer,LazyBuffer]], bufnames: List[str], local_size: List[int], prekernel: List[str]) -> str:
-    local_size = local_size if len(local_size) else [1]
+  def render_kernel(self, kernel:List[str], bufs:List[Union[LocalBuffer,LazyBuffer]], bufnames:List[str], global_size:List[int], local_size:List[int], prekernel:List[str]) -> str:
+    local_size = local_size[::-1] if len(local_size) else [1]
     bind_it = iter(range(len(bufs)))
     prg = "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) var<storage,read_write> data{i}: array<{type_map[x.dtype]}>;" for i,x in enumerate(bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)])
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn KERNEL_NAME_PLACEHOLDER(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
-    return prg
+    return prg, global_size[::-1] if len(global_size) else [1], local_size
   
-  def render_for(self, expr: str, _min: int, _max: int) -> str:
+  def render_for(self, expr:str, _min:int, _max:int) -> str:
     return f"for(var {expr} = {_min}; {expr} <= {_max}; {expr}++) {{"
   
-  def render_conditional(self, cond: str, x: str, y: str) -> str:
+  def render_conditional(self, cond:str, x:str, y:str) -> str:
     return f"select(f32({y}), {x}, bool({cond}))"
   
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
