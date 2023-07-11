@@ -85,7 +85,7 @@ def helper_test_generic_square(name, N, f1, f2, onearg=False):
   if str(torch_device) == 'cpu' and HALF:
     # CPU doesn't support half
     torch_a = torch_a.to(torch.float)
-    torch_b = torch_b.to(torch.float)
+    if not onearg: torch_b = torch_b.to(torch.float)
 
   helper_test_generic(f"{name:30s} {N:5d}x{N:5d}", f1, (torch_a, torch_b), TinyJit(lambda a,b:f2(a,b).realize()), (tiny_a, tiny_b))
 
@@ -106,16 +106,17 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
 def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_x):
   torch.manual_seed(0)
   torch_dat = torch.rand(bs, in_chans, img_size_y, img_size_x, dtype=torch.float16 if HALF else torch.float).to(torch_device)
-  torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None, dtype=torch.float16 if HALF else torch.float).to(torch_device)
+  torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None, dtype=torch.float).to(torch_device)
 
   tiny_dat = Tensor(torch_dat.cpu().numpy())
   tiny_conv = Conv2d(in_chans, out_chans, kernel_size, bias=None)
   tiny_conv.weight = Tensor(torch_conv.weight.detach().cpu().numpy())
 
+  if HALF: tiny_conv.weight = tiny_conv.weight.half().realize()
+
   if str(torch_device) == 'cpu' and HALF:
     # CPU doesn't support half
     torch_dat = torch_dat.to(torch.float)
-    torch_conv.weight = torch_conv.weight.to(torch.float)
 
   def f1(torch_dat): return torch_conv(torch_dat)
   def f2(tiny_dat): return tiny_conv(tiny_dat).realize()
