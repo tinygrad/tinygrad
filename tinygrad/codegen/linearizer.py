@@ -493,6 +493,7 @@ class Linearizer:
             else: casted.append(value)
           return casted
       casted_values = [maybe_cast(val, cast_dtype) for val in values]
+      acc = maybe_cast(acc, cast_dtype)
       ret = []
       if x.op.__class__ in {ReduceOps, FusedOps}:
         for idx, val in get_grouped_maybe_vector4(*casted_values, maybe_cast(acc, cast_dtype), grouping_allowed=self.supports_float4_alu):
