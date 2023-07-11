@@ -30,7 +30,7 @@ async function waitForText(selector, text) {
     return ready;
 }
 
-puppeteer.launch({ headless: false }).then(async browser => {
+puppeteer.launch({ headless: false, args: ["--enable-unsafe-webgpu"]}).then(async browser => {
     const page = await browser.newPage();
     page.on("console", message => console.log(`message from console ${message.text()}`))
         .on("pageerror", ({ message }) => console.log(`error from page ${message}`))
