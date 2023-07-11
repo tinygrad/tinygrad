@@ -72,6 +72,8 @@ class DType(NamedTuple):
 
 # dependent typing?
 class ImageDType(DType):
+  sz = DType.sz
+
   def __new__(cls, priority, itemsize, name, np, shape):
     return super().__new__(cls, priority, itemsize, name, np)
 
