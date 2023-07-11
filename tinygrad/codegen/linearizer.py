@@ -472,14 +472,10 @@ class Linearizer:
       def maybe_cast(values, cast_dtype):
 
         # These ops always need to be done in float32
-        if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX]:
+        if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2]:
           if len(values) >= 4 and len(values) % 4 == 0 and self.supports_float4: cast_dtype = dtypes._float4
           else: cast_dtype = dtypes.float
 
-        print('op is ', x.op)
-        print('cast dtype: ', cast_dtype)
-        print('values to cast: ', values)
-        
         casted = []
         if len(values) >= 4 and len(values) % 4 == 0 and self.supports_float4: # Use vector types
           cast_dtype = dtypes.get_vector_type(cast_dtype)
@@ -500,7 +496,6 @@ class Linearizer:
       ret = []
       if x.op.__class__ in {ReduceOps, FusedOps}:
         for idx, val in get_grouped_maybe_vector4(*casted_values, maybe_cast(acc, cast_dtype), grouping_allowed=self.supports_float4_alu):
-          print('convert reduce op to binary op')
           ret.append((idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])))
       else:
         for idx, val in get_grouped_maybe_vector4(*casted_values, grouping_allowed=self.supports_float4_alu and x.op != BinaryOps.CMPEQ):
