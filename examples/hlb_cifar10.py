@@ -21,7 +21,6 @@ def set_seed(seed):
 
 num_classes = 10
 HALF = getenv('HALF', 1) == 1
-LOGGING = getenv('LOGGING', 0) == 1
 
 def make_half(layer):
   if HALF:
@@ -48,26 +47,18 @@ class ConvGroup:
     x = self.norm[2](self.conv[2](x) * mult).relu()
     return x + residual
 
-def logging(func):
-  def add_logs(x):
-    if LOGGING: print(func, 'in', x.sum().numpy(), x.min().numpy(), x.max().numpy())
-    out = func(x)
-    if LOGGING: print(func, 'out', out.sum().numpy(), out.min().numpy(), out.max().numpy())
-    return out
-  return add_logs
-
 class SpeedyResNet:
   def __init__(self):
     # TODO: add whitening
     self.net = [
-      logging(make_half(nn.Conv2d(3, 64, kernel_size=1))),
-      logging(make_half(nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8))),
-      logging(lambda x: x.relu()),
-      logging(ConvGroup(64, 128, short=False)),
-      logging(ConvGroup(128, 256, short=True)),
-      logging(ConvGroup(256, 512, short=False)),
-      logging(lambda x: x.max((2,3))),
-      logging(make_half(nn.Linear(512, num_classes, bias=False)))
+      make_half(nn.Conv2d(3, 64, kernel_size=1)),
+      make_half(nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8)),
+      lambda x: x.relu(),
+      ConvGroup(64, 128, short=False),
+      ConvGroup(128, 256, short=True),
+      ConvGroup(256, 512, short=False),
+      lambda x: x.max((2,3)),
+      make_half(nn.Linear(512, num_classes, bias=False))
     ]
 
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
