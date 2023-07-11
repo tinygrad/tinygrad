@@ -134,8 +134,9 @@ class Linearizer:
     self.bufs = [output_buffer] + dedup(ast.buffers)
 
     # calculate mapping from buf to input
-    self.dedup_bufs = ASTRunner.dedup_kernel_inputs(self.bufs)
-    self.bufmap = [self.dedup_bufs.index(buf.realized) if buf.realized in self.dedup_bufs else None for buf in self.bufs]
+    self.dedup_bufs = dedup([buf.realized for buf in self.bufs], self.bufs)
+    dedup_rawbufs = [buf.realized for buf in self.dedup_bufs]
+    self.bufmap = [dedup_rawbufs.index(buf.realized) for buf in self.bufs]
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
