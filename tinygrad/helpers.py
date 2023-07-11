@@ -40,12 +40,13 @@ class ContextVar:
     self.key, self.initial_value = key, getenv(key, default_value)
     if key not in ContextVar.ctx_stack[-1]: ContextVar.ctx_stack[-1][key] = self.initial_value
   def __call__(self, x): ContextVar.ctx_stack[-1][self.key] = x
-  def __bool__(self): return self.value != 0
+  def __bool__(self) -> bool: return self.value != 0
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
+
   @property
-  def value(self): return ContextVar.ctx_stack[-1][self.key] if self.key in ContextVar.ctx_stack[-1] else self.initial_value
+  def value(self) -> int: return ContextVar.ctx_stack[-1][self.key] if self.key in ContextVar.ctx_stack[-1] else self.initial_value
 
 DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
 GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
@@ -67,15 +68,17 @@ class DType(NamedTuple):
   sz: int = 1
   def __repr__(self): return f"dtypes.{self.name}"
   @property
-  def key(self): return (self.name)
+  def key(self) -> str: return (self.name)
 
 # dependent typing?
 class ImageDType(DType):
   def __new__(cls, priority, itemsize, name, np, shape):
     return super().__new__(cls, priority, itemsize, name, np)
+
   def __init__(self, priority, itemsize, name, np, shape):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
     super().__init__()
+
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
 class dtypes:

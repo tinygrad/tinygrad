@@ -218,7 +218,7 @@ class SumNode(RedNode):
     return Node.__mod__(Node.sum(new_nodes), b)
 
   @property
-  def flat_components(self): # recursively expand sumnode components
+  def flat_components(self) -> List[Node]:
     new_nodes = []
     for x in self.nodes: new_nodes += (x.flat_components if isinstance(x, SumNode) else [x])
     return new_nodes
