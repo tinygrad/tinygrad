@@ -1,7 +1,5 @@
 import os, time, ctypes, hashlib, subprocess, platform
-import numpy as np
-from tinygrad.codegen.assembly_arm import ARMCodegen
-from tinygrad.helpers import DEBUG, getenv
+from tinygrad.helpers import DEBUG, getenv, fromimport
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
@@ -18,30 +16,18 @@ class ClangProgram:
         os.rename(fn+".tmp", fn)
     else:
       if DEBUG >= 5: print(prg)
-#       prg = """
-#       .arch armv8-a
-# .text
-# .global _test
-# .p2align 2
-# _test:
-# ldr     s0, [x1]
-# ldr     s1, [x2]
-# fadd  s0, s0, s1
-# str     s0, [x0]
-# ret;
-#       ""
-      subprocess.run(["as","-arch", "arm64", "-o", "kernel.o"], input=prg.encode('utf-8'))
-      subprocess.run(["clang", "-lm", "-shared", "kernel.o", "-o", fn])
+      subprocess.check_output(["as","-arch", "arm64", "-o", f"{name}.o"], input=prg.encode('utf-8'))
+      subprocess.check_output(["clang", "-lm", "-shared", f"{name}.o", "-o", fn])
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()
-    out = self.fxn(*[x._buf for x in args])
+    self.fxn(*[x._buf for x in args])
     if wait: return time.monotonic()-st
 
 class ClangCodegen(CStyleCodegen):
   lang = CStyleLanguage(buffer_suffix=" restrict")
   supports_float4: bool = False
 
-ClangBuffer = Compiled(RawMallocBuffer, ARMCodegen if getenv("ARM") else ClangCodegen, ClangProgram)
+ClangBuffer = Compiled(RawMallocBuffer, fromimport("tinygrad.codegen.assembly_arm", "ARMCodegen") if getenv("ARM") else ClangCodegen, ClangProgram)

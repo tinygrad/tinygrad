@@ -14,7 +14,7 @@ class Register(NamedTuple):
   nm:str
   dtype:DType
   scalar:bool
-  bufsize: int
+  bufsize:int = 0
   off:Optional[int] = None
   def __repr__(self): return self.nm if self.off is None else f"{self.nm}:{self.off}"
   def subregs(self):
@@ -39,7 +39,7 @@ class AssemblyCodegen(Linearizer):
   # s registers are the addresses and non local indexes
   def codegen(self):
     self.process()
-    if not getenv('ARM'): self.hand_coded_optimizations()
+    if not getenv('CLANG'): self.hand_coded_optimizations()
     self.limit_global_dims(3)  # all GPU asms have 3 (for now)
     self.linearize()
 
@@ -102,12 +102,9 @@ class AssemblyCodegen(Linearizer):
         return reg, None, off
 
     ins = []
-    #TODO: ceil needs to know output type 
     ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=self.bufs[i].dtype, scalar=True, bufsize=math.prod(self.bufs[i].shape)), [], f"buf{i}") for i in range(len(self.bufs))]
     global_size, local_size = [], []
     skipload_branch = 0
-    # for uop,newvar,vin,args in self.uops:
-    #   print(f"{uop} {newvar} {vin} {args}")
     for uop,newvar,vin,args in self.uops:
       if uop == UOps.CONST and newvar is not None:
         ins.append(AssemblyInstruction(UOps.CONST, newreg(newvar, dtype=newvar.dtype), [], args))
@@ -116,26 +113,26 @@ class AssemblyCodegen(Linearizer):
         ins.append(AssemblyInstruction(UOps.ALU, newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
       elif uop == UOps.LOOP:
         # TODO: check for CPU
-        # if args[1] == "global":
-        #   for i,var in enumerate(args[0]):
-        #     global_size.append(var.max+1)
-        #     ins.append(AssemblyInstruction(UOps.SPECIAL, newreg(var, dtype=dtypes.int32), [], f"gid{len(args[0])-1-i}"))
-        # elif args[1] == "local":
-        #   for i,var in enumerate(args[0]):
-        #     local_size.append(var.max+1)
-        #     ins.append(AssemblyInstruction(UOps.SPECIAL, newreg(var, dtype=dtypes.int32), [], f"lid{len(args[0])-1-i}"))
-        # else:
-        for var in args[0]:
-          if not isinstance(var, NumNode):  # TODO: why is this coming through?
-            ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32, scalar=True), [], 0))
-            ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
+        if args[1] == "global" and not getenv('CLANG'):
+          for i,var in enumerate(args[0]):
+            global_size.append(var.max+1)
+            ins.append(AssemblyInstruction(UOps.SPECIAL, newreg(var, dtype=dtypes.int32), [], f"gid{len(args[0])-1-i}"))
+        elif args[1] == "local" and not getenv('CLANG'):
+          for i,var in enumerate(args[0]):
+            local_size.append(var.max+1)
+            ins.append(AssemblyInstruction(UOps.SPECIAL, newreg(var, dtype=dtypes.int32), [], f"lid{len(args[0])-1-i}"))
+        else:
+          for var in args[0]:
+            if not isinstance(var, NumNode):  # TODO: why is this coming through?
+              ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32, scalar=True), [], 0))
+              ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
       elif uop == UOps.ENDLOOP:
-        #if args[1] not in ["global", "local", "global+local"]:
-        for var in reversed(args[0]):
-          if not isinstance(var, NumNode):  # TODO: why is this coming through?
-            ins.append(AssemblyInstruction(UOps.ALU, tor[var], [tor[var], 1], BinaryOps.ADD))
-            pred = render_alu(BinaryOps.CMPLT, tor[var], var.max+1, dtypes.bool)
-            ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], ("$loop_"+var.expr, True)))
+        if args[1] not in ["global", "local", "global+local"] or getenv('CLANG'):
+          for var in reversed(args[0]):
+            if not isinstance(var, NumNode):  # TODO: why is this coming through?
+              ins.append(AssemblyInstruction(UOps.ALU, tor[var], [tor[var], 1], BinaryOps.ADD))
+              pred = render_alu(BinaryOps.CMPLT, tor[var], var.max+1, dtypes.bool)
+              ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], ("$loop_"+var.expr, True)))
       elif uop == UOps.CAST and newvar is not None:
         # TODO: we should reconsider outputting CAST in the linearizer. these are needless copies
         out = newreg(newvar)

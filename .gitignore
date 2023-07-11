@@ -11,6 +11,7 @@ dist
 *.egg-info
 /env
 a.out
+test.o
 boxes.jpg
 weights/*
 pandecode.dump
