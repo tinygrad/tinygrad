@@ -115,6 +115,7 @@ def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_
   if str(torch_device) == 'cpu' and HALF:
     # CPU doesn't support half
     torch_dat = torch_dat.to(torch.float)
+    torch_conv.weight = torch_conv.weight.to(torch.float)
 
   def f1(torch_dat): return torch_conv(torch_dat)
   def f2(tiny_dat): return tiny_conv(tiny_dat).realize()
