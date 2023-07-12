@@ -73,7 +73,6 @@ class CUDAProgram:
     # TODO: name is wrong, so we get it from the ptx using hacks
     self.check_device_limit(global_size, local_size)
     
-  
   def check_device_limit(self, global_size, local_size):
     if global_size[2] > self.max_grid[2]:
       self.subprg.append(self.prg)

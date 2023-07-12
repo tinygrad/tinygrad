@@ -8,6 +8,7 @@ from tinygrad.runtime.lib import RawBuffer, RawConst
 if TYPE_CHECKING:
   from tinygrad.lazy import LazyBuffer
 
+CUDA = getenv("CUDA", 0)
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
 # NOTE: MOD, CMPLT don't have to be implemented on vectors, just scalars
@@ -132,8 +133,10 @@ class ASTRunner:
     self.local_size = (local_size + [1]*(3-len(local_size))) if local_size is not None else None
 
   def build(self, runtime):
-    self.clprg = runtime(self.name, self.prg, self.global_size, self.local_size, **self.runtime_args)
-    # self.clprg = runtime(self.name, self.prg, **self.runtime_args)
+    if CUDA == 1:
+      self.clprg = runtime(self.name, self.prg, self.global_size, self.local_size, **self.runtime_args)
+    else:
+      self.clprg = runtime(self.name, self.prg, **self.runtime_args)
     return self
 
   def exec(self, bufs) -> Optional[float]:
