@@ -6,15 +6,15 @@ import numpy as np
 from phonemizer import phonemize
 from unidecode import unidecode
 
+from extra.utils import download_file
 from tinygrad import nn
 from tinygrad.helpers import dtypes
-from tinygrad.nn import Embedding, Conv1d
 from tinygrad.state import torch_load
 from tinygrad.tensor import Tensor
 
 LRELU_SLOPE = 0.1
 
-class SynthesizerTrn:
+class Synthesizer:
   def __init__(self, n_vocab, spec_channels, segment_size, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, n_speakers=0, gin_channels=0, use_sdp=True, **kwargs):
     self.n_vocab, self.spec_channels, self.inter_channels, self.hidden_channels, self.filter_channels, self.n_heads, self.n_layers, self.kernel_size, self.p_dropout, self.resblock, self.resblock_kernel_sizes, self.resblock_dilation_sizes, self.upsample_rates, self.upsample_initial_channel, self.upsample_kernel_sizes, self.segment_size, self.n_speakers, self.gin_channels, self.use_sdp = n_vocab, spec_channels, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, segment_size, n_speakers, gin_channels, use_sdp
     self.enc_p = TextEncoder(n_vocab, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout)
@@ -22,10 +22,10 @@ class SynthesizerTrn:
     self.enc_q = PosteriorEncoder(spec_channels, inter_channels, hidden_channels, 5, 1, 16, gin_channels=gin_channels)
     self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, 4, gin_channels=gin_channels)
     self.dp = StochasticDurationPredictor(hidden_channels, 192, 3, 0.5, 4, gin_channels=gin_channels) if use_sdp else DurationPredictor(hidden_channels, 256, 3, 0.5, gin_channels=gin_channels)
-    if n_speakers > 1: self.emb_g = Embedding(n_speakers, gin_channels)
+    if n_speakers > 1: self.emb_g = nn.Embedding(n_speakers, gin_channels)
   def infer(self, x, x_lengths, sid=None, noise_scale=1.0, length_scale=1, noise_scale_w=1., max_len=None):
     x, m_p, logs_p, x_mask = self.enc_p.forward(x, x_lengths)
-    g = self.emb_g(sid).unsqueeze(-1) if self.n_speakers > 0 else None
+    g = squeeze_tinygrad(self.emb_g(sid.reshape(1, 1)), 1).unsqueeze(-1) if self.n_speakers > 0 else None
     logw = self.dp.forward(x, x_mask, g=g, reverse=self.use_sdp, noise_scale=noise_scale_w if self.use_sdp else 1.0)
     w_ceil = Tensor.ceil(logw.exp() * x_mask * length_scale)
     y_lengths = Tensor.maximum(w_ceil.sum([1, 2]), 1).cast(dtypes.int64)
@@ -48,15 +48,15 @@ class StochasticDurationPredictor:
     for _ in range(n_flows):
       self.flows.append(ConvFlow(2, filter_channels, kernel_size, n_layers=3))
       self.flows.append(Flip())
-    self.post_pre, self.post_proj = Conv1d(1, filter_channels, 1), Conv1d(filter_channels, filter_channels, 1)
+    self.post_pre, self.post_proj = nn.Conv1d(1, filter_channels, 1), nn.Conv1d(filter_channels, filter_channels, 1)
     self.post_convs = DDSConv(filter_channels, kernel_size, n_layers=3, p_dropout=p_dropout)
     self.post_flows = [ElementwiseAffine(2)]
     for _ in range(4):
       self.post_flows.append(ConvFlow(2, filter_channels, kernel_size, n_layers=3))
       self.post_flows.append(Flip())
-    self.pre, self.proj = Conv1d(in_channels, filter_channels, 1), Conv1d(filter_channels, filter_channels, 1)
+    self.pre, self.proj = nn.Conv1d(in_channels, filter_channels, 1), nn.Conv1d(filter_channels, filter_channels, 1)
     self.convs = DDSConv(filter_channels, kernel_size, n_layers=3, p_dropout=p_dropout)
-    if gin_channels != 0: self.cond = Conv1d(gin_channels, filter_channels, 1)
+    if gin_channels != 0: self.cond = nn.Conv1d(gin_channels, filter_channels, 1)
   def forward(self, x: Tensor, x_mask, w=None, g=None, reverse=False, noise_scale=1.0):
     x = self.pre(x.detach())
     if g is not None: x = x + self.cond(g.detach())
@@ -97,10 +97,10 @@ class StochasticDurationPredictor:
 class DurationPredictor:
   def __init__(self, in_channels, filter_channels, kernel_size, p_dropout, gin_channels=0):
     self.in_channels, self.filter_channels, self.kernel_size, self.p_dropout, self.gin_channels = in_channels, filter_channels, kernel_size, p_dropout, gin_channels
-    self.conv_1, self.norm_1 = Conv1d(in_channels, filter_channels, kernel_size, padding=kernel_size//2), LayerNorm(filter_channels)
-    self.conv_2, self.norm_2 = Conv1d(filter_channels, filter_channels, kernel_size, padding=kernel_size//2), LayerNorm(filter_channels)
-    self.proj = Conv1d(filter_channels, 1, 1)
-    if gin_channels != 0: self.cond = Conv1d(gin_channels, in_channels, 1)
+    self.conv_1, self.norm_1 = nn.Conv1d(in_channels, filter_channels, kernel_size, padding=kernel_size//2), LayerNorm(filter_channels)
+    self.conv_2, self.norm_2 = nn.Conv1d(filter_channels, filter_channels, kernel_size, padding=kernel_size//2), LayerNorm(filter_channels)
+    self.proj = nn.Conv1d(filter_channels, 1, 1)
+    if gin_channels != 0: self.cond = nn.Conv1d(gin_channels, in_channels, 1)
   def forward(self, x: Tensor, x_mask, g=None):
     x = x.detach()
     if g is not None: x = x + self.cond(g.detach())
@@ -113,13 +113,11 @@ class DurationPredictor:
 class TextEncoder:
   def __init__(self, n_vocab, out_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout):
     self.n_vocab, self.out_channels, self.hidden_channels, self.filter_channels, self.n_heads, self.n_layers, self.kernel_size, self.p_dropout = n_vocab, out_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout
-    self.emb = Embedding(n_vocab, hidden_channels)
+    self.emb = nn.Embedding(n_vocab, hidden_channels)
     self.encoder = Encoder(hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout)
-    self.proj = Conv1d(hidden_channels, out_channels * 2, 1)
-
+    self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
   def forward(self, x: Tensor, x_lengths: Tensor):
-    x = self.emb(x)
-    x = (x * math.sqrt(self.hidden_channels)).transpose(1, -1)  # [b, t, h] -transpose-> [b, h, t]
+    x = (self.emb(x) * math.sqrt(self.hidden_channels)).transpose(1, -1)  # [b, t, h] -transpose-> [b, h, t]
     x_mask = sequence_mask(x_lengths, x.shape[2]).unsqueeze(1).cast(x.dtype)  # TODO: verify this cast works
     x = self.encoder.forward(x * x_mask, x_mask)
     stats = self.proj(x) * x_mask
@@ -140,14 +138,11 @@ class ResidualCouplingBlock:
 class PosteriorEncoder:
   def __init__(self, in_channels, out_channels, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=0):
     self.in_channels, self.out_channels, self.hidden_channels, self.kernel_size, self.dilation_rate, self.n_layers, self.gin_channels = in_channels, out_channels, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels
-    self.pre = Conv1d(in_channels, hidden_channels, 1)
+    self.pre, self.proj = nn.Conv1d(in_channels, hidden_channels, 1), nn.Conv1d(hidden_channels, out_channels * 2, 1)
     self.enc = WN(hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=gin_channels)
-    self.proj = Conv1d(hidden_channels, out_channels * 2, 1)
   def forward(self, x, x_lengths, g=None):
     x_mask = sequence_mask(x_lengths, x.size(2)).unsqueeze(1).cast(x.dtype)
-    x = self.pre(x) * x_mask
-    x = self.enc.forward(x, x_mask, g=g)
-    stats = self.proj(x) * x_mask
+    stats = self.proj(self.enc.forward(self.pre(x) * x_mask, x_mask, g=g)) * x_mask
     m, logs = stats.split(self.out_channels, dim=1)
     z = (m + Tensor.randn(m.shape, m.dtype) * logs.exp()) * x_mask
     return z, m, logs, x_mask
@@ -160,7 +155,7 @@ class Generator:
   def __init__(self, initial_channel, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gin_channels=0):
     self.num_kernels = len(resblock_kernel_sizes)
     self.num_upsamples = len(upsample_rates)
-    self.conv_pre = Conv1d(initial_channel, upsample_initial_channel, 7, 1, padding=3)
+    self.conv_pre = nn.Conv1d(initial_channel, upsample_initial_channel, 7, 1, padding=3)
     resblock = ResBlock1 if resblock == '1' else ResBlock2
     self.ups = []
     for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
@@ -170,8 +165,8 @@ class Generator:
       ch = upsample_initial_channel // (2 ** (i + 1))
       for _, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes)):
         self.resblocks.append(resblock(ch, k, d))
-    self.conv_post = Conv1d(ch, 1, 7, 1, padding=3, bias=False)
-    if gin_channels != 0: self.cond = Conv1d(gin_channels, upsample_initial_channel, 1)
+    self.conv_post = nn.Conv1d(ch, 1, 7, 1, padding=3, bias=False)
+    if gin_channels != 0: self.cond = nn.Conv1d(gin_channels, upsample_initial_channel, 1)
   def forward(self, x: Tensor, g=None):
     x = self.conv_pre(x)
     if g is not None:  x = x + self.cond(g)
@@ -278,7 +273,7 @@ class ConvFlow:
     unnormalized_widths = h[..., :self.num_bins] / math.sqrt(self.filter_channels)
     unnormalized_heights = h[..., self.num_bins:2*self.num_bins] / math.sqrt(self.filter_channels)
     unnormalized_derivatives = h[..., 2 * self.num_bins:]
-    x1, logabsdet = piecewise_rational_quadratic_transform(x1, unnormalized_widths, unnormalized_heights, unnormalized_derivatives, inverse=reverse, tails='linear', tail_bound=self.tail_bound)
+    x1, logabsdet = piecewise_rational_quadratic_transform_cpu(x1, unnormalized_widths, unnormalized_heights, unnormalized_derivatives, inverse=reverse, tails='linear', tail_bound=self.tail_bound)
     x = x0.cat(x1, dim=1) * x_mask
     return x if reverse else (x, Tensor.sum(logabsdet * x_mask, [1,2]))
 
@@ -287,9 +282,9 @@ class ResidualCouplingLayer:
     assert channels % 2 == 0, "channels should be divisible by 2"
     self.channels, self.hidden_channels, self.kernel_size, self.dilation_rate, self.n_layers, self.mean_only = channels, hidden_channels, kernel_size, dilation_rate, n_layers, mean_only
     self.half_channels = channels // 2
-    self.pre = Conv1d(self.half_channels, hidden_channels, 1)
+    self.pre = nn.Conv1d(self.half_channels, hidden_channels, 1)
     self.enc = WN(hidden_channels, kernel_size, dilation_rate, n_layers, p_dropout=p_dropout, gin_channels=gin_channels)
-    self.post = Conv1d(hidden_channels, self.half_channels * (2 - mean_only), 1)
+    self.post = nn.Conv1d(hidden_channels, self.half_channels * (2 - mean_only), 1)
   def forward(self, x, x_mask, g=None, reverse=False):
     x0, x1 = split_tinygrad(x, [self.half_channels]*2, 1)
     stats = self.post(self.enc.forward(self.pre(x0) * x_mask, x_mask, g=g)) * x_mask
@@ -324,8 +319,8 @@ class MultiHeadAttention:
     assert channels % n_heads == 0
     self.channels, self.out_channels, self.n_heads, self.p_dropout, self.window_size, self.heads_share, self.block_length, self.proximal_bias, self.proximal_init = channels, out_channels, n_heads, p_dropout, window_size, heads_share, block_length, proximal_bias, proximal_init
     self.attn, self.k_channels  = None, channels // n_heads
-    self.conv_q, self.conv_k, self.conv_v = [Conv1d(channels, channels, 1) for _ in range(3)]
-    self.conv_o = Conv1d(channels, out_channels, 1)
+    self.conv_q, self.conv_k, self.conv_v = [nn.Conv1d(channels, channels, 1) for _ in range(3)]
+    self.conv_o = nn.Conv1d(channels, out_channels, 1)
     if window_size is not None: self.emb_rel_k, self.emb_rel_v = [Tensor.randn(1 if heads_share else n_heads, window_size * 2 + 1, self.k_channels) * (self.k_channels ** -0.5)] * 2
   def forward(self, x, c, attn_mask=None):
     q, k, v = self.conv_q(x), self.conv_k(c), self.conv_v(c)
@@ -336,13 +331,12 @@ class MultiHeadAttention:
     query = query.reshape(b, self.n_heads, self.k_channels, t_t).transpose(2, 3)
     key = key.reshape(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
     value = value.reshape(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
-    scores : Tensor = (query / math.sqrt(self.k_channels)) @ key.transpose(-2, -1)
+    scores = (query / math.sqrt(self.k_channels)) @ key.transpose(-2, -1)
     if self.window_size is not None:
       assert t_s == t_t, "Relative attention is only available for self-attention."
       key_relative_embeddings = self._get_relative_embeddings(self.emb_rel_k, t_s)
       rel_logits = self._matmul_with_relative_keys(query / math.sqrt(self.k_channels), key_relative_embeddings)
-      scores_local = self._relative_position_to_absolute_position(rel_logits)
-      scores = scores + scores_local
+      scores = scores + self._relative_position_to_absolute_position(rel_logits)
     if mask is not None:
       scores = masked_fill_tinygrad(scores, mask == 0, -1e4)
       if self.block_length is not None:
@@ -366,28 +360,23 @@ class MultiHeadAttention:
   def _relative_position_to_absolute_position(self, x: Tensor): # x: [b, h, l, 2*l-1] -> [b, h, l, l]
     batch, heads, length, _ = x.shape
     x = x.pad(convert_pad_shape([[0,0],[0,0],[0,0],[0,1]]))
-    x_flat = x.reshape([batch, heads, length * 2 * length])
-    x_flat = x_flat.pad(convert_pad_shape([[0,0],[0,0],[0,length-1]]))
-    x_final = x_flat.reshape([batch, heads, length+1, 2*length-1])[:, :, :length, length-1:]
-    return x_final
+    x_flat = x.reshape([batch, heads, length * 2 * length]).pad(convert_pad_shape([[0,0],[0,0],[0,length-1]]))
+    return x_flat.reshape([batch, heads, length+1, 2*length-1])[:, :, :length, length-1:]
   def _absolute_position_to_relative_position(self, x: Tensor): # x: [b, h, l, l] -> [b, h, l, 2*l-1]
     batch, heads, length, _ = x.shape
     x = x.pad(convert_pad_shape([[0, 0], [0, 0], [0, 0], [0, length-1]]))
-    x_flat = x.reshape([batch, heads, length**2 + length*(length -1)])
-    x_flat = x_flat.pad(convert_pad_shape([[0, 0], [0, 0], [length, 0]]))
-    x_final = x_flat.reshape([batch, heads, length, 2*length])[:,:,:,1:]
-    return x_final
+    x_flat = x.reshape([batch, heads, length**2 + length*(length -1)]).pad(convert_pad_shape([[0, 0], [0, 0], [length, 0]]))
+    return x_flat.reshape([batch, heads, length, 2*length])[:,:,:,1:]
 
 class FFN:
   def __init__(self, in_channels, out_channels, filter_channels, kernel_size, p_dropout=0., activation=None, causal=False):
     self.in_channels, self.out_channels, self.filter_channels, self.kernel_size, self.p_dropout, self.activation, self.causal = in_channels, out_channels, filter_channels, kernel_size, p_dropout, activation, causal
     self.padding = self._causal_padding if causal else self._same_padding
-    self.conv_1, self.conv_2 = Conv1d(in_channels, filter_channels, kernel_size), Conv1d(filter_channels, out_channels, kernel_size)
+    self.conv_1, self.conv_2 = nn.Conv1d(in_channels, filter_channels, kernel_size), nn.Conv1d(filter_channels, out_channels, kernel_size)
   def forward(self, x, x_mask):
     x = self.conv_1(self.padding(x * x_mask))
     x = x * (1.702 * x).sigmoid() if self.activation == "gelu" else x.relu()
-    x = self.conv_2(self.padding(x.dropout(self.p_dropout) * x_mask))
-    return x * x_mask
+    return self.conv_2(self.padding(x.dropout(self.p_dropout) * x_mask)) * x_mask
   def _causal_padding(self, x):return x if self.kernel_size == 1 else x.pad(convert_pad_shape([[0, 0], [0, 0], [self.kernel_size - 1, 0]]))
   def _same_padding(self, x): return x if self.kernel_size == 1 else x.pad(convert_pad_shape([[0, 0], [0, 0], [(self.kernel_size - 1) // 2, self.kernel_size // 2]]))
 
@@ -410,37 +399,25 @@ class Encoder:
     return x * x_mask
 
 DEFAULT_MIN_BIN_WIDTH, DEFAULT_MIN_BIN_HEIGHT, DEFAULT_MIN_DERIVATIVE = 1e-3, 1e-3, 1e-3
-def piecewise_rational_quadratic_transform(inputs, unnormalized_widths, unnormalized_heights, unnormalized_derivatives, inverse=False, tails=None, tail_bound=1., min_bin_width=DEFAULT_MIN_BIN_WIDTH, min_bin_height=DEFAULT_MIN_BIN_HEIGHT, min_derivative=DEFAULT_MIN_DERIVATIVE):
+def piecewise_rational_quadratic_transform_cpu(inputs, unnormalized_widths, unnormalized_heights, unnormalized_derivatives, inverse=False, tails=None, tail_bound=1., min_bin_width=DEFAULT_MIN_BIN_WIDTH, min_bin_height=DEFAULT_MIN_BIN_HEIGHT, min_derivative=DEFAULT_MIN_DERIVATIVE):
   # TODO: this all uses numpy atm
-  if tails is None:
-    spline_fn = rational_quadratic_spline
-    spline_kwargs = {}
-  else:
-    spline_fn = unconstrained_rational_quadratic_spline
-    spline_kwargs = {'tails': tails, 'tail_bound': tail_bound}
-  outputs, logabsdet = spline_fn( inputs=inputs, unnormalized_widths=unnormalized_widths, unnormalized_heights=unnormalized_heights, unnormalized_derivatives=unnormalized_derivatives, inverse=inverse, min_bin_width=min_bin_width, min_bin_height=min_bin_height, min_derivative=min_derivative, **spline_kwargs)
-  return outputs, logabsdet
+  if tails is None: spline_fn, spline_kwargs = rational_quadratic_spline, {}
+  else: spline_fn, spline_kwargs = unconstrained_rational_quadratic_spline, {'tails': tails, 'tail_bound': tail_bound}
+  return spline_fn(inputs=inputs, unnormalized_widths=unnormalized_widths, unnormalized_heights=unnormalized_heights, unnormalized_derivatives=unnormalized_derivatives, inverse=inverse, min_bin_width=min_bin_width, min_bin_height=min_bin_height, min_derivative=min_derivative, **spline_kwargs)
 def searchsorted(bin_locations, inputs, eps=1e-6):
   bin_locations[..., -1] += eps
   return np.sum(inputs[..., None] >= bin_locations, axis=-1) - 1
 def unconstrained_rational_quadratic_spline(inputs, unnormalized_widths, unnormalized_heights, unnormalized_derivatives, inverse=False, tails='linear', tail_bound=1., min_bin_width=DEFAULT_MIN_BIN_WIDTH, min_bin_height=DEFAULT_MIN_BIN_HEIGHT, min_derivative=DEFAULT_MIN_DERIVATIVE):
-  inputs = inputs.numpy()
+  inputs, unnormalized_widths, unnormalized_heights, unnormalized_derivatives = inputs.numpy(), unnormalized_widths.numpy(), unnormalized_heights.numpy(), unnormalized_derivatives.numpy()
   inside_interval_mask = (inputs >= -tail_bound) & (inputs <= tail_bound)
   outside_interval_mask = ~inside_interval_mask
-  outputs = np.zeros_like(inputs)
-  logabsdet = np.zeros_like(inputs)
-  unnormalized_widths = unnormalized_widths.numpy()
-  unnormalized_heights = unnormalized_heights.numpy()
-  unnormalized_derivatives = unnormalized_derivatives.numpy()
+  outputs, logabsdet = np.zeros_like(inputs), np.zeros_like(inputs)
   if tails == 'linear':
     unnormalized_derivatives = np.pad(unnormalized_derivatives, ((0, 0), (0, 0), (0, 0), (1, 1)))
     constant = np.log(np.exp(1 - min_derivative) - 1)
-    unnormalized_derivatives[..., 0] = constant
-    unnormalized_derivatives[..., -1] = constant
-    outputs[outside_interval_mask] = inputs[outside_interval_mask]
-    logabsdet[outside_interval_mask] = 0
-  else:
-    raise RuntimeError('{} tails are not implemented.'.format(tails))
+    unnormalized_derivatives[..., 0], unnormalized_derivatives[..., -1] = constant, constant
+    outputs[outside_interval_mask], logabsdet[outside_interval_mask] = inputs[outside_interval_mask], 0
+  else: raise RuntimeError('{} tails are not implemented.'.format(tails))
   outputs[inside_interval_mask], logabsdet[inside_interval_mask] = rational_quadratic_spline( inputs=inputs[inside_interval_mask], unnormalized_widths=unnormalized_widths[inside_interval_mask, :], unnormalized_heights=unnormalized_heights[inside_interval_mask, :], unnormalized_derivatives=unnormalized_derivatives[inside_interval_mask, :], inverse=inverse, left=-tail_bound, right=tail_bound, bottom=-tail_bound, top=tail_bound, min_bin_width=min_bin_width, min_bin_height=min_bin_height, min_derivative=min_derivative )
   return Tensor(outputs), Tensor(logabsdet)
 def softmax(arr, dim=-1): return np.exp(arr) / np.sum(np.exp(arr), axis=dim, keepdims=True)  # softmax
@@ -450,52 +427,41 @@ def rational_quadratic_spline(inputs, unnormalized_widths, unnormalized_heights,
   num_bins = unnormalized_widths.shape[-1]
   if min_bin_width * num_bins > 1.0: raise ValueError('Minimal bin width too large for the number of bins')
   if min_bin_height * num_bins > 1.0: raise ValueError('Minimal bin height too large for the number of bins')
-  widths = softmax(unnormalized_widths, dim=-1) # softmax
-  widths = min_bin_width + (1 - min_bin_width * num_bins) * widths
-  cumwidths = np.pad(widths.cumsum(axis=-1), pad_width=((0, 0), (1,0)), mode='constant', constant_values=0.0)
-  cumwidths = (right - left) * cumwidths + left
-  cumwidths[..., 0], cumwidths[..., -1] = left, right
-  widths = cumwidths[..., 1:] - cumwidths[..., :-1]
+  widths = min_bin_width + (1 - min_bin_width * num_bins) * softmax(unnormalized_widths, dim=-1)
+  cum_widths = (right - left) * np.pad(widths.cumsum(axis=-1), pad_width=((0, 0), (1,0)), mode='constant', constant_values=0.0) + left
+  cum_widths[..., 0], cum_widths[..., -1] = left, right
+  widths = cum_widths[..., 1:] - cum_widths[..., :-1]
   derivatives = min_derivative + np.log1p(np.exp(unnormalized_derivatives))
-  heights = softmax(unnormalized_heights, dim=-1)
-  heights = min_bin_height + (1 - min_bin_height * num_bins) * heights
-  cumheights = heights.cumsum(axis=-1)
-  cumheights = np.pad(cumheights, pad_width=((0, 0), (1,0)), mode='constant', constant_values=0.0)
-  cumheights = (top - bottom) * cumheights + bottom
-  cumheights[..., 0], cumheights[..., -1] = bottom, top
-  heights = cumheights[..., 1:] - cumheights[..., :-1]
-  bin_idx = searchsorted(cumheights if inverse else cumwidths, inputs)[..., None]
-  input_cumwidths = np.take_along_axis(cumwidths, bin_idx, axis=-1)[..., 0]
+  heights = min_bin_height + (1 - min_bin_height * num_bins) * softmax(unnormalized_heights, dim=-1)
+  cum_heights = (top - bottom) * np.pad(heights.cumsum(axis=-1), pad_width=((0, 0), (1,0)), mode='constant', constant_values=0.0) + bottom
+  cum_heights[..., 0], cum_heights[..., -1] = bottom, top
+  heights = cum_heights[..., 1:] - cum_heights[..., :-1]
+  bin_idx = searchsorted(cum_heights if inverse else cum_widths, inputs)[..., None]
+  input_cum_widths = np.take_along_axis(cum_widths, bin_idx, axis=-1)[..., 0]
   input_bin_widths = np.take_along_axis(widths, bin_idx, axis=-1)[..., 0]
-  input_cumheights = np.take_along_axis(cumheights, bin_idx, axis=-1)[..., 0]
-  delta = heights / widths
-  input_delta = np.take_along_axis(delta, bin_idx, axis=-1)[..., 0]
+  input_cum_heights = np.take_along_axis(cum_heights, bin_idx, axis=-1)[..., 0]
+  input_delta = np.take_along_axis(heights / widths, bin_idx, axis=-1)[..., 0]
   input_derivatives = np.take_along_axis(derivatives, bin_idx, axis=-1)[..., 0]
   input_derivatives_plus_one = np.take_along_axis(derivatives[..., 1:], bin_idx, axis=-1)[..., 0]
   input_heights = np.take_along_axis(heights, bin_idx, axis=-1)[..., 0]
   if inverse:
-    a = ((inputs - input_cumheights) * (input_derivatives + input_derivatives_plus_one - 2 * input_delta) + input_heights * (input_delta - input_derivatives))
-    b = (input_heights * input_derivatives - (inputs - input_cumheights) * (input_derivatives + input_derivatives_plus_one - 2 * input_delta))
-    c = - input_delta * (inputs - input_cumheights)
+    a = ((inputs - input_cum_heights) * (input_derivatives + input_derivatives_plus_one - 2 * input_delta) + input_heights * (input_delta - input_derivatives))
+    b = (input_heights * input_derivatives - (inputs - input_cum_heights) * (input_derivatives + input_derivatives_plus_one - 2 * input_delta))
+    c = - input_delta * (inputs - input_cum_heights)
     discriminant = np.square(b) - 4 * a * c
     assert (discriminant >= 0).all()
     root = (2 * c) / (-b - np.sqrt(discriminant))
-    outputs = root * input_bin_widths + input_cumwidths
     theta_one_minus_theta = root * (1 - root)
     denominator = input_delta + ((input_derivatives + input_derivatives_plus_one - 2 * input_delta) * theta_one_minus_theta)
     derivative_numerator = np.square(input_delta) * (input_derivatives_plus_one * np.square(root) + 2 * input_delta * theta_one_minus_theta + input_derivatives * np.square(1 - root))
-    logabsdet = np.log(derivative_numerator) - 2 * np.log(denominator)
-    return outputs, -logabsdet
+    return root * input_bin_widths + input_cum_widths, -(np.log(derivative_numerator) - 2 * np.log(denominator))
   else:
-    theta = (inputs - input_cumwidths) / input_bin_widths
+    theta = (inputs - input_cum_widths) / input_bin_widths
     theta_one_minus_theta = theta * (1 - theta)
     numerator = input_heights * (input_delta * theta.pow(2) + input_derivatives * theta_one_minus_theta)
     denominator = input_delta + ((input_derivatives + input_derivatives_plus_one - 2 * input_delta) * theta_one_minus_theta)
-    outputs = input_cumheights + numerator / denominator
     derivative_numerator = input_delta.pow(2) * (input_derivatives_plus_one * theta.pow(2) + 2 * input_delta * theta_one_minus_theta + input_derivatives * (1 - theta).pow(2))
-    logabsdet = derivative_numerator.log() - 2 * denominator.log()
-    return outputs, logabsdet
-
+    return input_cum_heights + numerator / denominator, derivative_numerator.log() - 2 * denominator.log()
 def norm_except_dim(v, dim):
   if dim == -1: return np.linalg.norm(v)
   elif dim == 0:
@@ -509,12 +475,9 @@ def norm_except_dim(v, dim):
   else:
     transposed_v = np.transpose(v, (dim,) + tuple(i for i in range(v.ndim) if i != dim))
     return np.transpose(norm_except_dim(transposed_v, 0), (dim,) + tuple(i for i in range(v.ndim) if i != dim))
-
-def weight_norm_tinygrad(v, g, dim):
+def weight_norm_tinygrad(v: Tensor, g: Tensor, dim):
   v, g = v.numpy(), g.numpy()
-  v_norm = norm_except_dim(v, dim)
-  w = v * (g / v_norm)
-  return Tensor(w)
+  return Tensor(v * (g / norm_except_dim(v, dim)))
 def masked_fill_tinygrad(tensor, mask, value): return tensor * (1 - mask) + value * mask
 def split_tinygrad(tensor, split_sizes, dim=0): # if split_sizes is an integer, convert it to a tuple of size split_sizes elements
   if isinstance(split_sizes, int): split_sizes = (split_sizes,) * (tensor.shape[dim] // split_sizes)
@@ -526,16 +489,12 @@ def split_tinygrad(tensor, split_sizes, dim=0): # if split_sizes is an integer, 
     start += size
   return [tensor.slice(s) for s in slices]
 def squeeze_tinygrad(tensor, axis=None):
-  if axis is None: new_shape = [dim for dim in tensor.shape if dim != 1]
-  else:
-    assert tensor.shape[axis] == 1, "Cannot squeeze dim {} with size {}".format(axis, tensor.shape[axis])
-    new_shape = list(tensor.shape)
-    new_shape.pop(axis)
-  return tensor.reshape(*new_shape)
-def sequence_mask(length: Tensor, max_length=None):
+  if axis is None: return tensor.reshape(*[dim for dim in tensor.shape if dim != 1])
+  assert tensor.shape[axis] == 1, f"Cannot squeeze dim {axis} with size {tensor.shape[axis]}"
+  return tensor.reshape(*[dim for idx, dim in enumerate(tensor.shape) if idx != axis])
+def sequence_mask(length: Tensor, max_length=None) -> Tensor:
   if max_length is None: max_length = length.numpy().max()
-  x = Tensor.arange(max_length, dtype=length.dtype, device=length.device)
-  return Tensor(x.unsqueeze(0).numpy() < length.unsqueeze(1).numpy())
+  return Tensor.arange(max_length, dtype=length.dtype, device=length.device).unsqueeze(0).__lt__(length.unsqueeze(1))
 def convert_pad_shape(pad_shape): return tuple(tuple(x) for x in pad_shape)
 def generate_path(duration: Tensor, mask: Tensor): # duration: [b, 1, t_x], mask: [b, 1, t_y, t_x]
   b, _, t_y, t_x = mask.shape
@@ -563,7 +522,7 @@ class HParams:
   def __contains__(self, key): return key in self.__dict__
   def __repr__(self): return self.__dict__.__repr__()
 
-def load_checkpoint(checkpoint_path, model: SynthesizerTrn, optimizer=None):
+def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None):
   assert os.path.isfile(checkpoint_path)
   start_time = time.time()
   checkpoint_dict = torch_load(checkpoint_path)
@@ -595,26 +554,30 @@ def load_checkpoint(checkpoint_path, model: SynthesizerTrn, optimizer=None):
     except Exception as e: raise e
   logger.info(f"Loaded checkpoint '{checkpoint_path}' (iteration {iteration}) in {time.time() - start_time:.4f}s")
   return model, optimizer, learning_rate, iteration
-def load_model(config_path, weights_path): # TODO: auto download from drive https://drive.google.com/drive/folders/1ksarh-cJf3F5eKJjLVWY0X1j1qsQqiS2
+def load_model(model):
+  config_path, weights_path = model[0], model[1]
+  if not os.path.isfile(config_path):
+    logger.info(f"Config file not found in {config_path}, downloading...")
+    download_file(model[2], config_path)
+  if not os.path.isfile(weights_path):
+    logger.info(f"Weights file not found in {weights_path}, downloading...")
+    download_file(model[3], weights_path)
   hps = get_hparams_from_file(config_path)
-  net_g = SynthesizerTrn(len(symbols),  hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, **hps.model)
+  net_g = Synthesizer(len(symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
   _ = load_checkpoint(weights_path, net_g, None)
   return net_g, hps
 
 """ from https://github.com/keithito/tacotron """
 # Export all symbols: _pad + _punctuation + _letters + _letters_ipa
 symbols = ['_'] + list(';:,.!?¡¿—…"«»“” ') + list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz') + list("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ")
-SPACE_ID = symbols.index(" ")
 _symbol_to_id, _id_to_symbol = {s: i for i, s in enumerate(symbols)}, {i: s for i, s in enumerate(symbols)}
 _whitespace_re, _abbreviations = re.compile(r'\s+'), [(re.compile('\\b%s\\.' % x[0], re.IGNORECASE), x[1]) for x in [ ('mrs', 'misess'), ('mr', 'mister'), ('dr', 'doctor'), ('st', 'saint'), ('co', 'company'), ('jr', 'junior'), ('maj', 'major'), ('gen', 'general'), ('drs', 'doctors'), ('rev', 'reverend'), ('lt', 'lieutenant'), ('hon', 'honorable'), ('sgt', 'sergeant'), ('capt', 'captain'), ('esq', 'esquire'), ('ltd', 'limited'), ('col', 'colonel'), ('ft', 'fort'),]]
 def text_to_sequence(text, cleaner_names):
-  sequence = []
   for name in cleaner_names:
-    cleaner =  globals().get(name)
+    cleaner = globals().get(name)
     if not cleaner: raise ModuleNotFoundError('Unknown cleaner: %s' % name)
     text = cleaner(text)
-  for symbol in text: sequence += [_symbol_to_id[symbol]]
-  return sequence
+  return [_symbol_to_id[symbol] for symbol in text]
 def expand_abbreviations(text):
   for regex, replacement in _abbreviations: text = re.sub(regex, replacement, text)
   return text
@@ -633,25 +596,29 @@ def get_text(text, hps):
   text_norm = text_to_sequence(text, hps.data.text_cleaners)
   if hps.data.add_blank: text_norm = intersperse(text_norm, 0)
   return Tensor(text_norm, dtype=dtypes.int64)
-
-VITS_PATH, OUT_PATH = Path(__file__).parent.parent / "weights/VITS/",  Path(__file__).parent.parent / "temp/tts_vits_test.wav"
-TEXT_TO_SYNTHESIZE = "Hello world!"
+VITS_PATH = Path(__file__).parent.parent / "weights/VITS/"
+MODELS = { # config_path, weights_path, config_url, weights_url
+  "ljs": (VITS_PATH / "ljs_base.json", VITS_PATH / "pretrained_ljs.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/ljs_base.json", "https://drive.google.com/uc?export=download&id=1q86w74Ygw2hNzYP9cWkeClGT5X25PvBT&confirm=t"),
+  "vctk": (VITS_PATH / "vctk_base.json", VITS_PATH / "pretrained_vctk.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/vctk_base.json", "https://drive.google.com/uc?export=download&id=11aHOlhnxzjpdWDpsz1vFDCzbeEfoIxru&confirm=t")
+}
+MODEL_TO_USE = "vctk" # "ljs" (female) or "vctk" (male)
+OUT_PATH = Path(__file__).parent.parent / f"temp/tts_vits_{MODEL_TO_USE}_test.wav"
+TEXT_TO_SYNTHESIZE = "Hello person, it's nice to talk with you, 1, 2, 3, weeee."
 # PAPER: https://arxiv.org/abs/2106.06103  CODE: https://github.com/jaywalnut310/vits/tree/main
 if __name__ == '__main__':
   logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
   logger = logging
   Tensor.no_grad, Tensor.Training = True, False
-  Tensor.manual_seed(1337)  # Deterministic
+  Tensor.manual_seed(1337)
   np.random.seed(1337)
-  net_g, hps = load_model(VITS_PATH / "ljs_base.json", VITS_PATH / "pretrained_ljs.pth")
+  net_g, hps = load_model(MODELS[MODEL_TO_USE])
   stn_tst = get_text(TEXT_TO_SYNTHESIZE, hps)
   logger.info(f"Converted input text to tensor \"{TEXT_TO_SYNTHESIZE}\" -> Tensor({stn_tst.shape}): {stn_tst.numpy()}")
   x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
   start_time = time.time()
-  out = net_g.infer(x_tst, x_tst_lengths, noise_scale=.667, noise_scale_w=0.8, length_scale=1)
+  out = net_g.infer(x_tst, x_tst_lengths, sid=Tensor([4], dtype=dtypes.int64) if MODEL_TO_USE == "vctk" else None, noise_scale=.667, noise_scale_w=0.8, length_scale=1)
   logger.info(f"Inference took {(time.time() - start_time):.2f}s")
-  audio = out[0][0, 0].numpy()
-  audio = ipd.Audio(audio, rate=hps.data.sampling_rate, normalize=False)
+  audio = ipd.Audio(out[0][0, 0].numpy(), rate=hps.data.sampling_rate, normalize=False)
   with open(OUT_PATH, 'wb') as f:
     f.write(audio.data)
     logger.info(f"Saved audio output to {OUT_PATH}")
