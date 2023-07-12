@@ -133,7 +133,7 @@ class Linearizer:
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)
 
-    # dedup by raw buffer and calculate mapping
+    # dedup by raw buffer
     self.dedup_bufs = dedup([x.realized for x in self.bufs], self.bufs)
 
     # key for lookup in cache (can change, str might not be right)
