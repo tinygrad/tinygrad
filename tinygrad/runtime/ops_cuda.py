@@ -1,6 +1,7 @@
 import subprocess, time, re, hashlib, tempfile
-from typing import Optional
+from typing import Optional, List
 import numpy as np
+import pycuda.driver as cuda 
 from pycuda.compiler import compile as cuda_compile # type: ignore
 from tinygrad.helpers import DEBUG, getenv, fromimport, colored
 from tinygrad.ops import Compiled
@@ -44,19 +45,16 @@ if getenv("CUDACPU", 0) == 1:
   RawCUDABuffer = RawMallocBuffer
 else:
   import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
-  import pycuda.driver as cuda # type: ignore
   class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
     def __init__(self, size, dtype): super().__init__(size, dtype, cuda.mem_alloc(size * dtype.itemsize)) # type: ignore
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore
     def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) # type: ignore
 
 class CUDAProgram:
-  def __init__(self, name:str, prg:str, global_size, local_size, binary=False):
+  def __init__(self, name:str, prg:str, global_size:List[int], local_size:List[int], binary=False):
     dev = cuda.Context.get_device()
     self.max_grid = [dev.get_attribute(cuda.device_attribute.MAX_GRID_DIM_X), dev.get_attribute(cuda.device_attribute.MAX_GRID_DIM_Y), dev.get_attribute(cuda.device_attribute.MAX_GRID_DIM_Z)]
     # self.max_block = [dev.get_attribute(cuda.device_attribute.MAX_BLOCK_DIM_X), dev.get_attribute(cuda.device_attribute.MAX_BLOCK_DIM_Y), dev.get_attribute(cuda.device_attribute.MAX_BLOCK_DIM_Z)]
-    self.global_size = []
-    self.subprg = []
     self.prg = prg
     try:
       if DEBUG >= 6:
@@ -74,16 +72,16 @@ class CUDAProgram:
     self.check_device_limit(global_size, local_size)
     
   def check_device_limit(self, global_size, local_size):
+    self.subprg = [self.prg]
     if global_size[2] > self.max_grid[2]:
-      self.subprg.append(self.prg)
+      self.global_size: List[tuple] = []
       for i in range(global_size[2]//self.max_grid[2]):
         offset = self.max_grid[2]*(i+1)
         self.subprg.append(self.prg.replace("gidx0", "(gidx0+%d)"%offset).replace("(gidx0+%d)"%offset, "gidx0", 1))
         self.global_size.append(tuple([global_size[0], global_size[1], self.max_grid[2]]))
       self.global_size.append(tuple([global_size[0],global_size[1], global_size[2]%self.max_grid[2]]))
     else:
-      self.subprg.append(self.prg)
-      self.global_size.append(global_size)
+      self.global_size = [global_size]
     self.subprg = [cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8') for prg in self.subprg]
     self.subprg = [cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]) for prg in self.subprg]
 
