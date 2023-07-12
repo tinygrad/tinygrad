@@ -4,8 +4,8 @@ from tinygrad.helpers import dtypes, DType
 from tinygrad.codegen.linearizer import LocalBuffer
 from tinygrad.codegen.cstyle import CStyleLanguage
 from typing import List, Union
-from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, FusedOps
 from tinygrad.runtime.lib import RawBuffer
+from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, FusedOps
 import math
 from typing import Tuple
 
