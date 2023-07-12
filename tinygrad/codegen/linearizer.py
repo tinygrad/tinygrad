@@ -142,7 +142,7 @@ class Linearizer:
     self.key = (ast.map_buffers({x:self.bufmap(i) for i,x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
 
   def bufmap(self, i: int) -> int:
-    return next(j for j,x in enumerate(self.dedup_bufs) if x.__class__ is LocalBuffer and x == self.bufs[i] or x.realized == self.bufs[i].realized)
+    return next(j for j,x in enumerate(self.dedup_bufs) if x.__class__ is LocalBuffer and x == self.bufs[i] or x.realized is not None and x.realized == self.bufs[i].realized)
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
@@ -611,10 +611,10 @@ class Linearizer:
           stride[j] = bst
           bst *= shp[j]
 
-    self.add_local(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()),
-                   ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
+    j = self.add_local(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()),
+                       ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
-    self.local_alias[i] = self.bufs[-1]
+    self.local_alias[i] = self.bufs[j]
 
   def hand_coded_optimizations(self):
     if getenv("NOOPT"): return
