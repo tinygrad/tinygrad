@@ -3,7 +3,10 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv
+from tinygrad.helpers import dedup, colored, DEBUG, prod, mnum, all_same, partition, getenv
+from tinygrad.ImageDType import ImageDType
+from tinygrad.dtypes import dtypes
+from tinygrad.DType import DType
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps

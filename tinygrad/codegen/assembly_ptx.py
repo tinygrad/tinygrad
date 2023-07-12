@@ -2,7 +2,7 @@ import struct
 from tinygrad.codegen.assembly import AssemblyCodegen
 from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
 from tinygrad.codegen.linearizer import UOps
-from tinygrad.helpers import dtypes
+from tinygrad.dtypes import dtypes
 
 dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "u16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32"}
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])

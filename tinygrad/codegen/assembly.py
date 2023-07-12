@@ -1,7 +1,9 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
 from tinygrad.codegen.linearizer import Linearizer, UOps, Token
 from tinygrad.ops import ASTRunner, BinaryOps, UnaryOps
-from tinygrad.helpers import DType, dtypes, DEBUG
+from tinygrad.helpers import DEBUG
+from tinygrad.DType import DType
+from tinygrad.dtypes import dtypes
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 import functools
 import math

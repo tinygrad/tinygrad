@@ -1,7 +1,5 @@
 from __future__ import annotations
 import platform, time, re
-from _weakref import _remove_dead_weakref # type: ignore
-import inspect
 from typing import Tuple, Union, List, Iterator, ClassVar, Any
 from tinygrad.GRAPH_MACROS import getenv
 from math import prod # noqa: F401 # pylint:disable=unused-import

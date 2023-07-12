@@ -2,7 +2,9 @@ from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, 
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
-from tinygrad.helpers import ImageDType, dtypes, colored, getenv, prod
+from tinygrad.helpers import colored, getenv, prod
+from tinygrad.ImageDType import ImageDType
+from tinygrad.dtypes import dtypes
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
 from tinygrad.lazy import LazyBuffer

@@ -2,6 +2,7 @@ import ctypes
 import numpy as np
 from typing import TypeVar, Type, Any
 from tinygrad.helpers import prod
+from tinygrad.dtypes import dtypes
 from tinygrad.DType import DType
 from tinygrad.GlobalCounters import GlobalCounters
 

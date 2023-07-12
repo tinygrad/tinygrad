@@ -2,7 +2,7 @@ from typing import Final, Dict, Callable, Any, List, Optional
 import functools
 from llvmlite import ir  # type: ignore
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token
-from tinygrad.helpers import dtypes
+from tinygrad.dtypes import dtypes
 from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, FusedOps
 from tinygrad.lazy import LazyBuffer
 

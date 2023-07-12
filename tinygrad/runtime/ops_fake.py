@@ -1,6 +1,7 @@
 # used for compilation only speed tests
 import numpy as np
-from tinygrad.helpers import dtypes, prod
+from tinygrad.helpers import prod
+from tinygrad.dtypes import dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBuffer
 
