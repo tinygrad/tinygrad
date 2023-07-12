@@ -29,7 +29,9 @@ class CStyleLanguage(NamedTuple):
   def render_cast(self, x:List[str], var_dtype) -> str:
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.make_vector_prefix is not None, "cast is not supported on this platform"
-    return f"({self.make_vector_prefix}{var_dtype.name})({','.join(x)})"
+    if not var_dtype.is_vector_type: prefix = '' 
+    else: prefix: self.make_vector_prefix
+    return f"({prefix}{var_dtype.name})({','.join(x)})"
 
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int], var_dtype) -> str:

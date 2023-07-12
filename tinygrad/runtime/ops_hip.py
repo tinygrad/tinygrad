@@ -57,7 +57,5 @@ class HIPCodegen(CStyleCodegen):
     half_prekernel = "", 
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
-  supports_float4 = False
-  supports_float4_alu = False
 
 HIPBuffer = Compiled(RawHIPBuffer, HIPCodegen, HIPProgram, hip.hipDeviceSynchronize)
