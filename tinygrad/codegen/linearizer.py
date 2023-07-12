@@ -434,6 +434,8 @@ class Linearizer:
       # end the global loop
       self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
+    self.bufs = self.dedup_bufs
+
   _OT = TypeVar("_OT")
   def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None) -> _OT:
     self.uops.append(UOp(uop, cast(Optional[Token], out), vin, arg))
