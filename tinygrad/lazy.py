@@ -46,12 +46,10 @@ def _ast_reduceops(self:LazyBuffer) -> LazyOp:
     # it's equivalent to performing the initial reduction and multiplying the result
     # by the size of the expanded dimension.
     if SIMPLIFY_SUM_RESHAPE_EXPAND_SUM and src.op.op == MovementOps.EXPAND: # type: ignore
-      expanded = src.op.src[0] # type: ignore
-      if expanded.op.op == MovementOps.RESHAPE: # type: ignore
-        reshaped = expanded.op.src[0] # type: ignore
-        simplified = _simplify_sum_reshape_expand_sum(self, reshaped, src)
-      else:
-        simplified = _simplify_sum_reshape_expand_sum(self, expanded, src)
+      arg = src.op.src[0] # type: ignore
+      if arg.op.op == MovementOps.RESHAPE: # type: ignore
+        arg = arg.op.src[0] # type: ignore
+      simplified = _simplify_sum_reshape_expand_sum(self, arg, src)
       if simplified: return simplified
     if MERGE_ELEMENTWISE_INTO_REDUCE and src.optype is BinaryOps and len(src.children) <= 1:
       # If we did remove an expand above, we might stumble back into a case where the reduction is not necessary
