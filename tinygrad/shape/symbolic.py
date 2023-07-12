@@ -49,7 +49,7 @@ class Node:
     return create_node(LtNode(lhs, b))
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
-    elif b == 1: return self
+    if b == 1: return self
     return create_node(MulNode(self, b))
 
   # *** complex ops ***

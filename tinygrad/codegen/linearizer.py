@@ -101,10 +101,10 @@ def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
 # TODO: generic visitor pattern?
 def expand_node(idx:Node) -> List[Node]:
   if isinstance(idx, Variable):  return [idx] if idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)]
-  elif isinstance(idx, NumNode): return [idx]
-  elif isinstance(idx, MulNode): return [x*idx.b for x in expand_node(idx.a)]
-  elif isinstance(idx, SumNode): return [Variable.sum(list(it)) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
-  else: raise NotImplementedError(idx)
+  if isinstance(idx, NumNode): return [idx]
+  if isinstance(idx, MulNode): return [x*idx.b for x in expand_node(idx.a)]
+  if isinstance(idx, SumNode): return [Variable.sum(list(it)) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
+  raise NotImplementedError(idx)
 
 def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
   for x in itertools.product(*[expand_node(idx) for idx in idxs[::-1]]):
