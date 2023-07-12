@@ -79,13 +79,16 @@ def get_grouped_vector_idxs(acc:List[Token], amt=4) -> Optional[List[int]]:
 def to_vector(x:List[Token], amt:int=4) -> Optional[Token]:
   if all_same(x): return x[0]
   if all_same([y.name for y in x]) and all(y.dtype.is_vector_type and y.offset == i for i,y in enumerate(x)):
+    # print('group success: ', x)
     return Token(x[0].name, dtypes.get_vector_type(x[0].dtype, amt=amt))
+  # print('group fail: ', x)
   return None
 
 def get_grouped_maybe_vector(*values:List[Token], grouping_allowed=True, amt=4):
   assert all_same([len(x) for x in values]), f"all values are not the same length {[len(x) for x in values]}"
   # these use accumulators, we can only fold if the acc is a vector
   idxs = get_grouped_vector_idxs(values[-1], amt) if grouping_allowed else None
+  # print('grouping idxs: ', idxs)
   if idxs is not None:
     new_idxs = []
     new_values = []
@@ -203,13 +206,12 @@ class Linearizer:
 
   def get_upcast_dim(self, i, amt=4):
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16, dtypes.int8, dtypes.int32, dtypes.int64] or isinstance(self.bufs[i].dtype, ImageDType))
-    print(self.bufs[i].dtype, [self.sts[i].shape[x] for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted])
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == amt]
 
   def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
-    upcast_dim = self.get_upcast_dim(i, amt=2) #if self.bufs[i].dtype == dtypes.half and not self.supports_half4 and self.supports_half2 else 4)
+    upcast_dim = self.get_upcast_dim(i, amt=2 if self.bufs[i].dtype == dtypes.half and not self.supports_half4 and self.supports_half2 else 4)
     amt = 1
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
@@ -220,15 +222,15 @@ class Linearizer:
       if amt > 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
         localtype = dtypes.get_vector_type(self.bufs[i].dtype, amt)
-        accumtype = dtypes.get_vector_type(dtypes.float, amt)
+        accumtype = dtypes.get_vector_type(dtypes.float, amt) if getenv('ACCUM_FLOAT', 1) else localtype
         if idx.render() != ((idx//amt)*amt).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
           localtype = self.bufs[i].dtype
-          accumtype = dtypes.float
+          accumtype = dtypes.float if getenv('ACCUM_FLOAT', 1) else localtype
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
         localtype = self.bufs[i].dtype
-        accumtype = dtypes.float
+        accumtype = dtypes.float if getenv('ACCUM_FLOAT', 1) else localtype
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
@@ -276,12 +278,12 @@ class Linearizer:
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
-      self.bufs.append(LocalBuffer("temp", self.sts[-1].size(), dtype=dtypes.float))
-      self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size(), dtypes.float))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size(), dtype=dtypes.float if getenv('ACCUM_FLOAT', 1) else self.bufs[-1].dtype))
+      self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size(), dtypes.float if getenv('ACCUM_FLOAT', 1) else self.bufs[-1].dtype))
 
     # define local buffers
     for lb in self.local_alias.values():
-      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size(), dtypes.float))
+      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size(), dtypes.float if getenv('ACCUM_FLOAT', 1) else self.bufs[-1].dtype))
 
     # print
     if DEBUG >= 3: self.printbufs()
@@ -296,9 +298,10 @@ class Linearizer:
 
     # ssa
     _ssa:DefaultDict[str,int] = defaultdict(int)
-    def ssa(name, ltype=dtypes.float) -> Token:
+    def ssa(name, ltype=dtypes.float, add_idx=True) -> Token:
       _ssa[name] += 1
-      return Token(f"{name}{_ssa[name]-1}", ltype)
+      name = f"{name}{_ssa[name]-1}" if add_idx else name
+      return Token(name, ltype)
 
     # global loop
     global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
@@ -443,7 +446,8 @@ class Linearizer:
   
   @staticmethod
   def ungroup(token, size=4):
-    # assert token.dtype.is_vector_type
+    assert token.dtype.is_vector_type
+    assert token.offset is None
     if isinstance(token, Token):
       new_tokens = []
       for idx in range(size):
@@ -468,59 +472,35 @@ class Linearizer:
       values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
 
       # Cast all to highest priority dtype
-      cast_dtype = dtypes.float if x.op.__class__ in {ReduceOps, FusedOps} else dtypes.float16
-      highest_priority = cast_dtype.priority
-      for val in values:
-        for v in val:
-          if v.dtype.priority > highest_priority:
-            highest_priority = v.dtype.priority
-            cast_dtype = v.dtype if v.offset is None else dtypes.get_normal_type(v.dtype) 
+      cast_dtype = dtypes.float if x.op.__class__ in {ReduceOps, FusedOps} and getenv('ACCUM_FLOAT', 1) else dtypes.float16
+      highest_priority = max([v.dtype.priority for val in values for v in val] + [cast_dtype.priority])
+      buf_cast_dtype = [v.dtype if v.offset is None else dtypes.get_normal_type(v.dtype) for val in values for v in val if v.dtype.priority == highest_priority]
+      if len(buf_cast_dtype) > 0: cast_dtype = buf_cast_dtype[0]
 
-      # Takes care of different data type interactions 
-      def maybe_cast(values, cast_dtype):
+      if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and getenv('NVIDIA'): cast_dtype = dtypes.float
 
-        # These ops always need to be done in float32 (for NVIDIA only)
-        if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and getenv('NVIDIA'):
-          if len(values) >= 4 and len(values) % 4 == 0 and self.supports_float4: cast_dtype = dtypes._float4
-          else: cast_dtype = dtypes.float
-
-        casted = []
-        if len(values) >= 4 and len(values) % 4 == 0 and self.supports_float4: # Use vector types
-          cast_dtype = dtypes.get_vector_type(cast_dtype)
-          if dtypes.get_vector_type(values[0].dtype) != cast_dtype:
-            for val_start_idx in range(0, len(values), 4):
-              value = values[val_start_idx:val_start_idx+4]
-              casted.extend(self.ungroup(self.uop(UOps.CAST, ssa("casted", cast_dtype), value), size=len(value)))
-            return casted
-          return values
-        else:
-          for value in values: # cast one at a time
-            if value.dtype != cast_dtype and dtypes.get_vector_type(value.dtype) != cast_dtype and (
-              (value.offset is not None and (dtypes.get_vector_type(cast_dtype) != value.dtype)) or value.offset is None):
-              casted.extend(self.ungroup(self.uop(UOps.CAST, ssa("casted", cast_dtype), [value]), size=1))
-            else: casted.append(value)
-          return casted
-      casted_values = [maybe_cast(val, cast_dtype) for val in values]
-      acc = maybe_cast(acc, cast_dtype)
       if dtypes.get_normal_type(cast_dtype) == dtypes.half:
-        if self.supports_half4_alu:
-          grouping_allowed, group_amt = True, 4
-        elif self.supports_half2_alu:
-          grouping_allowed, group_amt = True, 2
-        else:
-          grouping_allowed, group_amt = False, 4
-      else:
-        grouping_allowed, group_amt = self.supports_float4_alu, 4
+        if self.supports_half4_alu: grouping_allowed, group_amt = True, 4
+        elif self.supports_half2_alu: grouping_allowed, group_amt = True, 2
+        else: grouping_allowed, group_amt = False, 4
+      else: grouping_allowed, group_amt = self.supports_float4_alu, 4
 
-      print('group_amt: ', group_amt)
-
+      casts = {}
+      grouped = list(get_grouped_maybe_vector(*values, acc, grouping_allowed=grouping_allowed, amt=group_amt) if x.op.__class__ in {ReduceOps, FusedOps} else 
+                 get_grouped_maybe_vector(*values, grouping_allowed=grouping_allowed and x.op != BinaryOps.CMPEQ, amt=group_amt))
+      for idx, val in grouped:
+        for v in val:
+          if v.dtype.is_vector_type and v.offset is None and v.dtype != dtypes.get_vector_type(cast_dtype, group_amt) and v not in casts:
+            casts[v] = self.uop(UOps.CAST, ssa(f"casted_{v.name}", dtypes.get_vector_type(cast_dtype, group_amt), False), self.ungroup(v))
+          elif dtypes.get_normal_type(v.dtype) != cast_dtype and v not in casts:
+            offset = f"_{v.offset}" if v.offset is not None else ''
+            casts[v] = self.uop(UOps.CAST, ssa(f"casted_{v.name}{offset}", cast_dtype, False), [v])
       ret = []
-      if x.op.__class__ in {ReduceOps, FusedOps}:
-        for idx, val in get_grouped_maybe_vector(*casted_values, acc, grouping_allowed=grouping_allowed, amt=group_amt):
-          ret.append((idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])))
-      else:
-        for idx, val in get_grouped_maybe_vector(*casted_values,grouping_allowed=grouping_allowed and x.op != BinaryOps.CMPEQ, amt=group_amt):
-          ret.append((idx, self.uop(UOps.ALU, ssa('alu', dtypes.get_vector_type(val[0].dtype) if any(x.dtype.is_vector_type and x.offset is None for x in val) else val[0].dtype), list(val), x.op)))
+      for idx, val in grouped:
+        val = [casts.get(v, v) for v in val]
+        ret.append((idx, self.uop(UOps.ALU, val[-1] if x.op.__class__ in {ReduceOps, FusedOps} else ssa('alu', dtypes.get_vector_type(val[0].dtype, group_amt) if any(x.dtype.is_vector_type and x.offset is None for x in val) else val[0].dtype),
+                    list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}.get(x.op, x.op))))
+
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
       # scatter
       for i,j in ret:

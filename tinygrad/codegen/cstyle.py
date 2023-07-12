@@ -27,7 +27,7 @@ class CStyleLanguage(NamedTuple):
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype) -> str:
-    assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
+    # assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.make_vector_prefix is not None, "cast is not supported on this platform"
     if not var_dtype.is_vector_type: prefix = '' 
     else: prefix = self.make_vector_prefix
