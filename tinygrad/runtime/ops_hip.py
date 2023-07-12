@@ -54,8 +54,10 @@ class HIPProgram:
 class HIPCodegen(CStyleCodegen):
   lang = CStyleLanguage(
     kernel_prefix = "#define INFINITY (__builtin_inff())\nextern \"C\" __global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", make_vector_prefix = "make_",
-    half_prekernel = "",
+    half_prekernel = "", 
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
+  supports_float4 = False
+  supports_float4_alu = False
 
 HIPBuffer = Compiled(RawHIPBuffer, HIPCodegen, HIPProgram, hip.hipDeviceSynchronize)

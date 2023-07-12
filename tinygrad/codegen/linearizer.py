@@ -471,10 +471,10 @@ class Linearizer:
       # Takes care of different data type interactions 
       def maybe_cast(values, cast_dtype):
 
-        # These ops always need to be done in float32
-        # if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2]:
-        #   if len(values) >= 4 and len(values) % 4 == 0 and self.supports_float4: cast_dtype = dtypes._float4
-        #   else: cast_dtype = dtypes.float
+        # These ops always need to be done in float32 (for NVIDIA only)
+        if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and getenv('NVIDIA'):
+          if len(values) >= 4 and len(values) % 4 == 0 and self.supports_float4: cast_dtype = dtypes._float4
+          else: cast_dtype = dtypes.float
 
         casted = []
         if len(values) >= 4 and len(values) % 4 == 0 and self.supports_float4: # Use vector types
