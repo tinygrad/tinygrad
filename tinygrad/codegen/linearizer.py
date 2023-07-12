@@ -57,7 +57,7 @@ class Token(NamedTuple):
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
 # TODO: the next three functions are poorly written
-def get_grouped_vector4_idxs(acc:List[Token]) -> Optional[List[int]]:
+def get_grouped_vector_idxs(acc:List[Token], amt=4) -> Optional[List[int]]:
   idxs: Optional[List[int]] = []
   for i,a in enumerate(acc):
     if idxs is None: break
@@ -66,35 +66,35 @@ def get_grouped_vector4_idxs(acc:List[Token]) -> Optional[List[int]]:
       idxs.append(i)
       friends: List[int] = []
       for j,b in enumerate(acc):
-        if len(friends) == 3: break
+        if len(friends) == amt-1: break
         if j in idxs: continue
         if a.name == b.name and b.dtype.sz > 1 and b.offset == len(friends)+1:
           friends.append(j)
-      if len(friends) == 3: idxs += friends
+      if len(friends) == amt-1: idxs += friends
       else: idxs = None
     else:
       idxs = None
   return idxs
 
-def to_vector4(x:List[Token]) -> Optional[Token]:
+def to_vector(x:List[Token], amt:int=4) -> Optional[Token]:
   if all_same(x): return x[0]
   if all_same([y.name for y in x]) and all(y.dtype.is_vector_type and y.offset == i for i,y in enumerate(x)):
-    return Token(x[0].name, dtypes.get_vector_type(x[0].dtype))
+    return Token(x[0].name, dtypes.get_vector_type(x[0].dtype, amt=amt))
   return None
 
-def get_grouped_maybe_vector4(*values:List[Token], grouping_allowed=True):
+def get_grouped_maybe_vector(*values:List[Token], grouping_allowed=True, amt=4):
   assert all_same([len(x) for x in values]), f"all values are not the same length {[len(x) for x in values]}"
-  # these use accumulators, we can only fold if the acc is a float4
-  idxs = get_grouped_vector4_idxs(values[-1]) if grouping_allowed else None
+  # these use accumulators, we can only fold if the acc is a vector
+  idxs = get_grouped_vector_idxs(values[-1], amt) if grouping_allowed else None
   if idxs is not None:
     new_idxs = []
     new_values = []
-    for i in range(0, len(idxs), 4):
-      nv = [to_vector4([v[j] for j in idxs[i:i+4]]) for v in values]
+    for i in range(0, len(idxs), amt):
+      nv = [to_vector([v[j] for j in idxs[i:i+amt]], amt) for v in values]
       if any(x is None for x in nv): break
-      new_idxs.append(idxs[i:i+4])
+      new_idxs.append(idxs[i:i+amt])
       new_values.append(nv)
-    if len(new_values) == len(idxs)//4:
+    if len(new_values) == len(idxs)//amt:
       return zip(new_idxs, new_values)
   return zip([[i] for i in range(len(values[0]))], zip(*values))
 
@@ -125,6 +125,11 @@ class UOp(NamedTuple):
 class Linearizer:
   supports_float4: bool = False
   supports_float4_alu: bool = False
+  supports_half4: bool = False
+  supports_half4_alu: bool = False
+  supports_half2: bool = False
+  supports_half2_alu: bool = False
+
 
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
@@ -182,7 +187,7 @@ class Linearizer:
     if DEBUG >= 5: self.printbufs("early")
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
-  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]
+  def vector_axis(self, i, amt=4): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%amt == 0]
 
   def upcasted_axis(self, i):
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
@@ -198,13 +203,13 @@ class Linearizer:
 
   def get_upcast_dim(self, i, amt=4):
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16, dtypes.int8, dtypes.int32, dtypes.int64] or isinstance(self.bufs[i].dtype, ImageDType))
+    print(self.bufs[i].dtype, [self.sts[i].shape[x] for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted])
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == amt]
 
   def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
-    upcast_dim = self.get_upcast_dim(i)
-
+    upcast_dim = self.get_upcast_dim(i, amt=2) #if self.bufs[i].dtype == dtypes.half and not self.supports_half4 and self.supports_half2 else 4)
     amt = 1
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
@@ -215,7 +220,7 @@ class Linearizer:
       if amt > 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
         localtype = dtypes.get_vector_type(self.bufs[i].dtype, amt)
-        accumtype = dtypes._float4
+        accumtype = dtypes.get_vector_type(dtypes.float, amt)
         if idx.render() != ((idx//amt)*amt).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
           localtype = self.bufs[i].dtype
@@ -235,7 +240,7 @@ class Linearizer:
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
-    upcast_dim = self.get_upcast_dim(i)
+    upcast_dim = self.get_upcast_dim(i, amt=2 if self.bufs[i].dtype == dtypes.half and not self.supports_half4 and self.supports_half2 else 4)
 
     store_offset = dict(zip(_idxs, store))
 
@@ -497,12 +502,24 @@ class Linearizer:
           return casted
       casted_values = [maybe_cast(val, cast_dtype) for val in values]
       acc = maybe_cast(acc, cast_dtype)
+      if dtypes.get_normal_type(cast_dtype) == dtypes.half:
+        if self.supports_half4_alu:
+          grouping_allowed, group_amt = True, 4
+        elif self.supports_half2_alu:
+          grouping_allowed, group_amt = True, 2
+        else:
+          grouping_allowed, group_amt = False, 4
+      else:
+        grouping_allowed, group_amt = self.supports_float4_alu, 4
+
+      print('group_amt: ', group_amt)
+
       ret = []
       if x.op.__class__ in {ReduceOps, FusedOps}:
-        for idx, val in get_grouped_maybe_vector4(*casted_values, acc, grouping_allowed=self.supports_float4_alu):
+        for idx, val in get_grouped_maybe_vector(*casted_values, acc, grouping_allowed=grouping_allowed, amt=group_amt):
           ret.append((idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])))
       else:
-        for idx, val in get_grouped_maybe_vector4(*casted_values, grouping_allowed=self.supports_float4_alu and x.op != BinaryOps.CMPEQ):
+        for idx, val in get_grouped_maybe_vector(*casted_values,grouping_allowed=grouping_allowed and x.op != BinaryOps.CMPEQ, amt=group_amt):
           ret.append((idx, self.uop(UOps.ALU, ssa('alu', dtypes.get_vector_type(val[0].dtype) if any(x.dtype.is_vector_type and x.offset is None for x in val) else val[0].dtype), list(val), x.op)))
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
       # scatter
@@ -723,7 +740,7 @@ class Linearizer:
         return
 
     # are we grouping? (requires local shape support)
-    if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+    if not self.vector_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
@@ -732,7 +749,7 @@ class Linearizer:
           break
 
     # are we upcasting in mid reduce? (only for images)
-    if self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
+    if self.bufs[0].dtype.name.startswith('image') and not self.vector_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
       axes = self.sts[0].unit_stride_axes()
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
       if self.sts[0].shape[axes[0]]%4 == 0:

@@ -93,6 +93,7 @@ class dtypes:
   @staticmethod
   def get_vector_type(x: DType, amt: int = 4):
     if x.name == 'half' and amt == 4: return dtypes._half4 
+    if x.name == 'half' and amt == 2: return dtypes._half2
     if x.name == 'int' and amt == 4: return dtypes._int4 
     if x.name == 'char' and amt == 4: return dtypes._char4 
     if x.name == 'long' and amt == 4: return dtypes._long4 
@@ -102,6 +103,7 @@ class dtypes:
   @staticmethod
   def get_normal_type(x: DType):
     if x.name == 'half4': return dtypes.half 
+    if x.name == 'half2': return dtypes.half 
     if x.name == 'int4': return dtypes.int32
     if x.name == 'char4': return dtypes.int8
     if x.name == 'long4': return dtypes.int64
@@ -126,6 +128,8 @@ class dtypes:
   _long4: Final[DType] = DType(3, 4*8, "long4", None, 4, is_vector_type=True)
   _int4: Final[DType] = DType(2, 4*4, "int4", None, 4, is_vector_type=True)
   _float2: Final[DType] = DType(4, 4*2, "float2", None, 2, is_vector_type=True)
+  _half2: Final[DType] = DType(4, 2*2, "half2", None, 2, is_vector_type=True)
+
 
 
 

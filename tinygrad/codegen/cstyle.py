@@ -185,6 +185,10 @@ class CStyleCodegen(Linearizer):
   supports_constant_folding: bool = True
   supports_float4: bool = True
   supports_float4_alu: bool = True
+  supports_half4: bool = True
+  supports_half4_alu: bool = True
+  supports_half2: bool = True
+  supports_half2_alu: bool = True
 
   # for renaming
   kernel_cnt: Final[DefaultDict[str, int]] = collections.defaultdict(int)
