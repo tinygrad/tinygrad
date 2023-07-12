@@ -273,8 +273,10 @@ class Linearizer:
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
-      self.local_reduce_buf = self.add_local(LocalBuffer("temp", self.sts[-1].size()),
-          ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
+      self.dedup_bufs.append(self.bufs[-1])
+      self.local_reduce_buf = len(self.bufs) - 1
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
     # define local buffers
@@ -593,12 +595,6 @@ class Linearizer:
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
       if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
 
-  def add_local(self, buf: LocalBuffer, st: ShapeTracker):
-    self.sts.append(st)
-    self.bufs.append(buf)
-    self.dedup_bufs.append(buf)
-    return len(self.bufs) - 1
-
   def alias_buffer(self, i, pattern):
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
 
@@ -611,10 +607,11 @@ class Linearizer:
           stride[j] = bst
           bst *= shp[j]
 
-    j = self.add_local(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()),
-                       ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
+    self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
+    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
+    self.dedup_bufs.append(self.bufs[-1])
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
-    self.local_alias[i] = self.bufs[j]
+    self.local_alias[i] = self.bufs[-1]
 
   def hand_coded_optimizations(self):
     if getenv("NOOPT"): return
