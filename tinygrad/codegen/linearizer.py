@@ -4,7 +4,7 @@ from collections import defaultdict
 from enum import Enum, auto
 
 from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv
-from tinygrad.ops import ASTRunner, LazyOp, FlopCounter, get_lazyop_info, UnaryOps
+from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.runtime.lib import RawConst
