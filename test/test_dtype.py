@@ -3,9 +3,7 @@ import numpy as np
 from tinygrad.helpers import getenv, DType, DEBUG
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor, dtypes
-from tinygrad.runtime.ops_cpu import match_types
 from extra.utils import OSX
-import torch
 
 def _test_to_np(a:Tensor, np_dtype, target):
   print(a)
