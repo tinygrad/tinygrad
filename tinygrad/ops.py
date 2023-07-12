@@ -104,8 +104,7 @@ class Interpreted:
       assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
       output.output_buffer._buf = ret._buf
       return output.output_buffer
-    else:
-      return ret
+    return ret
 
 class FlopCounter:
   def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops, self._buf = *tup, self

@@ -188,7 +188,7 @@ class BoxList:
     if self.mode == "xyxy":
       xmin, ymin, xmax, ymax = self.bbox.chunk(4, dim=-1)
       return xmin, ymin, xmax, ymax
-    elif self.mode == "xywh":
+    if self.mode == "xywh":
       TO_REMOVE = 1
       xmin, ymin, w, h = self.bbox.chunk(4, dim=-1)
       return (
