@@ -200,7 +200,7 @@ class Linearizer:
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
-  def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
+  def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
@@ -217,10 +217,10 @@ class Linearizer:
         localtype = dtypes._float4 if amt == 4 else dtypes._float2
         if idx.render() != ((idx//amt)*amt).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
-          localtype = dtypes.float
+          localtype = dtypes.float32
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
-        localtype = dtypes.float
+        localtype = dtypes.float32
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
