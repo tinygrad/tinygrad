@@ -1,6 +1,6 @@
 import struct
 from tinygrad.codegen.assembly import AssemblyCodegen
-from tinygrad.ops import BinaryOps, UnaryOps, FusedOps, ASTRunner
+from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
 from tinygrad.codegen.linearizer import UOps
 from tinygrad.helpers import dtypes
 
