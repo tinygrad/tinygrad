@@ -264,6 +264,12 @@ class Linearizer:
       if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
       self.uop(UOps.STORE, None, [var], MemOp(self.bufmap[i], idx, valid))
 
+  def add_local(self, buf: LocalBuffer, st: ShapeTracker):
+    self.sts.append(st)
+    self.bufs.append(buf)
+    self.dedup_bufs.append(buf)
+    self.bufmap.append(len(self.dedup_bufs) - 1)
+
   def linearize(self):
     # uops
     self.uops: List[UOp] = []
@@ -272,10 +278,8 @@ class Linearizer:
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
-      self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
-      self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
-      self.dedup_bufs.append(self.bufs[-1])
-      self.bufmap.append(len(self.dedup_bufs) - 1)
+      self.add_local(LocalBuffer("temp", self.sts[-1].size()),
+                     ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.local_reduce_buf = len(self.bufs) - 1
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
@@ -607,10 +611,8 @@ class Linearizer:
           stride[j] = bst
           bst *= shp[j]
 
-    self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
-    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
-    self.dedup_bufs.append(self.bufs[-1])
-    self.bufmap.append(len(self.dedup_bufs) - 1)
+    self.add_local(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()),
+                   ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
 
