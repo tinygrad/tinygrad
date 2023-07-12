@@ -10,7 +10,8 @@ from models.rnnt import RNNT
 def rnnt_loss_forward(x: Tensor, y: Tensor, blank=28):
   T, U, _ = x.shape
 
-  alphas = Tensor.zeros((T,U))
+  alphas = Tensor.zeros((T, U))
+  alphas[1,0] = 1
 
   for t in range(1, T):
     alphas[t, 0] = alphas[t - 1, 0] + x[t - 1, 0, blank]
