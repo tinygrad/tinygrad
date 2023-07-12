@@ -94,9 +94,8 @@ backend_test.exclude('test_atanh_*')
 # no boolean ops (2d, 3d, 4d)
 backend_test.exclude('test_bitshift_*')
 
-# no scatter gather
+# no scatternd gathernd
 backend_test.exclude('test_gathernd_*')
-backend_test.exclude('test_scatter_*')
 backend_test.exclude('test_scatternd_*')
 
 # no quantize
@@ -115,7 +114,7 @@ backend_test.exclude('test_simple_rnn_*')
 # no control flow
 backend_test.exclude('test_if_*')
 backend_test.exclude('test_loop*')
-backend_test.exclude('test_range_float_type_positive_delta_expanded_cpu') # requires LOOP
+backend_test.exclude('test_range_float_type_positive_delta_expanded_cpu') # requires loop
 
 # unsupported (strange) ops
 backend_test.exclude('test_bitwise_*')

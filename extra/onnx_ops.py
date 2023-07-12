@@ -161,17 +161,21 @@ def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=N
   return ret, indices
 
 def MaxUnpool(xT, xI, outshape=None, kernel_shape=None, pads=None, strides=None):
-  xI = xI.flatten()
-  if outshape: outlength = int(prod(safe_numpy(outshape)))
-  else: outlength = int(safe_numpy(xI.max()))
-  zeros = Tensor.zeros(outlength)
-  arange = Tensor.arange(outlength)
-  haha = xI.unsqueeze(1).expand(prod(xT.shape), outlength)
-  lol = arange.reshape(1, outlength).expand(haha.shape)
-  ok = (haha == lol).sum(0)
-  # wtf to do after this......
-  # This shit is basically a scatter. Have to implement scatter.
-  return None
+  out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
+  outlength = prod(out_sh) 
+  xI = xI.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
+  arange = Tensor.arange(outlength).reshape(1, outlength).expand(xI.shape)
+  xT = xT.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
+  ret = ((xI == arange) * xT).sum(0).reshape([1, 1] + out_sh)
+  if outshape:
+    outshape = safe_numpy(outshape).tolist()
+    if outshape != ret.shape:
+      diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
+      pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
+      ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
+      # (padding_left, padding_right, padding_top, padding_bottom)
+      # onnx: [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
+  return ret
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
   if auto_pad != "NOTSET": padding = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
