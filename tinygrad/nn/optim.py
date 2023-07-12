@@ -11,7 +11,7 @@ class Optimizer:
 
     self.params: List[Tensor] = dedup([x for x in params if x.requires_grad])
     self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
-    self.lr = Tensor([lr], requires_grad=False)
+    self.lr = Tensor([lr], requires_grad=False).contiguous()
 
   def zero_grad(self):
     for param in self.params: param.grad = None
