@@ -25,6 +25,7 @@ HALF_SCALE = getenv('HALF_SCALE', 100)
 
 if HALF:
   Tensor.default_type = dtypes.float16
+else:
   HALF_SCALE = 1
 
 
