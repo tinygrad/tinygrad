@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 import operator
 from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast
 import sys, importlib, inspect, functools, pathlib
@@ -207,16 +208,22 @@ class LazyBuffer:
         return root.reshape(ret.st.shape)
     return ret
 
-  def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
+  def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
     srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
-
-    # Split multi-axis reduction into two kernels on Metal for perf
-    if sum(shape_differences := [new != old for new, old in zip(new_shape, self.shape)]) > 1 and self.device == "METAL":
-      intermediate_shape = tuple(old if i == shape_differences.index(True) else new for i, (new, old) in enumerate(zip(new_shape, self.shape)))
-      return create_lazybuffer(self.device, ShapeTracker(intermediate_shape), ReduceOps, LazyOp(op, srcs, intermediate_shape), self.dtype).reduce_op(op, new_shape)
-
     return create_lazybuffer(self.device, ShapeTracker(new_shape), ReduceOps, LazyOp(op, srcs, new_shape), self.dtype)
+
+  def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
+    if prod(self.shape) // prod(new_shape) > 8192:
+      reduced_dimensions = [(i, math.gcd(256, old), stride) for i, (old, new, stride) in enumerate(zip(self.shape, new_shape, self.st.real_strides())) if old != new]
+      dimension_to_split, divisor, _ = max(reduced_dimensions, key=lambda v: v[1]//(v[2] or math.inf) ) # heuristic -> choose largest divisor to split on, penalize large strides
+
+      intermediate_input_shape = self.shape[:dimension_to_split] + (self.shape[dimension_to_split]//divisor, divisor) + self.shape[dimension_to_split+1:]
+      intermediate_output_shape = self.shape[:dimension_to_split] + (self.shape[dimension_to_split]//divisor, 1) + self.shape[dimension_to_split+1:]
+      final_input_shape = self.shape[:dimension_to_split] + (self.shape[dimension_to_split]//divisor,) + self.shape[dimension_to_split+1:]
+
+      return self.reshape(intermediate_input_shape)._reduce_op(op, intermediate_output_shape).reshape(final_input_shape)._reduce_op(op, new_shape)
+    return self._reduce_op(op, new_shape)
 
   def reshape(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == arg: return self
