@@ -327,8 +327,7 @@ class _Device:
     x = x.split(":")[0].upper()
     runtime = self._runtimes.get(x)
     if runtime is None:
-      runtime = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._names][0]
-      self._runtimes[x] = runtime
+      self._runtimes[x] = runtime = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._names][0]
     return runtime
   def _default_device(self) -> str:
     for device in ["METAL", "CUDA", "GPU"]:
