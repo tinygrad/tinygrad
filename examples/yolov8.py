@@ -12,7 +12,7 @@ from tinygrad.state import safe_load, load_state_dict
 
 
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
-#The upsampling class has been taken from this pull request https://github.com/geohot/tinygrad/pull/784 by dc-dc-dc. Now 2(?) models use upsampling. (retinet and this)
+#The upsampling class has been taken from this pull request https://github.com/tinygrad/tinygrad/pull/784 by dc-dc-dc. Now 2(?) models use upsampling. (retinet and this)
 
 #Pre processing image functions.
 def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, scaleup=True, stride=32):
@@ -232,7 +232,7 @@ def label_predictions(all_predictions):
 
   return dict(class_index_count)
 
-#this is taken from https://github.com/geohot/tinygrad/pull/784/files by dc-dc-dc (Now 2 models use upsampling)
+#this is taken from https://github.com/tinygrad/tinygrad/pull/784/files by dc-dc-dc (Now 2 models use upsampling)
 class Upsample:
   def __init__(self, scale_factor:int, mode: str = "nearest") -> None:
     assert mode == "nearest" # only mode supported for now
