@@ -255,7 +255,7 @@ if __name__ == "__main__":
     sequence_ranker = MaximumLikelihoodRanker(None)
     seek, texts = 0, []
     while seek < content_frames:
-      initial_tokens = [enc._special_tokens["<|startoftranscript|>"]]
+      initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|transcribe|>"]]
       sample_begin = len(initial_tokens)
       mel_segment = mel[:, seek:seek+N_FRAMES]
       mel_segment = np.expand_dims(pad_or_trim(mel, N_FRAMES), axis=0)
