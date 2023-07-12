@@ -106,7 +106,7 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
 def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_x):
   torch.manual_seed(0)
   torch_dat = torch.rand(bs, in_chans, img_size_y, img_size_x, dtype=torch.float16 if HALF else torch.float).to(torch_device)
-  torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None, dtype=torch.float if (str(torch_device) == 'cpu' and not HALF) else torch.float16 if HALF else torch.float).to(torch_device)
+  torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None, dtype=torch.float if (str(torch_device) == 'cpu' and HALF) else torch.float16 if HALF else torch.float).to(torch_device)
 
   tiny_dat = Tensor(torch_dat.cpu().numpy())
   tiny_conv = Conv2d(in_chans, out_chans, kernel_size, bias=None)
