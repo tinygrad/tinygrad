@@ -273,6 +273,7 @@ class Linearizer:
     # uops
     self.uops: List[UOp] = []
     self.saved_exprs: Dict[LazyOp, List[Token]] = dict()
+    self.casts = {}
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
@@ -485,19 +486,18 @@ class Linearizer:
         else: grouping_allowed, group_amt = False, 4
       else: grouping_allowed, group_amt = self.supports_float4_alu, 4
 
-      casts = {}
       grouped = list(get_grouped_maybe_vector(*values, acc, grouping_allowed=grouping_allowed, amt=group_amt) if x.op.__class__ in {ReduceOps, FusedOps} else 
                  get_grouped_maybe_vector(*values, grouping_allowed=grouping_allowed and x.op != BinaryOps.CMPEQ, amt=group_amt))
       for idx, val in grouped:
         for v in val:
-          if v.dtype.is_vector_type and v.offset is None and v.dtype != dtypes.get_vector_type(cast_dtype, group_amt) and v not in casts:
-            casts[v] = self.uop(UOps.CAST, ssa(f"casted_{v.name}", dtypes.get_vector_type(cast_dtype, group_amt), False), self.ungroup(v))
-          elif dtypes.get_normal_type(v.dtype) != cast_dtype and v not in casts:
+          if v.dtype.is_vector_type and v.offset is None and v.dtype != dtypes.get_vector_type(cast_dtype, group_amt) and v not in self.casts:
+            self.casts[v] = self.uop(UOps.CAST, ssa(f"casted_{v.name}", dtypes.get_vector_type(cast_dtype, group_amt), False), self.ungroup(v))
+          elif dtypes.get_normal_type(v.dtype) != cast_dtype and v not in self.casts:
             offset = f"_{v.offset}" if v.offset is not None else ''
-            casts[v] = self.uop(UOps.CAST, ssa(f"casted_{v.name}{offset}", cast_dtype, False), [v])
+            self.casts[v] = self.uop(UOps.CAST, ssa(f"casted_{v.name}{offset}", cast_dtype, False), [v])
       ret = []
       for idx, val in grouped:
-        val = [casts.get(v, v) for v in val]
+        val = [self.casts.get(v, v) for v in val]
         ret.append((idx, self.uop(UOps.ALU, val[-1] if x.op.__class__ in {ReduceOps, FusedOps} else ssa('alu', dtypes.get_vector_type(val[0].dtype, group_amt) if any(x.dtype.is_vector_type and x.offset is None for x in val) else val[0].dtype),
                     list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}.get(x.op, x.op))))
 
