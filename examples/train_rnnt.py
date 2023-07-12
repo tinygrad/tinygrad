@@ -11,6 +11,7 @@ def rnnt_loss_forward(x, y, blank=28):
   T, U, _ = x.shape
 
   alphas = np.zeros((T, U))
+  alphas[1,0] = 1
 
   for t in range(1, T):
     alphas[t, 0] = alphas[t - 1, 0] + x[t - 1, 0, blank]
