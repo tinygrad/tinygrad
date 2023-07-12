@@ -7,10 +7,10 @@ import numpy as np
 
 from models.rnnt import RNNT
 
-def rnnt_loss_forward(x, y, blank=28):
+def rnnt_loss_forward(x: Tensor, y: Tensor, blank=28):
   T, U, _ = x.shape
 
-  alphas = np.zeros((T, U))
+  alphas = Tensor.zeros((T, U))
   alphas[1,0] = 1
 
   for t in range(1, T):
@@ -23,15 +23,15 @@ def rnnt_loss_forward(x, y, blank=28):
     for u in range(1, U):
       no_emit = alphas[t - 1, u] + x[t - 1, u, blank]
       emit = alphas[t, u - 1] + x[t, u - 1, y[u - 1]]
-      alphas[t, u] = np.logaddexp(emit, no_emit)
+      alphas[t, u] = (emit.exp() + no_emit.exp()).log()
 
   log_likelihood = alphas[T - 1, U - 1] + x[T - 1, U - 1, blank]
   return alphas, -log_likelihood
 
-def rnnt_loss_backward(x, y, blank=28):
+def rnnt_loss_backward(x: Tensor, y: Tensor, blank=28):
   T, U, _ = x.shape
 
-  betas = np.zeros((T, U))
+  betas = Tensor.zeros((T, U))
   betas[T - 1, U - 1] = x[T - 1, U - 1, blank]
 
   for t in reversed(range(T - 1)):
@@ -44,14 +44,14 @@ def rnnt_loss_backward(x, y, blank=28):
     for u in reversed(range(U - 1)):
       no_emit = betas[t + 1, u] + x[t, u, blank]
       emit = betas[t, u + 1] + x[t, u, y[u]]
-      betas[t, u] = np.logaddexp(emit, no_emit)
+      betas[t, u] = (emit.exp() + no_emit.exp()).log()
 
   return betas
 
-def rnnt_loss_grad(x, alphas, betas, y, blank=28):
+def rnnt_loss_grad(x: Tensor, alphas: Tensor, betas: Tensor, y: Tensor, blank=28):
   T, U, _ = x.shape
 
-  grads = np.full(x.shape, -np.inf)
+  grads = Tensor.full(x.shape, -np.inf)
   log_likelihood = betas[0, 0]
 
   grads[T - 1, U - 1, blank] = alphas[T - 1, U - 1]
@@ -60,7 +60,7 @@ def rnnt_loss_grad(x, alphas, betas, y, blank=28):
   for u, l in enumerate(y):
     grads[:, u, l] = alphas[:, u] + betas[:, u + 1]
 
-  grads = -np.exp(grads + x - log_likelihood)
+  grads = -((grads + x - log_likelihood).exp())
 
   return grads
 
@@ -71,7 +71,7 @@ def rnnt_loss(x, y, blank=28):
   return log_likelihood, grads
 
 def rnnt_loss_batch(x, x_lens, y, y_lens, blank=28):
-  grads = np.zeros_like(x)
+  grads = np.zeros_like(x) # Need?
   losses = []
   for b in range(x.shape[0]):
     t = int(x_lens[b])
@@ -79,19 +79,14 @@ def rnnt_loss_batch(x, x_lens, y, y_lens, blank=28):
     loss, grad = rnnt_loss(x[b, :t, :u, :], y[b, :u - 1], blank)
     losses.append(loss)
     grads[b, :t, :u, :] = grad
-  return np.array(losses, dtype=np.float32), grads
+  return Tensor(losses, dtype=np.float32), grads
 
 class RNNTLoss(Function):
   def forward(self, x, x_lens, y, y_lens):
     self.x, self.x_lens, self.y, self.y_lens = x, x_lens, y, y_lens
 
-    x_np = x.toCPU()
-    x_lens_np = x_lens.toCPU().astype(np.int32)
-    y_np = y.toCPU().astype(np.int32)
-    y_lens_np = y_lens.toCPU().astype(np.int32)
-
-    loss, grads = rnnt_loss_batch(x_np, x_lens_np, y_np, y_lens_np)
-    self.grads = grads.astype(np.float32)
+    loss, grads = rnnt_loss_batch(x, x_lens, y, y_lens) 
+    self.grads = grads
 
     return LazyBuffer.fromCPU(LazyNumpyArray(loss, loss.shape, loss.dtype), x.device)
 
@@ -99,11 +94,13 @@ class RNNTLoss(Function):
     return LazyBuffer.fromCPU(LazyNumpyArray(self.grads, self.grads.shape, self.grads.dtype), grad_output.device), None, None, None
 
 if __name__ == "__main__":
+  # Tinygrad set flags
   Tensor.training = True
-  np.set_printoptions(linewidth=200)
+  np.set_printoptions(linewidth=200) # Do we need this
 
+  # Load Model
   mdl = RNNT()
-  mdl.load_from_pretrained()
+  #mdl.load_from_pretrained()
   optim = LAMB(get_parameters(mdl), lr=4e-3, wd=1e-3)
 
   LABELS = [" ", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "'"]
@@ -122,7 +119,7 @@ if __name__ == "__main__":
 
       # print(out.shape)
       print("forward done")
-      loss = RNNTLoss.apply(out.log_softmax(), Tensor([10, 10, 10, 10]), y, Tensor([10, 10, 10, 10])).mean()
+      loss = RNNTLoss.apply(out.log_softmax(), Tensor([10, 10, 10, 10]), y, Tensor([10, 10, 10, 10])).mean() # Why pass tensor [10,10,10,10]?
       print("loss done")
       loss.backward()
       print("backward done")
