@@ -12,8 +12,8 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
@@ -41,8 +41,8 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
@@ -62,8 +62,8 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
@@ -83,8 +83,8 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
@@ -102,8 +102,8 @@ jobs:
     name: CLANG Tests ${{ matrix.os }} (w method cache)
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
@@ -121,8 +121,8 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
@@ -140,8 +140,8 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
     - name: Update packages
       run: |
         wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
@@ -169,8 +169,8 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
     - name: Update packages
       run: |
         wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
@@ -204,8 +204,8 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
     - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
@@ -226,8 +226,8 @@ jobs:
     if: ${{ false }}
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
     - name: Build Docker
       run: docker build -t tinygrad -f test/Dockerfile .
     - name: Test Docker
@@ -240,8 +240,8 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
     - name: Update packages
       run: |
         export DEBIAN_FRONTEND=noninteractive

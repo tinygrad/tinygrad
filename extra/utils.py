@@ -17,7 +17,7 @@ def fetch(url):
   if url.startswith("/"):
     with open(url, "rb") as f:
       return f.read()
-  import hashlib
+    import hashlib
   fp = temp(hashlib.md5(url.encode('utf-8')).hexdigest())
   download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
   with open(fp, "rb") as f:
@@ -27,7 +27,7 @@ def fetch_as_file(url):
   if url.startswith("/"):
     with open(url, "rb") as f:
       return f.read()
-  import hashlib
+    import hashlib
   fp = temp(hashlib.md5(url.encode('utf-8')).hexdigest())
   download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
   return fp
@@ -78,12 +78,12 @@ def my_unpickle(fb0):
       if module == "torch._utils":
         if name == "_rebuild_tensor_v2": return _rebuild_tensor_v2
         if name == "_rebuild_parameter": return _rebuild_parameter
-      else:
-        if module.startswith('pytorch_lightning'): return Dummy
-        try:
-          return super().find_class(module, name)
-        except Exception:
-          return Dummy
+        else:
+          if module.startswith('pytorch_lightning'): return Dummy
+          try:
+            return super().find_class(module, name)
+          except Exception:
+            return Dummy
 
     def persistent_load(self, pid):
       return pid
