@@ -662,7 +662,7 @@ class Linearizer:
         self.alias_buffer(buf1, alias_pattern)
 
         # very late upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
-        if self.use_tensor_cores:
+        if self.use_tensor_cores and self.full_shape[s0] % 2 == 0:
           self.shift_to(s0, 2, insert_before=self.first_reduce-self.local_dims)
           self.local_dims += 1
           self.exclude_local_upcast += 1
