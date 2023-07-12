@@ -65,7 +65,7 @@ if __name__ == "__main__":
   lbls = ast.literal_eval(lbls.decode('utf-8'))
 
   # load image and preprocess
-  url = sys.argv[1] if len(sys.argv) >= 2 else "https://raw.githubusercontent.com/geohot/tinygrad/master/docs/showcase/stable_diffusion_by_tinygrad.jpg"
+  url = sys.argv[1] if len(sys.argv) >= 2 else "https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/showcase/stable_diffusion_by_tinygrad.jpg"
   if url == 'webcam':
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
