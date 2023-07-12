@@ -134,11 +134,11 @@ class ASTRunner:
     return self
 
   @staticmethod
-  def dedup_kernel_inputs(bufs):
-    return dedup([x.realized for x in bufs if x.realized is not None and x.realized.__class__ is not RawConst])
+  def buf_is_kernel_arg(buf):
+    return buf.realized is not None and buf.realized.__class__ is not RawConst
 
   def exec(self, bufs) -> Optional[float]:
-    rawbufs = ASTRunner.dedup_kernel_inputs(bufs)
+    rawbufs = dedup([x.realized for x in bufs if ASTRunner.buf_is_kernel_arg(x)])
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs)
 

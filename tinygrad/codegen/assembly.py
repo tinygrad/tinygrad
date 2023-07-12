@@ -101,7 +101,7 @@ class AssemblyCodegen(Linearizer):
         return reg, None, off
 
     ins = []
-    ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64, scalar=True), [], f"buf{i}") for i in range(self.num_input_bufs)]
+    ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64, scalar=True), [], f"buf{i}") for i,x in enumerate(self.dedup_bufs) if ASTRunner.buf_is_kernel_arg(x)]
     global_size, local_size = [], []
     skipload_branch = 0
     for uop,newvar,vin,args in self.uops:

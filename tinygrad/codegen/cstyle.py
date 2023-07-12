@@ -88,7 +88,7 @@ def add_gl_dimension(args, i, var, local_size, xid):
     local_size.append(var.max+1)
     return f"{{ int {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
-def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,RawBuffer]], num_input_bufs:int, lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
+def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,RawBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
   prekernel: Set[str] = set()
   kernel = []
   global_size = []
@@ -169,7 +169,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,RawBuffer]], num_
 
   if any(isinstance(x.dtype, ImageDType) for x in bufs): prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
   buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else
-               ("const " if i > 0 else "")+lang.buffer_prefix+x.dtype.name+"*"+lang.buffer_suffix) for i,x in enumerate(bufs[:num_input_bufs])]
+               ("const " if i > 0 else "")+lang.buffer_prefix+x.dtype.name+"*"+lang.buffer_suffix) for i,x in enumerate(bufs) if ASTRunner.buf_is_kernel_arg(x)]
   prg = ''.join([f"{lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
     [', '.join([f'{t} {bufnames[i]}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
@@ -193,7 +193,7 @@ class CStyleCodegen(Linearizer):
     self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
     self.linearize()
 
-    prg, global_size, local_size = uops_to_cstyle(self.uops, self.dedup_bufs, self.num_input_bufs, self.lang)
+    prg, global_size, local_size = uops_to_cstyle(self.uops, self.dedup_bufs, self.lang)
 
     # painfully name the function something unique
     if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]
