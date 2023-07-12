@@ -35,7 +35,7 @@ numpy_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
   BinaryOps.MAX: np.maximum, BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.promote_types(x.dtype,y.dtype)), BinaryOps.MUL: lambda x, y: np.multiply(*match_types(x, y)), UnaryOps.SQRT: np.sqrt,
   MovementOps.PERMUTE: lambda x, order: x.transpose(order), MovementOps.PAD: np.pad, MovementOps.EXPAND: np.broadcast_to,
   MovementOps.STRIDE: lambda x, arg: x[tuple(slice(None, None, i) for i in arg)],
-  FusedOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy()), lambda x: x.strides, np.broadcast_to),
+  FusedOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy(), optimize=True), lambda x: x.strides, np.broadcast_to),
 }}
 
 class RawNumpyBuffer(RawBuffer):

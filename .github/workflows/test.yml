@@ -195,6 +195,8 @@ jobs:
         FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 test/test_ops.py
     - name: Test openpilot model correctness (float32)
       run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+    - name: Test tensor core ops
+      run: GPU=1 TC=2 python3 test/test_ops.py
 
   testmetal:
     name: Metal Tests
@@ -245,7 +247,7 @@ jobs:
         export DEBIAN_FRONTEND=noninteractive
         sudo apt-get update -y
     - name: Install packages
-      run: sudo apt-get install -y git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+      run: sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
     - name: Cache gpuocelot
       id: cache-build
       uses: actions/cache@v3
