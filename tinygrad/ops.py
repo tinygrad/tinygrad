@@ -127,12 +127,14 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
     if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args): print(prg)
-    self.name, self.prg, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
-    self.global_size = (global_size + [1]*(3-len(global_size))) if global_size is not None else None
-    self.local_size  = (local_size + [1]*(3-len(local_size))) if local_size is not None else None
+    self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
+    # self.name, self.prg, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
+    # self.global_size = (global_size + [1]*(3-len(global_size))) if global_size is not None else None
+    # self.local_size  = (local_size + [1]*(3-len(local_size))) if local_size is not None else None
 
   def build(self, runtime):
-    self.clprg = runtime(self.name, self.prg, self.global_size, self.local_size, **self.runtime_args)
+    self.clprg = runtime(self.name, self.prg, **self.runtime_args)    
+    # self.clprg = runtime(self.name, self.prg, self.global_size, self.local_size, **self.runtime_args)
     return self
 
   def exec(self, bufs) -> Optional[float]:
@@ -141,7 +143,10 @@ class ASTRunner:
     return self(rawbufs)
 
   def __call__(self, rawbufs:List[RawBuffer], jit=False, force_wait=False) -> Optional[float]:
-    if et := self.clprg(*rawbufs, wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
+    if et := self.clprg((self.global_size + [1]*(3-len(self.global_size))) if self.global_size is not None else None,
+                        (self.local_size + [1]*(3-len(self.local_size))) if self.local_size is not None else None,
+                        *rawbufs, wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
+    # if et := self.clprg(*rawbufs, wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
     if DEBUG >= 2:
       print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(29-ansilen(self.display_name))) if self.display_name is not None else self.name:26s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {int(self.op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {self.mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
