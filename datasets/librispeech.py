@@ -7,6 +7,7 @@ import hashlib
 import tarfile
 import random
 import subprocess
+import soundfile
 
 from pathlib import Path
 from tqdm import tqdm
@@ -114,7 +115,7 @@ def dataset_download(dataset, url, hash, num_threads=4):
 		print(f"{dataset} already extracted. Skipping extraction.")
 
 
-def dataset_preprocess(dataset, num_threads=4):
+def dataset_preprocess(dataset, num_threads=4, training = False):
 	flac_files = list((BASEDIR / "LibriSpeech" / dataset).glob("**/*.flac"))
 	wav_files = list((BASEDIR / "LibriSpeech" / f"{dataset}-wav").glob("**/*.wav"))
 	if not flac_files:
@@ -141,7 +142,8 @@ def dataset_preprocess(dataset, num_threads=4):
 				wav_file = (
 					wav_folder / folder_relative_path / file.name.replace(".flac", "")
 				).with_suffix(".wav")
-				tfm = sox.Transformer()
+				sr = random.randint(13800, 18400) if training else 16000
+				tfm = sox.Transformer().convert(samplerate=sr)
 				tfm.build(str(file), str(wav_file))
 				progress_bar.update(1)
 
@@ -259,11 +261,8 @@ def feature_extract(x, x_lens):
 	return features.transpose(2, 0, 1), x_lens.astype(np.float32)
 
 
-def load_wav(file, training=False):
-	if training: 
-		sr = random.randint(13800, 18400)
-	sr = sr or 16000
-	sample = soundfile.read(file, samplerate=sr)[0].astype(np.float32)
+def load_wav(file):
+	sample = soundfile.read(file)[0].astype(np.float32)
 	return sample, sample.shape[0]
 
 def remove_silence(path):
@@ -283,7 +282,7 @@ def remove_silence(path):
 	    print(stderr)
 
 def iterate(dataset, bs=1, start=0, val=True):
-	with open(BASEDIR / f"{dataset}.json") as f:
+	with open(BASEDIR / f"LibriSpeech/{dataset}.json") as f:
 		ci = json.load(f)
 	if val:
 		print(f"Number of samples in the dataset: {len(ci)}")
