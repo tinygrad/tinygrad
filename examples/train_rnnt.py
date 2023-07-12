@@ -1,5 +1,5 @@
 from datasets.librispeech import iterate
-from tinygrad.helpers import LazyNumpyArray
+# from tinygrad.helpers import LazyNumpyArray
 from tinygrad.lazy import LazyBuffer
 from tinygrad.tensor import Tensor, Function
 from tinygrad.nn.optim import LAMB, get_parameters
@@ -110,10 +110,10 @@ if __name__ == "__main__":
 
   optim.zero_grad()
   for epoch in range(100):
-    for X, Y, y_raw in iterate(val=False, bs=1):
+    # TO DO: update to training data set.
+    for X, Y, y_raw in iterate(dataset='dev-clean', val=False, bs=1):
       x, y = Tensor(X[0]), Tensor(Y)
       out = mdl(x, y)
-
       tt = mdl.decode(Tensor(X[0]), Tensor(X[1]))
       for n, t in enumerate(tt):
         tnp = np.array(t)
