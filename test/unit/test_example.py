@@ -7,7 +7,7 @@ from tinygrad.helpers import getenv
 def multidevice_test(fxn):
   exclude_devices = getenv("EXCLUDE_DEVICES", "").split(",")
   def ret(self):
-    for device in Device._buffers:
+    for device in Device._names:
       if device in ["DISK", "FAKE"]: continue
       print(device)
       if device in exclude_devices:

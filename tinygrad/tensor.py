@@ -645,7 +645,7 @@ class Tensor:
   def is_floating_point(self) -> bool: return dtypes.is_float(self.dtype)
 
 # register functions to move between devices
-for device in Device._buffers:
+for device in Device._names:
   setattr(Tensor, f"{device.lower()}", partialmethod(Tensor.to, device))
   setattr(Tensor, f"{device.lower()}_", partialmethod(Tensor.to_, device))
 
