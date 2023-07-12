@@ -6,7 +6,7 @@ from enum import Enum, auto
 from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
-from tinygrad.ops import ASTRunner, MovementOps, ReduceOps, BinaryOps, FusedOps
+from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode
@@ -133,7 +133,7 @@ class Linearizer:
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)
 
-    # calculate mapping from buf to input
+    # dedup by raw buffer and calculate mapping
     self.dedup_bufs = dedup([buf.realized for buf in self.bufs], self.bufs)
     dedup_rawbufs = [buf.realized for buf in self.dedup_bufs]
     self.bufmap = [dedup_rawbufs.index(buf.realized) for buf in self.bufs]

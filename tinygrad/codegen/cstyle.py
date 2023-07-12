@@ -3,7 +3,7 @@ import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
 from tinygrad.helpers import ImageDType, dtypes, colored, getenv, prod
-from tinygrad.runtime.lib import RawBuffer, RawConst
+from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
 from tinygrad.lazy import LazyBuffer
 
@@ -89,7 +89,7 @@ def add_gl_dimension(args, i, var, local_size, xid):
     local_size.append(var.max+1)
     return f"{{ int {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
-def uops_to_cstyle(uops:List[UOp], bufs: List[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
+def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
   prekernel: Set[str] = set()
   kernel = []
   global_size = []
@@ -173,7 +173,7 @@ def uops_to_cstyle(uops:List[UOp], bufs: List[Union[LocalBuffer,LazyBuffer]], la
   buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else
                ("const " if i > 0 else "")+lang.buffer_prefix+x.dtype.name+"*"+lang.buffer_suffix) for i,x in enumerate(bufs) if x.realized in input_bufs]
   prg = ''.join([f"{lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
-    [', '.join([f'{t} data{i}' for i,t in buftypes] + lang.extra_args)] +
+    [', '.join([f'{t} {bufnames[i]}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
   if lang.half_prekernel and any(x.dtype == dtypes.float16 for x in bufs): prg = ''.join([f"{lang.half_prekernel}", "\n", prg])
