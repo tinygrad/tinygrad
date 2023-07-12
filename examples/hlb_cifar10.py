@@ -103,8 +103,8 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     X_train, Y_train = fetch_cifar(train=True)
     X_test, Y_test = fetch_cifar(train=False)
   if HALF:
-    X_train = X_train.clip(-HALF_SCALE, HALF_SCALE)
-    X_test = X_test.clip(-HALF_SCALE, HALF_SCALE)
+    X_train = X_train.clip(-1e5, 1e5)
+    X_test = X_test.clip(-1e5, 1e5)
 
   model = SpeedyResNet()
   optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
