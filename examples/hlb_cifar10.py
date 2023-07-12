@@ -76,7 +76,7 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
     all_X, all_Y = _shuffle(all_X, all_Y)
     for batch_start in range(0, all_Y.shape[0], BS):
       batch_end = min(batch_start+BS, all_Y.shape[0])
-      np_batch = (all_X[batch_end-BS:batch_end]/HALF_SCALE).astype(np.float16 if HALF else np.float32)
+      np_batch = (all_X[batch_end-BS:batch_end]).astype(np.float16 if HALF else np.float32)
       X = Tensor(np_batch) # batch_end-BS for padding
       Y = np.zeros((BS, num_classes), np.float16 if HALF else np.float32)
       Y[range(BS),all_Y[batch_end-BS:batch_end]] = -1.0*num_classes
@@ -118,6 +118,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     X = Tensor.where(Tensor.rand(X.shape[0],1,1,1, dtype=X.dtype) < 0.5, X[..., ::-1], X) # flip augmentation
     out = model(X)
     loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
+    loss = loss/HALF_SCALE
     if not getenv("DISABLE_BACKWARD"):
       optimizer.zero_grad()
       loss.backward()
