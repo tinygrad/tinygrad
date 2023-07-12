@@ -97,7 +97,7 @@ class AssemblyCodegen(Linearizer):
           reg = new_reg
         return tor[f"buf{args.i}"], reg, off
       else:
-        reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{args.i}" if self.dedup_bufs[args.i].__class__ is LocalBuffer else self.dedup_bufs[args.i].name], dtype=dtypes.uint64)
+        reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{args.i}" if self.dedup_bufs[args.i].__class__ is not LocalBuffer else self.dedup_bufs[args.i].name], dtype=dtypes.uint64)
         return reg, None, off
 
     ins = []
