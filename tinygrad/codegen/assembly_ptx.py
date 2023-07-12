@@ -16,7 +16,7 @@ class PTXCodegen(AssemblyCodegen):
            f".visible .entry test({', '.join(f'.param .u64 buf{i}' for i,x in enumerate(self.dedup_bufs) if ASTRunner.buf_is_kernel_arg(x))}) {{"]
 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
-           BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.eq", UnaryOps.SQRT: 'sqrt.approx',
+           BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.eq",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
            FusedOps.MULACC: "fma.rn"}
 
