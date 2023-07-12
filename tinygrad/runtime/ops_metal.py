@@ -70,8 +70,7 @@ class MetalProgram:
     if wait:
       command_buffer.waitUntilCompleted()
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
-    else:
-      METAL.mtl_buffers_in_flight.append(command_buffer)
+    METAL.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalCodegen(CStyleCodegen):
   lang = CStyleLanguage(

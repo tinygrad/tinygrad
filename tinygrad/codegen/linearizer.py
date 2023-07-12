@@ -104,10 +104,10 @@ def get_grouped_maybe_vector(*values:List[Token], grouping_allowed=True, amt=4):
 # TODO: generic visitor pattern?
 def expand_node(idx:Node) -> List[Node]:
   if isinstance(idx, Variable):  return [idx] if idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)]
-  elif isinstance(idx, NumNode): return [idx]
-  elif isinstance(idx, MulNode): return [x*idx.b for x in expand_node(idx.a)]
-  elif isinstance(idx, SumNode): return [Variable.sum(list(it)) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
-  else: raise NotImplementedError(idx)
+  if isinstance(idx, NumNode): return [idx]
+  if isinstance(idx, MulNode): return [x*idx.b for x in expand_node(idx.a)]
+  if isinstance(idx, SumNode): return [Variable.sum(list(it)) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
+  raise NotImplementedError(idx)
 
 def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
   for x in itertools.product(*[expand_node(idx) for idx in idxs[::-1]]):
@@ -208,7 +208,7 @@ class Linearizer:
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16, dtypes.int8, dtypes.int32, dtypes.int64] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == amt]
 
-  def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
+  def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i, amt=2 if self.bufs[i].dtype == dtypes.half and not self.supports_half4 and self.supports_half2 else 4)
@@ -711,7 +711,7 @@ class Linearizer:
         self.alias_buffer(buf1, alias_pattern)
 
         # very late upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
-        if self.use_tensor_cores:
+        if self.use_tensor_cores and self.full_shape[s0] % 2 == 0:
           self.shift_to(s0, 2, insert_before=self.first_reduce-self.local_dims)
           self.local_dims += 1
           self.exclude_local_upcast += 1

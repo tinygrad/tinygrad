@@ -24,7 +24,7 @@ def safe_save(tensors:Dict[str, Tensor], fn:str):
   pathlib.Path(fn).unlink(missing_ok=True)
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
   t[0:1].cast(dtypes.int64).assign([len(j)])
-  t[8:8+len(j)].assign(Tensor(list(j.encode('utf-8')), dtype=dtypes.uint8))
+  t[8:8+len(j)].assign(Tensor(list(j.encode('utf-8')), dtype=dtypes.uint8, device="cpu"))
   for k,v in safe_load(t).items(): v.assign(tensors[k])
 
 # state dict
