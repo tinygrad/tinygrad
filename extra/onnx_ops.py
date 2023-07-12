@@ -136,6 +136,7 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value)
 
 def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
+  if dilations != 1: raise NotImplementedError(f"dilations != 1 not implemented, dilations:{dilations}")
   pixel_axes = tuple(range(len(X.shape)))[-2:]
   if ceil_mode: auto_pad = "SAME_UPPER" # ceil mode uses auto_pad I think
   padding_included = _padding(X, pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations).avg_pool2d(kernel_shape, stride=strides)
@@ -166,15 +167,13 @@ def MaxUnpool(xT, xI, outshape=None, kernel_shape=None, pads=None, strides=None)
   xI = xI.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
   arange = Tensor.arange(outlength).reshape(1, outlength).expand(xI.shape)
   xT = xT.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
-  ret = ((xI == arange) * xT).sum(0).reshape([1, 1] + out_sh)
+  ret = ((xI == arange) * xT).sum(0).reshape([1, 1] + out_sh) # TODO THIS MIGHT NOT BE [1, 1], should depend on kernel shape?
   if outshape:
     outshape = safe_numpy(outshape).tolist()
     if outshape != ret.shape:
       diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
       pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
       ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
-      # (padding_left, padding_right, padding_top, padding_bottom)
-      # onnx: [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
   return ret
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
@@ -187,7 +186,7 @@ def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_
     if not kernel_shape: kernel_shape = W.shape[-len(strides):]
     pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
   ret = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding) 
-  # super stupid HACK. Need smarter way of determining ret shape and output_shape
+  # super stupid HACK. Need smarter way of determining ret shape and output_shape   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
   if output_shape and not output_padding: 
     output_padding = [os - rs for os, rs in zip(output_shape, ret.shape[-2:])]
     ret = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding) 
@@ -535,19 +534,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
 
   def _cubic_coeffs(ratio, scale=None, A=-0.75):
     return Tensor([((A * (ratio + 1) - 5 * A) * (ratio + 1) + 8 * A) * (ratio + 1) - 4 * A, ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1, ((A + 2) * (1 - ratio) - (A + 3)) * (1 - ratio) * (1 - ratio) + 1, ((A * ((1 - ratio) + 1) - 5 * A) * ((1 - ratio) + 1) + 8 * A) * ((1 - ratio) + 1) - 4 * A,])
-
-def Gradient(a, b, xs, y):
-  # parse what the operations are from node
-  # add_node = onnx.helper.make_node("Add", ["a", "b"], ["c"], name="my_add")
-  # mul_node = onnx.helper.make_node("Mul", ["c", "a"], ["d"], name="my_mul")
-  print(a, "a")
-  print(b, "b")
-  print(xs, "xs")
-  print(y, "y")
-  da = None 
-  db = None
-  return da, db
-  
 
 def CenterCropPad(input, shape, axes=None):
   if not axes: axes = list(range(input.ndim))

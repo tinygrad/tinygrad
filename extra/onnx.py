@@ -34,6 +34,7 @@ def get_run_onnx(onnx_model: ModelProto):
       attr = type_proto.WhichOneof('value')
       if attr == 'tensor_type': return tuple(x.dim_value for x in getattr(type_proto, attr).shape.dim)
       elif attr == 'sequence_type': 
+        return []
         type_proto = getattr(type_proto, attr).elem_type
         attr = type_proto.WhichOneof('value')
         t_shape = [x.dim_value for x in getattr(type_proto, attr).shape.dim]
@@ -103,6 +104,11 @@ def get_run_onnx(onnx_model: ModelProto):
     intermediate_tensors: Dict[str,Tensor] = {}
     output_tensor_names = [x.name for x in onnx_model.graph.output]
 
+    requires_grad = False
+    for opset in onnx_model.opset_import:
+      if opset.domain == "ai.onnx.preview.training": requires_grad = True
+    print(requires_grad, "fuck")
+
     # get inputs
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
@@ -112,12 +118,13 @@ def get_run_onnx(onnx_model: ModelProto):
         if isinstance(inputs[inp.name], Tensor):
           input_tensors[inp.name] = inputs[inp.name]
         elif isinstance(inputs[inp.name], list):
-          print('fuck')
-          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
+          input_tensors[inp.name] = [Tensor(i, requires_grad=False) for i in inputs[inp.name]]
+        elif requires_grad:
+          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True)
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         input_shape = input_tensors[inp.name].shape
-        assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
+        assert input_shape == shape or shape == [], f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
         for _,v in input_tensors.items(): v.realize()
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
@@ -218,6 +225,10 @@ def get_run_onnx(onnx_model: ModelProto):
       elif n.op_type == "Shrink":
         bias = opt['bias'] if 'bias' in opt else 0
         ret = (inp[0] < -opt['lambd'])*(inp[0]+bias) + (inp[0] > opt['lambd'])*(inp[0]-bias)
+      elif n.op_type == "Gradient":
+        y = opt["y"]
+        intermediate_tensors[y].backward()
+        ret = tuple([t.grad for t in inp])
       elif hasattr(onnx_ops, n.op_type):
         fxn = getattr(onnx_ops, n.op_type)
         if isinstance(fxn, dict):
