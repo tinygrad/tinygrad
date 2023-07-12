@@ -264,12 +264,6 @@ class Linearizer:
       if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
       self.uop(UOps.STORE, None, [var], MemOp(self.bufmap[i], idx, valid))
 
-  def add_local(self, buf: LocalBuffer, st: ShapeTracker):
-    self.sts.append(st)
-    self.bufs.append(buf)
-    self.dedup_bufs.append(buf)
-    self.bufmap.append(len(self.dedup_bufs) - 1)
-
   def linearize(self):
     # uops
     self.uops: List[UOp] = []
@@ -598,6 +592,12 @@ class Linearizer:
       num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
       if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
+
+  def add_local(self, buf: LocalBuffer, st: ShapeTracker):
+    self.sts.append(st)
+    self.bufs.append(buf)
+    self.dedup_bufs.append(buf)
+    self.bufmap.append(len(self.dedup_bufs) - 1)
 
   def alias_buffer(self, i, pattern):
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
