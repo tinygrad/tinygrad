@@ -142,7 +142,7 @@ class Linearizer:
     self.key = (ast.map_buffers({x:self.bufmap(i) for i,x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
 
   def bufmap(self, i: int) -> int:
-    return next(j for j,x in enumerate(self.dedup_bufs) if x.__class__ is LocalBuffer and x == self.bufs[i] or x.realized is not None and x.realized == self.bufs[i].realized)
+    return next(j for j,x in enumerate(self.dedup_bufs) if x.realized is None and x == self.bufs[i] or x.realized is not None and x.realized == self.bufs[i].realized)
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
