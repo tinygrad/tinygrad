@@ -52,26 +52,56 @@ else:
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
-    try:
-      if DEBUG >= 6:
-        fn = f"{tempfile.gettempdir()}/tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}"
-        with open(fn, "wb") as f:
-          f.write(cuda_compile(prg, target="cubin", no_extern_c=True))
-        sass = subprocess.check_output(['nvdisasm', fn]).decode('utf-8')
-        print(sass)
-      if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8')
-    except cuda.CompileError as e:
-      if DEBUG >= 3: print("FAILED TO BUILD", prg)
-      raise e
-    if DEBUG >= 5: print(pretty_ptx(prg))
+    dev = cuda.Context.get_device()
+    self.max_grid = [dev.get_attribute(cuda.device_attribute.MAX_GRID_DIM_X), dev.get_attribute(cuda.device_attribute.MAX_GRID_DIM_Y), dev.get_attribute(cuda.device_attribute.MAX_GRID_DIM_Z)]
+    # self.max_block = [dev.get_attribute(cuda.device_attribute.MAX_BLOCK_DIM_X), dev.get_attribute(cuda.device_attribute.MAX_BLOCK_DIM_Y), dev.get_attribute(cuda.device_attribute.MAX_BLOCK_DIM_Z)]
+    self.global_size = []
+    self.prg = prg
+    # if global_size[2] > max_grid[2]:
+    #   for i in range(global_size[2]//max_grid[2]):
+    #     offset = max_grid[2]*(i+1)
+    #     self.prg.append(prg.replace("gidx0", "(gidx0+%d)"%offset).replace("(gidx0+%d)"%offset, "gidx0", 1))
+    #     self.global_size.append(tuple([global_size[0], global_size[1], max_grid[2]]))
+    #   self.global_size.append(tuple([global_size[0],global_size[1], global_size[2]%max_grid[2]]))
+    # else:
+    #   self.global_size = [global_size]
+    # try:
+    #   if DEBUG >= 6:
+    #     fn = f"{tempfile.gettempdir()}/tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}"
+    #     with open(fn, "wb") as f:
+    #       f.write(cuda_compile(prg, target="cubin", no_extern_c=True))
+    #     sass = subprocess.check_output(['nvdisasm', fn]).decode('utf-8')
+    #     print(sass)
+    #   if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8')
+    # except cuda.CompileError as e:
+    #   if DEBUG >= 3: print("FAILED TO BUILD", prg)
+    #   raise e
+    # if DEBUG >= 5: print(pretty_ptx(prg))
     # TODO: name is wrong, so we get it from the ptx using hacks
-    self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
+    # self.prg =[cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]) for prg in self.prg]
+  
+  def check_device_limit(self, global_size, local_size):
+    self.subprg = []
+    if global_size[2] > self.max_grid[2]:
+      self.subprg.append(self.prg)
+      for i in range(global_size[2]//self.max_grid[2]):
+        offset = self.max_grid[2]*(i+1)
+        self.subprg.append(self.prg.replace("gidx0", "(gidx0+%d)"%offset).replace("(gidx0+%d)"%offset, "gidx0", 1))
+        self.global_size.append(tuple([global_size[0], global_size[1], self.max_grid[2]]))
+      self.global_size.append(tuple([global_size[0],global_size[1], global_size[2]%self.max_grid[2]]))
+    else:
+      self.subprg.append(self.prg)
+      self.global_size.append(global_size)
+    self.subprg = [cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8') for prg in self.subprg]
+    self.subprg = [cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]) for prg in self.subprg]
 
   def __call__(self, global_size, local_size, *args, wait=False):
+    self.check_device_limit(global_size, local_size)
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
-    self.prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size))
+    for prg, global_size in zip(self.subprg, self.global_size): 
+      prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size)) 
     if wait:
       end.record()
       end.synchronize()
