@@ -18,7 +18,7 @@ base_fxn_for_op: Dict[Op, Callable] = {
 
 def match_types(x, y):
   up = x.dtype if dtypes.from_np(x.dtype).priority > dtypes.from_np(y.dtype).priority else y.dtype
-  return x.astype(up), y.astype(up)
+  return x.astype(up, copy=False), y.astype(up, copy=False)
 
 def einsum_mulacc(einsum, get_strides, expand):
   def einscripts(x): return ''.join(["abcdefghijklmnopqrstuvwxyz"[i] for i in x])
