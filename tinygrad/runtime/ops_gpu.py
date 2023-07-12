@@ -50,6 +50,7 @@ class CLBuffer(RawBufferCopyInOut):
 
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
+    if not binary: prg = '#define max(x,y) ((isnan(x) || isnan(y)) ? NAN : ((x > y) ? x : y))\n' + prg
     self.name, self.argdtypes, self.clprogram = name, argdtypes, cl.Program(CL.cl_ctx, CL.cl_ctx.devices, [prg]*len(CL.cl_ctx.devices)) if binary else cl.Program(CL.cl_ctx, prg)  # type: ignore
     try:
       self._clprg = self.clprogram.build(options=options)

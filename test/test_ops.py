@@ -1028,7 +1028,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,4)], lambda x: x[:, 1:2][0:1])
     helper_test_op([(4,4)], lambda x: x[:, 1:2][:, 0:1])
 
-  @unittest.skip("this test is broken #862")
+  @unittest.skipIf(Device.DEFAULT != "GPU" and Device.DEFAULT != "CLANG", "LLVM and METAL fail #1069")
   def test_max_inf(self):
     n = Tensor([1, float("nan")]).max().numpy()
     assert math.isnan(n.item()), f"{n.item()} is not nan"
