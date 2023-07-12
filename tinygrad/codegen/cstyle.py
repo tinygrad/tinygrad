@@ -169,8 +169,9 @@ def uops_to_cstyle(uops:List[UOp], bufs: List[Union[LocalBuffer,LazyBuffer]], la
       raise RuntimeError(f"failed to render {uop}")
 
   if any(isinstance(x.dtype, ImageDType) for x in bufs): prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
+  input_bufs = ASTRunner.dedup_kernel_inputs(bufs)
   buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else
-               ("const " if i > 0 else "")+lang.buffer_prefix+x.dtype.name+"*"+lang.buffer_suffix) for i,x in enumerate(ASTRunner.dedup_kernel_inputs(bufs))]
+               ("const " if i > 0 else "")+lang.buffer_prefix+x.dtype.name+"*"+lang.buffer_suffix) for i,x in enumerate(bufs) if x.realized in input_bufs]
   prg = ''.join([f"{lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
     [', '.join([f'{t} data{i}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
