@@ -24,7 +24,7 @@ class CStyleLanguage(NamedTuple):
   float4: Optional[str] = None
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
-  loop_pragma: Optional[str] = None
+  loop_pragma: Optional[Callable] = None
 
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int], var_dtype) -> str:
@@ -74,8 +74,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
   global_size = []
   local_size = []
   pend_close = None
-  loop_seen = False
-
+  nloop = 0
   bufnames = [b.name if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(bufs)]
 
   depth = 0
@@ -99,7 +98,9 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
             kk(f"{{ int {var.expr} = {lang.lid[len(args[0])-1-i]};  /* {var.max+1} */")
             local_size.append(var.max+1)
           else:
-            if args[0] in ["global", "local"] and not loop_seen: kk("FIRST_LOOP_PRAGMA_REPLACEME"); loop_seen = True # noqa: E702
+            if args[1] in ["global", "local"]:
+              if not nloop: kk("FIRST_LOOP_PRAGMA_REPLACEME")
+              nloop += 1
             kk(f"for (int {var.expr} = {var.min}; {var.expr} <= {var.max}; ++{var.expr}) {{")
       depth += 1
     elif uop == UOps.BARRIER:
@@ -153,7 +154,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
   if lang.half_prekernel and any(x.dtype == dtypes.float16 for x in bufs): prg = ''.join([f"{lang.half_prekernel}", "\n", prg])
-  prg = prg.replace("FIRST_LOOP_PRAGMA_REPLACEME", lang.loop_pragma if lang.loop_pragma and not any(isinstance(x, LocalBuffer) for x in bufs) else "")
+  prg = prg.replace("FIRST_LOOP_PRAGMA_REPLACEME", lang.loop_pragma(nloop) if lang.loop_pragma and not any(isinstance(x, LocalBuffer) for x in bufs) else "")
   return prg, global_size, local_size
 
 class CStyleCodegen(Linearizer):
@@ -173,6 +174,7 @@ class CStyleCodegen(Linearizer):
     self.linearize()
 
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.bufs, self.lang)
+    # print(global_size, local_size)
 
     # painfully name the function something unique
     if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]
