@@ -139,7 +139,7 @@ class Linearizer:
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
-    self.key = (ast.map_buffers({x:self.dedup_bufs[i].index(x.realized) for i,x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
+    self.key = (ast.map_buffers({x:self.dedup_bufs.index(x.realized) for i,x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
