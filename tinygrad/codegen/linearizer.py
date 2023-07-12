@@ -215,17 +215,20 @@ class Linearizer:
       if amt > 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
         localtype = dtypes.get_vector_type(self.bufs[i].dtype, amt)
+        accumtype = dtypes._float4
         if idx.render() != ((idx//amt)*amt).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
           localtype = self.bufs[i].dtype
+          accumtype = dtypes.float
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
         localtype = self.bufs[i].dtype
+        accumtype = dtypes.float
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
-                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
+                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", accumtype), [], const)
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype.is_vector_type else cache[key])
     return ret
 
@@ -268,12 +271,12 @@ class Linearizer:
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
-      self.bufs.append(LocalBuffer("temp", self.sts[-1].size(), dtype=self.bufs[-1].dtype))
-      self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size(), self.bufs[-1].dtype))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size(), dtype=dtypes.float))
+      self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size(), dtypes.float))
 
     # define local buffers
     for lb in self.local_alias.values():
-      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size(), self.bufs[-1].dtype))
+      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size(), dtypes.float))
 
     # print
     if DEBUG >= 3: self.printbufs()
@@ -460,8 +463,8 @@ class Linearizer:
       values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
 
       # Cast all to highest priority dtype
-      cast_dtype = None
-      highest_priority = -1
+      cast_dtype = dtypes.float if x.op.__class__ in {ReduceOps, FusedOps} else dtypes.float16
+      highest_priority = cast_dtype.priority
       for val in values:
         for v in val:
           if v.dtype.priority > highest_priority:
