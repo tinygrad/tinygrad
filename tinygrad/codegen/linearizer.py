@@ -134,12 +134,15 @@ class Linearizer:
     self.bufs = [output_buffer] + dedup(ast.buffers)
 
     # dedup by raw buffer and calculate mapping
-    self.dedup_bufs = dedup([x.realized for x in self.bufs])
+    self.dedup_bufs = dedup([x.realized for x in self.bufs], self.bufs)
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
-    self.key = (ast.map_buffers({x:self.dedup_bufs.index(x.realized) for i,x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
+    self.key = (ast.map_buffers({x:self.bufmap(i) for i,x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
+
+  def bufmap(self, i: int) -> int:
+    return next(j for j,x in enumerate(self.dedup_bufs) if x.__class__ is LocalBuffer and x == self.bufs[i] or x.realized == self.bufs[i].realized)
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
@@ -227,7 +230,7 @@ class Linearizer:
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.dedup_bufs.index(self.bufs[i].realized if self.bufs[i].__class__ != LocalBuffer else self.bufs[i]), idx, valid)) if const is None else \
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.bufmap(i), idx, valid)) if const is None else \
                      self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return ret
@@ -260,7 +263,7 @@ class Linearizer:
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-      self.uop(UOps.STORE, None, [var], MemOp(self.dedup_bufs.index(self.bufs[i].realized if self.bufs[i].__class__ != LocalBuffer else self.bufs[i]), idx, valid))
+      self.uop(UOps.STORE, None, [var], MemOp(self.bufmap(i), idx, valid))
 
   def linearize(self):
     # uops

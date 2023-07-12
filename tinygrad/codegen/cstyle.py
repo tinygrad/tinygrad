@@ -165,8 +165,8 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,RawBuffer]], lang
       # valids are handled here
       if args.valid.max == 0:
         val = lang.render_const(0.0, newvar.dtype)
-      elif isinstance(bufs[args.i], RawConst):
-        val = lang.render_const(bufs[args.i]._buf, newvar.dtype)
+      elif isinstance(bufs[args.i].realized, RawConst):
+        val = lang.render_const(bufs[args.i].realized._buf, newvar.dtype)
       else:
         val = lang.render_load(newvar.dtype, bufnames[args.i], bufs[args.i].dtype, args.idx, isinstance(bufs[args.i], LocalBuffer))
       if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(0.0, newvar.dtype))
