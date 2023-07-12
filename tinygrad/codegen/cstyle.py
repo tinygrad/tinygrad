@@ -43,7 +43,7 @@ class CStyleLanguage(NamedTuple):
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "cast is not supported on this platform"
     if var_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
-    elif var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
+    if var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   # returns a str expression of the const with the given type
@@ -58,12 +58,11 @@ class CStyleLanguage(NamedTuple):
     if isinstance(buf_dtype, ImageDType):
       assert output_dtype == dtypes._float4, "images must be float4"
       return f"read_imagef({buf_name}, smp, (int2)({idx[0].render(render_cl)}, {idx[1].render(render_cl)}))"
-    elif self.uses_vload and buf_dtype == dtypes.float16:
+    if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx.render(render_cl, strip_parens=True)})"
-    elif output_dtype.sz > 1:
+    if output_dtype.sz > 1:
       return f"({output_dtype.name})(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})))"
-    else:
-      return f"{buf_name}[{idx.render(render_cl)}]"
+    return f"{buf_name}[{idx.render(render_cl)}]"
   
   def render_local(self, name:str, size:int): 
     return self.smem_prefix + f"float {name}[{size}];"
@@ -85,17 +84,17 @@ class CStyleLanguage(NamedTuple):
     if self.half_prekernel and any(x.dtype == dtypes.float16 for x in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
 
     return prg, global_size[::-1], local_size[::-1]
+
   # returns a str statement that does the store
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
       assert var_dtype == dtypes._float4, "images must be float4"
       return f"write_imagef({buf_name}, (int2)({idx[0].render(render_cl)}, {idx[1].render(render_cl)}), {var_name});"
-    elif self.uses_vload and buf_dtype == dtypes.float16:
+    if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx.render(render_cl, strip_parens=True)});"
-    elif var_dtype.sz > 1:
+    if var_dtype.sz > 1:
       return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
-    else:
-      return f"{buf_name}[{idx.render(render_cl)}] = {var_name};"
+    return f"{buf_name}[{idx.render(render_cl)}] = {var_name};"
 
 def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:List[str]):
   # for M1 tensor core stuff, support > 3 dims
@@ -107,9 +106,8 @@ def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:Li
     lidx = (lidx//((lidx.max+1)//local_size[-1]))%(var.max+1)
     assert lidx.max == var.max and lidx.min == var.min
     return f"{{ {prefix} {var.expr} = {lidx.render(render_cl)};  /* {var.max+1} */"
-  else:
-    local_size.append(var.max+1)
-    return f"{{ {prefix} {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
+  local_size.append(var.max+1)
+  return f"{{ {prefix} {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
 def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
   kernel,global_size,local_size,prekernel = [],[],[],[]
