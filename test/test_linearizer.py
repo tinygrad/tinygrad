@@ -16,3 +16,6 @@ class TestLinearizer(unittest.TestCase):
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.realized, b.lazydata.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     assert (np_c == c.numpy()).all()
+
+if __name__ == '__main__':
+  unittest.main()
