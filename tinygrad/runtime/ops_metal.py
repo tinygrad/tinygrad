@@ -8,6 +8,7 @@ from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferMapped
 
 METAL_XCODE = getenv("METAL_XCODE")
+METAL_NO_FAST_MATH = getenv("METAL_NO_FAST_MATH")
 
 class _METAL:
   def __init__(self):
@@ -45,6 +46,8 @@ class MetalProgram:
       self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
     else:
       options = Metal.MTLCompileOptions.alloc().init()
+      if METAL_NO_FAST_MATH:
+        options.setFastMathEnabled_(0)
       self.library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
     self.fxn = self.library.newFunctionWithName_(name)
     # hacks to disassemble shader

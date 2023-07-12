@@ -242,6 +242,8 @@ jobs:
     - name: Run ops test
       run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
     # dtype test has issues on test_half_to_int8
+    - name: Run jit test
+      run: METAL_NO_FAST_MATH=1 METAL=1 python -m pytest test/test_jit.py
 
   testdocker:
     name: Docker Test

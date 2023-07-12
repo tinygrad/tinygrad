@@ -2,9 +2,9 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
-from tinygrad.jit import TinyJit
+from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 
-@unittest.skipUnless(Device.DEFAULT == "GPU", "JIT is only for GPU")
+@unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE, f"no JIT for {Device.DEFAULT}")
 class TestJit(unittest.TestCase):
   def test_simple_jit(self):
     @TinyJit
@@ -53,7 +53,7 @@ class TestJit(unittest.TestCase):
       c = add_array(a, [b])
       if i >= 2:
         # should fail once jitted since jit can't handle arrays
-        np.testing.assert_equal(np.any(np.not_equal(c.numpy(),a.numpy()+b.numpy())), True)
+        assert np.any(np.not_equal(c.numpy(),a.numpy()+b.numpy()))
       else:
         np.testing.assert_equal(c.numpy(), a.numpy()+b.numpy())
 
