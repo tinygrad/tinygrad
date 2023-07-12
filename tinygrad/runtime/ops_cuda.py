@@ -88,7 +88,6 @@ class CUDAProgram:
     self.subprg = [cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]) for prg in self.subprg]
 
   def __call__(self, global_size, local_size, *args, wait=False):
-    self.check_device_limit(global_size, local_size)
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
