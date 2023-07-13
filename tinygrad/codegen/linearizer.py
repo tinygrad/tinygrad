@@ -135,7 +135,6 @@ class Linearizer:
 
     # dedup by raw buffer
     self.dedup_bufs = dedup([x.realized for x in self.bufs], self.bufs)
-    self.dedup_bufs = self.bufs
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
@@ -143,7 +142,6 @@ class Linearizer:
     self.key = (ast.map_buffers({x:self.bufmap(i) for i,x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
 
   def bufmap(self, i: int) -> int:
-    return i
     return next(j for j,x in enumerate(self.dedup_bufs) if x.realized is None and x == self.bufs[i] or x.realized is not None and x.realized == self.bufs[i].realized)
 
   def process(self) -> None:

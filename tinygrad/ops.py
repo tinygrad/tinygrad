@@ -137,7 +137,7 @@ class ASTRunner:
     return buf.realized is not None and buf.realized.__class__ is not RawConst
 
   def exec(self, bufs) -> Optional[float]:
-    rawbufs = ([x.realized for x in bufs if ASTRunner.buf_is_kernel_arg(x)])
+    rawbufs = dedup([x.realized for x in bufs if ASTRunner.buf_is_kernel_arg(x)])
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs)
 
