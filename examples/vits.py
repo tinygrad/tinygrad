@@ -616,9 +616,9 @@ if __name__ == '__main__':
   logger.info(f"Converted input text to tensor \"{TEXT_TO_SYNTHESIZE}\" -> Tensor({stn_tst.shape}): {stn_tst.numpy()}")
   x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
   start_time = time.time()
-  out = net_g.infer(x_tst, x_tst_lengths, sid=Tensor([4], dtype=dtypes.int64) if MODEL_TO_USE == "vctk" else None, noise_scale=.667, noise_scale_w=0.8, length_scale=1)
+  audio_tensor = net_g.infer(x_tst, x_tst_lengths, sid=Tensor([4], dtype=dtypes.int64) if MODEL_TO_USE == "vctk" else None, noise_scale=.667, noise_scale_w=0.8, length_scale=1)[0][0, 0].realize()
   logger.info(f"Inference took {(time.time() - start_time):.2f}s")
-  audio = ipd.Audio(out[0][0, 0].numpy(), rate=hps.data.sampling_rate, normalize=False)
+  audio = ipd.Audio(audio_tensor.numpy(), rate=hps.data.sampling_rate, normalize=False)
   with open(OUT_PATH, 'wb') as f:
     f.write(audio.data)
     logger.info(f"Saved audio output to {OUT_PATH}")
