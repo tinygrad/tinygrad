@@ -1,7 +1,6 @@
 import subprocess, time, re, hashlib, tempfile
 from typing import Optional, List
 import numpy as np
-import pycuda.driver as cuda 
 from pycuda.compiler import compile as cuda_compile # type: ignore
 from tinygrad.helpers import DEBUG, getenv, fromimport, colored
 from tinygrad.ops import Compiled
@@ -35,6 +34,7 @@ if getenv("CUDACPU", 0) == 1:
       def synchronize(self): pass
     class Context:
       synchronize = lambda:0 # noqa: E731
+      get_device = lambda: context.device # pylint: disable=unnecessary-lambda # noqa: E731
     CompileError = Exception
   class context:
     class device:
@@ -45,6 +45,7 @@ if getenv("CUDACPU", 0) == 1:
   RawCUDABuffer = RawMallocBuffer
 else:
   import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
+  import pycuda.driver as cuda 
   class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
     def __init__(self, size, dtype): super().__init__(size, dtype, cuda.mem_alloc(size * dtype.itemsize)) # type: ignore
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore
