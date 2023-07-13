@@ -70,6 +70,18 @@ class Linear:
   def __call__(self, x):
     return x.linear(self.weight.transpose(), self.bias)
 
+class Quadric:
+  def __init__(self, in_features, out_features, bias=True):
+    self.qweight = Tensor.kaiming_uniform(out_features, in_features, a=math.sqrt(5))
+    self.lweight = Tensor.kaiming_uniform(out_features, in_features, a=math.sqrt(5))
+    bound = 1 / math.sqrt(self.lweight.shape[1])
+    self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
+
+  def __call__(self, x):
+    q = x.mul(x).linear(self.qweight.transpose())
+    lb = x.linear(self.lweight.transpose(), self.bias)
+    return q.add(lb)
+
 class GroupNorm:
   def __init__(self, num_groups:int, num_channels:int, eps:float=1e-5, affine:bool=True):
     self.num_groups, self.num_channels, self.eps = num_groups, num_channels, eps
