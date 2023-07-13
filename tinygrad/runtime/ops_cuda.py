@@ -22,6 +22,10 @@ if getenv("CUDACPU", 0) == 1:
   lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
   lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
   class cuda:
+    class device_attribute:
+      MAX_GRID_DIM_X = 100
+      MAX_GRID_DIM_Y = 100
+      MAX_GRID_DIM_Z = 100
     class module:
       def __init__(self, src): self.src = src
       def get_function(self, _): return self
@@ -39,13 +43,14 @@ if getenv("CUDACPU", 0) == 1:
   class context:
     class device:
       compute_capability = lambda: (3,5) # pylint: disable=unnecessary-lambda # noqa: E731
+      get_attribute = lambda: 2**31 # pylint: disable=unnecessary-lambda # noqa: E731
     get_device = lambda: context.device # pylint: disable=unnecessary-lambda # noqa: E731
   import pycuda.driver # type: ignore
   pycuda.driver.Context = context
   RawCUDABuffer = RawMallocBuffer
 else:
   import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
-  import pycuda.driver as cuda 
+  import pycuda.driver as cuda # type: ignore
   class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
     def __init__(self, size, dtype): super().__init__(size, dtype, cuda.mem_alloc(size * dtype.itemsize)) # type: ignore
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore
