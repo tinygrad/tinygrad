@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, time
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer, RawConst
 if TYPE_CHECKING:
@@ -132,8 +132,12 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg, **self.runtime_args)
     return self
 
+  @staticmethod
+  def buf_is_kernel_arg(buf):
+    return buf.realized is not None and buf.realized.__class__ is not RawConst
+
   def exec(self, bufs) -> Optional[float]:
-    rawbufs = [x.realized for x in bufs if x.realized is not None and x.realized.__class__ is not RawConst]
+    rawbufs = dedup([x.realized for x in bufs if ASTRunner.buf_is_kernel_arg(x)])
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs)
 

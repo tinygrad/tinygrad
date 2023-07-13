@@ -37,7 +37,7 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
   module = ir.Module(name=__file__)
 
   # create llvm function
-  func_dtypes = [{dtypes.float16:ir.HalfType(), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32)}[buf.dtype] for buf in bufs]
+  func_dtypes = [{dtypes.float16:ir.HalfType(), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32)}[buf.dtype] for buf in bufs if ASTRunner.buf_is_kernel_arg(buf)]
   func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in func_dtypes]), name='exec')
 
   # force llvmlite to allow us to add function attribute then add the attribute
@@ -114,4 +114,4 @@ class LLVMIRCodegen(Linearizer):
     self.process()
     # no optimize, this doesn't support local
     self.linearize()
-    return ASTRunner('exec', uops_to_llvm_ir(self.uops, self.bufs), op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name)
+    return ASTRunner('exec', uops_to_llvm_ir(self.uops, self.dedup_bufs), op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name)
