@@ -65,7 +65,7 @@ class CUDAProgram:
         with open(fn + ".ptx", "wb") as f: f.write(prg)
         subprocess.run(["ptxas", f"-arch={arch()}", "-o", fn, fn+".ptx"])
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
-      except: print("failed to generate SASS")
+      except Exception as e: print("failed to generate SASS", str(e))
     # TODO: name is wrong, so we get it from the ptx using hacks
     self.prg = cuda.module_from_buffer(prg).get_function(prg.split(".visible .entry ")[1].split("(")[0])
 
