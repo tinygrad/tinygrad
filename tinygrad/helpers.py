@@ -99,6 +99,7 @@ class dtypes:
     if x.name == 'long' and amt == 4: return dtypes._long4 
     if x.is_vector_type: return x
     if amt == 2: return dtypes._float2 
+    if amt == 1: return x
     return dtypes._float4 
   @staticmethod
   def get_normal_type(x: DType):

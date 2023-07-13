@@ -259,9 +259,13 @@ class Linearizer:
         assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
         assert valid.min == 1, "stores are always valid"
         if all_same([x.name for x in out_tokens]) and tuple(range(amt)) == tuple(x.offset for x in out_tokens) and out_tokens[0].dtype == self.bufs[i].dtype:
-          store_offset_new[k] = Token(out_tokens[0].name, dtypes.get_vector_type(out_tokens[0].dtype, amt=amt))
+          dt = dtypes.get_vector_type(dtypes.get_normal_type(self.bufs[i].dtype), amt=amt)
+          print(dt, amt)
+          store_offset_new[k] = Token(out_tokens[0].name, dt, amt=amt)
         else:
-          store_offset_new[k] = self.uop(UOps.CAST, ssa("alu", dtypes.get_vector_type(self.bufs[i].dtype, amt=amt)), out_tokens)
+          dt = dtypes.get_vector_type(dtypes.get_normal_type(self.bufs[i].dtype), amt=amt)
+          print(dt, amt)
+          store_offset_new[k] = self.uop(UOps.CAST, ssa("alu", dt), out_tokens)
       store_offset = store_offset_new
 
     for idx, var in store_offset.items():
@@ -498,7 +502,7 @@ class Linearizer:
       ret = []
       for idx, val in grouped:
         val = [self.casts.get(v, v) for v in val]
-        ret.append((idx, self.uop(UOps.ALU, val[-1] if x.op.__class__ in {ReduceOps, FusedOps} else ssa('alu', dtypes.get_vector_type(val[0].dtype, group_amt) if any(x.dtype.is_vector_type and x.offset is None for x in val) else val[0].dtype),
+        ret.append((idx, self.uop(UOps.ALU, val[-1] if x.op.__class__ in {ReduceOps, FusedOps} else ssa('alu', dtypes.get_vector_type(val[0].dtype, group_amt) if any(x.dtype.is_vector_type and x.offset is None for x in val) else dtypes.get_normal_type(val[0].dtype)),
                     list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}.get(x.op, x.op))))
 
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
