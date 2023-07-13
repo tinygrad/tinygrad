@@ -21,7 +21,8 @@ class MultiStepLR(LR_Scheduler):
     super().__init__(optimizer)
     self.milestones = milestones
     self.gamma = gamma
-  
+    self.epoch_counter.assign(self.epoch_counter + 1).realize()
+
   def get_lr(self) -> Tensor:
     if self.epoch_counter.numpy()[0] not in self.milestones:
       return self.optimizer.lr
@@ -61,6 +62,7 @@ class CosineAnnealingLR(LR_Scheduler):
     self.T_max = T_max
     self.eta_min = eta_min
     self.eta_max = optimizer.lr.numpy()[0]
+    self.epoch_counter.assign(self.epoch_counter + 1).realize()
 
   def get_lr(self) -> Tensor:
     return Tensor([self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter.numpy()[0]/self.T_max) * math.pi))])

@@ -56,7 +56,6 @@ class TestLrScheduler(unittest.TestCase):
     accs = opts.pop('accs', None)
     tinygrad_optim, torch_optim = Adam([], lr=0.01), torch.optim.Adam([torch.tensor([0.], requires_grad=True)], lr=0.01)
     tinygrad_sched, torch_sched = tinygrad_sched(tinygrad_optim, **opts), torch_sched(torch_optim, **opts)
-
     tinygrad_lrs = get_lrs(tinygrad_optim, tinygrad_sched, epochs, accs=accs)
     torch_lrs = get_lrs(torch_optim, torch_sched, epochs, accs=accs)
 
