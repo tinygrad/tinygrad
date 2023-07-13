@@ -95,8 +95,7 @@ class CUDAProgram:
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
-    for prg, gs in zip(self.subprg, self.global_size): 
-      prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(gs)) 
+    for prg, gs in zip(self.subprg, self.global_size): prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(gs)) # type: ignore
     if wait:
       end.record()
       end.synchronize()
