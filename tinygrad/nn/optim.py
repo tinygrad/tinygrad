@@ -1,6 +1,6 @@
 # sorted in order of increasing complexity
 from typing import List
-from tinygrad.helpers import dedup, dtypes
+from tinygrad.helpers import dedup
 from tinygrad.tensor import Tensor
 
 class Optimizer:

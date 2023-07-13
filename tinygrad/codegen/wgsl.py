@@ -24,8 +24,9 @@ class WGSLLanguage(CStyleLanguage):
     FusedOps.MULACC: lambda x,y,z: f"fma({x},{y},{z})",
   }
 
-  def render_local(self, name: str, size: int):
-    return f"var<workgroup> {name}: array<f32,{size}>;"
+  def render_local(self, name: str, size: int, dtype:str = 'float'):
+    dtype = type_map.get(dtypes.__dict__[dtype], 'f32')
+    return f"var<workgroup> {name}: array<{dtype},{size}>;"
   
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isinf(x): val = ("-" if x < 0 else "") + "0x1.fffffep+127f"
