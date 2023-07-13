@@ -9,7 +9,7 @@ from tinygrad.lazy import Device
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
-def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3):
+def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3, test_except=False):
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
   torch.manual_seed(0)
   np.random.seed(0)
@@ -34,11 +34,13 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     tinygrad_exception = e
   tinygrad_fp = time.monotonic() - st
 
-  if torch_exception is not None or tinygrad_exception is not None:
+  if test_except and (torch_exception or tinygrad_exception):
     if torch_exception and not tinygrad_exception: raise Exception(f"torch raised {torch_exception} but tinygrad did not")
     if tinygrad_exception and not torch_exception: raise Exception(f"tinygrad raised {tinygrad_exception} but torch did not")
     print("\ntesting %40r   torch/tinygrad exception: %s / %s" % (shps, torch_exception, tinygrad_exception), end="")
     return
+  elif torch_exception: raise torch_exception
+  elif tinygrad_exception: raise tinygrad_exception
 
   def compare(s, x,y,atol,rtol):
     if PRINT_TENSORS: print(s, x, y)
@@ -595,16 +597,16 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,3,6,6)], lambda x: torch.squeeze(x, 0), lambda x: x.squeeze(dim=0))
     helper_test_op([(4,3,1,6)], lambda x: torch.squeeze(x, 1), lambda x: x.squeeze(dim=1))
     helper_test_op([(4,3,6,6)], lambda x: torch.squeeze(x, 3), lambda x: x.squeeze(dim=3))
-    helper_test_op([(4,3,6,6)], lambda x: torch.squeeze(x, 50), lambda x: x.squeeze(dim=50))
-    helper_test_op([(4,3,6,6)], lambda x: torch.squeeze(x, -50), lambda x: x.squeeze(dim=-50))
+    helper_test_op([(4,3,6,6)], lambda x: torch.squeeze(x, 50), lambda x: x.squeeze(dim=50), test_except=True)
+    helper_test_op([(4,3,6,6)], lambda x: torch.squeeze(x, -50), lambda x: x.squeeze(dim=-50), test_except=True)
     helper_test_op([(4,3,6,1)], lambda x: torch.squeeze(x, -1), lambda x: x.squeeze(dim=-1))
     helper_test_op([(4,3,6,6)], lambda x: torch.squeeze(x), lambda x: x.squeeze())
     helper_test_op([(1,3,6,6)], lambda x: torch.squeeze(x), lambda x: x.squeeze())
     helper_test_op([(2,3,1)], lambda x: torch.squeeze(x), lambda x: x.squeeze())
-    # helper_test_op([()], lambda x: torch.squeeze(x, -1), lambda x: x.squeeze(dim=-1)) #TODO: torch does not throw here?
-    # helper_test_op([()], lambda x: torch.squeeze(x, 0), lambda x: x.squeeze(dim=0))   #TODO: torch does not throw here?
-    helper_test_op([()], lambda x: torch.squeeze(x, 10), lambda x: x.squeeze(dim=10))
-    helper_test_op([()], lambda x: torch.squeeze(x), lambda x: x.squeeze())
+    # helper_test_op([()], lambda x: torch.squeeze(x, -1), lambda x: x.squeeze(dim=-1), test_except=True) #TODO: torch does not throw here?
+    # helper_test_op([()], lambda x: torch.squeeze(x, 0), lambda x: x.squeeze(dim=0), test_except=True)   #TODO: torch does not throw here?
+    helper_test_op([()], lambda x: torch.squeeze(x, 10), lambda x: x.squeeze(dim=10), test_except=True)
+    helper_test_op([()], lambda x: torch.squeeze(x), lambda x: x.squeeze(), test_except=True)
 
   def test_unsqueeze(self):
     helper_test_op([(4,3,6,6)], lambda x: torch.unsqueeze(x, 0), lambda x: x.unsqueeze(dim=0))
