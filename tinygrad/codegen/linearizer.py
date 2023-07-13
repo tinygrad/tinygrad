@@ -79,16 +79,13 @@ def get_grouped_vector_idxs(acc:List[Token], amt=4) -> Optional[List[int]]:
 def to_vector(x:List[Token], amt:int=4) -> Optional[Token]:
   if all_same(x): return x[0]
   if all_same([y.name for y in x]) and all(y.dtype.is_vector_type and y.offset == i for i,y in enumerate(x)):
-    # print('group success: ', x)
     return Token(x[0].name, dtypes.get_vector_type(x[0].dtype, amt=amt))
-  # print('group fail: ', x)
   return None
 
 def get_grouped_maybe_vector(*values:List[Token], grouping_allowed=True, amt=4):
   assert all_same([len(x) for x in values]), f"all values are not the same length {[len(x) for x in values]}"
   # these use accumulators, we can only fold if the acc is a vector
   idxs = get_grouped_vector_idxs(values[-1], amt) if grouping_allowed else None
-  # print('grouping idxs: ', idxs)
   if idxs is not None:
     new_idxs = []
     new_values = []
@@ -258,13 +255,10 @@ class Linearizer:
         idx, valid = self.sts[i].expr_idxs(k)
         assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
         assert valid.min == 1, "stores are always valid"
+        dt = dtypes.get_vector_type(dtypes.get_normal_type(self.bufs[i].dtype), amt=amt)
         if all_same([x.name for x in out_tokens]) and tuple(range(amt)) == tuple(x.offset for x in out_tokens) and out_tokens[0].dtype == self.bufs[i].dtype:
-          dt = dtypes.get_vector_type(dtypes.get_normal_type(self.bufs[i].dtype), amt=amt)
-          print(dt, amt)
           store_offset_new[k] = Token(out_tokens[0].name, dt, amt=amt)
         else:
-          dt = dtypes.get_vector_type(dtypes.get_normal_type(self.bufs[i].dtype), amt=amt)
-          print(dt, amt)
           store_offset_new[k] = self.uop(UOps.CAST, ssa("alu", dt), out_tokens)
       store_offset = store_offset_new
 
