@@ -9,7 +9,7 @@ def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 
 #NOTE: Darwin needs lm functions to start with a "_" 
 def get_op(op): return f"bl {'_' if platform.system() == 'Darwin' else ''}{op}"
-
+_type_to_reg = {dtypes.half: 'h', dtypes.float32: 's', dtypes.bool: 'x',dtypes.int8:'w', dtypes.int32: 'w', dtypes.int64: 'x', dtypes.uint8:'w', dtypes.uint32: 'w', dtypes.uint64: 'x'}
 class ARMCodegen(AssemblyCodegen):
   def specialize(self, asm):
     ins = [] 
@@ -29,11 +29,16 @@ class ARMCodegen(AssemblyCodegen):
         buf_map[arg] = out[1] 
         if arg.startswith('buf'):
           if int(arg[3:]) >= 8: ins.append(f"ldr x1, [x19, #{(int(arg[3:]) - 8) * 8}]")
-          if out[1] == dtypes.int32 and arg != "buf0":
-            for i in range(out.bufsize):
-              ins.append(f"ldr s0, [x{'1' if int(arg[3:]) >= 8 else arg[3:]}, #{i*4}]")
-              ins.append("scvtf s0, s0")
-              ins.append(f"str s0, [x{'1' if int(arg[3:]) >= 8 else arg[3:]}, #{i*4}]")
+          # if out[1] != dtypes.int32 and arg != "buf0":
+          #   for i in range(out.bufsize):
+          #     ins.append(f"ldr s0, [x{'1' if int(arg[3:]) >= 8 else arg[3:]}, #{i*4}]")
+          #     ins.append("scvtf s0, s0")
+          #     ins.append(f"str s0, [x{'1' if int(arg[3:]) >= 8 else arg[3:]}, #{i*4}]")
+          # if arg != "buf0":
+          #   for i in range(out.bufsize):
+          #     ins.append(f"ldr h0, [x{'1' if int(arg[3:]) >= 8 else arg[3:]}, #{i*2}]")
+          #     ins.append("fcvt s0, h0")
+          #     ins.append(f"str s0, [x{'1' if int(arg[3:]) >= 8 else arg[3:]}, #{i*4}]")
           ins.append(f"str x{'1' if int(arg[3:]) >= 8 else arg[3:]}, {reg_map[out.nm]}")
       elif uop == UOps.CONST:
         ins.append(f"mov w0, #{arg & 0xffff if arg > 65535 else arg}" if arg.__class__ is int else f"mov x0, 0x{float_to_hex(arg)}")
@@ -84,6 +89,7 @@ class ARMCodegen(AssemblyCodegen):
         ins.append(f"str {reg}{'2' if arg == BinaryOps.MOD else '0'}, {reg_map[out.nm]}")
       elif uop == UOps.LOAD:
         reg = 's0' if dtypes.is_float(out[1]) else 'x0'
+        #reg = _type_to_reg[out[1]] + '0' 
         ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
         if reg == 's0' and arg[0] < -255:
           ins.append(f"mov x2, #{abs(arg[0])}")
@@ -93,15 +99,28 @@ class ARMCodegen(AssemblyCodegen):
           ins.append(f"ldr {reg}, [x1, #{arg[0]}]")
         ins.append(f"str {reg}, {reg_map[out.nm]}")
       elif uop == UOps.STORE:
-        reg = 's0' if dtypes.is_float(vin[1][1]) else 'x0'
-        ins.append(f"ldr {reg}, {reg_map[vin[1].nm]}")
-        if buf_map["buf0"] == dtypes.int32 and buf_map["buf1"] == dtypes.float:
-          ins.append(f"fcvtzs w0, {reg}")
-          reg = 'w0'
-        elif buf_map["buf0"] == dtypes.float and buf_map["buf1"] == dtypes.int32:
-          ins.append(f"scvtf {reg}, {reg}")
-        ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
-        ins.append(f"str {reg}, [x1, #{arg[0]}]")
+        out = _type_to_reg[buf_map['buf0']] + '0' 
+        inp = f"{_type_to_reg[buf_map['buf1']]}{'0' if buf_map['buf1'] in [dtypes.int8, dtypes.uint8] else '1'}"
+        ins.append(f"ldr{'sb' if buf_map['buf1'] in [dtypes.int8, dtypes.uint8] else ''} {inp}, {reg_map[vin[1].nm]}")
+        if len(buf_map) == 2 and buf_map['buf0'] != buf_map['buf1']:
+          if buf_map['buf1'] == dtypes.half:
+            ins.append(f"fcvt s0, {inp}")
+            if dtypes.is_int(buf_map['buf0']) or dtypes.is_unsigned(buf_map['buf0']):
+              ins.append(f"fcvtzs {out}, s0")
+          elif buf_map['buf1'] == dtypes.float:
+            if buf_map['buf0'] == dtypes.half:
+              ins.append(f"fcvt {out}, {inp}")
+            else:
+              ins.append(f"fcvtzs {out}, {inp}")
+          elif buf_map['buf1'] in [dtypes.int8, dtypes.uint8]:
+            if buf_map['buf0'] == dtypes.float:
+              ins.append(f"scvtf {out}, {inp}")
+            elif buf_map['buf0'] == dtypes.half: 
+              ins.append(f"scvtf s0, {inp}")
+              ins.append(f"fcvt {out}, s0")
+        ins.append(f"mov x3, #{arg[0]}")
+        ins.append(f"ldr x2, {reg_map[vin[0].nm]}")
+        ins.append(f"str {out}, [x2, x3, lsl {'#3' if buf_map['buf0'] == dtypes.int64 else '#1' if  buf_map['buf0'] == dtypes.half else '#2' if buf_map['buf1'] in [dtypes.int8, dtypes.uint8] else '#0'}]")
       elif uop == UOps.COND_BRANCH:
         ins.append(f"b.{'lt' if arg[1]==True else 'ge'} {arg[0][1:]}")
       elif uop == UOps.LABEL:
