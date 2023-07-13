@@ -281,7 +281,7 @@ jobs:
         key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
         restore-keys: |
           ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
-    - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
+    - if:
       name: Clone gpuocelot
       uses: actions/checkout@v3
       with:
@@ -289,7 +289,7 @@ jobs:
         ref: 19626fc00b6ee321638c3111074269c69050e091
         path: ${{ github.workspace }}/gpuocelot
         submodules: true
-    - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
+    - if:
       name: Compile gpuocelot
       run: |
         cd ${{ github.workspace }}/gpuocelot/ocelot
