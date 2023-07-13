@@ -63,7 +63,7 @@ class CUDAProgram:
       try:
         fn = f"{tempfile.gettempdir()}\\tinycuda_{hashlib.md5(prg).hexdigest()}"
         with open(fn + ".ptx", "wb") as f: f.write(prg)
-        subprocess.run(["ptxas", f"-arch={arch()}", "-o", fn, fn+".ptx"])
+        subprocess.run(["ptxas", f"-arch={arch()}", "-o", fn, fn+".ptx"], check=True)
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
       except Exception as e: print("failed to generate SASS", str(e))
     # TODO: name is wrong, so we get it from the ptx using hacks
