@@ -4,7 +4,8 @@ from tinygrad.helpers import dtypes, DType
 from tinygrad.codegen.linearizer import LocalBuffer
 from tinygrad.codegen.cstyle import CStyleLanguage
 from typing import List, Union
-from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, FusedOps
+from tinygrad.runtime.lib import RawConst
+from tinygrad.ops import UnaryOps, BinaryOps, FusedOps
 import math
 from typing import Tuple
 
@@ -34,7 +35,7 @@ class WGSLLanguage(CStyleLanguage):
   def render_kernel(self, kernel:List[str], bufs:List[Union[LocalBuffer,LazyBuffer]], bufnames:List[str], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str, List[int], List[int]]:
     local_size = local_size[::-1] if len(local_size) else [1]
     bind_it = iter(range(len(bufs)))
-    prg = "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) var<storage,read_write> data{i}: array<{type_map[x.dtype]}>;" for i,x in enumerate(bufs) if ASTRunner.buf_is_kernel_arg(x)])
+    prg = "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) var<storage,read_write> data{i}: array<{type_map[x.dtype]}>;" for i,x in enumerate(bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)])
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn KERNEL_NAME_PLACEHOLDER(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
     return prg, global_size[::-1] if len(global_size) else [1], local_size
   

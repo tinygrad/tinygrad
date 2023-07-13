@@ -1,6 +1,6 @@
 import struct
 from tinygrad.codegen.assembly import AssemblyCodegen
-from tinygrad.ops import BinaryOps, UnaryOps, FusedOps, ASTRunner
+from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
 from tinygrad.codegen.linearizer import UOps
 from tinygrad.helpers import dtypes
 
@@ -13,7 +13,7 @@ class PTXCodegen(AssemblyCodegen):
 
   def specialize(self, asm):
     ins = [".version 7.8", ".target sm_86", ".address_size 64",
-           f".visible .entry test({', '.join(f'.param .u64 buf{i}' for i,x in enumerate(self.dedup_bufs) if ASTRunner.buf_is_kernel_arg(x))}) {{"]
+           f".visible .entry test({', '.join(f'.param .u64 buf{i}' for i in range(len(self.bufs)))}) {{"]
 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.eq",

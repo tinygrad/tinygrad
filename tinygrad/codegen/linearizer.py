@@ -133,18 +133,10 @@ class Linearizer:
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)
 
-    # dedup by raw buffer
-    # self.dedup_bufs = dedup([x.realized for x in self.bufs], self.bufs)
-    self.dedup_bufs = self.bufs
-
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
-    self.key = (ast.map_buffers({x:self.bufmap(i) for i,x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
-
-  def bufmap(self, i: int) -> int:
-    return i
-    return next(j for j,x in enumerate(self.dedup_bufs) if x.realized is None and x == self.bufs[i] or x.realized is not None and x.realized == self.bufs[i].realized)
+    self.key = (ast.map_buffers({x:i for i,x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
@@ -232,7 +224,7 @@ class Linearizer:
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.bufmap(i), idx, valid)) if const is None else \
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
                      self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return ret
@@ -265,7 +257,7 @@ class Linearizer:
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-      self.uop(UOps.STORE, None, [var], MemOp(self.bufmap(i), idx, valid))
+      self.uop(UOps.STORE, None, [var], MemOp(i, idx, valid))
 
   def linearize(self):
     # uops
@@ -277,7 +269,6 @@ class Linearizer:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
-      self.dedup_bufs.append(self.bufs[-1])
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
     # define local buffers
@@ -610,7 +601,6 @@ class Linearizer:
 
     self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
     self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
-    self.dedup_bufs.append(self.bufs[-1])
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
 
