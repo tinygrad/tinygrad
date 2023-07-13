@@ -7,7 +7,7 @@ import pycocotools.mask as _mask
 from tinygrad.tensor import Tensor
 from extra.utils import download_file
 
-from models.mask_rcnn import BoxList
+from models.maskrcnn.bounding_box import BoxList
 from models.mask_rcnn import SegmentationMask
 from models.mask_rcnn import PersonKeypoints
 
@@ -116,7 +116,6 @@ class COCODataset(torchvision.datasets.coco.CocoDetection):
       #
       # numpy convert PIL into (800, 1066, 3)
       # torch convert PIL into (3, 800, 1066)
-      print(img)
       img, target = self._transforms(img, target)
 
     return img, target, idx
