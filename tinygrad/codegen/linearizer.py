@@ -134,7 +134,7 @@ class Linearizer:
     self.bufs = [output_buffer] + dedup(ast.buffers)
 
     # dedup by raw buffer
-    # self.dedup_bufs = dedup([x.realized for x in self.bufs], self.bufs)
+    self.dedup_bufs = dedup([x.realized for x in self.bufs], self.bufs)
     self.dedup_bufs = self.bufs
 
     # key for lookup in cache (can change, str might not be right)
