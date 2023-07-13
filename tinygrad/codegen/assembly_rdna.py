@@ -35,7 +35,7 @@ class RDNACodegen(AssemblyCodegen):
   no_div: bool = True
 
   def specialize(self, asm) -> Tuple[str, str]:
-    args = [{'.address_space': 'global', '.name': f'buf_{i}', '.offset': i*8, '.size': 8, '.type_name': b.dtype.name+"*", '.value_kind': 'global_buffer'} for i,b in enumerate(self.dedup_bufs) if ASTRunner.buf_is_kernel_arg(b)]
+    args = [{'.address_space': 'global', '.name': f'buf_{i}', '.offset': i*8, '.size': 8, '.type_name': b.dtype.name+"*", '.value_kind': 'global_buffer'} for i,b in enumerate(self.dedup_bufs)]
     ins = []
 
     v_cnt = 3  # v[0:2] is local_xyz
