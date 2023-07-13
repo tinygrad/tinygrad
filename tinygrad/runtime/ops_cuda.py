@@ -53,7 +53,7 @@ else:
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
     try:
-      if DEBUG >= 6:
+      if DEBUG >= 6 and not getenv("PTX"):
         fn = f"{tempfile.gettempdir()}/tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}"
         with open(fn, "wb") as f:
           f.write(cuda_compile(prg, target="cubin", no_extern_c=True))
