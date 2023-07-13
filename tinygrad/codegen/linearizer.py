@@ -257,7 +257,7 @@ class Linearizer:
         assert valid.min == 1, "stores are always valid"
         dt = dtypes.get_vector_type(dtypes.get_normal_type(self.bufs[i].dtype), amt=amt)
         if all_same([x.name for x in out_tokens]) and tuple(range(amt)) == tuple(x.offset for x in out_tokens) and out_tokens[0].dtype == self.bufs[i].dtype:
-          store_offset_new[k] = Token(out_tokens[0].name, dt, amt=amt)
+          store_offset_new[k] = Token(out_tokens[0].name, dt)
         else:
           store_offset_new[k] = self.uop(UOps.CAST, ssa("alu", dt), out_tokens)
       store_offset = store_offset_new

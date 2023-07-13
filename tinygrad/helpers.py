@@ -105,7 +105,7 @@ class dtypes:
   uint32: Final[DType] = DType(2, 4, "unsigned int", np.uint32)
   uint64: Final[DType] = DType(3, 8, "unsigned long", np.uint64)
   @staticmethod
-  def get_vector_type(x: DType, amt: int = 4):
+  def get_vector_type(x:DType, amt=4):
     if not x.is_vector_type: return dtypes.__dict__[f"_{x.name}{amt}"]
     return x
   @staticmethod
