@@ -21,12 +21,24 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   tst = [Tensor(x.detach().numpy(), requires_grad=not FORWARD_ONLY) for x in ts]
 
   st = time.monotonic()
-  out = torch_fxn(*ts)
+  try:
+    out, torch_exception = torch_fxn(*ts), None
+  except Exception as e:
+    torch_exception = e
   torch_fp = time.monotonic() - st
 
   st = time.monotonic()
-  ret = tinygrad_fxn(*tst).realize()
+  try:
+    ret, tinygrad_exception = tinygrad_fxn(*tst).realize(), None
+  except Exception as e:
+    tinygrad_exception = e
   tinygrad_fp = time.monotonic() - st
+
+  if torch_exception is not None or tinygrad_exception is not None:
+    if torch_exception and not tinygrad_exception: raise Exception(f"torch raised {torch_exception} but tinygrad did not")
+    if tinygrad_exception and not torch_exception: raise Exception(f"tinygrad raised {tinygrad_exception} but torch did not")
+    print("\ntesting %40r   torch/tinygrad exception: %s / %s" % (shps, torch_exception, tinygrad_exception), end="")
+    return
 
   def compare(s, x,y,atol,rtol):
     if PRINT_TENSORS: print(s, x, y)
@@ -578,6 +590,21 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: torch.flip(x, ()), lambda x: x.flip(axis=()))
     helper_test_op([(1,)], lambda x: torch.flip(x, ()), lambda x: x.flip(axis=()))
     helper_test_op([(4, 3, 6, 6)], lambda x: torch.flip(x, ()), lambda x: x.flip(axis=()))
+
+  def test_squeeze(self):
+    helper_test_op([(1,3,6,6)], lambda x: torch.squeeze(x, 0), lambda x: x.squeeze(dim=0))
+    helper_test_op([(4,3,1,6)], lambda x: torch.squeeze(x, 1), lambda x: x.squeeze(dim=1))
+    helper_test_op([(4,3,6,6)], lambda x: torch.squeeze(x, 3), lambda x: x.squeeze(dim=3))
+    helper_test_op([(4,3,6,6)], lambda x: torch.squeeze(x, 50), lambda x: x.squeeze(dim=50))
+    helper_test_op([(4,3,6,6)], lambda x: torch.squeeze(x, -50), lambda x: x.squeeze(dim=-50))
+    helper_test_op([(4,3,6,1)], lambda x: torch.squeeze(x, -1), lambda x: x.squeeze(dim=-1))
+    helper_test_op([(4,3,6,6)], lambda x: torch.squeeze(x), lambda x: x.squeeze())
+    helper_test_op([(1,3,6,6)], lambda x: torch.squeeze(x), lambda x: x.squeeze())
+    helper_test_op([(2,3,1)], lambda x: torch.squeeze(x), lambda x: x.squeeze())
+    # helper_test_op([()], lambda x: torch.squeeze(x, -1), lambda x: x.squeeze(dim=-1)) #TODO: torch does not throw here?
+    # helper_test_op([()], lambda x: torch.squeeze(x, 0), lambda x: x.squeeze(dim=0))   #TODO: torch does not throw here?
+    helper_test_op([()], lambda x: torch.squeeze(x, 10), lambda x: x.squeeze(dim=10))
+    helper_test_op([()], lambda x: torch.squeeze(x), lambda x: x.squeeze())
 
   def test_unsqueeze(self):
     helper_test_op([(4,3,6,6)], lambda x: torch.unsqueeze(x, 0), lambda x: x.unsqueeze(dim=0))
