@@ -6,8 +6,10 @@ from tinygrad.ops import GlobalCounters, Compiled
 from tinygrad.tensor import Tensor
 
 class TestLinearizer(unittest.TestCase):
-  @unittest.skipUnless(isinstance(Device[Device.DEFAULT], Compiled), "Only Compiled supports cache")
   def test_arg_dedup(self):
+    if isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled supports cache")
+      return  # Only Compiled supports cache
     a, b = Tensor.randn(4), Tensor.randn(4)
     np_a, np_b = a.numpy(), b.numpy()
     GlobalCounters.cache = []
