@@ -104,9 +104,11 @@ class dtypes:
   uint8: Final[DType] = DType(0, 1, "unsigned char", np.uint8)
   uint32: Final[DType] = DType(2, 4, "unsigned int", np.uint32)
   uint64: Final[DType] = DType(3, 8, "unsigned long", np.uint64)
+  @staticmethod
   def get_vector_type(x: DType, amt: int = 4):
     if not x.is_vector_type: return dtypes.__dict__[f"_{x.name}{amt}"]
     return x
+  @staticmethod
   def get_normal_type(x: DType):
     if x.is_vector_type: return dtypes.__dict__[f"{x.name[:-1]}"]
     return x
