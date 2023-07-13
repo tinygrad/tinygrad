@@ -42,9 +42,8 @@ if getenv("CUDACPU", 0) == 1:
     CompileError = Exception
   class context:
     class device:
-      def __init__(self, src): self.src = src
       compute_capability = lambda: (3,5) # pylint: disable=unnecessary-lambda # noqa: E731
-      get_attribute = lambda src: context.device(src) # pylint: disable=unnecessary-lambda # noqa: E731
+      get_attribute = lambda x: 300*x # pylint: disable=unnecessary-lambda # noqa: E731
     get_device = lambda: context.device # pylint: disable=unnecessary-lambda # noqa: E731
   import pycuda.driver # type: ignore
   pycuda.driver.Context = context
