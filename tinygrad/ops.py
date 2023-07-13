@@ -131,7 +131,8 @@ class ASTRunner:
     self.local_size = (local_size + [1]*(3-len(local_size))) if local_size is not None else None
 
   def build(self, runtime):
-    if getenv("CUDA", 0):
+    # TODO There has to be a better way to do this
+    if self.prg[:10] == "__global__":
       self.clprg = runtime(self.name, self.prg, self.global_size, self.local_size, **self.runtime_args)
     else:
       self.clprg = runtime(self.name, self.prg, **self.runtime_args)
