@@ -201,14 +201,14 @@ class Linearizer:
     acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
-  def get_upcast_dim(self, i, amt=4):
+  def get_upcast_dim(self, i):
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16, dtypes.int8, dtypes.int32, dtypes.int64] or isinstance(self.bufs[i].dtype, ImageDType))
-    return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == amt]
+    return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
-    upcast_dim = self.get_upcast_dim(i, amt=2 if self.bufs[i].dtype == dtypes.half and not self.supports_half4 and self.supports_half2 else 4)
+    upcast_dim = self.get_upcast_dim(i)
     amt = 1
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
@@ -239,7 +239,7 @@ class Linearizer:
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
-    upcast_dim = self.get_upcast_dim(i, amt=2 if self.bufs[i].dtype == dtypes.half and not self.supports_half4 and self.supports_half2 else 4)
+    upcast_dim = self.get_upcast_dim(i)
 
     store_offset = dict(zip(_idxs, store))
 
@@ -475,8 +475,8 @@ class Linearizer:
       highest_priority = max([v.dtype.priority for val in values for v in val] + [cast_dtype.priority])
       buf_cast_dtype = [v.dtype if v.offset is None else dtypes.get_normal_type(v.dtype) for val in values for v in val if v.dtype.priority == highest_priority]
       if len(buf_cast_dtype) > 0: cast_dtype = buf_cast_dtype[0]
-
-      if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and getenv('NVIDIA'): cast_dtype = dtypes.float
+      is_nvidia = self.__getattribute__('is_nvidia') if hasattr(self, 'is_nvidia') else False
+      if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and is_nvidia: cast_dtype = dtypes.float
 
       if dtypes.get_normal_type(cast_dtype) == dtypes.half:
         if self.supports_half4_alu: grouping_allowed, group_amt = True, 4

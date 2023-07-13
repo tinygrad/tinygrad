@@ -83,55 +83,38 @@ class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   def is_int(x: DType)-> bool: return x in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64)
   @staticmethod
-  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes._half4, dtypes._float4)
+  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes._half4, dtypes._float4, dtypes._half2, dtypes._float2)
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint32, dtypes.uint64)
   @staticmethod
   def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
-  @staticmethod
-  def get_vector_type(x: DType, amt: int = 4):
-    if x.name == 'half' and amt == 4: return dtypes._half4 
-    if x.name == 'half' and amt == 2: return dtypes._half2
-    if x.name == 'int' and amt == 4: return dtypes._int4 
-    if x.name == 'char' and amt == 4: return dtypes._char4 
-    if x.name == 'long' and amt == 4: return dtypes._long4 
-    if x.is_vector_type: return x
-    if amt == 2: return dtypes._float2 
-    if amt == 1: return x
-    return dtypes._float4 
-  @staticmethod
-  def get_normal_type(x: DType):
-    if x.name == 'half4': return dtypes.half 
-    if x.name == 'half2': return dtypes.half 
-    if x.name == 'int4': return dtypes.int32
-    if x.name == 'char4': return dtypes.int8
-    if x.name == 'long4': return dtypes.int64
-    if not x.is_vector_type: return x
-    return dtypes.float 
   bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   half = float16
   float32: Final[DType] = DType(4, 4, "float", np.float32)
   float = float32
   int8: Final[DType] = DType(0, 1, "char", np.int8)
+  char = int8
   int32: Final[DType] = DType(2, 4, "int", np.int32)
+  int = int32
   int64: Final[DType] = DType(3, 8, "long", np.int64)
+  long = int64
   uint8: Final[DType] = DType(0, 1, "unsigned char", np.uint8)
   uint32: Final[DType] = DType(2, 4, "unsigned int", np.uint32)
   uint64: Final[DType] = DType(3, 8, "unsigned long", np.uint64)
+  def get_vector_type(x: DType, amt: int = 4):
+    if not x.is_vector_type: return dtypes.__dict__[f"_{x.name}{amt}"]
+    return x
+  def get_normal_type(x: DType):
+    if x.is_vector_type: return dtypes.__dict__[f"{x.name[:-1]}"]
+    return x
 
-  # NOTE: these are internal dtypes, should probably check for that
-  _half4: Final[DType] = DType(0, 2*4, "half4", None, 4, is_vector_type=True)
-  _float4: Final[DType] = DType(4, 4*4, "float4", None, 4, is_vector_type=True)
-  _char4: Final[DType] = DType(0, 4*1, "char4", None, 4, is_vector_type=True)
-  _long4: Final[DType] = DType(3, 4*8, "long4", None, 4, is_vector_type=True)
-  _int4: Final[DType] = DType(2, 4*4, "int4", None, 4, is_vector_type=True)
-  _float2: Final[DType] = DType(4, 4*2, "float2", None, 2, is_vector_type=True)
-  _half2: Final[DType] = DType(4, 2*2, "half2", None, 2, is_vector_type=True)
-
-
+# create vector types
+for attr in list(dtypes.__dict__.values()):
+  for amt in [2, 4]:
+    if isinstance(attr, DType): setattr(dtypes, f"_{attr.name}{amt}",  DType(attr.priority, attr.itemsize*amt, f"{attr.name}{amt}", None, amt, True))
 
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
