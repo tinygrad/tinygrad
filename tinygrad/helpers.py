@@ -10,7 +10,7 @@ ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
 
-def dedup(x): return list(dict.fromkeys(x))   # retains list order
+def dedup(x, values=None): return list(dict(zip(x, values if values is not None else x)).values())   # retains list order
 def argfix(*x):
   if x[0].__class__ in {tuple, list}:
     try: return tuple(x[0])
