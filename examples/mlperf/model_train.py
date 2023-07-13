@@ -51,15 +51,15 @@ def train_maskrcnn():
                         transforms=transform)
 
   # Sanity test while refactoring the COCO dataset code base
-  print("Data")
-  print(dataset[0][0])
+  # print("Data")
+  # print(dataset[0][0])
   print("Bounding box")
   print(dataset[0][1].bbox)
-  print("Label")
-  print(dataset[0][1].get_field('labels'))
-  print("Segmentation mask")
-  for p in dataset[0][1].get_field('masks').polygons:
-    print(p.polygons)
+  # print("Label")
+  # print(dataset[0][1].get_field('labels'))
+  # print("Segmentation mask")
+  # for p in dataset[0][1].get_field('masks').polygons:
+  #   print(p.polygons)
 
   # For training, you must also adjust the learning rate and schedule length 
   # according to the linear scaling rule. See for example:
