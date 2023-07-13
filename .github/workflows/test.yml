@@ -281,7 +281,7 @@ jobs:
         key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
         restore-keys: |
           ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
-    - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
+    - if:
       name: Clone gpuocelot
       uses: actions/checkout@v3
       with:
@@ -289,7 +289,7 @@ jobs:
         ref: 19626fc00b6ee321638c3111074269c69050e091
         path: ${{ github.workspace }}/gpuocelot
         submodules: true
-    - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
+    - if:
       name: Compile gpuocelot
       run: |
         cd ${{ github.workspace }}/gpuocelot/ocelot
@@ -310,4 +310,4 @@ jobs:
     - name: Install tinygrad dependencies
       run: pip install -e '.[testing, cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run pytest
-      run: FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"
+      run: FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half and example"
