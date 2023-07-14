@@ -53,7 +53,7 @@ class Token(NamedTuple):
       return f"{self.dtype.name} {self.name}"
     if self.offset is None: return self.name
     assert self.dtype.is_vector_type, self
-    return self.name+".s"+str(int(self.offset))
+    return self.name+"."+"xyzw"[int(self.offset)]
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
 # TODO: the next three functions are poorly written
@@ -210,7 +210,7 @@ class Linearizer:
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
     amt = 1
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [8,4,2]:
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     cache: Dict[str, Token] = {}
@@ -244,7 +244,7 @@ class Linearizer:
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4,8]:
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (expanded_nodes[upcast_dim[0]][0],) + k[upcast_dim[0]+1:]
@@ -474,16 +474,11 @@ class Linearizer:
       cast_dtype = dtypes.float if x.op.__class__ in {ReduceOps, FusedOps} and getenv('ACCUM_FLOAT', 1) else dtypes.float16
       highest_priority = max([v.dtype.priority for val in values for v in val] + [cast_dtype.priority])
       buf_cast_dtype = [v.dtype if v.offset is None else dtypes.get_normal_type(v.dtype) for val in values for v in val if v.dtype.priority == highest_priority]
+      group_amt = 4 if (self.supports_float4_alu or self.supports_half4_alu) else 2
       if len(buf_cast_dtype) > 0: cast_dtype = buf_cast_dtype[0]
       is_nvidia = self.__getattribute__('is_nvidia') if hasattr(self, 'is_nvidia') else False
       if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and is_nvidia: cast_dtype = dtypes.float
-
-      if dtypes.get_normal_type(cast_dtype) == dtypes.half:
-        if self.supports_half4_alu: grouping_allowed, group_amt = True, 8
-        elif self.supports_half2_alu: grouping_allowed, group_amt = True, 2
-        else: grouping_allowed, group_amt = False, 8
-      else: grouping_allowed, group_amt = self.supports_float4_alu, 8
-
+      grouping_allowed = ((self.supports_half4_alu or self.supports_half2_alu) and dtypes.get_normal_type(cast_dtype) == dtypes.half) or (dtypes.get_normal_type(cast_dtype) != dtypes.half and self.supports_float4_alu)
       grouped = list(get_grouped_maybe_vector(*values, acc, grouping_allowed=grouping_allowed, amt=group_amt) if x.op.__class__ in {ReduceOps, FusedOps} else 
                  get_grouped_maybe_vector(*values, grouping_allowed=grouping_allowed and x.op != BinaryOps.CMPEQ, amt=group_amt))
       for idx, val in grouped:
@@ -757,7 +752,7 @@ class Linearizer:
     upcasted_axis = set()
     while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
       xb_choices = []
-      for axis, upcast_amount in itertools.product(range(self.first_reduce), [8,4,3,2]):   # consider all the non reduce axes, and a 3 or 4 reduce
+      for axis, upcast_amount in itertools.product(range(self.first_reduce), [2,3,4]):   # consider all the non reduce axes, and a 2, 3 or 4 reduce
         # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
         if axis not in upcasted_axis and self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
           xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in self.sts), sum(st.views[-1].strides[axis] for st in self.sts), axis, upcast_amount))
@@ -778,7 +773,7 @@ class Linearizer:
         # if it's small, upcast a second reduce dimension too
         if self.first_reduce < (self.shape_len-self.upcasted) and s <= 3 and self.full_unupcasted_shape[-1] <= 3: self.upcast()
       else:
-        for splits in [8, 4, 2]:
+        for splits in [4, 2]:
           if self.full_unupcasted_shape[-1]%splits == 0:
             self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
             self.upcast()
@@ -786,7 +781,7 @@ class Linearizer:
 
     # if nothing at all is upcasted and it's easy to, do an upcast
     # TODO: this is breaking the tests
-    for splits in [8, 4, 2]:
+    for splits in [4, 2]:
       if self.upcasted == 0 and len(self.full_unupcasted_shape) > 0 and self.full_unupcasted_shape[-1] % splits == 0:
         self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
         self.upcast()

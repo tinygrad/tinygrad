@@ -115,7 +115,7 @@ class dtypes:
 
 # create vector types
 for attr in list(dtypes.__dict__.values()):
-  for amt in [2, 4, 8]:
+  for amt in [2, 4]:
     if isinstance(attr, DType): setattr(dtypes, f"_{attr.name}{amt}",  DType(attr.priority, attr.itemsize*amt, f"{attr.name}{amt}", None, amt, True))
 
 
