@@ -1,5 +1,5 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
-import os, subprocess, pathlib
+import os, subprocess, pathlib, platform
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
@@ -77,6 +77,7 @@ class MetalCodegen(CStyleCodegen):
     kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel", buffer_prefix = "device ", smem_prefix = "threadgroup ",
     barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);", float4 = "float4",
     gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
-    extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
+    extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'],
+    volatile_load = platform.processor() == 'i386')
 
 MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram, METAL.synchronize)

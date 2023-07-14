@@ -27,6 +27,7 @@ class CStyleLanguage(NamedTuple):
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
   external_local_bufs: bool = False
+  volatile_load: bool = False
   code_for_op: Dict = {
     UnaryOps.EXP2: lambda x: f"exp2({x})",
     UnaryOps.LOG2: lambda x: f"log2({x})",
@@ -171,7 +172,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       else:
         val = lang.render_load(newvar.dtype, bufnames[args.i], bufs[args.i].dtype, args.idx, isinstance(bufs[args.i], LocalBuffer))
       if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(0.0, newvar.dtype))
-      kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '', True)} = {val};")
+      kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '', lang.volatile_load)} = {val};")
     elif uop == UOps.STORE:
       assert args.valid.min == 1, "store must be valid"
       # TODO: instead of dtypes.float, a base type
