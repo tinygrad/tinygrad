@@ -229,7 +229,7 @@ class Linearizer:
           localtype = dtypes.float32
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
-        localtype = self.bufs[i].dtype
+        localtype = dtypes.float32#self.bufs[i].dtype
       key = f"{localtype}{idx.render()}{valid.render()}"
       print("loading", key)
       if key not in cache:
