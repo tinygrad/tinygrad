@@ -479,10 +479,10 @@ class Linearizer:
       if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and is_nvidia: cast_dtype = dtypes.float
 
       if dtypes.get_normal_type(cast_dtype) == dtypes.half:
-        if self.supports_half4_alu: grouping_allowed, group_amt = True, 4
+        if self.supports_half4_alu: grouping_allowed, group_amt = True, 8
         elif self.supports_half2_alu: grouping_allowed, group_amt = True, 2
-        else: grouping_allowed, group_amt = False, 4
-      else: grouping_allowed, group_amt = self.supports_float4_alu, 4
+        else: grouping_allowed, group_amt = False, 8
+      else: grouping_allowed, group_amt = self.supports_float4_alu, 8
 
       grouped = list(get_grouped_maybe_vector(*values, acc, grouping_allowed=grouping_allowed, amt=group_amt) if x.op.__class__ in {ReduceOps, FusedOps} else 
                  get_grouped_maybe_vector(*values, grouping_allowed=grouping_allowed and x.op != BinaryOps.CMPEQ, amt=group_amt))
