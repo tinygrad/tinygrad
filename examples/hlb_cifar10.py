@@ -53,9 +53,9 @@ class SpeedyResNet:
       nn.Conv2d(3, 64, kernel_size=1),
       nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
       lambda x: x.relu(),
-      ConvGroup(64, 128, short=False),
+      ConvGroup(64, 128, short=True),
       ConvGroup(128, 256, short=True),
-      ConvGroup(256, 512, short=False),
+      ConvGroup(256, 512, short=True),
       lambda x: x.max((2,3)),
       nn.Linear(512, num_classes, bias=False)
     ]
