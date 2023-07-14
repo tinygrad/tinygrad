@@ -1,5 +1,6 @@
 import json, logging, math, os, re, sys, time
 from pathlib import Path
+from typing import Tuple
 
 import IPython.display as ipd
 import numpy as np
@@ -554,7 +555,7 @@ def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None):
     except Exception as e: raise e
   logger.info(f"Loaded checkpoint '{checkpoint_path}' (iteration {iteration}) in {time.time() - start_time:.4f}s")
   return model, optimizer, learning_rate, iteration
-def load_model(model):
+def load_model(text_mapper, model) -> Tuple[Synthesizer, HParams]:
   config_path, weights_path = model[0], model[1]
   if not os.path.isfile(config_path):
     logger.info(f"Config file not found in {config_path}, downloading...")
@@ -563,61 +564,85 @@ def load_model(model):
     logger.info(f"Weights file not found in {weights_path}, downloading...")
     download_file(model[3], weights_path)
   hps = get_hparams_from_file(config_path)
-  net_g = Synthesizer(len(symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
+  net_g = Synthesizer(len(text_mapper.symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
   _ = load_checkpoint(weights_path, net_g, None)
   return net_g, hps
 
-""" from https://github.com/keithito/tacotron """
-# Export all symbols: _pad + _punctuation + _letters + _letters_ipa
-symbols = ['_'] + list(';:,.!?¡¿—…"«»“” ') + list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz') + list("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ")
-_symbol_to_id, _id_to_symbol = {s: i for i, s in enumerate(symbols)}, {i: s for i, s in enumerate(symbols)}
-_whitespace_re, _abbreviations = re.compile(r'\s+'), [(re.compile('\\b%s\\.' % x[0], re.IGNORECASE), x[1]) for x in [ ('mrs', 'misess'), ('mr', 'mister'), ('dr', 'doctor'), ('st', 'saint'), ('co', 'company'), ('jr', 'junior'), ('maj', 'major'), ('gen', 'general'), ('drs', 'doctors'), ('rev', 'reverend'), ('lt', 'lieutenant'), ('hon', 'honorable'), ('sgt', 'sergeant'), ('capt', 'captain'), ('esq', 'esquire'), ('ltd', 'limited'), ('col', 'colonel'), ('ft', 'fort'),]]
-def text_to_sequence(text, cleaner_names):
-  for name in cleaner_names:
-    cleaner = globals().get(name)
-    if not cleaner: raise ModuleNotFoundError('Unknown cleaner: %s' % name)
-    text = cleaner(text)
-  return [_symbol_to_id[symbol] for symbol in text]
-def expand_abbreviations(text):
-  for regex, replacement in _abbreviations: text = re.sub(regex, replacement, text)
-  return text
-def lowercase(text): return text.lower()
-def collapse_whitespace(text): return re.sub(_whitespace_re, ' ', text)
-def convert_to_ascii(text): return unidecode(text)
-def basic_cleaners(text): return collapse_whitespace(lowercase(text))
-def transliteration_cleaners(text): return collapse_whitespace(lowercase(convert_to_ascii(text)))
-def english_cleaners(text): return collapse_whitespace(phonemize(expand_abbreviations(lowercase(convert_to_ascii(text))), language='en-us', backend='espeak', strip=True))
-def english_cleaners2(text): return collapse_whitespace(phonemize(expand_abbreviations(lowercase(convert_to_ascii(text))), language='en-us', backend='espeak', strip=True, preserve_punctuation=True, with_stress=True))
-def intersperse(lst, item):
-  result = [item] * (len(lst) * 2 + 1)
-  result[1::2] = lst
-  return result
-def get_text(text, hps):
-  text_norm = text_to_sequence(text, hps.data.text_cleaners)
-  if hps.data.add_blank: text_norm = intersperse(text_norm, 0)
-  return Tensor(text_norm, dtype=dtypes.int64)
+class TextMapper: # Based on https://github.com/keithito/tacotron
+  def __init__(self, vocab_file=None, apply_cleaners=True):
+    self.apply_cleaners = apply_cleaners
+    self.symbols =  [x.replace("\n", "") for x in open(vocab_file, encoding="utf-8").readlines()] if vocab_file else ['_'] + list(';:,.!?¡¿—…"«»“” ') + list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz') + list("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ")
+    self._symbol_to_id, _id_to_symbol = {s: i for i, s in enumerate(self.symbols)}, {i: s for i, s in enumerate(self.symbols)}
+    self._whitespace_re, self._abbreviations = re.compile(r'\s+'), [(re.compile('\\b%s\\.' % x[0], re.IGNORECASE), x[1]) for x in [('mrs', 'misess'), ('mr', 'mister'), ('dr', 'doctor'), ('st', 'saint'), ('co', 'company'), ('jr', 'junior'), ('maj', 'major'), ('gen', 'general'), ('drs', 'doctors'), ('rev', 'reverend'), ('lt', 'lieutenant'), ('hon', 'honorable'), ('sgt', 'sergeant'), ('capt', 'captain'), ('esq', 'esquire'), ('ltd', 'limited'), ('col', 'colonel'), ('ft', 'fort'), ]]
+  def text_to_sequence(self, text, cleaner_names):
+    if self.apply_cleaners:
+      for name in cleaner_names:
+        cleaner = getattr(self, name)
+        if not cleaner: raise ModuleNotFoundError('Unknown cleaner: %s' % name)
+        text = cleaner(text)
+    else: text = text.strip()
+    return [self._symbol_to_id[symbol] for symbol in text]
+  def expand_abbreviations(self, text):
+    for regex, replacement in self._abbreviations: text = re.sub(regex, replacement, text)
+    return text
+  def collapse_whitespace(self, text): return re.sub(self._whitespace_re, ' ', text)
+  def basic_cleaners(self, text): return self.collapse_whitespace(text.lower())
+  def transliteration_cleaners(self, text): return self.collapse_whitespace(unidecode(text.lower()))
+  def english_cleaners(self, text): return self.collapse_whitespace(phonemize(self.expand_abbreviations(unidecode(text.lower())), language='en-us', backend='espeak', strip=True))
+  def english_cleaners2(self, text): return self.collapse_whitespace(phonemize(self.expand_abbreviations(unidecode(text.lower())), language='en-us', backend='espeak', strip=True, preserve_punctuation=True, with_stress=True))
+  def intersperse(self, lst, item):
+    result = [item] * (len(lst) * 2 + 1)
+    result[1::2] = lst
+    return result
+  def get_text(self, text, hps: HParams):
+    text_norm = self.text_to_sequence(text, hps.data.text_cleaners)
+    if hps.data.add_blank: text_norm = self.intersperse(text_norm, 0)
+    return Tensor(text_norm, dtype=dtypes.int64)
+  def filter_oov(self, text): return "".join(list(filter(lambda x: x in self._symbol_to_id, text)))
+
 VITS_PATH = Path(__file__).parent.parent / "weights/VITS/"
 MODELS = { # config_path, weights_path, config_url, weights_url
   "ljs": (VITS_PATH / "ljs_base.json", VITS_PATH / "pretrained_ljs.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/ljs_base.json", "https://drive.google.com/uc?export=download&id=1q86w74Ygw2hNzYP9cWkeClGT5X25PvBT&confirm=t"),
-  "vctk": (VITS_PATH / "vctk_base.json", VITS_PATH / "pretrained_vctk.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/vctk_base.json", "https://drive.google.com/uc?export=download&id=11aHOlhnxzjpdWDpsz1vFDCzbeEfoIxru&confirm=t")
+  "vctk": (VITS_PATH / "vctk_base.json", VITS_PATH / "pretrained_vctk.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/vctk_base.json", "https://drive.google.com/uc?export=download&id=11aHOlhnxzjpdWDpsz1vFDCzbeEfoIxru&confirm=t"),
+  "mmts-tts": (VITS_PATH / "mmts-tts.json", VITS_PATH / "pretrained_mmts-tts.pth", "https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/config.json", "https://huggingface.co/facebook/mms-tts/resolve/main/full_models/eng/G_100000.pth"),
 }
-MODEL_TO_USE = "vctk" # "ljs" (female) or "vctk" (male)
-OUT_PATH = Path(__file__).parent.parent / f"temp/tts_vits_{MODEL_TO_USE}_test.wav"
-TEXT_TO_SYNTHESIZE = "Hello person, it's nice to talk with you, 1, 2, 3, weeee."
+MODEL_TO_USE = "vctk" # "ljs" (female) or "vctk" (multiple speakers, default one is male), mmts-tts (male)
+SPEAKER_ID = 2 # 0-109, only applicable for VCTK model atm.
+OUT_PATH = Path(__file__).parent.parent / f"temp/tts_vits_{MODEL_TO_USE}_{SPEAKER_ID}_test.wav"
+TEXT_TO_SYNTHESIZE = """
+Hello person.
+If the code you are contributing isn't some of the highest quality code you've written in your life, either put in the effort to make it great, or don't bother.
+"""
 # PAPER: https://arxiv.org/abs/2106.06103  CODE: https://github.com/jaywalnut310/vits/tree/main
 if __name__ == '__main__':
   logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
   logger = logging
+
   Tensor.no_grad, Tensor.Training = True, False
   Tensor.manual_seed(1337)
   np.random.seed(1337)
-  net_g, hps = load_model(MODELS[MODEL_TO_USE])
-  stn_tst = get_text(TEXT_TO_SYNTHESIZE, hps)
+
+  if MODEL_TO_USE == "mmts-tts":
+    vocab_file = VITS_PATH / "vocab_mmts-tts.txt"
+    if not os.path.isfile(vocab_file):
+      logger.info(f"Vocab file not found in {vocab_file}, downloading...")
+      download_file("https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/vocab.txt", vocab_file)
+    text_mapper = TextMapper(vocab_file, apply_cleaners=False)
+  else:
+    text_mapper = TextMapper(apply_cleaners=True)
+
+  net_g, hps = load_model(text_mapper, MODELS[MODEL_TO_USE])
+  logger.info(f"Loaded model with hps: {hps}")
+
+  if MODEL_TO_USE == "mmts-tts": TEXT_TO_SYNTHESIZE = text_mapper.filter_oov(TEXT_TO_SYNTHESIZE.lower())
+  stn_tst = text_mapper.get_text(TEXT_TO_SYNTHESIZE, hps)
   logger.info(f"Converted input text to tensor \"{TEXT_TO_SYNTHESIZE}\" -> Tensor({stn_tst.shape}): {stn_tst.numpy()}")
+
   x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
   start_time = time.time()
-  audio_tensor = net_g.infer(x_tst, x_tst_lengths, sid=Tensor([4], dtype=dtypes.int64) if MODEL_TO_USE == "vctk" else None, noise_scale=.667, noise_scale_w=0.8, length_scale=1)[0][0, 0].realize()
+  audio_tensor = net_g.infer(x_tst, x_tst_lengths, sid=Tensor([SPEAKER_ID], dtype=dtypes.int64) if MODEL_TO_USE == "vctk" else None, noise_scale=.667, noise_scale_w=0.8, length_scale=1)[0][0, 0].realize()
   logger.info(f"Inference took {(time.time() - start_time):.2f}s")
+
   audio = ipd.Audio(audio_tensor.numpy(), rate=hps.data.sampling_rate, normalize=False)
   with open(OUT_PATH, 'wb') as f:
     f.write(audio.data)
