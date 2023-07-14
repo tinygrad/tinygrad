@@ -143,7 +143,7 @@ class BoxList:
     return bbox.convert(self.mode)
 
   def clip_to_image(self, remove_empty=True):
-    print(self.bbox)
+    # print(self.bbox)
     TO_REMOVE = 1
     # TODO find solutions for 
     # 'Tensor' object does not support item assignment
@@ -155,7 +155,6 @@ class BoxList:
     if remove_empty:
       # keep = (bb3 > bb1) * (bb2 > bb0)
       keep = ((bb3 > bb1) * (bb2 > bb0)).numpy().astype(dtype=bool)
-      print(keep)
       return self[keep]
     return self
 

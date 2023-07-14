@@ -8,7 +8,7 @@ from tinygrad.tensor import Tensor
 from extra.utils import download_file
 
 from models.maskrcnn.bounding_box import BoxList
-from models.mask_rcnn import SegmentationMask
+from models.maskrcnn.segmentation_mask import SegmentationMask
 from models.mask_rcnn import PersonKeypoints
 
 iou         = _mask.iou
@@ -44,7 +44,7 @@ def has_valid_annotation(anno):
   return False
 
 # Note:
-# CocoDetection class load image into PIL format
+# CocoDetection class loads image into PIL format
 # currently it is converted to numpy before applying the transform
 class COCODataset(torchvision.datasets.coco.CocoDetection):
   def __init__(self, root='COCO/train2017',

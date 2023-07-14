@@ -54,12 +54,21 @@ def train_maskrcnn():
   # print("Data")
   # print(dataset[0][0])
   print("Bounding box")
-  print(dataset[0][1].bbox)
-  # print("Label")
-  # print(dataset[0][1].get_field('labels'))
-  # print("Segmentation mask")
+  print(dataset[0][1].bbox[0])
+  print(dataset[0][1].bbox[0].numpy())
+  print("Label")
+  print(dataset[0][1].get_field('labels')[0])
+  print(dataset[0][1].get_field('labels')[0].numpy())
+  print("Segmentation mask")
+  # print(dataset[0][1].get_field('masks'))
+  # print(dataset[0][1].get_field('masks').polygons)
+  # print(dataset[0][1].get_field('masks').polygons[0])
+  print(dataset[0][1].get_field('masks').polygons[0].polygons[0])
+  print(dataset[0][1].get_field('masks').polygons[0].polygons[0].numpy())
   # for p in dataset[0][1].get_field('masks').polygons:
-  #   print(p.polygons)
+  # print(p.polygons)
+  #   for p2 in p.polygons:
+  #     print(p2)
 
   # For training, you must also adjust the learning rate and schedule length 
   # according to the linear scaling rule. See for example:
