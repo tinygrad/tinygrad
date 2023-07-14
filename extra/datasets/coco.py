@@ -1,15 +1,17 @@
 import pathlib
 import zipfile
 import numpy as np
-import torchvision
 import pycocotools.mask as _mask
-
 from tinygrad.tensor import Tensor
 from extra.utils import download_file
 
 from models.maskrcnn.bounding_box import BoxList
 from models.maskrcnn.segmentation_mask import SegmentationMask
-from models.mask_rcnn import PersonKeypoints
+from models.maskrcnn.keypoint import PersonKeypoints
+
+# There's no torch tensor being used while calling torchvision. We just need to 
+# implement our own PIL image loader to get rid of it.
+import torchvision
 
 iou         = _mask.iou
 merge       = _mask.merge
@@ -45,7 +47,6 @@ def has_valid_annotation(anno):
 
 # Note:
 # CocoDetection class loads image into PIL format
-# currently it is converted to numpy before applying the transform
 class COCODataset(torchvision.datasets.coco.CocoDetection):
   def __init__(self, root='COCO/train2017',
                      ann_file='COCO/annotations/instances_train2017.json', 
@@ -80,7 +81,7 @@ class COCODataset(torchvision.datasets.coco.CocoDetection):
     # Raw image before any opration in case I need to check my sanity
     # import matplotlib.pyplot as plt
     # plt.imshow(np.array(img))
-    # plt.savefig('/home/iris/yg5d6/Workspace/coco.png')
+    # plt.savefig('/home/iris/yg5d6/Workspace/tinygrad/notebooks/coco_raw.png')
 
     # filter crowd annotations
     # TODO might be better to add an extra field

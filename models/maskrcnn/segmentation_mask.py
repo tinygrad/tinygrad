@@ -50,7 +50,7 @@ class Polygons(object):
   def __init__(self, polygons, size, mode):
     # assert isinstance(polygons, list), '{}'.format(polygons)
     if isinstance(polygons, list):
-      polygons = [Tensor(p) for p in polygons]
+      polygons = [Tensor(p, requires_grad=True) for p in polygons]
     elif isinstance(polygons, Polygons):
       polygons = polygons.polygons
 
@@ -60,9 +60,7 @@ class Polygons(object):
 
   def transpose(self, method):
     if method not in (FLIP_LEFT_RIGHT, FLIP_TOP_BOTTOM):
-      raise NotImplementedError(
-        "Only FLIP_LEFT_RIGHT and FLIP_TOP_BOTTOM implemented"
-      )
+      raise NotImplementedError("Only FLIP_LEFT_RIGHT and FLIP_TOP_BOTTOM implemented")
     
     flipped_polygons = []
     width, height = self.size

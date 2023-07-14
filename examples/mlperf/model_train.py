@@ -51,8 +51,12 @@ def train_maskrcnn():
                         transforms=transform)
 
   # Sanity test while refactoring the COCO dataset code base
-  # print("Data")
-  # print(dataset[0][0])
+  # import matplotlib.pyplot as plt
+  # import numpy as np
+  # plt.imshow(np.moveaxis(dataset[0][0].numpy(),0,-1))
+  # plt.savefig('/home/iris/yg5d6/Workspace/tinygrad/notebooks/coco_after.png')
+  print("Data")
+  print(dataset[0][0])
   print("Bounding box")
   print(dataset[0][1].bbox[0])
   print(dataset[0][1].bbox[0].numpy())
@@ -60,15 +64,8 @@ def train_maskrcnn():
   print(dataset[0][1].get_field('labels')[0])
   print(dataset[0][1].get_field('labels')[0].numpy())
   print("Segmentation mask")
-  # print(dataset[0][1].get_field('masks'))
-  # print(dataset[0][1].get_field('masks').polygons)
-  # print(dataset[0][1].get_field('masks').polygons[0])
   print(dataset[0][1].get_field('masks').polygons[0].polygons[0])
   print(dataset[0][1].get_field('masks').polygons[0].polygons[0].numpy())
-  # for p in dataset[0][1].get_field('masks').polygons:
-  # print(p.polygons)
-  #   for p2 in p.polygons:
-  #     print(p2)
 
   # For training, you must also adjust the learning rate and schedule length 
   # according to the linear scaling rule. See for example:

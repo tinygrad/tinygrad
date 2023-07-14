@@ -1,5 +1,7 @@
 from tinygrad.tensor import Tensor
 
+# numpy is still used for easy indexing
+
 # transpose
 FLIP_LEFT_RIGHT = 0
 FLIP_TOP_BOTTOM = 1
@@ -7,7 +9,7 @@ FLIP_TOP_BOTTOM = 1
 class BoxList:
   def __init__(self, bbox, image_size, mode="xyxy"):
     if not isinstance(bbox, Tensor):
-      bbox = Tensor(bbox)
+      bbox = Tensor(bbox, requires_grad=True)
     if bbox.ndim != 2:
       raise ValueError(
         "bbox should have 2 dimensions, got {}".format(bbox.ndim)

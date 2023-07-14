@@ -4,6 +4,9 @@ from tinygrad.tensor import Tensor
 import numpy as np
 from torchvision.transforms import functional as F
 
+# Currently all the data processing is done through torch.tensor, and get 
+# converted to numpy, and finally get converted into tinygrad Tensor
+
 class Compose(object):
   def __init__(self, transforms):
     self.transforms = transforms
@@ -82,7 +85,6 @@ class RandomHorizontalFlip(object):
   def __init__(self, prob=0.5):
     self.prob = prob
   
-  # TODO remove dependence from torchvision
   def __call__(self, image, target):
 
     if random.random() < self.prob:
@@ -111,6 +113,8 @@ class Normalize:
     # `_C.INPUT.TO_BGR255 = True
     if self.to_bgr255:
       image = image[[2, 1, 0]] * 255
+    else:
+      image = image[[0, 1, 2]] * 255
     image = Tensor(F.normalize(image, mean=self.mean, std=self.std).numpy())
     if target:
       return image, target
