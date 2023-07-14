@@ -11,14 +11,16 @@ def float_to_hex(x): return "0F%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1
 # https://docs.nvidia.com/cuda/parallel-thread-execution/#
 class PTXCodegen(AssemblyCodegen):
   #supports_constant_folding: bool = True
-  # supports_float4 = False
+
   def specialize(self, asm):
     ins = [".version 7.8", ".target sm_86", ".address_size 64",
            f".visible .entry test({', '.join(f'.param .u64 buf{i}' for i in range(len(self.bufs)))}) {{"]
+
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.eq", UnaryOps.SQRT: "sqrt.approx",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
            FusedOps.MULACC: "fma.rn"}
+
     for uop, out, vin, arg in asm:
       if uop == UOps.DEFINE_REGISTER:
         ins.append(f".reg .{dtype_to_nvtype[arg[0][0]]} %{arg[1]}<{arg[2]}>;",)
@@ -57,12 +59,12 @@ class PTXCodegen(AssemblyCodegen):
           ins.append(f"cvt.{mod}{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
           # ins.append(f"cvt.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
       elif uop == UOps.CONST:
-        # print("++++++++++++++= CONST UOPPPPp")
+        # print("[+] CONST UOP")
         ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {float_to_hex(arg) if dtypes.is_float(out.dtype) else int(arg)};")
       elif uop == UOps.LABEL:
         ins.append(f"{arg}:")
       elif uop == UOps.COND_BRANCH:
         ins.append(f"@{'!' if not arg[1] else ''}{vin[0]} bra {arg[0]};")
-    
+
     ins += ["bar.sync 0;", "ret;", "}"]
     return "test", '\n'.join(ins)
