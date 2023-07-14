@@ -215,7 +215,7 @@ jobs:
     - name: Test GPU IMAGE ops
       run: |
         GPU=1 IMAGE=1 python3 -m pytest -s -v -n=auto test/test_ops.py
-        FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 test/test_ops.py
+        FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 -s -v -n=auto test/test_ops.py
     - name: Test openpilot model correctness (float32)
       run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
     - name: Test tensor core ops
