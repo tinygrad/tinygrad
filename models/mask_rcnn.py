@@ -2,6 +2,8 @@ import re
 import math
 import os
 import numpy as np
+import pycocotools.mask as mask_utils
+
 from pathlib import Path
 from tinygrad import nn
 from tinygrad.tensor import Tensor
@@ -10,7 +12,7 @@ from extra.utils import get_child, download_file
 from tinygrad.state import torch_load
 from models.resnet import ResNet
 from models.retinanet import nms as _box_nms
-import pycocotools.mask as mask_utils
+from models.maskrcnn.bounding_box import BoxList
 
 FLIP_LEFT_RIGHT = 0
 FLIP_TOP_BOTTOM = 1
@@ -747,6 +749,8 @@ def _roi_align(input, rois, spatial_scale, pooled_height, pooled_width, sampling
     val = xmask[:, None, None, None, None, :].where(val, 0)
 
   output = val.sum((-1, -2))
+  print(output)
+  print(count)
   if isinstance(count, Tensor):
     output /= count[:, None, None, None]
   else:
@@ -989,7 +993,6 @@ class MaskPostProcessor:
 
     return results
 
-
 class Mask:
   def __init__(self):
     self.feature_extractor = MaskRCNNFPNFeatureExtractor()
@@ -1004,7 +1007,6 @@ class Mask:
         result = self.post_processor(mask_logits, proposals)
         return x, result, {}
     return x, [], {}
-
 
 class RoIHeads:
   def __init__(self, in_channels):
