@@ -181,8 +181,8 @@ jobs:
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Optimizer Test (OPT 2 and 3)
       run: |
-        PYTHONPATH="." OPT=2 GPU=1 python test/external/external_test_opt.py
-        PYTHONPATH="." OPT=3 GPU=1 python test/external/external_test_opt.py
+        PYTHONPATH="." OPT=2 GPU=1 python -m pytest -s -v -n=auto test/external/external_test_opt.py
+        PYTHONPATH="." OPT=3 GPU=1 python -m pytest -s -v -n=auto test/external/external_test_opt.py
     - name: Run Pytest (default)
       run: GPU=1 python -m pytest -s -v -n=auto test/
 
@@ -214,12 +214,12 @@ jobs:
         python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
     - name: Test GPU IMAGE ops
       run: |
-        GPU=1 IMAGE=1 python3 test/test_ops.py
+        GPU=1 IMAGE=1 python3 -m pytest -s -v -n=auto test/test_ops.py
         FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 test/test_ops.py
     - name: Test openpilot model correctness (float32)
       run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
     - name: Test tensor core ops
-      run: GPU=1 TC=2 python3 test/test_ops.py
+      run: GPU=1 TC=2 python3 -m pytest -s -v -n=auto test/test_ops.py
 
   testmetal:
     name: Metal Tests
