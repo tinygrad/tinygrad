@@ -1,4 +1,4 @@
-import subprocess, time, re, hashlib, tempfile
+import subprocess, time, re, hashlib, tempfile, textwrap
 from typing import Optional
 import numpy as np
 from pycuda.compiler import compile as cuda_compile # type: ignore
@@ -82,13 +82,14 @@ class CUDACodegen(CStyleCodegen):
     kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
-    half_prekernel = """
+    half_prekernel = textwrap.dedent("""\
       #include <cuda_fp16.h>
-      struct __align__(8) half4 {
-        half2 x, y;
-        __device__ __forceinline__ explicit operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
-      };
-    """)
+      struct __align__(8) half4 { half2 x, y; };
+      __device__ __forceinline__ half4 make_half4(float4 a) { return half4{make_half2(__float2half(a.x), __float2half(a.y)), make_half2(__float2half(a.z), __float2half(a.w))}; }
+      __device__ __forceinline__ half2 make_half2(float2 a) { return __float22half2_rn(a); }
+      __device__ __forceinline__ float4 make_float4(half4 a) { return make_float4(__half2float(a.x.x), __half2float(a.x.y), __half2float(a.y.x), __half2float(a.y.y)); }
+      __device__ __forceinline__ float2 make_float2(half2 a) { return __half22float2(a); }
+    """))
   supports_float4_alu = False
 
 CUDABuffer = Compiled(RawCUDABuffer, fromimport("tinygrad.codegen.assembly_ptx", "PTXCodegen") if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)
