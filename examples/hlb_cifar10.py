@@ -49,15 +49,16 @@ class ConvGroup:
 class SpeedyResNet:
   def __init__(self):
     # TODO: add whitening
+    BASE_DIM=getenv("BASE_DIM", 64)
     self.net = [
-      nn.Conv2d(3, 64, kernel_size=1),
-      nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
+      nn.Conv2d(3, BASE_DIM, kernel_size=1),
+      nn.BatchNorm2d(BASE_DIM, track_running_stats=False, eps=1e-12, momentum=0.8),
       lambda x: x.relu(),
-      ConvGroup(64, 128, short=True),
-      ConvGroup(128, 256, short=True),
-      ConvGroup(256, 512, short=True),
+      ConvGroup(BASE_DIM, BASE_DIM*2, short=True),
+      ConvGroup(BASE_DIM*2, BASE_DIM*4, short=True),
+      ConvGroup(BASE_DIM*4, BASE_DIM*8, short=True),
       lambda x: x.max((2,3)),
-      nn.Linear(512, num_classes, bias=False)
+      nn.Linear(BASE_DIM*8, num_classes, bias=False)
     ]
 
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
