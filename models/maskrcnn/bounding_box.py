@@ -147,14 +147,15 @@ class BoxList:
     TO_REMOVE = 1
     # TODO find solutions for 
     # 'Tensor' object does not support item assignment
-    # self.bbox's gradients need to be tracked but not for the bbx here since
-    # they are only for calculating indices
+    # One day we will make Tensors to support all these operations
     bb0 = self.bbox[:,0].clip(min_=0, max_=self.size[0] - TO_REMOVE)
     bb1 = self.bbox[:,1].clip(min_=0, max_=self.size[1] - TO_REMOVE)
     bb2 = self.bbox[:,2].clip(min_=0, max_=self.size[0] - TO_REMOVE)
     bb3 = self.bbox[:,3].clip(min_=0, max_=self.size[1] - TO_REMOVE)
     if remove_empty:
+      # keep = (bb3 > bb1) * (bb2 > bb0)
       keep = ((bb3 > bb1) * (bb2 > bb0)).numpy().astype(dtype=bool)
+      print(keep)
       return self[keep]
     return self
 
@@ -164,10 +165,9 @@ class BoxList:
         return []
       if sum(item) == len(item) and isinstance(item[0], bool):
         return self
+    bbox = BoxList(Tensor(self.bbox.numpy()[item], requires_grad=True), self.size, self.mode)
     # bbox = BoxList(tensor_gather(self.bbox, item), self.size, self.mode
-    # bbox = BoxList(Tensor(self.bbox.numpy()[item]), self.size, self.mode)
-    print(item)
-    bbox = BoxList(self.bbox[item], self.size, self.mode)
+    # bbox = BoxList(self.bbox[item], self.size, self.mode)
     for k, v in self.extra_fields.items():
       if not isinstance(v, Tensor):
         bbox.add_field(k, v[item])
