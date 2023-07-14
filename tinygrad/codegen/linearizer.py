@@ -206,7 +206,8 @@ class Linearizer:
     upcast_dim = self.get_upcast_dim(i)
 
     amt = 1
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
+    dimset = len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]
+    if dimset:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     cache: Dict[str, Token] = {}
@@ -216,45 +217,48 @@ class Linearizer:
         idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
         localtype = dtypes._float4 if amt == 4 else dtypes._float2
         if idx.render() != ((idx//amt)*amt).render():
-# # <<<<<<< ptx_testing
-#     for _idx in expand_idxs(idxs):
-#       if len(upcast_dim) == 1:
-#         idx, valid = self.sts[i].expr_idxs((_idx[:upcast_dim[0]] + (Variable.num(0),) + _idx[upcast_dim[0]+1:]))
-#         localtype = dtypes._float4
-#         # disallow unaligned access, fall back to float
-#         if idx.render() != ((idx//4)*4).render():
-# =======
-# >>>>>>> master
+          # # <<<<<<< ptx_testing
+          #     for _idx in expand_idxs(idxs):
+          #       if len(upcast_dim) == 1:
+          #         idx, valid = self.sts[i].expr_idxs((_idx[:upcast_dim[0]] + (Variable.num(0),) + _idx[upcast_dim[0]+1:]))
+          #         localtype = dtypes._float4
+          #         # disallow unaligned access, fall back to float
+          #         if idx.render() != ((idx//4)*4).render():
+          # =======
+          # >>>>>>> master
           idx, valid = self.sts[i].expr_idxs(_idx)
           localtype = dtypes.float32
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
         localtype = dtypes.float32#self.bufs[i].dtype
       key = f"{localtype}{idx.render()}{valid.render()}"
-      print("loading", key)
+      print("loading", key, self.bufs[i].dtype)
       if key not in cache:
-# <<<<<<< ptx_testing
-      #   if const is not None:
-      #     if localtype.itemsize < 4: # ptx doesn't support fp16,u8,s8 constants
-      #       # assert ssa is not None
-      #       widet = dtypes.int64 if dtypes.is_int(localtype) else dtypes.float32
-      #       print("FP16 ------------------- const loading", idx, valid, const)
-      #       wide = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}_wide", widet), [], const)
-      #       print(wide)
-      #       cache[key] = self.uop(UOps.CAST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [wide])
-      #       print(cache[key])
-      #     else:
-      #       cache[key] = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
-      #   else:
-      #     print("LOADING NONCONST", localtype, f"val{mnum(i)}_{len(cache)}")
-      #     cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid))
-      # ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b) if localtype == dtypes._float4 else cache[key])
-    # print(ret[0])
-# =======
-        if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
-                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
-      ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
+        # <<<<<<< ptx_testing
+        if const is not None:
+          print("LOADING CONST", const, localtype, f"val{mnum(i)}_{len(cache)}")
+          if localtype.itemsize < 4:
+            widet = dtypes.int64 if dtypes.is_int(localtype) else dtypes.float32
+            print("FP16 ------------------- const loading", idx, valid, const)
+            wide = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}_wide", widet), [], const)
+            print(wide)
+            cache[key] = self.uop(UOps.CAST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [wide])
+            print(cache[key])
+          else:
+            cache[key] = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
+        else:
+          print("LOADING NONCONST", const, self.bufs[i].dtype)
+          #     if localtype.itemsize < 4: # ptx doesn't support fp16,u8,s8 constants
+          #       # assert ssa is not None
+          #   else:
+          #     cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid))
+          # ret.append(Token(cache[key].name, cache[key].dtype, _idx[upcast_dim[0]].b) if localtype == dtypes._float4 else cache[key])
+          # print(ret[0])
+          # =======
+          if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+          cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
+                      self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
+      ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if dimset else cache[key])
     return ret
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
@@ -285,10 +289,14 @@ class Linearizer:
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+      if var.dtype != self.bufs[i].dtype and len(upcast_dim) != 1:
+        print("not casted!", self.bufs[i].dtype, "->", var.dtype)
+        var = self.uop(UOps.CAST, ssa("cast", self.bufs[i].dtype), [var])
       self.uop(UOps.STORE, None, [var], MemOp(i, idx, valid))
+      print(var.dtype)
 # <<<<<<< ptx_testing
     # # do stores
-    # print("global store", self, i, idxs, store, ssa)
+    print("global store", self, i, idxs, store, ssa)
     # # print(store[0])
     # for idxs, var in store_offset.items():
     #   print(var.dtype, self.bufs[i].dtype)
@@ -493,9 +501,23 @@ class Linearizer:
     if x not in self.saved_exprs:
       values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
       if x.op.__class__ in {ReduceOps, FusedOps}:
-        ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
+        print("ALU OPERATIONNNNN")
+        casted = [(idx, [self.uop(UOps.CAST, ssa("cast", dtypes.float), [v]) if v.dtype != dtypes.float else v for v in val]) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
+        ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in casted]
+        # ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
       else:
-        ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
+        print("ALU2222", [*get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)])
+        for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ):
+          print(idx, val)
+        casted = [(idx, [self.uop(UOps.CAST, ssa("cast", dtypes.float), [v]) if v.dtype != dtypes.float else v for v in val]) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
+        ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in casted]
+        for casts, (idx, val) in zip(casted, get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)):
+          for v,c in zip(val, casts):
+            if v.dtype != dtypes.float32:
+              self.uop(UOps.CAST, v, [c])
+        # [(idx, [self.uop(UOps.CAST, v, [c]) if v.dtype != dtypes.float else v for v in val]) for idx, val in zip(casted, get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ))]
+        
+        # ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
       # scatter
       for i,j in ret:
