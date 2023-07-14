@@ -444,12 +444,12 @@ class Linearizer:
     return out
   
   @staticmethod
-  def ungroup(token, size=4):
+  def ungroup(token):
     assert token.dtype.is_vector_type
     assert token.offset is None
     if isinstance(token, Token):
       new_tokens = []
-      for idx in range(size):
+      for idx in range(token.dtype.sz):
         new_tokens.append(Token(token.name, token.dtype, idx if token.dtype.is_vector_type else None))
       return new_tokens
     return token
@@ -474,7 +474,7 @@ class Linearizer:
       cast_dtype = dtypes.float if x.op.__class__ in {ReduceOps, FusedOps} and getenv('ACCUM_FLOAT', 1) else dtypes.float16
       highest_priority = max([v.dtype.priority for val in values for v in val] + [cast_dtype.priority])
       buf_cast_dtype = [v.dtype if v.offset is None else dtypes.get_normal_type(v.dtype) for val in values for v in val if v.dtype.priority == highest_priority]
-      group_amt = 4 if (self.supports_float4_alu or self.supports_half4_alu) else 2
+      group_amt = 4 if (self.supports_float4_alu or self.supports_half4_alu) and max([v.dtype.sz for val in values for v in val])==4 else 2
       if len(buf_cast_dtype) > 0: cast_dtype = buf_cast_dtype[0]
       is_nvidia = self.__getattribute__('is_nvidia') if hasattr(self, 'is_nvidia') else False
       if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and is_nvidia: cast_dtype = dtypes.float
