@@ -15,6 +15,8 @@ VariableOrNum = Union[Variable, NumNode, Node]
 # bottom ones are asm only
 class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
+  
+VECTOR_SIZE=getenv('VECTOR_SIZE', 4)
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
@@ -53,11 +55,12 @@ class Token(NamedTuple):
       return f"{self.dtype.name} {self.name}"
     if self.offset is None: return self.name
     assert self.dtype.is_vector_type, self
-    return self.name+"."+"xyzw"[int(self.offset)]
+    selector = f".{'xyzw'[int(self.offset)]}" if self.offset < 4 else f".s{int(self.offset)}"
+    return self.name + selector
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
 # TODO: the next three functions are poorly written
-def get_grouped_vector_idxs(acc:List[Token], amt=4) -> Optional[List[int]]:
+def get_grouped_vector_idxs(acc:List[Token], amt=VECTOR_SIZE) -> Optional[List[int]]:
   idxs: Optional[List[int]] = []
   for i,a in enumerate(acc):
     if idxs is None: break
@@ -76,13 +79,13 @@ def get_grouped_vector_idxs(acc:List[Token], amt=4) -> Optional[List[int]]:
       idxs = None
   return idxs
 
-def to_vector(x:List[Token], amt:int=4) -> Optional[Token]:
+def to_vector(x:List[Token], amt:int=VECTOR_SIZE) -> Optional[Token]:
   if all_same(x): return x[0]
   if all_same([y.name for y in x]) and all(y.dtype.is_vector_type and y.offset == i for i,y in enumerate(x)):
     return Token(x[0].name, dtypes.get_vector_type(x[0].dtype, amt=amt))
   return None
 
-def get_grouped_maybe_vector(*values:List[Token], grouping_allowed=True, amt=4):
+def get_grouped_maybe_vector(*values:List[Token], grouping_allowed=True, amt=VECTOR_SIZE):
   assert all_same([len(x) for x in values]), f"all values are not the same length {[len(x) for x in values]}"
   # these use accumulators, we can only fold if the acc is a vector
   idxs = get_grouped_vector_idxs(values[-1], amt) if grouping_allowed else None
@@ -210,7 +213,7 @@ class Linearizer:
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
     amt = 1
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [8,4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     cache: Dict[str, Token] = {}
@@ -244,7 +247,7 @@ class Linearizer:
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4]:
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4,8]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (expanded_nodes[upcast_dim[0]][0],) + k[upcast_dim[0]+1:]
@@ -474,7 +477,7 @@ class Linearizer:
       cast_dtype = dtypes.float if x.op.__class__ in {ReduceOps, FusedOps} and getenv('ACCUM_FLOAT', 1) else dtypes.float16
       highest_priority = max([v.dtype.priority for val in values for v in val] + [cast_dtype.priority])
       buf_cast_dtype = [v.dtype if v.offset is None else dtypes.get_normal_type(v.dtype) for val in values for v in val if v.dtype.priority == highest_priority]
-      group_amt = 4 if (self.supports_float4_alu or self.supports_half4_alu) and max([v.dtype.sz for val in values for v in val])==4 else 2
+      group_amt = VECTOR_SIZE if (self.supports_float4_alu or self.supports_half4_alu) and max([v.dtype.sz for val in values for v in val])==VECTOR_SIZE else 2
       if len(buf_cast_dtype) > 0: cast_dtype = buf_cast_dtype[0]
       is_nvidia = self.__getattribute__('is_nvidia') if hasattr(self, 'is_nvidia') else False
       if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and is_nvidia: cast_dtype = dtypes.float
@@ -613,11 +616,11 @@ class Linearizer:
 
   def required_optimizations(self, early_only=False):
     for buf_index,buf in enumerate(self.bufs):
-      unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes(ignore_valid=True) if self.sts[buf_index].shape[i]%4 == 0]
+      unit_stride_axes_mul_sz = [i for i in self.sts[buf_index].unit_stride_axes(ignore_valid=True) if self.sts[buf_index].shape[i]%VECTOR_SIZE == 0]
       if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype.__class__ is ImageDType:
-        assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
-        if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
-          self.shift_to(unit_stride_axes_mul_4[0], 4)
+        assert len(unit_stride_axes_mul_sz) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
+        if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_sz) and unit_stride_axes_mul_sz[0] not in self.upcast_in_mid_reduce_axes:
+          self.shift_to(unit_stride_axes_mul_sz[0], VECTOR_SIZE)
           self.upcast()
 
   def limit_global_dims(self, limit):
@@ -725,9 +728,9 @@ class Linearizer:
     if self.bufs[0].dtype.name.startswith('image') and not self.vector_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
       axes = self.sts[0].unit_stride_axes()
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
-      if self.sts[0].shape[axes[0]]%4 == 0:
-        self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
-        self.group_for_reduce.append(4)
+      if self.sts[0].shape[axes[0]]%VECTOR_SIZE == 0:
+        self.shift_to(axes[0], VECTOR_SIZE, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
+        self.group_for_reduce.append(VECTOR_SIZE)
 
     # now do everything required
     self.required_optimizations()
@@ -752,7 +755,7 @@ class Linearizer:
     upcasted_axis = set()
     while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
       xb_choices = []
-      for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
+      for axis, upcast_amount in itertools.product(range(self.first_reduce), [VECTOR_SIZE]):   # consider all the non reduce axes, and a VECTOR_SIZE reduce
         # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
         if axis not in upcasted_axis and self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
           xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in self.sts), sum(st.views[-1].strides[axis] for st in self.sts), axis, upcast_amount))
@@ -773,7 +776,7 @@ class Linearizer:
         # if it's small, upcast a second reduce dimension too
         if self.first_reduce < (self.shape_len-self.upcasted) and s <= 3 and self.full_unupcasted_shape[-1] <= 3: self.upcast()
       else:
-        for splits in [4]:
+        for splits in [VECTOR_SIZE]:
           if self.full_unupcasted_shape[-1]%splits == 0:
             self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
             self.upcast()
@@ -781,7 +784,7 @@ class Linearizer:
 
     # if nothing at all is upcasted and it's easy to, do an upcast
     # TODO: this is breaking the tests
-    for splits in [4]:
+    for splits in [VECTOR_SIZE]:
       if self.upcasted == 0 and len(self.full_unupcasted_shape) > 0 and self.full_unupcasted_shape[-1] % splits == 0:
         self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
         self.upcast()
