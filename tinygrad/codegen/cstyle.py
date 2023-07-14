@@ -172,7 +172,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       else:
         val = lang.render_load(newvar.dtype, bufnames[args.i], bufs[args.i].dtype, args.idx, isinstance(bufs[args.i], LocalBuffer))
       if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(0.0, newvar.dtype))
-      kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '', lang.volatile_load)} = {val};")
+      kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '', lang.volatile_load and dtypes.is_float(bufs[args.i].dtype))} = {val};")
     elif uop == UOps.STORE:
       assert args.valid.min == 1, "store must be valid"
       # TODO: instead of dtypes.float, a base type
