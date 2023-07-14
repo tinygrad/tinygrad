@@ -55,7 +55,7 @@ class Token(NamedTuple):
       return f"{self.dtype.name} {self.name}"
     if self.offset is None: return self.name
     assert self.dtype.is_vector_type, self
-    selector = f".{'xyzw'[int(self.offset)]}" if self.offset < 4 else f".s{int(self.offset)}"
+    selector = f".{'xyzw'[int(self.offset)]}" if self.offset < 4 else f".s{'0123456789aAbBcCdDeEfF'[int(self.offset)]}"
     return self.name + selector
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
@@ -190,7 +190,7 @@ class Linearizer:
     if DEBUG >= 5: self.printbufs("early")
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
-  def vector_axis(self, i, amt=4): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%amt == 0]
+  def vector_axis(self, i, amt=VECTOR_SIZE): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%amt == 0]
 
   def upcasted_axis(self, i):
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
@@ -213,7 +213,7 @@ class Linearizer:
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
     amt = 1
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [8,4,2]:
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [16,8,4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     cache: Dict[str, Token] = {}
@@ -247,7 +247,7 @@ class Linearizer:
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4,8]:
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4,8,16]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (expanded_nodes[upcast_dim[0]][0],) + k[upcast_dim[0]+1:]

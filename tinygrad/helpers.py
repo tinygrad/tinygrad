@@ -110,12 +110,12 @@ class dtypes:
     return x
   @staticmethod
   def get_normal_type(x: DType):
-    if x.is_vector_type: return dtypes.__dict__[f"{x.name[:-1]}"]
+    if x.is_vector_type: return dtypes.__dict__[f"{''.join([c for c in x.name if c.isalpha()])}"]
     return x
 
 # create vector types
 for attr in list(dtypes.__dict__.values()):
-  for amt in [2, 4, 8]:
+  for amt in [2,4,8,16]:
     if isinstance(attr, DType): setattr(dtypes, f"_{attr.name}{amt}",  DType(attr.priority, attr.itemsize*amt, f"{attr.name}{amt}", None, amt, True))
 
 
