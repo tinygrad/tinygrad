@@ -47,10 +47,10 @@ class Token(NamedTuple):
   name: str
   dtype: DType
   offset: Optional[int] = None
-  def render(self, with_type=False):
+  def render(self, with_type=False, volatile=False):
     if with_type:
       assert self.offset is None
-      return f"{self.dtype.name} {self.name}"
+      return ("volatile " if volatile else "")+ f"{self.dtype.name} {self.name}"
     if self.offset is None: return self.name
     assert self.dtype in [dtypes._float4, dtypes._float2]
     return self.name+"."+"xyzw"[int(self.offset)]
