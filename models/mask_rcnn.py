@@ -12,7 +12,7 @@ from extra.utils import get_child, download_file
 from tinygrad.state import torch_load
 from models.resnet import ResNet
 from models.retinanet import nms as _box_nms
-from models.maskrcnn.bounding_box import BoxList
+from models.maskrcnn.outputs.bounding_box import BoxList
 
 FLIP_LEFT_RIGHT = 0
 FLIP_TOP_BOTTOM = 1
@@ -749,8 +749,6 @@ def _roi_align(input, rois, spatial_scale, pooled_height, pooled_width, sampling
     val = xmask[:, None, None, None, None, :].where(val, 0)
 
   output = val.sum((-1, -2))
-  print(output)
-  print(count)
   if isinstance(count, Tensor):
     output /= count[:, None, None, None]
   else:

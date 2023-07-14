@@ -5,9 +5,9 @@ import pycocotools.mask as _mask
 from tinygrad.tensor import Tensor
 from extra.utils import download_file
 
-from models.maskrcnn.bounding_box import BoxList
-from models.maskrcnn.segmentation_mask import SegmentationMask
-from models.maskrcnn.keypoint import PersonKeypoints
+from models.maskrcnn.outputs.bounding_box import BoxList
+from models.maskrcnn.outputs.segmentation_mask import SegmentationMask
+from models.maskrcnn.outputs.keypoint import PersonKeypoints
 
 # There's no torch tensor being used while calling torchvision. We just need to 
 # implement our own PIL image loader to get rid of it.

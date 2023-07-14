@@ -9,7 +9,7 @@ FLIP_TOP_BOTTOM = 1
 class BoxList:
   def __init__(self, bbox, image_size, mode="xyxy"):
     if not isinstance(bbox, Tensor):
-      bbox = Tensor(bbox, requires_grad=True)
+      bbox = Tensor(bbox)
     if bbox.ndim != 2:
       raise ValueError(
         "bbox should have 2 dimensions, got {}".format(bbox.ndim)
@@ -166,7 +166,7 @@ class BoxList:
         return []
       if sum(item) == len(item) and isinstance(item[0], bool):
         return self
-    bbox = BoxList(Tensor(self.bbox.numpy()[item], requires_grad=True), self.size, self.mode)
+    bbox = BoxList(Tensor(self.bbox.numpy()[item]), self.size, self.mode)
     # bbox = BoxList(tensor_gather(self.bbox, item), self.size, self.mode
     # bbox = BoxList(self.bbox[item], self.size, self.mode)
     for k, v in self.extra_fields.items():
