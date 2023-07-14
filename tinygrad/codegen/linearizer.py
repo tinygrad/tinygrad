@@ -755,7 +755,7 @@ class Linearizer:
     upcasted_axis = set()
     while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
       xb_choices = []
-      for axis, upcast_amount in itertools.product(range(self.first_reduce), [VECTOR_SIZE]):   # consider all the non reduce axes, and a VECTOR_SIZE reduce
+      for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,VECTOR_SIZE]):   # consider all the non reduce axes, and a VECTOR_SIZE reduce
         # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
         if axis not in upcasted_axis and self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
           xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in self.sts), sum(st.views[-1].strides[axis] for st in self.sts), axis, upcast_amount))
