@@ -40,7 +40,10 @@ def _process_wrap(rank, world_size, device, oob, fn, args=()):
     CL.post_init(device_num)
   if DEBUG >= 1: print(f"DDPProcess {rank} initialized runtime for device {device}")
 
-  fn(rank, world_size, device, *args)
+  # convert device to be process specific
+  Device.DEFAULT = device.split(":")[0]
+
+  fn(rank, world_size, Device.DEFAULT, *args)
 
 # wrapper around mp.Process that initializes the runtime
 def spawn(rank, world_size, device, oob, fn, args=()):
