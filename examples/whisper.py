@@ -131,8 +131,8 @@ LANGUAGES = {
 BASE = Path(__file__).parent.parent / "weights"
 
 def get_encoding(n_vocab_in):
-  download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/gpt2.tiktoken", BASE / "gpt2.tiktoken")
-  ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(BASE / "gpt2.tiktoken") if line)}
+  download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/multilingual.tiktoken", BASE / "multilingual.tiktoken")
+  ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(BASE / "multilingual.tiktoken") if line)}
   n_vocab = len(ranks)
   specials = [
     "<|endoftext|>",
@@ -238,11 +238,11 @@ class MaximumLikelihoodRanker:
 
 if __name__ == "__main__":
   if getenv("SMALL"):
-    fn = BASE / "whisper-small.en.pt"
-    download_file("https://openaipublic.azureedge.net/main/whisper/models/f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872/small.en.pt", fn)
+    fn = BASE / "whisper-small.pt"
+    download_file("https://openaipublic.azureedge.net/main/whisper/models/9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt", fn)
   else:
-    fn = BASE / "whisper-tiny.en.pt"
-    download_file("https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt", fn)
+    fn = BASE / "whisper-tiny.pt"
+    download_file("https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt", fn)
   state = torch_load(fn)
   model = Whisper(state['dims'])
   load_state_dict(model, state['model_state_dict'])
@@ -251,11 +251,11 @@ if __name__ == "__main__":
   def transcribe_wav(fn, sample_len=224, n_audio=1, n_group=1, logprob_threshold=-1.0, no_speech_threshold=0.6):
     mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
     content_frames = mel.shape[-1] - N_FRAMES
+    initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|en|>"], enc._special_tokens["<|transcribe|>"]]
     decoder = GreedyDecoder(eot=enc.eot_token)
     sequence_ranker = MaximumLikelihoodRanker(None)
     seek, texts = 0, []
     while seek < content_frames:
-      initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|transcribe|>"]]
       sample_begin = len(initial_tokens)
       mel_segment = mel[:, seek:seek+N_FRAMES]
       mel_segment = np.expand_dims(pad_or_trim(mel, N_FRAMES), axis=0)
@@ -280,7 +280,7 @@ if __name__ == "__main__":
       texts.extend([enc.decode(t[1:]).strip() for t in tokens])
       sum_logprobs = [lp[i] for i, lp in zip(selected, sum_logprobs)]
       avg_logprobs = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
-      #if no_speech_probs[0] > no_speech_threshold and avg_logprob[0] <= logprob_threshold:
+      #if no_speech_probs[0] > no_speech_threshold and avg_logprobs[0] <= logprob_threshold:
       seek += segment_size
     return texts[0] if mel.ndim == 2 else texts
 
