@@ -1,6 +1,6 @@
 import os, mmap
 try: import _posixshmem # not available on windows
-except: pass
+except Exception: pass
 from typing import Callable, Dict
 from tinygrad.helpers import DType
 from tinygrad.runtime.lib import RawBufferMapped
