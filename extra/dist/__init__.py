@@ -13,15 +13,13 @@ class _OOB:
   def __init__(self, pipes):
     self.pipes = pipes
   def send(self, data, target_rank):
-    print(f"SENDING {data} to {target_rank} from {RANK}, using pipe {target_rank * (WORLD_SIZE - 1) + RANK}")
-    self.pipes[target_rank * (WORLD_SIZE - 1) + RANK][1].send(data)
+    self.pipes[RANK * WORLD_SIZE + target_rank][1].send(data)
   def recv(self, target_rank):
-    print(f"RECEIVING from {target_rank} to {RANK}, using pipe {RANK * (WORLD_SIZE - 1) + target_rank}")
-    return self.pipes[RANK * (WORLD_SIZE - 1) + target_rank][0].recv()
+    return self.pipes[target_rank * WORLD_SIZE + RANK][0].recv()
 OOB = None
 
 def init_oob(world_size):
-  return [mp.Pipe(False) for _ in range(world_size * (world_size - 1))]
+  return [mp.Pipe(False) for _ in range(world_size * world_size)]
 
 RANK = -1
 WORLD_SIZE = -1
