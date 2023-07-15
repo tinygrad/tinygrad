@@ -134,7 +134,6 @@ def cat_boxlist(bboxes):
 
   return cat_boxes
 
-
 class FPN:
   def __init__(self, in_channels_list, out_channels):
     self.inner_blocks, self.layer_blocks = [], []
