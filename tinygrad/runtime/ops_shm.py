@@ -15,6 +15,7 @@ class RawShmBuffer(RawBufferMapped):
     if cache_id in SHM_CACHE: shm = SHM_CACHE[cache_id]
     else:
       fd = _posixshmem.shm_open(device, os.O_RDWR, 0o600)
+      # TODO: these flags are somewhat platform specific, but python doesn't expose the ones we need
       shm = mmap.mmap(fd, size * dtype.itemsize, flags=mmap.MAP_SHARED | 0x2000 | 0x008000)
       os.close(fd)
       if cache_id is not None: SHM_CACHE[cache_id] = shm
