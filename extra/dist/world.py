@@ -11,21 +11,23 @@ def send_lb(x:LazyBuffer, target_rank, **kwargs) -> None:
   # assuming intra node transfer so we just use shared memory
   # cache the shared memory so we don't have to create it every time
   cache_id = kwargs.get("cache_id", None)
-  if cache_id in send_lb.shared_memory_cache:
+  if cache_id is not None and cache_id in send_lb.shared_memory_cache:
     shm_name = send_lb.shared_memory_cache[cache_id]
   else:
     shm_name = (s := shared_memory.SharedMemory(create=True, size=prod(x.shape) * x.dtype.itemsize)).name
     s.close()
     if cache_id is not None: send_lb.shared_memory_cache[cache_id] = shm_name
   # we instantly realize here to force the copy into shared memory
-  LazyBuffer.loadop(LoadOps.FROM, x.shape, x.dtype, f"shm:{shm_name},{cache_id}", src=x).realize()
+  device = f"shm:{shm_name},{cache_id}" if cache_id is not None else f"shm:{shm_name}"
+  LazyBuffer.loadop(LoadOps.FROM, x.shape, x.dtype, device, src=x).realize()
   dist.OOB.send((x.shape, x.dtype, (shm_name, cache_id)), target_rank)
 setattr(send_lb, "shared_memory_cache", {})
 
 def recv_lb(target_rank) -> LazyBuffer:
   shape, dtype, extra = dist.OOB.recv(target_rank)
   # intra node transfer so we just use shared memory
-  lb = LazyBuffer.loadop(LoadOps.FROM, shape, dtype, Device.DEFAULT, src=LazyBuffer.loadop(LoadOps.EMPTY, shape, dtype, f"shm:{extra[0]},{extra[1]}")).realize()
+  device = f"shm:{extra[0]},{extra[1]}" if extra[1] is not None else f"shm:{extra[0]}"
+  lb = LazyBuffer.loadop(LoadOps.FROM, shape, dtype, Device.DEFAULT, src=LazyBuffer.loadop(LoadOps.EMPTY, shape, dtype, device)).realize()
   # delete the shared memory if we're not caching it
   if extra[1] is None:
     (s := shared_memory.SharedMemory(name=extra[0])).close()
