@@ -1,13 +1,8 @@
-import argparse
-import json, logging, math, os, re, sys, time
-import wave
+import json, logging, math, os, re, sys, time, wave, argparse, numpy as np
 from pathlib import Path
 from typing import Tuple
-
-import numpy as np
 from phonemizer import phonemize
 from unidecode import unidecode
-
 from extra.utils import download_file
 from tinygrad import nn
 from tinygrad.helpers import dtypes
@@ -121,8 +116,7 @@ class TextEncoder:
     x = (self.emb(x) * math.sqrt(self.hidden_channels)).transpose(1, -1)  # [b, t, h] -transpose-> [b, h, t]
     x_mask = sequence_mask(x_lengths, x.shape[2]).unsqueeze(1).cast(x.dtype)  # TODO: verify this cast works
     x = self.encoder.forward(x * x_mask, x_mask)
-    stats = self.proj(x) * x_mask
-    m, logs = split_tinygrad(stats, self.out_channels, dim=1)
+    m, logs = split_tinygrad(self.proj(x) * x_mask, self.out_channels, dim=1)
     return x, m, logs, x_mask
 
 class ResidualCouplingBlock:
@@ -150,13 +144,10 @@ class PosteriorEncoder:
 
 class Generator:
   def __init__(self, initial_channel, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gin_channels=0):
-    self.num_kernels = len(resblock_kernel_sizes)
-    self.num_upsamples = len(upsample_rates)
+    self.num_kernels, self.num_upsamples = len(resblock_kernel_sizes), len(upsample_rates)
     self.conv_pre = nn.Conv1d(initial_channel, upsample_initial_channel, 7, 1, padding=3)
     resblock = ResBlock1 if resblock == '1' else ResBlock2
-    self.ups = []
-    for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
-      self.ups.append(nn.ConvTranspose1d(upsample_initial_channel//(2**i), upsample_initial_channel//(2**(i+1)),k, u, padding=(k-u)//2))
+    self.ups = [nn.ConvTranspose1d(upsample_initial_channel//(2**i), upsample_initial_channel//(2**(i+1)),k, u, padding=(k-u)//2) for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes))]
     self.resblocks = []
     for i in range(len(self.ups)):
       ch = upsample_initial_channel // (2 ** (i + 1))
@@ -187,12 +178,8 @@ class WN:
     if gin_channels != 0: self.cond_layer = nn.Conv1d(gin_channels, 2 * hidden_channels * n_layers, 1)
     for i in range(n_layers):
       dilation = dilation_rate ** i
-      padding = int((kernel_size * dilation - dilation) / 2)
-      in_layer = nn.Conv1d(hidden_channels, 2 * hidden_channels, kernel_size, dilation=dilation, padding=padding)
-      self.in_layers.append(in_layer)
-      res_skip_channels = 2 * hidden_channels if i < n_layers - 1 else hidden_channels
-      res_skip_layer = nn.Conv1d(hidden_channels, res_skip_channels, 1)
-      self.res_skip_layers.append(res_skip_layer)
+      self.in_layers.append(nn.Conv1d(hidden_channels, 2 * hidden_channels, kernel_size, dilation=dilation, padding=int((kernel_size * dilation - dilation) / 2)))
+      self.res_skip_layers.append(nn.Conv1d(hidden_channels, 2 * hidden_channels if i < n_layers - 1 else hidden_channels, 1))
   def forward(self, x, x_mask, g=None, **kwargs):
     output, n_channels_tensor = Tensor.zeros_like(x), Tensor([self.hidden_channels], dtype=dtypes.int64)
     if g is not None: g = self.cond_layer(g)
@@ -206,8 +193,7 @@ class WN:
       acts = fused_add_tanh_sigmoid_multiply(x_in, g_l, n_channels_tensor)
       res_skip_acts = self.res_skip_layers[i](acts)
       if i < self.n_layers - 1:
-        res_acts = res_skip_acts[:, :self.hidden_channels, :]
-        x = (x + res_acts) * x_mask
+        x = (x + res_skip_acts[:, :self.hidden_channels, :]) * x_mask
         output = output + res_skip_acts[:, self.hidden_channels:, :]
       else:
         output = output + res_skip_acts
@@ -302,8 +288,7 @@ class Log:
 
 class Flip:
   def forward(self, x: Tensor, *args, reverse=False, **kwargs):
-    x = x.flip([1])
-    return x if reverse else (x, Tensor.zeros(x.shape[0], dtype=x.dtype).to(device=x.device))
+    return x.flip([1]) if reverse else (x.flip([1]), Tensor.zeros(x.shape[0], dtype=x.dtype).to(device=x.device))
 
 class ElementwiseAffine:
   def __init__(self, channels): self.m, self.logs = Tensor.zeros(channels, 1), Tensor.zeros(channels, 1)
@@ -638,10 +623,10 @@ if __name__ == '__main__':
     text_to_synthesize = args.text_to_synthesize
 
   net_g, hps = load_model(text_mapper, MODELS[args.model_to_use])
-  logging.info(f"Loaded model with hps: {hps}")
+  logging.debug(f"Loaded model with hps: {hps}")
 
   stn_tst = text_mapper.get_text(text_to_synthesize, hps)
-  logging.info(f"Converted input text to tensor \"{text_to_synthesize}\" -> Tensor({stn_tst.shape}): {stn_tst.numpy()}")
+  logging.debug(f"Converted input text to tensor \"{text_to_synthesize}\" -> Tensor({stn_tst.shape}): {stn_tst.numpy()}")
 
   x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
   sid = Tensor([args.speaker_id], dtype=dtypes.int64) if model_has_sid else None
