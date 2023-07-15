@@ -31,8 +31,7 @@ extra/datasets/kits/
 extra/datasets/COCO/
 extra/datasets/audio*
 venv
-examples/net.js
-examples/net.safetensors
+examples/net.*[js,json,safetensors]
 node_modules
 package.json
 package-lock.json
