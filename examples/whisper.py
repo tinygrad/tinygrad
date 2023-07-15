@@ -215,6 +215,7 @@ class GreedyDecoder:
     sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)
     next_tokens[tokens[:, -1] == self.eot] = self.eot
     tokens = np.concatenate([tokens, next_tokens[:, None]], axis=-1)
+    print(tokens)
     completed = (tokens[:, -1] == self.eot).all()
     return Tensor(tokens), completed
 
@@ -280,6 +281,7 @@ if __name__ == "__main__":
       texts.extend([enc.decode(t[1:]).strip() for t in tokens])
       sum_logprobs = [lp[i] for i, lp in zip(selected, sum_logprobs)]
       avg_logprobs = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
+      # TODO: increment seek properly and implement fallback
       #if no_speech_probs[0] > no_speech_threshold and avg_logprobs[0] <= logprob_threshold:
       seek += segment_size
     return texts[0] if mel.ndim == 2 else texts
