@@ -618,8 +618,8 @@ if __name__ == '__main__':
   parser.add_argument("--noise_scale_w", type=float, default=0.8, help="Specify the noise scale w. Default is 0.8.")
   parser.add_argument("--length_scale", type=float, default=1, help="Specify the length scale. Default is 1.")
   parser.add_argument("--seed", type=int, default=1337, help="Specify the seed (set to None if no seed). Default is 1337.")
-  parser.add_argument("--num_channels", type=int, default=2, help="Specify the number of audio output channels. Default is 2.")
-  parser.add_argument("--sample_width", type=int, default=1, help="Specify the number of bytes per sample, adjust if necessary. Default is 2.")
+  parser.add_argument("--num_channels", type=int, default=1, help="Specify the number of audio output channels. Default is 1.")
+  parser.add_argument("--sample_width", type=int, default=2, help="Specify the number of bytes per sample, adjust if necessary. Default is 2.")
   args = parser.parse_args()
 
   model_has_sid = args.model_to_use in ["vctk"] # has more than one speaker, speaker selected through setting speaker_id
