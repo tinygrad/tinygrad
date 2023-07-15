@@ -1,10 +1,10 @@
-from typing import Tuple, Dict
+from typing import Tuple, Dict, List
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.state import get_state_dict
 import json
 
-def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],Dict[str,Tuple[str,int,int]],Dict[str,Tuple[str,int,int]],Dict[str,Tensor]]:
+def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[str,int,int]],Dict[str,Tensor]]:
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
   for fxn,args in run.jit_cache:
     functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
@@ -136,7 +136,7 @@ def export_model(model, input:Tensor, target:str):
     elif target == "webgpu":
       prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names)
     else:
-      print(statements)
-      prg = json.dumps()
+      from tinygrad.tensor import Device
+      prg = json.dumps({"backend": Device.DEFAULT, "input_size": bufs['input'][0], "output_size": bufs["outputs"][0], "functions": functions, "statements": [{"kernel":kernel,"args":args, "global_size":global_size} for (kernel, args, global_size) in statements], "bufs": {name:{"size":size, "id":str(_key)} for name, (size, _key) in bufs.items()}, "buf_id_map": weight_names})
 
     return prg, bufs['input'][0], bufs['outputs'][0], state
