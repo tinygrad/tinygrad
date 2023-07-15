@@ -11,14 +11,7 @@ FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
 def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3):
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
-  torch.manual_seed(0)
-  np.random.seed(0)
-  if shps is None:
-    ts = [torch.tensor(x, requires_grad=True) for x in vals]
-  else:
-    ts = [torch.tensor((np.random.random(size=x)+a)*b, requires_grad=True, dtype=torch.float32) for x in shps]
-
-  tst = [Tensor(x.detach().numpy(), requires_grad=not FORWARD_ONLY) for x in ts]
+  ts, tst = prepare_test_op(a, b, shps, vals)
 
   st = time.monotonic()
   out = torch_fxn(*ts)
@@ -58,7 +51,25 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
 
   print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
+def prepare_test_op(a, b, shps, vals):
+  torch.manual_seed(0)
+  np.random.seed(0)
+  if shps is None: ts = [torch.tensor(x, requires_grad=True) for x in vals]
+  else: ts = [torch.tensor((np.random.random(size=x) + a) * b, requires_grad=True, dtype=torch.float32) for x in shps]
+  tst = [Tensor(x.detach().numpy(), requires_grad=not FORWARD_ONLY) for x in ts]
+  return ts, tst
+
 class TestOps(unittest.TestCase):
+
+  def helper_test_exception(self, shps, torch_fxn, tinygrad_fxn, expected, exact=False, vals=None, a=-0.5, b=3):
+    ts, tst = prepare_test_op(a, b, shps, vals)
+    with self.assertRaises(expected) as torch_cm:
+      torch_fxn(*ts)
+    with self.assertRaises(expected) as tinygrad_cm:
+      tinygrad_fxn(*tst)
+    if exact: self.assertEqual(str(torch_cm.exception), str(tinygrad_cm.exception))
+    print("\ntesting %40r   torch/tinygrad exception: %s / %s" % (shps, torch_cm.exception, tinygrad_cm.exception), end="")
+
   def test_full_like(self):
     a = Tensor([[1,2,3],[4,5,6]])
     b = torch.tensor([[1,2,3],[4,5,6]])
@@ -578,6 +589,21 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: torch.flip(x, ()), lambda x: x.flip(axis=()))
     helper_test_op([(1,)], lambda x: torch.flip(x, ()), lambda x: x.flip(axis=()))
     helper_test_op([(4, 3, 6, 6)], lambda x: torch.flip(x, ()), lambda x: x.flip(axis=()))
+
+  def test_squeeze(self):
+    helper_test_op([(1,3,6,6)], lambda x: torch.squeeze(x, 0), lambda x: x.squeeze(dim=0))
+    helper_test_op([(4,3,1,6)], lambda x: torch.squeeze(x, 1), lambda x: x.squeeze(dim=1))
+    helper_test_op([(4,3,6,6)], lambda x: torch.squeeze(x, 3), lambda x: x.squeeze(dim=3))
+    self.helper_test_exception([(4,3,6,6)], lambda x: torch.squeeze(x, 50), lambda x: x.squeeze(dim=50), expected=IndexError, exact=True)
+    self.helper_test_exception([(4,3,6,6)], lambda x: torch.squeeze(x, -50), lambda x: x.squeeze(dim=-50), expected=IndexError, exact=True)
+    helper_test_op([(4,3,6,1)], lambda x: torch.squeeze(x, -1), lambda x: x.squeeze(dim=-1))
+    helper_test_op([(4,3,6,6)], lambda x: torch.squeeze(x), lambda x: x.squeeze())
+    helper_test_op([(1,3,6,6)], lambda x: torch.squeeze(x), lambda x: x.squeeze())
+    helper_test_op([(2,3,1)], lambda x: torch.squeeze(x), lambda x: x.squeeze())
+    helper_test_op([()], lambda x: torch.squeeze(x, -1), lambda x: x.squeeze(dim=-1))
+    helper_test_op([()], lambda x: torch.squeeze(x, 0), lambda x: x.squeeze(dim=0))
+    self.helper_test_exception([()], lambda x: torch.squeeze(x, 10), lambda x: x.squeeze(dim=10), expected=IndexError, exact=True)
+    helper_test_op([()], lambda x: torch.squeeze(x), lambda x: x.squeeze())
 
   def test_unsqueeze(self):
     helper_test_op([(4,3,6,6)], lambda x: torch.unsqueeze(x, 0), lambda x: x.unsqueeze(dim=0))
