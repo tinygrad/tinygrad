@@ -418,7 +418,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       if chatbot and outputted.endswith(end_delim): break
     if not chatbot: break
 
-  if args.profile:
+  if args.profile and args.count > 0:
     profiler.disable()
     stats = pstats.Stats(profiler)
     stats.dump_stats('out.prof')
