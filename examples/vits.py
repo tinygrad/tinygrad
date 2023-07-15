@@ -1,4 +1,4 @@
-import json, logging, math, os, re, sys, time, wave, argparse, numpy as np
+import json, logging, math, os, re, sys, time, wave, argparse, numpy as np, inflect
 from pathlib import Path
 from typing import Tuple
 from phonemizer import phonemize
@@ -114,7 +114,7 @@ class TextEncoder:
     self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
   def forward(self, x: Tensor, x_lengths: Tensor):
     x = (self.emb(x) * math.sqrt(self.hidden_channels)).transpose(1, -1)  # [b, t, h] -transpose-> [b, h, t]
-    x_mask = sequence_mask(x_lengths, x.shape[2]).unsqueeze(1).cast(x.dtype)  # TODO: verify this cast works
+    x_mask = sequence_mask(x_lengths, x.shape[2]).unsqueeze(1).cast(x.dtype)
     x = self.encoder.forward(x * x_mask, x_mask)
     m, logs = split_tinygrad(self.proj(x) * x_mask, self.out_channels, dim=1)
     return x, m, logs, x_mask
@@ -538,21 +538,20 @@ def download_if_not_present(file_path: Path, url: str):
     download_file(url, file_path)
   return file_path
 
-def load_model(text_mapper, model) -> Tuple[Synthesizer, HParams]:
-  config_path, weights_path = model[0], model[1]
-  download_if_not_present(config_path, model[2])
+def load_model(text_mapper, hps, model) -> Tuple[Synthesizer, HParams]:
+  weights_path = model[1]
   download_if_not_present(weights_path, model[3])
-  hps = get_hparams_from_file(config_path)
   net_g = Synthesizer(len(text_mapper.symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
   _ = load_checkpoint(weights_path, net_g, None)
-  return net_g, hps
+  return net_g
 
 class TextMapper: # Based on https://github.com/keithito/tacotron
-  def __init__(self, vocab=None, apply_cleaners=True):
+  def __init__(self, symbols, apply_cleaners=True):
     self.apply_cleaners = apply_cleaners
-    self.symbols =  [x.replace("\n", "") for x in open(vocab, encoding="utf-8").readlines()] if vocab else ['_'] + list(';:,.!?¡¿—…"«»“” ') + list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz') + list("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ")
+    self.symbols = symbols
     self._symbol_to_id, _id_to_symbol = {s: i for i, s in enumerate(self.symbols)}, {i: s for i, s in enumerate(self.symbols)}
     self._whitespace_re, self._abbreviations = re.compile(r'\s+'), [(re.compile('\\b%s\\.' % x[0], re.IGNORECASE), x[1]) for x in [('mrs', 'misess'), ('mr', 'mister'), ('dr', 'doctor'), ('st', 'saint'), ('co', 'company'), ('jr', 'junior'), ('maj', 'major'), ('gen', 'general'), ('drs', 'doctors'), ('rev', 'reverend'), ('lt', 'lieutenant'), ('hon', 'honorable'), ('sgt', 'sergeant'), ('capt', 'captain'), ('esq', 'esquire'), ('ltd', 'limited'), ('col', 'colonel'), ('ft', 'fort'), ]]
+    self._inflect = inflect.engine()
   def text_to_sequence(self, text, cleaner_names):
     if self.apply_cleaners:
       for name in cleaner_names:
@@ -569,6 +568,44 @@ class TextMapper: # Based on https://github.com/keithito/tacotron
   def transliteration_cleaners(self, text): return self.collapse_whitespace(unidecode(text.lower()))
   def english_cleaners(self, text): return self.collapse_whitespace(phonemize(self.expand_abbreviations(unidecode(text.lower())), language='en-us', backend='espeak', strip=True))
   def english_cleaners2(self, text): return self.collapse_whitespace(phonemize(self.expand_abbreviations(unidecode(text.lower())), language='en-us', backend='espeak', strip=True, preserve_punctuation=True, with_stress=True))
+  def cjke_cleaners2(self, text): return re.sub(r'([^\.,!\?\-…~])$', r'\1.', re.sub(r'\s+$', '', self.english_to_ipa2(text)))
+  def mark_dark_l(self, text): return re.sub(r'l([^aeiouæɑɔəɛɪʊ ]*(?: |$))', lambda x: 'ɫ' + x.group(1), text)
+  def _remove_commas(self, m): return m.group(1).replace(',', '')
+  def _expand_decimal_point(self, m): return m.group(1).replace('.', ' point ')
+  def _expand_dollars(self, m):
+    match = m.group(1)
+    parts = match.split('.')
+    if len(parts) > 2: return match + ' dollars'  # Unexpected format
+    dollars, cents = int(parts[0]) if parts[0] else 0, int(parts[1]) if len(parts) > 1 and parts[1] else 0
+    if dollars and cents: return '%s %s, %s %s' % (dollars, 'dollar' if dollars == 1 else 'dollars', cents, 'cent' if cents == 1 else 'cents')
+    if dollars: return '%s %s' % (dollars, 'dollar' if dollars == 1 else 'dollars')
+    if cents: return '%s %s' % (cents, 'cent' if cents == 1 else 'cents')
+    return 'zero dollars'
+  def _expand_ordinal(self, m): return self._inflect.number_to_words(m.group(0))
+  def _expand_number(self, m):
+    num = int(m.group(0))
+    if 1000 < num < 3000:
+      if num == 2000: return 'two thousand'
+      if 2000 < num < 2010: return 'two thousand ' + self._inflect.number_to_words(num % 100)
+      if num % 100 == 0: return self._inflect.number_to_words(num // 100) + ' hundred'
+      return self._inflect.number_to_words(num, andword='', zero='oh', group=2).replace(', ', ' ')
+    return self._inflect.number_to_words(num, andword='')
+  def normalize_numbers(self, text):
+    text = re.sub(re.compile(r'([0-9][0-9\,]+[0-9])'), self._remove_commas, text)
+    text = re.sub(re.compile(r'£([0-9\,]*[0-9]+)'), r'\1 pounds', text)
+    text = re.sub(re.compile(r'\$([0-9\.\,]*[0-9]+)'), self._expand_dollars, text)
+    text = re.sub(re.compile(r'([0-9]+\.[0-9]+)'), self._expand_decimal_point, text)
+    text = re.sub(re.compile(r'[0-9]+(st|nd|rd|th)'), self._expand_ordinal, text)
+    text = re.sub(re.compile(r'[0-9]+'), self._expand_number, text)
+    return text
+  def english_to_ipa(self, text):
+    import eng_to_ipa as ipa
+    return self.collapse_whitespace(ipa.convert(self.normalize_numbers(self.expand_abbreviations(unidecode(text).lower()))))
+  def english_to_ipa2(self, text):
+    _ipa_to_ipa2 = [(re.compile('%s' % x[0]), x[1]) for x in [ ('r', 'ɹ'), ('ʤ', 'dʒ'), ('ʧ', 'tʃ')]]
+    text = self.mark_dark_l(self.english_to_ipa(text))
+    for regex, replacement in _ipa_to_ipa2: text = re.sub(regex, replacement, text)
+    return text.replace('...', '…')
   def intersperse(self, lst, item):
     result = [item] * (len(lst) * 2 + 1)
     result[1::2] = lst
@@ -584,6 +621,7 @@ MODELS = { # config_path, weights_path, config_url, weights_url
   "ljs": (VITS_PATH / "ljs_base.json", VITS_PATH / "pretrained_ljs.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/ljs_base.json", "https://drive.google.com/uc?export=download&id=1q86w74Ygw2hNzYP9cWkeClGT5X25PvBT&confirm=t"),
   "vctk": (VITS_PATH / "vctk_base.json", VITS_PATH / "pretrained_vctk.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/vctk_base.json", "https://drive.google.com/uc?export=download&id=11aHOlhnxzjpdWDpsz1vFDCzbeEfoIxru&confirm=t"),
   "mmts-tts": (VITS_PATH / "mmts-tts.json", VITS_PATH / "pretrained_mmts-tts.pth", "https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/config.json", "https://huggingface.co/facebook/mms-tts/resolve/main/full_models/eng/G_100000.pth"),
+  "uma_trilingual": (VITS_PATH / "uma_trilingual.json", VITS_PATH / "pretrained_uma_trilingual.pth", "https://huggingface.co/spaces/Plachta/VITS-Umamusume-voice-synthesizer/raw/main/configs/uma_trilingual.json", "https://huggingface.co/spaces/Plachta/VITS-Umamusume-voice-synthesizer/resolve/main/pretrained_models/G_trilingual.pth"),
 }
 # PAPER: https://arxiv.org/abs/2106.06103  CODE: https://github.com/jaywalnut310/vits/tree/main
 if __name__ == '__main__':
@@ -607,22 +645,33 @@ if __name__ == '__main__':
   parser.add_argument("--sample_width", type=int, default=2, help="Specify the number of bytes per sample, adjust if necessary. Default is 2.")
   args = parser.parse_args()
 
-  model_has_sid = args.model_to_use in ["vctk"] # has more than one speaker, speaker selected through setting speaker_id
+  model_has_sid = args.model_to_use in ["vctk", "uma_trilingual"] # has more than one speaker, speaker selected through setting speaker_id
 
   Tensor.no_grad, Tensor.Training = True, False
   if args.seed is not None:
     Tensor.manual_seed(args.seed)
     np.random.seed(args.seed)
 
+  model = MODELS[args.model_to_use]
+
+  config_path = model[0]
+  download_if_not_present(config_path, model[2])
+  hps = get_hparams_from_file(config_path)
+
+  text_to_synthesize = args.text_to_synthesize
   if args.model_to_use == "mmts-tts":
     vocab_file = download_if_not_present(VITS_PATH / "vocab_mmts-tts.txt", "https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/vocab.txt")
-    text_mapper = TextMapper(vocab_file, apply_cleaners=False)
-    text_to_synthesize = text_mapper.filter_oov(args.text_to_synthesize.lower())
+    text_mapper = TextMapper(apply_cleaners=False, symbols= [x.replace("\n", "") for x in open(vocab_file, encoding="utf-8").readlines()])
+    text_to_synthesize = text_mapper.filter_oov(text_to_synthesize.lower())
+  elif args.model_to_use == "uma_trilingual": # TODO: this model sounds slightly off from the original
+    speaker_name = next((key for key, value in hps.speakers.items() if value == args.speaker_id), None)
+    if speaker_name is None: raise ValueError(f"Speaker ID {args.speaker_id} not found in the speaker list.")
+    logging.info(f"Speaker name: {speaker_name}")
+    text_mapper = TextMapper(apply_cleaners=True, symbols=hps.symbols)
   else:
-    text_mapper = TextMapper(apply_cleaners=True)
-    text_to_synthesize = args.text_to_synthesize
+    text_mapper = TextMapper(apply_cleaners=True, symbols=['_'] + list(';:,.!?¡¿—…"«»“” ') + list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz') + list("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ"))
 
-  net_g, hps = load_model(text_mapper, MODELS[args.model_to_use])
+  net_g = load_model(text_mapper, hps, model)
   logging.debug(f"Loaded model with hps: {hps}")
 
   stn_tst = text_mapper.get_text(text_to_synthesize, hps)
