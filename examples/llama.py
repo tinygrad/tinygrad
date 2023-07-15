@@ -393,7 +393,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
     last_break = len(outputted)
     for i in range(args.count):
-      if args.profile and i == 2: profiler.enable()
+      if args.profile and i == 0: profiler.enable()
 
       if args.timing: print("")
       st = GlobalCounters.time_sum_s
