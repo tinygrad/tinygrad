@@ -4,7 +4,6 @@ from multiprocessing import shared_memory
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.tensor import Tensor, Function
-import time
 
 # sends a lazybuffer from our rank to the target rank
 # transfer method differs depending on if this is a cross or intra node transfer
