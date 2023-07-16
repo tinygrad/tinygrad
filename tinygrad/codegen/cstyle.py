@@ -1,7 +1,7 @@
 from typing import Final, Dict, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Union
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer
-from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, FusedOps
+from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, colored, getenv, prod, DType
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
@@ -35,7 +35,8 @@ class CStyleLanguage(NamedTuple):
     BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
     BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
     BinaryOps.MAX: lambda a,b: f"max({a},{b})",
-    BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", FusedOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})"
+    BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", TernaryOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})",
+    TernaryOps.WHERE: lambda a,b,c: f"({a}!=0?{b}:{c})"
   }
 
   # returns a str expression of the casted xs with the given type
