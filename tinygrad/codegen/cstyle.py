@@ -3,7 +3,7 @@ import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, MemOp, ConstOp
 from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, colored, getenv, prod, DType
-from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
+from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, sym_render
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -73,12 +73,13 @@ class CStyleLanguage(NamedTuple):
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
 
-  def render_kernel(self, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str,List[int],List[int]]:
+  def render_kernel(self, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str], symbols:List[str]) -> Tuple[str,List[int],List[int]]:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""
+    symbol_args = [f"const {self.buffer_prefix}int* {symbol}" for symbol in symbols]
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix) for i,(name,dtype) in enumerate(bufs)]
     prg = ''.join([f"{self.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
-    [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
+    [', '.join([f'{t} {name}' for name,t in buftypes] + symbol_args + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
 
@@ -115,6 +116,7 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
   pend_close = None
   bufs = []
   depth = 0
+  symbols = []
   def kk(s): kernel.append("  "*depth+s)
 
   for uop,newvar,vin,args in uops:
@@ -126,7 +128,7 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
           kk(add_gl_dimension(lang.size_prefix, args, i, var, local_size, lang.lid))
         else:
           if getenv("NOUNROLL"): kk("#pragma unroll(1)")   # prevent loop unrolling
-          kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, var.min, var.max))
+          kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, sym_render(var.min), sym_render(var.max)))
       depth += 1
     elif uop == UOps.BARRIER:
       kk(lang.barrier)
@@ -150,6 +152,9 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
       kk(f"c.thread_elements()[0] = {vin[4].render()}; c.thread_elements()[1] = {vin[5].render()};")
       kk("simdgroup_multiply_accumulate(c, a, b, c);")
       kk(f"{vin[4].render()} = c.thread_elements()[0]; {vin[5].render()} = c.thread_elements()[1]; }}")
+    elif uop == UOps.SYMBOL:
+      symbols.append(args)
+      kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = *{args};")
     elif uop == UOps.ALU:
       assert newvar is not None
       kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")
@@ -180,7 +185,7 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
     else:
       raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(kernel, bufs, global_size, local_size, prekernel)
+  return lang.render_kernel(kernel, bufs, global_size, local_size, prekernel, symbols)
 
 class CStyleCodegen(Linearizer):
   lang: ClassVar[CStyleLanguage] = CStyleLanguage()

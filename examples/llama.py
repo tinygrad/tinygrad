@@ -17,6 +17,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
 from tinygrad.ops import GlobalCounters
 from tinygrad.jit import TinyJit
+from tinygrad.shape.symbolic import Variable
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
@@ -56,14 +57,31 @@ class Attention:
     self.n_heads = n_heads
     self.head_dim = dim // n_heads
 
+    if getenv("JIT_ATTN"):
+      self._attn = TinyJit(self.attn)
+    else:
+      self._attn = self.attn
+
   def prepare_attention(self, x:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
     xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], self.n_heads, self.head_dim) for x in (xq, xk, xv)]
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
     return xq, xk, xv
 
-  def inner_attention(self, xq:Tensor, xk:Tensor, xv:Tensor, start_pos:int, mask:Optional[Tensor]) -> Tensor:
+  def attn(self, xq, keys, values, mask):
     bsz, seqlen, _, _ = xq.shape
+    xq = xq.transpose(1, 2)
+    keys = keys.transpose(1, 2)
+    values = values.transpose(1, 2)
+
+    scores = xq.matmul(keys.transpose(2, 3)) / math.sqrt(self.head_dim)
+    if mask is not None:
+      scores = scores + mask
+    scores = scores.softmax()  # this is casted to float
+    return scores.matmul(values).transpose(1, 2).reshape(bsz, seqlen, -1).realize()
+
+  def inner_attention(self, xq:Tensor, xk:Tensor, xv:Tensor, start_pos:int, mask:Optional[Tensor]) -> Tensor:
+    _, seqlen, _, _ = xq.shape
     # kv caching!
     if start_pos == 0:
       keys, values = xk, xv
@@ -76,14 +94,13 @@ class Attention:
     # save the cache
     self.cache_k, self.cache_v = keys.realize(), values.realize()
 
-    xq = xq.transpose(1, 2)
-    keys = keys.transpose(1, 2)
-    values = values.transpose(1, 2)
-    scores = xq.matmul(keys.transpose(2, 3)) / math.sqrt(self.head_dim)
-    if mask is not None:
-      scores = scores + mask
-    scores = scores.softmax()  # this is casted to float
-    return scores.matmul(values).transpose(1, 2).reshape(bsz, seqlen, -1)
+    if getenv("JIT_ATTN"):
+      pos = Variable("pos", 1, 100)
+      keys = keys.reshape(keys.shape[0], pos, keys.shape[2], keys.shape[3])
+      values = values.reshape(values.shape[0], pos, values.shape[2], values.shape[3])
+
+    # NOTE: JIT does not work with data dependenet control flow
+    return self.attn(xq, keys, values, mask) if mask else self._attn(xq, keys, values, mask)
 
   # NOTE: this is not called
   def __call__(self, x:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
@@ -115,6 +132,11 @@ class TransformerBlock:
     else:
       self._pre, self._post = self.pre, self.post
 
+    if getenv("JIT_ATTN"):
+      self._attn = TinyJit(self.attention.inner_attention)
+    else:
+      self._attn = self.attention.inner_attention
+
   def pre(self, x:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
     xq, xk, xv = self.attention.prepare_attention(self.attention_norm(x), freqs_cis)
     return xq.realize(), xk.realize(), xv.realize()
@@ -125,7 +147,6 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]):
     xq, xk, xv = self._pre(x, freqs_cis)
-    # inner_attention can't be jitted because it's dynamic based on start_pos
     output = self.attention.inner_attention(xq, xk, xv, start_pos, mask)
     return self._post(x, output)
 

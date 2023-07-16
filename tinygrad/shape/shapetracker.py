@@ -4,13 +4,13 @@ from enum import Enum, auto
 import functools
 from typing import Dict, Tuple, Union, List, Optional, Callable, cast, NamedTuple
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, is_sym_int
+from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, is_sym_int, sym_infer
 
 # these ops live here
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
 
 @functools.lru_cache(maxsize=None)
-def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
+def to_shape_strides(shape:Tuple[Union[Node, int], ...], strides:Tuple[Union[Node, int], ...]) -> Tuple[Tuple[Union[Node, int], Union[Node, int]], ...]:
   assert len(shape) == len(strides)
   ret = [(shape[0], strides[0])] if len(shape) > 0 else []
   for i in range(1, len(shape)):
@@ -28,7 +28,7 @@ def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int,
   return tuple(stride if shp != 1 else 0 for stride, shp in zip(strides, shape))
 
 class ViewInternal(NamedTuple):
-  shape:Tuple[int, ...]
+  shape:Tuple[Union[Node, int], ...]
   strides:Tuple[int, ...]
   offset:int
   mask:Optional[Tuple[Tuple[int, int]]]
@@ -67,7 +67,8 @@ class View(ViewInternal):
   # generate an expression if you have a variable or expression for each index
   def expr_idxs(self, idxs) -> Node:
     assert len(idxs) == len(self.shape), f"need an idx for all dimensions {idxs} vs {self.shape}"
-    return Variable.sum([Variable.num(self.offset)] + [idx*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
+    offset = Variable.num(self.offset) if isinstance(self.offset, int) else self.offset
+    return Variable.sum([offset] + [idx*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
 
 @functools.lru_cache(maxsize=None)
 def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
@@ -80,7 +81,7 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
   return Variable.sum(ret)
 
 @functools.lru_cache(maxsize=None)
-def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
+def strides_for_shape(shape:Tuple[Union[Node, int], ...]) -> Tuple[Union[Node, int], ...]:
   strides = [1] if shape else []
   for d in shape[::-1][:-1]: strides = [d*strides[0]] + strides
   return tuple([st if s != 1 else 0 for st, s in zip(strides, shape)])
@@ -132,9 +133,10 @@ def get_unsafe_resize_offset(strides, arg):
   return sum([s * x[0] for s, x in zip(strides,arg)])
 
 class ShapeTracker:
-  __slots__ = "views"
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[View]]=None):
+  __slots__ = "views", "symbols"
+  def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node, int], ...]], views:Optional[List[View]]=None):
     self.views: List[View] = views if views is not None else ([*cast(ShapeTracker, shape).views] if shape.__class__ is ShapeTracker else [view_from_shape(shape)])
+    self.symbols = {}
   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
   def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
 
@@ -142,13 +144,16 @@ class ShapeTracker:
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
 
   @property
-  def shape(self) -> Tuple[int, ...]: return self.views[-1].shape
+  def shape(self) -> Tuple[Union[Node, int], ...]: return self.views[-1].shape
 
   @property
   def key(self) -> Tuple[View, ...]: return tuple(self.views)
 
+  def inferred_shape(self, symbols): return tuple(sym_infer(s, symbols) for s in self.shape)
+
   # this is the real size (ish)
   def size(self): return prod([s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])
+  def inferred_size(self, symbols): return prod([sym_infer(s, symbols) for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])
 
   # these are multiview strides, value is None if it's not a simple strided dimension
   # TODO: this can be shared code between simplify and merge_views
@@ -225,15 +230,15 @@ class ShapeTracker:
     self.__unsafe_resize(arg)
     return self
 
-  def expand(self, new_shape: Tuple[int, ...]) -> ShapeTracker:
+  def expand(self, new_shape: Tuple[Union[Node, int], ...]) -> ShapeTracker:
     assert len(new_shape) == len(self.views[-1].shape)
-    assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
+    assert all(is_sym_int(x) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)]) if self.views[-1].mask else None
     self.views[-1] = View(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
     return self
 
-  def reshape(self, new_shape: Tuple[int, ...]):
+  def reshape(self, new_shape: Tuple[Union[Node, int], ...]):
     if self.views[-1].shape == new_shape: return self
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done

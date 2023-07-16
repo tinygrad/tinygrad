@@ -10,6 +10,7 @@ from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG
 from math import ceil, pi, prod, sqrt, log, cos, copysign
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
+from tinygrad.shape.symbolic import Node
 
 # An instantiation of the Function is the Context
 class Function:
@@ -83,7 +84,10 @@ class Tensor:
   def device(self) -> str: return self.lazydata.device
 
   @property
-  def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
+  def shape(self) -> Tuple[Union[Node, int], ...]: return self.lazydata.shape
+
+  @property
+  def inferred_shape(self) -> Tuple[Union[Node, int], ...]: return self.lazydata.inferred_shape
 
   @property
   def dtype(self) -> DType: return self.lazydata.dtype

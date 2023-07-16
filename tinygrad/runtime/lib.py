@@ -21,6 +21,7 @@ class RawBuffer:  # pylint: disable=abstract-method
   @classmethod
   def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
   def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
+  def resize(self, newsize:int): raise RuntimeError("must be implemented")
 
 class RawBufferCopyIn(RawBuffer):
   def _copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
@@ -39,8 +40,16 @@ class RawBufferMapped(RawBufferCopyIn):
 
 # this one is simple enough that i moved it out of the runtimes
 class RawMallocBuffer(RawBufferMapped):
-  def __init__(self, size, dtype: DType): super().__init__(size, dtype, ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16, dtypes.bfloat16: ctypes.c_int16, dtypes.int8: ctypes.c_int8, dtypes.uint8: ctypes.c_uint8, dtypes.bool: ctypes.c_uint8, dtypes.int32: ctypes.c_int32, dtypes.int64: ctypes.c_int64}[dtype] * size)())
+  def __init__(self, size, dtype: DType):
+    self._ctype = {dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16, dtypes.bfloat16: ctypes.c_int16, dtypes.int8: ctypes.c_int8, dtypes.uint8: ctypes.c_uint8, dtypes.bool: ctypes.c_uint8, dtypes.int32: ctypes.c_int32, dtypes.int64: ctypes.c_int64}[dtype]
+    super().__init__(size, dtype, (self._ctype * size)())
   def _buffer(self): return memoryview(self._buf)
+  def resize(self, newsize):
+    if self.size < newsize:
+      ctypes.resize(self._buf, ctypes.sizeof(self._ctype)*newsize)
+      self._memsz = newsize*self.dtype.itemsize
+      GlobalCounters.mem_used += (newsize-self.size)*self.dtype.itemsize
+      self.size = newsize
 
 class RawBufferCopyInOut(RawBufferCopyIn):
   def _copyout(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")

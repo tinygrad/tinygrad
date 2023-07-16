@@ -9,6 +9,7 @@ from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten,
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.shape.shapetracker import MovementOps, ShapeTracker, View, get_contraction
+from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, TernaryOps, ReduceOps, LoadOps, OpType, LazyOp
 from tinygrad.runtime.lib import RawBufferMapped, RawConst, RawBuffer
 
@@ -84,6 +85,8 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   for x in real_srcs.keys():
     if not real_srcs[x]: real_srcs[x] = x.reshape(intermediate_shape)
   ast = self.op.map_buffers(real_srcs)
+  # attach symbol_info to this new ast
+  ast.symbol_info = {k: (v, Device[self.device].buffer(1, dtypes.int32).fromCPU(np.array((v,), dtype=np.int32))) for k,v in self.st.symbols.items()}
   return LazyOp(MovementOps.RESHAPE, (ast, ), self.shape) if intermediate_shape != self.shape else ast
 
 # **** lazy operations ****
@@ -118,7 +121,9 @@ class LazyBuffer:
     self.children: LightWeakSet = LightWeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
     self.op: LazyOp = op
-    for x in op.buffers: x.children.add(self)
+    for x in op.buffers:
+      x.children.add(self)
+      self.st.symbols.update(x.st.symbols)
     if not LAZY: self.realize()
 
     # log phantom ops to the graph
@@ -134,6 +139,9 @@ class LazyBuffer:
 
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
 
+  @property
+  def inferred_shape(self): return self.st.inferred_shape
+
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       # get real ops first
@@ -144,6 +152,8 @@ class LazyBuffer:
       elif self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
       # run the ast if we still have to, and log the op
       if not self.realized:
+        # pass down symbols with buffers to ast
+        self.op.symbol_info = {k: (v, Device[self.device].buffer(1, dtypes.int32).fromCPU(np.array((v,), dtype=np.int32))) for k,v in self.st.symbols.items()}
         for x in self.op.buffers: x.realize()
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
@@ -187,7 +197,7 @@ class LazyBuffer:
   def toCPU(self):
     assert self.dtype.np, "numpy dtype is required for toCPU"
     realized = self.cast(dtypes.from_np(self.dtype.np)).contiguous().realize().realized
-    ret = cast(RawBuffer, realized).toCPU().reshape(self.shape)
+    ret = cast(RawBuffer, realized).toCPU().reshape(self.inferred_shape(self.st.symbols))
     return ret
 
   def cast(self:LazyBuffer, arg:DType) -> LazyBuffer: return elementwise_op(UnaryOps.CAST, self, arg=arg) if self.dtype != arg else self
@@ -214,10 +224,15 @@ class LazyBuffer:
     srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
     return create_lazybuffer(self.device, ShapeTracker(new_shape), ReduceOps, LazyOp(op, srcs, new_shape), self.dtype)
 
-  def reshape(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
+  def reshape(self:LazyBuffer, arg:Tuple[Union[int, Variable], ...]) -> LazyBuffer:
     if self.shape == arg: return self
+    # check if we reshape into symbols
+    if len(self.shape)==len(arg) and all(a==b for a,b in zip(self.shape,arg) if isinstance(b, int)):
+      for a, b in zip(arg,self.shape):
+        if isinstance(a, Variable): self.st.symbols[a] = b
     if not self.realized and self.op.op == MovementOps.RESHAPE:
       self.op.src[0].children.discard(self) # NOTE: this is only required in reshape and when pushing permutes, why??
+      self.op.src[0].st.symbols.update(self.st.symbols)
       return self.op.src[0].reshape(arg)
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).reshape(arg), MovementOps.RESHAPE, arg)
 

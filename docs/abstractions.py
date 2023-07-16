@@ -307,7 +307,7 @@ GlobalCounters.cache = None  # disable the cache
 
 # there's one ASTRunner in the cache
 assert len(cache_saved) == 1
-prg, bufs = cache_saved[0]
+prg, bufs, sts = cache_saved[0]
 
 # print the C Program :)
 print(prg.prg)

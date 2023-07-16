@@ -2,8 +2,9 @@ from __future__ import annotations
 import functools, time
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
 from tinygrad.shape.shapetracker import MovementOps
+from tinygrad.shape.symbolic import sym_infer
 from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg
 if TYPE_CHECKING:
   from tinygrad.lazy import LazyBuffer
@@ -23,7 +24,7 @@ OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOp
 
 class LazyOp:
   # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
-  __slots__ = "op", "src", "arg", "buffers", "__weakref__"
+  __slots__ = "op", "src", "arg", "buffers", "__weakref__", "symbol_info"
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Any
@@ -33,6 +34,10 @@ class LazyOp:
     self.op = op
     self.src = src
     self.arg = arg
+    self.symbol_info = {}
+    for s in src:
+      if hasattr(s, "symbol_info"): self.symbol_info.update(s.symbol_info)
+
     try:
       self.buffers = tuple([y for x in src for y in x.buffers])
     except AttributeError:
@@ -101,7 +106,7 @@ class Interpreted:
     if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(time.perf_counter()-st)*1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape) if hasattr(ret._buf, 'shape') else str(len(ret._buf)):30s} in({len(srcs)}):", list(set(x._buf.shape if hasattr(x._buf, 'shape') else len(x._buf) for x in srcs)), ast.arg if ast.arg is not None else "")
     if not created_context: context[ast] = ret
     if output is not None and output.output_buffer is not None:
-      assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
+      assert output.output_buffer.size == ret.size and output.output_buffer.dtype == ret.dtype
       output.output_buffer._buf = ret._buf
       return output.output_buffer
     return ret
@@ -133,21 +138,35 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg, **self.runtime_args)
     return self
 
-  def exec(self, bufs, force_wait=False) -> Optional[float]:
-    rawbufs = dedup([x.realized for x in bufs if buf_is_kernel_arg(x)])
-    if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
-    return self(rawbufs, force_wait=force_wait)
+  def exec(self, bufs, force_wait=False, symbol_info=None) -> Optional[float]:
+    rawbufs = []
+    buf_sts = []
+    for x in bufs:
+      if buf_is_kernel_arg(x) and x.realized not in rawbufs:
+        rawbufs.append(x.realized)
+        buf_sts.append(x.st)
+    if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs, buf_sts))
+    # jit recreates symbol buffers so we don't store them in cache to simply cache checks
+    if symbol_info is not None: rawbufs += [s[1] for s in symbol_info.values()]
+    return self(rawbufs, force_wait=force_wait, symbols={k:v[0] for k,v in symbol_info.items()})
 
-  def __call__(self, rawbufs:List[RawBuffer], jit=False, force_wait=False) -> Optional[float]:
-    if et := self.clprg((self.global_size + [1]*(3-len(self.global_size))) if self.global_size is not None else None,
-                        (self.local_size + [1]*(3-len(self.local_size))) if self.local_size is not None else None,
+  def __call__(self, rawbufs:List[RawBuffer], jit=False, force_wait=False, symbols=None) -> Optional[float]:
+    if symbols is None: symbols = {}
+    global_size = [sym_infer(sz, symbols) for sz in self.global_size]
+    local_size = [sym_infer(sz, symbols) for sz in self.local_size]
+    if et := self.clprg((global_size + [1]*(3-len(global_size))) if global_size is not None else None,
+                        (local_size + [1]*(3-len(local_size))) if local_size is not None else None,
                         *rawbufs, wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
+
+    op_estimate = sym_infer(self.op_estimate, symbols)
+    mem_estimate = sym_infer(self.mem_estimate, symbols)
     if DEBUG >= 2:
-      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(33-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {int(self.op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
-            (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {self.mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
+      # TODO: infer the op_estimate and op_estimate
+      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(33-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+            (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
     GlobalCounters.kernel_count += 1
-    GlobalCounters.global_ops += self.op_estimate
-    GlobalCounters.global_mem += self.mem_estimate
+    GlobalCounters.global_ops += op_estimate
+    GlobalCounters.global_mem += mem_estimate
     if getenv("EARLY_STOPPING") and GlobalCounters.kernel_count == getenv("EARLY_STOPPING"): exit(0)
     return et
 
@@ -173,7 +192,7 @@ class Compiled:
 
     # we don't have an output buffer, we have to create it
     if not output.realized:
-      output.realized = self.buffer(prod(output.shape), output.dtype, **kwargs)
+      output.realized = self.buffer(output.st.inferred_size(output.st.symbols), output.dtype, **kwargs)
 
     # compilation time
     k = self.codegen(ast, output)
@@ -194,5 +213,5 @@ class Compiled:
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
-    prg.exec(k.bufs)
+    prg.exec(k.bufs, symbol_info=ast.symbol_info)
     return output.realized

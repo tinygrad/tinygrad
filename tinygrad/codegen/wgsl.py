@@ -30,7 +30,7 @@ class WGSLLanguage(CStyleLanguage):
     else: val = f"{x}" + ("" if dtypes.is_int(var_dtype) else "f")
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
 
-  def render_kernel(self, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str, List[int], List[int]]:
+  def render_kernel(self, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str], symbols:List[str]) -> Tuple[str, List[int], List[int]]:
     local_size = local_size[::-1] if len(local_size) else [1]
     bind_it = iter(range(len(bufs)))
     prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"

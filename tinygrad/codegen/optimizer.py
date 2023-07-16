@@ -160,6 +160,10 @@ def hand_coded_optimizations(k:Linearizer):
       # early exit
       return
 
+  # TODO: figure out if we can what kind of optimization is okay for symbolic.
+  if k.full_unupcasted_shape and any(not isinstance(s, int) for s in k.full_unupcasted_shape):
+    return
+
   if hasattr(k, 'lang') and len(k.lang.smem_prefix):
     # are we grouping? (requires local shape support)
     if not k.float4_axis(0) and k.first_reduce <= 2 and k.first_reduce + 1 <= k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:

@@ -22,6 +22,7 @@ METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):
   def __init__(self, size:int, dtype:DType):
+    self.dtype = dtype
     super().__init__(size, dtype, METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared))
   def __del__(self):
     self._buf.release()
@@ -29,6 +30,8 @@ class RawMetalBuffer(RawBufferMapped):
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
+  def resize(self, newsize):
+    self._buf = METAL.device.newBufferWithLength_options_(newsize*self.dtype.itemsize, Metal.MTLResourceStorageModeShared)
 
 def unwrap(x):
   ret, err = x
