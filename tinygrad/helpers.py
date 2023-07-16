@@ -155,7 +155,7 @@ class LightWeakValueDictionary:
 """Sets class variables to bools based on the current platform. Usage: if Platform.OSX: ... elif Platform.LINUX: ... else: ..."""
 class Platform: OSX, LINUX, WINDOWS, JAVA, UNKNOWN = tuple([platform.system() == s for s in ["Darwin", "Linux", "Windows", "Java", ""]])
 """Stores and loads the environment variables and stores their defaults."""
-class Env: KEEP_TEMPDIR = tuple([os.getenv(name, (cast(default) if cast else default)) for (name, default, cast) in [("KEEP_TEMPDIR", False, lambda x: True if x.lower() == "true" else False),]])
+class Env: KEEP_TEMPDIR = tuple([os.getenv(name, (cast(default) if (cast is not None) else default)) for (name, default, cast) in [("KEEP_TEMPDIR", False, lambda x: True if x.lower() == "true" else False),]])
 """tempfile package wrapper for standardizing the tempdir for sanity, cleanup, debugging, and CI/CD"""
 class Files:
   # TODO: Allow a environment variable to override the _temp_path
