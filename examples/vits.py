@@ -1,5 +1,6 @@
 import json, logging, math, os, re, sys, time, wave, argparse, numpy as np, inflect
 from pathlib import Path
+from typing import List
 from phonemizer import phonemize
 from unidecode import unidecode
 from extra.utils import download_file
@@ -11,16 +12,16 @@ from tinygrad.tensor import Tensor
 LRELU_SLOPE = 0.1
 
 class Synthesizer:
-  def __init__(self, n_vocab, spec_channels, segment_size, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, n_speakers=0, gin_channels=0, use_sdp=True, **kwargs):
+  def __init__(self, n_vocab, spec_channels, segment_size, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, n_speakers=0, gin_channels=0, use_sdp=True, emotion_embedding=False, **kwargs):
     self.n_vocab, self.spec_channels, self.inter_channels, self.hidden_channels, self.filter_channels, self.n_heads, self.n_layers, self.kernel_size, self.p_dropout, self.resblock, self.resblock_kernel_sizes, self.resblock_dilation_sizes, self.upsample_rates, self.upsample_initial_channel, self.upsample_kernel_sizes, self.segment_size, self.n_speakers, self.gin_channels, self.use_sdp = n_vocab, spec_channels, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, segment_size, n_speakers, gin_channels, use_sdp
-    self.enc_p = TextEncoder(n_vocab, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout)
+    self.enc_p = TextEncoder(n_vocab, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, emotion_embedding)
     self.dec = Generator(inter_channels, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gin_channels=gin_channels)
     self.enc_q = PosteriorEncoder(spec_channels, inter_channels, hidden_channels, 5, 1, 16, gin_channels=gin_channels)
     self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, 4, gin_channels=gin_channels)
     self.dp = StochasticDurationPredictor(hidden_channels, 192, 3, 0.5, 4, gin_channels=gin_channels) if use_sdp else DurationPredictor(hidden_channels, 256, 3, 0.5, gin_channels=gin_channels)
     if n_speakers > 1: self.emb_g = nn.Embedding(n_speakers, gin_channels)
-  def infer(self, x, x_lengths, sid=None, noise_scale=1.0, length_scale=1, noise_scale_w=1., max_len=None):
-    x, m_p, logs_p, x_mask = self.enc_p.forward(x, x_lengths)
+  def infer(self, x, x_lengths, sid=None, noise_scale=1.0, length_scale=1, noise_scale_w=1., max_len=None, emotion_embedding=None):
+    x, m_p, logs_p, x_mask = self.enc_p.forward(x, x_lengths, emotion_embedding)
     g = self.emb_g(sid.reshape(1, 1)).squeeze(1).unsqueeze(-1) if self.n_speakers > 0 else None
     logw = self.dp.forward(x, x_mask, g=g, reverse=self.use_sdp, noise_scale=noise_scale_w if self.use_sdp else 1.0)
     w_ceil = Tensor.ceil(logw.exp() * x_mask * length_scale)
@@ -106,13 +107,16 @@ class DurationPredictor:
     return self.proj(x * x_mask) * x_mask
 
 class TextEncoder:
-  def __init__(self, n_vocab, out_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout):
+  def __init__(self, n_vocab, out_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, emotion_embedding):
     self.n_vocab, self.out_channels, self.hidden_channels, self.filter_channels, self.n_heads, self.n_layers, self.kernel_size, self.p_dropout = n_vocab, out_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout
-    self.emb = nn.Embedding(n_vocab, hidden_channels)
+    if n_vocab!=0:self.emb = nn.Embedding(n_vocab, hidden_channels)
+    if emotion_embedding: self.emo_proj = nn.Linear(1024, hidden_channels)
     self.encoder = Encoder(hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout)
     self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
-  def forward(self, x: Tensor, x_lengths: Tensor):
-    x = (self.emb(x) * math.sqrt(self.hidden_channels)).transpose(1, -1)  # [b, t, h] -transpose-> [b, h, t]
+  def forward(self, x: Tensor, x_lengths: Tensor, emotion_embedding=None):
+    if self.n_vocab!=0: x = (self.emb(x) * math.sqrt(self.hidden_channels))
+    if emotion_embedding: x = x + self.emo_proj(emotion_embedding).unsqueeze(1)
+    x = x.transpose(1, -1)  # [b, t, h] -transpose-> [b, h, t]
     x_mask = sequence_mask(x_lengths, x.shape[2]).unsqueeze(1).cast(x.dtype)
     x = self.encoder.forward(x * x_mask, x_mask)
     m, logs = split_tinygrad(self.proj(x) * x_mask, self.out_channels, dim=1)
@@ -537,10 +541,10 @@ def download_if_not_present(file_path: Path, url: str):
     download_file(url, file_path)
   return file_path
 
-def load_model(text_mapper, hps, model) -> Synthesizer:
+def load_model(symbols, hps, model) -> Synthesizer:
   weights_path = model[1]
   download_if_not_present(weights_path, model[3])
-  net_g = Synthesizer(len(text_mapper.symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
+  net_g = Synthesizer(len(symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
   _ = load_checkpoint(weights_path, net_g, None)
   return net_g
 
@@ -567,7 +571,9 @@ class TextMapper: # Based on https://github.com/keithito/tacotron
   def transliteration_cleaners(self, text): return self.collapse_whitespace(unidecode(text.lower()))
   def english_cleaners(self, text): return self.collapse_whitespace(phonemize(self.expand_abbreviations(unidecode(text.lower())), language='en-us', backend='espeak', strip=True))
   def english_cleaners2(self, text): return self.collapse_whitespace(phonemize(self.expand_abbreviations(unidecode(text.lower())), language='en-us', backend='espeak', strip=True, preserve_punctuation=True, with_stress=True))
+  def cjke_cleaners(self, text): return re.sub(r'([^\.,!\?\-…~])$', r'\1.', re.sub(r'\s+$', '', self.english_to_ipa2(text).replace('ɑ', 'a').replace('ɔ', 'o').replace('ɛ', 'e').replace('ɪ', 'i').replace('ʊ', 'u')))
   def cjke_cleaners2(self, text): return re.sub(r'([^\.,!\?\-…~])$', r'\1.', re.sub(r'\s+$', '', self.english_to_ipa2(text)))
+  def cjks_cleaners(self, text): return re.sub(r'([^\.,!\?\-…~])$', r'\1.', re.sub(r'\s+$', '', self.english_to_lazy_ipa(text)))
   def mark_dark_l(self, text): return re.sub(r'l([^aeiouæɑɔəɛɪʊ ]*(?: |$))', lambda x: 'ɫ' + x.group(1), text)
   def _remove_commas(self, m): return m.group(1).replace(',', '')
   def _expand_decimal_point(self, m): return m.group(1).replace('.', ' point ')
@@ -605,6 +611,11 @@ class TextMapper: # Based on https://github.com/keithito/tacotron
     text = self.mark_dark_l(self.english_to_ipa(text))
     for regex, replacement in _ipa_to_ipa2: text = re.sub(regex, replacement, text)
     return text.replace('...', '…')
+  def english_to_lazy_ipa(self, text):
+    _lazy_ipa = [(re.compile('%s' % x[0]), x[1]) for x in [('r', 'ɹ'),('æ', 'e'),('ɑ', 'a'),('ɔ', 'o'),('ð', 'z'),('θ', 's'),('ɛ', 'e'),('ɪ', 'i'),('ʊ', 'u'),('ʒ', 'ʥ'),('ʤ', 'ʥ'),('ˈ', '↓')]]
+    text = self.english_to_ipa(text)
+    for regex, replacement in _lazy_ipa: text = re.sub(regex, replacement, text)
+    return text
   def intersperse(self, lst, item):
     result = [item] * (len(lst) * 2 + 1)
     result[1::2] = lst
@@ -617,74 +628,96 @@ class TextMapper: # Based on https://github.com/keithito/tacotron
 
 VITS_PATH = Path(__file__).parent.parent / "weights/VITS/"
 MODELS = { # config_path, weights_path, config_url, weights_url
-  "ljs": (VITS_PATH / "ljs_base.json", VITS_PATH / "pretrained_ljs.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/ljs_base.json", "https://drive.google.com/uc?export=download&id=1q86w74Ygw2hNzYP9cWkeClGT5X25PvBT&confirm=t"),
-  "vctk": (VITS_PATH / "vctk_base.json", VITS_PATH / "pretrained_vctk.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/vctk_base.json", "https://drive.google.com/uc?export=download&id=11aHOlhnxzjpdWDpsz1vFDCzbeEfoIxru&confirm=t"),
-  "mmts-tts": (VITS_PATH / "mmts-tts.json", VITS_PATH / "pretrained_mmts-tts.pth", "https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/config.json", "https://huggingface.co/facebook/mms-tts/resolve/main/full_models/eng/G_100000.pth"),
-  "uma_trilingual": (VITS_PATH / "uma_trilingual.json", VITS_PATH / "pretrained_uma_trilingual.pth", "https://huggingface.co/spaces/Plachta/VITS-Umamusume-voice-synthesizer/raw/main/configs/uma_trilingual.json", "https://huggingface.co/spaces/Plachta/VITS-Umamusume-voice-synthesizer/resolve/main/pretrained_models/G_trilingual.pth"),
+  "ljs": (VITS_PATH / "config_ljs.json", VITS_PATH / "pretrained_ljs.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/ljs_base.json", "https://drive.google.com/uc?export=download&id=1q86w74Ygw2hNzYP9cWkeClGT5X25PvBT&confirm=t"),
+  "vctk": (VITS_PATH / "config_vctk.json", VITS_PATH / "pretrained_vctk.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/vctk_base.json", "https://drive.google.com/uc?export=download&id=11aHOlhnxzjpdWDpsz1vFDCzbeEfoIxru&confirm=t"),
+  "mmts-tts": (VITS_PATH / "config_mmts-tts.json", VITS_PATH / "pretrained_mmts-tts.pth", "https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/config.json", "https://huggingface.co/facebook/mms-tts/resolve/main/full_models/eng/G_100000.pth"),
+  "uma_trilingual": (VITS_PATH / "config_uma_trilingual.json", VITS_PATH / "pretrained_uma_trilingual.pth", "https://huggingface.co/spaces/Plachta/VITS-Umamusume-voice-synthesizer/raw/main/configs/uma_trilingual.json", "https://huggingface.co/spaces/Plachta/VITS-Umamusume-voice-synthesizer/resolve/main/pretrained_models/G_trilingual.pth"),
+  "cjks": (VITS_PATH / "config_cjks.json", VITS_PATH / "pretrained_cjks.pth", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/14/config.json", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/14/model.pth"),
+  "voistock": (VITS_PATH / "config_voistock.json", VITS_PATH / "pretrained_voistock.pth", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/15/config.json", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/15/model.pth"),
 }
 # PAPER: https://arxiv.org/abs/2106.06103  CODE: https://github.com/jaywalnut310/vits/tree/main
 if __name__ == '__main__':
   logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
+  #######################################################################
+  # Some good speakers to try out, there may be much better ones, I only tried out a few:
+  # male vctk 1  | --model_to_use vctk --speaker_id 2
+  # male vctk 2  | --model_to_use vctk --speaker_id 6
+  # anime lady 1 | --model_to_use uma_trilingual --speaker_id 36
+  # anime lady 2 | --model_to_use uma_trilingual --speaker_id 121
+  #######################################################################
   parser = argparse.ArgumentParser()
-  parser.add_argument("--model_to_use", default="vctk", help="Specify the model to use. Default is 'vctk'.")
-  parser.add_argument("--speaker_id", type=int, default=2, help="Specify the speaker ID. Default is 2.")
+  parser.add_argument("--model_to_use", default="voistock", help="Specify the model to use. Default is 'vctk'.")
+  parser.add_argument("--speaker_id", type=int, default=76, help="Specify the speaker ID. Default is 2.")
   parser.add_argument("--out_path", default=None, help="Specify the full output path. Overrides the --out_dir and --name parameter.")
   parser.add_argument("--out_dir", default=str(Path(__file__).parent.parent / "temp"), help="Specify the output path.")
   parser.add_argument("--base_name", default="test", help="Specify the base of the output file name. Default is 'test'.")
-  parser.add_argument("--text_to_synthesize", default="""
-  Hello person.
-  If the code you are contributing isn't some of the highest quality code you've written in your life, either put in the effort to make it great, or don't bother.
-  """, help="Specify the text to synthesize. Default is a greeting message.")
+  parser.add_argument("--text_to_synthesize", default="""Hello person. If the code you are contributing isn't some of the highest quality code you've written in your life, either put in the effort to make it great, or don't bother.""", help="Specify the text to synthesize. Default is a greeting message.")
   parser.add_argument("--noise_scale", type=float, default=0.667, help="Specify the noise scale. Default is 0.667.")
   parser.add_argument("--noise_scale_w", type=float, default=0.8, help="Specify the noise scale w. Default is 0.8.")
   parser.add_argument("--length_scale", type=float, default=1, help="Specify the length scale. Default is 1.")
   parser.add_argument("--seed", type=int, default=1337, help="Specify the seed (set to None if no seed). Default is 1337.")
   parser.add_argument("--num_channels", type=int, default=1, help="Specify the number of audio output channels. Default is 1.")
   parser.add_argument("--sample_width", type=int, default=2, help="Specify the number of bytes per sample, adjust if necessary. Default is 2.")
+  parser.add_argument("--emotion_path", type=str, default=None, help="Specify the path to emotion reference.")
   args = parser.parse_args()
 
-  model_has_sid = args.model_to_use in ["vctk", "uma_trilingual"] # has more than one speaker, speaker selected through setting speaker_id
+  model_config = MODELS[args.model_to_use]
 
+  # Load the hyperparameters from the config file.
+  config_path = model_config[0]
+  download_if_not_present(config_path, model_config[2])
+  hps = get_hparams_from_file(config_path)
+
+  # If model has multiple speakers, validate speaker id and retrieve name if available.
+  model_has_multiple_spakers = hps.data.n_speakers > 0
+  if model_has_multiple_spakers:
+    logging.info(f"Model has {hps.data.n_speakers} speakers")
+    if args.speaker_id >= hps.data.n_speakers: raise ValueError(f"Speaker ID {args.speaker_id} is invalid for this model.")
+    speaker_name = "?"
+    if hps.__contains__("speakers"): # maps speaker ids to names
+      speakers = hps.speakers
+      if isinstance(speakers, List): speakers = {speaker: i for i, speaker in enumerate(speakers)}
+      print(speakers["L（山口勝平）（DEATH NOTE）"])
+      speaker_name = next((key for key, value in speakers.items() if value == args.speaker_id), None)
+    logging.info(f"You selected speaker {args.speaker_id} (name: {speaker_name})")
+
+  # Load emotions if any. TODO: find an english model with emotions, this is untested atm.
+  emotion = None
+  if args.emotion_path is not None:
+    if args.emotion_path.endswith(".npy"): emotion = Tensor(np.load(args.emotion_path), dtype=dtypes.int64).unsqueeze(0)
+    else: raise ValueError("Emotion path must be a .npy file.")
+
+  # Load symbols, instantiate TextMapper and clean the text.
+  if hps.__contains__("symbols"): symbols = hps.symbols
+  elif args.model_to_use == "mmts-tts": symbols = [x.replace("\n", "") for x in open(download_if_not_present(VITS_PATH / "vocab_mmts-tts.txt", "https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/vocab.txt"), encoding="utf-8").readlines()]
+  else: symbols = ['_'] + list(';:,.!?¡¿—…"«»“” ') + list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz') + list("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ")
+  text_mapper = TextMapper(apply_cleaners=True, symbols=symbols)
+
+  # Load the model.
   Tensor.no_grad, Tensor.Training = True, False
   if args.seed is not None:
     Tensor.manual_seed(args.seed)
     np.random.seed(args.seed)
-
-  model = MODELS[args.model_to_use]
-
-  config_path = model[0]
-  download_if_not_present(config_path, model[2])
-  hps = get_hparams_from_file(config_path)
-
-  text_to_synthesize = args.text_to_synthesize
-  if args.model_to_use == "mmts-tts":
-    vocab_file = download_if_not_present(VITS_PATH / "vocab_mmts-tts.txt", "https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/vocab.txt")
-    text_mapper = TextMapper(apply_cleaners=False, symbols= [x.replace("\n", "") for x in open(vocab_file, encoding="utf-8").readlines()])
-    text_to_synthesize = text_mapper.filter_oov(text_to_synthesize.lower())
-  elif args.model_to_use == "uma_trilingual":
-    speaker_name = next((key for key, value in hps.speakers.items() if value == args.speaker_id), None)
-    if speaker_name is None: raise ValueError(f"Speaker ID {args.speaker_id} not found in the speaker list.")
-    logging.info(f"Speaker name: {speaker_name}")
-    text_mapper = TextMapper(apply_cleaners=True, symbols=hps.symbols)
-  else:
-    text_mapper = TextMapper(apply_cleaners=True, symbols=['_'] + list(';:,.!?¡¿—…"«»“” ') + list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz') + list("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ"))
-
-  net_g = load_model(text_mapper, hps, model)
+  net_g = load_model(text_mapper.symbols, hps, model_config)
   logging.debug(f"Loaded model with hps: {hps}")
 
+  # Convert the input text to a tensor.
+  text_to_synthesize = args.text_to_synthesize
+  if args.model_to_use == "mmts-tts": text_to_synthesize = text_mapper.filter_oov(text_to_synthesize.lower())
   stn_tst = text_mapper.get_text(text_to_synthesize, hps)
   logging.debug(f"Converted input text to tensor \"{text_to_synthesize}\" -> Tensor({stn_tst.shape}): {stn_tst.numpy()}")
-
   x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
-  sid = Tensor([args.speaker_id], dtype=dtypes.int64) if model_has_sid else None
+  sid = Tensor([args.speaker_id], dtype=dtypes.int64) if model_has_multiple_spakers else None
 
+  # Perform inference.
   start_time = time.time()
-  audio_tensor = net_g.infer(x_tst, x_tst_lengths, sid=sid, noise_scale=args.noise_scale, noise_scale_w=args.noise_scale_w, length_scale=args.length_scale)[0][0, 0].realize()
+  audio_tensor = net_g.infer(x_tst, x_tst_lengths, sid=sid, noise_scale=args.noise_scale, noise_scale_w=args.noise_scale_w, length_scale=args.length_scale, emotion_embedding=emotion)[0][0, 0].realize()
   logging.info(f"Inference took {(time.time() - start_time):.2f}s")
 
+  # Save the audio output.
   audio_data = (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
-  out_path = Path(args.out_path or Path(args.out_dir)/f"{args.model_to_use}{f'_sid_{args.speaker_id}' if model_has_sid else ''}_{args.base_name}.wav")
+  out_path = Path(args.out_path or Path(args.out_dir)/f"{args.model_to_use}{f'_sid_{args.speaker_id}' if model_has_multiple_spakers else ''}_{args.base_name}.wav")
   out_path.parent.mkdir(parents=True, exist_ok=True)
   with wave.open(str(out_path), 'wb') as wav_file:
     wav_file.setnchannels(args.num_channels)
