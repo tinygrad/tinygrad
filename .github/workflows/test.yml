@@ -9,6 +9,7 @@ jobs:
   linter:
     name: Linters
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -37,6 +38,7 @@ jobs:
   testcpu:
     name: CPU Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -53,10 +55,34 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
     - name: Run Pytest
       run: python -m pytest -s -v -n=auto test/
+  
+  testwebgpu:
+    name: WebGPU Tests
+    runs-on: macos-13
 
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+    - name: Install Dependencies
+      run: pip install -e '.[testing,webgpu]' --extra-index-url https://download.pytorch.org/whl/cpu
+    # - name: Set Env
+    #   run: printf "WEBGPU=1\nWGPU_BACKEND_TYPE=D3D12\n" >> $GITHUB_ENV
+    - name: Run Pytest
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -s -v -n=auto test/test_ops.py test/test_speed_v_torch.py test/test_nn.py test/test_jit.py test/test_randomness.py test/test_tensor.py test/test_assign.py test/test_conv.py test/test_nn.py test/test_custom_function.py test/test_conv_shapetracker.py
+    - name: Build WEBGPU Efficientnet
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.webgpu.compile_webgpu
+    # - name: Install Puppeteer
+    #   run: npm install puppeteer
+    # - name: Run Efficientnet
+    #   run: node test/test_webgpu.js
   testimagenet:
     name: ImageNet to C Compile Test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -77,6 +103,7 @@ jobs:
   testllvm:
     name: LLVM Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -114,6 +141,7 @@ jobs:
   testtorch:
     name: Torch Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -132,6 +160,7 @@ jobs:
   testgpu:
     name: GPU Tests
     runs-on: ubuntu-20.04
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -160,6 +189,7 @@ jobs:
   testopencl:
     name: openpilot (OpenCL) Test
     runs-on: ubuntu-20.04
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -178,20 +208,24 @@ jobs:
         python-version: 3.8
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Test openpilot model compile and size
+      run: |
+        DEBUG=2 ALLOWED_KERNEL_COUNT=199 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+        python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
     - name: Test GPU IMAGE ops
       run: |
         GPU=1 IMAGE=1 python3 test/test_ops.py
         FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 test/test_ops.py
-    - name: Test openpilot model compile and size
-      run: |
-        ALLOWED_KERNEL_COUNT=199 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
-        python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
     - name: Test openpilot model correctness (float32)
       run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+    - name: Test tensor core ops
+      run: GPU=1 TC=2 python3 test/test_ops.py
 
   testmetal:
     name: Metal Tests
     runs-on: macos-13
+    timeout-minutes: 20
+
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
@@ -226,6 +260,8 @@ jobs:
   testcuda:
     name: (emulated) cuda test
     runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
@@ -234,7 +270,7 @@ jobs:
         export DEBIAN_FRONTEND=noninteractive
         sudo apt-get update -y
     - name: Install packages
-      run: sudo apt-get install -y git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+      run: sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
     - name: Cache gpuocelot
       id: cache-build
       uses: actions/cache@v3

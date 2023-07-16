@@ -12,10 +12,12 @@ class Node:
   b: int
   min: int
   max: int
-  def render(self, ops=None, ctx=None) -> str:
+  def render(self, ops=None, ctx=None, strip_parens=False) -> str:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
-    return ops[type(self)](self, ops, ctx)
+    ret = ops[type(self)](self, ops, ctx)
+    if strip_parens and ret[0] == '(' and ret[-1] == ')': ret = ret[1:-1]
+    return ret
   def vars(self): return []
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
@@ -47,7 +49,7 @@ class Node:
     return create_node(LtNode(lhs, b))
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
-    elif b == 1: return self
+    if b == 1: return self
     return create_node(MulNode(self, b))
 
   # *** complex ops ***
@@ -184,28 +186,23 @@ class SumNode(RedNode):
   def __floordiv__(self, b: int, factoring_allowed=True):
     if b == 1: return self
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
-    factors: List[Node] = []
-    nofactor_mul: List[Node] = []
-    nofactor_nonmul: List[Node] = []
+    fully_divided: List[Node] = []
+    rest: List[Node] = []
+    _gcd = b
+    divisor = 1
     for x in self.flat_components:
-      if x.__class__ is NumNode and x.b%b == 0: factors.append(x)
-      elif x.__class__ is MulNode: factors.append(x) if x.b%b == 0 else  nofactor_mul.append(x)
-      else: nofactor_nonmul.append(x)
-
-    if factors:  # factor out largest possible gcd
-      factor_term = [x.a * x.b//b if isinstance(x, MulNode) else NumNode(x.b//b) for x in factors]
-      if nofactor_mul and not nofactor_nonmul:
-        gcds = [gcd(x.b, b) for x in nofactor_mul]
-        if (t := min(gcds)) > 1 and all(x.b%t == 0 for x in nofactor_mul):
-          nofactor_term = [Node.sum([x.a * x.b//t for x in nofactor_mul if isinstance(x, MulNode)])//(b//t)]  # mypy wants the isinstance
+      if x.__class__ in (NumNode, MulNode):
+        if x.b%b == 0: fully_divided.append(x//b)
         else:
-          nofactor_term = [Node.sum(nofactor_mul)//b] if nofactor_mul else []
+          rest.append(x)
+          _gcd = gcd(_gcd, x.b)
+          if x.__class__ == MulNode and divisor == 1 and b%x.b == 0: divisor = x.b
       else:
-        nofactor_term = [Node.sum(nofactor_mul+nofactor_nonmul)//b] if nofactor_mul + nofactor_nonmul else []
-      return Node.sum(factor_term + nofactor_term)
-    for m in nofactor_mul:
-      if m.b > 1 and b%m.b == 0: return (self//m.b)//(b//m.b)
-    return Node.__floordiv__(self, b, factoring_allowed)
+        rest.append(x)
+        _gcd = 1
+    if _gcd > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(_gcd) // (b//_gcd)
+    if divisor > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(divisor) // (b//divisor)
+    return Node.sum(fully_divided) + Node.__floordiv__(Node.sum(rest), b)
 
   def __mod__(self, b: int):
     new_nodes: List[Node] = []

@@ -33,7 +33,7 @@ def colorize_float(x):
   ret = f"{x:7.2f}x"
   if x < 0.75:
     return colored(ret, 'green')
-  elif x > 1.33:
+  elif x > 1.15:
     return colored(ret, 'red')
   else:
     return colored(ret, 'yellow')
@@ -118,10 +118,10 @@ class TestBigSpeed(unittest.TestCase):
     return super().setUp()
   def test_add(self):
     def f(a, b): return a+b
-    helper_test_generic_square('add', 16384, f, f)
+    helper_test_generic_square('add', 8192, f, f)
   def test_exp(self):
     def f(a, b): return a.exp()
-    helper_test_generic_square('exp', 16384, f, f, onearg=True)
+    helper_test_generic_square('exp', 8192, f, f, onearg=True)
   def test_gemm_2048(self):
     def f(a, b): return a @ b
     helper_test_generic_square('gemm', 2048, f, f)
@@ -131,7 +131,7 @@ class TestBigSpeed(unittest.TestCase):
   def test_large_conv_1x1(self): helper_test_conv(bs=32, in_chans=128, out_chans=128, kernel_size=1, img_size_y=128, img_size_x=128)
   def test_large_conv_3x3(self): helper_test_conv(bs=32, in_chans=128, out_chans=128, kernel_size=3, img_size_y=130, img_size_x=130)
 
-@unittest.skipIf(getenv("BIG") == 1, "only big tests")
+@unittest.skipIf((getenv("BIG") == 1 or Device.DEFAULT == "WEBGPU"), "only big tests")
 class TestSpeed(unittest.TestCase):
   def setUp(self):
     global prefix
