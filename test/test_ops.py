@@ -1054,10 +1054,16 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,4)], lambda x: x[:, 1:2][0:1])
     helper_test_op([(4,4)], lambda x: x[:, 1:2][:, 0:1])
 
-  @unittest.skipIf(Device.DEFAULT != "GPU" and Device.DEFAULT != "CLANG", "LLVM and METAL fail #1069")
-  def test_max_inf(self):
+  def test_max_nan(self):
     n = Tensor([1, float("nan")]).max().numpy()
     assert math.isnan(n.item()), f"{n.item()} is not nan"
+    n = Tensor([float("nan"), 1]).max().numpy()
+    assert math.isnan(n.item()), f"{n.item()} is not nan"
+
+  def test_max_float4_nan(self):
+    n = Tensor(np.array([[1.0, 2.0, np.nan, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)).max().numpy()
+    print("Float 4 nan: ", math.isnan(n.item()))
+    assert math.isnan(n.item()), f"tinygrad max: {n.item()} is not nan"
 
   @unittest.skip("this test is broken #942")
   def test_inf_where(self):
