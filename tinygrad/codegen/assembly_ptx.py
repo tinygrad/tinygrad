@@ -8,7 +8,7 @@ from tinygrad.runtime.ops_cuda import arch
 dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "u16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32"}
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 
-"""https://docs.nvidia.com/cuda/parallel-thread-execution/#"""
+# https://docs.nvidia.com/cuda/parallel-thread-execution/#
 class PTXCodegen(AssemblyCodegen):
   #supports_constant_folding: bool = True
 
