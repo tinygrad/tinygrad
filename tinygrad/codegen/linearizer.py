@@ -213,7 +213,7 @@ class Linearizer:
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
     amt = 1
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [16,8,4,2]:
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [8,4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     cache: Dict[str, Token] = {}
@@ -247,7 +247,7 @@ class Linearizer:
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4,8,16]:
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4,8]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (expanded_nodes[upcast_dim[0]][0],) + k[upcast_dim[0]+1:]
