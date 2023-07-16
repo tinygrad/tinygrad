@@ -39,8 +39,7 @@ def download_file(url, fp, skip_if_exists=True):
   r = requests.get(url, stream=True)
   assert r.status_code == 200
   progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
-  path = pathlib.Path(fp).parent
-  path.mkdir(parents=True, exist_ok=True)
+  (path := pathlib.Path(fp).parent).mkdir(parents=True, exist_ok=True)
   with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
     for chunk in r.iter_content(chunk_size=16384):
       progress_bar.update(f.write(chunk))
