@@ -311,3 +311,26 @@ jobs:
       run: pip install -e '.[testing, cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run pytest
       run: FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"
+
+  testmodels:
+    strategy:
+      matrix:
+        backend: [llvm, clang-windows, clang-ubuntu, gpu]
+
+    name: Model Tests (${{ matrix.backend }})
+    runs-on: ${{ matrix.backend == 'clang-windows' && 'windows-latest' || matrix.backend == 'gpu' && 'ubuntu-20.04'  || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Install dependencies
+        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Set env
+        run: prinf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || (matrix.backend == 'clang-ubuntu' || matrix.backend == 'clang-windows') && 'CI=1\nCLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1'}}" >> $GITHUB_ENV
+      - name: Run pytest
+        run: python -m pytest -s -v -n=auto test/ -k "models"
+
