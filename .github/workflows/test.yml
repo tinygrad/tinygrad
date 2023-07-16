@@ -330,7 +330,14 @@ jobs:
       - name: Install dependencies
         run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Set env
-        run: prinf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || (matrix.backend == 'clang-ubuntu' || matrix.backend == 'clang-windows') && 'CI=1\nCLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1'}}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || (matrix.backend == 'clang-ubuntu' || matrix.backend == 'clang-windows') && 'CI=1\nCLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1'}}" >> $GITHUB_ENV
+      - name: Update packages
+        if: matrix.backend == 'clang-ubuntu' || matrix.backend == 'clang-windows'
+        run: |
+          wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt-get update
+          sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl 
       - name: Run pytest
         run: python -m pytest -s -v -n=auto test/ -k "models"
 
