@@ -474,7 +474,9 @@ class Linearizer:
       values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
 
       # Cast all to highest priority dtype
-      cast_dtype = dtypes.float if x.op.__class__ in {ReduceOps, TernaryOps} and getenv('ACCUM_FLOAT', 1) else dtypes.float16
+      ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
+      use_accum = x.op in ops
+      cast_dtype = dtypes.float if use_accum and getenv('ACCUM_FLOAT', 1) else dtypes.float16
       highest_priority = max([v.dtype.priority for val in values for v in val] + [cast_dtype.priority])
       buf_cast_dtype = [v.dtype if v.offset is None else dtypes.get_normal_type(v.dtype) for val in values for v in val if v.dtype.priority == highest_priority]
       group_amt = VECTOR_SIZE if (self.supports_float4_alu or self.supports_half4_alu) and max([v.dtype.sz for val in values for v in val])==VECTOR_SIZE else 2
@@ -482,7 +484,7 @@ class Linearizer:
       is_nvidia = self.__getattribute__('is_nvidia') if hasattr(self, 'is_nvidia') else False
       if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and is_nvidia: cast_dtype = dtypes.float
       grouping_allowed = ((self.supports_half4_alu or self.supports_half2_alu) and dtypes.get_normal_type(cast_dtype) == dtypes.half) or (dtypes.get_normal_type(cast_dtype) != dtypes.half and self.supports_float4_alu)
-      grouped = list(get_grouped_maybe_vector(*values, acc, grouping_allowed=grouping_allowed, amt=group_amt) if x.op.__class__ in {ReduceOps, TernaryOps} else 
+      grouped = list(get_grouped_maybe_vector(*values, acc, grouping_allowed=grouping_allowed, amt=group_amt) if use_accum else 
                  get_grouped_maybe_vector(*values, grouping_allowed=grouping_allowed and x.op not in {BinaryOps.CMPEQ, TernaryOps.WHERE}, amt=group_amt))
       for idx, val in grouped:
         for v in val:
@@ -494,9 +496,8 @@ class Linearizer:
       ret = []
       for idx, val in grouped:
         val = [self.casts.get(v, v) for v in val]
-        ret.append((idx, self.uop(UOps.ALU, val[-1] if x.op.__class__ in {ReduceOps, TernaryOps} else ssa('alu', dtypes.get_vector_type(val[0].dtype, group_amt) if any(x.dtype.is_vector_type and x.offset is None for x in val) else dtypes.get_normal_type(val[0].dtype)),
-                    list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}.get(x.op, x.op))))
-
+        ret.append((idx, self.uop(UOps.ALU, val[-1] if use_accum else ssa('alu', dtypes.get_vector_type(val[0].dtype, group_amt) if any(x.dtype.is_vector_type and x.offset is None for x in val) else dtypes.get_normal_type(val[0].dtype)),
+                    list(val), ops.get(x.op, x.op))))
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
       # scatter
       for i,j in ret:
