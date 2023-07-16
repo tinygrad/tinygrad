@@ -318,7 +318,8 @@ jobs:
         backend: [llvm, clang-windows, clang-ubuntu, gpu, cuda]
 
     name: Ops Tests (${{ matrix.backend }})
-    runs-on: ${{ matrix.backend == 'clang-windows' && 'windows-latest' || (matrix.backend == 'gpu' || matrix.backend == 'cuda') && 'ubuntu-20.04'  || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.backend == 'clang-windows' && 'windows-latest' || matrix.backend == 'gpu'  && 'ubuntu-20.04' || matrix.backend=='cuda'&&'ubuntu-22.04' || 'ubuntu-latest' }}
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Code
