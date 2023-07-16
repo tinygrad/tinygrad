@@ -155,7 +155,7 @@ class LightWeakValueDictionary:
 """Sets class variables to bools based on the current platform. Usage: if Platform.OSX: ... elif Platform.LINUX: ... else: ..."""
 class Platform: OSX, LINUX, WINDOWS, JAVA, UNKNOWN = tuple([platform.system() == s for s in ["Darwin", "Linux", "Windows", "Java", ""]])
 """Stores and loads the environment variables and stores their defaults."""
-class Env: KEEP_TEMPDIR = tuple([os.getenv(name, default) for (name, default) in [("KEEP_TEMPDIR", False)]])
+class Env: KEEP_TEMPDIR = tuple([os.getenv(name, (cast(default) if cast else default)) for (name, default, cast) in [("KEEP_TEMPDIR", False, lambda x: True if x.lower() == "true" else False),]])
 """tempfile package wrapper for standardizing the tempdir for sanity, cleanup, debugging, and CI/CD"""
 class Files:
   # TODO: Allow a environment variable to override the _temp_path
@@ -163,5 +163,6 @@ class Files:
   _temp_path: Union[pathlib.Path, str] = pathlib.Path(tempfile.gettempdir()) / "tinygrad"
   _exit: Callable[[],] = atexit.register(lambda: Env.KEEP_TEMPDIR or os.rmdir(Files._temp_path))
   tempdir = type('tempdir', (), {'__get__': lambda *_: os.path.exists(Files._temp_path) and Files._temp_path or (pathlib.Path(Files._temp_path).mkdir(parents=True, exist_ok=True) or Files._temp_path)})()
+  @staticmethod
   def NamedTemporaryFile(mode: tempfile.OpenBinaryMode = "w+b", buffering: int = -1, encoding: str | None = None, newline: str | None = None, suffix: str | None = None, prefix: str | None = None, delete: bool = True, *, errors: str | None = None) -> tempfile._TemporaryFileWrapper[bytes]:
     return tempfile.NamedTemporaryFile(mode, buffering, encoding, newline, suffix, prefix, dir=Files.tempdir, delete=delete, errors=errors)
