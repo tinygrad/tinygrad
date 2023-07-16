@@ -1,18 +1,19 @@
 import struct
 from tinygrad.codegen.assembly import AssemblyCodegen
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.codegen.linearizer import UOps
 from tinygrad.helpers import dtypes
+from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
+from tinygrad.runtime.ops_cuda import arch
 
 dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "u16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32"}
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 
-# https://docs.nvidia.com/cuda/parallel-thread-execution/#
+"""https://docs.nvidia.com/cuda/parallel-thread-execution/#"""
 class PTXCodegen(AssemblyCodegen):
   #supports_constant_folding: bool = True
 
   def specialize(self, asm):
-    ins = [".version 7.8", ".target sm_86", ".address_size 64",
+    ins = [".version 8.2", ".target " + arch(), ".address_size 64",
            f".visible .entry test({', '.join(f'.param .u64 buf{i}' for i in range(len(self.bufs)))}) {{"]
 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
