@@ -1,6 +1,5 @@
 import json, logging, math, os, re, sys, time, wave, argparse, numpy as np, inflect
 from pathlib import Path
-from typing import Tuple
 from phonemizer import phonemize
 from unidecode import unidecode
 from extra.utils import download_file
@@ -303,7 +302,7 @@ class MultiHeadAttention:
     self.attn, self.k_channels  = None, channels // n_heads
     self.conv_q, self.conv_k, self.conv_v = [nn.Conv1d(channels, channels, 1) for _ in range(3)]
     self.conv_o = nn.Conv1d(channels, out_channels, 1)
-    if window_size is not None: self.emb_rel_k, self.emb_rel_v = [Tensor.randn(1 if heads_share else n_heads, window_size * 2 + 1, self.k_channels) * (self.k_channels ** -0.5)] * 2
+    if window_size is not None: self.emb_rel_k, self.emb_rel_v = [Tensor.randn(1 if heads_share else n_heads, window_size * 2 + 1, self.k_channels) * (self.k_channels ** -0.5) for _ in range(2)]
   def forward(self, x, c, attn_mask=None):
     q, k, v = self.conv_q(x), self.conv_k(c), self.conv_v(c)
     x, self.attn = self.attention(q, k, v, mask=attn_mask)
@@ -538,7 +537,7 @@ def download_if_not_present(file_path: Path, url: str):
     download_file(url, file_path)
   return file_path
 
-def load_model(text_mapper, hps, model) -> Tuple[Synthesizer, HParams]:
+def load_model(text_mapper, hps, model) -> Synthesizer:
   weights_path = model[1]
   download_if_not_present(weights_path, model[3])
   net_g = Synthesizer(len(text_mapper.symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
@@ -663,7 +662,7 @@ if __name__ == '__main__':
     vocab_file = download_if_not_present(VITS_PATH / "vocab_mmts-tts.txt", "https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/vocab.txt")
     text_mapper = TextMapper(apply_cleaners=False, symbols= [x.replace("\n", "") for x in open(vocab_file, encoding="utf-8").readlines()])
     text_to_synthesize = text_mapper.filter_oov(text_to_synthesize.lower())
-  elif args.model_to_use == "uma_trilingual": # TODO: this model sounds slightly off from the original
+  elif args.model_to_use == "uma_trilingual":
     speaker_name = next((key for key, value in hps.speakers.items() if value == args.speaker_id), None)
     if speaker_name is None: raise ValueError(f"Speaker ID {args.speaker_id} not found in the speaker list.")
     logging.info(f"Speaker name: {speaker_name}")
