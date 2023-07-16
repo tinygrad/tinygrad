@@ -3,12 +3,12 @@ import pathlib
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
-from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
+from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, Platform, fromimport
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
-OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
+OSX_TIMING_RATIO = (125/3) if Platform.OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
 ROCM_LLVM_PATH = pathlib.Path("/opt/rocm/llvm/bin")
@@ -57,7 +57,7 @@ class CLProgram:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
     self.clprg = self._clprg.__getattr__(name)
-    if DEBUG >= 5 and not OSX:
+    if DEBUG >= 5 and not Platform.OSX:
       if 'Adreno' in CL.cl_ctx.devices[0].name:
         fromimport('disassemblers.adreno', 'disasm')(self.binary())
       elif CL.cl_ctx.devices[0].name.startswith('gfx'):

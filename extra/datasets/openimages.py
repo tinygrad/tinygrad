@@ -1,15 +1,12 @@
-import os
-import math
 import json
-from extra.utils import OSX
 import numpy as np
-from PIL import Image
 import pathlib
 import boto3, botocore
-from extra.utils import download_file
-from tqdm import tqdm
 import pandas as pd
 import concurrent.futures
+from PIL import Image
+from extra.utils import download_file
+from tqdm import tqdm
 
 BASEDIR = pathlib.Path(__file__).parent / "open-images-v6-mlperf"
 BUCKET_NAME = "open-images-dataset"

@@ -1,15 +1,12 @@
-import pickle
+import tempfile, os, pickle
 import numpy as np
 from tqdm import tqdm
-import tempfile, platform, os
 from collections import defaultdict
-from tinygrad.helpers import prod, getenv, DEBUG, dtypes
+from tinygrad.helpers import prod, getenv, DEBUG, dtypes, Platform
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import Device
 from tinygrad.shape.shapetracker import strides_for_shape
-OSX = platform.system() == "Darwin"
-WINDOWS = platform.system() == "Windows"
 
 def temp(x:str) -> str: return os.path.join(tempfile.gettempdir(), x)
 
@@ -133,7 +130,7 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
       ret = np.empty(lna.shape, dtype=lna.dtype)
       myfile.readinto(ret.data)
       return ret
-    if mmap_allowed and not OSX and t.device in ["GPU", "CUDA"]: t.lazydata.op.arg.fxn = _mmap
+    if mmap_allowed and not Platform.OSX and t.device in ["GPU", "CUDA"]: t.lazydata.op.arg.fxn = _mmap
     else: t.lazydata.op.arg.fxn = _read
     t.realize()
 

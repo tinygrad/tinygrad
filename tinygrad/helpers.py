@@ -5,10 +5,9 @@ from _weakref import _remove_dead_weakref # type: ignore
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 from math import prod # noqa: F401 # pylint:disable=unused-import
+# NOTE: helpers is not allowed to import from anything else in tinygrad
 
 ShapeType = Tuple[int, ...]
-# NOTE: helpers is not allowed to import from anything else in tinygrad
-OSX = platform.system() == "Darwin"
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x):
@@ -152,3 +151,6 @@ class LightWeakValueDictionary:
   def __delitem__(self, key): del self.data[key]
   def __setitem__(self, key, value): self.data[key] = KeyedRef(value, self._remove, key)
   def __contains__(self, key): return key in self.data
+
+"""Sets class variables to bools based on the current platform. Usage: if Platform.OSX: ... elif Platform.LINUX: ... else: ..."""
+class Platform: OSX, LINUX, WINDOWS, JAVA, UNKNOWN = tuple([platform.system() == s for s in ["Darwin", "Linux", "Windows", "Java", ""]])

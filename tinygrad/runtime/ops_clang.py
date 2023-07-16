@@ -1,13 +1,12 @@
-import os, time, ctypes, hashlib, subprocess, platform, tempfile
+import os, time, ctypes, hashlib, subprocess, tempfile
+from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
+from tinygrad.helpers import Platform
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawMallocBuffer
-from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
-args = {
-  'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
-  'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'exp':''},
-  'Darwin': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'dylib', 'exp':''}
-}[platform.system()]
+args = Platform.WINDOWS and {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'} or \
+       Platform.LINUX and {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'exp':''} or \
+       Platform.OSX and {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'dylib', 'exp':''}
 
 class ClangProgram:
   def __init__(self, name:str, prg:str):

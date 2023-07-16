@@ -1,18 +1,15 @@
 import numpy as np
 import torch
 import time
-import platform
 from torch import nn
 from torch import optim
 
 from extra.datasets import fetch_cifar
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Platform
 
 # allow TF32
 torch.set_float32_matmul_precision('high')
-
-OSX = platform.system() == "Darwin"
-device = 'mps' if OSX else 'cuda'
+device = 'mps' if Platform.OSX else 'cuda'
 
 num_classes = 10
 class ConvGroup(nn.Module):
