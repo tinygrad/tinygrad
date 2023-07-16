@@ -1,6 +1,6 @@
 from __future__ import annotations
+import os, functools, platform, time, re, atexit, pathlib, tempfile, shutil
 import numpy as np
-import os, functools, platform, time, re, atexit, pathlib, tempfile
 from weakref import KeyedRef, ref
 from _weakref import _remove_dead_weakref # type: ignore
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
@@ -159,7 +159,7 @@ class Files:
   # TODO: Allow a environment variable to override the _temp_path
   # TODO: Instead of throwing all the model downloads into the temp dir, should we add modeldir seperately ad default it to the project dir /models??
   _temp_path: Union[pathlib.Path, str] = pathlib.Path(tempfile.gettempdir()) / "tinygrad"
-  _exit: Callable[[],] = atexit.register(lambda: os.getenv("KEEP_TEMPDIR") or os.rmdir(Files._temp_path))
+  _exit: Callable[[],] = atexit.register(lambda: os.getenv("KEEP_TEMPDIR") or shutil.rmtree(Files._temp_path, ignore_errors=True))
   tempdir = type('tempdir', (), {'__get__': lambda *_: os.path.exists(Files._temp_path) and Files._temp_path or (pathlib.Path(Files._temp_path).mkdir(parents=True, exist_ok=True) or Files._temp_path)})()
   @staticmethod
   def NamedTemporaryFile(mode: tempfile.OpenBinaryMode = "w+b", buffering: int = -1, encoding: str | None = None, newline: str | None = None, suffix: str | None = None, prefix: str | None = None, delete: bool = True, *, errors: str | None = None) -> tempfile._TemporaryFileWrapper[bytes]:
