@@ -137,6 +137,6 @@ def export_model(model, input:Tensor, target:str):
       prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names)
     else:
       from tinygrad.tensor import Device
-      prg = json.dumps({"backend": Device.DEFAULT, "input_size": bufs['input'][0], "output_size": bufs["outputs"][0], "functions": functions, "statements": [{"kernel":kernel,"args":args, "global_size":global_size} for (kernel, args, global_size) in statements], "bufs": {name:{"size":size, "id":str(_key)} for name, (size, _key) in bufs.items()}, "buf_id_map": weight_names})
+      prg = json.dumps({"backend": Device.DEFAULT, "input_size": bufs['input'][0], "output_size": bufs["outputs"][0], "functions": functions, "statements": [{"kernel":kernel,"args":args, "global_size":global_size} for (kernel, args, global_size) in statements], "buffers": {name:{"size":size, "id": weight_names[_key] if _key in weight_names else ""} for name, (size, _key) in bufs.items()}})
 
     return prg, bufs['input'][0], bufs['outputs'][0], state
