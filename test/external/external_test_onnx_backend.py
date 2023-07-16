@@ -46,7 +46,6 @@ backend_test.exclude('test_reduce_prod_*')
 
 # no optimizers (add them?)
 backend_test.exclude('test_adagrad_*')
-backend_test.exclude('test_adam_*')
 backend_test.exclude('test_nesterov_momentum_*')
 backend_test.exclude('test_momentum_*')
 

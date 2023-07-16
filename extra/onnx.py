@@ -105,9 +105,8 @@ def get_run_onnx(onnx_model: ModelProto):
     output_tensor_names = [x.name for x in onnx_model.graph.output]
 
     requires_grad = False
-    for opset in onnx_model.opset_import:
-      if opset.domain == "ai.onnx.preview.training": requires_grad = True
-    print(requires_grad, "fuck")
+    for opset in onnx_model.opset_import: 
+      if opset.domain == "ai.onnx.preview.training": requires_grad = True # TODO TEST WITH REAL ONNX MODELS CUZ I HAVE NO IDEA IF THIS WORKS IN PRACTICE
 
     # get inputs
     for inp in onnx_model.graph.input:
@@ -123,9 +122,9 @@ def get_run_onnx(onnx_model: ModelProto):
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True)
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
-        input_shape = input_tensors[inp.name].shape
+        input_shape = input_tensors[inp.name].shape if input_tensors[inp.name].__class__ is Tensor else []
         assert input_shape == shape or shape == [], f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
-        for _,v in input_tensors.items(): v.realize()
+        for _,v in input_tensors.items(): v.realize() if v.__class__ is Tensor else ...
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
 
@@ -193,8 +192,6 @@ def get_run_onnx(onnx_model: ModelProto):
           i = i+s
         continue
       elif n.op_type == "Slice":
-        arg = [(0,x,1) for x in inp[0].shape]
-        shrink_args = [(0,x) for x in inp[0].shape]
         if onnx_model_version < 10:
           axes = list(opt["axes"])
           ends = list(opt["ends"])
@@ -204,28 +201,26 @@ def get_run_onnx(onnx_model: ModelProto):
           starts, ends = inp[1:3]
           axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3]).tolist()
           steps = safe_numpy(inp[4]) if len(inp) > 4 else [1]*inp[0].ndim
-          starts, ends = safe_numpy(starts.ceil().cast(dtypes.int32)).tolist(), safe_numpy(ends.ceil().cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
-        # TODO: Change __getitem__() to PAD -> RESHAPE -> SHRINK IF s == e ELSE SHRINK
-        shrink = False # HACKY BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise Tensor.reshape() has to allow 0 in newshape 
-        for i,axis in enumerate(axes):
+          starts, ends = safe_numpy(starts.ceil().cast(dtypes.int32)).tolist(), safe_numpy(ends.ceil().cast(dtypes.int32)).tolist()
+        arg = [(0,x,1) for x in inp[0].shape]
+        shrink_args = [(0,x) for x in inp[0].shape]
+        only_shrink = False # HACK BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise __getitem__ Tensor.reshape() has to allow 0 in newshape 
+        for i, axis in enumerate(axes):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
-          starts[i] = starts[i] + inp[0].shape[axis] if starts[i] < 0 else starts[i]
-          ends[i] = ends[i] + inp[0].shape[axis] if ends[i] < 0 else ends[i]
-          starts[i] = max(0, min(starts[i], inp[0].shape[axis]))
-          ends[i] = max(0, min(ends[i], inp[0].shape[axis]))
-          if starts[i] == ends[i]:
-            shrink_args[axis] = (starts[i], ends[i])
-            shrink = True # ugly ass hack
-          elif starts[i] > ends[i] and steps[i] >= 0:
-            steps[i] = -steps[i]
-            arg[axis] = (starts[i], ends[i], steps[i])
-          else: 
-            arg[axis] = (starts[i], ends[i], steps[i])
-        ret = inp[0].shrink(tuple(shrink_args)) if shrink else inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
+          starts[i], ends[i] = starts[i] + inp[0].shape[axis] if starts[i] < 0 else starts[i], ends[i] + inp[0].shape[axis] if ends[i] < 0 else ends[i]
+          starts[i], ends[i] = max(0, min(starts[i], inp[0].shape[axis])), max(0, min(ends[i], inp[0].shape[axis]))
+          shrink_args[axis] = (starts[i], ends[i])
+          if starts[i] == ends[i]: 
+            only_shrink = True 
+            continue
+          if starts[i] > ends[i] and steps[i] >= 0: steps[i] = -steps[i]
+          arg[axis] = (starts[i], ends[i], steps[i])
+        ret = inp[0].shrink(tuple(shrink_args)) if only_shrink else inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
       elif n.op_type == "Shrink":
         bias = opt['bias'] if 'bias' in opt else 0
         ret = (inp[0] < -opt['lambd'])*(inp[0]+bias) + (inp[0] > opt['lambd'])*(inp[0]-bias)
-      elif n.op_type == "Gradient":
+      elif n.op_type == "Gradient": # TODO NO IDEA IF THIS IS CORRECT LOL
+        assert len(opt["xs"]) == len(inp), "output and input has to match lol"
         y = opt["y"]
         intermediate_tensors[y].backward()
         ret = tuple([t.grad for t in inp])

@@ -1,5 +1,5 @@
 from tinygrad.nn import Conv2d
-from tinygrad.nn.optim import Adam as Adam_
+from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, dtypes
 from extra.onnx import safe_numpy
@@ -7,6 +7,30 @@ import numpy as np
 import functools
 from typing import Union, Tuple, Optional
 import math
+
+def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
+  inputs = [[i.shrink(((idx, idx+1),)) for idx in range(i.shape[0])] for i in inputs]
+  X, G, V, H = inputs
+  R.requires_grad = False
+  T.requires_grad = False
+  for v in V: v.requires_grad = False
+  for h in H: h.requires_grad = False
+  for x, g in zip(X, G): 
+    x.grad = norm_coefficient * x + g
+    x.grad.requires_grad = False
+  adam = optim.Adam(X, lr=R, b1=alpha, b2=beta, eps=epsilon)
+  adam.m = V
+  adam.v = H
+  adam.t = T.reshape(1).cast(dtypes.float32)
+  adam.step()
+  X_new = [(1 - norm_coefficient_post) * p for p in adam.params]
+  V_new = adam.m
+  H_new = adam.v
+  print([p.numpy() for p in adam.params])
+  for x in X_new[1:]: X_new[0] = X_new[0].cat(x) # X_new is wrong
+  for v in V_new[1:]: V_new[0] = V_new[0].cat(v)
+  for h in H_new[1:]: H_new[0] = H_new[0].cat(h)
+  return X_new[0], V_new[0], H_new[0]
 
 def Unsqueeze(data, axes):
   axes = [len(data.shape) + int(x) if x < 0 else int(x) for x in safe_numpy(axes)]
@@ -247,8 +271,8 @@ def Softmax_13(input, axis=-1): return input.softmax(axis)
 Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
 def LogSoftmax(input, axis=-1): return input.log_softmax(axis)
 def Clip(input, min=None, max=None):
-  if min is None: min = -3.4e38
-  if max is None: max = 3.4e38
+  if min is None: min = float("-inf")
+  if max is None: max = float("inf")
   return input.clip(min, max)
 
 def Sin(x): return x.sin()
@@ -454,6 +478,11 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       x_out = roi[-1][0] * (X.shape[-1] - 1) + x_out * ((roi[-1][1] - roi[-1][0]) * (X.shape[-1] - 1) / (output_shape[-1] - 1))  if output_shape[-1] > 1 else Tensor([0.5 * (roi[-1][0] + roi[-1][1]) * (X.shape[-1] - 1)])
       y_out = roi[-2][0] * (X.shape[-2] - 1) + y_out * ((roi[-2][1] - roi[-2][0]) * (X.shape[-2] - 1) / (output_shape[-2] - 1))  if output_shape[-2] > 1 else Tensor([0.5 * (roi[-2][0] + roi[-2][1]) * (X.shape[-2] - 1)])
     return x_out.clip(0, X.shape[-1]-1), y_out.clip(0, X.shape[-2]-1)
+  def _cubic_interpolation(p, x):
+    return p[1] + 0.5 * x*(p[2] - p[0] + x*(2.0*p[0] - 5.0*p[1] + 4.0*p[2] - p[3] + x*(3.0*(p[1] - p[2]) + p[3] - p[0])))
+  def _bicubic_interpolation(pixels, x, y):
+    ret = [_cubic_interpolation(pixels[0], y), _cubic_interpolation(pixels[1], y), _cubic_interpolation(pixels[2], y), _cubic_interpolation(pixels[3], y)]
+    return _cubic_interpolation(ret, x)
       
   assert scales or sizes and not (scales and sizes), "only scales or sizes, sir"
   if roi:
@@ -503,7 +532,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
     y_out = _nearest_mode(y_out, nearest_mode, X.shape[-1])
     y_out = [int(i) for i in safe_numpy(y_out)]
-    stack_args = [x_out + y * X.shape[-1] for y in y_out] # HACK wow this is ugly but I see no other way cuz me stupid!
+    stack_args = [x_out + y * X.shape[-1] for y in y_out]
     indices_out = Tensor.stack(stack_args).flatten()
     return _nearest_gather(X, indices_out, output_shape)
   elif mode == "linear":
@@ -515,22 +544,29 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
         y_shrink = (0, X.shape[2]) if X.shape[2] == 1 else (y_floor, y_floor+2) if y != y_floor else (y_floor, y_floor+1)
         x_shrink = (x_floor, x_floor+2) if x != x_floor else (x_floor, x_floor+1)
         shrink_args = ((0, X.shape[0]), (0, X.shape[1]), y_shrink, x_shrink)
-        corners = safe_numpy(X.shrink(shrink_args).flatten()) # TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT
+        corners = safe_numpy(X.shrink(shrink_args)) # TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT
+        print(corners)
         x1, x2, y1, y2 = x_floor, x_floor+1, y_floor, y_floor+1
         if x == x_floor and y == y_floor: # TODO UGLY IF STATEMENTS.... https://en.wikipedia.org/wiki/Bilinear_interpolation#Weighted_mean maybe do weighted mean?
-          ret.append(corners[0]) 
+          ret.append(corners[0,0,0,0]) 
         elif x == x_floor:
-          ret.append((corners[0] * (y2 - y) + corners[1] * (y - y1)) / (y2 - y1))
+          ret.append((corners[0,0,0,0] * (y2 - y) + corners[0,0,1,0] * (y - y1)) / (y2 - y1))
         elif y == y_floor:
-          ret.append((corners[0] * (x2 - x) + corners[1] * (x - x1)) / (x2 - x1))
+          ret.append((corners[0,0,0,0] * (x2 - x) + corners[0,0,0,1] * (x - x1)) / (x2 - x1))
         else: 
-          ret.append((corners[0] * (x2 - x) * (y2 - y) + corners[1] * (x - x1) * (y2 - y) + corners[2] * (x2 - x) * (y - y1) + corners[3] * (x - x1) * (y - y1)) / ((x2 - x1) * (y2 - y1)))
+          ret.append((corners[0,0,0,0] * (x2 - x) * (y2 - y) + corners[0,0,0,1] * (x - x1) * (y2 - y) + corners[0,0,1,0] * (x2 - x) * (y - y1) + corners[0,0,1,1] * (x - x1) * (y - y1)) / ((x2 - x1) * (y2 - y1)))
     return Tensor(ret).reshape(output_shape)
   elif mode == "cubic":
     print("cubic")
-    print(x_out.numpy())
-    print(y_out.numpy())
-    return 
+    pixels = safe_numpy(X.reshape(4,4)).tolist()
+    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape_, scales, roi)
+    ret = []
+    for y in safe_numpy(y_out):
+      for x in safe_numpy(x_out):
+        ret.append(_bicubic_interpolation(pixels, x, y))
+    return Tensor(ret).reshape(output_shape)
+    # print(x_out.numpy())
+    # print(y_out.numpy())
 
   def _cubic_coeffs(ratio, scale=None, A=-0.75):
     return Tensor([((A * (ratio + 1) - 5 * A) * (ratio + 1) + 8 * A) * (ratio + 1) - 4 * A, ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1, ((A + 2) * (1 - ratio) - (A + 3)) * (1 - ratio) * (1 - ratio) + 1, ((A * ((1 - ratio) + 1) - 5 * A) * ((1 - ratio) + 1) + 8 * A) * ((1 - ratio) + 1) - 4 * A,])
