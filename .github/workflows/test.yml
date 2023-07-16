@@ -312,13 +312,13 @@ jobs:
     - name: Run pytest
       run: FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"
 
-  testmodels:
+  testops:
     strategy:
       matrix:
-        backend: [llvm, clang-windows, clang-ubuntu, gpu]
+        backend: [llvm, clang-windows, clang-ubuntu, gpu, cuda]
 
-    name: Model Tests (${{ matrix.backend }})
-    runs-on: ${{ matrix.backend == 'clang-windows' && 'windows-latest' || matrix.backend == 'gpu' && 'ubuntu-20.04'  || 'ubuntu-latest' }}
+    name: Ops Tests (${{ matrix.backend }})
+    runs-on: ${{ matrix.backend == 'clang-windows' && 'windows-latest' || (matrix.backend == 'gpu' || matrix.backend == 'cuda') && 'ubuntu-20.04'  || 'ubuntu-latest' }}
 
     steps:
       - name: Checkout Code
@@ -327,17 +327,49 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: 3.8
+          cache: 'pip'
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || (matrix.backend == 'clang-ubuntu' || matrix.backend == 'clang-windows') && 'CI=1\nCLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1'}}" >> $GITHUB_ENV
-      - name: Update packages
+      - name: Install packages (gpu)
         if: matrix.backend == 'gpu'
         run: |
           wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
           echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt-get update
           sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl 
+      - name: Install packages (cuda)
+        if: matrix.backend == 'cuda'
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+      - name: Cache gpuocelot
+        if: matrix.backend == 'cuda'
+        id: cache-build
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-gpuocelot-build
+        with:
+          path: ${{ github.workspace }}/gpuocelot/ocelot/
+          key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
+          restore-keys: |
+            ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
+      - name: Clone/compile gpuocelot
+        if: matrix.backend == 'cuda' && steps.cache-build.outputs.cache-hit != 'true'
+        run: |
+          git clone --recursive https://github.com/gpuocelot/gpuocelot.git -b 19626fc00b6ee321638c3111074269c69050e091 ${{ github.workspace }}/gpuocelot
+          cd ${{ github.workspace }}/gpuocelot/ocelot
+          mkdir build
+          cd build
+          cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
+          ninja
+      - name: Install gpuocelot
+        if: matrix.backend == 'cuda'
+        run: |
+          cd ${{ github.workspace }}/gpuocelot/ocelot/build
+          sudo ninja install
       - name: Run pytest
-        run: python -m pytest -s -v -n=auto test/ -k "models"
+        run: python -m pytest -s -v -n=auto test/test_ops.py ${{matrix.backend=='cuda'&&'-k "not half"'||''}}
 
