@@ -209,6 +209,7 @@ jobs:
     strategy:
       matrix:
         backend: [llvm, clang-windows, clang-ubuntu, gpu, cuda]
+        tests: ['test_ops.py or test_nn.py or test_net_speed.py', 'not (test_ops.py or test_nn.py or test_net_speed.py)']
 
     name: Ops Tests (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'clang-windows' && 'windows-latest' || matrix.backend == 'gpu'  && 'ubuntu-20.04' || matrix.backend=='cuda'&&'ubuntu-22.04' || 'ubuntu-latest' }}
@@ -266,4 +267,4 @@ jobs:
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
-        run: python -m pytest -s -v -n=auto test/ ${{matrix.backend=='cuda'&&'--ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"'||''}}
+        run: python -m pytest -s -v -n=auto test/ -k '${{ matrix.tests }} ${{matrix.backend=='cuda'&&'and "not half"'||''}}' ${{matrix.backend=='cuda'&&'--ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py'||''}}
