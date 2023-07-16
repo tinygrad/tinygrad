@@ -97,6 +97,7 @@ class UOp(NamedTuple):
 class Linearizer:
   supports_float4: bool = False
   supports_float4_alu: bool = False
+  supports_atomics: bool = False
 
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
@@ -143,7 +144,7 @@ class Linearizer:
     self.group_for_reduce: List[int] = []
     self.upcasted: int = 0
     self.local_dims: int = 0
-    self.forced_global_dims: int = 0
+    self.reduce_in_global_dim: int = 0
 
     # group simplifies
     self.simplify_ones()
@@ -229,7 +230,7 @@ class Linearizer:
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
-      self.sts.append(ShapeTracker(tuple([1] * self.forced_global_dims + [1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.forced_global_dims - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      self.sts.append(ShapeTracker(tuple([1] * self.reduce_in_global_dim + [1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.reduce_in_global_dim - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
@@ -251,24 +252,29 @@ class Linearizer:
       _ssa[name] += 1
       return Token(f"{name}{_ssa[name]-1}", ltype)
 
+    # Axes arrangement: global, local, reduce, upcast. Some of them might be empty.
+    global_range_end = self.first_reduce-self.local_dims+self.reduce_in_global_dim
+    local_range_end = self.first_reduce+len(self.group_for_reduce)+self.reduce_in_global_dim
+    reduce_range_end = self.shape_len-self.upcasted
+
     # global loop
-    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims+self.forced_global_dims)]
+    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, global_range_end)]
     self.uop(UOps.LOOP, None, [], (global_idxs, "global"))
 
     # local loop
-    local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce-self.local_dims+self.forced_global_dims, self.first_reduce+len(self.group_for_reduce)+self.forced_global_dims)]
+    local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(global_range_end, local_range_end)]
     self.uop(UOps.LOOP, None, [], (local_idxs, "local"))
 
     # upcast indexes
-    full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
-    upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
+    full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[reduce_range_end:]]
+    upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[reduce_range_end:]]
 
     # reduce op
     fake_reduce_idxs = []
     if self.reduceops is not None:
       for reduce_idx,reduceop in enumerate(self.reduceops):
         # define indexes
-        reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce)+self.forced_global_dims, self.shape_len-self.upcasted)]
+        reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(local_range_end, reduce_range_end)]
         fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
         # define accumulator
@@ -288,12 +294,10 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (reduce_idxs, "reduce"))
 
         # end the local loop, do the local reduce
-        if self.group_for_reduce and getenv("CUREDUCE", 1):
+        if self.group_for_reduce and getenv("CUREDUCE", 0):
           self.uop(UOps.BARRIER, None, [], ())
           self.uop(UOps.CUDA_REDUCE, None, [], ())
         elif self.group_for_reduce:
-          # TODO: Work needed here.
-          # assert False
           fake_global_idxs = [x*0 for x in global_idxs]
           self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc, ssa)  # store accumulators
           self.uop(UOps.BARRIER, None, [], ())
@@ -318,7 +322,7 @@ class Linearizer:
           accs = [acc]
 
           # late reduce loop
-          end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce+self.forced_global_dims else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce)+self.forced_global_dims)]
+          end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce+self.reduce_in_global_dim else 0) for i in range(0, local_range_end)]
           self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
           # load localbufs
@@ -339,7 +343,7 @@ class Linearizer:
     # store
     # TODO: We should not allow this kind of optimization when we have any operation on acc
     # which cannot match with SUM/MAX operation.
-    if self.forced_global_dims:
+    if self.reduce_in_global_dim:
       cll = {ReduceOps.SUM: self.atomic_add, ReduceOps.MAX: self.atomic_add}[cast(ReduceOps, reduceop.op)]
       cll(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
     else:
@@ -357,6 +361,19 @@ class Linearizer:
     self.uops.append(UOp(uop, cast(Optional[Token], out), vin, arg))
     if DEBUG >= 4: print(self.uops[-1])
     return out
+
+  def _can_use_atomics(self, x:UOps) -> Tuple[bool, bool]: # return pair of bools (if can use atomics & if children have reduce op)
+    if x.__class__ is not LazyOp: return (True, True)
+    if x.op in ReduceOps: return (True, True)
+    results = [self._can_use_atomics(v) for v in x.src]
+    if not all([x for x,_ in results]): return (False, False)
+    if not any([y for _,y in results]): return (True, False)
+    if x.op in [BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.DIV]: return (True, True)
+    return (False, True)
+
+  def can_use_atomics(self) -> bool:
+    if not self.supports_atomics: return False
+    return self._can_use_atomics(self.ast)[0]
 
   def ast_parse(self, x, accs, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
     if x.__class__ is not LazyOp: return loaded_buffers[x]
@@ -385,7 +402,7 @@ class Linearizer:
     return cast(List[Token], ordered_ret)
 
   @property
-  def first_reduce(self) -> int: return [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True)
+  def first_reduce(self) -> int: return [x!=y for x,y in zip(self.sts[0].shape[self.reduce_in_global_dim:self.shape_len-self.upcasted]+(0,), self.full_shape[self.reduce_in_global_dim:self.shape_len-self.upcasted]+(1,))].index(True)
 
   @property
   def output_shape(self) -> Tuple[int, ...]: return self.sts[0].shape
@@ -400,7 +417,7 @@ class Linearizer:
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
   @property
-  def upcast_in_mid_reduce_axes(self) -> List[int]: return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)+self.forced_global_dims) if self.full_shape[j] == self.sts[0].shape[j]]
+  def upcast_in_mid_reduce_axes(self) -> List[int]: return [j for j in range(self.first_reduce+self.reduce_in_global_dim, self.first_reduce+len(self.group_for_reduce)+self.reduce_in_global_dim) if self.full_shape[j] == self.sts[0].shape[j]]
 
   # there's seven chunks of the shape
   # blue   -- global dims
@@ -414,13 +431,13 @@ class Linearizer:
   # yellow -- normal upcasted dimensions
   def colors(self) -> List[str]:
     # up to first_reduce, they are all global (blue)
-    colors = ["blue"] * (self.first_reduce-self.local_dims+self.forced_global_dims)
+    colors = ["blue"] * (self.first_reduce-self.local_dims+self.reduce_in_global_dim)
     # except the local_dims, these are non-reduce locals (cyan)
     colors += ["cyan"] * (self.local_dims)
     # between first_reduce and first_reduce + group_for_reduce, they are either local (cyan), or late upcasted (green)
     colors += ["white" if i in self.upcast_in_mid_reduce_axes else "green" for i in range(self.first_reduce, self.first_reduce + len(self.group_for_reduce))]
     # between first_reduce + group_for_reduce and upcasted, they are reduce (red)
-    colors += ["red"] * ((self.shape_len-self.upcasted) - (self.first_reduce + len(self.group_for_reduce) +self.forced_global_dims))
+    colors += ["red"] * ((self.shape_len-self.upcasted) - (self.first_reduce + len(self.group_for_reduce) +self.reduce_in_global_dim))
     # upcasted dimensions are reduce (magenta) or normal (yellow)
     colors += ["magenta" if self.full_shape[i] != self.sts[0].shape[i] else "yellow" for i in range(self.shape_len-self.upcasted, self.shape_len)]
     assert len(colors) == self.shape_len, "colors size mismatch"
@@ -536,14 +553,12 @@ class Linearizer:
           self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
           self.group_for_reduce.append(4)
 
-      # If has group but global dims is 1, upcast it and use atomics.
-      # TODO: determine which device support atomics before applying this.
-      if self.group_for_reduce and prod(self.sts[0].shape[:self.first_reduce]) <= 64: # TODO: Better const than 64.
-        for sz in [16384, 8192, 4096, 2048, 1024, 512, 256, 64, 32, 16]:
-          # print(self.sts, self.first_reduce + len(self.group_for_reduce))
+      # When has local reduce and kernel is heavy on ops count, use atomics to fill enough SMs.
+      if self.group_for_reduce and prod(self.full_shape[self.first_reduce+1:]) >= 8 and self.can_use_atomics():
+        for sz in [16384, 8192, 4096, 2048, 1024, 512, 256, 64, 32, 16]: # TODO: sz do not like this.
           if all(st.shape[self.first_reduce + len(self.group_for_reduce)] % sz == 0 or st.shape[self.first_reduce + len(self.group_for_reduce)] == 1 for st in self.sts):
             self.shift_to(self.first_reduce + len(self.group_for_reduce), sz, top=True, insert_before=0)
-            self.forced_global_dims = 1
+            self.reduce_in_global_dim = 1
             break
 
         for splits in [2]:
@@ -552,20 +567,20 @@ class Linearizer:
             self.upcast()
             break
 
-      # if not self.float4_axis(0) and self.group_for_reduce and not self.group_for_reduce:
-      #   # Trying more agressive
-      #   # reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
-      #   warp_size = 32
-      #   fxd_range = range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)
-      #   for i in fxd_range:
-      #     if self.full_shape[i] <= 512: continue # fine for inner loop for now, but should be fixed based on threadgroup size...
-      #     for sz in range(min(256, self.full_shape[i] // 2 + 1), 1, -1):
-      #       if all(st.shape[i] % sz == 0 or st.shape[i] == 1 for st in self.sts):
-      #         # print("group for reduce")
-      #         self.shift_to(i, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
-      #         self.group_for_reduce.append(sz)
-      #         fxd_range = []
-      #         break
+      if not self.float4_axis(0) and not self.group_for_reduce:
+        # Trying more agressive
+        # reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
+        warp_size = 32
+        fxd_range = range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)
+        for i in fxd_range:
+          if self.full_shape[i] <= 512: continue # fine for inner loop for now, but should be fixed based on threadgroup size...
+          for sz in range(min(256, self.full_shape[i] // 2 + 1), 1, -1):
+            if all(st.shape[i] % sz == 0 or st.shape[i] == 1 for st in self.sts):
+              # print("group for reduce")
+              self.shift_to(i, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
+              self.group_for_reduce.append(sz)
+              fxd_range = []
+              break
 
     # now do everything required
     self.required_optimizations()

@@ -20,7 +20,7 @@ class TinyJit:
   def __call__(self, *args, **kwargs) -> Any:
     # TODO: Back METAL for JIT: atomic operation which are implemented for metal requires
     # zeroes/-inf buffers (for sum/max). This is broken for JIT.
-    if Device.DEFAULT not in ["GPU", "CLANG", "HIP"]: return self.fxn(*args, **kwargs)  # only jit on the GPU codegen
+    if Device.DEFAULT not in ["GPU", "CLANG", "METAL", "HIP"]: return self.fxn(*args, **kwargs)  # only jit on the GPU codegen
     # NOTE: this cast is needed since although we know realize will create a ".realized" DeviceBuffer, the type checker doesn't
     input_rawbuffers: Dict[Union[int, str], RawBuffer] = {cast(Union[int, str], k):cast(RawBuffer, v.realize().lazydata.realized) for k,v in itertools.chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
