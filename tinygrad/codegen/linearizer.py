@@ -6,7 +6,7 @@ from enum import Enum, auto
 from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
-from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
+from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode
@@ -463,9 +463,9 @@ class Linearizer:
     if x.op in ReduceOps and not do_reduce: return acc
     # MULACC fusion. TODO: this is copied from Interpreted
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
-      x = LazyOp(FusedOps.MULACC, x.src[0].src, x.arg)
+      x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL:
-      x = LazyOp(FusedOps.MULACC, x.src[0].src[0].src, x.arg)
+      x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
     if x.op in {BinaryOps.ADD, BinaryOps.MUL}:
       # Reorder sources to put constants first so get_grouped_maybe_float4 can fold the op
       srcs = sorted(x.src, key=lambda x: (x.realized.__class__ != RawConst) if x.__class__ == LazyBuffer else 0)
@@ -483,7 +483,7 @@ class Linearizer:
       if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and is_nvidia: cast_dtype = dtypes.float
       grouping_allowed = ((self.supports_half4_alu or self.supports_half2_alu) and dtypes.get_normal_type(cast_dtype) == dtypes.half) or (dtypes.get_normal_type(cast_dtype) != dtypes.half and self.supports_float4_alu)
       grouped = list(get_grouped_maybe_vector(*values, acc, grouping_allowed=grouping_allowed, amt=group_amt) if x.op.__class__ in {ReduceOps, FusedOps} else 
-                 get_grouped_maybe_vector(*values, grouping_allowed=grouping_allowed and x.op != BinaryOps.CMPEQ, amt=group_amt))
+                 get_grouped_maybe_vector(*values, grouping_allowed=grouping_allowed and x.op not in {BinaryOps.CMPEQ, TernaryOps.WHERE}, amt=group_amt))
       for idx, val in grouped:
         for v in val:
           if v.dtype.is_vector_type and v.offset is None and v.dtype != dtypes.get_vector_type(cast_dtype, group_amt) and v not in self.casts:
