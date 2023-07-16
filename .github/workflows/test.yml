@@ -215,13 +215,13 @@ jobs:
     - name: Test Docker
       run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
 
-  testops:
+  tests:
     strategy:
       matrix:
         backend: [llvm, clang-windows, clang-ubuntu, gpu, cuda]
         tests: ['test_ops.py or test_nn.py', 'not (test_ops.py or models or test_nn.py)', 'models or test_tensor']
 
-    name: Ops Tests (${{ matrix.backend }})
+    name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'clang-windows' && 'windows-latest' || matrix.backend == 'gpu'  && 'ubuntu-20.04' || matrix.backend=='cuda'&&'ubuntu-22.04' || 'ubuntu-latest' }}
     timeout-minutes: 20
 
