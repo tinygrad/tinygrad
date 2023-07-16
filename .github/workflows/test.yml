@@ -151,8 +151,8 @@ jobs:
       - if: ${{ matrix.task == 'opt' }}
         name: Run Optimizer Test (OPT 2 and 3)
         run: |
-          PYTHONPATH="." OPT=2 GPU=1 python test/external/external_test_opt.py
-          PYTHONPATH="." OPT=3 GPU=1 python test/external/external_test_opt.py
+          PYTHONPATH="." OPT=2 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
+          PYTHONPATH="." OPT=3 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model compile and size
         run: |
@@ -163,12 +163,12 @@ jobs:
         run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test tensor core ops
-        run: GPU=1 TC=2 python3 test/test_ops.py
+        run: GPU=1 TC=2 python3 -m pytest -n=auto test/test_ops.py
       - if: ${{ matrix.task == 'image'}}
         name: Test GPU IMAGE ops
         run: |
-          GPU=1 IMAGE=1 python3 test/test_ops.py
-          FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 test/test_ops.py
+          GPU=1 IMAGE=1 python3 -m pytest -n=auto test/test_ops.py
+          FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 -m pytest -n=auto test/test_ops.py
 
   testmetal:
     name: Metal Tests
