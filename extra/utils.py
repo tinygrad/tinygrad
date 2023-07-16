@@ -1,14 +1,14 @@
-import tempfile, os, pickle
+import os, pickle
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
-from tinygrad.helpers import prod, getenv, DEBUG, dtypes, Platform
+from tinygrad.helpers import Files, prod, getenv, DEBUG, dtypes, Platform
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import Device
 from tinygrad.shape.shapetracker import strides_for_shape
 
-def temp(x:str) -> str: return os.path.join(tempfile.gettempdir(), x)
+def temp(x:str) -> str: return Files.tempdir / x
 
 def fetch(url):
   if url.startswith("/"):
@@ -30,14 +30,13 @@ def fetch_as_file(url):
   return fp
 
 def download_file(url, fp, skip_if_exists=True):
-  import requests, pathlib
+  import requests
   if skip_if_exists and os.path.isfile(fp) and os.stat(fp).st_size > 0:
     return
   r = requests.get(url, stream=True)
   assert r.status_code == 200
   progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
-  (path := pathlib.Path(fp).parent).mkdir(parents=True, exist_ok=True)
-  with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
+  with Files.NamedTemporaryFile(delete=False) as f:
     for chunk in r.iter_content(chunk_size=16384):
       progress_bar.update(f.write(chunk))
     f.close()

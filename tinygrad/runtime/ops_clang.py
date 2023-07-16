@@ -1,6 +1,6 @@
-import os, time, ctypes, hashlib, subprocess, tempfile
+import os, time, ctypes, hashlib, subprocess
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
-from tinygrad.helpers import Platform
+from tinygrad.helpers import Platform, Files
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawMallocBuffer
 
@@ -12,7 +12,7 @@ class ClangProgram:
   def __init__(self, name:str, prg:str):
     prg = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n' + prg
     # TODO: is there a way to not write this to disk?
-    fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
+    fn =  Files.tempdir / f"clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
     if not os.path.exists(fn):
       subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+fn+'.tmp').split(), input=prg.encode('utf-8'))
       os.rename(fn+'.tmp', fn)

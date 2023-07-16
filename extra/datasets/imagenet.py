@@ -2,10 +2,11 @@
 import glob, random
 import json
 import numpy as np
+import functools
 from PIL import Image
-import functools, pathlib
+from tinygrad.helpers import Files
 
-BASEDIR = pathlib.Path(__file__).parent / "imagenet"
+BASEDIR = Files.tempdir / "imagenet"
 ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
 cir = {v[0]: int(k) for k,v in ci.items()}
 

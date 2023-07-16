@@ -1,8 +1,8 @@
 import json
-import pathlib
 import numpy as np
 import librosa
 import soundfile
+from tinygrad.helpers import Files
 
 """
 The dataset has to be downloaded manually from https://www.openslr.org/12/ and put in `extra/datasets/librispeech`.
@@ -15,7 +15,7 @@ for file in $(find * | grep flac); do ffmpeg -i $file -ar 16k "$(dirname $file)/
 
 Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recognition/rnnt/dev-clean-wav.json) has to also be put in `extra/datasets/librispeech`.
 """
-BASEDIR = pathlib.Path(__file__).parent / "librispeech"
+BASEDIR = Files.tempdir / "librispeech"
 with open(BASEDIR / "dev-clean-wav.json") as f:
   ci = json.load(f)
 

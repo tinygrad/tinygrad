@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-import os, cloudpickle, tempfile, unittest, subprocess
+import os, cloudpickle, unittest, subprocess
 from extra.helpers import enable_early_exec, cross_process, _CloudpickleFunctionWrapper
+from tinygrad.helpers import Files
 
 def normalize_line_endings(s): return s.replace(b'\r\n', b'\n')
 
@@ -9,7 +10,7 @@ class TestEarlyExec(unittest.TestCase):
     self.early_exec = enable_early_exec()
 
   def early_exec_py_file(self, file_content, exec_args):
-    with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as temp:
+    with Files.NamedTemporaryFile(suffix=".py", delete=False) as temp:
       temp.write(file_content)
       temp_path = temp.name
     try:

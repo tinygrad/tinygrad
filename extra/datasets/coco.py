@@ -2,21 +2,20 @@ import json
 import pathlib
 import zipfile
 import numpy as np
-from extra.utils import download_file
 import pycocotools._mask as _mask
-from examples.mask_rcnn import Masker
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
+from examples.mask_rcnn import Masker
+from extra.utils import download_file
+from tinygrad.helpers import Files
 
 iou         = _mask.iou
 merge       = _mask.merge
 frPyObjects = _mask.frPyObjects
 
-BASEDIR = pathlib.Path(__file__).parent / "COCO"
-BASEDIR.mkdir(exist_ok=True)
+BASEDIR = Files.tempdir / "COCO"
 
 def create_dict(key_row, val_row, rows): return {row[key_row]:row[val_row] for row in rows}
-
 
 if not pathlib.Path(BASEDIR/'val2017').is_dir():
   fn = BASEDIR/'val2017.zip'
