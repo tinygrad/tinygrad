@@ -2,6 +2,7 @@ import os, time, ctypes, hashlib, subprocess, platform, tempfile
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
+from tinygrad.helpers import dtypes
 
 args = {
   'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
@@ -27,6 +28,8 @@ class ClangProgram:
 
 class ClangCodegen(CStyleCodegen):
   lang = CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict")
-  supports_float4: bool = False
+  supported_vector_sizes = {dtypes.float: []}
+  supported_vector_sizes_alu = {dtypes.float: []}
+  uses_float32_calculations = False
 
 ClangBuffer = Compiled(RawMallocBuffer, ClangCodegen, ClangProgram)

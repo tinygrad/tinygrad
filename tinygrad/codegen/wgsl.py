@@ -24,6 +24,10 @@ class WGSLLanguage(CStyleLanguage):
     TernaryOps.MULACC: lambda x,y,z: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c: f"select({c},{b},{a}!=0.)"
   }
 
+  def render_cast(self, x:List[str], var_dtype) -> str:
+    prefix = type_map[var_dtype]
+    return f"{prefix}({','.join(x)})"
+
   def render_local(self, name: str, size: int, dtype:str = 'float'):
     dtype = type_map.get(dtypes.__dict__[dtype], 'f32')
     return f"var<workgroup> {name}: array<{dtype},{size}>;"

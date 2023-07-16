@@ -91,5 +91,6 @@ class CLCodegen(CStyleCodegen):
     barrier = "barrier(CLK_LOCAL_MEM_FENCE);",
     gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=False)
   is_nvidia = CL.cl_ctx.devices[0].name.startswith('NVIDIA')
+  uses_float32_calculations = False
 
 GPUBuffer = Compiled(CLBuffer, fromimport("tinygrad.codegen.assembly_rdna", "RDNACodegen") if getenv("RDNA") else CLCodegen, CLProgram, CL.synchronize)

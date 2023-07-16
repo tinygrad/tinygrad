@@ -1,7 +1,7 @@
 import numpy as np
 import ctypes
 import extra.hip_wrapper as hip
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
@@ -57,7 +57,8 @@ class HIPCodegen(CStyleCodegen):
     half_prekernel = "", 
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
-  supports_half4: bool = False
-  supports_half4_alu: bool = False
+  supported_vector_sizes = {dtypes.float: [2,4], dtypes.half: [2]}
+  supported_vector_sizes_alu = {dtypes.float: [2,4], dtypes.half: [2]}
+  uses_float32_calculations = False
 
 HIPBuffer = Compiled(RawHIPBuffer, HIPCodegen, HIPProgram, hip.hipDeviceSynchronize)

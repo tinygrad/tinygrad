@@ -81,11 +81,11 @@ class ImageDType(DType):
 
 class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
-  def is_int(x: DType)-> bool: return x in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64)
+  def is_int(x: DType)-> bool: return dtypes.get_normal_type(x) in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64)
   @staticmethod
-  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes._half4, dtypes._float4, dtypes._half2, dtypes._float2)
+  def is_float(x: DType) -> bool: return dtypes.get_normal_type(x) in (dtypes.float16, dtypes.float32)
   @staticmethod
-  def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint32, dtypes.uint64)
+  def is_unsigned(x: DType) -> bool: return dtypes.get_normal_type(x) in (dtypes.uint8, dtypes.uint32, dtypes.uint64)
   @staticmethod
   def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
@@ -106,12 +106,10 @@ class dtypes:
   uint64: Final[DType] = DType(3, 8, "unsigned long", np.uint64)
   @staticmethod
   def get_vector_type(x:DType, amt=4):
-    if not x.is_vector_type: return dtypes.__dict__[f"_{x.name}{amt}"]
-    return x
+    return dtypes.__dict__.get(f"_{x.name}{amt}", x if x.is_vector_type else dtypes._float4)
   @staticmethod
   def get_normal_type(x: DType):
-    if x.is_vector_type: return dtypes.__dict__[f"{''.join([c for c in x.name if c.isalpha()])}"]
-    return x
+    return dtypes.__dict__.get(f"{''.join([c for c in x.name if c.isalpha()])}", x if not x.is_vector_type else dtypes._float4)
 
 # create vector types
 for attr in list(dtypes.__dict__.values()):

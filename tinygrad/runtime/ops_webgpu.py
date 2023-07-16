@@ -28,7 +28,8 @@ class WebGPUProgram:
 
 class WGSLCodegen(CStyleCodegen):
   lang = WGSLLanguage()
-  supports_float4: bool = False
+  supported_vector_sizes = {dtypes.float: []}
+  supported_vector_sizes_alu = {dtypes.float: []}
 
 class RawWebGPUBuffer(RawBufferCopyIn):
   def __init__(self, size:int, dtype:DType):

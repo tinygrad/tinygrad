@@ -41,11 +41,9 @@ class CStyleLanguage(NamedTuple):
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype) -> str:
-    # assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
-    assert self.make_vector_prefix is not None, "cast is not supported on this platform"
-    if not var_dtype.is_vector_type: prefix = '' 
-    else: prefix = self.make_vector_prefix
-    return f"({prefix}{var_dtype.name})({','.join(x)})"
+    if not var_dtype.is_vector_type: prefix = f'{var_dtype.name}' 
+    else: prefix = f'{self.make_vector_prefix}{var_dtype.name.replace(" ", "_")}'
+    return f"({prefix})({','.join(x)})"
 
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int], var_dtype) -> str:
@@ -178,7 +176,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       # TODO: instead of dtypes.float, a base type
       kk(lang.render_store(bufnames[args.i], bufs[args.i].dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, isinstance(bufs[args.i], LocalBuffer)))
     elif uop == UOps.CAST and newvar is not None:
-      kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
+      kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
     elif uop == UOps.DEFINE_LOCAL:
       dtype = 'float' if len(args)==2 else args[2].name
       if lang.external_local_bufs:
@@ -193,12 +191,9 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 class CStyleCodegen(Linearizer):
   lang: ClassVar[CStyleLanguage] = CStyleLanguage()
   supports_constant_folding: bool = True
-  supports_float4: bool = True
-  supports_float4_alu: bool = True
-  supports_half4: bool = True
-  supports_half4_alu: bool = True
-  supports_half2: bool = True
-  supports_half2_alu: bool = True
+  supported_vector_sizes: Dict[DType, List[int]] = {dtypes.float: [2,4,8]}
+  supported_vector_sizes_alu: Dict[DType, List[int]] = {dtypes.float: [2,4,8]}
+  uses_float32_calculations = True
 
   # for renaming
   kernel_cnt: Final[DefaultDict[str, int]] = collections.defaultdict(int)

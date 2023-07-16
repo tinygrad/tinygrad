@@ -2,7 +2,7 @@ import subprocess, time, re, hashlib, tempfile
 from typing import Optional
 import numpy as np
 from pycuda.compiler import compile as cuda_compile # type: ignore
-from tinygrad.helpers import DEBUG, getenv, fromimport, colored
+from tinygrad.helpers import DEBUG, getenv, fromimport, colored, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
@@ -91,6 +91,7 @@ class CUDACodegen(CStyleCodegen):
         __device__ __forceinline__ explicit operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
       };
     """)
-  supports_float4_alu = False
+  supported_vector_sizes = {dtypes.float: [2,4]}
+  supported_vector_sizes_alu = {dtypes.float: []}
 
 CUDABuffer = Compiled(RawCUDABuffer, fromimport("tinygrad.codegen.assembly_ptx", "PTXCodegen") if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)

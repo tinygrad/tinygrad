@@ -126,13 +126,9 @@ class UOp(NamedTuple):
   def __repr__(self): return f"{str(self.uop):20s}: {str(self.out) if self.out is not None else '':25s} {str(self.vin):32s} {self.arg}"
 
 class Linearizer:
-  supports_float4: bool = False
-  supports_float4_alu: bool = False
-  supports_half4: bool = False
-  supports_half4_alu: bool = False
-  supports_half2: bool = False
-  supports_half2_alu: bool = False
-
+  supported_vector_sizes: Dict[DType, List[int]] = {dtypes.float: []}
+  supported_vector_sizes_alu: Dict[DType, List[int]] = {dtypes.float: []}
+  uses_float32_calculations = True
 
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
@@ -205,7 +201,8 @@ class Linearizer:
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
   def get_upcast_dim(self, i):
-    should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16, dtypes.int8, dtypes.int32, dtypes.int64] or isinstance(self.bufs[i].dtype, ImageDType))
+    vector_types = [dtypes.float32,] if self.uses_float32_calculations else [dtypes.float32, dtypes.float16, dtypes.int8, dtypes.int32, dtypes.int64, ]
+    should_upcast = len(self.supported_vector_sizes.get(self.bufs[i].dtype, self.supported_vector_sizes[dtypes.float])) > 0 and (self.bufs[i].dtype in vector_types or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
@@ -213,7 +210,7 @@ class Linearizer:
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
     amt = 1
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [8,4,2]:
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in self.supported_vector_sizes.get(self.bufs[i].dtype, self.supported_vector_sizes[dtypes.float]):
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     cache: Dict[str, Token] = {}
@@ -221,15 +218,15 @@ class Linearizer:
     for _idx in _idxs:
       if amt > 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
-        localtype = dtypes.get_vector_type(self.bufs[i].dtype, amt)
+        localtype = dtypes.get_vector_type(dtypes.float if self.uses_float32_calculations else self.bufs[i].dtype, amt)
         accumtype = dtypes.get_vector_type(dtypes.float, amt) if getenv('ACCUM_FLOAT', 1) else localtype
         if idx.render() != ((idx//amt)*amt).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
-          localtype = self.bufs[i].dtype
+          localtype = dtypes.float if self.uses_float32_calculations else self.bufs[i].dtype 
           accumtype = dtypes.float if getenv('ACCUM_FLOAT', 1) else localtype
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
-        localtype = self.bufs[i].dtype
+        localtype = dtypes.float if self.uses_float32_calculations else self.bufs[i].dtype 
         accumtype = dtypes.float if getenv('ACCUM_FLOAT', 1) else localtype
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
@@ -245,9 +242,8 @@ class Linearizer:
     upcast_dim = self.get_upcast_dim(i)
 
     store_offset = dict(zip(_idxs, store))
-
     # float4 grouping
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4,8]:
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in self.supported_vector_sizes.get(self.bufs[i].dtype, self.supported_vector_sizes[dtypes.float]):
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (expanded_nodes[upcast_dim[0]][0],) + k[upcast_dim[0]+1:]
@@ -258,7 +254,7 @@ class Linearizer:
         idx, valid = self.sts[i].expr_idxs(k)
         assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
         assert valid.min == 1, "stores are always valid"
-        dt = dtypes.get_vector_type(dtypes.get_normal_type(self.bufs[i].dtype), amt=amt)
+        dt = dtypes.get_vector_type(dtypes.get_normal_type(dtypes.float if self.uses_float32_calculations else self.bufs[i].dtype), amt=amt) 
         if all_same([x.name for x in out_tokens]) and tuple(range(amt)) == tuple(x.offset for x in out_tokens) and out_tokens[0].dtype == self.bufs[i].dtype:
           store_offset_new[k] = Token(out_tokens[0].name, dt)
         else:
@@ -280,12 +276,12 @@ class Linearizer:
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
-      self.bufs.append(LocalBuffer("temp", self.sts[-1].size(), dtype=dtypes.float if getenv('ACCUM_FLOAT', 1) else self.bufs[-1].dtype))
-      self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size(), dtypes.float if getenv('ACCUM_FLOAT', 1) else self.bufs[-1].dtype))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size(), dtype=dtypes.float if (getenv('ACCUM_FLOAT', 1) or self.uses_float32_calculations) else self.bufs[-1].dtype))
+      self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size(), dtypes.float if (getenv('ACCUM_FLOAT', 1) or self.uses_float32_calculations) else self.bufs[-1].dtype))
 
     # define local buffers
     for lb in self.local_alias.values():
-      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size(), dtypes.float if getenv('ACCUM_FLOAT', 1) else self.bufs[-1].dtype))
+      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size(), dtypes.float if (getenv('ACCUM_FLOAT', 1) or self.uses_float32_calculations) else self.bufs[-1].dtype))
 
     # print
     if DEBUG >= 3: self.printbufs()
@@ -479,24 +475,29 @@ class Linearizer:
       cast_dtype = dtypes.float if use_accum and getenv('ACCUM_FLOAT', 1) else dtypes.float16
       highest_priority = max([v.dtype.priority for val in values for v in val] + [cast_dtype.priority])
       buf_cast_dtype = [v.dtype if v.offset is None else dtypes.get_normal_type(v.dtype) for val in values for v in val if v.dtype.priority == highest_priority]
-      group_amt = VECTOR_SIZE if (self.supports_float4_alu or self.supports_half4_alu) and max([v.dtype.sz for val in values for v in val])==VECTOR_SIZE else 2
       if len(buf_cast_dtype) > 0: cast_dtype = buf_cast_dtype[0]
+      # Special case for NVIDIA
       is_nvidia = self.__getattribute__('is_nvidia') if hasattr(self, 'is_nvidia') else False
       if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and is_nvidia: cast_dtype = dtypes.float
-      grouping_allowed = ((self.supports_half4_alu or self.supports_half2_alu) and dtypes.get_normal_type(cast_dtype) == dtypes.half) or (dtypes.get_normal_type(cast_dtype) != dtypes.half and self.supports_float4_alu)
-      grouped = list(get_grouped_maybe_vector(*values, acc, grouping_allowed=grouping_allowed, amt=group_amt) if use_accum else 
-                 get_grouped_maybe_vector(*values, grouping_allowed=grouping_allowed and x.op not in {BinaryOps.CMPEQ, TernaryOps.WHERE}, amt=group_amt))
+      # Group values
+      grouping_allowed = VECTOR_SIZE in self.supported_vector_sizes_alu.get(cast_dtype, self.supported_vector_sizes_alu[dtypes.float])
+      grouped = list(get_grouped_maybe_vector(*values, acc, grouping_allowed=grouping_allowed, amt=VECTOR_SIZE) if use_accum else 
+                 get_grouped_maybe_vector(*values, grouping_allowed=grouping_allowed and x.op not in {BinaryOps.CMPEQ, TernaryOps.WHERE}, amt=VECTOR_SIZE))
+      # Cast grouped values if required
       for idx, val in grouped:
         for v in val:
-          if v.dtype.is_vector_type and v.offset is None and v.dtype != dtypes.get_vector_type(cast_dtype, group_amt) and v not in self.casts:
-            self.casts[v] = self.uop(UOps.CAST, ssa(f"casted_{v.name}", dtypes.get_vector_type(cast_dtype, group_amt), False), self.ungroup(v))
+          if v.dtype.is_vector_type and v.offset is None and v.dtype != dtypes.get_vector_type(cast_dtype, VECTOR_SIZE) and v not in self.casts:
+            self.casts[v] = self.uop(UOps.CAST, ssa(f"casted_{v.name}", dtypes.get_vector_type(cast_dtype, VECTOR_SIZE), False), self.ungroup(v))
           elif dtypes.get_normal_type(v.dtype) != cast_dtype and v not in self.casts:
             offset = f"_{v.offset}" if v.offset is not None else ''
             self.casts[v] = self.uop(UOps.CAST, ssa(f"casted_{v.name}{offset}", cast_dtype, False), [v])
+      # ALU with casted grouped values
       ret = []
       for idx, val in grouped:
-        val = [self.casts.get(v, v) for v in val]
-        ret.append((idx, self.uop(UOps.ALU, val[-1] if use_accum else ssa('alu', dtypes.get_vector_type(val[0].dtype, group_amt) if any(x.dtype.is_vector_type and x.offset is None for x in val) else dtypes.get_normal_type(val[0].dtype)),
+        val = [self.casts.get(v, v) for v in val] # cast if needed
+        val_dtype = dtypes.get_vector_type(val[0].dtype, VECTOR_SIZE) if any(x.dtype.is_vector_type and x.offset is None for x in val) else dtypes.get_normal_type(val[0].dtype)
+        val_dtype = (dtypes._float4 if any(x.dtype.is_vector_type and x.offset is None for x in val) else dtypes.float) if self.uses_float32_calculations else val_dtype
+        ret.append((idx, self.uop(UOps.ALU, val[-1] if use_accum else ssa('alu', val_dtype),
                     list(val), ops.get(x.op, x.op))))
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
       # scatter
@@ -646,7 +647,7 @@ class Linearizer:
           bst *= shp[j]
 
     self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
-    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size(), dtype=self.bufs[-1].dtype))
+    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size(), dtype=dtypes.float if self.uses_float32_calculations else self.bufs[-1].dtype))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
 
