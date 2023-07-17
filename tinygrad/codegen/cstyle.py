@@ -64,13 +64,13 @@ class CStyleLanguage(NamedTuple):
     if output_dtype.sz > 1:
       return f"({output_dtype.name})(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})))"
     return f"{buf_name}[{idx.render(render_cl)}]"
-  
-  def render_local(self, name:str, size:int): 
+
+  def render_local(self, name:str, size:int):
     return self.smem_prefix + f"float {name}[{size}];"
-  
+
   def render_for(self, expr: str, _min:int, _max:int) -> str:
     return f"for (int {expr} = {_min}; {expr} <= {_max}; ++{expr}) {{"
-  
+
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
 
@@ -156,27 +156,24 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       kk(f"c.thread_elements()[0] = {vin[4].render()}; c.thread_elements()[1] = {vin[5].render()};")
       kk("simdgroup_multiply_accumulate(c, a, b, c);")
       kk(f"{vin[4].render()} = c.thread_elements()[0]; {vin[5].render()} = c.thread_elements()[1]; }}")
-    elif uop == UOps.CONST:
-      assert newvar is not None
-      kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = {lang.render_const(args, newvar.dtype)};")
     elif uop == UOps.ALU:
       assert newvar is not None
       kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")
-    elif uop == UOps.LOAD:
+    elif uop in [UOps.LOAD, UOps.CONST]:
       assert newvar is not None
       # valids are handled here
       if args.valid.max == 0:
         val = lang.render_const(0.0, newvar.dtype)
-      elif isinstance(bufs[args.i].realized, RawConst):
-        val = lang.render_const(bufs[args.i].realized._buf, newvar.dtype)
+      elif uop == UOps.CONST:
+        val = lang.render_const(args.value, newvar.dtype)
       else:
-        val = lang.render_load(newvar.dtype, bufnames[args.i], bufs[args.i].dtype, args.idx, isinstance(bufs[args.i], LocalBuffer))
+        val = lang.render_load(newvar.dtype, args.name, args.dtype, args.idx, args.local)
       if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(0.0, newvar.dtype))
       kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = {val};")
     elif uop == UOps.STORE:
       assert args.valid.min == 1, "store must be valid"
       # TODO: instead of dtypes.float, a base type
-      kk(lang.render_store(bufnames[args.i], bufs[args.i].dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, isinstance(bufs[args.i], LocalBuffer)))
+      kk(lang.render_store(args.name, args.dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, args.local))
     elif uop == UOps.CAST and newvar is not None and newvar.dtype.sz > 1:
       kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
     elif uop == UOps.DEFINE_LOCAL:
