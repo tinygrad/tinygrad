@@ -236,25 +236,15 @@ jobs:
           cache-dependency-path: setup.py
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || (matrix.backend == 'clang-ubuntu' || matrix.backend == 'clang-windows') && 'CI=1\nCLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1'||matrix.backend=='cuda'&&'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1'}}" >> $GITHUB_ENV
-      - name: Update repos (gpu)
+      - name: Install packages (gpu)
         if: matrix.backend == 'gpu'
         run: |
           wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
           echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-      - name: Update packages (gpu/cuda)
-        if: matrix.backend == 'gpu' || matrix.backend == 'cuda'
-        run: sudo apt-get update -y
-      - name: Install packages (gpu)
-        if: matrix.backend == 'gpu'
-        uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl  
+          sudo apt-get update
+          sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl 
       - name: Install packages (cuda)
         if: matrix.backend == 'cuda'
-        # run: |
-        #   export DEBIAN_FRONTEND=noninteractive
-        #   sudo apt-get update -y
-        #   sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
