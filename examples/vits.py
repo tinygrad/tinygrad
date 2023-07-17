@@ -695,7 +695,7 @@ if __name__ == '__main__':
   text_mapper = TextMapper(apply_cleaners=True, symbols=symbols)
 
   # Load the model.
-  Tensor.no_grad, Tensor.Training = True, False
+  Tensor.no_grad = True
   if args.seed is not None:
     Tensor.manual_seed(args.seed)
     np.random.seed(args.seed)
