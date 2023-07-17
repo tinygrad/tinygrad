@@ -263,8 +263,9 @@ jobs:
       - name: Clone/compile gpuocelot
         if: matrix.backend == 'cuda' && steps.cache-build.outputs.cache-hit != 'true'
         run: |
-          git clone --recursive https://github.com/gpuocelot/gpuocelot.git -b 19626fc00b6ee321638c3111074269c69050e091 ${{ github.workspace }}/gpuocelot
+          git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
           cd ${{ github.workspace }}/gpuocelot/ocelot
+          git checkout 19626fc00b6ee321638c3111074269c69050e091
           mkdir build
           cd build
           cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
