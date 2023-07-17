@@ -241,8 +241,9 @@ jobs:
         run: |
           wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
           echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-          sudo apt-get update
-          # sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl 
+      - name: Update packages (gpu/cuda)
+        if: matrix.backend == 'gpu' || matrix.backend == 'cuda'
+        run: sudo apt-get update -y
       - name: Install packages (gpu)
         if: matrix.backend == 'gpu'
         uses: awalsh128/cache-apt-pkgs-action@latest
