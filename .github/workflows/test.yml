@@ -220,7 +220,7 @@ jobs:
       matrix:
         backend: [llvm, clang-windows, clang-ubuntu, gpu, cuda]
         # tests: ['models or extra', 'not (models or extra or ops.py or tensor.py or optim.py)', 'ops.py or tensor.py or optim.py']
-        tests: ['']
+        tests: ['test']
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'clang-windows' && 'windows-latest' || matrix.backend == 'gpu'  && 'ubuntu-20.04' || matrix.backend=='cuda'&&'ubuntu-22.04' || 'ubuntu-latest' }}
@@ -249,6 +249,7 @@ jobs:
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+          version: 1.0
       - name: Cache gpuocelot
         if: matrix.backend == 'cuda'
         id: cache-build
