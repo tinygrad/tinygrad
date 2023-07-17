@@ -78,7 +78,7 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False):
     all_X, all_Y = _shuffle(all_X, all_Y)
     for batch_start in range(0, all_Y.shape[0], BS):
       batch_end = min(batch_start+BS, all_Y.shape[0])
-      np_batch = (all_X[batch_end-BS:batch_end]/HALF_SCALE).astype(np.float16 if HALF else np.float32)
+      np_batch = all_X[batch_end-BS:batch_end].astype(np.float16 if HALF else np.float32)
       X = Tensor(np_batch) # batch_end-BS for padding
       Y = np.zeros((BS, num_classes), np.float16 if HALF else np.float32)
       Y[range(BS),all_Y[batch_end-BS:batch_end]] = -1.0*num_classes
@@ -104,9 +104,6 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   else:
     X_train, Y_train = fetch_cifar(train=True)
     X_test, Y_test = fetch_cifar(train=False)
-  if HALF:
-    X_train = X_train.clip(-1e5, 1e5)
-    X_test = X_test.clip(-1e5, 1e5)
 
   model = SpeedyResNet()
   optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
