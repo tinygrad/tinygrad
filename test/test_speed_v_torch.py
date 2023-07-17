@@ -143,6 +143,7 @@ class TestBigSpeed(unittest.TestCase):
   def test_large_conv_1x1(self): helper_test_conv(bs=32, in_chans=128, out_chans=128, kernel_size=1, img_size_y=128, img_size_x=128)
   def test_large_conv_3x3(self): helper_test_conv(bs=32, in_chans=128, out_chans=128, kernel_size=3, img_size_y=130, img_size_x=130)
 
+@unittest.skipIf((Device.DEFAULT == "WEBGPU"), "only big tests")
 class TestSpeed(unittest.TestCase):
   def setUp(self):
     global prefix
