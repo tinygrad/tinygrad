@@ -97,9 +97,8 @@ class AssemblyCodegen(Linearizer):
           ins.append(AssemblyInstruction(UOps.ALU, new_reg, [reg], UnaryOps.NOOP))
           reg = new_reg
         return tor[f"buf{args.i}"], reg, off
-      else:
-        reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{args.i}"], dtype=dtypes.uint64)
-        return reg, None, off
+      reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{args.i}"], dtype=dtypes.uint64)
+      return reg, None, off
 
     ins = []
     ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=self.bufs[i].dtype, scalar=True, bufsize=math.prod(self.bufs[i].shape)), [], f"buf{i}") for i in range(len(self.bufs))]
