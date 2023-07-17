@@ -27,7 +27,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   BinaryOps.SUB: lambda builder,x,y: builder.fsub(x,y, flags=('fast',)),
   BinaryOps.MUL: lambda builder,x,y: builder.fmul(x,y, flags=('fast',)),
   BinaryOps.DIV: lambda builder,x,y: builder.fdiv(x,y, flags=('fast',)),
-  BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y, flags=('fast',)), ir.FloatType()),
+  BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y, flags=('ninf','nsz','arcp','contract','afn','reassoc',)), ir.FloatType()), # include all fast-math flags except nnan "no NaNs"
   BinaryOps.MAX: lambda builder,x,y: builder.select(builder.fcmp_unordered(">", x, y, flags=('fast',)), x, y, flags=('fast',)),
   TernaryOps.MULACC: lambda builder,x,y,z: builder.fadd(builder.fmul(x,y, flags=('fast',)), z, flags=('fast',)),
   TernaryOps.WHERE: lambda builder,x,y,z: builder.select(builder.fcmp_unordered("!=", x, ir.Constant(ir.FloatType(), 0), flags=('fast',)), y, z, flags=('fast',)),
@@ -40,10 +40,6 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
   # create llvm function
   func_dtypes = [{dtypes.float16:ir.HalfType(), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32)}[buf.dtype] for buf in bufs]
   func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in func_dtypes]), name='exec')
-
-  # force llvmlite to allow us to add function attribute then add the attribute
-  func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
-  func.attributes.add('"no-nans-fp-math"="true"')
 
   bb = [ir.IRBuilder(func.append_basic_block("entry"))]
   loop_blocks = []

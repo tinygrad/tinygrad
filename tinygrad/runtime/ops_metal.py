@@ -45,6 +45,7 @@ class MetalProgram:
       self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
     else:
       options = Metal.MTLCompileOptions.alloc().init()
+      options.setFastMathEnabled_(0)
       self.library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
     self.fxn = self.library.newFunctionWithName_(name)
     # hacks to disassemble shader

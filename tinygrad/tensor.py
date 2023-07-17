@@ -517,6 +517,7 @@ class Tensor:
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
   def reciprocal(self): return 1.0/self
+  def isnan(self) -> Tensor: return self != self
 
   # ***** activation functions (unary) *****
   def elu(self, alpha=1.0): return self.relu() - alpha*(1-self.exp()).relu()

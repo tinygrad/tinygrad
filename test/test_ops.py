@@ -1064,6 +1064,15 @@ class TestOps(unittest.TestCase):
     n = (x < 0).where(x, 1).numpy()
     assert np.all(n == 1.)
 
+  def test_is_nan(self):
+    x = Tensor.full((3, 3), float("nan"))
+    n = (x != x).numpy()
+    assert np.all(n == 1.)
+
+    y = Tensor([1, float("nan")])
+    m = (y != y).numpy()
+    assert np.all(m == [0, 1.])
+
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)
