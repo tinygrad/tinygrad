@@ -647,8 +647,8 @@ if __name__ == '__main__':
   # anime lady 2 | --model_to_use uma_trilingual --speaker_id 121
   #######################################################################
   parser = argparse.ArgumentParser()
-  parser.add_argument("--model_to_use", default="voistock", help="Specify the model to use. Default is 'vctk'.")
-  parser.add_argument("--speaker_id", type=int, default=76, help="Specify the speaker ID. Default is 2.")
+  parser.add_argument("--model_to_use", default="vctk", help="Specify the model to use. Default is 'vctk'.")
+  parser.add_argument("--speaker_id", type=int, default=6, help="Specify the speaker ID. Default is 6.")
   parser.add_argument("--out_path", default=None, help="Specify the full output path. Overrides the --out_dir and --name parameter.")
   parser.add_argument("--out_dir", default=str(Path(__file__).parent.parent / "temp"), help="Specify the output path.")
   parser.add_argument("--base_name", default="test", help="Specify the base of the output file name. Default is 'test'.")
