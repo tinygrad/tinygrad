@@ -110,10 +110,11 @@ def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:Li
   local_size.append(var.max+1)
   return f"{{ {prefix} {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
-def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
+def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
   kernel,global_size,local_size,prekernel = [],[],[],[]
   pend_close = None
-  bufnames = [b.name if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(bufs)]
+  #bufnames = [b.name if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(bufs)]
+  bufs, bufnames = [], []
   depth = 0
   def kk(s): kernel.append("  "*depth+s)
 
@@ -181,6 +182,9 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         prekernel.append(lang.render_local(args[0], args[1]))
       else:
         kk(lang.render_local(args[0], args[1]))
+    elif uop == UOps.DEFINE_GLOBAL:
+      bufs.append(args[1])
+      bufnames.append(args[0])
     else:
       raise RuntimeError(f"failed to render {uop}")
 
@@ -202,7 +206,7 @@ class CStyleCodegen(Linearizer):
     self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
     self.linearize()
 
-    prg, global_size, local_size = uops_to_cstyle(self.uops, self.bufs, self.lang)
+    prg, global_size, local_size = uops_to_cstyle(self.uops, self.lang)
 
     # painfully name the function something unique
     if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]

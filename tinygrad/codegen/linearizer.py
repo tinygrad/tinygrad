@@ -7,13 +7,13 @@ from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mn
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
-from tinygrad.runtime.lib import RawConst
+from tinygrad.runtime.lib import RawConst, buf_is_kernel_arg
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode
 VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
+class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); DEFINE_GLOBAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
@@ -277,6 +277,11 @@ class Linearizer:
     # uops
     self.uops: List[UOp] = []
     self.saved_exprs: Dict[LazyOp, List[Token]] = dict()
+
+    # add global buffers
+    for i,x in enumerate(self.bufs):
+      if buf_is_kernel_arg(x):
+        self.uop(UOps.DEFINE_GLOBAL, None, [], (self.get_buffer_name(i), self.bufs[i]))
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
