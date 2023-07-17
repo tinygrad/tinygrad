@@ -150,8 +150,8 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
       ed_slice_arg = [(0,s) if dim != n else (s-1, s) for dim,s in enumerate(x.shape)]
       st_repeat_arg = [(1) if i != n else (pad_st) for i in range(x.ndim)]
       ed_repeat_arg = [(1) if i != n else (pad_ed) for i in range(x.ndim)]
-      pad_st = x.slice(st_slice_arg).repeat(st_repeat_arg)
-      pad_ed = x.slice(ed_slice_arg).repeat(ed_repeat_arg)
+      pad_st = x.shrink(tuple(st_slice_arg)).repeat(st_repeat_arg)
+      pad_ed = x.shrink(tuple(ed_slice_arg)).repeat(ed_repeat_arg)
       x = pad_st.cat(x, dim=n).cat(pad_ed, dim=n)
     return x
   elif mode == "constant":
@@ -566,9 +566,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     # print(x_out.numpy())
     # print(y_out.numpy())
 
-  def _cubic_coeffs(ratio, scale=None, A=-0.75):
-    return Tensor([((A * (ratio + 1) - 5 * A) * (ratio + 1) + 8 * A) * (ratio + 1) - 4 * A, ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1, ((A + 2) * (1 - ratio) - (A + 3)) * (1 - ratio) * (1 - ratio) + 1, ((A * ((1 - ratio) + 1) - 5 * A) * ((1 - ratio) + 1) + 8 * A) * ((1 - ratio) + 1) - 4 * A,])
-
 def CenterCropPad(input, shape, axes=None):
   if not axes: axes = list(range(input.ndim))
   shrink_arg = [(0,i) for i in input.shape]
@@ -582,7 +579,7 @@ def CenterCropPad(input, shape, axes=None):
 
 def OneHot(indices, depth, values, axis=-1):
   depth = int(safe_numpy(depth).item())
-  indices, rank = (indices.cast(dtypes.float32) < 0).where(indices+depth, indices), len(indices.shape)
+  indices, rank = (indices < 0).where(indices+depth, indices), len(indices.shape)
   if axis < 0: axis += rank + 1
   ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
   cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
