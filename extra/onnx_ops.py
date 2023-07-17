@@ -8,22 +8,41 @@ import functools
 from typing import Union, Tuple, Optional
 import math
 
+def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
+  groups = len(inputs) // 3
+  grouped_inputs = [inputs[i::groups] for i in range(groups)]
+  T = safe_numpy(T)
+  R = safe_numpy(R)
+  r = R / (1 + T * decay_factor)
+  ret = []
+  for input in grouped_inputs:
+    X, G, H = input
+    X.grad = norm_coefficient * X + G
+    X.grad.requires_grad = False
+    H.requires_grad = False
+    H.assign(H.detach() + X.grad * X.grad).realize()
+    H_adaptive = H.sqrt() + epsilon
+    X.assign(X.detach() - r * X.grad / H_adaptive)
+    ret.extend([X, H])
+  ret = ret[::2] + ret[1::2]
+  return tuple(ret)
+    
+
 def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
   groups = len(inputs) // 3
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
   T = safe_numpy(T)
   R = safe_numpy(R)
+  beta_adjusted = beta if T > 0 else 1
   ret = []
   for input in grouped_inputs:
     X, G, V = input
-    X.grad = norm_coefficient * X + G
-    V.requires_grad = False
+    X.grad = (norm_coefficient * X + G).realize()
     X.grad.requires_grad = False
-    beta_adjusted = beta if T > 0 else 1
+    V.requires_grad = False
     V.assign(alpha * V + beta_adjusted * X.grad).realize()
     if mode == "standard": X.assign(X.detach() - R * V).realize()
     elif mode == "nesterov": X.assign(X.detach() - R * (X.grad + alpha + V)).realize()
-    print("fuck")
     ret.extend([X, V])
   ret = ret[::2] + ret[1::2]
   return tuple(ret)
@@ -37,7 +56,7 @@ def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0
   ret = []
   for input in grouped_inputs:
     X, G, V, H = input
-    X.grad = norm_coefficient * X + G
+    X.grad = (norm_coefficient * X + G).realize()
     V.requires_grad = False
     H.requires_grad = False
     X.grad.requires_grad = False

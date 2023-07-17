@@ -44,9 +44,6 @@ backend_test.exclude('test_sce_*')
 # no support for reduce with multiply (needs llop)
 backend_test.exclude('test_reduce_prod_*')
 
-# no optimizers (add them?)
-backend_test.exclude('test_adagrad_*')
-
 # disable some creation ops
 backend_test.exclude('test_eyelike_*')
 
