@@ -8,29 +8,27 @@ import functools
 from typing import Union, Tuple, Optional
 import math
 
+# copied from tinygrad/nn/optim.py: LAMB
 def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
-  inputs = [[i.shrink(((idx, idx+1),)) for idx in range(i.shape[0])] for i in inputs]
-  X, G, V, H = inputs
-  R.requires_grad = False
-  T.requires_grad = False
-  for v in V: v.requires_grad = False
-  for h in H: h.requires_grad = False
-  for x, g in zip(X, G): 
-    x.grad = norm_coefficient * x + g
-    x.grad.requires_grad = False
-  adam = optim.Adam(X, lr=R, b1=alpha, b2=beta, eps=epsilon)
-  adam.m = V
-  adam.v = H
-  adam.t = T.reshape(1).cast(dtypes.float32)
-  adam.step()
-  X_new = [(1 - norm_coefficient_post) * p for p in adam.params]
-  V_new = adam.m
-  H_new = adam.v
-  print([p.numpy() for p in adam.params])
-  for x in X_new[1:]: X_new[0] = X_new[0].cat(x) # X_new is wrong
-  for v in V_new[1:]: V_new[0] = V_new[0].cat(v)
-  for h in H_new[1:]: H_new[0] = H_new[0].cat(h)
-  return X_new[0], V_new[0], H_new[0]
+  groups = len(inputs) // 4
+  grouped_inputs = [inputs[i::groups] for i in range(groups)]
+  T = safe_numpy(T)
+  R = safe_numpy(R)
+  ret = []
+  for input in grouped_inputs:
+    X, G, V, H = input
+    X.grad = norm_coefficient * X + G
+    V.requires_grad = False
+    H.requires_grad = False
+    X.grad.requires_grad = False
+    V.assign(alpha * V + (1.0 - alpha) * X.grad).realize()
+    H.assign(beta * H + (1.0 - beta) * (X.grad * X.grad)).realize()
+    up = (V / (1.0 - alpha**T)) / ((H / (1.0 - beta**T)).sqrt() + epsilon) if T > 0 else V / (H.sqrt() + epsilon)
+    X.assign(X.detach() - R * up)
+    X = (1 - norm_coefficient_post) * X
+    ret.extend([X, V, H])
+  ret = ret[::3] + ret[1::3] + ret[2::3]
+  return tuple(ret)
 
 def Unsqueeze(data, axes):
   axes = [len(data.shape) + int(x) if x < 0 else int(x) for x in safe_numpy(axes)]
@@ -416,7 +414,7 @@ def Gather(input, indices, axis=0):
     return ret.reshape(*reshape_arg)
 
 def GatherElements(input, indices, axis):
-  indices = (indices < 0).where(indices+input.shape[axis], indices)
+  indices = (indices < 0).where(indices+input.shape[axis], indices).realize()
   indices = indices.transpose(ax1=axis, ax2=0)
   permute_args = list(range(input.ndim))
   permute_args[0], permute_args[axis] = permute_args[axis], permute_args[0]
