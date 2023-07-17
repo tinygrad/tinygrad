@@ -8,6 +8,26 @@ import functools
 from typing import Union, Tuple, Optional
 import math
 
+def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
+  groups = len(inputs) // 3
+  grouped_inputs = [inputs[i::groups] for i in range(groups)]
+  T = safe_numpy(T)
+  R = safe_numpy(R)
+  ret = []
+  for input in grouped_inputs:
+    X, G, V = input
+    X.grad = norm_coefficient * X + G
+    V.requires_grad = False
+    X.grad.requires_grad = False
+    beta_adjusted = beta if T > 0 else 1
+    V.assign(alpha * V + beta_adjusted * X.grad).realize()
+    if mode == "standard": X.assign(X.detach() - R * V).realize()
+    elif mode == "nesterov": X.assign(X.detach() - R * (X.grad + alpha + V)).realize()
+    print("fuck")
+    ret.extend([X, V])
+  ret = ret[::2] + ret[1::2]
+  return tuple(ret)
+
 # copied from tinygrad/nn/optim.py: LAMB
 def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
   groups = len(inputs) // 4
@@ -24,7 +44,7 @@ def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0
     V.assign(alpha * V + (1.0 - alpha) * X.grad).realize()
     H.assign(beta * H + (1.0 - beta) * (X.grad * X.grad)).realize()
     up = (V / (1.0 - alpha**T)) / ((H / (1.0 - beta**T)).sqrt() + epsilon) if T > 0 else V / (H.sqrt() + epsilon)
-    X.assign(X.detach() - R * up)
+    X.assign(X.detach() - R * up).realize()
     X = (1 - norm_coefficient_post) * X
     ret.extend([X, V, H])
   ret = ret[::3] + ret[1::3] + ret[2::3]
