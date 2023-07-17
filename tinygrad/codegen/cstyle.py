@@ -1,11 +1,9 @@
 from typing import Final, Dict, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Union
 import math, collections
-from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer
+from tinygrad.codegen.linearizer import Linearizer, UOps, UOp
 from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, colored, getenv, prod, DType
-from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
-from tinygrad.lazy import LazyBuffer
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -74,15 +72,14 @@ class CStyleLanguage(NamedTuple):
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
 
-  def render_kernel(self, kernel:List[str], bufs:List[Union[LocalBuffer,LazyBuffer]], bufnames:List[str], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str,List[int],List[int]]:
-    tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(x.dtype, ImageDType) for x in bufs) else ""
-    buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else
-                ("const " if i > 0 else "")+self.buffer_prefix+x.dtype.name+"*"+self.buffer_suffix) for i,x in enumerate(bufs)
-                if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]
+  def render_kernel(self, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str,List[int],List[int]]:
+    tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""
+    buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
+                ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix) for i,(name,dtype) in enumerate(bufs)]
     prg = ''.join([f"{self.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
-    [', '.join([f'{t} {bufnames[i]}' for i,t in buftypes] + self.extra_args)] +
+    [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
-    if self.half_prekernel and any(x.dtype == dtypes.float16 for x in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
+    if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
 
     return prg, global_size[::-1], local_size[::-1]
 
@@ -113,8 +110,7 @@ def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:Li
 def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
   kernel,global_size,local_size,prekernel = [],[],[],[]
   pend_close = None
-  #bufnames = [b.name if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(bufs)]
-  bufs, bufnames = [], []
+  bufs = []
   depth = 0
   def kk(s): kernel.append("  "*depth+s)
 
@@ -183,12 +179,11 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
       else:
         kk(lang.render_local(args[0], args[1]))
     elif uop == UOps.DEFINE_GLOBAL:
-      bufs.append(args[1])
-      bufnames.append(args[0])
+      bufs.append(args)
     else:
       raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(kernel, bufs, bufnames, global_size, local_size, prekernel)
+  return lang.render_kernel(kernel, bufs, global_size, local_size, prekernel)
 
 class CStyleCodegen(Linearizer):
   lang: ClassVar[CStyleLanguage] = CStyleLanguage()

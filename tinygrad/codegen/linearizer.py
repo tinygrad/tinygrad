@@ -281,7 +281,7 @@ class Linearizer:
     # add global buffers
     for i,x in enumerate(self.bufs):
       if buf_is_kernel_arg(x):
-        self.uop(UOps.DEFINE_GLOBAL, None, [], (self.get_buffer_name(i), self.bufs[i]))
+        self.uop(UOps.DEFINE_GLOBAL, None, [], (self.get_buffer_name(i), self.bufs[i].dtype))
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
