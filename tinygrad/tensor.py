@@ -217,7 +217,7 @@ class Tensor:
         continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
-      grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
+      grads = [Tensor(g, device=self.device, requires_grad=False, dtype=self.dtype) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):
         if g is not None and t.requires_grad:

@@ -51,6 +51,7 @@ class SGD(Optimizer):
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g).realize()  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
+      g = g.cast(t.dtype) if g.dtype != t.dtype else g
       t.assign(t.detach() - g * self.lr)
     self.realize(self.b)
     global_steps += 1
