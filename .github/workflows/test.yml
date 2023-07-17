@@ -219,7 +219,7 @@ jobs:
     strategy:
       matrix:
         backend: [llvm, clang-windows, clang-ubuntu, gpu, cuda]
-        tests: ['test_ops.py or test_nn.py', 'not (test_ops.py or models or test_nn.py)', 'models or test_tensor']
+        tests: ['test_ops.py or test_net_speed.py', 'not (test_ops.py or test_tensor.py or test_net_speed.py or models)', 'models or test_tensor.py']
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'clang-windows' && 'windows-latest' || matrix.backend == 'gpu'  && 'ubuntu-20.04' || matrix.backend=='cuda'&&'ubuntu-22.04' || 'ubuntu-latest' }}
