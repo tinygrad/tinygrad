@@ -1,7 +1,20 @@
 # sorted in order of increasing complexity
 from typing import List
-from tinygrad.helpers import dedup
+from tinygrad.helpers import dedup, getenv
 from tinygrad.tensor import Tensor
+
+global_steps = 0
+
+def log_grad(i,g):
+  import numpy as np
+  global global_steps
+  if global_steps == 0:
+    with open('/tmp/grad_logs.csv', 'w') as f:
+      f.write('step,param_dtype,param_number,param_shape,grad_min,grad_10,grad_25,grad_50,grad_75,grad_90,grad_max\n')
+  with open('/tmp/grad_logs.csv', 'a') as f:
+    grad = g.numpy()
+    row = f"{str(global_steps)},{grad.dtype},{i},{'-'.join(map(str,grad.shape))},{grad.min()},{np.percentile(grad, 10)},{np.percentile(grad, 25)},{np.percentile(grad, 50)},{np.percentile(grad, 75)},{np.percentile(grad, 90)},{grad.max()}"
+    f.write(f"{row}\n")  
 
 class Optimizer:
   def __init__(self, params: List[Tensor], lr: float):
@@ -30,14 +43,17 @@ class SGD(Optimizer):
 
   # https://pytorch.org/docs/stable/generated/torch.optim.SGD.html
   def step(self) -> None:
+    global global_steps
     for i, t in enumerate(self.params):
       assert t.grad is not None
+      if getenv('LOG_GRADS', 0) == 1: log_grad(i, t.grad)
       g = t.grad.realize() + self.wd * t.detach()
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g).realize()  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       t.assign(t.detach() - g * self.lr)
     self.realize(self.b)
+    global_steps += 1
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
 def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01): return LAMB(params, lr, b1, b2, eps, wd, adam=True)
