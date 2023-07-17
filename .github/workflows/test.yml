@@ -219,7 +219,8 @@ jobs:
     strategy:
       matrix:
         backend: [llvm, clang-windows, clang-ubuntu, gpu, cuda]
-        tests: ['models or extra', 'not (models or extra or ops.py or tensor.py or optim.py)', 'ops.py or tensor.py or optim.py']
+        # tests: ['models or extra', 'not (models or extra or ops.py or tensor.py or optim.py)', 'ops.py or tensor.py or optim.py']
+        tests: ['']
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'clang-windows' && 'windows-latest' || matrix.backend == 'gpu'  && 'ubuntu-20.04' || matrix.backend=='cuda'&&'ubuntu-22.04' || 'ubuntu-latest' }}
