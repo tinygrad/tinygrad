@@ -127,7 +127,7 @@ jobs:
     - name: Run Pytest
       run: TORCH=1 python -m pytest -s -v -n=auto test/
     - name: Run ONNX
-      run: TORCH=1 python -m pytest test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
 
   
   testopencl:
@@ -199,7 +199,7 @@ jobs:
     #- name: Run dtype test
     #  run: DEBUG=4 METAL=1 python -m pytest test/test_dtype.py
     - name: Run ops test
-      run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
+      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
     # dtype test has issues on test_half_to_int8
 
   testdocker:
