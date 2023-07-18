@@ -54,7 +54,7 @@ class LazyOp:
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
     from tinygrad.lazy import elementwise_op
-    assert self.op in BinaryOps or self.op in UnaryOps
+    assert self.op in BinaryOps or self.op in UnaryOps or self.op in TernaryOps
     return elementwise_op(self.op, *[z.replace_with_movement_ops(ops) for z in self.src], arg=self.arg)   # type: ignore
 
   @property
