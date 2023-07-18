@@ -2,9 +2,9 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
-from tinygrad.jit import TinyJit
+from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 
-@unittest.skipUnless(Device.DEFAULT == "GPU", "JIT is only for GPU")
+@unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE, f"no JIT on {Device.DEFAULT}")
 class TestJit(unittest.TestCase):
   def test_simple_jit(self):
     @TinyJit
