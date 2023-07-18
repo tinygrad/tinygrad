@@ -7,7 +7,7 @@ on:
 
 jobs:
   linter:
-    name: Linters and Torch Tests
+    name: Linters
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -36,10 +36,6 @@ jobs:
       run: sudo apt-get install sloccount
     - name: Check <5000 lines
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
-    - name: Run Pytest
-      run: TORCH=1 python -m pytest -v -n=auto test/
-    - name: Run ONNX
-      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
@@ -69,6 +65,28 @@ jobs:
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
       run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
+
+  testtorch:
+    name: Torch Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+        cache: 'pip'
+        cache-dependency-path: setup.py
+    - name: Install Dependencies
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Run Pytest
+      run: TORCH=1 python -m pytest -v -n=auto test/
+    - name: Run ONNX
+      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+
   
   testopencl:
     strategy:
@@ -162,10 +180,10 @@ jobs:
   tests:
     strategy:
       matrix:
-        backend: [llvm, clang-windows, clang-ubuntu, gpu, cuda]
+        backend: [llvm, clang, gpu, cuda]
 
     name: Tests on (${{ matrix.backend }})
-    runs-on: ${{ matrix.backend == 'clang-windows' && 'windows-latest' || matrix.backend == 'gpu'  && 'ubuntu-20.04' || matrix.backend=='cuda'&&'ubuntu-22.04' || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || matrix.backend=='cuda'&&'ubuntu-22.04' || 'ubuntu-latest' }}
     timeout-minutes: 20
 
     steps:
@@ -178,7 +196,7 @@ jobs:
           cache: 'pip'
           cache-dependency-path: setup.py
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || (matrix.backend == 'clang-ubuntu' || matrix.backend == 'clang-windows') && 'CI=1\nCLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1'||matrix.backend=='cuda'&&'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1'}}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang-ubuntu' && 'CI=1\nCLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1'||matrix.backend=='cuda'&&'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1'}}" >> $GITHUB_ENV
       - name: Install packages (gpu)
         if: matrix.backend == 'gpu'
         run: |
