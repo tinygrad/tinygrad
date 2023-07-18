@@ -58,7 +58,7 @@ jobs:
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
     - name: Run Pytest
-      run: python -m pytest -s -v -n=auto test/
+      run: python -m pytest -v -n=auto test/
   
   testwebgpu:
     name: WebGPU Tests
@@ -78,7 +78,7 @@ jobs:
     # - name: Set Env
     #   run: printf "WEBGPU=1\nWGPU_BACKEND_TYPE=D3D12\n" >> $GITHUB_ENV
     - name: Run Pytest
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -s -v -n=auto test/test_ops.py test/test_speed_v_torch.py test/test_nn.py test/test_jit.py test/test_randomness.py test/test_tensor.py test/test_assign.py test/test_conv.py test/test_nn.py test/test_custom_function.py test/test_conv_shapetracker.py
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -v -n=auto test/test_ops.py test/test_speed_v_torch.py test/test_nn.py test/test_jit.py test/test_randomness.py test/test_tensor.py test/test_assign.py test/test_conv.py test/test_nn.py test/test_custom_function.py test/test_conv_shapetracker.py
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.webgpu.compile_webgpu
     # - name: Install Puppeteer
@@ -125,7 +125,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: TORCH=1 python -m pytest -s -v -n=auto test/
+      run: TORCH=1 python -m pytest -v -n=auto test/
     - name: Run ONNX
       run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
 
@@ -281,4 +281,4 @@ jobs:
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
-        run: python -m pytest -s -v -n=auto test/ ${{matrix.backend=='cuda'&&'--ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"'||''}}
+        run: python -m pytest -v -n=auto test/ ${{matrix.backend=='cuda'&&'--ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"'||''}}
