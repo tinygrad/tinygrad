@@ -198,12 +198,8 @@ def concat_weights(models):
       axis = 0
     lazy_tensors = [data.to(device=Device.DEFAULT) for data in disk_tensors]
     first, rest = lazy_tensors[0], lazy_tensors[1:]
-    return first.cat(*rest, dim=axis).realize()
-  ret = {}
-  for name in (t := tqdm({name: None for model in models for name in model})):
-    t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB @ {name}")
-    ret[name] = convert(name)
-  return ret
+    return first.cat(*rest, dim=axis)
+  return {name: convert(name) for name in {name: None for model in models for name in model}}
 
 # **** main code ****
 
