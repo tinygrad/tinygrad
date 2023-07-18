@@ -60,7 +60,7 @@ jobs:
     - name: Run Pytest
       run: python -m pytest -v -n=auto test/
     - name: Compile EfficientNet to C
-      run: python3 examples/compile_efficientnet.py > recognize.c
+      run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
