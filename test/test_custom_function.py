@@ -3,6 +3,7 @@
 
 import unittest
 import numpy as np
+import time
 from typing import Optional, Tuple
 from tinygrad.helpers import prod, dtypes
 
@@ -31,8 +32,7 @@ def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
 # NOTE: The derivative of atan2 doesn't need a custom op! https://www.liquisearch.com/atan2/derivative
 # In general, it is also optional to write a backward function, just your backward pass won't work without it
 
-from tinygrad.ops import ASTRunner, LazyOp, LoadOps, BinaryOps, UnaryOps
-from tinygrad.lazy import LazyBuffer
+from tinygrad.ops import LazyOp, LoadOps, BinaryOps
 from tinygrad.tensor import Function
 
 class ATan2(Function):
@@ -48,7 +48,7 @@ class ATan2(Function):
 
 # *** third, we use our lovely new mlop in some tests ***
 
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 
 @unittest.skipUnless(Device.DEFAULT in ["CPU", "GPU"], "atan2 is only implemented for CPU and GPU")
 class TestCustomFunction(unittest.TestCase):
@@ -59,7 +59,7 @@ class TestCustomFunction(unittest.TestCase):
 
     # run the forward pass. note: up until the .numpy(), it's all lazy
     c = ATan2.apply(a, b)
-    print(c.numpy())
+    #print(c.numpy())
 
     # check the forward pass (in numpy)
     np.testing.assert_allclose(c.numpy(), np.arctan2(a.numpy(), b.numpy()), atol=1e-5)
@@ -67,24 +67,33 @@ class TestCustomFunction(unittest.TestCase):
   # fun fact, this never actually calls forward, so it works in all the backends
   def test_atan2_backward(self):
     # have to go forward before we can go backward
+    tg_start = time.perf_counter()
     a = Tensor.randn(4,4,requires_grad=True).permute(1,0)
     b = Tensor.randn(4,4,requires_grad=True).permute(1,0)
     c = ATan2.apply(a, b)
 
     # run the backward pass
     c.mean().backward()
+    tg_end = time.perf_counter()
     assert a.grad is not None and b.grad is not None, "tinygrad didn't compute gradients"
-    print(a.grad.numpy())
-    print(b.grad.numpy())
+    #print(a.grad.numpy())
+    #print(b.grad.numpy())
 
-    # check the backward pass (in torch)
-    import torch
-    ta, tb = torch.tensor(a.numpy(), requires_grad=True), torch.tensor(b.numpy(), requires_grad=True)
-    tc = torch.atan2(ta, tb)
-    tc.mean().backward()
-    assert ta.grad is not None and tb.grad is not None, "torch didn't compute gradients"
-    np.testing.assert_allclose(a.grad.numpy(), ta.grad.numpy(), atol=1e-5)
-    np.testing.assert_allclose(b.grad.numpy(), tb.grad.numpy(), atol=1e-5)
+    # check the backward pass (in numpy)
+    np_start = time.perf_counter()
+    na, nb = a.numpy(), b.numpy()
+    nc = np.arctan2(na, nb)
+
+    denom = (na**2 + nb**2)
+    nc_grad = np.ones_like(nc) / np.prod(nc.shape)
+    na_grad = (nb / denom) * nc_grad
+    nb_grad = (-na / denom) * nc_grad
+    np_end = time.perf_counter()
+
+    assert na_grad is not None and nb_grad is not None, "numpy didn't compute gradients"
+    np.testing.assert_allclose(a.grad.numpy(), na_grad, atol=1e-5)
+    np.testing.assert_allclose(b.grad.numpy(), nb_grad, atol=1e-5)
+    print(f"test_atan2_backward tg: {(tg_end-tg_start)*1000:.4f} ms, np: {(np_end-np_start)*1000:.4f} ms")
 
   def test_atan2_jit(self):
     # custom ops even work in the JIT!
