@@ -59,3 +59,22 @@ def f1_score(x, y):
   p = ns / len(xt)
   r = ns / len(yt)
   return 2 * p * r / (p + r)
+
+
+def neg_log_likelihood(y_hat : np.ndarray, true_labels : np.ndarray):
+  """
+    args: y_hat, true_labels
+        : y_hat is the predicted probabilities
+        : true_labels are the ground truth of the predicted probabilities
+  """
+  if len(y_hat) < len(true_labels):
+    padding = np.random.uniform(low=1e-10,high=1e-8,size=(true_labels.shape[0] - y_hat.shape[0], y_hat.shape[1]))
+    y_hat = np.vstack((y_hat, padding))
+  elif len(y_hat) > len(true_labels):
+    padding = np.zeros(y_hat.shape[0] - true_labels.shape[0])
+    true_labels = np.concatenate((true_labels, padding))
+  assert true_labels.shape[0] == y_hat.shape[0], "Invalid dimensions"
+  one_hot_true_labels = np.eye(28)[true_labels.astype(np.int32)]
+  y_hat_true = np.sum(y_hat * one_hot_true_labels, axis=1)
+  neg_log_likelihood = -np.mean(np.log(y_hat_true))
+  return neg_log_likelihood

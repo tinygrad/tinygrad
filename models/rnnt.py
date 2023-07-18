@@ -4,6 +4,8 @@ from tinygrad.nn import Linear, Embedding
 import numpy as np
 from extra.utils import download_file
 from pathlib import Path
+from typing import Optional, Tuple
+from examples.mlperf.metrics import neg_log_likelihood
 
 
 class RNNT:
@@ -13,7 +15,7 @@ class RNNT:
     self.joint = Joint(vocab_size, pred_hidden_size, enc_hidden_size, joint_hidden_size, dropout)
 
   @TinyJit
-  def __call__(self, x, y, hc=None):
+  def __call__(self, x : Tensor, y : Tensor, hc=None):
     f, _ = self.encoder(x, None)
     g, _ = self.prediction(y, hc, Tensor.ones(1, requires_grad=False))
     out = self.joint(f, g)
@@ -21,17 +23,22 @@ class RNNT:
 
   def decode(self, x, x_lens):
     logits, logit_lens = self.encoder(x, x_lens)
+    print(logits.shape)
+    print(logit_lens.shape)
     outputs = []
+    pred_probs = []
     for b in range(logits.shape[0]):
       inseq = logits[b, :, :].unsqueeze(1)
       logit_len = logit_lens[b]
-      seq = self._greedy_decode(inseq, int(np.ceil(logit_len.numpy()).item()))
+      seq, softmax_probs = self._greedy_decode(inseq, int(np.ceil(logit_len.numpy().item())))
+      pred_probs.append(softmax_probs)
       outputs.append(seq)
-    return outputs
+    return outputs, pred_probs
 
   def _greedy_decode(self, logits, logit_len):
     hc = Tensor.zeros(self.prediction.rnn.layers, 2, self.prediction.hidden_size, requires_grad=False)
     labels = []
+    softmax_probs = []
     label = Tensor.zeros(1, 1, requires_grad=False)
     mask = Tensor.zeros(1, requires_grad=False)
     for time_idx in range(logit_len):
@@ -42,17 +49,19 @@ class RNNT:
         if len(labels) > 0:
           mask = (mask + 1).clip(0, 1)
           label = Tensor([[labels[-1] if labels[-1] <= 28 else labels[-1] - 1]], requires_grad=False) + 1 - 1
-        jhc = self._pred_joint(Tensor(logit.numpy()), label, hc, mask)
-        k = np.argmax(jhc[0, 0, :29].numpy(), axis=0)
+        jhc : Tensor = self._pred_joint(Tensor(logit.numpy()), label, hc, mask)
+        softmax_prob = jhc[0,0,:29].softmax(axis=-1).numpy()
+        k = np.argmax(softmax_prob)
         not_blank = k != 28
         if not_blank:
           labels.append(k)
+          softmax_probs.append(softmax_prob[:28])
           hc = jhc[:, :, 29:] + 1 - 1
         added += 1
-    return labels
+    return labels, softmax_probs
 
   @TinyJit
-  def _pred_joint(self, logit, label, hc, mask):
+  def _pred_joint(self, logit, label, hc, mask) -> Tensor:
     g, hc = self.prediction(label, hc, mask)
     j = self.joint(logit, g)[0]
     j = j.pad(((0, 1), (0, 1), (0, 0)))
@@ -103,7 +112,7 @@ class LSTMCell:
     self.weights_hh = Tensor.uniform(hidden_size * 4, hidden_size)
     self.bias_hh = Tensor.uniform(hidden_size * 4)
 
-  def __call__(self, x, hc):
+  def __call__(self, x, hc) -> Tensor:
     gates = x.linear(self.weights_ih.T, self.bias_ih) + hc[:x.shape[0]].linear(self.weights_hh.T, self.bias_hh)
 
     i, f, g, o = gates.chunk(4, 1)
@@ -164,11 +173,11 @@ class Encoder:
     self.stack_time = StackTime(stack_time_factor)
     self.post_rnn = LSTM(stack_time_factor * hidden_size, hidden_size, post_layers, dropout)
 
-  def __call__(self, x, x_lens):
+  def __call__(self, x : Tensor, x_lens : Tensor):
     x, _ = self.pre_rnn(x, None)
     x, x_lens = self.stack_time(x, x_lens)
     x, _ = self.post_rnn(x, None)
-    return x.transpose(0, 1), x_lens
+    return x.transpose(0, 1), x_lens.transpose(0, 1)
 
 
 class Prediction:
@@ -178,7 +187,8 @@ class Prediction:
     self.emb = Embedding(vocab_size - 1, hidden_size)
     self.rnn = LSTM(hidden_size, hidden_size, layers, dropout)
 
-  def __call__(self, x, hc, m):
+  def __call__(self, x : Tensor, hc : Optional[Tuple[Tensor,Tensor]], m):
+    assert x.ndim == 2, "x must be a 2D tensor"
     emb = self.emb(x) * m
     x_, hc = self.rnn(emb.transpose(0, 1), hc)
     return x_.transpose(0, 1), hc
@@ -191,7 +201,7 @@ class Joint:
     self.l1 = Linear(pred_hidden_size + enc_hidden_size, joint_hidden_size)
     self.l2 = Linear(joint_hidden_size, vocab_size)
 
-  def __call__(self, f, g):
+  def __call__(self, f : Tensor, g : Tensor):
     (_, T, H), (B, U, H2) = f.shape, g.shape
     f = f.unsqueeze(2).expand(B, T, U, H)
     g = g.unsqueeze(1).expand(B, T, U, H2)

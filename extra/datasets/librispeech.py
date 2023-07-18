@@ -5,10 +5,8 @@ import numpy as np
 import librosa
 import soundfile as sf
 import tarfile
-import urllib
 from extra.utils import download_file
 from typing import List
-from tinygrad.helpers import dtypes
 
 """
 The dataset has to be downloaded manually from https://www.openslr.org/12/ and put in `datasets/librispeech`.
@@ -21,49 +19,56 @@ for file in $(find * | grep flac); do ffmpeg -i $file -ar 16k "$(dirname $file)/
 
 Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recognition/rnnt/dev-clean-wav.json) has to also be put in `datasets/librispeech`.
 """
-BASEDIR = pathlib.Path(__file__).parent.parent / "librispeech"
-
-os.makedirs(BASEDIR, exist_ok=True)
+BASEDIR = pathlib.Path(__file__).parent.parent / "datasets"
 
 # with open(BASEDIR / "dev-clean-wav.json") as f:
 #   ci = json.load(f)
 
 
 def get_train_files() -> list[dict]:
-    fp = BASEDIR / "train/train-clean-100.tar.gz"
-    fp_target = BASEDIR / "train/train-clean-100"
+    fp = BASEDIR / "librispeech" / "train"/ "train-clean-100.tar.gz"
+    fp_target = BASEDIR / "librispeech" / "train"
     file_name = "train_clean_100.json"
     if not os.path.exists(fp):
-        urllib.request.urlretrieve(
+        download_file(
             "https://www.openslr.org/resources/12/train-clean-100.tar.gz", fp
         )
-    tarfile.open(fp, "r").extractall(fp_target)
-    fp.unlink()
-    generate_transcripts(
-        fp_target, file_name
-    )  # TODO: check if the transcripts already exists, and if yes skip this step.
+    if not os.path.exists(fp_target/"LibriSpeech"):
+        tarfile_ = tarfile.open(fp, "r")
+        tarfile_.extractall(fp_target)
+        tarfile_.close()
+    # fp.unlink()
+    if not os.path.exists(fp_target/"LibriSpeech"/f"{file_name}"):
+        generate_transcripts(
+            fp_target, file_name
+        )  # TODO: check if the transcripts already exists, and if yes skip this step.
     return load_transcripts(fp_target / file_name)
 
 
 def get_validation_files() -> List[dict]:
-    fp = BASEDIR / "val/dev-clean.tar.gz"
-    fp_target = BASEDIR / "val/dev-clean"
+    fp = BASEDIR / "librispeech" / "val"/ "dev-clean.tar.gz"
+    fp_target = BASEDIR / "librispeech" / "val"
     print("fp_target", fp_target)
     file_name = "dev_clean.json"
-    download_file("https://www.openslr.org/resources/12/dev-clean.tar.gz", fp)
-    tarfile.open(fp, "r").extractall(fp_target)
-    fp.unlink()
-    generate_transcripts(
-        fp_target, file_name
-    )  # TODO: check if the transcripts already exists, and if yes skip this step.
-    return load_transcripts(fp_target / file_name)
+    if not os.path.exists(fp):
+        download_file("https://www.openslr.org/resources/12/dev-clean.tar.gz", fp)
+    if not os.path.exists(fp_target/"LibriSpeech"):
+        tarfile_ = tarfile.open(fp, "r")
+        tarfile_.extractall(fp_target)
+        tarfile_.close()
+    # fp.unlink()
+    if not os.path.exists(fp_target/"LibriSpeech"/f"{file_name}"):
+        generate_transcripts(
+            fp_target, file_name
+        )  # TODO: check if the transcripts already exists, and if yes skip this step.
+    return load_transcripts(fp_target / "LibriSpeech" / file_name)
 
 
 def generate_transcripts(file_path: str, file_name: str):
     transcripts: list = []
     transcript_file_paths = [
         os.path.join(root, name)
-        for root, dirs, files in os.walk(file_path, topdown=True)
+        for root, dirs, files in os.walk(file_path/"LibriSpeech"/"dev-clean", topdown=True)
         for name in files
         if name.endswith(".trans.txt")
     ]
@@ -71,18 +76,17 @@ def generate_transcripts(file_path: str, file_name: str):
         with open(t, "r") as transcript_file:
             for line in transcript_file:
                 if line:
-                    decoded_line = line.decode("utf-8").strip()
-                    file_id, transcript = decoded_line.split(" ", 1)
+                    # decoded_line = line.encode("utf-8").strip()
+                    file_id, transcript = line.strip().split(" ", 1)
                     speaker_id, chapter_id = [int(el) for el in file_id.split("-")[:2]]
                     transcripts.append(
                         {
                             "id": file_id,
-                            "file_path": file_path
-                            + f"/{speaker_id}/{chapter_id}/{file_id}.flac",
+                            "file_path": os.path.join(file_path,f"LibriSpeech/dev-clean/{speaker_id}/{chapter_id}/{file_id}.flac"),
                             "transcript": transcript,
                         }
                     )
-    final_transcript_file = file_path / file_name
+    final_transcript_file = file_path / "LibriSpeech" / file_name
     with open(final_transcript_file, "w") as f:
         json.dump(transcripts, f)
 
@@ -99,8 +103,8 @@ FILTER_BANK = np.expand_dims(
 WINDOW = librosa.filters.get_window("hann", 320)
 
 
-def feature_extract(x, x_lens):
-    x_lens = np.ceil((x_lens / 160) / 3).astype(dtypes.int32)
+def feature_extract(x : np.ndarray[np.float32] , x_lens : np.ndarray[np.float32]):
+    x_lens = np.ceil((x_lens / 160) / 3).astype(np.int32)
 
     # pre-emphasis
     x = np.concatenate(
@@ -147,11 +151,11 @@ def feature_extract(x, x_lens):
         features_std, 2
     )
 
-    return features.transpose(2, 0, 1), x_lens.astype(dtypes.float32)
+    return features.transpose(2, 0, 1), x_lens.astype(np.float32)
 
 
 def load_audio_file(file):
-    sample = sf.read(file)[0].astype(dtypes.float32)
+    sample = sf.read(file)[0].astype(np.float32)
     return sample, sample.shape[0]
 
 
@@ -179,5 +183,5 @@ def iterate(bs=1, start=0, mode="val"):
 
 
 if __name__ == "__main__":
-    X, Y = next(iterate(mode="val"))
-    print(X[0].shape, Y.shape)
+    result = next(iterate(mode="val"))
+    print(result)

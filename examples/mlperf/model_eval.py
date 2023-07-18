@@ -136,26 +136,37 @@ def eval_rnnt():
   mdl.load_from_pretrained()
 
   from extra.datasets.librispeech import iterate
-  from examples.mlperf.metrics import word_error_rate
+  from examples.mlperf.metrics import word_error_rate, neg_log_likelihood
 
   LABELS = [" ", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "'"]
 
   c = 0
   scores = 0
   words = 0
+  loss = 0
   st = time.perf_counter()
-  for X, Y in iterate():
+  for X, Y in iterate(bs=5):
+    print(X[0].shape)
+    print(Y.shape)
+    print(X[1].shape)
     mt = time.perf_counter()
-    tt = mdl.decode(Tensor(X[0]), Tensor([X[1]]))
+    tt, pred_probs = mdl.decode(Tensor(X[0]), Tensor([X[1]]))
     et = time.perf_counter()
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
     for n, t in enumerate(tt):
       tnp = np.array(t)
-      _, scores_, words_ = word_error_rate(["".join([LABELS[int(tnp[i])] for i in range(tnp.shape[0])])], [Y[n]])
+      pred_prob = np.array(pred_probs[n])
+      y = np.array([LABELS.index(char.lower()) for char in Y[n]])
+      print('length of y',len(y))
+      x = [LABELS[int(tnp[i])] for i in range(tnp.shape[0])]
+      print('length of x',len(x))
+      _, scores_, words_ = word_error_rate(["".join(x)], [Y[n]])
+      loss_ = neg_log_likelihood(pred_prob,y)
       scores += scores_
       words += words_
+      loss += loss_
     c += len(tt)
-    print(f"WER: {scores/words}, {words} words, raw scores: {scores}, c: {c}")
+    print(f"WER: {scores/words}, {words} words, raw scores: {scores}, loss: {loss} c: {c}")
     st = time.perf_counter()
 
 def eval_bert():
