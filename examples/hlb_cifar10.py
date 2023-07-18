@@ -23,8 +23,8 @@ num_classes = 10
 HALF = getenv('HALF', 1) == 1
 LOSS_SCALE = getenv('HALF_SCALE', 100) 
 
-cifar10_mean = Tensor(np.array([125.30694, 122.95044, 113.86538], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
-cifar10_std = Tensor(np.array([62.993225, 62.08872 , 66.704895], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
+cifar10_mean = Tensor(np.array([125.306918046875, 122.950394140625, 113.86538318359375], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
+cifar10_std = Tensor(np.array([62.993219278136884, 62.08870764001421, 66.70489964063091], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
 
 
 if HALF:
