@@ -87,7 +87,7 @@ jobs:
     - name: Set env (torch)
       run: printf "TORCH=1\n" >> $GITHUB_ENV
     - name: Run ONNX
-      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+      run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
     - name: Set env (clang)
       run: printf "CLANG=1\nENABLE_METHOD_CACHE=1" >> $GITHUB_ENV
     - name: Test CLANG
