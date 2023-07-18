@@ -114,6 +114,12 @@ class TestOps(unittest.TestCase):
         lambda x, a, b: torch.where(x > 0.5, a, b),
         lambda x, a, b: (x > 0.5).where(a, b), forward_only=True)
 
+  def test_where_permute(self):
+    helper_test_op(
+      [(5, 5)],
+      lambda x: torch.where(x > 0.5, 4, 2).permute((1, 0)),
+      lambda x: (x > 0.5).where(4, 2).permute((1, 0)), forward_only=True)
+
   def _test_cmp(self, fxn, reverse=True):
     for shps in [[(3, 4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
       helper_test_op(shps, fxn, fxn, forward_only=True)
@@ -338,6 +344,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
     helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=1), lambda x: Tensor.cumsum(x, axis=1), atol=1e-6)
     helper_test_op([(20,30,40)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2), atol=1e-6)
+    helper_test_op([(20,30,40)], lambda x: torch.cumsum(x, dim=-1), lambda x: Tensor.cumsum(x, axis=-1), atol=1e-6)
   def test_matmul_simple(self):
     helper_test_op([(4), (4,4)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_matmul(self):
@@ -567,6 +574,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,2,3,4)], lambda x: x.movedim((3,0,2,1),(0,1,2,3)), lambda x: x.permute(order=(3,0,2,1)))
     helper_test_op([(3,4,5,6)], lambda x: x.movedim((3,2,1,0),(0,1,2,3)), lambda x: x.permute(order=(3,2,1,0)))
     helper_test_op([()], lambda x: x.permute(()), lambda x: x.permute(()))
+
 
   def test_reshape(self):
     helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,3,6,6)), lambda x: x.reshape(shape=(-1,3,6,6)))
