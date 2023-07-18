@@ -37,8 +37,8 @@ jobs:
     - name: Check <5000 lines
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
 
-  testcpuimagenet:
-    name: CPU and ImageNet to C Tests
+  testcpu:
+    name: CPU Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -59,16 +59,10 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
     - name: Run Pytest
       run: python -m pytest -v -n=auto test/
-    - name: Compile EfficientNet to C
-      run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
-    - name: Compile C to native
-      run: clang -O2 recognize.c -lm -o recognize
-    - name: Test EfficientNet
-      run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
 
-  testtorchclang:
-    name: Torch and CLANG Tests (windows)
-    runs-on: windows-latest
+  testtorch:
+    name: Torch Tests
+    runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
@@ -82,16 +76,34 @@ jobs:
         cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Set env (torch)
-      run: printf "TORCH=1\n" >> $GITHUB_ENV
     - name: Run Pytest
-      run: python -m pytest -v -n=auto test/
+      run: TORCH=1 python -m pytest -v -n=auto test/
     - name: Run ONNX
-      run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+
+  testclangimagenet:
+    name: CLANG and ImageNet to C Test (windows)
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+        cache: 'pip'
+        cache-dependency-path: setup.py
     - name: Set env (CLANG)
       run: printf "CLANG=1\nENABLE_METHOD_CACHE=1" >> $GITHUB_ENV
     - name: CLANG test
       run: python -m pytest -v test/test_gc.py
+    - name: Compile EfficientNet to C
+      run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
+    - name: Compile C to native
+      run: clang -O2 recognize.c -lm -o recognize
+    - name: Test EfficientNet
+      run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
   
   testopencl:
     strategy:
