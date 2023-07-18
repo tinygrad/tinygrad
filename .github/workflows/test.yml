@@ -97,11 +97,11 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Set env (CLANG)
-      run: printf "CLANG=1\nENABLE_METHOD_CACHE=1" >> $GITHUB_ENV
+      run: printf "CLANG=1\nENABLE_METHOD_CACHE=1\nPYTHONPATH="." >> $GITHUB_ENV
     - name: CLANG test
       run: python -m pytest -v test/test_gc.py
     - name: Compile EfficientNet to C
-      run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
+      run: python3 examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
