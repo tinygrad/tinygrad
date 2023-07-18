@@ -80,15 +80,14 @@ class CUDAProgram:
     self.check_device_limit(global_size, local_size)
     
   def check_device_limit(self, global_size, local_size):
-    self.subprg = [self.prg]
+    # self.subprg = [self.prg]
     if global_size[2] > self.max_grid[2]:
-      self.global_size: List[tuple] = []
-      for i in range(global_size[2]//self.max_grid[2]):
-        offset = self.max_grid[2]*(i+1)
-        self.subprg.append(self.prg.replace("gidx0", "(gidx0+%d)"%offset).replace("(gidx0+%d)"%offset, "gidx0", 1))
-        self.global_size.append(tuple([global_size[0], global_size[1], self.max_grid[2]]))
+      self.subprg = [self.prg.replace("gidx0", "(gidx0+%d)"%(self.max_grid[2]*i)).replace("(gidx0+%d)"%(self.max_grid[2]*i), "gidx0", 1) if i>0 else self.prg for i in range(global_size[2]//self.max_grid[2])]
+      self.global_size = [tuple([global_size[0], global_size[1], self.max_grid[2]]) for i in range(global_size[2]//self.max_grid[2])]
+      self.subprg.append(self.prg.replace("gidx0", "(gidx0+%d)"%(self.max_grid[2]*(global_size[2]//self.max_grid[2]))).replace("(gidx0+%d)"%(self.max_grid[2]*(global_size[2]//self.max_grid[2])), "gidx0", 1))
       self.global_size.append(tuple([global_size[0],global_size[1], global_size[2]%self.max_grid[2]]))
     else:
+      self.subprg = [self.prg]
       self.global_size = [global_size]
     self.subprg = [cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8') for prg in self.subprg]
     self.subprg = [cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]) for prg in self.subprg]
