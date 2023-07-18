@@ -480,6 +480,7 @@ class Tensor:
     return (x*w).sum(-1)
 
   def cumsum(self, axis=0):
+    axis = (axis + self.ndim) if axis < 0 else axis
     x = self.permute(*(i for i in range(self.ndim) if i != axis), axis)
     return x.reshape(1, 1, -1, self.shape[axis]).conv2d(Tensor.ones(1, 1, 1, self.shape[axis], dtype=self.dtype, device=self.device), padding=(self.shape[axis]-1, 0, 0, 0)).reshape(*x.shape).permute(*range(axis), self.ndim - 1, *range(axis, self.ndim-1))
 

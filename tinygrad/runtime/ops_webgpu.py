@@ -1,11 +1,11 @@
 import numpy as np
-from wgpu.utils._device import get_default_device
+from wgpu.utils._device import get_default_device  # type: ignore
 from tinygrad.runtime.lib import RawBufferCopyIn
 from tinygrad.helpers import dtypes, DType
 from tinygrad.ops import Compiled
 from tinygrad.codegen.cstyle import CStyleCodegen
 from tinygrad.codegen.wgsl import WGSLLanguage
-import wgpu
+import wgpu  # type: ignore
 
 device = get_default_device()
 
