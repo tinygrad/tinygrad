@@ -17,8 +17,6 @@ pandecode.dump
 vertex.bin
 recognize*
 .idea
-.replit
-replit.nix
 disassemblers/applegpu
 disassemblers/cuda_ioctl_sniffer
 *.prof
@@ -33,3 +31,8 @@ extra/datasets/kits/
 extra/datasets/COCO/
 extra/datasets/audio*
 venv
+examples/webgpu/net.js
+examples/webgpu/net.safetensors
+node_modules
+package.json
+package-lock.json
