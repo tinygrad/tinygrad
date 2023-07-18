@@ -78,11 +78,10 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False):
     all_X, all_Y = _shuffle(all_X, all_Y)
     for batch_start in range(0, all_Y.shape[0], BS):
       batch_end = min(batch_start+BS, all_Y.shape[0])
-      np_batch = all_X[batch_end-BS:batch_end].astype(np.float16 if HALF else np.float32)
-      X = Tensor(np_batch) # batch_end-BS for padding
+      X = all_X[batch_end-BS:batch_end].astype(np.float16 if HALF else np.float32, copy=False) # batch_end-BS for padding
       Y = np.zeros((BS, num_classes), np.float16 if HALF else np.float32)
       Y[range(BS),all_Y[batch_end-BS:batch_end]] = -1.0*num_classes
-      Y = Tensor(Y.reshape(BS, num_classes))
+      Y = Y.reshape(BS, num_classes)
       yield X, Y
     if not is_train: break
     seed += 1
@@ -148,13 +147,13 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   i = 0
   left_batcher, right_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True), fetch_batches(X_train, Y_train, BS=BS, seed=seed+1, is_train=True)
   while i <= STEPS:
-    (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
     mixup_prob = Tensor(np.random.beta(MIXUP_ALPHA, MIXUP_ALPHA, (1, )).astype(np.float16 if HALF else np.float32)).contiguous() if MIXUP_ALPHA > 0 else Tensor.ones(Xr.shape[0], 1, 1, 1, dtype=dtypes.float16 if HALF else dtypes.float32).contiguous()
     if i%50 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
       losses = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
+        Xt, Yt = Tensor(Xt), Tensor(Yt) 
         out, loss = eval_step_jitted(model, Xt, Yt)
         outs = out.numpy().argmax(axis=1)
         correct = outs == Yt.numpy().argmin(axis=1)
@@ -168,11 +167,14 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     train_func = train_step_jitted if getenv('JIT', 1) == 1 else train_step
     GlobalCounters.reset()
     st = time.monotonic()
+    (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
+    Xr, Xl, Yr, Yl = Tensor(Xr), Tensor(Xl), Tensor(Yr), Tensor(Yl)
+    lt = time.monotonic()
     loss = train_func(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
     et = time.monotonic()
     loss_cpu = loss.numpy() 
     cl = time.monotonic()
-    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {loss.dtype} dtype, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(lt-st)*1000.0:7.2f} ms copy-in, {(et-lt)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {loss.dtype} dtype, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
 
 if __name__ == "__main__":
