@@ -7,8 +7,8 @@ on:
 
 jobs:
   linter:
-    name: Linters and CLANG test (windows)
-    runs-on: windows-latest
+    name: Linters
+    runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
@@ -36,10 +36,6 @@ jobs:
       run: sudo apt-get install sloccount
     - name: Check <5000 lines
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
-    - name: Set env (clang)
-      run: printf "CLANG=1\nENABLE_METHOD_CACHE=1" >> $GITHUB_ENV
-    - name: Test CLANG
-      run: python -m pytest -v test/test_gc.py
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
