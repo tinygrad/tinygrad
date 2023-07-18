@@ -400,7 +400,7 @@ class Linearizer:
       # end the local loop, do the local reduce
       if self.group_for_reduce and self.supports_fast_local_reduce and not self.upcast_in_mid_reduce_axes and self.reduceop.op == ReduceOps.SUM:
         self.uop(UOps.BARRIER, None, [], ())
-        self.uop(UOps.LOCAL_REDUCE, None, [local_idxs, acc[0], self.bufs[-1], prod(self.group_for_reduce)], ())
+        self.uop(UOps.LOCAL_REDUCE, None, [], (local_idxs, acc[0], self.bufs[-1], self.sts[-1].size()))
         self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
       elif self.group_for_reduce:
         fake_global_idxs = [x*0 for x in global_idxs]
@@ -445,7 +445,7 @@ class Linearizer:
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
 
     # store
-    mreq_type = {ReduceOps.SUM: MemRequestType.ATOMIC_ADD}[cast(ReduceOps, self.reduceop.op)] if self.forced_global_dims_with_reduce else MemRequestType.REGULAR
+    mreq_type = {ReduceOps.SUM: MemRequestType.ATOMIC_ADD}[cast(ReduceOps, self.reduceop.op)] if self.reduceop and self.forced_global_dims_with_reduce else MemRequestType.REGULAR
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa, mreq_type)
 
     if not self.group_for_reduce:
@@ -490,12 +490,12 @@ class Linearizer:
       self.saved_exprs[x] = cast(List[Token], ordered_ret)
     return self.saved_exprs[x]
 
-  def _can_use_atomics(self, x:UOps) -> Tuple[bool, bool]: # return pair of bools (if can use atomics & if children have reduce op)
+  def _can_use_atomics(self, x) -> Tuple[bool, bool]: # return pair of bools (if can use atomics & if children have reduce op)
     if x.__class__ is not LazyOp: return (True, True)
     if x.op in ReduceOps: return (True, True)
     results = [self._can_use_atomics(v) for v in x.src]
-    if not all([x for x,_ in results]): return (False, False)
-    if not any([y for _,y in results]): return (True, False)
+    if not all(x for x,_ in results): return (False, False)
+    if not any(y for _,y in results): return (True, False)
     if x.op in [BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.DIV]: return (True, True)
     return (False, True)
 
@@ -715,7 +715,7 @@ class Linearizer:
         # early exit
         return
 
-    def round_to_power2(x): return 1<<(x-1).bit_length()
+    def round_to_power2(x): return 1<<(x-1).bit_length() if x > 0 else 0
 
     # TODO: Calculate this based on GPU?
     minimum_preferred_global_dim = 1024
@@ -741,8 +741,8 @@ class Linearizer:
     if self.group_for_reduce and self.can_use_atomics():
       #TODO: Is it possible to improve full_shape with ML (using time metrics)?
       initial_global_dims = self.first_reduce - self.local_dims
-      min_shape = min(st.shape[self.first_reduce + len(self.group_for_reduce)] for st in self.sts if st.shape[self.first_reduce + len(self.group_for_reduce)] != 1)
-      sz = round_to_power2(max(minimum_preferred_global_dim, min(prod(self.full_shape[self.first_reduce+len(self.group_for_reduce):]) // 8, min_shape))) # willing to have only up to 8 ops in the kernel.
+      reduce_shapes = [st.shape[self.first_reduce + len(self.group_for_reduce)] for st in self.sts if st.shape[self.first_reduce + len(self.group_for_reduce)] != 1]
+      sz = round_to_power2(min(prod(self.full_shape[self.first_reduce+len(self.group_for_reduce):]) // 8, min(reduce_shapes) if reduce_shapes else 1)) # willing to have only up to 8 ops in the kernel.
       if sz > 1 and all(st.shape[self.first_reduce + len(self.group_for_reduce)] % sz == 0 or st.shape[self.first_reduce + len(self.group_for_reduce)] == 1 for st in self.sts):
         self.shift_to(self.first_reduce + len(self.group_for_reduce), sz, top=True, insert_before=0)
         self.forced_global_dims_with_reduce = initial_global_dims + 1

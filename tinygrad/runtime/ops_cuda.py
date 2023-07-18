@@ -74,7 +74,7 @@ class CUDAProgram:
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
-    if self.has_atomics_on_output: cuda.memset_d8(args[0]._buf, 0, args[0].size * args[0].dtype.itemsize)
+    if self.has_atomics_on_output: cuda.memset_d8(args[0]._buf, 0, args[0].size * args[0].dtype.itemsize) # type: ignore
     self.prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size))
     if wait:
       end.record()
@@ -82,8 +82,8 @@ class CUDAProgram:
       return start.time_till(end)*1e-3
 
 class CUDACodegen(CStyleCodegen):
-  supports_atomics: bool = True
-  supports_fast_local_reduce: bool = True if not getenv("CUDACPU", 0) else False
+  supports_atomics: bool = not getenv("CUDACPU", 0)
+  supports_fast_local_reduce: bool = not getenv("CUDACPU", 0)
   lang = CStyleLanguage(
     kernel_prefix = "#define warp_size (32)\n__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],

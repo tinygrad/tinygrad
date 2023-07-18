@@ -111,7 +111,7 @@ class dtypes:
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}
 
 # NOTE: Store ops can access memory atomically. This enum determines type of each store op.
-class MemRequestType(Enum): REGULAR = auto(); ATOMIC_ADD = auto()
+class MemRequestType(Enum): REGULAR = auto(); ATOMIC_ADD = auto() # noqa: E702
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0

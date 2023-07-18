@@ -1,7 +1,7 @@
 from tinygrad.codegen.cstyle import render_cl
-from tinygrad.helpers import dtypes, DType
+from tinygrad.helpers import dtypes, DType, MemRequestType
 from tinygrad.codegen.cstyle import CStyleLanguage
-from typing import List, Union
+from typing import List, Union, Set
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 import math
 from typing import Tuple
@@ -29,7 +29,7 @@ class WGSLLanguage(CStyleLanguage):
     else: val = f"{x}" + ("" if dtypes.is_int(var_dtype) else "f")
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
 
-  def render_kernel(self, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str, List[int], List[int]]:
+  def render_kernel(self, kernel:List[str], bufs:List[Tuple[str,DType]], atomics_on_bufs:Set[str], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str, List[int], List[int]]:
     local_size = local_size[::-1] if len(local_size) else [1]
     bind_it = iter(range(len(bufs)))
     prg = "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) var<storage,read_write> {name}: array<{type_map[dtype]}>;" for name,dtype in bufs])
@@ -45,7 +45,7 @@ class WGSLLanguage(CStyleLanguage):
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
     return f"f32({super().render_load(output_dtype, buf_name, buf_dtype, idx, local)})"
 
-  def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
+  def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False, mreq_type=MemRequestType.REGULAR) -> str:
     if buf_dtype != var_dtype:
       var_name = f"{type_map[buf_dtype]}({var_name})"
     return f"{buf_name}[{idx.render(render_cl)}] = {var_name};"

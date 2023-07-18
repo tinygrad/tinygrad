@@ -216,7 +216,10 @@ class LazyBuffer:
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if prod(self.shape) // prod(new_shape) > 8192:
-      reduced_dimensions = [(i, math.gcd(256, old), stride) for i, (old, new, stride) in enumerate(zip(self.shape, new_shape, self.st.real_strides())) if old != new]
+      device_support_atomics = getattr(Device[self.device].codegen, 'supports_atomics') if hasattr(Device[self.device].codegen, 'supports_atomics') else False
+      min_dimension = 32 if op == ReduceOps.SUM and device_support_atomics else 256
+      reduced_dimensions = [(i, math.gcd(min_dimension, old), stride) for i, (old, new, stride) in enumerate(zip(self.shape, new_shape, self.st.real_strides())) if old != new]
+
       dimension_to_split, divisor, _ = max(reduced_dimensions, key=lambda v: v[1]//(v[2] or math.inf) ) # heuristic -> choose largest divisor to split on, penalize large strides
 
       intermediate_input_shape = self.shape[:dimension_to_split] + (self.shape[dimension_to_split]//divisor, divisor) + self.shape[dimension_to_split+1:]
