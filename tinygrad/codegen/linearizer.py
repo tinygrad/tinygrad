@@ -3,7 +3,7 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv
+from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv, MemRequestType
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
@@ -116,6 +116,7 @@ class MemOp(NamedTuple):
   valid: Variable
   dtype: DType
   local: bool
+  mreq_type: MemRequestType = MemRequestType.REGULAR
 
 class ConstOp(NamedTuple):
   value: float
@@ -132,6 +133,7 @@ class UOp(NamedTuple):
 class Linearizer:
   supports_float4: bool = False
   supports_float4_alu: bool = False
+  supports_atomics: bool = True
 
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
@@ -186,6 +188,7 @@ class Linearizer:
     self.local_alias: Dict[int, LocalBuffer] = {}
     self.use_tensor_cores: bool = False
     self.exclude_local_upcast: int = 0
+    self.forced_global_dims_with_reduce: int = 0
 
     # group simplifies
     self.simplify_ones()
@@ -244,7 +247,7 @@ class Linearizer:
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return ret
 
-  def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
+  def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa, mreq_type = MemRequestType.REGULAR) -> None:
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
@@ -272,7 +275,7 @@ class Linearizer:
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-      self.uop(UOps.STORE, None, [var], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer))
+      self.uop(UOps.STORE, None, [var], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer, mreq_type))
 
   def linearize(self):
     # uops
@@ -437,7 +440,8 @@ class Linearizer:
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
 
     # store
-    self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa)
+    mreq_type = {ReduceOps.SUM: MemRequestType.ATOMIC_ADD, ReduceOps.MAX: MemRequestType.ATOMIC_MAX}[cast(ReduceOps, self.reduceop.op)] if self.forced_global_dims_with_reduce else MemRequestType.REGULAR
+    self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa, mreq_type)
 
     if not self.group_for_reduce:
       # end the global+local loop
@@ -481,8 +485,23 @@ class Linearizer:
       self.saved_exprs[x] = cast(List[Token], ordered_ret)
     return self.saved_exprs[x]
 
+  def _can_use_atomics(self, x:UOps) -> Tuple[bool, bool]: # return pair of bools (if can use atomics & if children have reduce op)
+    if x.__class__ is not LazyOp: return (True, True)
+    if x.op in ReduceOps: return (True, True)
+    results = [self._can_use_atomics(v) for v in x.src]
+    if not all([x for x,_ in results]): return (False, False)
+    if not any([y for _,y in results]): return (True, False)
+    if x.op in [BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.DIV]: return (True, True)
+    return (False, True)
+
+  def can_use_atomics(self) -> bool:
+    if not self.supports_atomics: return False
+    return self._can_use_atomics(self.ast)[0]
+
   @property
-  def first_reduce(self) -> int: return [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True)
+  def first_reduce(self) -> int:
+    # NOTE: Global dims are ignored, since there is no real reduce. Reduce in global dims is just atomics.
+    return self.forced_global_dims_with_reduce + [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True)
 
   @property
   def output_shape(self) -> Tuple[int, ...]: return self.sts[0].shape
@@ -706,6 +725,15 @@ class Linearizer:
       if self.sts[0].shape[axes[0]]%4 == 0:
         self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
         self.group_for_reduce.append(4)
+
+    # When has local reduce and kernel is heavy on ops count, use atomics to fill up enough SMs.
+    if self.group_for_reduce and prod(self.full_shape[self.first_reduce+1:]) >= 8 and self.can_use_atomics():
+      #TODO: Is it possible to improve full_shape with ML (using time metrics)?
+      initial_global_dims = self.first_reduce - self.local_dims
+      sz = min(prod(self.full_shape[self.first_reduce+1:]) // 32, min(st.shape[self.first_reduce + len(self.group_for_reduce)] for st in self.sts if st.shape[self.first_reduce + len(self.group_for_reduce)] != 1)) # willing to have only up to 32 ops in the kernel.
+      if sz > 1 and all(st.shape[self.first_reduce + len(self.group_for_reduce)] % sz == 0 or st.shape[self.first_reduce + len(self.group_for_reduce)] == 1 for st in self.sts):
+        self.shift_to(self.first_reduce + len(self.group_for_reduce), sz, top=True, insert_before=0)
+        self.forced_global_dims_with_reduce = initial_global_dims + 1
 
     # now do everything required
     self.required_optimizations()
