@@ -23,6 +23,10 @@ num_classes = 10
 HALF = getenv('HALF', 1) == 1
 LOSS_SCALE = getenv('HALF_SCALE', 100) 
 
+cifar10_mean = Tensor(np.array([125.30694, 122.95044, 113.86538], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
+cifar10_std = Tensor(np.array([62.993225, 62.08872 , 66.704895], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
+
+
 if HALF:
   Tensor.default_type = dtypes.float16
 else:
@@ -78,7 +82,7 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False):
     all_X, all_Y = _shuffle(all_X, all_Y)
     for batch_start in range(0, all_Y.shape[0], BS):
       batch_end = min(batch_start+BS, all_Y.shape[0])
-      X = all_X[batch_end-BS:batch_end].astype(np.float16 if HALF else np.float32, copy=False) # batch_end-BS for padding
+      X = all_X[batch_end-BS:batch_end] # batch_end-BS for padding
       Y = np.zeros((BS, num_classes), np.float16 if HALF else np.float32)
       Y[range(BS),all_Y[batch_end-BS:batch_end]] = -1.0*num_classes
       Y = Y.reshape(BS, num_classes)
@@ -111,6 +115,8 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
 
 
   def train_step(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
+    Xr = (Xr - cifar10_mean) / cifar10_std
+    Xl = (Xl - cifar10_mean) / cifar10_std
     X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
     X = Tensor.where(Tensor.rand(X.shape[0],1,1,1, dtype=X.dtype) < 0.5, X[..., ::-1], X) # flip augmentation
     out = model(X)

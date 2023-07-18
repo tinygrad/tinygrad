@@ -14,8 +14,6 @@ def fetch_mnist():
   return X_train, Y_train, X_test, Y_test
 
 def fetch_cifar(train=True):
-  cifar10_mean = np.array([0.4913997551666284, 0.48215855929893703, 0.4465309133731618], dtype=np.float32).reshape(1,3,1,1)
-  cifar10_std = np.array([0.24703225141799082, 0.24348516474564, 0.26158783926049628], dtype=np.float32).reshape(1,3,1,1)
   fn = os.path.dirname(__file__)+"/cifar-10-python.tar.gz"
   download_file('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz', fn)
   tt = tarfile.open(fn, mode='r:gz')
@@ -25,6 +23,4 @@ def fetch_cifar(train=True):
     db = [pickle.load(tt.extractfile('cifar-10-batches-py/test_batch'), encoding="bytes")]
   X = np.concatenate([x[b'data'].reshape((-1, 3, 32, 32)) for x in db], axis=0)
   Y = np.concatenate([np.array(x[b'labels']) for x in db], axis=0)
-  X = (X / 255.).astype(np.float32)
-  X = (X - cifar10_mean) / cifar10_std
   return X, Y
