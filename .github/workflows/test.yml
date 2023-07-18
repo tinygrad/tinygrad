@@ -82,10 +82,10 @@ jobs:
         cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Run Pytest
-      run: TORCH=1 python -m pytest -v -n=auto test/
     - name: Set env (torch)
       run: printf "TORCH=1\n" >> $GITHUB_ENV
+    - name: Run Pytest
+      run: python -m pytest -v -n=auto test/
     - name: Run ONNX
       run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
     - name: Set env (clang)
