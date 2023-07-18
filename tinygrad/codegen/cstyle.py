@@ -164,11 +164,11 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
       local_index = Variable.sum(vin[0]).render(render_cl)
       kk(f"{{ int lane = {local_index} % warp_size;")
       kk(f"int wid = {local_index} / warp_size;")
-      kk(f"{lang.simd_sum.format(vin[1].render())};")
+      kk(f"{lang.simd_sum.format(vin[1].render())}")
       kk(f"if (lane == 0) {vin[2].name}[wid]={vin[1].render()};")
-      kk(f"{lang.barrier};")
+      kk(f"{lang.barrier}")
       kk(f"{vin[1].render()} = ({local_index} < {vin[3]} / warp_size) ? {vin[2].name}[lane] : 0;")
-      kk(f"if (wid == 0) {lang.simd_sum.format(vin[1].render())}; }}")
+      kk(f"if (wid == 0) {lang.simd_sum.format(vin[1].render())} }}")
     elif uop == UOps.ALU:
       assert newvar is not None
       kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")
