@@ -1,10 +1,11 @@
 from typing import Tuple, Dict, List
+from tinygrad.helpers import DType
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.state import get_state_dict
 import json
 
-def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[str,int,int]],Dict[str,Tensor]]:
+def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
   for fxn,args in run.jit_cache:
     functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
@@ -13,15 +14,15 @@ def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str]
       key = id(arg)
       if key not in bufs:
         if key in special_names:
-          bufs[key] = (special_names[key], arg._memsz, key)
+          bufs[key] = (special_names[key], arg._memsz, arg.dtype, key)
         else:
-          bufs[key] = (f"buf_{bufnum}", arg._memsz, key)
+          bufs[key] = (f"buf_{bufnum}", arg._memsz, arg.dtype, key)
           bufnum += 1
           if i > 0: bufs_to_save[bufs[key][0]] = arg   # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
-    statements.append((fxn.name, cargs, fxn.global_size))
+    statements.append((fxn.name, cargs, fxn.global_size, fxn.local_size))
 
-  return functions, statements, {name:(size, key) for (name,size,key) in bufs.values()}, bufs_to_save
+  return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
 
 def jit_model(model, the_input:Tensor) -> Tuple[TinyJit,Dict[int,str]]:
   @TinyJit
@@ -48,18 +49,18 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
     cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
 
   # buffers (empty + weights)
-  cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,(len,_key) in bufs.items() if name not in ['input', 'outputs']]
+  cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in ['input', 'outputs']]
   # the functions
   cprog += list(functions.values())
   # the net 
-  cprog += ["void net(float* input, float* outputs) {"] + [f"{name}({', '.join(args)});" for (name, args, _global_size) in statements] + ["}"]
+  cprog += ["void net(float* input, float* outputs) {"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
   return '\n'.join(cprog)
 
 def export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names) -> Tuple[str,int,int]:
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
-  kernel_names = ', '.join([name for (name, _args, _global_size) in statements])
-  kernel_calls = '\n    '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size) in enumerate(statements) ])
-  _bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weight_names else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weight_names[_key]}']))") + ";"  for name,(size,_key) in bufs.items()])
+  kernel_names = ', '.join([name for (name, _args, _global_size, _local_size) in statements])
+  kernel_calls = '\n    '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
+  _bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weight_names else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weight_names[_key]}']))") + ";"  for name,(size,dtype,_key) in bufs.items()])
   return f"""
 const getTensorMetadata = (safetensorBuffer) => {{
   const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
@@ -137,6 +138,6 @@ def export_model(model, input:Tensor, target:str):
       prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names)
     else:
       from tinygrad.tensor import Device
-      prg = json.dumps({"backend": Device.DEFAULT, "input_size": bufs['input'][0], "output_size": bufs["outputs"][0], "functions": functions, "statements": [{"kernel":kernel,"args":args, "global_size":global_size} for (kernel, args, global_size) in statements], "buffers": {name:{"size":size, "id": weight_names[_key] if _key in weight_names else ""} for name, (size, _key) in bufs.items()}})
+      prg = json.dumps({"backend": Device.DEFAULT, "input_size": { "size": bufs['input'][0], "dtype": bufs['input'][1].name}, "output_size": {"size": bufs["outputs"][0], "dtype": bufs["outputs"][1].name}, "functions": functions, "statements": [{"kernel":kernel,"args":args, "global_size":global_size, "local_size": local_size} for (kernel, args, global_size, local_size) in statements], "buffers": {name:{"size":size, "dtype": dtype.name, "id": weight_names[_key] if _key in weight_names else ""} for name, (size,dtype,_key) in bufs.items()}})
 
     return prg, bufs['input'][0], bufs['outputs'][0], state
