@@ -110,9 +110,8 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, 
                             total_steps=STEPS, pct_start=PCT_START)
 
-  # JIT at every run
-  @TinyJit 
-  def train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
+
+  def train_step(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
     X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
     X = Tensor.where(Tensor.rand(X.shape[0],1,1,1, dtype=X.dtype) < 0.5, X[..., ::-1], X) # flip augmentation
     out = model(X)
@@ -123,8 +122,14 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
       loss.backward()
       optimizer.step()
       lr_scheduler.step()
+    loss = loss * HALF_SCALE
     return loss.realize()
-
+  
+  # JIT at every run
+  @TinyJit 
+  def train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
+    return train_step(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
+  
   @TinyJit
   def eval_step_jitted(model, X, Y):
     out = model(X, training=False)
@@ -160,11 +165,12 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
         best_eval = acc
         print(f"eval {sum(corrects)}/{len(corrects)} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
     if STEPS == 0 or i==STEPS: break
+    train_func = train_step_jitted if getenv('JIT', 1) == 1 else train_step
     GlobalCounters.reset()
     st = time.monotonic()
-    loss = train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
+    loss = train_func(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
     et = time.monotonic()
-    loss_cpu = loss.numpy() * HALF_SCALE
+    loss_cpu = loss.numpy() 
     cl = time.monotonic()
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {loss.dtype} dtype, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
