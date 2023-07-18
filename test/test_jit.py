@@ -71,5 +71,14 @@ class TestJit(unittest.TestCase):
       c = fun(b)
       np.testing.assert_equal(c.numpy(), fun.a.numpy()+b.numpy())
 
+  def test_jit_handles_constant_input(self):
+    @TinyJit
+    def add(a, b): return (a+b).realize()
+    for _ in range(3):
+      a = Tensor.randn(10, 10)
+      b = Tensor([1])
+      c = add(a, b)
+      np.testing.assert_equal(c.numpy(), a.numpy()+1)
+
 if __name__ == '__main__':
   unittest.main()
