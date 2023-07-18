@@ -8,6 +8,7 @@ import functools
 from typing import Union, Tuple, Optional
 import math
 
+# No idea if these optimizers are correct lol
 def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
   groups = len(inputs) // 3
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
@@ -47,7 +48,7 @@ def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
   ret = ret[::2] + ret[1::2]
   return tuple(ret)
 
-# copied from tinygrad/nn/optim.py: LAMB
+# copied from tinygrad/nn/optim.py: LAMB with some edits
 def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
   groups = len(inputs) // 4
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
@@ -345,7 +346,18 @@ def ReduceLogSum(data, axes=None, keepdims=1, noop_with_empty_axes=0): return da
 def ReduceLogSumExp(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
 
 
-def GlobalAveragePool(X): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
+def GlobalAveragePool(X): 
+  # print(X[:, -9:-8, :, :].numpy())
+  # print((X[:, -9:-8, :, :] == X[:, -8:-7, :, :]).numpy())
+  ret = X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
+  haha = X[:, -50:, :, :].mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
+  print(haha.numpy())
+  print("fuck")
+  # print((ret[:, :, :, :] == ret[:, -8:-7, :, :]).numpy())
+  # print(ret)
+  # print(ret.numpy())
+  # print(ret)
+  return ret
 def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def OptionalHasElement(x: Tensor=None): return Tensor(x is not None and x.numel() > 0, dtype=dtypes.bool)
 def OptionalGetElement(x: Tensor=None): return x if x is not None else Tensor([], dtype=dtypes.float32)
@@ -453,7 +465,7 @@ def Gather(input, indices, axis=0):
     return ret.reshape(*reshape_arg)
 
 def GatherElements(input, indices, axis):
-  indices = (indices < 0).where(indices+input.shape[axis], indices).realize()
+  indices = (indices < 0).where(indices+input.shape[axis], indices)
   indices = indices.transpose(ax1=axis, ax2=0)
   permute_args = list(range(input.ndim))
   permute_args[0], permute_args[axis] = permute_args[axis], permute_args[0]
@@ -521,7 +533,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     ret = [_cubic_interpolation(pixels[0], y), _cubic_interpolation(pixels[1], y), _cubic_interpolation(pixels[2], y), _cubic_interpolation(pixels[3], y)]
     return _cubic_interpolation(ret, x)
       
-  assert scales or sizes and not (scales and sizes), "only scales or sizes, sir"
   if roi:
     roi = safe_numpy(roi)
     roi = [(st,ed) for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])]
@@ -549,11 +560,11 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     else: scales = [si/xs for xs, si in zip(X.shape, sizes)]
     if keep_aspect_ratio_policy == "not_larger":
       scale = min(scales)
-      sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, "round_up")
+      sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, "round_up") # lol, maybe don't use Tensor here?
       sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
     elif keep_aspect_ratio_policy == "not_smaller":
       scale = max(scales)
-      sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, "round_up")
+      sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, "round_up") # lol, maybe don't use Tensor here?
       sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
 
   output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)] 
@@ -582,7 +593,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
         x_shrink = (x_floor, x_floor+2) if x != x_floor else (x_floor, x_floor+1)
         shrink_args = ((0, X.shape[0]), (0, X.shape[1]), y_shrink, x_shrink)
         corners = safe_numpy(X.shrink(shrink_args)) # TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT
-        print(corners)
         x1, x2, y1, y2 = x_floor, x_floor+1, y_floor, y_floor+1
         if x == x_floor and y == y_floor: # TODO UGLY IF STATEMENTS.... https://en.wikipedia.org/wiki/Bilinear_interpolation#Weighted_mean maybe do weighted mean?
           ret.append(corners[0,0,0,0]) 
@@ -594,16 +604,15 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
           ret.append((corners[0,0,0,0] * (x2 - x) * (y2 - y) + corners[0,0,0,1] * (x - x1) * (y2 - y) + corners[0,0,1,0] * (x2 - x) * (y - y1) + corners[0,0,1,1] * (x - x1) * (y - y1)) / ((x2 - x1) * (y2 - y1)))
     return Tensor(ret).reshape(output_shape)
   elif mode == "cubic":
+    raise Exception("cubic interpolation is not implemented")
     print("cubic")
-    pixels = safe_numpy(X.reshape(4,4)).tolist()
+    pixels = safe_numpy(X.reshape(X.shape[-2:])).tolist()
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape_, scales, roi)
     ret = []
     for y in safe_numpy(y_out):
       for x in safe_numpy(x_out):
         ret.append(_bicubic_interpolation(pixels, x, y))
     return Tensor(ret).reshape(output_shape)
-    # print(x_out.numpy())
-    # print(y_out.numpy())
 
 def CenterCropPad(input, shape, axes=None):
   if not axes: axes = list(range(input.ndim))
