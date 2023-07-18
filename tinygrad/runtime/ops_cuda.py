@@ -61,7 +61,6 @@ class CUDAProgram:
   def __init__(self, name:str, prg:str, global_size:List[int], local_size:List[int], binary=False):
     dev = cuda.Context.get_device()
     self.max_grid = [dev.get_attribute(cuda.device_attribute.MAX_GRID_DIM_X), dev.get_attribute(cuda.device_attribute.MAX_GRID_DIM_Y), dev.get_attribute(cuda.device_attribute.MAX_GRID_DIM_Z)]
-    # self.max_block = [dev.get_attribute(cuda.device_attribute.MAX_BLOCK_DIM_X), dev.get_attribute(cuda.device_attribute.MAX_BLOCK_DIM_Y), dev.get_attribute(cuda.device_attribute.MAX_BLOCK_DIM_Z)]
     self.prg = prg
     if not binary:
       try: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8')
@@ -80,15 +79,17 @@ class CUDAProgram:
     self.check_device_limit(global_size, local_size)
     
   def check_device_limit(self, global_size, local_size):
-    # self.subprg = [self.prg]
-    if global_size[2] > self.max_grid[2]:
-      self.subprg = [self.prg.replace("gidx0", "(gidx0+%d)"%(self.max_grid[2]*i)).replace("(gidx0+%d)"%(self.max_grid[2]*i), "gidx0", 1) if i>0 else self.prg for i in range(global_size[2]//self.max_grid[2])]
-      self.global_size = [tuple([global_size[0], global_size[1], self.max_grid[2]]) for i in range(global_size[2]//self.max_grid[2])]
-      self.subprg.append(self.prg.replace("gidx0", "(gidx0+%d)"%(self.max_grid[2]*(global_size[2]//self.max_grid[2]))).replace("(gidx0+%d)"%(self.max_grid[2]*(global_size[2]//self.max_grid[2])), "gidx0", 1))
-      self.global_size.append(tuple([global_size[0],global_size[1], global_size[2]%self.max_grid[2]]))
-    else:
-      self.subprg = [self.prg]
-      self.global_size = [global_size]
+    print(global_size)
+    self.subprg = [self.prg]
+    self.global_size = [global_size]    
+    for gd in range(3):
+      if global_size[gd] > self.max_grid[gd]:
+        self.subprg = [self.prg.replace("gidx%d"%(2-gd), "(gidx%d+%d)"%(2-gd, self.max_grid[gd]*i)).replace("(gidx%d+%d)"%(2-gd, self.max_grid[gd]*i), "gidx%d"%(2-gd), 1) if i>0 else self.prg for i in range(global_size[gd]//self.max_grid[gd])]
+        self.global_size = [tuple([global_size[gid] if gid != gd else self.max_grid[gd] for gid in range(3)]) for i in range(global_size[gd]//self.max_grid[gd])]
+
+        self.subprg.append(self.prg.replace("gidx%d"%(2-gd), "(gidx%d+%d)"%(2-gd, self.max_grid[gd]*(global_size[gd]//self.max_grid[gd]))).replace("(gidx%d+%d)"%(2-gd, self.max_grid[gd]*(global_size[gd]//self.max_grid[gd])), "gidx%d"%(2-gd), 1))
+        self.global_size.append(tuple([global_size[gid] if gid != gd else global_size[gd]%self.max_grid[gd] for gid in range(3)]))
+
     self.subprg = [cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8') for prg in self.subprg]
     self.subprg = [cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]) for prg in self.subprg]
 
