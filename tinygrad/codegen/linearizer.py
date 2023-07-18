@@ -6,14 +6,14 @@ from enum import Enum, auto
 from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
-from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
-from tinygrad.runtime.lib import RawConst
+from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
+from tinygrad.runtime.lib import RawConst, buf_is_kernel_arg
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode
 VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
+class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); DEFINE_GLOBAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
@@ -101,18 +101,25 @@ def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
 # TODO: generic visitor pattern?
 def expand_node(idx:Node) -> List[Node]:
   if isinstance(idx, Variable):  return [idx] if idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)]
-  elif isinstance(idx, NumNode): return [idx]
-  elif isinstance(idx, MulNode): return [x*idx.b for x in expand_node(idx.a)]
-  elif isinstance(idx, SumNode): return [Variable.sum(list(it)) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
-  else: raise NotImplementedError(idx)
+  if isinstance(idx, NumNode): return [idx]
+  if isinstance(idx, MulNode): return [x*idx.b for x in expand_node(idx.a)]
+  if isinstance(idx, SumNode): return [Variable.sum(list(it)) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
+  raise NotImplementedError(idx)
 
 def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
   for x in itertools.product(*[expand_node(idx) for idx in idxs[::-1]]):
     yield x[::-1]
 
 class MemOp(NamedTuple):
-  i: int
+  name: str
   idx: Variable
+  valid: Variable
+  dtype: DType
+  local: bool
+
+class ConstOp(NamedTuple):
+  value: float
+  dtype: DType
   valid: Variable
 
 class UOp(NamedTuple):
@@ -137,6 +144,11 @@ class Linearizer:
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
     self.key = (ast.map_buffers({x:i for i,x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
+
+  def get_buffer_name(self, i):
+    if self.bufs[i].__class__ == LocalBuffer: return self.bufs[i].name
+    assert self.bufs[i].realized.__class__ is not RawConst  # constants shouldn't be loaded with memops
+    return f"data{i}"
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
@@ -200,7 +212,9 @@ class Linearizer:
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
-  def global_load(self, i, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
+  def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
+    if isinstance(self.bufs[i].realized, RawConst): const = self.bufs[i].realized._buf
+
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
@@ -217,15 +231,15 @@ class Linearizer:
         localtype = dtypes._float4 if amt == 4 else dtypes._float2
         if idx.render() != ((idx//amt)*amt).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
-          localtype = dtypes.float
+          localtype = dtypes.float32
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
-        localtype = dtypes.float
+        localtype = dtypes.float32
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
-                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer)) if const is None else \
+                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], ConstOp(const, self.bufs[i].dtype, valid))
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return ret
 
@@ -257,12 +271,17 @@ class Linearizer:
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-      self.uop(UOps.STORE, None, [var], MemOp(i, idx, valid))
+      self.uop(UOps.STORE, None, [var], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer))
 
   def linearize(self):
     # uops
     self.uops: List[UOp] = []
     self.saved_exprs: Dict[LazyOp, List[Token]] = dict()
+
+    # add global buffers
+    for i,x in enumerate(self.bufs):
+      if buf_is_kernel_arg(x):
+        self.uop(UOps.DEFINE_GLOBAL, None, [], (self.get_buffer_name(i), self.bufs[i].dtype))
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
@@ -439,19 +458,20 @@ class Linearizer:
     if x.op in ReduceOps and not do_reduce: return acc
     # MULACC fusion. TODO: this is copied from Interpreted
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
-      x = LazyOp(FusedOps.MULACC, x.src[0].src, x.arg)
+      x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL:
-      x = LazyOp(FusedOps.MULACC, x.src[0].src[0].src, x.arg)
+      x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
     if x.op in {BinaryOps.ADD, BinaryOps.MUL}:
       # Reorder sources to put constants first so get_grouped_maybe_float4 can fold the op
       srcs = sorted(x.src, key=lambda x: (x.realized.__class__ != RawConst) if x.__class__ == LazyBuffer else 0)
       x.src = tuple(srcs)
     if x not in self.saved_exprs:
       values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
-      if x.op.__class__ in {ReduceOps, FusedOps}:
-        ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
+      ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
+      if x.op in ops:
+        ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), ops[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
       else:
-        ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
+        ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op not in {BinaryOps.CMPEQ, TernaryOps.WHERE})]
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
       # scatter
       for i,j in ret:
@@ -662,7 +682,7 @@ class Linearizer:
         self.alias_buffer(buf1, alias_pattern)
 
         # very late upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
-        if self.use_tensor_cores:
+        if self.use_tensor_cores and self.full_shape[s0] % 2 == 0:
           self.shift_to(s0, 2, insert_before=self.first_reduce-self.local_dims)
           self.local_dims += 1
           self.exclude_local_upcast += 1

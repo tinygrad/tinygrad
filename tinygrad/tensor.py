@@ -67,8 +67,11 @@ class Tensor:
 
     if data.__class__ is np.ndarray:
       data = cast(np.ndarray, data)
-      data = LazyBuffer.fromCPU(data)
-      self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
+      if data.size == 1: # constant fold
+        self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtypes.from_np(data.dtype), device, data.flat[0]).reshape(data.shape)
+      else:
+        data = LazyBuffer.fromCPU(data)
+        self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
 
     raise RuntimeError(f"can't create Tensor from {data}")
@@ -166,10 +169,6 @@ class Tensor:
 
   @staticmethod
   def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
-
-  def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
-    cond = (self != 0.0)
-    return cond * input_ + (1.0 - cond) * other
 
   # ***** rng hlops *****
 
@@ -347,6 +346,13 @@ class Tensor:
       slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
     return [self.slice(p) for p in slice_params]
 
+  def squeeze(self, dim=None):
+    if dim is None: return self if 1 not in self.shape else self.reshape(*[size for size in self.shape if size != 1])
+    if dim <= 0 and self.ndim == 0: return self # This is to match PyTorch behavior
+    if not -self.ndim <= dim < self.ndim: raise IndexError(f"Dimension out of range (expected to be in range of [{-self.ndim if self.ndim > 0 else self.ndim-1}, {self.ndim-1 if self.ndim > 0 else self.ndim}], but got {dim})")
+    if dim < 0: dim += self.ndim
+    return self if self.shape[dim] != 1 else self.reshape(*[size for idx, size in enumerate(self.shape) if idx != dim])
+
   def unsqueeze(self, dim):
     if dim < 0: dim = len(self.shape) + dim + 1
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
@@ -419,17 +425,16 @@ class Tensor:
       xup = xup.slice(slc_prefix + flatten(((0,k), (0,o), (0,1)) for k,o in zip(k_, o_)))
       xup = xup.reshape(*prefix, *flatten((k,o) for k,o in zip(k_, o_)))
       return xup.permute(*range(len(prefix)), *[len(prefix)+i*2+1 for i in range(len(k_))], *[len(prefix)+i*2 for i in range(len(k_))])
-    else:
-      # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
-      o_ = [(i+(s-k))//s for i,s,k in zip(i_, s_, k_)]
-      xup = self.slice(slc_prefix + [(0,o*s) for o,s in zip(o_, s_)])
-      xup = xup.reshape(*prefix, *([1]*len(_insert_dims)), *flatten(((o, s) for o,s in zip(o_, s_))))
-      if len(_insert_dims):
-        xup = xup.expand(*prefix, *_insert_dims, *flatten(((o, s) for o,s in zip(o_, s_))))
-        prefix += _insert_dims
-        slc_prefix += [(0,x) for x in _insert_dims]
-      xup = xup.slice(slc_prefix + flatten(((0,o), (0,k)) for o,k in zip(o_, k_)))
-      return xup.permute(*range(len(prefix)), *[len(prefix)+i*2 for i in range(len(k_))], *[len(prefix)+i*2+1 for i in range(len(k_))])
+    # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
+    o_ = [(i+(s-k))//s for i,s,k in zip(i_, s_, k_)]
+    xup = self.slice(slc_prefix + [(0,o*s) for o,s in zip(o_, s_)])
+    xup = xup.reshape(*prefix, *([1]*len(_insert_dims)), *flatten(((o, s) for o,s in zip(o_, s_))))
+    if len(_insert_dims):
+      xup = xup.expand(*prefix, *_insert_dims, *flatten(((o, s) for o,s in zip(o_, s_))))
+      prefix += _insert_dims
+      slc_prefix += [(0,x) for x in _insert_dims]
+    xup = xup.slice(slc_prefix + flatten(((0,o), (0,k)) for o,k in zip(o_, k_)))
+    return xup.permute(*range(len(prefix)), *[len(prefix)+i*2 for i in range(len(k_))], *[len(prefix)+i*2+1 for i in range(len(k_))])
 
   # NOTE: these work for more than 2D
   def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
@@ -476,6 +481,7 @@ class Tensor:
     return (x*w).sum(-1)
 
   def cumsum(self, axis=0):
+    axis = (axis + self.ndim) if axis < 0 else axis
     x = self.permute(*(i for i in range(self.ndim) if i != axis), axis)
     return x.reshape(1, 1, -1, self.shape[axis]).conv2d(Tensor.ones(1, 1, 1, self.shape[axis], dtype=self.dtype, device=self.device), padding=(self.shape[axis]-1, 0, 0, 0)).reshape(*x.shape).permute(*range(axis), self.ndim - 1, *range(axis, self.ndim-1))
 
@@ -572,6 +578,31 @@ class Tensor:
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)
   def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
   def eq(self, x) -> Tensor: return self._broadcasted(mlops.Equal, x, False)
+
+  # ***** broadcasted trinary mlops *****
+
+  def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
+    # TODO: ensure self is non-differentiable, could mess with ceil/float though
+    dtype = self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
+    x: Tensor = self
+    y: Tensor = Tensor(cast(float, input_), device=self.device, requires_grad=False, dtype=dtype) if input_.__class__ is not Tensor else cast(Tensor, input_)
+    z: Tensor = Tensor(cast(float, other), device=self.device, requires_grad=False, dtype=dtype) if other.__class__ is not Tensor else cast(Tensor, other)
+    if x.shape == y.shape and y.shape == z.shape: return mlops.Where.apply(x, y, z)
+
+    # TODO refactor this code along with the binary version above
+    len_x_shape, len_y_shape, len_z_shape = len(x.shape), len(y.shape), len(z.shape)
+    max_shape = max(len_x_shape, len_y_shape, len_z_shape)
+
+    if len_x_shape != max_shape: x = x.reshape((1,) * (max_shape - len_x_shape) + x.shape)
+    if len_y_shape != max_shape: y = y.reshape((1,) * (max_shape - len_y_shape) + y.shape)
+    if len_z_shape != max_shape: z = z.reshape((1,) * (max_shape - len_z_shape) + z.shape)
+
+    shape_ret = tuple([max(x, y, z) for x, y, z in zip(x.shape, y.shape, z.shape)])
+    if x.shape != shape_ret: x = x.expand(shape_ret)
+    if y.shape != shape_ret: y = y.expand(shape_ret)
+    if z.shape != shape_ret: z = z.expand(shape_ret)
+
+    return mlops.Where.apply(x, y, z)
 
   # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
 

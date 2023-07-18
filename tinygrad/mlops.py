@@ -1,6 +1,6 @@
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort, ShapeType
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 import math
@@ -160,6 +160,19 @@ class Div(Function):
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output.binary_op(BinaryOps.DIV, self.y) if self.needs_input_grad[0] else None, \
            grad_output.const_like(0).binary_op(BinaryOps.SUB, grad_output).binary_op(BinaryOps.MUL, self.x).binary_op(BinaryOps.DIV, self.y.binary_op(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None
+
+# ************* ternary ops *************
+
+class Where(Function):
+  __slots__ = "x"
+  def forward(self, x:LazyBuffer, y:LazyBuffer, z:LazyBuffer) -> LazyBuffer:
+    self.x = x
+    return x.ternary_op(TernaryOps.WHERE, y, z)
+
+  def backward(self, grad_output:LazyBuffer):
+    return None, \
+           self.x.ternary_op(TernaryOps.WHERE, grad_output, self.x.const_like(0)) if self.needs_input_grad[1] else None, \
+           self.x.ternary_op(TernaryOps.WHERE, self.x.const_like(0), grad_output) if self.needs_input_grad[2] else None
 
 # ************* movement ops *************
 

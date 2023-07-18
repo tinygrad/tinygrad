@@ -1,6 +1,6 @@
 # Adding a new accelerator to tinygrad
 
-It's pretty easy to add a new accelerator to tinygrad. All you need to do is implement a total of 26 (optionally 27) low level ops. Then tinygrad takes care of the rest, handling derivatives and syntactic sugar.
+It's pretty easy to add a new accelerator to tinygrad. All you need to do is implement a total of 27 (optionally 28) low level ops. Then tinygrad takes care of the rest, handling derivatives and syntactic sugar.
 
 ## llops
 
@@ -12,7 +12,8 @@ reduce_op (SUM, MAX)                                         # A -> B (smaller s
 binary_op (ADD, SUB, MUL, DIV, CMPEQ, MAX)                   # A + A -> A (all the same size)
 movement_op (EXPAND, RESHAPE, PERMUTE, PAD, SHRINK, STRIDE)  # A -> B (different size)
 load_op   (EMPTY, RAND, CONST, FROM, CONTIGUOUS, CUSTOM)     # -> A   (initialize data on device)
-fused_op [[optional]] (MULACC)                               # A * A -> B
+ternary_op (WHERE)                                           # A, A, A -> A
+ternary_op [[optional]] (MULACC)                             # A * A -> B
 ```
 
 ## mlops
@@ -23,6 +24,7 @@ Relu, Log, Exp, Sin                            # unary ops
 Sum, Max                                       # reduce ops (with axis argument)
 Maximum, Add, Sub, Mul, Pow, Div, Equal        # binary ops (no broadcasting, use expand)
 Expand, Reshape, Permute, Pad, Shrink, Flip    # movement ops
+Where                                          # ternary ops
 ```
 These are implemented in [mlops.py](/tinygrad/mlops.py).
 
