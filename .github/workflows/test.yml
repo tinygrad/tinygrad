@@ -37,8 +37,8 @@ jobs:
     - name: Check <5000 lines
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
 
-  testcpu:
-    name: CPU Tests
+  testcpuimagenet:
+    name: CPU and ImageNet to C Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -59,6 +59,12 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
     - name: Run Pytest
       run: python -m pytest -v -n=auto test/
+    - name: Compile EfficientNet to C
+      run: python3 examples/compile_efficientnet.py > recognize.c
+    - name: Compile C to native
+      run: clang -O2 recognize.c -lm -o recognize
+    - name: Test EfficientNet
+      run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
 
   testtorch:
     name: Torch Tests
@@ -81,8 +87,8 @@ jobs:
     - name: Run ONNX
       run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
 
-  testclangimagenet:
-    name: CLANG and ImageNet to C Test (windows)
+  testclang:
+    name: CLANG (windows)
     runs-on: windows-latest
 
     steps:
@@ -100,12 +106,6 @@ jobs:
       run: printf 'CLANG=1\nENABLE_METHOD_CACHE=1\nPYTHONPATH="."' >> $GITHUB_ENV
     - name: CLANG test
       run: python -m pytest -v test/test_gc.py
-    - name: Compile EfficientNet to C
-      run: python3 examples/compile_efficientnet.py > recognize.c
-    - name: Compile C to native
-      run: clang -O2 recognize.c -lm -o recognize
-    - name: Test EfficientNet
-      run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
   
   testopencl:
     strategy:
