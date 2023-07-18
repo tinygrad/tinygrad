@@ -21,12 +21,12 @@ def set_seed(seed):
 
 num_classes = 10
 HALF = getenv('HALF', 1) == 1
-HALF_SCALE = getenv('HALF_SCALE', 100) 
+LOSS_SCALE = getenv('HALF_SCALE', 100) 
 
 if HALF:
   Tensor.default_type = dtypes.float16
 else:
-  HALF_SCALE = 1
+  LOSS_SCALE = 1
 
 
 class ConvGroup:
@@ -116,13 +116,13 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     X = Tensor.where(Tensor.rand(X.shape[0],1,1,1, dtype=X.dtype) < 0.5, X[..., ::-1], X) # flip augmentation
     out = model(X)
     loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
-    loss = loss/HALF_SCALE
+    loss = loss/LOSS_SCALE
     if not getenv("DISABLE_BACKWARD"):
       optimizer.zero_grad()
       loss.backward()
       optimizer.step()
       lr_scheduler.step()
-    loss = loss * HALF_SCALE
+    loss = loss * LOSS_SCALE
     return loss.realize()
   
   # JIT at every run
