@@ -66,9 +66,9 @@ jobs:
     - name: Test EfficientNet
       run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
 
-  testtorch:
-    name: Torch Tests
-    runs-on: ubuntu-latest
+  testtorchclang:
+    name: Torch and CLANG Tests (windows)
+    runs-on: windows-latest
     timeout-minutes: 20
 
     steps:
@@ -82,11 +82,16 @@ jobs:
         cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Set env (torch)
+      run: printf "TORCH=1\n" >> $GITHUB_ENV
     - name: Run Pytest
-      run: TORCH=1 python -m pytest -v -n=auto test/
+      run: python -m pytest -v -n=auto test/
     - name: Run ONNX
-      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
-
+      run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+    - name: Set env (CLANG)
+      run: printf "CLANG=1\nENABLE_METHOD_CACHE=1" >> $GITHUB_ENV
+    - name: CLANG test
+      run: python -m pytest -v test/test_gc.py
   
   testopencl:
     strategy:
