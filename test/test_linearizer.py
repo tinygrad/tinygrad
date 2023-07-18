@@ -1,3 +1,4 @@
+import numpy as np
 import unittest
 
 from tinygrad.lazy import Device
@@ -15,7 +16,7 @@ class TestLinearizer(unittest.TestCase):
     GlobalCounters.cache = None
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.realized, b.lazydata.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
-    assert (np_c == c.numpy()).all()
+    np.testing.assert_allclose(np_c, c.numpy())
 
 if __name__ == '__main__':
   unittest.main()
