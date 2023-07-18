@@ -30,4 +30,4 @@ class ClangCodegen(CStyleCodegen):
   lang = CStyleLanguage(buffer_suffix=" restrict")
   supports_float4: bool = False
 
-ClangBuffer = Compiled(RawMallocBuffer, fromimport("tinygrad.codegen.assembly_arm", "ARMCodegen") if getenv("ARM") else ClangCodegen, ClangProgram)
+ClangBuffer = Compiled(RawMallocBuffer, fromimport("extra.assembly.assembly_arm", "ARMCodegen") if getenv("ARM") else ClangCodegen, ClangProgram)

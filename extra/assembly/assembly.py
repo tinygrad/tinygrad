@@ -14,7 +14,7 @@ class Register(NamedTuple):
   nm:str
   dtype:DType
   scalar:bool
-  bufsize:int = 0
+  #bufsize:int = 0
   off:Optional[int] = None
   def __repr__(self): return self.nm if self.off is None else f"{self.nm}:{self.off}"
   def subregs(self):
@@ -45,10 +45,10 @@ class AssemblyCodegen(Linearizer):
 
     cnts:DefaultDict[Tuple[DType, bool], int] = defaultdict(int)
     tor: Dict[Any, Register] = {}
-    def newreg(tok, dtype=dtypes.float32, scalar=False, bufsize=None):
+    def newreg(tok, dtype=dtypes.float32, scalar=False):
       nonlocal cnts, tor
       if isinstance(tok, Token): dtype = tok.dtype  # this
-      tor[tok] = ret = Register(f"%{type_to_letter((dtype, scalar))}{cnts[(dtype, scalar)]}", dtype, scalar, bufsize)
+      tor[tok] = ret = Register(f"%{type_to_letter((dtype, scalar))}{cnts[(dtype, scalar)]}", dtype, scalar)
       if dtype == dtypes._float4:
         for off in range(4):
           tor[Token(tok.name, tok.dtype, off)] = Register(ret.nm, dtypes.float, ret.scalar, off)
@@ -83,7 +83,7 @@ class AssemblyCodegen(Linearizer):
       AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: render_alu(BinaryOps.MUL, a, b.render(ops,ctx), dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
     def addr_w_offset(args):
-      idx = args.idx*self.bufs[args.i].dtype.itemsize
+      idx = args.idx*args.dtype.itemsize
       off = 0  # TODO: should this be None?
       if isinstance(idx, SumNode):
         nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
@@ -97,11 +97,13 @@ class AssemblyCodegen(Linearizer):
           ins.append(AssemblyInstruction(UOps.ALU, new_reg, [reg], UnaryOps.NOOP))
           reg = new_reg
         return tor[f"buf{args.i}"], reg, off
-      reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{args.i}"], dtype=dtypes.uint64)
+      reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[args[0]], dtype=dtypes.uint64)
       return reg, None, off
 
     ins = []
-    ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=self.bufs[i].dtype, scalar=True, bufsize=math.prod(self.bufs[i].shape)), [], f"buf{i}") for i in range(len(self.bufs))]
+    #ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=self.bufs[i].dtype, scalar=True, bufsize=math.prod(self.bufs[i].shape)), [], f"buf{i}") for i in range(len(self.bufs))]
+    ins += [AssemblyInstruction(UOps.DEFINE_GLOBAL, newreg(args[0], dtype=args[1], scalar=True), [], args[0]) for uop,_,_,args in self.uops if uop == UOps.DEFINE_GLOBAL]
+
     global_size, local_size = [], []
     skipload_branch = 0
     for uop,newvar,vin,args in self.uops:
@@ -111,7 +113,6 @@ class AssemblyCodegen(Linearizer):
         ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
         ins.append(AssemblyInstruction(UOps.ALU, newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
       elif uop == UOps.LOOP:
-        # TODO: check for CPU
         if args[1] == "global" and not getenv('CLANG'):
           for i,var in enumerate(args[0]):
             global_size.append(var.max+1)
@@ -164,13 +165,13 @@ class AssemblyCodegen(Linearizer):
             ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
         if args.valid.max == 1:
           # NOTE: you can't compute the index in here, because it assumes it's all available later
-          ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if args.i != -1 else 'shared')))
+          ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' ))) #if args.i != -1 else 'shared')
         if args.valid.min == 0 and args.valid.max == 1:
           ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
           skipload_branch += 1
       elif uop == UOps.STORE:
         idx, treg, off = addr_w_offset(args)
-        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if args.i != -1 else 'shared')))
+        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global'))) #if args.i != -1 else 'shared')
 
     # define registers
     ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)) for dtype,c in cnts.items()] + ins
