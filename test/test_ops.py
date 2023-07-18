@@ -570,7 +570,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x.permute(()), lambda x: x.permute(()))
 
   def test_transpose_where(self):
-    Tensor.rand(5,5).ceil().permute((1, 0))
+    helper_test_op([(5, 5)], lambda x: x.ceil().permute((0, 1)), lambda x: x.ceil().permute((0, 1)), forward_only=True)
 
   def test_reshape(self):
     helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,3,6,6)), lambda x: x.reshape(shape=(-1,3,6,6)))
