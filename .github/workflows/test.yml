@@ -133,8 +133,8 @@ jobs:
   testopencl:
     strategy:
       matrix:
-        task: [opt, openpilot, image]
-    name: ${{ matrix.task=='opt'&&'GPU OPT Tests'||matrix.task=='image'&&'Test GPU IMAGE ops'||'openpilot (OpenCL) Tests'}}
+        task: [optimage, openpilot]
+    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'||'openpilot (OpenCL) Tests'}}
     runs-on: ubuntu-20.04
     timeout-minutes: 20
 
@@ -158,11 +158,16 @@ jobs:
 
       - name: Install Dependencies
         run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - if: ${{ matrix.task == 'opt' }}
+      - if: ${{ matrix.task == 'optimage' }}
         name: Run Optimizer Test (OPT 2 and 3)
         run: |
           PYTHONPATH="." OPT=2 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
           PYTHONPATH="." OPT=3 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
+      - if: ${{ matrix.task == 'optimage'}}
+        name: Test GPU IMAGE ops
+        run: |
+          GPU=1 IMAGE=1 python3 -m pytest -n=auto test/test_ops.py
+          FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 -m pytest -n=auto test/test_ops.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model compile and size
         run: |
@@ -174,11 +179,6 @@ jobs:
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test tensor core ops
         run: GPU=1 TC=2 python3 -m pytest -n=auto test/test_ops.py
-      - if: ${{ matrix.task == 'image'}}
-        name: Test GPU IMAGE ops
-        run: |
-          GPU=1 IMAGE=1 python3 -m pytest -n=auto test/test_ops.py
-          FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 -m pytest -n=auto test/test_ops.py
 
   testmetal:
     name: Metal Tests
