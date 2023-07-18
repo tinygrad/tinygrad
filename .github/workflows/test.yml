@@ -37,8 +37,8 @@ jobs:
     - name: Check <5000 lines
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
 
-  testcpu:
-    name: CPU Tests
+  testcpuimagenet:
+    name: CPU and ImageNet to C Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -59,23 +59,6 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
     - name: Run Pytest
       run: python -m pytest -v -n=auto test/
-  
-  testimagenet:
-    name: ImageNet to C Compile Test
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-        cache: 'pip'
-        cache-dependency-path: setup.py
-    - name: Install Dependencies
-      run: pip install -e .
     - name: Compile EfficientNet to C
       run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
