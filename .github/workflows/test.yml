@@ -239,9 +239,13 @@ jobs:
       run: PYTHONPATH="." METAL=1 python3 test/external/external_test_speed_llama.py
     #- name: Run dtype test
     #  run: DEBUG=4 METAL=1 python -m pytest test/test_dtype.py
+    # dtype test has issues on test_half_to_int8
     - name: Run ops test
       run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
-    # dtype test has issues on test_half_to_int8
+    - name: Run JIT test
+      run: DEBUG=2 METAL=1 python -m pytest test/test_jit.py
+    # TODO: why not testing the whole test/?
+
 
   testdocker:
     name: Docker Test
