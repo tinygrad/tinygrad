@@ -37,7 +37,7 @@ def unwrap(x):
 
 class MetalProgram:
   def __init__(self, name:str, prg:str):
-    self.has_atomics_output = prg.find("atomic_") != -1
+    self.has_atomics_on_output = prg.find("atomic_") != -1
     if METAL_XCODE:
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
@@ -62,10 +62,9 @@ class MetalProgram:
   def __call__(self, global_size, local_size, *bufs, wait=False):
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
     command_buffer = METAL.mtl_queue.commandBuffer()
-    if self.has_atomics_output:
-      # TODO: Think of supporting max operations as well, since currently we cannot fillup metal buffers with -inf.
+    if self.has_atomics_on_output:
       blit_encoder = command_buffer.blitCommandEncoder()
-      blit_encoder.fillBuffer_range_value_(bufs[0]._buf, Metal.NSRange(0, bufs[0].size * 4), 0.0)
+      blit_encoder.fillBuffer_range_value_(bufs[0]._buf, Metal.NSRange(0, bufs[0].size * bufs[0].dtype.itemsize), 0.0)
       blit_encoder.endEncoding()
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)

@@ -440,7 +440,7 @@ class Linearizer:
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
 
     # store
-    mreq_type = {ReduceOps.SUM: MemRequestType.ATOMIC_ADD, ReduceOps.MAX: MemRequestType.ATOMIC_MAX}[cast(ReduceOps, self.reduceop.op)] if self.forced_global_dims_with_reduce else MemRequestType.REGULAR
+    mreq_type = {ReduceOps.SUM: MemRequestType.ATOMIC_ADD}[cast(ReduceOps, self.reduceop.op)] if self.forced_global_dims_with_reduce else MemRequestType.REGULAR
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa, mreq_type)
 
     if not self.group_for_reduce:
@@ -496,6 +496,7 @@ class Linearizer:
 
   def can_use_atomics(self) -> bool:
     if not self.supports_atomics: return False
+    if not self.reduceop or self.reduceop.op != ReduceOps.SUM: return False
     return self._can_use_atomics(self.ast)[0]
 
   @property

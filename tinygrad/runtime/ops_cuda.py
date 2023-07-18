@@ -53,6 +53,7 @@ else:
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
+    self.has_atomics_on_output = prg.find("atomic") != -1
     if not binary:
       try: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8')
       except cuda.CompileError as e:
@@ -73,6 +74,7 @@ class CUDAProgram:
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
+    if self.has_atomics_on_output: cuda.memset_d8(args[0]._buf, 0, args[0].size * args[0].dtype.itemsize)
     self.prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size))
     if wait:
       end.record()
@@ -80,10 +82,12 @@ class CUDAProgram:
       return start.time_till(end)*1e-3
 
 class CUDACodegen(CStyleCodegen):
+  supports_atomics: bool = True
   lang = CStyleLanguage(
     kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
+    atomic_add = "atomicAdd({0}, {1})",
     half_prekernel = """
       #include <cuda_fp16.h>
       struct __align__(8) half4 {
