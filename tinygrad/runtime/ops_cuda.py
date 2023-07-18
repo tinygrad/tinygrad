@@ -83,11 +83,13 @@ class CUDAProgram:
 
 class CUDACodegen(CStyleCodegen):
   supports_atomics: bool = True
+  supports_fast_local_reduce: bool = True
   lang = CStyleLanguage(
-    kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
+    kernel_prefix = "#define warp_size (32)\n__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
     atomic_add = "atomicAdd({0}, {1})",
+    simd_sum = "for (int __offset = warp_size/2; __offset > 0; __offset /= 2) {0} += __shfl_down_sync(0xFFFFFFFF, {0}, __offset)",
     half_prekernel = """
       #include <cuda_fp16.h>
       struct __align__(8) half4 {

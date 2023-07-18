@@ -13,7 +13,7 @@ from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode
 VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); DEFINE_GLOBAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
+class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); DEFINE_GLOBAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); LOCAL_REDUCE = auto(); \
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
@@ -133,7 +133,8 @@ class UOp(NamedTuple):
 class Linearizer:
   supports_float4: bool = False
   supports_float4_alu: bool = False
-  supports_atomics: bool = True
+  supports_atomics: bool = False
+  supports_fast_local_reduce: bool = False
 
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
@@ -397,7 +398,11 @@ class Linearizer:
       self.uop(UOps.ENDLOOP, None, [], (reduce_idxs, "reduce"))
 
       # end the local loop, do the local reduce
-      if self.group_for_reduce:
+      if self.group_for_reduce and self.supports_fast_local_reduce and not self.upcast_in_mid_reduce_axes and self.reduceop.op == ReduceOps.SUM:
+        self.uop(UOps.BARRIER, None, [], ())
+        self.uop(UOps.LOCAL_REDUCE, None, [local_idxs, acc[0], self.bufs[-1], prod(self.group_for_reduce)], ())
+        self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
+      elif self.group_for_reduce:
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc, ssa)  # store accumulators
         self.uop(UOps.BARRIER, None, [], ())
@@ -710,14 +715,19 @@ class Linearizer:
         # early exit
         return
 
+    def round_to_power2(x): return 1<<(x-1).bit_length()
+
+    # TODO: Calculate this based on GPU?
+    minimum_preferred_global_dim = 1024
+
     # are we grouping? (requires local shape support)
     if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
-      for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
-        if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
-          self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
-          self.group_for_reduce.append(sz)
-          break
+      # Choose local shape to be as big as possible but not making global dim too small.
+      sz = min(512, round_to_power2(max(prod(self.full_shape[self.first_reduce:]) // (minimum_preferred_global_dim * 8), 32)))
+      if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
+        self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
+        self.group_for_reduce.append(sz)
 
     # are we upcasting in mid reduce? (only for images)
     if self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
@@ -728,13 +738,20 @@ class Linearizer:
         self.group_for_reduce.append(4)
 
     # When has local reduce and kernel is heavy on ops count, use atomics to fill up enough SMs.
-    if self.group_for_reduce and prod(self.full_shape[self.first_reduce+1:]) >= 8 and self.can_use_atomics():
+    if self.group_for_reduce and self.can_use_atomics():
       #TODO: Is it possible to improve full_shape with ML (using time metrics)?
       initial_global_dims = self.first_reduce - self.local_dims
-      sz = min(prod(self.full_shape[self.first_reduce+1:]) // 32, min(st.shape[self.first_reduce + len(self.group_for_reduce)] for st in self.sts if st.shape[self.first_reduce + len(self.group_for_reduce)] != 1)) # willing to have only up to 32 ops in the kernel.
+      min_shape = min(st.shape[self.first_reduce + len(self.group_for_reduce)] for st in self.sts if st.shape[self.first_reduce + len(self.group_for_reduce)] != 1)
+      sz = round_to_power2(max(minimum_preferred_global_dim, min(prod(self.full_shape[self.first_reduce+len(self.group_for_reduce):]) // 8, min_shape))) # willing to have only up to 8 ops in the kernel.
       if sz > 1 and all(st.shape[self.first_reduce + len(self.group_for_reduce)] % sz == 0 or st.shape[self.first_reduce + len(self.group_for_reduce)] == 1 for st in self.sts):
         self.shift_to(self.first_reduce + len(self.group_for_reduce), sz, top=True, insert_before=0)
         self.forced_global_dims_with_reduce = initial_global_dims + 1
+
+      for splits in [2]:
+        if self.full_unupcasted_shape[-1]%splits == 0:
+          self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
+          self.upcast()
+          break
 
     # now do everything required
     self.required_optimizations()
@@ -757,7 +774,7 @@ class Linearizer:
 
     # potentially do more upcasts of non reduce axes based on a heuristic
     upcasted_axis = set()
-    while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
+    while prod(self.sts[0].shape[:self.first_reduce]) >= minimum_preferred_global_dim:
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
         # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
@@ -796,11 +813,12 @@ class Linearizer:
     # **** local groups ****
 
     for axis in range(self.first_reduce - self.local_dims - 1, -1, -1):
+      global_size = prod(self.full_shape[:self.first_reduce-self.local_dims])
       local_size = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
       if self.full_shape[axis] == 1: continue
       last_try = self.local_dims == 0 and axis == 0
       if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))) or last_try:
-        for sz in [x for x in (([32] if last_try else []) + [16,8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 128]:
+        for sz in [x for x in (([512, 256, 128, 64, 32] if last_try else []) + [16,8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 512 and global_size//x >= minimum_preferred_global_dim]:
           self.shift_to(axis, sz, insert_before=self.first_reduce-self.local_dims)
           self.local_dims += 1
           break
