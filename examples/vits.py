@@ -87,7 +87,7 @@ class StochasticDurationPredictor:
     flows = flows[:-2] + [flows[-1]] # remove a useless vflow
     z = Tensor.randn(x.shape[0], 2, x.shape[2], dtype=x.dtype).to(device=x.device) * noise_scale
     for flow in flows: z = flow.forward(z, x_mask, g=x, reverse=reverse)
-    z0, z1 = split_tinygrad(z,[1, 1], 1)
+    z0, z1 = split(z, [1, 1], 1)
     return z0
 
 class DurationPredictor:
@@ -119,7 +119,7 @@ class TextEncoder:
     x = x.transpose(1, -1)  # [b, t, h] -transpose-> [b, h, t]
     x_mask = sequence_mask(x_lengths, x.shape[2]).unsqueeze(1).cast(x.dtype)
     x = self.encoder.forward(x * x_mask, x_mask)
-    m, logs = split_tinygrad(self.proj(x) * x_mask, self.out_channels, dim=1)
+    m, logs = split(self.proj(x) * x_mask, self.out_channels, dim=1)
     return x, m, logs, x_mask
 
 class ResidualCouplingBlock:
@@ -252,7 +252,7 @@ class ConvFlow:
     self.convs = DDSConv(filter_channels, kernel_size, n_layers, p_dropout=0.)
     self.proj = nn.Conv1d(filter_channels, self.half_channels * (num_bins * 3 - 1), 1)
   def forward(self, x, x_mask, g=None, reverse=False):
-    x0, x1 = split_tinygrad(x, [self.half_channels]*2, 1)
+    x0, x1 = split(x, [self.half_channels] * 2, 1)
     h = self.proj(self.convs.forward(self.pre(x0), x_mask, g=g)) * x_mask
     b, c, t = x0.shape
     h = h.reshape(b, c, -1, t).permute(0, 1, 3, 2) # [b, cx?, t] -> [b, c, t, ?]
@@ -272,10 +272,10 @@ class ResidualCouplingLayer:
     self.enc = WN(hidden_channels, kernel_size, dilation_rate, n_layers, p_dropout=p_dropout, gin_channels=gin_channels)
     self.post = nn.Conv1d(hidden_channels, self.half_channels * (2 - mean_only), 1)
   def forward(self, x, x_mask, g=None, reverse=False):
-    x0, x1 = split_tinygrad(x, [self.half_channels]*2, 1)
+    x0, x1 = split(x, [self.half_channels] * 2, 1)
     stats = self.post(self.enc.forward(self.pre(x0) * x_mask, x_mask, g=g)) * x_mask
     if not self.mean_only:
-      m, logs = split_tinygrad(stats, [self.half_channels]*2, 1)
+      m, logs = split(stats, [self.half_channels] * 2, 1)
     else:
       m = stats
       logs = Tensor.zeros_like(m)
@@ -323,10 +323,10 @@ class MultiHeadAttention:
       rel_logits = self._matmul_with_relative_keys(query / math.sqrt(self.k_channels), key_relative_embeddings)
       scores = scores + self._relative_position_to_absolute_position(rel_logits)
     if mask is not None:
-      scores = masked_fill_tinygrad(scores, mask == 0, -1e4)
+      scores = masked_fill(scores, mask == 0, -1e4)
       if self.block_length is not None:
         assert t_s == t_t, "Local attention is only available for self-attention."
-        scores = masked_fill_tinygrad(scores, Tensor.ones_like(scores).triu(-self.block_length).tril(self.block_length) == 0, -1e4)
+        scores = masked_fill(scores, Tensor.ones_like(scores).triu(-self.block_length).tril(self.block_length) == 0, -1e4)
     p_attn = scores.softmax(axis=-1)  # [b, n_h, t_t, t_s]
     output = p_attn.matmul(value)
     if self.window_size is not None:
@@ -384,29 +384,16 @@ class Encoder:
     return x * x_mask
 
 DEFAULT_MIN_BIN_WIDTH, DEFAULT_MIN_BIN_HEIGHT, DEFAULT_MIN_DERIVATIVE = 1e-3, 1e-3, 1e-3
-def piecewise_rational_quadratic_transform_cpu(inputs, unnormalized_widths, unnormalized_heights, unnormalized_derivatives, inverse=False, tails=None, tail_bound=1., min_bin_width=DEFAULT_MIN_BIN_WIDTH, min_bin_height=DEFAULT_MIN_BIN_HEIGHT, min_derivative=DEFAULT_MIN_DERIVATIVE):
+def piecewise_rational_quadratic_transform_cpu(inputs, un_normalized_widths, un_normalized_heights, un_normalized_derivatives, inverse=False, tails=None, tail_bound=1., min_bin_width=DEFAULT_MIN_BIN_WIDTH, min_bin_height=DEFAULT_MIN_BIN_HEIGHT, min_derivative=DEFAULT_MIN_DERIVATIVE):
   if tails is None: spline_fn, spline_kwargs = rational_quadratic_spline, {}
   else: spline_fn, spline_kwargs = unconstrained_rational_quadratic_spline, {'tails': tails, 'tail_bound': tail_bound}
-  return spline_fn(inputs=inputs, un_normalized_widths=unnormalized_widths, un_normalized_heights=unnormalized_heights, un_normalized_derivatives=unnormalized_derivatives, inverse=inverse, min_bin_width=min_bin_width, min_bin_height=min_bin_height, min_derivative=min_derivative, **spline_kwargs)
+  return spline_fn(inputs=inputs, un_normalized_widths=un_normalized_widths, un_normalized_heights=un_normalized_heights, un_normalized_derivatives=un_normalized_derivatives, inverse=inverse, min_bin_width=min_bin_width, min_bin_height=min_bin_height, min_derivative=min_derivative, **spline_kwargs)
 def unconstrained_rational_quadratic_spline(inputs, un_normalized_widths, un_normalized_heights, un_normalized_derivatives, inverse=False, tails='linear', tail_bound=1., min_bin_width=DEFAULT_MIN_BIN_WIDTH, min_bin_height=DEFAULT_MIN_BIN_HEIGHT, min_derivative=DEFAULT_MIN_DERIVATIVE):
   if not tails == 'linear': raise RuntimeError('{} tails are not implemented.'.format(tails))
   constant = np.log(np.exp(1 - min_derivative) - 1)
   un_normalized_derivatives = cat_lr(un_normalized_derivatives, constant, constant)
   output, log_abs_det = rational_quadratic_spline(inputs=inputs.squeeze(dim=0).squeeze(dim=0), unnormalized_widths=un_normalized_widths.squeeze(dim=0).squeeze(dim=0), unnormalized_heights=un_normalized_heights.squeeze(dim=0).squeeze(dim=0), unnormalized_derivatives=un_normalized_derivatives.squeeze(dim=0).squeeze(dim=0), inverse=inverse, left=-tail_bound, right=tail_bound, bottom=-tail_bound, top=tail_bound, min_bin_width=min_bin_width, min_bin_height=min_bin_height, min_derivative=min_derivative)
   return output.unsqueeze(dim=0).unsqueeze(dim=0), log_abs_det.unsqueeze(dim=0).unsqueeze(dim=0)
-def cat_lr(t, left, right): return Tensor.full(get_shape(t), left).cat(t, dim=-1).cat(Tensor.full(get_shape(t), right), dim=-1)
-def get_shape(unnormalized_widths):
-  (shape := list(unnormalized_widths.shape))[-1] = 1
-  return tuple(shape)
-def GatherElements(x, indices, axis):
-  indices = (indices < 0).where(indices + x.shape[axis], indices).transpose(ax1=axis, ax2=0)
-  permute_args = list(range(x.ndim))
-  permute_args[0], permute_args[axis] = permute_args[axis], permute_args[0]
-  permute_args.append(permute_args.pop(0))
-  return _gather(x.permute(*permute_args), indices).transpose(ax1=0, ax2=axis)
-def _gather(x: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
-  reshape_arg = [1] * x.ndim + [x.shape[-1]]
-  return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, x.shape[-1]) == Tensor.arange(x.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, x.shape[-1])) * x).sum(indices.ndim)
 def rational_quadratic_spline(inputs: Tensor, unnormalized_widths: Tensor, unnormalized_heights: Tensor, unnormalized_derivatives: Tensor, inverse=False, left=0., right=1., bottom=0., top=1., min_bin_width=DEFAULT_MIN_BIN_WIDTH, min_bin_height=DEFAULT_MIN_BIN_HEIGHT, min_derivative=DEFAULT_MIN_DERIVATIVE):
   num_bins = unnormalized_widths.shape[-1]
   if min_bin_width * num_bins > 1.0: raise ValueError('Minimal bin width too large for the number of bins')
@@ -419,13 +406,13 @@ def rational_quadratic_spline(inputs: Tensor, unnormalized_widths: Tensor, unnor
   cum_heights = cat_lr(((top - bottom) * heights[..., :-1].cumsum(axis=1) + bottom), bottom, top + 1e-6 if inverse else top)
   heights = cum_heights[..., 1:] - cum_heights[..., :-1]
   bin_idx = ((inputs[..., None] >= (cum_heights if inverse else cum_widths)).sum(axis=-1) - 1)[..., None]
-  input_cum_widths = GatherElements(cum_widths, bin_idx, axis=-1)[..., 0]
-  input_bin_widths = GatherElements(widths, bin_idx, axis=-1)[..., 0]
-  input_cum_heights = GatherElements(cum_heights, bin_idx, axis=-1)[..., 0]
-  input_delta = GatherElements(heights / widths, bin_idx, axis=-1)[..., 0]
-  input_derivatives = GatherElements(derivatives, bin_idx, axis=-1)[..., 0]
-  input_derivatives_plus_one = GatherElements(derivatives[..., 1:], bin_idx, axis=-1)[..., 0]
-  input_heights = GatherElements(heights, bin_idx, axis=-1)[..., 0]
+  input_cum_widths = gather(cum_widths, bin_idx, axis=-1)[..., 0]
+  input_bin_widths = gather(widths, bin_idx, axis=-1)[..., 0]
+  input_cum_heights = gather(cum_heights, bin_idx, axis=-1)[..., 0]
+  input_delta = gather(heights / widths, bin_idx, axis=-1)[..., 0]
+  input_derivatives = gather(derivatives, bin_idx, axis=-1)[..., 0]
+  input_derivatives_plus_one = gather(derivatives[..., 1:], bin_idx, axis=-1)[..., 0]
+  input_heights = gather(heights, bin_idx, axis=-1)[..., 0]
   if inverse:
     a = ((inputs - input_cum_heights) * (input_derivatives + input_derivatives_plus_one - 2 * input_delta) + input_heights * (input_delta - input_derivatives))
     b = (input_heights * input_derivatives - (inputs - input_cum_heights) * (input_derivatives + input_derivatives_plus_one - 2 * input_delta))
@@ -443,6 +430,45 @@ def rational_quadratic_spline(inputs: Tensor, unnormalized_widths: Tensor, unnor
   denominator = input_delta + ((input_derivatives + input_derivatives_plus_one - 2 * input_delta) * theta_one_minus_theta)
   derivative_numerator = input_delta.pow(2) * (input_derivatives_plus_one * theta.pow(2) + 2 * input_delta * theta_one_minus_theta + input_derivatives * (1 - theta).pow(2))
   return input_cum_heights + numerator / denominator, derivative_numerator.log() - 2 * denominator.log()
+
+def sequence_mask(length: Tensor, max_length): return Tensor.arange(max_length, dtype=length.dtype, device=length.device).unsqueeze(0).__lt__(length.unsqueeze(1))
+def generate_path(duration: Tensor, mask: Tensor):  # duration: [b, 1, t_x], mask: [b, 1, t_y, t_x]
+  b, _, t_y, t_x = mask.shape
+  path = sequence_mask(duration.cumsum(axis=2).reshape(b * t_x), t_y).cast(mask.dtype).reshape(b, t_x, t_y)
+  path = path - path.pad(convert_pad_shape([[0, 0], [1, 0], [0, 0]]))[:, :-1]
+  return path.unsqueeze(1).transpose(2, 3) * mask
+def fused_add_tanh_sigmoid_multiply(input_a: Tensor, input_b: Tensor, n_channels: int):
+  n_channels_int, in_act = n_channels, input_a + input_b
+  t_act, s_act = in_act[:, :n_channels_int, :].tanh(), in_act[:, n_channels_int:, :].sigmoid()
+  return t_act * s_act
+
+def cat_lr(t, left, right): return Tensor.full(get_shape(t), left).cat(t, dim=-1).cat(Tensor.full(get_shape(t), right), dim=-1)
+def masked_fill(tensor, mask, value): return tensor * (1 - mask) + value * mask
+def get_shape(tensor):
+  (shape := list(tensor.shape))[-1] = 1
+  return tuple(shape)
+def convert_pad_shape(pad_shape): return tuple(tuple(x) for x in pad_shape)
+def get_padding(kernel_size, dilation=1): return int((kernel_size*dilation - dilation)/2)
+def split(tensor, split_sizes, dim=0):  # if split_sizes is an integer, convert it to a tuple of size split_sizes elements
+  if isinstance(split_sizes, int): split_sizes = (split_sizes,) * (tensor.shape[dim] // split_sizes)
+  assert sum(split_sizes) == tensor.shape[
+    dim], "Sum of split_sizes must equal the dimension size of tensor along the given dimension."
+  start, slices = 0, []
+  for size in split_sizes:
+    slice_range = [(start, start + size) if j == dim else None for j in range(len(tensor.shape))]
+    slices.append(slice_range)
+    start += size
+  return [tensor.slice(s) for s in slices]
+def gather(x, indices, axis):
+  indices = (indices < 0).where(indices + x.shape[axis], indices).transpose(ax1=axis, ax2=0)
+  permute_args = list(range(x.ndim))
+  permute_args[0], permute_args[axis] = permute_args[axis], permute_args[0]
+  permute_args.append(permute_args.pop(0))
+  x = x.permute(*permute_args)
+  reshape_arg = [1] * x.ndim + [x.shape[-1]]
+  return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, x.shape[-1]) == Tensor.arange(x.shape[-1]).reshape(
+    *reshape_arg).expand(*indices.shape, x.shape[-1])) * x).sum(indices.ndim).transpose(ax1=0, ax2=axis)
+
 def norm_except_dim(v, dim):
   if dim == -1: return np.linalg.norm(v)
   if dim == 0:
@@ -453,34 +479,13 @@ def norm_except_dim(v, dim):
     return np.linalg.norm(v.reshape(-1, v.shape[-1]), axis=0).reshape(output_shape)
   transposed_v = np.transpose(v, (dim,) + tuple(i for i in range(v.ndim) if i != dim))
   return np.transpose(norm_except_dim(transposed_v, 0), (dim,) + tuple(i for i in range(v.ndim) if i != dim))
-def weight_norm_tinygrad(v: Tensor, g: Tensor, dim):
+def weight_norm(v: Tensor, g: Tensor, dim):
   v, g = v.numpy(), g.numpy()
   return Tensor(v * (g / norm_except_dim(v, dim)))
-def masked_fill_tinygrad(tensor, mask, value): return tensor * (1 - mask) + value * mask
-def split_tinygrad(tensor, split_sizes, dim=0): # if split_sizes is an integer, convert it to a tuple of size split_sizes elements
-  if isinstance(split_sizes, int): split_sizes = (split_sizes,) * (tensor.shape[dim] // split_sizes)
-  assert sum(split_sizes) == tensor.shape[dim], "Sum of split_sizes must equal the dimension size of tensor along the given dimension."
-  start, slices = 0, []
-  for size in split_sizes:
-    slice_range = [(start, start + size) if j == dim else None for j in range(len(tensor.shape))]
-    slices.append(slice_range)
-    start += size
-  return [tensor.slice(s) for s in slices]
-def sequence_mask(length: Tensor, max_length): return Tensor.arange(max_length, dtype=length.dtype, device=length.device).unsqueeze(0).__lt__(length.unsqueeze(1))
-def generate_path(duration: Tensor, mask: Tensor): # duration: [b, 1, t_x], mask: [b, 1, t_y, t_x]
-  b, _, t_y, t_x = mask.shape
-  path = sequence_mask(duration.cumsum(axis = 2).reshape(b * t_x), t_y).cast(mask.dtype).reshape(b, t_x, t_y)
-  path = path - path.pad(convert_pad_shape([[0, 0], [1, 0], [0, 0]]))[:, :-1]
-  return path.unsqueeze(1).transpose(2, 3) * mask
-def fused_add_tanh_sigmoid_multiply(input_a: Tensor, input_b: Tensor, n_channels: int):
-  n_channels_int, in_act = n_channels, input_a + input_b
-  t_act, s_act = in_act[:, :n_channels_int, :].tanh(), in_act[:, n_channels_int:, :].sigmoid()
-  return t_act * s_act
-def convert_pad_shape(pad_shape): return tuple(tuple(x) for x in pad_shape)
-def get_padding(kernel_size, dilation=1): return int((kernel_size*dilation - dilation)/2)
 
-def get_hparams_from_file(config_path):
-  with open(config_path, "r") as f:
+# HPARAMS LOADING
+def get_hparams_from_file(path):
+  with open(path, "r") as f:
     data = f.read()
   return HParams(**json.loads(data))
 class HParams:
@@ -495,6 +500,13 @@ class HParams:
   def __contains__(self, key): return key in self.__dict__
   def __repr__(self): return self.__dict__.__repr__()
 
+# MODEL LOADING
+def load_model(symbols, hps, model) -> Synthesizer:
+  weights_path = model[1]
+  download_if_not_present(weights_path, model[3])
+  net_g = Synthesizer(len(symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
+  _ = load_checkpoint(weights_path, net_g, None)
+  return net_g
 def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None):
   assert os.path.isfile(checkpoint_path)
   start_time = time.time()
@@ -520,7 +532,7 @@ def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None):
       if weight_g and weight_v:
         setattr(obj, "weight_g", weight_g.numpy())
         setattr(obj, "weight_v", weight_v.numpy())
-        obj, v = getattr(parent, "weight"), weight_norm_tinygrad(weight_v, weight_g, 0)
+        obj, v = getattr(parent, "weight"), weight_norm(weight_v, weight_g, 0)
         weight_g, weight_v, parent, skip = None, None, None, False
       if not skip and obj.shape == v.shape: obj.assign(v.to(obj.device))
       elif not skip: logging.error(f"MISMATCH SHAPE IN {key}, {obj.shape} {v.shape}")
@@ -534,13 +546,7 @@ def download_if_not_present(file_path: Path, url: str):
     download_file(url, file_path)
   return file_path
 
-def load_model(symbols, hps, model) -> Synthesizer:
-  weights_path = model[1]
-  download_if_not_present(weights_path, model[3])
-  net_g = Synthesizer(len(symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
-  _ = load_checkpoint(weights_path, net_g, None)
-  return net_g
-
+# Used for cleaning input text and mapping to symbols
 class TextMapper: # Based on https://github.com/keithito/tacotron
   def __init__(self, symbols, apply_cleaners=True):
     self.apply_cleaners = apply_cleaners
