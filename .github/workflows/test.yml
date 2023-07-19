@@ -49,14 +49,14 @@ jobs:
         python-version: 3.8
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    # - name: Test Docs
-    #   run: python docs/abstractions.py
-    # - name: Test Quickstart
-    #   run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
-    # - name: Run Pytest
-    #   run: python -m pytest -s -v -n=auto test/
-    # - name: Fuzz Test symbolic
-    #   run: DEBUG=1 python test/external/fuzz_symbolic.py
+    - name: Test Docs
+      run: python docs/abstractions.py
+    - name: Test Quickstart
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
+    - name: Run Pytest
+      run: python -m pytest -s -v -n=auto test/
+    - name: Fuzz Test symbolic
+      run: DEBUG=1 python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
       run: PYTHONPATH="." DEBUG=1 python test/external/fuzz_shapetracker.py
   
