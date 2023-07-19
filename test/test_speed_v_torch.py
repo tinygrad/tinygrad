@@ -138,6 +138,10 @@ class TestBigSpeed(unittest.TestCase):
   def test_gemm_4096(self):
     def f(a, b): return a @ b
     helper_test_generic_square('gemm', 4096, f, f)
+  @unittest.skipIf(Device.DEFAULT == "METAL", "broken both for tinygrad and torch on M1s")
+  def test_cube_sum_512(self):
+    def f(a, b): return a.sum()
+    helper_test_generic_cube('cube_sum', 512, f, f, onearg=True)
   def test_large_conv_1x1(self): helper_test_conv(bs=32, in_chans=128, out_chans=128, kernel_size=1, img_size_y=128, img_size_x=128)
   def test_large_conv_3x3(self): helper_test_conv(bs=32, in_chans=128, out_chans=128, kernel_size=3, img_size_y=130, img_size_x=130)
 
@@ -165,8 +169,7 @@ class TestSpeed(unittest.TestCase):
 
   def test_cube_sum(self):
     def f(a, b): return a.sum()
-    helper_test_generic_cube('sum', 256, f, f, onearg=True)
-    helper_test_generic_cube('sum', 512, f, f, onearg=True)
+    helper_test_generic_cube('cube_sum', 256, f, f, onearg=True)
 
   def test_partial_sum(self):
     R = 256
