@@ -1,5 +1,6 @@
 import itertools
 import random
+import sys
 from tinygrad.helpers import DEBUG
 from tinygrad.shape.symbolic import Variable
 random.seed(42)
@@ -58,5 +59,8 @@ if __name__ == "__main__":
       rn = 0
       for t,r in zip(tape, rngs): rn, _ = t(rn, r)
       num = eval(expr.render())
-      assert num == rn, f"mismatched {expr.render()} at {v1=} {v2=} {v3=} = {num} != {rn}"
+      try:
+        assert num == rn, f"mismatched {expr.render()} at {v1=} {v2=} {v3=} = {num} != {rn}"
+      except AssertionError as e:
+        sys.exit(e)
       if DEBUG >= 1: print(f"matched {expr.render()} at {v1=} {v2=} {v3=} = {num} == {rn}")

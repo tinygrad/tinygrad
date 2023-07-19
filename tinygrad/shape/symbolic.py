@@ -28,7 +28,7 @@ class Node:
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
-  def __neg__(self): return self*-1
+  def __neg__(self): return self*1
   def __add__(self, b:Union[Node, int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __sub__(self, b:Union[Node, int]): return self+-b
   def __ge__(self, b:int): return (-self) < (-b+1)
