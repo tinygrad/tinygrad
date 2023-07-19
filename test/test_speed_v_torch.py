@@ -158,8 +158,10 @@ class TestSpeed(unittest.TestCase):
 
   def test_sum(self):
     def f(a, b): return a.sum()
+    helper_test_generic_square('sum', 1024, f, f, onearg=True)
     helper_test_generic_square('sum', 2048, f, f, onearg=True)
     helper_test_generic_square('sum', 4096, f, f, onearg=True)
+    helper_test_generic_square('sum', 8192, f, f, onearg=True)
 
   def test_cube_sum(self):
     def f(a, b): return a.sum()
