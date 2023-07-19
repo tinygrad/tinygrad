@@ -162,12 +162,12 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
       kk(f"{vin[4].render()} = c.thread_elements()[0]; {vin[5].render()} = c.thread_elements()[1]; }}")
     elif uop == UOps.LOCAL_REDUCE:
       local_index = Variable.sum(args[0]).render(render_cl)
-      kk(f"{{ int lane = {local_index} % warp_size;")
-      kk(f"int wid = {local_index} / warp_size;")
+      kk(f"{{ int lane = ({local_index}) % warp_size;")
+      kk(f"int wid = ({local_index}) / warp_size;")
       kk(f"{lang.simd_sum.format(args[1].render())}")
       kk(f"if (lane == 0) {args[2].name}[wid]={args[1].render()};")
       kk(f"{lang.barrier}")
-      kk(f"{args[1].render()} = ({local_index} < {args[3]} / warp_size) ? {args[2].name}[lane] : 0;")
+      kk(f"{args[1].render()} = (({local_index}) < ({args[3]} / warp_size)) ? {args[2].name}[lane] : 0;")
       kk(f"if (wid == 0) {lang.simd_sum.format(args[1].render())} }}")
     elif uop == UOps.ALU:
       assert newvar is not None

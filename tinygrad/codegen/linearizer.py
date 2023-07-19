@@ -290,9 +290,11 @@ class Linearizer:
       self.uop(UOps.DEFINE_GLOBAL, None, [], (name, buf.dtype))
 
     # add a local buffer for multistage reduce
+    can_use_fast_late_reduce = self.supports_fast_local_reduce and len(self.group_for_reduce) == 1 and self.reduceop.op == ReduceOps.SUM and not self.upcast_in_mid_reduce_axes # type: ignore
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
-      self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      greduce = [math.ceil(i / unwrap_optional(self.target_dev.device_info.threads_executed_in_parallel, 1)) for i in self.group_for_reduce] if can_use_fast_late_reduce else self.group_for_reduce
+      self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + greduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
@@ -400,9 +402,9 @@ class Linearizer:
       self.uop(UOps.ENDLOOP, None, [], (reduce_idxs, "reduce"))
 
       # end the local loop, do the local reduce
-      if self.group_for_reduce and self.supports_fast_local_reduce and not self.upcast_in_mid_reduce_axes and self.reduceop.op == ReduceOps.SUM:
+      if self.group_for_reduce and can_use_fast_late_reduce:
         self.uop(UOps.BARRIER, None, [], ())
-        self.uop(UOps.LOCAL_REDUCE, None, [], (local_idxs, acc[0], self.bufs[-1], self.sts[-1].size()))
+        self.uop(UOps.LOCAL_REDUCE, None, [], (local_idxs, acc[0], self.bufs[-1], prod(self.group_for_reduce)))
         self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
       elif self.group_for_reduce:
         fake_global_idxs = [x*0 for x in global_idxs]
