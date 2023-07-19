@@ -150,25 +150,39 @@ class Transformer:
 
 # **** files and arguments ****
 
-WEIGHTS_DIR = Path(__file__).parent.parent / "weights/LLaMA/"
-TOKENIZER_FILENAME = WEIGHTS_DIR / "tokenizer.model"
 VOCAB_SIZE = 32000
 MODEL_PARAMS = {
-  "7B": {
-    "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
-    "files": 1,
+  1: {
+    "7B": {
+      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
+      "files": 1,
+    },
+    "13B": {
+      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
+      "files": 2,
+    },
+    "30B": {
+      "args": {"dim": 6656, "multiple_of": 256, "n_heads": 52, "n_layers": 60, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
+      "files": 4,
+    },
+    "65B": {
+      "args": {"dim": 8192, "multiple_of": 256, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+      "files": 8,
+    },
   },
-  "13B": {
-    "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
-    "files": 2,
-  },
-  "30B": {
-    "args": {"dim": 6656, "multiple_of": 256, "n_heads": 52, "n_layers": 60, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
-    "files": 4,
-  },
-  "65B": {
-    "args": {"dim": 8192, "multiple_of": 256, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
-    "files": 8,
+  2: {
+    "7B": {
+      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+      "files": 1,
+    },
+    "13B": {
+      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+      "files": 2,
+    },
+    "70B": {
+      "args": {"dim": 8192, "multiple_of": 4096, "ffn_dim_multiplier": 1.3, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+      "files": 8,
+    },
   },
 }
 
@@ -203,11 +217,8 @@ def concat_weights(models):
 if __name__ == "__main__":
   Tensor.no_grad = True
   print(f"using {Device.DEFAULT} backend")
-  from sentencepiece import SentencePieceProcessor
-  sp_model = SentencePieceProcessor(model_file=str(TOKENIZER_FILENAME))
-  assert sp_model.vocab_size() == VOCAB_SIZE
 
-  parser = argparse.ArgumentParser(description='Run LLaMA 7B in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser = argparse.ArgumentParser(description='Run LLaMA in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   # test: python3 examples/llama.py --prompt="Hello." --temperature=0
   # Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
   parser.add_argument('--prompt', type=str, default=None, help="Phrase to start with. Without this, it goes into chatbot mode")
@@ -217,15 +228,25 @@ if __name__ == "__main__":
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
   parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
-  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B]")
+  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B, 70B] for Gen 2")
+  parser.add_argument('--gen', type=int, default="1", help="Generation of the model to use [1, 2]")
 
   args = parser.parse_args()
   chatbot = args.prompt == None
 
+  LLAMA_SUFFIX = {1: "", 2: "-2"}[args.gen]
+  WEIGHTS_DIR = Path(__file__).parent.parent / f"weights/LLaMA{LLAMA_SUFFIX}/"
+  TOKENIZER_FILENAME = WEIGHTS_DIR / "tokenizer.model"
+
+  from sentencepiece import SentencePieceProcessor
+  sp_model = SentencePieceProcessor(model_file=str(TOKENIZER_FILENAME))
+  assert sp_model.vocab_size() == VOCAB_SIZE
+
   from tinygrad.state import torch_load, load_state_dict
-  print(f"using LLaMA {args.size} model")
-  model = Transformer(**MODEL_PARAMS[args.size]["args"])
-  weights = [torch_load(WEIGHTS_DIR / f"{args.size}/consolidated.{i:02d}.pth") for i in range(MODEL_PARAMS[args.size]["files"])]
+  print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
+  params = MODEL_PARAMS[args.gen][args.size]
+  model = Transformer(**params["args"])
+  weights = [torch_load(WEIGHTS_DIR / f"{args.size}/consolidated.{i:02d}.pth") for i in range(params["files"])]
   if len(weights) == 1:
     load_state_dict(model, weights[0], strict=False)
   else:

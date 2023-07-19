@@ -19,7 +19,7 @@ class TestLLaMASpeed(unittest.TestCase):
     print("using", Device['fake'].codegen)
 
     print("testing llama python run time")
-    model = Transformer(**MODEL_PARAMS["7B"]["args"])
+    model = Transformer(**MODEL_PARAMS[1]["7B"]["args"])
     print("built model")
     # assign fake tensors to the values
     for v in get_state_dict(model).values(): v.assign(Tensor.empty(*v.shape, dtype=v.dtype))
