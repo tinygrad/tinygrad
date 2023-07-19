@@ -483,23 +483,22 @@ class Linearizer:
         grouped = list(get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op not in {BinaryOps.CMPEQ, TernaryOps.WHERE}))
         for idx, val in grouped:
           out = ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu')
-          op = x.op
 
           fold_result = None
           if any(v.const_zero for v in val):
-            if op in [UnaryOps.NOOP, UnaryOps.SIN, UnaryOps.SQRT]: fold_result = val[0]
-            if op == BinaryOps.ADD:
+            if x.op in [UnaryOps.NOOP, UnaryOps.SIN, UnaryOps.SQRT]: fold_result = val[0]
+            if x.op == BinaryOps.ADD:
               fold_result = val[1] if val[0].const_zero else val[0]
-            elif op == BinaryOps.SUB:
+            elif x.op == BinaryOps.SUB:
               if val[1].const_zero: fold_result = val[0]
-            elif op == BinaryOps.MUL:
+            elif x.op == BinaryOps.MUL:
               fold_result = val[0] if val[0].const_zero else val[1]
             # todo: 0/x? but 0/0 is undefined
 
           if fold_result is not None:
             ret.append((idx, fold_result))
           else:
-            ret.append( (idx, self.uop(UOps.ALU, out, list(val), op)) )
+            ret.append( (idx, self.uop(UOps.ALU, out, list(val), x.op)) )
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
       # scatter
       for i,j in ret:
