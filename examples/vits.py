@@ -1,13 +1,13 @@
-import json, logging, math, os, re, sys, time, wave, argparse, numpy as np, inflect
+import json, logging, math, os, re, sys, time, wave, argparse, numpy as np
+from functools import reduce
 from pathlib import Path
 from typing import List
-from phonemizer import phonemize
-from unidecode import unidecode
 from extra.utils import download_file
 from tinygrad import nn
 from tinygrad.helpers import dtypes
 from tinygrad.state import torch_load
 from tinygrad.tensor import Tensor
+from unidecode import unidecode
 
 LRELU_SLOPE = 0.1
 
@@ -20,22 +20,37 @@ class Synthesizer:
     self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, 4, gin_channels=gin_channels)
     self.dp = StochasticDurationPredictor(hidden_channels, 192, 3, 0.5, 4, gin_channels=gin_channels) if use_sdp else DurationPredictor(hidden_channels, 256, 3, 0.5, gin_channels=gin_channels)
     if n_speakers > 1: self.emb_g = nn.Embedding(n_speakers, gin_channels)
-  def infer(self, x, x_lengths, sid=None, noise_scale=1.0, length_scale=1, noise_scale_w=1., max_len=None, emotion_embedding=None):
+  def infer(self, x, x_lengths, sid=None, noise_scale=1.0, length_scale=1, noise_scale_w=1., max_len=None, emotion_embedding=None, max_y_length_estimate_scale=None):
     x, m_p, logs_p, x_mask = self.enc_p.forward(x, x_lengths, emotion_embedding)
     g = self.emb_g(sid.reshape(1, 1)).squeeze(1).unsqueeze(-1) if self.n_speakers > 0 else None
     logw = self.dp.forward(x, x_mask, g=g, reverse=self.use_sdp, noise_scale=noise_scale_w if self.use_sdp else 1.0)
     w_ceil = Tensor.ceil(logw.exp() * x_mask * length_scale)
     y_lengths = Tensor.maximum(w_ceil.sum([1, 2]), 1).cast(dtypes.int64)
-    y_mask = sequence_mask(y_lengths, y_lengths.max().lazydata.toCPU()).unsqueeze(1).cast(x_mask.dtype)
+    return self.generate(g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths)
+  def generate(self, g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths):
+    max_y_length = y_lengths.max().numpy() if max_y_length_estimate_scale is None else max(15, x.shape[-1]) * max_y_length_estimate_scale
+    y_mask = sequence_mask(y_lengths, max_y_length).unsqueeze(1).cast(x_mask.dtype)
     attn_mask = x_mask.unsqueeze(2) * y_mask.unsqueeze(-1)
     attn = generate_path(w_ceil, attn_mask)
-    m_p = attn.squeeze(1).matmul(m_p.transpose(1, 2)).transpose(1, 2)       # [b, t', t], [b, t, d] -> [b, d, t']
-    logs_p = attn.squeeze(1).matmul(logs_p.transpose(1, 2)).transpose(1, 2) # [b, t', t], [b, t, d] -> [b, d, t']
-    z_p = m_p + Tensor.randn(*m_p.shape, dtype=m_p.dtype) * logs_p.exp() * noise_scale
+    m_p_2 = attn.squeeze(1).matmul(m_p.transpose(1, 2)).transpose(1, 2)        # [b, t', t], [b, t, d] -> [b, d, t']
+    logs_p_2 = attn.squeeze(1).matmul(logs_p.transpose(1, 2)).transpose(1, 2)  # [b, t', t], [b, t, d] -> [b, d, t']
+    z_p = m_p_2 + Tensor.randn(*m_p_2.shape, dtype=m_p_2.dtype) * logs_p_2.exp() * noise_scale
     y_mask = y_mask.cast(z_p.dtype)
     z = self.flow.forward(z_p, y_mask, g=g, reverse=True)
     o = self.dec.forward((z * y_mask)[:, :, :max_len], g=g)
-    return o, attn, y_mask, (z, z_p, m_p, logs_p)
+    if max_y_length_estimate_scale is not None:
+      length_scaler = o.shape[-1] / max_y_length
+      o.realize()
+      real_max_y_length = y_lengths.max().numpy()
+      if real_max_y_length > max_y_length:
+        logging.warning(f"Underestimated max length by {(((real_max_y_length / max_y_length) * 100) - 100):.2f}%, recomputing inference without estimate...")
+        return self.generate(g, logs_p, m_p, max_len, None, noise_scale, w_ceil, x, x_mask, y_lengths)
+      if real_max_y_length < max_y_length:
+        overestimation = ((max_y_length / real_max_y_length) * 100) - 100
+        logging.info(f"Overestimated max length by {overestimation:.2f}%")
+        if overestimation > 120: logging.warning("Warning: max length overestimated by more than 120%")
+      o = o[:, :, :(real_max_y_length * length_scaler).astype(np.int32)]
+    return o
 
 class StochasticDurationPredictor:
   def __init__(self, in_channels, filter_channels, kernel_size, p_dropout, n_flows=4, gin_channels=0):
@@ -150,7 +165,7 @@ class Generator:
     self.num_kernels, self.num_upsamples = len(resblock_kernel_sizes), len(upsample_rates)
     self.conv_pre = nn.Conv1d(initial_channel, upsample_initial_channel, 7, 1, padding=3)
     resblock = ResBlock1 if resblock == '1' else ResBlock2
-    self.ups = [nn.ConvTranspose1d(upsample_initial_channel//(2**i), upsample_initial_channel//(2**(i+1)),k, u, padding=(k-u)//2) for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes))]
+    self.ups = [nn.ConvTranspose1d(upsample_initial_channel//(2**i), upsample_initial_channel//(2**(i+1)), k, u, padding=(k-u)//2) for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes))]
     self.resblocks = []
     for i in range(len(self.ups)):
       ch = upsample_initial_channel // (2 ** (i + 1))
@@ -223,7 +238,7 @@ class ResBlock2:
       x = xt + x
     return x if x_mask is None else x * x_mask
 
-class DDSConv: # Dialted and Depth-Separable Convolution
+class DDSConv: # Dilated and Depth-Separable Convolution
   def __init__(self, channels, kernel_size, n_layers, p_dropout=0.):
     self.channels, self.kernel_size, self.n_layers, self.p_dropout = channels, kernel_size, n_layers, p_dropout
     self.convs_sep, self.convs_1x1, self.norms_1, self.norms_2 = [], [], [], []
@@ -256,12 +271,12 @@ class ConvFlow:
     h = self.proj(self.convs.forward(self.pre(x0), x_mask, g=g)) * x_mask
     b, c, t = x0.shape
     h = h.reshape(b, c, -1, t).permute(0, 1, 3, 2) # [b, cx?, t] -> [b, c, t, ?]
-    unnormalized_widths = h[..., :self.num_bins] / math.sqrt(self.filter_channels)
-    unnormalized_heights = h[..., self.num_bins:2*self.num_bins] / math.sqrt(self.filter_channels)
-    unnormalized_derivatives = h[..., 2 * self.num_bins:]
-    x1, logabsdet = piecewise_rational_quadratic_transform_cpu(x1, unnormalized_widths, unnormalized_heights, unnormalized_derivatives, inverse=reverse, tails='linear', tail_bound=self.tail_bound)
+    un_normalized_widths = h[..., :self.num_bins] / math.sqrt(self.filter_channels)
+    un_normalized_heights = h[..., self.num_bins:2*self.num_bins] / math.sqrt(self.filter_channels)
+    un_normalized_derivatives = h[..., 2 * self.num_bins:]
+    x1, log_abs_det = piecewise_rational_quadratic_transform(x1, un_normalized_widths, un_normalized_heights, un_normalized_derivatives, inverse=reverse, tails='linear', tail_bound=self.tail_bound)
     x = x0.cat(x1, dim=1) * x_mask
-    return x if reverse else (x, Tensor.sum(logabsdet * x_mask, [1,2]))
+    return x if reverse else (x, Tensor.sum(log_abs_det * x_mask, [1,2]))
 
 class ResidualCouplingLayer:
   def __init__(self, channels, hidden_channels, kernel_size, dilation_rate, n_layers, p_dropout=0, gin_channels=0, mean_only=False):
@@ -384,7 +399,7 @@ class Encoder:
     return x * x_mask
 
 DEFAULT_MIN_BIN_WIDTH, DEFAULT_MIN_BIN_HEIGHT, DEFAULT_MIN_DERIVATIVE = 1e-3, 1e-3, 1e-3
-def piecewise_rational_quadratic_transform_cpu(inputs, un_normalized_widths, un_normalized_heights, un_normalized_derivatives, inverse=False, tails=None, tail_bound=1., min_bin_width=DEFAULT_MIN_BIN_WIDTH, min_bin_height=DEFAULT_MIN_BIN_HEIGHT, min_derivative=DEFAULT_MIN_DERIVATIVE):
+def piecewise_rational_quadratic_transform(inputs, un_normalized_widths, un_normalized_heights, un_normalized_derivatives, inverse=False, tails=None, tail_bound=1., min_bin_width=DEFAULT_MIN_BIN_WIDTH, min_bin_height=DEFAULT_MIN_BIN_HEIGHT, min_derivative=DEFAULT_MIN_DERIVATIVE):
   if tails is None: spline_fn, spline_kwargs = rational_quadratic_spline, {}
   else: spline_fn, spline_kwargs = unconstrained_rational_quadratic_spline, {'tails': tails, 'tail_bound': tail_bound}
   return spline_fn(inputs=inputs, un_normalized_widths=un_normalized_widths, un_normalized_heights=un_normalized_heights, un_normalized_derivatives=un_normalized_derivatives, inverse=inverse, min_bin_width=min_bin_width, min_bin_height=min_bin_height, min_derivative=min_derivative, **spline_kwargs)
@@ -465,8 +480,8 @@ def gather(x, indices, axis):
   permute_args.append(permute_args.pop(0))
   x = x.permute(*permute_args)
   reshape_arg = [1] * x.ndim + [x.shape[-1]]
-  return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, x.shape[-1]) == Tensor.arange(x.shape[-1]).reshape(
-    *reshape_arg).expand(*indices.shape, x.shape[-1])) * x).sum(indices.ndim).transpose(ax1=0, ax2=axis)
+  return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, x.shape[-1]) ==
+           Tensor.arange(x.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, x.shape[-1])) * x).sum(indices.ndim).transpose(ax1=0, ax2=axis)
 
 def norm_except_dim(v, dim):
   if dim == -1: return np.linalg.norm(v)
@@ -548,11 +563,9 @@ def download_if_not_present(file_path: Path, url: str):
 # Used for cleaning input text and mapping to symbols
 class TextMapper: # Based on https://github.com/keithito/tacotron
   def __init__(self, symbols, apply_cleaners=True):
-    self.apply_cleaners = apply_cleaners
-    self.symbols = symbols
-    self._symbol_to_id, _id_to_symbol = {s: i for i, s in enumerate(self.symbols)}, {i: s for i, s in enumerate(self.symbols)}
+    self.apply_cleaners, self.symbols, self._inflect = apply_cleaners, symbols, None
+    self._symbol_to_id, _id_to_symbol = {s: i for i, s in enumerate(symbols)}, {i: s for i, s in enumerate(symbols)}
     self._whitespace_re, self._abbreviations = re.compile(r'\s+'), [(re.compile('\\b%s\\.' % x[0], re.IGNORECASE), x[1]) for x in [('mrs', 'misess'), ('mr', 'mister'), ('dr', 'doctor'), ('st', 'saint'), ('co', 'company'), ('jr', 'junior'), ('maj', 'major'), ('gen', 'general'), ('drs', 'doctors'), ('rev', 'reverend'), ('lt', 'lieutenant'), ('hon', 'honorable'), ('sgt', 'sergeant'), ('capt', 'captain'), ('esq', 'esquire'), ('ltd', 'limited'), ('col', 'colonel'), ('ft', 'fort'), ]]
-    self._inflect = inflect.engine()
   def text_to_sequence(self, text, cleaner_names):
     if self.apply_cleaners:
       for name in cleaner_names:
@@ -560,21 +573,47 @@ class TextMapper: # Based on https://github.com/keithito/tacotron
         if not cleaner: raise ModuleNotFoundError('Unknown cleaner: %s' % name)
         text = cleaner(text)
     else: text = text.strip()
+    print(text)
     return [self._symbol_to_id[symbol] for symbol in text]
-  def expand_abbreviations(self, text):
-    for regex, replacement in self._abbreviations: text = re.sub(regex, replacement, text)
-    return text
-  def collapse_whitespace(self, text): return re.sub(self._whitespace_re, ' ', text)
-  def basic_cleaners(self, text): return self.collapse_whitespace(text.lower())
+  def get_text(self, text, add_blank=False, cleaners=('english_cleaners',)):
+    text_norm = self.text_to_sequence(text, cleaners)
+    return Tensor(self.intersperse(text_norm, 0) if add_blank else text_norm, dtype=dtypes.int64)
+  def intersperse(self, lst, item):
+    (result := [item] * (len(lst) * 2 + 1))[1::2] = lst
+    return result
+  def filter_oov(self, text): return "".join(list(filter(lambda x: x in self._symbol_to_id, text)))
+  def base_english_cleaners(self, text, preserve_punctuation=False, with_stress=False):
+    from phonemizer import phonemize
+    return self.collapse_whitespace(phonemize(self.expand_abbreviations(unidecode(text.lower())), language='en-us', backend='espeak', strip=True, preserve_punctuation=preserve_punctuation, with_stress=with_stress))
+  def english_cleaners(self, text): return self.base_english_cleaners(text)
+  def english_cleaners2(self, text): return self.base_english_cleaners(text, preserve_punctuation=True, with_stress=True)
   def transliteration_cleaners(self, text): return self.collapse_whitespace(unidecode(text.lower()))
-  def english_cleaners(self, text): return self.collapse_whitespace(phonemize(self.expand_abbreviations(unidecode(text.lower())), language='en-us', backend='espeak', strip=True))
-  def english_cleaners2(self, text): return self.collapse_whitespace(phonemize(self.expand_abbreviations(unidecode(text.lower())), language='en-us', backend='espeak', strip=True, preserve_punctuation=True, with_stress=True))
   def cjke_cleaners(self, text): return re.sub(r'([^\.,!\?\-…~])$', r'\1.', re.sub(r'\s+$', '', self.english_to_ipa2(text).replace('ɑ', 'a').replace('ɔ', 'o').replace('ɛ', 'e').replace('ɪ', 'i').replace('ʊ', 'u')))
   def cjke_cleaners2(self, text): return re.sub(r'([^\.,!\?\-…~])$', r'\1.', re.sub(r'\s+$', '', self.english_to_ipa2(text)))
   def cjks_cleaners(self, text): return re.sub(r'([^\.,!\?\-…~])$', r'\1.', re.sub(r'\s+$', '', self.english_to_lazy_ipa(text)))
+  def english_to_ipa2(self, text):
+    _ipa_to_ipa2 = [(re.compile('%s' % x[0]), x[1]) for x in [ ('r', 'ɹ'), ('ʤ', 'dʒ'), ('ʧ', 'tʃ')]]
+    return reduce(lambda t, rx: re.sub(rx[0], rx[1], t), _ipa_to_ipa2, self.mark_dark_l(self.english_to_ipa(text))).replace('...', '…')
   def mark_dark_l(self, text): return re.sub(r'l([^aeiouæɑɔəɛɪʊ ]*(?: |$))', lambda x: 'ɫ' + x.group(1), text)
-  def _remove_commas(self, m): return m.group(1).replace(',', '')
-  def _expand_decimal_point(self, m): return m.group(1).replace('.', ' point ')
+  def english_to_ipa(self, text):
+    import eng_to_ipa as ipa
+    return self.collapse_whitespace(ipa.convert(self.normalize_numbers(self.expand_abbreviations(unidecode(text).lower()))))
+  def english_to_lazy_ipa(self, text):
+    _lazy_ipa = [(re.compile('%s' % x[0]), x[1]) for x in [('r', 'ɹ'), ('æ', 'e'), ('ɑ', 'a'), ('ɔ', 'o'), ('ð', 'z'), ('θ', 's'), ('ɛ', 'e'), ('ɪ', 'i'), ('ʊ', 'u'), ('ʒ', 'ʥ'), ('ʤ', 'ʥ'), ('ˈ', '↓')]]
+    return reduce(lambda t, rx: re.sub(rx[0], rx[1], t), _lazy_ipa, self.english_to_ipa(text))
+  def expand_abbreviations(self, text): return reduce(lambda t, abbr: re.sub(abbr[0], abbr[1], t), self._abbreviations, text)
+  def collapse_whitespace(self, text): return re.sub(self._whitespace_re, ' ', text)
+  def normalize_numbers(self, text):
+    import inflect
+    self._inflect = inflect.engine()
+    text = re.sub(re.compile(r'([0-9][0-9\,]+[0-9])'), self._remove_commas, text)
+    text = re.sub(re.compile(r'£([0-9\,]*[0-9]+)'), r'\1 pounds', text)
+    text = re.sub(re.compile(r'\$([0-9\.\,]*[0-9]+)'), self._expand_dollars, text)
+    text = re.sub(re.compile(r'([0-9]+\.[0-9]+)'), self._expand_decimal_point, text)
+    text = re.sub(re.compile(r'[0-9]+(st|nd|rd|th)'), self._expand_ordinal, text)
+    text = re.sub(re.compile(r'[0-9]+'), self._expand_number, text)
+    return text
+  def _remove_commas(self, m): return m.group(1).replace(',', '') # george won't like this
   def _expand_dollars(self, m):
     match = m.group(1)
     parts = match.split('.')
@@ -584,46 +623,32 @@ class TextMapper: # Based on https://github.com/keithito/tacotron
     if dollars: return '%s %s' % (dollars, 'dollar' if dollars == 1 else 'dollars')
     if cents: return '%s %s' % (cents, 'cent' if cents == 1 else 'cents')
     return 'zero dollars'
+  def _expand_decimal_point(self, m): return m.group(1).replace('.', ' point ')
   def _expand_ordinal(self, m): return self._inflect.number_to_words(m.group(0))
-  def _expand_number(self, m):
+  def _expand_number(self, _inflect, m):
     num = int(m.group(0))
     if 1000 < num < 3000:
       if num == 2000: return 'two thousand'
       if 2000 < num < 2010: return 'two thousand ' + self._inflect.number_to_words(num % 100)
       if num % 100 == 0: return self._inflect.number_to_words(num // 100) + ' hundred'
-      return self._inflect.number_to_words(num, andword='', zero='oh', group=2).replace(', ', ' ')
+      return _inflect.number_to_words(num, andword='', zero='oh', group=2).replace(', ', ' ')
     return self._inflect.number_to_words(num, andword='')
-  def normalize_numbers(self, text):
-    text = re.sub(re.compile(r'([0-9][0-9\,]+[0-9])'), self._remove_commas, text)
-    text = re.sub(re.compile(r'£([0-9\,]*[0-9]+)'), r'\1 pounds', text)
-    text = re.sub(re.compile(r'\$([0-9\.\,]*[0-9]+)'), self._expand_dollars, text)
-    text = re.sub(re.compile(r'([0-9]+\.[0-9]+)'), self._expand_decimal_point, text)
-    text = re.sub(re.compile(r'[0-9]+(st|nd|rd|th)'), self._expand_ordinal, text)
-    text = re.sub(re.compile(r'[0-9]+'), self._expand_number, text)
-    return text
-  def english_to_ipa(self, text):
-    import eng_to_ipa as ipa
-    return self.collapse_whitespace(ipa.convert(self.normalize_numbers(self.expand_abbreviations(unidecode(text).lower()))))
-  def english_to_ipa2(self, text):
-    _ipa_to_ipa2 = [(re.compile('%s' % x[0]), x[1]) for x in [ ('r', 'ɹ'), ('ʤ', 'dʒ'), ('ʧ', 'tʃ')]]
-    text = self.mark_dark_l(self.english_to_ipa(text))
-    for regex, replacement in _ipa_to_ipa2: text = re.sub(regex, replacement, text)
-    return text.replace('...', '…')
-  def english_to_lazy_ipa(self, text):
-    _lazy_ipa = [(re.compile('%s' % x[0]), x[1]) for x in [('r', 'ɹ'),('æ', 'e'),('ɑ', 'a'),('ɔ', 'o'),('ð', 'z'),('θ', 's'),('ɛ', 'e'),('ɪ', 'i'),('ʊ', 'u'),('ʒ', 'ʥ'),('ʤ', 'ʥ'),('ˈ', '↓')]]
-    text = self.english_to_ipa(text)
-    for regex, replacement in _lazy_ipa: text = re.sub(regex, replacement, text)
-    return text
-  def intersperse(self, lst, item):
-    result = [item] * (len(lst) * 2 + 1)
-    result[1::2] = lst
-    return result
-  def get_text(self, text, hps: HParams):
-    text_norm = self.text_to_sequence(text, hps.data.text_cleaners)
-    if hps.data.add_blank: text_norm = self.intersperse(text_norm, 0)
-    return Tensor(text_norm, dtype=dtypes.int64)
-  def filter_oov(self, text): return "".join(list(filter(lambda x: x in self._symbol_to_id, text)))
 
+#########################################################################################
+# PAPER: https://arxiv.org/abs/2106.06103
+# CODE: https://github.com/jaywalnut310/vits/tree/main
+#########################################################################################
+# INSTALLATION: this is based on default config, dependencies are for preprocessing.
+# vctk, ljs                      | pip3 install unidecode phonemizer          | phonemizer requires [eSpeak](https://espeak.sourceforge.net) backend to be installed on your system
+# mmts-tts                       | pip3 install unidecode                     |
+# uma_trilingual, cjks, voistock | pip3 install unidecode inflect eng_to_ipa  |
+#########################################################################################
+# Some good speakers to try out, there may be much better ones, I only tried out a few:
+# male vctk 1  | --model_to_use vctk --speaker_id 2
+# male vctk 2  | --model_to_use vctk --speaker_id 6
+# anime lady 1 | --model_to_use uma_trilingual --speaker_id 36
+# anime lady 2 | --model_to_use uma_trilingual --speaker_id 121
+#########################################################################################
 VITS_PATH = Path(__file__).parent.parent / "weights/VITS/"
 MODELS = { # config_path, weights_path, config_url, weights_url
   "ljs": (VITS_PATH / "config_ljs.json", VITS_PATH / "pretrained_ljs.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/ljs_base.json", "https://drive.google.com/uc?export=download&id=1q86w74Ygw2hNzYP9cWkeClGT5X25PvBT&confirm=t"),
@@ -633,17 +658,9 @@ MODELS = { # config_path, weights_path, config_url, weights_url
   "cjks": (VITS_PATH / "config_cjks.json", VITS_PATH / "pretrained_cjks.pth", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/14/config.json", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/14/model.pth"),
   "voistock": (VITS_PATH / "config_voistock.json", VITS_PATH / "pretrained_voistock.pth", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/15/config.json", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/15/model.pth"),
 }
-# PAPER: https://arxiv.org/abs/2106.06103  CODE: https://github.com/jaywalnut310/vits/tree/main
+Y_LENGTH_ESTIMATE_SCALARS = {"ljs": 2.8, "vctk": 1.74, "mmts-tts": 1.9, "uma_trilingual": 2.3, "cjks": 3.3, "voistock": 3.1}
 if __name__ == '__main__':
   logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
-
-  #######################################################################
-  # Some good speakers to try out, there may be much better ones, I only tried out a few:
-  # male vctk 1  | --model_to_use vctk --speaker_id 2
-  # male vctk 2  | --model_to_use vctk --speaker_id 6
-  # anime lady 1 | --model_to_use uma_trilingual --speaker_id 36
-  # anime lady 2 | --model_to_use uma_trilingual --speaker_id 121
-  #######################################################################
   parser = argparse.ArgumentParser()
   parser.add_argument("--model_to_use", default="vctk", help="Specify the model to use. Default is 'vctk'.")
   parser.add_argument("--speaker_id", type=int, default=6, help="Specify the speaker ID. Default is 6.")
@@ -658,6 +675,7 @@ if __name__ == '__main__':
   parser.add_argument("--num_channels", type=int, default=1, help="Specify the number of audio output channels. Default is 1.")
   parser.add_argument("--sample_width", type=int, default=2, help="Specify the number of bytes per sample, adjust if necessary. Default is 2.")
   parser.add_argument("--emotion_path", type=str, default=None, help="Specify the path to emotion reference.")
+  parser.add_argument("--estimate_max_y_length", type=str, default=True, help="If true, overestimate the output length and then trim it to the correct length, to prevent premature realization. Default is True.")
   args = parser.parse_args()
 
   model_config = MODELS[args.model_to_use]
@@ -680,9 +698,9 @@ if __name__ == '__main__':
     logging.info(f"You selected speaker {args.speaker_id} (name: {speaker_name})")
 
   # Load emotions if any. TODO: find an english model with emotions, this is untested atm.
-  emotion = None
+  emotion_embedding = None
   if args.emotion_path is not None:
-    if args.emotion_path.endswith(".npy"): emotion = Tensor(np.load(args.emotion_path), dtype=dtypes.int64).unsqueeze(0)
+    if args.emotion_path.endswith(".npy"): emotion_embedding = Tensor(np.load(args.emotion_path), dtype=dtypes.int64).unsqueeze(0)
     else: raise ValueError("Emotion path must be a .npy file.")
 
   # Load symbols, instantiate TextMapper and clean the text.
@@ -702,14 +720,15 @@ if __name__ == '__main__':
   # Convert the input text to a tensor.
   text_to_synthesize = args.text_to_synthesize
   if args.model_to_use == "mmts-tts": text_to_synthesize = text_mapper.filter_oov(text_to_synthesize.lower())
-  stn_tst = text_mapper.get_text(text_to_synthesize, hps)
+  stn_tst = text_mapper.get_text(text_to_synthesize, hps.data.add_blank, hps.data.text_cleaners)
   logging.debug(f"Converted input text to tensor \"{text_to_synthesize}\" -> Tensor({stn_tst.shape}): {stn_tst.numpy()}")
   x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
   sid = Tensor([args.speaker_id], dtype=dtypes.int64) if model_has_multiple_spakers else None
 
   # Perform inference.
   start_time = time.time()
-  audio_tensor = net_g.infer(x_tst, x_tst_lengths, sid=sid, noise_scale=args.noise_scale, noise_scale_w=args.noise_scale_w, length_scale=args.length_scale, emotion_embedding=emotion)[0][0, 0].realize()
+  audio_tensor = net_g.infer(x_tst, x_tst_lengths, sid, args.noise_scale, args.length_scale, args.noise_scale_w, emotion_embedding=emotion_embedding,
+                             max_y_length_estimate_scale=Y_LENGTH_ESTIMATE_SCALARS[args.model_to_use] if args.estimate_max_y_length else None)[0, 0].realize()
   logging.info(f"Inference took {(time.time() - start_time):.2f}s")
 
   # Save the audio output.
