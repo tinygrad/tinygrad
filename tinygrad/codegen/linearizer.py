@@ -114,15 +114,15 @@ def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
 
 class MemOp(NamedTuple):
   name: str
-  idx: Variable
-  valid: Variable
+  idx: Node
+  valid: Node
   dtype: DType
   local: bool
 
 class ConstOp(NamedTuple):
   value: float
   dtype: DType
-  valid: Variable
+  valid: Node
 
 class UOp(NamedTuple):
   uop: UOps
@@ -150,7 +150,7 @@ class Linearizer:
 
   def get_buffer_name(self, i):
     if self.bufs[i].__class__ == LocalBuffer: return self.bufs[i].name
-    assert self.bufs[i].realized.__class__ is not RawConst  # constants shouldn't be loaded with memops
+    if self.bufs[i].realized.__class__ is RawConst: return self.bufs[i].realized._buf
     return self.arg_bufs[self.bufs[i].realized]
 
   def process(self) -> None:
@@ -240,13 +240,13 @@ class Linearizer:
         idx, valid = self.sts[i].expr_idxs(_idx)
         localtype = dtypes.float32
       this_const = 0.0 if valid.max == 0 else const
-      key = f"{localtype}{idx.render()}{valid.render()}"
+      key = f"{localtype}{valid.render()}" if var_type == "val" and this_const is not None else f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         if this_const is None:
           cache[key] = self.uop(UOps.LOAD, Token(f"{var_type}{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer))
         else:
-          cache[key] = self.uop(UOps.CONST, Token(f"{var_type}{mnum(i)}_{len(cache)}", localtype, const_zero=valid.max == 0), [], ConstOp(const, self.bufs[i].dtype, valid))
+          cache[key] = self.uop(UOps.CONST, Token(f"{var_type}{mnum(i)}_{len(cache)}", localtype, const_zero=valid.max == 0), [], ConstOp(this_const, self.bufs[i].dtype, valid if valid.max != 0 else Node.num(1)))
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return ret
 
