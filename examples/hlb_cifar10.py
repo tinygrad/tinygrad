@@ -159,11 +159,14 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   def train_step_jitted(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
     return train_step(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
   
-  @TinyJit
-  def eval_step_jitted(model_fp32, X, Y):
+  def eval_step(model_fp32, X, Y):
     out = model_fp32(X, training=False)
     loss = out.mul(Y).mean()
     return out.realize(), loss.realize()
+
+  @TinyJit
+  def eval_step_jitted(model_fp32, X, Y):
+    return eval_step(model_fp32, X, Y)
   
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
@@ -182,9 +185,10 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
       losses = []
+      eval_func = eval_step_jitted if getenv('JIT', 1) == 1 else eval_step
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
         Xt, Yt = Tensor(Xt), Tensor(Yt) 
-        out, loss = eval_step_jitted(model_fp32, Xt, Yt)
+        out, loss = eval_func(model_fp32, Xt, Yt)
         outs = out.numpy().argmax(axis=1)
         correct = outs == Yt.numpy().argmin(axis=1)
         losses.append(loss.numpy().tolist())
