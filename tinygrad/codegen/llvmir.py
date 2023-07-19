@@ -91,6 +91,8 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
           val = bb[-1].select(valid, ir.Constant(ir.FloatType(), args.value), ir.Constant(ir.FloatType(), args.invalid_value))
         else:
           val = ir.Constant(ir.FloatType(), args.value if args.valid.min == 1 else args.invalid_value)
+        # TODO: this is a hack. it shouldn't be const that signals this
+        reduce_phis.append(newvar)
       else:
         llvm_dtype = dtype_to_llvm_dtype[args.memory_dtype]
         idx = args.idx.render(render_llvm, bb[-1])
