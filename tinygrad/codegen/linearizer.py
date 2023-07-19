@@ -214,8 +214,9 @@ class Linearizer:
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
-  def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None, load_cache=None) -> Tuple[Token]:
+  def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None, load_cache=None) -> Tuple[Token, ...]:
     if isinstance(self.bufs[i].realized, RawConst): const = self.bufs[i].realized._buf
+
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
@@ -244,7 +245,7 @@ class Linearizer:
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return tuple(ret)
 
-  def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
+  def global_store(self, i, idxs:List[VariableOrNum], store:Sequence[Token], ssa) -> None:
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
@@ -303,7 +304,7 @@ class Linearizer:
 
     # parse AST
     loaded_buffers = {}
-    acc = []
+    acc: Tuple[Token, ...] = tuple()
 
     # ssa
     _ssa:DefaultDict[str,int] = defaultdict(int)
@@ -336,7 +337,7 @@ class Linearizer:
       # reduce loop
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
-      inner_load_cache = defaultdict(dict)
+      inner_load_cache: Dict[str, Dict[str, Tuple[Token, ...]]] = defaultdict(dict)
 
       # barrier for fast GEMM
       if self.use_tensor_cores: self.uop(UOps.BARRIER, None, [], ())
@@ -433,7 +434,7 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    outer_load_cache = defaultdict(dict)
+    outer_load_cache: Dict[str, Dict[str, Tuple[Token, ...]]] = defaultdict(dict)
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, load_cache=outer_load_cache) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})
 
     # run late AST
