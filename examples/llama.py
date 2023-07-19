@@ -3,6 +3,7 @@
 #import typeguard.importhook
 #typeguard.importhook.install_import_hook('tinygrad')
 
+import functools
 from pathlib import Path
 import sys, argparse, math, platform
 import numpy as np
@@ -143,8 +144,7 @@ class Transformer:
     # get only the part we are using. making it contiguous avoids more kernel calls
     freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen].contiguous().realize()
     mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
-    for layer in self.layers:
-      h = layer(h, start_pos, freqs_cis, mask)
+    h = h.sequential([functools.partial(layer, start_pos=start_pos, freqs_cis=freqs_cis, mask=mask) for layer in self.layers])
 
     return self.output(self.norm(h)[:, -1, :])
 
