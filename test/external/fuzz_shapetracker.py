@@ -1,5 +1,4 @@
 import random
-import sys
 from tinygrad.helpers import DEBUG
 from test.unit.test_shapetracker import CheckingShapeTracker
 random.seed(42)
@@ -59,7 +58,4 @@ if __name__ == "__main__":
   for _ in range(200):
     st = CheckingShapeTracker((random.randint(2, 10), random.randint(2, 10), random.randint(2, 10)))
     for i in range(8): random.choice(ops)(st)
-    try:
-      st.assert_same()
-    except AssertionError as e:
-      sys.exit(e)
+    st.assert_same()
