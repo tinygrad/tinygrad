@@ -194,8 +194,15 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: 3.8
-          cache: 'pip'
-          cache-dependency-path: setup.py
+          # cache: 'pip'
+          # cache-dependency-path: setup.py
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ${{ matrix.backend=='clang'&&'~/Library/Caches/pip'||'~/.cache/pip' }}
+          key: ${{ runner.os }}-pip-${{ matrix.backend }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1'||matrix.backend=='cuda'&&'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1'}}" >> $GITHUB_ENV
       - name: Install packages (gpu)
