@@ -7,13 +7,13 @@ from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mn
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
-from tinygrad.runtime.lib import RawConst
+from tinygrad.runtime.lib import RawConst, buf_is_kernel_arg
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode
 VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
+class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); DEFINE_GLOBAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
@@ -111,8 +111,15 @@ def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
     yield x[::-1]
 
 class MemOp(NamedTuple):
-  i: int
+  name: str
   idx: Variable
+  valid: Variable
+  dtype: DType
+  local: bool
+
+class ConstOp(NamedTuple):
+  value: float
+  dtype: DType
   valid: Variable
 
 class UOp(NamedTuple):
@@ -132,11 +139,17 @@ class Linearizer:
 
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)
+    self.arg_bufs = {x:f"data{i}" for i,x in enumerate(dedup([x.realized for x in self.bufs if buf_is_kernel_arg(x)]))}
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
-    self.key = (ast.map_buffers({x:i for i,x in enumerate(self.bufs)}).key, tuple([x.key for x in self.bufs]))
+    self.key = (ast.map_buffers({x:(self.arg_bufs[x.realized] if x.realized in self.arg_bufs else x) for x in self.bufs}).key, tuple([x.key for x in self.bufs]))
+
+  def get_buffer_name(self, i):
+    if self.bufs[i].__class__ == LocalBuffer: return self.bufs[i].name
+    assert self.bufs[i].realized.__class__ is not RawConst  # constants shouldn't be loaded with memops
+    return self.arg_bufs[self.bufs[i].realized]
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
@@ -201,6 +214,8 @@ class Linearizer:
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
+    if isinstance(self.bufs[i].realized, RawConst): const = self.bufs[i].realized._buf
+
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
@@ -224,8 +239,8 @@ class Linearizer:
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else \
-                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer)) if const is None else \
+                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], ConstOp(const, self.bufs[i].dtype, valid))
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return ret
 
@@ -257,12 +272,16 @@ class Linearizer:
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-      self.uop(UOps.STORE, None, [var], MemOp(i, idx, valid))
+      self.uop(UOps.STORE, None, [var], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer))
 
   def linearize(self):
     # uops
     self.uops: List[UOp] = []
     self.saved_exprs: Dict[LazyOp, List[Token]] = dict()
+
+    # add global buffers
+    for buf,name in self.arg_bufs.items():
+      self.uop(UOps.DEFINE_GLOBAL, None, [], (name, buf.dtype))
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):

@@ -168,7 +168,9 @@ class Tensor:
   def ones_like(tensor, **kwargs): return Tensor.full_like(tensor, 1, **kwargs)
 
   @staticmethod
-  def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
+  def eye(dim:int, **kwargs):
+    return Tensor([1], **kwargs).pad(((0,dim),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
+
 
   # ***** rng hlops *****
 
@@ -481,6 +483,7 @@ class Tensor:
     return (x*w).sum(-1)
 
   def cumsum(self, axis=0):
+    axis = (axis + self.ndim) if axis < 0 else axis
     x = self.permute(*(i for i in range(self.ndim) if i != axis), axis)
     return x.reshape(1, 1, -1, self.shape[axis]).conv2d(Tensor.ones(1, 1, 1, self.shape[axis], dtype=self.dtype, device=self.device), padding=(self.shape[axis]-1, 0, 0, 0)).reshape(*x.shape).permute(*range(axis), self.ndim - 1, *range(axis, self.ndim-1))
 

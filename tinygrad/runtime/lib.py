@@ -54,3 +54,6 @@ class RawConst(RawBuffer): # pylint: disable=abstract-method
   def __repr__(self): return f"const<{self._buf}, {self.dtype}>"
   @property
   def key(self): return (str(self._buf), self.dtype.key)
+
+def buf_is_kernel_arg(x) -> bool:
+  return x.realized is not None and x.realized.__class__ is not RawConst
