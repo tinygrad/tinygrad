@@ -217,7 +217,7 @@ jobs:
           cache: 'pip'
           cache-dependency-path: setup.py
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CI=1\nCLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1'||matrix.backend=='cuda'&&'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1'}}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1'||matrix.backend=='cuda'&&'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1'}}\nCI=1" >> $GITHUB_ENV
       - name: Install packages (gpu)
         if: matrix.backend == 'gpu'
         run: |

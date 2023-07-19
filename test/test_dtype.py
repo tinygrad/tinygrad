@@ -6,9 +6,9 @@ from tinygrad.tensor import Tensor, dtypes
 from extra.utils import OSX
 
 def _test_to_np(a:Tensor, np_dtype, target):
-  print(a)
+  if not getenv("CI", 0): print(a)
   na = a.numpy()
-  print(na, na.dtype, a.lazydata.realized)
+  if not getenv("CI", 0): print(na, na.dtype, a.lazydata.realized)
   assert na.dtype == np_dtype
   np.testing.assert_allclose(na, target)
 
