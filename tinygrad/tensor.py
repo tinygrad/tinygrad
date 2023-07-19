@@ -343,7 +343,7 @@ class Tensor:
   def chunk(self, num, dim):
     dim = (dim + self.ndim) if dim < 0 else dim
     x = self.permute(*(i for i in range(self.ndim) if i != dim), dim)
-    dv, mod = np.divmod(self.shape[dim], num)
+    dv, mod = divmod(self.shape[dim], num)
     step = dv if mod == 0 else dv + 1
     return [x[..., i:i + step].permute(*range(dim), self.ndim - 1, *range(dim, self.ndim - 1)) for i in range(0, self.shape[dim], step)]
 
