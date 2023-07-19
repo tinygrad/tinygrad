@@ -6,13 +6,14 @@ import time
 import numpy as np
 from extra.datasets import fetch_cifar
 from tinygrad import nn
-from tinygrad.state import get_parameters
+from tinygrad.state import get_parameters, get_state_dict
 from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, dtypes
 from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
+from copy import deepcopy
 
 
 def set_seed(seed):
@@ -21,16 +22,34 @@ def set_seed(seed):
 
 num_classes = 10
 HALF = getenv('HALF', 1) == 1
-LOSS_SCALE = getenv('HALF_SCALE', 100) 
+LOSS_SCALE = getenv('LOSS_SCALE', 1) 
 
 cifar10_mean = Tensor(np.array([125.306918046875, 122.950394140625, 113.86538318359375], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
 cifar10_std = Tensor(np.array([62.993219278136884, 62.08870764001421, 66.70489964063091], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
 
+def change_dtype(layers, dtype):
+  revert = False
+  if not isinstance(layers, list): layers, revert = [layers], True
+  for layer in layers:
+    if hasattr(layer, '__dict__'):
+      for attr, value in layer.__dict__.items():
+        if isinstance(value, Tensor) and value.dtypedtype != dtype:
+          if value.grad is not None and value.grad.dtype != dtype: value.grad = value.grad.cast(dtype).realize()
+          layer.__dict__[attr] = value.cast(dtype).realize()
+        value = change_dtype(value, dtype)
+  return layers[0] if revert else layers
 
-if HALF:
-  Tensor.default_type = dtypes.float16
-else:
-  LOSS_SCALE = 1
+def copy_weights(from_model, to_model):
+  from_model_state = get_state_dict(from_model)
+  to_model_state = get_state_dict(to_model)
+  for k,v in from_model_state.items():
+    # print(f"copying {k}, from {from_model_state[k].dtype} to {to_model_state[k].dtype}")
+    to_model_state[k].assign(Tensor(v.cast(to_model_state[k].dtype).numpy()).realize())
+    to_model_state[k].requires_grad = from_model_state[k].requires_grad
+    if v.grad is not None:
+      # print(f"copying {k}.grad, from {from_model_state[k].dtype} to {to_model_state[k].dtype}")
+      if to_model_state[k].grad is None: to_model_state[k].grad = Tensor(v.grad.cast(to_model_state[k].dtype).numpy(), requires_grad=False).realize()
+      to_model_state[k].grad.assign(Tensor(v.grad.cast(to_model_state[k].dtype).numpy(), requires_grad=False).realize())
 
 class ConvGroup:
   def __init__(self, channels_in, channels_out, short, se=True):
@@ -107,36 +126,42 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     X_train, Y_train = fetch_cifar(train=True)
     X_test, Y_test = fetch_cifar(train=False)
 
-  model = SpeedyResNet()
-  optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  model_fp32 = SpeedyResNet()
+  model_fp16 = change_dtype(SpeedyResNet(), dtypes.float16 if HALF else dtypes.float32)
+
+  optimizer = optim.SGD(get_parameters(model_fp32), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, 
                             total_steps=STEPS, pct_start=PCT_START)
 
-
-  def train_step(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
+  def train_step(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
     Xr = (Xr - cifar10_mean) / cifar10_std
     Xl = (Xl - cifar10_mean) / cifar10_std
     X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
     X = Tensor.where(Tensor.rand(X.shape[0],1,1,1, dtype=X.dtype) < 0.5, X[..., ::-1], X) # flip augmentation
-    out = model(X)
+    copy_weights(model_fp32, model_fp16)
+    out = model_fp16(X)
     loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
     loss = loss/LOSS_SCALE
     if not getenv("DISABLE_BACKWARD"):
-      optimizer.zero_grad()
+      optimizer.init_params(get_parameters(model_fp16))
+      optimizer.zero_grad() # Zero grad needs to be called with fp16 params
+      optimizer.init_params(get_parameters(model_fp32))
       loss.backward()
+      copy_weights(model_fp16, model_fp32)
       optimizer.step()
+      copy_weights(model_fp32, model_fp16) # TODO: is this needed?
       lr_scheduler.step()
     loss = loss * LOSS_SCALE
     return loss.realize()
   
   # JIT at every run
   @TinyJit 
-  def train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
-    return train_step(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
+  def train_step_jitted(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
+    return train_step(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
   
   @TinyJit
-  def eval_step_jitted(model, X, Y):
-    out = model(X, training=False)
+  def eval_step_jitted(model_fp32, X, Y):
+    out = model_fp32(X, training=False)
     loss = out.mul(Y).mean()
     return out.realize(), loss.realize()
   
@@ -159,7 +184,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
       losses = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
         Xt, Yt = Tensor(Xt), Tensor(Yt) 
-        out, loss = eval_step_jitted(model, Xt, Yt)
+        out, loss = eval_step_jitted(model_fp32, Xt, Yt)
         outs = out.numpy().argmax(axis=1)
         correct = outs == Yt.numpy().argmin(axis=1)
         losses.append(loss.numpy().tolist())
@@ -169,13 +194,14 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
         best_eval = acc
         print(f"eval {sum(corrects)}/{len(corrects)} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
     if STEPS == 0 or i==STEPS: break
+    # TODO: JIT is broken with mixed precision training 
     train_func = train_step_jitted if getenv('JIT', 1) == 1 else train_step
     GlobalCounters.reset()
     st = time.monotonic()
     (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
     Xr, Xl, Yr, Yl = Tensor(Xr), Tensor(Xl), Tensor(Yr), Tensor(Yl)
     lt = time.monotonic()
-    loss = train_func(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
+    loss = train_func(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
     et = time.monotonic()
     loss_cpu = loss.numpy() 
     cl = time.monotonic()

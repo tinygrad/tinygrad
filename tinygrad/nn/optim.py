@@ -1,6 +1,6 @@
 # sorted in order of increasing complexity
 from typing import List
-from tinygrad.helpers import dedup, getenv
+from tinygrad.helpers import dedup, getenv, dtypes
 from tinygrad.tensor import Tensor
 
 global_steps = 0
@@ -18,16 +18,18 @@ def log_grad(i,g):
 
 class Optimizer:
   def __init__(self, params: List[Tensor], lr: float):
-    # if it's None, but being put into an optimizer, set it to True
-    for x in params:
-      if x.requires_grad is None: x.requires_grad = True
-
-    self.params: List[Tensor] = dedup([x for x in params if x.requires_grad])
-    self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
-    self.lr = Tensor([lr], requires_grad=False).contiguous()
+    self.init_params(params)
+    self.lr = Tensor([lr], requires_grad=False, dtype=dtypes.float16 if getenv('HALF') else None).contiguous()
 
   def zero_grad(self):
     for param in self.params: param.grad = None
+
+  def init_params(self, params):
+    # if it's None, but being put into an optimizer, set it to True
+    for x in params:
+      if x.requires_grad is None: x.requires_grad = True
+    self.params: List[Tensor] = dedup([x for x in params if x.requires_grad])
+    self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
 
   def realize(self, extra=None):
     # TODO: corealize
