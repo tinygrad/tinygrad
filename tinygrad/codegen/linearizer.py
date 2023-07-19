@@ -502,6 +502,7 @@ class Linearizer:
     return (False, True)
 
   def can_use_atomics(self) -> bool:
+    if not self.bufs[0].dtype in [dtypes.float32, dtypes.int32, dtypes.uint32]: return False
     if not self.supports_atomics: return False
     if not self.reduceop or self.reduceop.op != ReduceOps.SUM: return False
     return self._can_use_atomics(self.ast)[0]
