@@ -92,9 +92,12 @@ class Attention:
     return self.wo(output)
 
 class FeedForward:
-  def __init__(self, dim, hidden_dim, multiple_of):
+  def __init__(self, dim, hidden_dim, multiple_of, ffn_dim_multiplier=None):
     # TODO: what is this?
     hidden_dim = int(2 * hidden_dim / 3)
+    # custom dim factor multiplier
+    if ffn_dim_multiplier is not None:
+      hidden_dim = int(ffn_dim_multiplier * hidden_dim)
     hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
     self.w1 = Linear(dim, hidden_dim, bias=False)
     self.w2 = Linear(hidden_dim, dim, bias=False)
@@ -104,9 +107,9 @@ class FeedForward:
     return self.w2(self.w1(x).silu() * self.w3(x))
 
 class TransformerBlock:
-  def __init__(self, dim, multiple_of, n_heads, norm_eps):
+  def __init__(self, dim, multiple_of, n_heads, norm_eps, ffn_dim_multiplier=None):
     self.attention = Attention(dim, n_heads)
-    self.feed_forward = FeedForward(dim, 4*dim, multiple_of)
+    self.feed_forward = FeedForward(dim, 4*dim, multiple_of, ffn_dim_multiplier)
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
     if getenv("JIT"):
@@ -130,8 +133,8 @@ class TransformerBlock:
     return self._post(x, output)
 
 class Transformer:
-  def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, max_batch_size=32, max_seq_len=1024):
-    self.layers = [TransformerBlock(dim, multiple_of, n_heads, norm_eps) for _ in range(n_layers)]
+  def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None):
+    self.layers = [TransformerBlock(dim, multiple_of, n_heads, norm_eps, ffn_dim_multiplier) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = Embedding(vocab_size, dim)
     self.output = Linear(dim, vocab_size, bias=False)
