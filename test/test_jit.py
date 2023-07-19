@@ -96,7 +96,6 @@ class TestJit(unittest.TestCase):
       np.testing.assert_equal(c.numpy(), fun.a.numpy()+b.numpy())
     assert len(fun.__call__.func.__self__.jit_cache) == 1
 
-  @unittest.expectedFailure # size 1 input foldes into constant and not jitted
   def test_jit_size1_input(self):
     @TinyJit
     def f(a, b): return (a+b).realize()
