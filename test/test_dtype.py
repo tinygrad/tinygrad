@@ -1,14 +1,14 @@
 import unittest
 import numpy as np
-from tinygrad.helpers import getenv, DType, DEBUG, print_ci
+from tinygrad.helpers import getenv, DType, DEBUG, CI
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor, dtypes
 from extra.utils import OSX
 
 def _test_to_np(a:Tensor, np_dtype, target):
-  print_ci(a)
+  if not CI: print(a)
   na = a.numpy()
-  print_ci(na, na.dtype, a.lazydata.realized)
+  if not CI: print(na, na.dtype, a.lazydata.realized)
   assert na.dtype == np_dtype
   np.testing.assert_allclose(na, target)
 
