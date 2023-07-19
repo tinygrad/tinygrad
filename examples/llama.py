@@ -10,7 +10,7 @@ from tqdm import tqdm
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple
 
-from tinygrad.helpers import Timing, getenv, DEBUG
+from tinygrad.helpers import Timing, getenv, DEBUG, dtypes
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
@@ -142,15 +142,8 @@ class Transformer:
 
     # get only the part we are using. making it contiguous avoids more kernel calls
     freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen].contiguous().realize()
-    if seqlen > 1:
-      mask = np.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=np.float32)
-      mask = np.triu(mask, k=start_pos + 1)  # TODO: this is hard to do in tinygrad
-      mask = Tensor(mask)
-    else:
-      mask = None
-    # mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1) if seqlen > 1 else None #TODO: Pending(#942)
+    mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
     for layer in self.layers:
-      h.realize()  # TODO: why do i need this?
       h = layer(h, start_pos, freqs_cis, mask)
 
     return self.output(self.norm(h)[:, -1, :])
