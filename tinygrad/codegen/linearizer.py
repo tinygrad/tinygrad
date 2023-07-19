@@ -48,6 +48,7 @@ class Token(NamedTuple):
   name: str
   dtype: DType
   offset: Optional[int] = None
+  const_zero: bool = False
   def render(self, with_type=False):
     if with_type:
       assert self.offset is None
@@ -237,11 +238,14 @@ class Linearizer:
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
         localtype = dtypes.float32
+      this_const = 0.0 if valid.max == 0 else const
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer)) if const is None else \
-                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], ConstOp(const, self.bufs[i].dtype, valid))
+        if this_const is None:
+          cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer))
+        else:
+          cache[key] = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype, const_zero=valid.max == 0), [], ConstOp(const, self.bufs[i].dtype, valid))
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return ret
 
@@ -475,7 +479,27 @@ class Linearizer:
       if x.op in ops:
         ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), ops[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
       else:
-        ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op not in {BinaryOps.CMPEQ, TernaryOps.WHERE})]
+        ret = []
+        grouped = list(get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op not in {BinaryOps.CMPEQ, TernaryOps.WHERE}))
+        for idx, val in grouped:
+          out = ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu')
+          op = x.op
+
+          fold_result = None
+          if any(v.const_zero for v in val):
+            if op in [UnaryOps.NOOP, UnaryOps.SIN, UnaryOps.SQRT]: fold_result = val[0]
+            if op == BinaryOps.ADD:
+              fold_result = val[1] if val[0].const_zero else val[0]
+            elif op == BinaryOps.SUB:
+              if val[1].const_zero: fold_result = val[0]
+            elif op == BinaryOps.MUL:
+              fold_result = val[0] if val[0].const_zero else val[1]
+            # todo: 0/x? but 0/0 is undefined
+
+          if fold_result is not None:
+            ret.append((idx, fold_result))
+          else:
+            ret.append( (idx, self.uop(UOps.ALU, out, list(val), op)) )
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
       # scatter
       for i,j in ret:
