@@ -83,6 +83,16 @@ def helper_test_generic_square(name, N, f1, f2, onearg=False):
 
   helper_test_generic(f"{name:30s} {N:5d}x{N:5d}", f1, (torch_a, torch_b), TinyJit(lambda a,b:f2(a,b).realize()), (tiny_a, tiny_b))
 
+def helper_test_generic_cube(name, N, f1, f2, onearg=False):
+  torch.manual_seed(0)
+  torch_a = (torch.rand(N, N, N) - 0.5).to(torch_device)
+  torch_b = (torch.rand(N, N, N) - 0.5).to(torch_device) if not onearg else None
+
+  tiny_a = Tensor(torch_a.cpu().numpy())
+  tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
+
+  helper_test_generic(f"{name:30s} {N:5d}x{N:5d}x{N:5d}", f1, (torch_a, torch_b), TinyJit(lambda a,b:f2(a,b).realize()), (tiny_a, tiny_b))
+
 prefix = None
 def helper_test_generic(name, f1, f1_args, f2, f2_args):
   global prefix
@@ -150,6 +160,11 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a.sum()
     helper_test_generic_square('sum', 2048, f, f, onearg=True)
     helper_test_generic_square('sum', 4096, f, f, onearg=True)
+
+  def test_cube_sum(self):
+    def f(a, b): return a.sum()
+    helper_test_generic_cube('sum', 256, f, f, onearg=True)
+    helper_test_generic_cube('sum', 512, f, f, onearg=True)
 
   def test_partial_sum(self):
     R = 256
