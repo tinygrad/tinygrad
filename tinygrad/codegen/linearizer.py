@@ -214,7 +214,7 @@ class Linearizer:
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
-  def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None, load_cache=None) -> Tuple[Token, ...]:
+  def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None, load_cache=None) -> List[Token]:
     if isinstance(self.bufs[i].realized, RawConst): const = self.bufs[i].realized._buf
 
     expanded_nodes = [expand_node(idx) for idx in idxs]
@@ -243,9 +243,9 @@ class Linearizer:
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer)) if const is None else \
                      self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], ConstOp(const, self.bufs[i].dtype, valid))
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
-    return tuple(ret)
+    return ret
 
-  def global_store(self, i, idxs:List[VariableOrNum], store:Sequence[Token], ssa) -> None:
+  def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
@@ -304,7 +304,7 @@ class Linearizer:
 
     # parse AST
     loaded_buffers = {}
-    acc: Tuple[Token, ...] = tuple()
+    acc = []
 
     # ssa
     _ssa:DefaultDict[str,int] = defaultdict(int)
@@ -388,7 +388,7 @@ class Linearizer:
           self.uop(UOps.BARRIER, None, [], ())
 
         # load earlybufs
-        loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs, load_cache=inner_load_cache) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
+        loaded_buffers.update({b:tuple(self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs, load_cache=inner_load_cache)) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
 
         # run early AST (with reduce)
         self.ast_parse(self.reduceop.map_buffers(loaded_buffers), [acc[off] for off in self.acc_offsets(self.full_buf_index)], ssa, do_reduce=True)
@@ -425,7 +425,7 @@ class Linearizer:
         self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
         # load localbufs
-        loaded_buffers[self.bufs[-1]] = self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs)
+        loaded_buffers[self.bufs[-1]] = tuple(self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs))
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
         self.ast_parse(LazyOp(self.reduceop.op, (self.bufs[-1],)).map_buffers(loaded_buffers), [acc[off] for off in self.acc_offsets(-1)], ssa, do_reduce=True) # type: ignore
@@ -435,7 +435,7 @@ class Linearizer:
 
     # load latebufs
     outer_load_cache: Dict[str, Dict[str, Tuple[Token, ...]]] = defaultdict(dict)
-    loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, load_cache=outer_load_cache) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})
+    loaded_buffers.update({b:tuple(self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, load_cache=outer_load_cache)) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})
 
     # run late AST
     val = self.ast_parse(self.ast.map_buffers(loaded_buffers), acc, ssa)
