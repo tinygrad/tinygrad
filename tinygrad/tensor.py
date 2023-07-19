@@ -341,6 +341,7 @@ class Tensor:
 
   # TODO: make this nicer with syntactic sugar in slice
   def chunk(self, num, dim):
+    dim = (dim + self.ndim) if dim < 0 else dim
     x = self.permute(*(i for i in range(self.ndim) if i != dim), dim)
     dv, mod = np.divmod(self.shape[dim], num)
     step = dv if mod == 0 else dv + 1
