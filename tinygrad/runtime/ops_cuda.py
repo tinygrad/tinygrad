@@ -1,7 +1,6 @@
-import subprocess, time, re, hashlib, tempfile
+import subprocess, time, re, hashlib, tempfile, os
 from typing import Optional
 import numpy as np
-import os
 from pycuda.compiler import compile as cuda_compile # type: ignore
 from tinygrad.helpers import DEBUG, getenv, fromimport, colored
 from tinygrad.ops import Compiled
