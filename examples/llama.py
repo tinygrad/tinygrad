@@ -153,20 +153,24 @@ class Transformer:
 WEIGHTS_DIR = Path(__file__).parent.parent / "weights/LLaMA/"
 TOKENIZER_FILENAME = WEIGHTS_DIR / "tokenizer.model"
 VOCAB_SIZE = 32000
-
-args_small = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE}
-
-args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_7B_FILENAME = WEIGHTS_DIR / "7B/consolidated.00.pth"
-
-args_13B = {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_13B_FILENAMES = [WEIGHTS_DIR / "13B/consolidated.00.pth", WEIGHTS_DIR / "13B/consolidated.01.pth"]
-
-args_30B = {"dim": 6656, "multiple_of": 256, "n_heads": 52, "n_layers": 60, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_30B_FILENAMES = [WEIGHTS_DIR / "30B/consolidated.00.pth", WEIGHTS_DIR / "30B/consolidated.01.pth", WEIGHTS_DIR / "30B/consolidated.02.pth", WEIGHTS_DIR / "30B/consolidated.03.pth"]
-
-args_65B = {"dim": 8192, "multiple_of": 256, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE}
-WEIGHTS_65B_FILENAMES = [WEIGHTS_DIR / "65B/consolidated.00.pth", WEIGHTS_DIR / "65B/consolidated.01.pth", WEIGHTS_DIR / "65B/consolidated.02.pth", WEIGHTS_DIR / "65B/consolidated.03.pth", WEIGHTS_DIR / "65B/consolidated.04.pth", WEIGHTS_DIR / "65B/consolidated.05.pth", WEIGHTS_DIR / "65B/consolidated.06.pth", WEIGHTS_DIR / "65B/consolidated.07.pth"]
+MODEL_PARAMS = {
+  "7B": {
+    "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
+    "files": 1,
+  },
+  "13B": {
+    "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
+    "files": 2,
+  },
+  "30B": {
+    "args": {"dim": 6656, "multiple_of": 256, "n_heads": 52, "n_layers": 60, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
+    "files": 4,
+  },
+  "65B": {
+    "args": {"dim": 8192, "multiple_of": 256, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+    "files": 8,
+  },
+}
 
 # **** helper functions ****
 def sample(logits, temperature):
@@ -219,25 +223,13 @@ if __name__ == "__main__":
   chatbot = args.prompt == None
 
   from tinygrad.state import torch_load, load_state_dict
-  if args.size == "65B":
-    print("using 65B model")
-    model = Transformer(**args_65B)
-    weights = [torch_load(filename) for filename in WEIGHTS_65B_FILENAMES]
-    load_state_dict(model, concat_weights(weights), strict=False)
-  elif args.size == "30B":
-    print("using 30B model")
-    model = Transformer(**args_30B)
-    weights = [torch_load(filename) for filename in WEIGHTS_30B_FILENAMES]
-    load_state_dict(model, concat_weights(weights), strict=False)
-  elif args.size == "13B":
-    print("using 13B model")
-    model = Transformer(**args_13B)
-    weights = [torch_load(filename) for filename in WEIGHTS_13B_FILENAMES]
-    load_state_dict(model, concat_weights(weights), strict=False)
+  print(f"using LLaMA {args.size} model")
+  model = Transformer(**MODEL_PARAMS[args.size]["args"])
+  weights = [torch_load(WEIGHTS_DIR / f"{args.size}/consolidated.{i:02d}.pth") for i in range(MODEL_PARAMS[args.size]["files"])]
+  if len(weights) == 1:
+    load_state_dict(model, weights[0], strict=False)
   else:
-    print("using 7B model")
-    model = Transformer(**args_7B)
-    load_state_dict(model, torch_load(WEIGHTS_7B_FILENAME), strict=False)
+    load_state_dict(model, concat_weights(weights), strict=False)
 
   # *** prompt engineers work here ****
 
