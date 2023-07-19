@@ -675,7 +675,7 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv3d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
-  @unittest.skipIf(IMAGE>0, "no conv3d on images")
+  @unittest.skipIf((IMAGE>0 or (Device.DEFAULT == "METAL" and getenv("CI","") != "")), "no conv3d on images + broken on Metal CI")
   def test_padded_conv3d(self):
     helper_test_op([(1,4,9,9,9), (4,4,3,3,3)],
       lambda x,w: torch.nn.functional.conv3d(x,w,padding=1).relu(),

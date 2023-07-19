@@ -4,7 +4,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup
 from tinygrad.shape.shapetracker import MovementOps
-from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg
+from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg, DeviceInfo
 if TYPE_CHECKING:
   from tinygrad.lazy import LazyBuffer
 
@@ -152,8 +152,8 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], codegen, runtime, synchronize=lambda: None):
-    self.buffer, self.codegen, self.runtime, self.synchronize = buffer, codegen, runtime, synchronize
+  def __init__(self, buffer: Type[RawBuffer], codegen, runtime, synchronize=lambda: None, device_info = DeviceInfo()):
+    self.buffer, self.codegen, self.runtime, self.synchronize, self.device_info = buffer, codegen, runtime, synchronize, device_info
     self.method_cache: Dict[str, ASTRunner] = {}
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):

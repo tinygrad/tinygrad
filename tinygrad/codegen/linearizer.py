@@ -3,9 +3,9 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv, MemRequestType
-from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
-from tinygrad.lazy import LazyBuffer
+from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv, MemRequestType, unwrap_optional
+from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, Compiled
+from tinygrad.lazy import LazyBuffer, Device
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst, buf_is_kernel_arg
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
@@ -148,6 +148,8 @@ class Linearizer:
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
     self.key = (ast.map_buffers({x:(self.arg_bufs[x.realized] if x.realized in self.arg_bufs else x) for x in self.bufs}).key, tuple([x.key for x in self.bufs]))
+
+    self.target_dev = cast(Compiled, Device[output_buffer.device]) # only Compiled calls linearizer
 
   def get_buffer_name(self, i):
     if self.bufs[i].__class__ == LocalBuffer: return self.bufs[i].name
@@ -717,17 +719,20 @@ class Linearizer:
 
     def round_to_power2(x): return 1<<(x-1).bit_length() if x > 0 else 0
 
-    # TODO: Calculate this based on GPU?
-    minimum_preferred_global_dim = 1024
+    # NOTE: Default is 256 to match previous hand-written value=1024. So should not get worse perf on devices with no device_info.
+    min_preferred_global_dim = unwrap_optional(self.target_dev.device_info.cores_count_executing_in_parallel, 256) * 4
+    min_preferred_local_dim = unwrap_optional(self.target_dev.device_info.threads_executed_in_parallel, 32)
 
     # are we grouping? (requires local shape support)
     if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
-      # Choose local shape to be as big as possible but not making global dim too small.
-      sz = min(512, round_to_power2(max(prod(self.full_shape[self.first_reduce:]) // (minimum_preferred_global_dim * 8), 32)))
-      if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
-        self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
-        self.group_for_reduce.append(sz)
+      # Choose local shape to be as big as possible but not making global dim too small at the same time.
+      preferred_sz = min(512, round_to_power2(max(prod(self.full_shape[self.first_reduce:]) // (min_preferred_global_dim * 8), min_preferred_local_dim)))
+      for sz in [preferred_sz, 16]:
+        if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
+          self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
+          self.group_for_reduce.append(sz)
+          break
 
     # are we upcasting in mid reduce? (only for images)
     if self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
@@ -774,7 +779,7 @@ class Linearizer:
 
     # potentially do more upcasts of non reduce axes based on a heuristic
     upcasted_axis = set()
-    while prod(self.sts[0].shape[:self.first_reduce]) >= minimum_preferred_global_dim:
+    while prod(self.sts[0].shape[:self.first_reduce]) >= min_preferred_global_dim:
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
         # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
@@ -818,7 +823,7 @@ class Linearizer:
       if self.full_shape[axis] == 1: continue
       last_try = self.local_dims == 0 and axis == 0
       if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))) or last_try:
-        for sz in [x for x in (([512, 256, 128, 64, 32] if last_try else []) + [16,8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 512 and global_size//x >= minimum_preferred_global_dim]:
+        for sz in [x for x in (([512, 256, 128, 64, 32] if last_try else []) + [16,8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 512 and global_size//x >= min_preferred_global_dim]:
           self.shift_to(axis, sz, insert_before=self.first_reduce-self.local_dims)
           self.local_dims += 1
           break

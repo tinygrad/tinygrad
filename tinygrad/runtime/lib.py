@@ -1,7 +1,8 @@
 import ctypes
 import numpy as np
-from typing import TypeVar, Type, Any
+from typing import TypeVar, Type, Any, Optional
 from tinygrad.helpers import DType, dtypes, prod, GlobalCounters
+from dataclasses import dataclass
 
 _T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method
@@ -57,3 +58,10 @@ class RawConst(RawBuffer): # pylint: disable=abstract-method
 
 def buf_is_kernel_arg(x) -> bool:
   return x.realized is not None and x.realized.__class__ is not RawConst
+
+# **** device info classes *****
+
+@dataclass
+class DeviceInfo:
+  cores_count_executing_in_parallel: Optional[int] = None # aka SM count for GPUs.
+  threads_executed_in_parallel: Optional[int] = None # aka warp_size for GPUs.

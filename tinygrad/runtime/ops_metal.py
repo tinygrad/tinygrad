@@ -5,7 +5,7 @@ from typing import List, Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferMapped
+from tinygrad.runtime.lib import RawBufferMapped, DeviceInfo
 
 METAL_XCODE = getenv("METAL_XCODE")
 
@@ -14,6 +14,7 @@ class _METAL:
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueue()
+    self.device_info = DeviceInfo(cores_count_executing_in_parallel=self.device.gpuCoreCount() if hasattr(self.device, 'gpuCoreCount') else 16, threads_executed_in_parallel=32)
   # TODO: is there a better way to do this?
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
@@ -89,4 +90,4 @@ class MetalCodegen(CStyleCodegen):
     simd_sum = "{0} = simd_sum({0});",
     extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]', 'uint warp_size [[threads_per_simdgroup]]'])
 
-MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram, METAL.synchronize)
+MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram, METAL.synchronize, METAL.device_info)
