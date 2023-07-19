@@ -182,10 +182,11 @@ MODEL_PARAMS = {
       "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
       "files": 2,
     },
-    "70B": {
-      "args": {"dim": 8192, "multiple_of": 4096, "ffn_dim_multiplier": 1.3, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
-      "files": 8,
-    },
+#     # 70B is disabled because we do not yet implement n_kv_heads argument
+#     "70B": {
+#       "args": {"dim": 8192, "multiple_of": 4096, "ffn_dim_multiplier": 1.3, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+#       "files": 8,
+#     },
   },
 }
 
@@ -231,7 +232,7 @@ if __name__ == "__main__":
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
   parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
-  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B, 70B] for Gen 2")
+  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B] for Gen 2")
   parser.add_argument('--gen', type=int, default="1", help="Generation of the model to use [1, 2]")
 
   args = parser.parse_args()
