@@ -84,7 +84,7 @@ class SpeedyResNet:
     ]
 
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
-  def __call__(self, x, training=True): 
+  def __call__(self, x, training=True):
     if not training and getenv('TTA', 0)==1: return ((x.sequential(self.net) * 0.5) + (x[..., ::-1].sequential(self.net) * 0.5)).log_softmax()
     return x.sequential(self.net).log_softmax()
 

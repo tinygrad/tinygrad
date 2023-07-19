@@ -67,11 +67,8 @@ class Tensor:
 
     if data.__class__ is np.ndarray:
       data = cast(np.ndarray, data)
-      if data.size == 1: # constant fold
-        self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtypes.from_np(data.dtype), device, data.flat[0]).reshape(data.shape)
-      else:
-        data = LazyBuffer.fromCPU(data)
-        self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
+      data = LazyBuffer.fromCPU(data)
+      self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
 
     raise RuntimeError(f"can't create Tensor from {data}")
@@ -168,7 +165,9 @@ class Tensor:
   def ones_like(tensor, **kwargs): return Tensor.full_like(tensor, 1, **kwargs)
 
   @staticmethod
-  def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
+  def eye(dim:int, **kwargs):
+    return Tensor([1], **kwargs).pad(((0,dim),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
+
 
   # ***** rng hlops *****
 
