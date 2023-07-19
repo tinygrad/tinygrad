@@ -58,7 +58,7 @@ jobs:
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
     - name: Run Pytest
-      run: python -m pytest -n=logical test/
+      run: python -m pytest -n=auto test/
     - name: Compile EfficientNet to C
       run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
@@ -83,9 +83,9 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: TORCH=1 python -m pytest -n=logical test/
+      run: TORCH=1 python -m pytest -n=auto test/
     - name: Run ONNX
-      run: TORCH=1 python -m pytest -n=logical test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
 
   testclang:
     name: CLANG (windows)
@@ -138,13 +138,13 @@ jobs:
       - if: ${{ matrix.task == 'optimage' }}
         name: Run Optimizer Test (OPT 2 and 3)
         run: |
-          PYTHONPATH="." OPT=2 GPU=1 python -m pytest -n=logical test/external/external_test_opt.py
-          PYTHONPATH="." OPT=3 GPU=1 python -m pytest -n=logical test/external/external_test_opt.py
+          PYTHONPATH="." OPT=2 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
+          PYTHONPATH="." OPT=3 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
       - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE ops
         run: |
-          GPU=1 IMAGE=1 python3 -m pytest -n=logical test/test_ops.py
-          FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 -m pytest -n=logical test/test_ops.py
+          GPU=1 IMAGE=1 python3 -m pytest -n=auto test/test_ops.py
+          FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 -m pytest -n=auto test/test_ops.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model compile and size
         run: |
@@ -155,7 +155,7 @@ jobs:
         run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test tensor core ops
-        run: GPU=1 TC=2 python3 -m pytest -n=logical test/test_ops.py
+        run: GPU=1 TC=2 python3 -m pytest -n=auto test/test_ops.py
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests
@@ -178,10 +178,10 @@ jobs:
     #- name: Run dtype test
     #  run: DEBUG=4 METAL=1 python -m pytest test/test_dtype.py
     - name: Run metal ops test
-      run: DEBUG=2 METAL=1 python -m pytest -n=logical test/test_ops.py
+      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
     # dtype test has issues on test_half_to_int8
     - name: Run webgpu pytest
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=logical test/test_ops.py test/test_speed_v_torch.py test/test_nn.py test/test_jit.py test/test_randomness.py test/test_tensor.py test/test_assign.py test/test_conv.py test/test_nn.py test/test_custom_function.py test/test_conv_shapetracker.py
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_ops.py test/test_speed_v_torch.py test/test_nn.py test/test_jit.py test/test_randomness.py test/test_tensor.py test/test_assign.py test/test_conv.py test/test_nn.py test/test_custom_function.py test/test_conv_shapetracker.py
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.webgpu.compile_webgpu
 
@@ -260,4 +260,4 @@ jobs:
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
-        run: python -m pytest -n=logical test/ ${{matrix.backend=='cuda'&&'--ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"'||''}}
+        run: python -m pytest -n=auto test/ ${{matrix.backend=='cuda'&&'--ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"'||''}}
