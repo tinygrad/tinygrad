@@ -24,8 +24,6 @@ num_classes = 10
 HALF = getenv('HALF', 1) == 1
 LOSS_SCALE = getenv('LOSS_SCALE', 1) 
 
-cifar10_mean = Tensor(np.array([125.306918046875, 122.950394140625, 113.86538318359375], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
-cifar10_std = Tensor(np.array([62.993219278136884, 62.08870764001421, 66.70489964063091], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
 
 def change_dtype(layers, dtype):
   revert = False
@@ -125,6 +123,9 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   else:
     X_train, Y_train = fetch_cifar(train=True)
     X_test, Y_test = fetch_cifar(train=False)
+
+  cifar10_mean = Tensor(np.array([125.306918046875, 122.950394140625, 113.86538318359375], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
+  cifar10_std = Tensor(np.array([62.993219278136884, 62.08870764001421, 66.70489964063091], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
 
   model_fp32 = SpeedyResNet()
   model_fp16 = change_dtype(SpeedyResNet(), dtypes.float16 if HALF else dtypes.float32)
