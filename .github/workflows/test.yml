@@ -199,7 +199,7 @@ jobs:
       - name: Cache pip
         uses: actions/cache@v3
         with:
-          path: ${{ matrix.backend=='clang'&&'~/Library/Caches/pip'||'~/.cache/pip' }}
+          path: ${{ matrix.backend=='clang'&&'~\AppData\Local\pip\cache'||'~/.cache/pip' }}
           key: ${{ runner.os }}-pip-${{ matrix.backend }}
           restore-keys: |
             ${{ runner.os }}-pip-
