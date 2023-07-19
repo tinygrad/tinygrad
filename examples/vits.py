@@ -48,7 +48,7 @@ class Synthesizer:
       if real_max_y_length < max_y_length:
         overestimation = ((max_y_length / real_max_y_length) * 100) - 100
         logging.info(f"Overestimated max length by {overestimation:.2f}%")
-        if overestimation > 120: logging.warning("Warning: max length overestimated by more than 120%")
+        if overestimation > 10: logging.warning("Warning: max length overestimated by more than 10%")
       o = o[:, :, :(real_max_y_length * length_scaler).astype(np.int32)]
     return o
 
