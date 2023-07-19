@@ -1,4 +1,4 @@
-import subprocess, time, re, hashlib, tempfile
+import subprocess, time, re, hashlib, tempfile, os
 from typing import Optional
 import numpy as np
 from pycuda.compiler import compile as cuda_compile # type: ignore
@@ -61,7 +61,7 @@ class CUDAProgram:
     if DEBUG >= 5: print(pretty_ptx(prg))
     if DEBUG >= 6:
       try:
-        fn = f"{tempfile.gettempdir()}\\tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}"
+        fn = os.path.join(tempfile.gettempdir(), f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}")
         with open(fn + ".ptx", "wb") as f: f.write(prg.encode('utf-8'))
         subprocess.run(["ptxas", f"-arch={arch()}", "-o", fn, fn+".ptx"], check=True)
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
