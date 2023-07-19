@@ -52,9 +52,12 @@ class HIPProgram:
       return hip.hipEventElapsedTime(start, end)*1e-3
 
 class HIPCodegen(CStyleCodegen):
+  # TODO: Test __shfl_down for simd_sum.
+  supports_atomics: bool = True
   lang = CStyleLanguage(
     kernel_prefix = "#define INFINITY (__builtin_inff())\nextern \"C\" __global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
     half_prekernel = "",
+    atomic_add = "atomicAdd({0}, {1});",
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 
