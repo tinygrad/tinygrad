@@ -198,6 +198,8 @@ jobs:
     timeout-minutes: 20
     container:
       image: cheeetoo/tinygrad-cuda-ubuntu:latest
+      volumes:
+        - /home/runner/.cache/pip:/root/.cache/pip
 
     steps:
       - name: Checkout Code
