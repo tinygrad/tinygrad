@@ -60,7 +60,7 @@ class TestOnnxModel(unittest.TestCase):
     tinygrad_out = run_onnx(inputs)['outputs']
     tinygrad_out.realize()
     tinygrad_out = tinygrad_out.numpy()
-    if not getenv("CI", ""):
+    if not CI:
       pr.disable()
       stats = pstats.Stats(pr)
       stats.dump_stats(temp("net.prof"))
