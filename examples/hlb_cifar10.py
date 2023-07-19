@@ -33,7 +33,7 @@ def change_dtype(layers, dtype):
   for layer in layers:
     if hasattr(layer, '__dict__'):
       for attr, value in layer.__dict__.items():
-        if isinstance(value, Tensor) and value.dtypedtype != dtype:
+        if isinstance(value, Tensor) and value.dtype != dtype:
           if value.grad is not None and value.grad.dtype != dtype: value.grad = value.grad.cast(dtype).realize()
           layer.__dict__[attr] = value.cast(dtype).realize()
         value = change_dtype(value, dtype)
