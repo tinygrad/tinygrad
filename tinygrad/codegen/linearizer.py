@@ -480,10 +480,7 @@ class Linearizer:
         ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), ops[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
       else:
         ret = []
-        grouped = list(get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op not in {BinaryOps.CMPEQ, TernaryOps.WHERE}))
-        for idx, val in grouped:
-          out = ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu')
-
+        for idx, val in list(get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op not in {BinaryOps.CMPEQ, TernaryOps.WHERE})):
           fold_result = None
           if any(v.const_zero for v in val):
             if x.op in [UnaryOps.NOOP, UnaryOps.SIN, UnaryOps.SQRT]: fold_result = val[0]
@@ -498,6 +495,7 @@ class Linearizer:
           if fold_result is not None:
             ret.append((idx, fold_result))
           else:
+            out = ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu')
             ret.append( (idx, self.uop(UOps.ALU, out, list(val), x.op)) )
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
       # scatter
