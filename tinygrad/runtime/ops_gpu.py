@@ -1,5 +1,5 @@
 from __future__ import annotations
-import pathlib, os
+import pathlib
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
@@ -17,8 +17,7 @@ if DEBUG >= 5:
   early_exec = fromimport("extra.helpers", "enable_early_exec")()
 
 class _CL:
-  def __init__(self):
-    self.events_in_flight = []
+  def __init__(self): self.events_in_flight = []
   def post_init(self, device=None):
     platforms: List[List[cl.Device]] = [y for y in ([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()] + [x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()]) if len(y)]
     self.cl_platform = cl.get_platforms()[getenv('CL_PLATFORM', 0)]
@@ -30,7 +29,7 @@ class _CL:
     self.events_in_flight.clear()
     for q in self.cl_queue: q.finish()
 CL = _CL()
-CL.post_init() if not os.environ.get("DELAYED_RUNTIME_INIT", False) else None
+CL.post_init() if not getenv("DELAYED_RUNTIME_INIT", False) else None
 
 class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device='0'):
@@ -46,10 +45,9 @@ class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
 
   def _copyin(self, x: np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
-    # CL.events_in_flight.append(cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False))
-    cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False)
+    CL.events_in_flight.append(cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False))
   def _copyout(self, x:np.ndarray):
-    # CL.synchronize()
+    CL.synchronize()
     assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
     cl.enqueue_copy(CL.cl_queue[self._buf.device], x, self._buf, is_blocking=True)
   def _transfer(self, x):
