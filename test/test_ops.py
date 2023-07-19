@@ -97,6 +97,16 @@ class TestOps(unittest.TestCase):
   def test_eye(self):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
 
+  def test_chunk(self):
+    ten = torch.arange(13).repeat(8, 1).chunk(6, 1)
+    tor = Tensor.arange(13).repeat((8, 1)).chunk(6, 1)
+    for i in range(len(ten)):
+      helper_test_op([], lambda: ten[i], lambda: tor[i], forward_only=True)
+    ten = torch.arange(13).repeat(8, 1).chunk(6, 0)
+    tor = Tensor.arange(13).repeat((8, 1)).chunk(6, 0)
+    for i in range(len(ten)):
+      helper_test_op([], lambda: ten[i], lambda: tor[i], forward_only=True)
+
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
     helper_test_op([], lambda: torch.arange(5, 10, 3), lambda: Tensor.arange(10, 5, 3), forward_only=True)
