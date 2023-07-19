@@ -29,6 +29,8 @@ def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
+def print_ci(*args, **kwargs): print(*args, **kwargs) if not getenv("CI", "") else None
+
 class Context:
   def __init__(self, **kwargs): self.pvars = kwargs
   def __enter__(self): ContextVar.ctx_stack.append({ **self.pvars, **{ key: ContextVar.ctx_stack[-1][key] for key in ContextVar.ctx_stack[-1].keys() if key not in self.pvars } })
