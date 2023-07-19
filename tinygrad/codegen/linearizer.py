@@ -118,14 +118,14 @@ class MemOp(NamedTuple):
 
   # shared
   valid: Variable
-  invalid_value: float = 0.0
+  invalid_value: Union[float, int] = 0.0
 
 class ConstOp(NamedTuple):
   value: float
 
   # shared
   valid: Variable
-  invalid_value: float = 0.0
+  invalid_value: Union[float, int] = 0.0
 
 class UOp(NamedTuple):
   uop: UOps
@@ -244,7 +244,7 @@ class Linearizer:
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid)) if const is None else \
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, 0.0 if not dtypes.is_int(self.bufs[i].dtype) else 0)) if const is None else \
                      self.uop(UOps.LOAD, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], ConstOp(const, valid))
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return ret
