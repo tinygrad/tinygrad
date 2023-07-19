@@ -199,7 +199,7 @@ jobs:
     container:
       image: cheeetoo/tinygrad-cuda-ubuntu:latest
       volumes:
-        - ~/.cache/pip:/root/.cache/pip
+        - /home/runner/.cache/pip:/root/.cache/pip
 
     steps:
       - name: Checkout Code
@@ -207,7 +207,7 @@ jobs:
       - name: Cache pip
         uses: actions/cache@v3
         with:
-          path: ~/.cache/pip
+          path: /home/runner/.cache/pip
           key: cuda
       - name: Install tinygrad dependencies
         run: pip install -e '.[testing, cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
