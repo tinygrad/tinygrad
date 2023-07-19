@@ -30,10 +30,10 @@ class TestCifar(unittest.TestCase):
       loss.backward()
       optimizer.step()
     for _ in range(3): train(Tensor.randn(32, 3, 32, 32))
-    print(f"used {GlobalCounters.mem_used/1e9} GB")
-    print(len(train.jit_cache))
-    assert GlobalCounters.mem_used/1e9 < 0.55, "CIFAR used more than 0.55 GB"
-    assert len(train.jit_cache) <= 236, "CIFAR training than 236 kernels"
+
+    print(f"used {GlobalCounters.mem_used/1e9} GB and {len(train.jit_cache)} kernels")
+    assert GlobalCounters.mem_used/1e9 < 0.55, "CIFAR training used more than 0.55 GB"
+    assert len(train.jit_cache) <= 236, "CIFAR training used more than 236 kernels"
 
     # reset device
     Tensor.training = old_training
