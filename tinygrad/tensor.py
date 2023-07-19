@@ -168,7 +168,7 @@ class Tensor:
   def ones_like(tensor, **kwargs): return Tensor.full_like(tensor, 1, **kwargs)
 
   @staticmethod
-  def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
+  def eye(dim:int, **kwargs): return Tensor([1], **kwargs).pad(((0,dim),)).repeat((dim,)).shrink(((0,dim*dim),)).reshape(dim, dim)
 
   # ***** rng hlops *****
 

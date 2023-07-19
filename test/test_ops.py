@@ -96,6 +96,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.ones_like(b), lambda: Tensor.ones_like(a), forward_only=True)
   def test_eye(self):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
+    helper_test_op([], lambda: torch.eye(1), lambda: Tensor.eye(1), forward_only=True)
 
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
