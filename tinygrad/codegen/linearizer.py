@@ -216,6 +216,7 @@ class Linearizer:
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None, load_cache=None) -> List[Token]:
+    var_type = "val" if const is None else "acc"
     if isinstance(self.bufs[i].realized, RawConst): const = self.bufs[i].realized._buf
 
     expanded_nodes = [expand_node(idx) for idx in idxs]
@@ -226,7 +227,7 @@ class Linearizer:
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
-    cache = load_cache[self.get_buffer_name(i)] if load_cache is not None and const is None else {}
+    cache = load_cache[self.get_buffer_name(i)] if load_cache is not None and var_type == "val" else {}
     ret = []
     for _idx in _idxs:
       if amt > 1:
@@ -243,9 +244,9 @@ class Linearizer:
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         if this_const is None:
-          cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer))
+          cache[key] = self.uop(UOps.LOAD, Token(f"{var_type}{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer))
         else:
-          cache[key] = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype, const_zero=valid.max == 0), [], ConstOp(const, self.bufs[i].dtype, valid))
+          cache[key] = self.uop(UOps.CONST, Token(f"{var_type}{mnum(i)}_{len(cache)}", localtype, const_zero=valid.max == 0), [], ConstOp(const, self.bufs[i].dtype, valid))
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return ret
 
