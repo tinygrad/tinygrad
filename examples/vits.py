@@ -323,10 +323,10 @@ class MultiHeadAttention:
       rel_logits = self._matmul_with_relative_keys(query / math.sqrt(self.k_channels), key_relative_embeddings)
       scores = scores + self._relative_position_to_absolute_position(rel_logits)
     if mask is not None:
-      scores = masked_fill(scores, mask == 0, -1e4)
+      scores = Tensor.where(mask, scores, -1e4)
       if self.block_length is not None:
         assert t_s == t_t, "Local attention is only available for self-attention."
-        scores = masked_fill(scores, Tensor.ones_like(scores).triu(-self.block_length).tril(self.block_length) == 0, -1e4)
+        scores = Tensor.where(Tensor.ones_like(scores).triu(-self.block_length).tril(self.block_length), scores, -1e4)
     p_attn = scores.softmax(axis=-1)  # [b, n_h, t_t, t_s]
     output = p_attn.matmul(value)
     if self.window_size is not None:
@@ -443,7 +443,6 @@ def fused_add_tanh_sigmoid_multiply(input_a: Tensor, input_b: Tensor, n_channels
   return t_act * s_act
 
 def cat_lr(t, left, right): return Tensor.full(get_shape(t), left).cat(t, dim=-1).cat(Tensor.full(get_shape(t), right), dim=-1)
-def masked_fill(tensor, mask, value): return tensor * (1 - mask) + value * mask
 def get_shape(tensor):
   (shape := list(tensor.shape))[-1] = 1
   return tuple(shape)
