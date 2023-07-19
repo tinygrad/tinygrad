@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.helpers import prod, all_same
-from tinygrad.shape.shapetracker import ShapeTracker, View, merge_views, get_contraction
-from tinygrad.codegen.linearizer import to_image_idx
+from tinygrad.helpers import prod, DEBUG
+from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction
 
 def shapetracker_getitem(st, val):
   locals = {"idx": val, "valid": 1}
@@ -63,7 +62,7 @@ class CheckingShapeTracker:
     x = [shapetracker_getitem(self.st, i) for i in range(prod(self.st.shape))]
     y = [self[i] for i in range(prod(self.shape))]
     idx, valid = self.st.expr_node()
-    print(x, y, self.st.shape, self.shape, idx.render(), valid.render(), self.st)
+    if DEBUG >= 1: print(x, y, self.st.shape, self.shape, idx.render(), valid.render(), self.st)
     assert self.st.shape == self.shape
     assert x == y, f"mismatch shapetracker:{x} real:{y}"
 
