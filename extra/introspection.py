@@ -1,6 +1,6 @@
 # TODO: move the GRAPH and DEBUG stuff to here
 import gc
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, CI
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.ops_gpu import CLBuffer
@@ -15,9 +15,10 @@ def print_objects():
   realized_buffers = [x.realized for x in lazybuffers if x.realized]
   gpubuffers_orphaned = [x for x in gpubuffers if x not in realized_buffers]
 
-  print(f"{len(tensors)} tensors allocated in {tensor_ram_used/1e9:.2f} GB, GPU using {GlobalCounters.mem_used/1e9:.2f} GB")
-  print(f"{len(lazybuffers)} lazybuffers {len(realized_buffers)} realized, {len(gpubuffers)} GPU buffers")
-  print(f"{len(gpubuffers_orphaned)} GPU buffers are orphaned")
+  if not CI:
+    print(f"{len(tensors)} tensors allocated in {tensor_ram_used/1e9:.2f} GB, GPU using {GlobalCounters.mem_used/1e9:.2f} GB")
+    print(f"{len(lazybuffers)} lazybuffers {len(realized_buffers)} realized, {len(gpubuffers)} GPU buffers")
+    print(f"{len(gpubuffers_orphaned)} GPU buffers are orphaned")
 
   cnt = 0
   for tb in gpubuffers_orphaned:

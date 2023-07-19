@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.tensor import Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, DEBUG, print_unless_ci
 from extra.training import train
 from models.convnext import ConvNeXt
 from models.efficientnet import EfficientNet
@@ -20,11 +20,11 @@ def train_one_step(model,X,Y):
   for p in params:
     pcount += np.prod(p.shape)
   optimizer = optim.SGD(params, lr=0.001)
-  print("stepping %r with %.1fM params bs %d" % (type(model), pcount/1e6, BS))
+  print_unless_ci("stepping %r with %.1fM params bs %d" % (type(model), pcount/1e6, BS))
   st = time.time()
   train(model, X, Y, optimizer, steps=1, BS=BS)
   et = time.time()-st
-  print("done in %.2f ms" % (et*1000.))
+  print_unless_ci("done in %.2f ms" % (et*1000.))
 
 def check_gc():
   if Device.DEFAULT == "GPU":

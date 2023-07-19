@@ -8,6 +8,7 @@ import onnx
 from extra.utils import fetch, temp
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import print_unless_ci, CI
 
 def run_onnx_torch(onnx_model, inputs):
   import torch
@@ -48,28 +49,32 @@ class TestOnnxModel(unittest.TestCase):
       mt2 = time.monotonic()
       tinygrad_out = tinygrad_out.numpy()
       et = time.monotonic()
-      print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
+      print_unless_ci(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
-    import cProfile
-    import pstats
-    inputs = get_inputs()
-    pr = cProfile.Profile(timer=time.perf_counter_ns, timeunit=1e-6)
-    pr.enable()
+    if not CI:
+      import cProfile
+      import pstats
+      inputs = get_inputs()
+      pr = cProfile.Profile(timer=time.perf_counter_ns, timeunit=1e-6)
+      pr.enable()
+
     tinygrad_out = run_onnx(inputs)['outputs']
     tinygrad_out.realize()
     tinygrad_out = tinygrad_out.numpy()
-    pr.disable()
-    stats = pstats.Stats(pr)
-    stats.dump_stats(temp("net.prof"))
-    os.system(f"flameprof {temp('net.prof')} > {temp('prof.svg')}")
-    ps = stats.sort_stats(pstats.SortKey.TIME)
-    ps.print_stats(30)
+
+    if not CI: 
+      pr.disable()
+      stats = pstats.Stats(pr)
+      stats.dump_stats(temp("net.prof"))
+      os.system(f"flameprof {temp('net.prof')} > {temp('prof.svg')}")
+      ps = stats.sort_stats(pstats.SortKey.TIME)
+      ps.print_stats(30)
 
   def test_openpilot_model(self):
     dat = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(io.BytesIO(dat))
     run_onnx = get_run_onnx(onnx_model)
-    print("got run_onnx")
+    print_unless_ci("got run_onnx")
     inputs = {
       "input_imgs": np.random.randn(*(1, 12, 128, 256)),
       "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
@@ -81,20 +86,20 @@ class TestOnnxModel(unittest.TestCase):
     inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
 
     st = time.monotonic()
-    print("****** run onnx ******")
+    print_unless_ci("****** run onnx ******")
     tinygrad_out = run_onnx(inputs)['outputs']
     mt = time.monotonic()
-    print("****** realize ******")
+    print_unless_ci("****** realize ******")
     tinygrad_out.realize()
     mt2 = time.monotonic()
     tinygrad_out = tinygrad_out.numpy()
     et = time.monotonic()
-    print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
+    print_unless_ci(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
     Tensor.no_grad = True
     torch_out = run_onnx_torch(onnx_model, inputs).numpy()
     Tensor.no_grad = False
-    print(tinygrad_out, torch_out)
+    print_unless_ci(tinygrad_out, torch_out)
     np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
 
   def test_efficientnet(self):
@@ -104,7 +109,7 @@ class TestOnnxModel(unittest.TestCase):
 
   def test_shufflenet(self):
     dat = fetch("https://github.com/onnx/models/raw/main/vision/classification/shufflenet/model/shufflenet-9.onnx")
-    print(f"shufflenet downloaded : {len(dat)/1e6:.2f} MB")
+    print_unless_ci(f"shufflenet downloaded : {len(dat)/1e6:.2f} MB")
     input_name, input_new = "gpu_0/data_0", False
     self._test_model(dat, input_name, input_new)
 
@@ -112,13 +117,13 @@ class TestOnnxModel(unittest.TestCase):
   def test_resnet(self):
     # NOTE: many onnx models can't be run right now due to max pool with strides != kernel_size
     dat = fetch("https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet18-v2-7.onnx")
-    print(f"resnet downloaded : {len(dat)/1e6:.2f} MB")
+    print_unless_ci(f"resnet downloaded : {len(dat)/1e6:.2f} MB")
     input_name, input_new = "data", False
     self._test_model(dat, input_name, input_new)
 
   def _test_model(self, dat, input_name, input_new, debug=False):
     onnx_model = onnx.load(io.BytesIO(dat))
-    print("onnx loaded")
+    print_unless_ci("onnx loaded")
     from test.models.test_efficientnet import chicken_img, car_img, preprocess, _LABELS
     run_onnx = get_run_onnx(onnx_model)
 
@@ -128,10 +133,10 @@ class TestOnnxModel(unittest.TestCase):
       return tinygrad_out.argmax()
 
     cls = run(chicken_img)
-    print(cls, _LABELS[cls])
+    print_unless_ci(cls, _LABELS[cls])
     assert _LABELS[cls] == "hen" or _LABELS[cls] == "cock"
     cls = run(car_img)
-    print(cls, _LABELS[cls])
+    print_unless_ci(cls, _LABELS[cls])
     assert "car" in _LABELS[cls] or _LABELS[cls] == "convertible"
 
 if __name__ == "__main__":

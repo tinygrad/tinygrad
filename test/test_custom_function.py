@@ -4,7 +4,7 @@
 import unittest
 import numpy as np
 from typing import Optional, Tuple
-from tinygrad.helpers import prod, dtypes
+from tinygrad.helpers import prod, dtypes, print_unless_ci
 
 # *** first, we implement the atan2 op at the lowest level ***
 # `atan2_gpu` for GPUBuffers and `atan2_cpu` for CPUBuffers
@@ -59,7 +59,7 @@ class TestCustomFunction(unittest.TestCase):
 
     # run the forward pass. note: up until the .numpy(), it's all lazy
     c = ATan2.apply(a, b)
-    print(c.numpy())
+    print_unless_ci(c.numpy())
 
     # check the forward pass (in numpy)
     np.testing.assert_allclose(c.numpy(), np.arctan2(a.numpy(), b.numpy()), atol=1e-5)
@@ -74,8 +74,8 @@ class TestCustomFunction(unittest.TestCase):
     # run the backward pass
     c.mean().backward()
     assert a.grad is not None and b.grad is not None, "tinygrad didn't compute gradients"
-    print(a.grad.numpy())
-    print(b.grad.numpy())
+    print_unless_ci(a.grad.numpy())
+    print_unless_ci(b.grad.numpy())
 
     # check the backward pass (in torch)
     import torch

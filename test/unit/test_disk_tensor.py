@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor, Device
 from tinygrad.state import safe_load, safe_save, get_state_dict, torch_load
 from tinygrad.helpers import dtypes
 from tinygrad.runtime.ops_disk import RawDiskBuffer
-from tinygrad.helpers import Timing
+from tinygrad.helpers import Timing, print_unless_ci
 from extra.utils import fetch_as_file, temp
 
 def compare_weights_both(url):
@@ -16,7 +16,7 @@ def compare_weights_both(url):
   assert list(tg_weights.keys()) == list(torch_weights.keys())
   for k in tg_weights:
     np.testing.assert_equal(tg_weights[k].numpy(), torch_weights[k].numpy(), err_msg=f"mismatch at {k}, {tg_weights[k].shape}")
-  print(f"compared {len(tg_weights)} weights")
+  print_unless_ci(f"compared {len(tg_weights)} weights")
 
 class TestTorchLoad(unittest.TestCase):
   # pytorch pkl format
@@ -96,7 +96,7 @@ class TestDiskTensor(unittest.TestCase):
 
     out = Tensor.ones(10, 10, device="CPU")
     outdisk = out.to(f"disk:{temp('dt2')}")
-    print(outdisk)
+    print_unless_ci(outdisk)
     outdisk.realize()
     del out, outdisk
 
@@ -114,7 +114,7 @@ class TestDiskTensor(unittest.TestCase):
     Tensor.arange(10, device="CPU").to(f"disk:{temp('dt3')}").realize()
 
     slice_me = Tensor.empty(10, device=f"disk:{temp('dt3')}")
-    print(slice_me)
+    print_unless_ci(slice_me)
     is_3 = slice_me[3:4].cpu()
     assert is_3.numpy()[0] == 3
 
@@ -123,7 +123,7 @@ class TestDiskTensor(unittest.TestCase):
     Tensor.arange(100, device="CPU").to(f"disk:{temp('dt5')}").realize()
     slice_me = Tensor.empty(10, 10, device=f"disk:{temp('dt5')}")
     tst = slice_me[1].numpy()
-    print(tst)
+    print_unless_ci(tst)
     np.testing.assert_allclose(tst, np.arange(10, 20))
 
   def test_assign_slice(self):
@@ -131,9 +131,9 @@ class TestDiskTensor(unittest.TestCase):
     cc = Tensor.arange(10, device="CPU").to(f"disk:{temp('dt4')}").realize()
 
     #cc.assign(np.ones(10)).realize()
-    print(cc[3:5].numpy())
+    print_unless_ci(cc[3:5].numpy())
     cc[3:5].assign([13, 12]).realize()
-    print(cc.numpy())
+    print_unless_ci(cc.numpy())
 
 if __name__ == "__main__":
   unittest.main()

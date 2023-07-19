@@ -49,6 +49,7 @@ class ContextVar:
 
 DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
 GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
+CI = getenv("CI", "")
 
 class Timing(object):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
@@ -152,3 +153,6 @@ class LightWeakValueDictionary:
   def __delitem__(self, key): del self.data[key]
   def __setitem__(self, key, value): self.data[key] = KeyedRef(value, self._remove, key)
   def __contains__(self, key): return key in self.data
+
+def print_unless_ci(*args, **kwargs):
+  if not CI: print(*args, **kwargs)

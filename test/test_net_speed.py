@@ -5,6 +5,7 @@ import pstats
 import unittest
 import torch
 from tinygrad.tensor import Tensor, Device
+from tinygrad.helpers import CI
 
 def start_profile():
   import time
@@ -17,7 +18,19 @@ def stop_profile(pr, sort='cumtime', frac=0.2):
   ps = pstats.Stats(pr)
   ps.strip_dirs()
   ps.sort_stats(sort)
-  ps.print_stats(frac)
+  ps.print_stats(0.3)
+  profiles = ps.get_stats_profile().func_profiles.values()
+  filenames= ["lazy.py", "tensor.py", "shapetracker.py", "ops.py", "symbolic.py", "helpers.py", "lib.py"]
+  for p in filenames:
+    ps.print_stats(p, 0.3)
+  perf = [(name, ps_sum(profiles,name)) for name in filenames]
+  for name, time in perf:
+    print(f"{time:.2f} {name}")
+  print(f"{sum(x[1] for x in perf):.2f} total")
+  print("\n")
+
+def ps_sum(profiles, filename):
+  return sum([x.tottime for x in profiles if x.file_name == filename])
 
 class TestConvSpeed(unittest.TestCase):
 
@@ -56,10 +69,11 @@ class TestConvSpeed(unittest.TestCase):
       fpt += (et1-et0)
       bpt += (et2-et1)
 
-    fpt_baseline = (fpt*1000/cnt)
-    bpt_baseline = (bpt*1000/cnt)
-    print("torch forward pass:  %.3f ms" % fpt_baseline)
-    print("torch backward pass: %.3f ms" % bpt_baseline)
+    if not CI:
+      fpt_baseline = (fpt*1000/cnt)
+      bpt_baseline = (bpt*1000/cnt)
+      print("torch forward pass:  %.3f ms" % fpt_baseline)
+      print("torch backward pass: %.3f ms" % bpt_baseline)
 
     # ****** tinygrad compare *******
 
@@ -82,17 +96,19 @@ class TestConvSpeed(unittest.TestCase):
       out.backward()
       [x.grad.realize() for x in [c1, c2, l1]]
       et2 = time.time()
-      if i == 0:
-        pr = start_profile()
-      else:
-        fpt += (et1-et0)
-        bpt += (et2-et1)
+      if not CI:
+        if i == 0:
+          pr = start_profile()
+        else:
+          fpt += (et1-et0)
+          bpt += (et2-et1)
 
-    stop_profile(pr, sort='time')
-    fpt = (fpt*1000/cnt)
-    bpt = (bpt*1000/cnt)
-    print("forward pass:  %.3f ms, %.2fx off baseline %.3f ms" % (fpt, fpt/fpt_baseline, fpt_baseline))
-    print("backward pass: %.3f ms, %.2fx off baseline %.3f ms" % (bpt, bpt/bpt_baseline, bpt_baseline))
+    if not CI:
+      stop_profile(pr, sort='time')
+      fpt = (fpt*1000/cnt)
+      bpt = (bpt*1000/cnt)
+      print("forward pass:  %.3f ms, %.2fx off baseline %.3f ms" % (fpt, fpt/fpt_baseline, fpt_baseline))
+      print("backward pass: %.3f ms, %.2fx off baseline %.3f ms" % (bpt, bpt/bpt_baseline, bpt_baseline))
 
 
 if __name__ == '__main__':

@@ -3,7 +3,7 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv
+from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, CI, prod, dtypes, mnum, DType, all_same, partition, getenv
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
@@ -635,7 +635,7 @@ class Linearizer:
 
     # should use tensor cores?
     # first, confirm it's a straightforward mulacc on a device with real locals
-    tensor_cores_allowed = getenv("TC", 1) != 0 and (getenv("TC", 1) == 2 or (self.bufs[0].device == "METAL" and getenv("CI", "") != "true"))
+    tensor_cores_allowed = getenv("TC", 1) != 0 and (getenv("TC", 1) == 2 or (self.bufs[0].device == "METAL" and CI))
     if tensor_cores_allowed and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
        isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
        isinstance(self.reduceop.src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[1], LazyBuffer) and hasattr(self, 'lang') and len(self.lang.lid):

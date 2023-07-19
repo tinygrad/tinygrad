@@ -1,7 +1,7 @@
 import numpy as np
 from tqdm import trange
 from tinygrad.tensor import Tensor, Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import print_unless_ci, CI
 
 def sparse_categorical_crossentropy(out, Y):
   num_classes = out.shape[-1]
@@ -14,10 +14,10 @@ def sparse_categorical_crossentropy(out, Y):
   return out.mul(y).mean()
 
 def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categorical_crossentropy, 
-        transform=lambda x: x, target_transform=lambda x: x, noloss=False):
+        transform=lambda x: x, target_transform=lambda x: x, noloss=CI):
   Tensor.training = True
   losses, accuracies = [], []
-  for i in (t := trange(steps, disable=getenv('CI', False))):
+  for _ in (t := trange(steps, disable=CI)):
     samp = np.random.randint(0, X_train.shape[0], size=(BS))
     x = Tensor(transform(X_train[samp]), requires_grad=False)
     y = target_transform(Y_train[samp])
@@ -48,7 +48,7 @@ def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=Fal
   Tensor.training = False
   def numpy_eval(Y_test, num_classes):
     Y_test_preds_out = np.zeros(list(Y_test.shape)+[num_classes])
-    for i in trange((len(Y_test)-1)//BS+1, disable=getenv('CI', False)):
+    for i in trange((len(Y_test)-1)//BS+1, disable=CI):
       x = Tensor(transform(X_test[i*BS:(i+1)*BS]))
       out = model.forward(x) if hasattr(model, 'forward') else model(x)
       Y_test_preds_out[i*BS:(i+1)*BS] = out.cpu().numpy()
@@ -58,6 +58,6 @@ def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=Fal
 
   if num_classes is None: num_classes = Y_test.max().astype(int)+1
   acc, Y_test_pred = numpy_eval(Y_test, num_classes)
-  print("test set accuracy is %f" % acc)
+  print_unless_ci("test set accuracy is %f" % acc)
   return (acc, Y_test_pred) if return_predict else acc
 

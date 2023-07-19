@@ -3,6 +3,7 @@ import gc
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import print_unless_ci
 
 def tensors_allocated():
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])
@@ -26,9 +27,9 @@ class TestGC(unittest.TestCase):
     del b
     assert(tensors_allocated() == 2)
     b = Tensor(np.zeros((4, 4), dtype=np.float32), requires_grad=True)
-    print(tensors_allocated())
+    print_unless_ci(tensors_allocated())
     (a*b).mean().backward()
-    print(tensors_allocated())
+    print_unless_ci(tensors_allocated())
     assert(tensors_allocated() == 4)
     del b
     assert(tensors_allocated() == 2)

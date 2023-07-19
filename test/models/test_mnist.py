@@ -49,65 +49,59 @@ class TinyConvNet:
     return x.dot(self.l1).log_softmax()
 
 class TestMNIST(unittest.TestCase):
+
+  def test_conv_with_bn(self):
+    model = TinyConvNet(has_batchnorm=True)
+    optimizer = optim.AdamW(model.parameters(), lr=0.003)
+    train(model, X_train, Y_train, optimizer, steps=200)
+    assert evaluate(model, X_test, Y_test) > 0.94
+
+  def test_conv_onestep(self):
+    model = TinyConvNet()
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
+    train(model, X_train, Y_train, optimizer, BS=69, steps=1, noloss=True)
+    for p in model.parameters(): p.realize()
+
   def test_sgd_onestep(self):
-    np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=1)
     for p in model.parameters(): p.realize()
 
   def test_sgd_threestep(self):
-    np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=3)
 
   def test_sgd_sixstep(self):
-    np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=6, noloss=True)
 
   def test_adam_onestep(self):
-    np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=1)
     for p in model.parameters(): p.realize()
 
   def test_adam_threestep(self):
-    np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=3)
 
-  def test_conv_onestep(self):
-    np.random.seed(1337)
-    model = TinyConvNet()
-    optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, BS=69, steps=1, noloss=True)
-    for p in model.parameters(): p.realize()
-
   def test_conv(self):
-    np.random.seed(1337)
     model = TinyConvNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, steps=100)
     assert evaluate(model, X_test, Y_test) > 0.94   # torch gets 0.9415 sometimes
 
-  def test_conv_with_bn(self):
-    np.random.seed(1337)
-    model = TinyConvNet(has_batchnorm=True)
-    optimizer = optim.AdamW(model.parameters(), lr=0.003)
-    train(model, X_train, Y_train, optimizer, steps=200)
-    assert evaluate(model, X_test, Y_test) > 0.94
 
   def test_sgd(self):
-    np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, steps=600)
     assert evaluate(model, X_test, Y_test) > 0.94   # CPU gets 0.9494 sometimes
 
 if __name__ == '__main__':
+  np.random.seed(1337)
   unittest.main()

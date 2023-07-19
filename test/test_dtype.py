@@ -1,14 +1,14 @@
 import unittest
 import numpy as np
-from tinygrad.helpers import getenv, DType, DEBUG
+from tinygrad.helpers import getenv, DType, DEBUG, CI, print_unless_ci
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor, dtypes
 from extra.utils import OSX
 
 def _test_to_np(a:Tensor, np_dtype, target):
-  print(a)
+  print_unless_ci(a)
   na = a.numpy()
-  print(na, na.dtype, a.lazydata.realized)
+  print_unless_ci(na, na.dtype, a.lazydata.realized)
   assert na.dtype == np_dtype
   np.testing.assert_allclose(na, target)
 
@@ -28,7 +28,7 @@ def _test_matmul_upcast(a:Tensor, b:Tensor, target_dtype:DType, target): _test_o
 
 # for GPU, cl_khr_fp16 isn't supported (except now we don't need it!)
 # for LLVM, it segfaults because it can't link to the casting function
-@unittest.skipIf((getenv("CI", "") != "" and Device.DEFAULT in ["LLVM"]) or Device.DEFAULT == "WEBGPU", "float16 broken in some CI backends")
+@unittest.skipIf((CI and Device.DEFAULT in ["LLVM"]) or Device.DEFAULT == "WEBGPU", "float16 broken in some CI backends")
 class TestHalfDtype(unittest.TestCase):
   def test_half_to_np(self): _test_to_np(Tensor([1,2,3,4], dtype=dtypes.float16), np.float16, [1,2,3,4])
 

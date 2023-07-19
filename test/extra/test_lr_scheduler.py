@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import unittest
+from tinygrad.helpers import print_unless_ci
 from tinygrad.tensor import Tensor
 from tinygrad.state import get_parameters
 from tinygrad.nn.optim import Adam
