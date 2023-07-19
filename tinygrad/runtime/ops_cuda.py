@@ -61,13 +61,16 @@ class CUDAProgram:
   def __init__(self, name:str, prg:str, global_size:List[int], local_size:List[int], binary=False):
     dev = cuda.Context.get_device()
     self.max_grid = [dev.get_attribute(cuda.device_attribute.MAX_GRID_DIM_X), dev.get_attribute(cuda.device_attribute.MAX_GRID_DIM_Y), dev.get_attribute(cuda.device_attribute.MAX_GRID_DIM_Z)]
+    self.global_size = global_size
     self.prg = prg
+    self.check_device_limit(prg, global_size)
     if not binary:
       try: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8')
       except cuda.CompileError as e:
         if DEBUG >= 3: print("FAILED TO BUILD", prg)
         raise e
     if DEBUG >= 5: print(pretty_ptx(prg))
+    # TODO: name is wrong, so we get it from the ptx using hacks
     if DEBUG >= 6:
       try:
         fn = f"{tempfile.gettempdir()}\\tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}"
@@ -75,29 +78,48 @@ class CUDAProgram:
         subprocess.run(["ptxas", f"-arch={arch()}", "-o", fn, fn+".ptx"], check=True)
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
       except Exception as e: print("failed to generate SASS", str(e))
-    # TODO: name is wrong, so we get it from the ptx using hacks
-    self.check_device_limit(global_size, local_size)
     
-  def check_device_limit(self, global_size, local_size):
-    print(global_size)
-    self.subprg = [self.prg]
-    self.global_size = [global_size]    
-    for gd in range(3):
-      if global_size[gd] > self.max_grid[gd]:
-        self.subprg = [self.prg.replace("gidx%d"%(2-gd), "(gidx%d+%d)"%(2-gd, self.max_grid[gd]*i)).replace("(gidx%d+%d)"%(2-gd, self.max_grid[gd]*i), "gidx%d"%(2-gd), 1) if i>0 else self.prg for i in range(global_size[gd]//self.max_grid[gd])]
-        self.global_size = [tuple([global_size[gid] if gid != gd else self.max_grid[gd] for gid in range(3)]) for i in range(global_size[gd]//self.max_grid[gd])]
+  def check_device_limit(self, prg, global_size):
+    self.sub_prg = []
+    self.sub_global_size = []    
 
-        self.subprg.append(self.prg.replace("gidx%d"%(2-gd), "(gidx%d+%d)"%(2-gd, self.max_grid[gd]*(global_size[gd]//self.max_grid[gd]))).replace("(gidx%d+%d)"%(2-gd, self.max_grid[gd]*(global_size[gd]//self.max_grid[gd])), "gidx%d"%(2-gd), 1))
-        self.global_size.append(tuple([global_size[gid] if gid != gd else global_size[gd]%self.max_grid[gd] for gid in range(3)]))
+    for j in range(self.global_size[1]//self.max_grid[1]+1):
+      prg = self.prg.replace("gidx1", "(gidx1+%d)"%(j*self.max_grid[1])).replace("(gidx1+%d)"%(j*self.max_grid[1]), "gidx1", 1) if j > 0 else self.prg
+      if self.global_size[1] > self.max_grid[1]: global_size = [self.global_size[0], self.max_grid[1], self.global_size[2]] if j < self.global_size[1]//self.max_grid[1] else [self.global_size[0], self.global_size[1]%self.max_grid[1], self.global_size[2]]
 
-    self.subprg = [cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8') for prg in self.subprg]
-    self.subprg = [cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]) for prg in self.subprg]
+      for k in range(self.global_size[2]//self.max_grid[2]+1):
+        prg = self.prg.replace("gidx0", "(gidx0+%d)"%(k*self.max_grid[2])).replace("(gidx0+%d)"%(k*self.max_grid[2]), "gidx0", 1) if k > 0 else self.prg
+        if self.global_size[2] > self.max_grid[2]: global_size = [self.global_size[0], self.global_size[1], self.max_grid[2]] if k < self.global_size[2]//self.max_grid[2] else [self.global_size[0], self.global_size[1], self.global_size[2]%self.max_grid[2]]
+
+        self.sub_prg.append(prg)
+        self.sub_global_size.append(global_size)
+
+    print("==========")
+    if self.global_size[2] > 65535 or self.global_size[1] > 65535:
+      print(*self.sub_global_size, sep='\n')
+      print(*self.sub_prg, sep='\n')
+
+    # for gd in range(3):
+    #   if global_size[gd] > self.max_grid[gd]:
+    #     self.subprg = [self.prg.replace("gidx%d"%(2-gd), "(gidx%d+%d)"%(2-gd, self.max_grid[gd]*i)).replace("(gidx%d+%d)"%(2-gd, self.max_grid[gd]*i), "gidx%d"%(2-gd), 1) if i>0 else self.prg for i in range(global_size[gd]//self.max_grid[gd])]
+    #     self.global_size = [tuple([global_size[gid] if gid != gd else self.max_grid[gd] for gid in range(3)]) for i in range(global_size[gd]//self.max_grid[gd])]
+
+    #     self.subprg.append(self.prg.replace("gidx%d"%(2-gd), "(gidx%d+%d)"%(2-gd, self.max_grid[gd]*(global_size[gd]//self.max_grid[gd]))).replace("(gidx%d+%d)"%(2-gd, self.max_grid[gd]*(global_size[gd]//self.max_grid[gd])), "gidx%d"%(2-gd), 1))
+    #     self.global_size.append(tuple([global_size[gid] if gid != gd else global_size[gd]%self.max_grid[gd] for gid in range(3)]))
+
+    self.sub_prg = [cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8') for prg in self.sub_prg]
+    self.sub_prg = [cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]) for prg in self.sub_prg]
 
   def __call__(self, global_size, local_size, *args, wait=False):
+    print(global_size)
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
-    for prg, gs in zip(self.subprg, self.global_size): prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(gs)) # type: ignore
+    for prg, gs in zip(self.sub_prg, self.sub_global_size): 
+      # if self.global_size[2] > 65535:
+      #   print(prg)
+      #   print(gs)
+      prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(gs)) # type: ignore
     if wait:
       end.record()
       end.synchronize()
