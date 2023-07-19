@@ -1,5 +1,5 @@
 from __future__ import annotations
-import pathlib, os
+import pathlib
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
@@ -29,7 +29,7 @@ class _CL:
     self.events_in_flight.clear()
     for q in self.cl_queue: q.finish()
 CL = _CL()
-CL.post_init() if not os.environ.get("DELAYED_RUNTIME_INIT", False) else None
+CL.post_init() if not getenv("DELAYED_RUNTIME_INIT", False) else None
 
 class CLBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype, device='0'):
