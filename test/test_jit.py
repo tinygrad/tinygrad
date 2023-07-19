@@ -8,10 +8,6 @@ from tinygrad.helpers import GlobalCounters
 # NOTE: METAL fails, might be platform and optimization options dependent.
 @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["METAL", "WEBGPU"], f"no JIT on {Device.DEFAULT}")
 class TestJit(unittest.TestCase):
-  def setUp(self):
-    GlobalCounters.reset()
-    assert GlobalCounters.kernel_jitted == 0
-
   def test_simple_jit(self):
     @TinyJit
     def add(a, b): return (a+b).realize()
@@ -20,7 +16,7 @@ class TestJit(unittest.TestCase):
       b = Tensor.randn(10, 10)
       c = add(a, b)
       np.testing.assert_equal(c.numpy(), a.numpy()+b.numpy())
-    assert GlobalCounters.kernel_jitted > 0
+    assert len(add.jit_cache) == 1
 
   def test_jit_multiple_outputs(self):
     @TinyJit
@@ -32,7 +28,7 @@ class TestJit(unittest.TestCase):
       np.testing.assert_equal(c.numpy(), a.numpy()+b.numpy())
       np.testing.assert_equal(d.numpy(), a.numpy()-b.numpy())
       np.testing.assert_equal(e.numpy(), a.numpy()*b.numpy())
-    assert GlobalCounters.kernel_jitted > 0
+    assert len(f.jit_cache) == 3
 
   def test_nothing_jitted(self):
     @TinyJit
@@ -70,7 +66,7 @@ class TestJit(unittest.TestCase):
       b = Tensor.randn(10, 10)
       c = add_kwargs(first=a, second=b)
       np.testing.assert_equal(c.numpy(), a.numpy()+b.numpy())
-    assert GlobalCounters.kernel_jitted > 0
+    assert len(add_kwargs.jit_cache) == 1
 
   def test_array_jit(self):
     @TinyJit
@@ -85,7 +81,7 @@ class TestJit(unittest.TestCase):
         np.testing.assert_equal(np.any(np.not_equal(c.numpy(),a.numpy()+b.numpy())), True)
       else:
         np.testing.assert_equal(c.numpy(), a.numpy()+b.numpy())
-    assert GlobalCounters.kernel_jitted > 0
+    assert len(add_array.jit_cache) == 1
 
   def test_method_jit(self):
     class Fun:
@@ -99,7 +95,7 @@ class TestJit(unittest.TestCase):
       b = Tensor.randn(10, 10)
       c = fun(b)
       np.testing.assert_equal(c.numpy(), fun.a.numpy()+b.numpy())
-    assert GlobalCounters.kernel_jitted > 0
+    assert len(fun.__call__.func.__self__.jit_cache) == 1
 
   @unittest.expectedFailure # size 1 input foldes into constant and not jitted
   def test_jit_size1_input(self):
@@ -108,7 +104,7 @@ class TestJit(unittest.TestCase):
     a = Tensor([1, 2, 3])
     for i in range(5):
       np.testing.assert_equal(f(a, Tensor([i])).cpu().numpy(), (a+i).cpu().numpy())
-    assert GlobalCounters.kernel_jitted > 0
+    assert len(f.jit_cache) == 1
 
   def test_jit_output_non_tensor_fail(self):
     @TinyJit
@@ -126,7 +122,7 @@ class TestJit(unittest.TestCase):
     np.testing.assert_equal(output1, expect1)
     # the jit only works with Tensor outputs
     assert output2 != expect2
-    assert GlobalCounters.kernel_jitted > 0
+    assert len(f.jit_cache) == 1
 
 if __name__ == '__main__':
   unittest.main()
