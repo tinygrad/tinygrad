@@ -24,7 +24,7 @@ jobs:
         path: ~/.cache/pip
         key: linting
     - name: Install dependencies
-      run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install --use-feature=fast-deps -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Repo line count
       run: python3 sz.py
     - name: Lint with pylint
@@ -58,7 +58,7 @@ jobs:
         path: ~/.cache/pip
         key: testing
     - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install --use-feature=fast-deps -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test Docs
       run: python docs/abstractions.py
     - name: Test Quickstart
@@ -90,7 +90,7 @@ jobs:
         path: ~/.cache/pip
         key: testing
     - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install --use-feature=fast-deps -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
       run: TORCH=1 python -m pytest -n=auto test/
     - name: Run ONNX
@@ -125,7 +125,7 @@ jobs:
           path: ~/.cache/pip
           key: testing
       - name: Install Dependencies
-        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install --use-feature=fast-deps -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - if: ${{ matrix.task == 'optimage' }}
         name: Run Optimizer Test (OPT 2 and 3)
         run: |
@@ -166,7 +166,7 @@ jobs:
         path: ~/Library/Caches/pip
         key: metalwebgpu
     - name: Install Dependencies
-      run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install --use-feature=fast-deps -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python3 test/external/external_test_speed_llama.py
     #- name: Run dtype test
@@ -202,7 +202,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
       - name: Install tinygrad dependencies
-        run: pip install -e . --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install --use-feature=fast-deps -e . --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
         run: FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python3 -m pytest -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"
 
@@ -237,6 +237,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl 
       - name: Install dependencies
-        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install --use-feature=fast-deps -e '.[testing${{matrix.backend=='llvm'&&',llvm'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
         run: python -m pytest -n=auto test/ --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py
