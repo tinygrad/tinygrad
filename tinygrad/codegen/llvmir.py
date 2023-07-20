@@ -1,7 +1,7 @@
 from typing import Final, Dict, Callable, Any, List, Optional
 import functools
 from llvmlite import ir  # type: ignore
-from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token
+from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token, MemOp, ConstOp
 from tinygrad.helpers import dtypes
 from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, TernaryOps
 
@@ -41,7 +41,8 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
   buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
 
   # create llvm function
-  func_dtypes = [{dtypes.float16:ir.HalfType(), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32)}[dtype] for dtype in buf_to_dtype.values()]
+  dtype_to_llvm_dtype = {dtypes.float16:ir.HalfType(), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32)}
+  func_dtypes = [dtype_to_llvm_dtype[dtype] for dtype in buf_to_dtype.values()]
   func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in func_dtypes]), name='exec')
 
   # force llvmlite to allow us to add function attribute then add the attribute
@@ -56,14 +57,6 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
   render_llvm[Variable] = lambda self,ops,ctx: lvars[self.expr]
 
   for uop,newvar,vin,args in uops:
-    if uop == UOps.CONST:
-      val = ir.Constant(ir.FloatType(), args.value)
-      if args.valid.min == 0:
-        # TODO: this path isn't tested
-        valid = args.valid.render(render_llvm, bb[-1])
-        val = bb[-1].select(valid, val, ir.Constant(ir.FloatType(), 0.0))
-      lvars[newvar] = val
-      reduce_phis.append(newvar)
     if uop == UOps.LOOP:
       for var in args[0]:
         if isinstance(var, NumNode): continue
@@ -90,28 +83,39 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
         bb.append(ir.IRBuilder(func.append_basic_block(f"loop_exit_{var.expr}")))
         bb[-2].cbranch(bb[-2].icmp_unsigned("==", idx_p1, int_const(var.max+1)), bb[-1]._block, block._block)
     if uop == UOps.LOAD:
-      idx, valid = args.idx.render(render_llvm, bb[-1]), args.valid.render(render_llvm, bb[-1])
-      if args.valid.min == 0:
-        aug_idx = bb[-1].select(valid, idx, int_const(0))
-        val = bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [aug_idx], inbounds=True)), ir.Constant(func_dtypes[buf_index[args.name]], 0))
-      else:
-        val = bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [idx], inbounds=True))
-
-      if func_dtypes[buf_index[args.name]] != ir.FloatType():
-        if dtypes.is_int(buf_to_dtype[args.name]):
-          val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(buf_to_dtype[args.name]) else bb[-1].sitofp(val, ir.FloatType())
+      assert newvar is not None and isinstance(args, (MemOp, ConstOp))
+      assert newvar.dtype == dtypes.float, "newvar must be float"
+      valid = args.valid.render(render_llvm, bb[-1])
+      if isinstance(args, ConstOp):
+        if args.valid.min == 0 and args.valid.max == 1:
+          val = bb[-1].select(valid, ir.Constant(ir.FloatType(), args.value), ir.Constant(ir.FloatType(), args.invalid_value))
         else:
-          val = bb[-1].fpext(val, ir.FloatType())
+          val = ir.Constant(ir.FloatType(), args.value if args.valid.min == 1 else args.invalid_value)
+        # TODO: this is a hack. it shouldn't be const that signals this
+        reduce_phis.append(newvar)
+      else:
+        idx = args.idx.render(render_llvm, bb[-1])
+        if args.valid.min == 0:
+          aug_idx = bb[-1].select(valid, idx, int_const(0))
+          val = bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [aug_idx], inbounds=True)), ir.Constant(dtype_to_llvm_dtype[args.memory_dtype], args.invalid_value))
+        else:
+          val = bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [idx], inbounds=True))
+
+        if args.memory_dtype != newvar.dtype:
+          if dtypes.is_int(args.memory_dtype):
+            val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(args.memory_dtype) else bb[-1].sitofp(val, ir.FloatType())
+          else:
+            val = bb[-1].fpext(val, ir.FloatType())
       lvars[newvar] = val
     if uop == UOps.STORE:
-      assert args.valid.min == 1, "store must be valid"
+      assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
       idx = args.idx.render(render_llvm, bb[-1])
       element = lvars[vin[0]]
-      if func_dtypes[0] != ir.FloatType():
-        if dtypes.is_int(buf_to_dtype[args.name]):
-          element = bb[-1].fptoui(element, func_dtypes[0]) if dtypes.is_unsigned(buf_to_dtype[args.name]) else bb[-1].fptosi(element, func_dtypes[0])
+      if args.memory_dtype != vin[0].dtype:
+        if dtypes.is_int(args.memory_dtype):
+          element = bb[-1].fptoui(element, dtype_to_llvm_dtype[args.memory_dtype]) if dtypes.is_unsigned(args.memory_dtype) else bb[-1].fptosi(element, dtype_to_llvm_dtype[args.memory_dtype])
         else:
-          element = bb[-1].fptrunc(element, func_dtypes[0])
+          element = bb[-1].fptrunc(element, dtype_to_llvm_dtype[args.memory_dtype])
       bb[-1].store(element, bb[-1].gep(func.args[buf_index[args.name]], [idx], inbounds=True))
     if uop == UOps.ALU:
       lvars[newvar] = code_for_op[args](bb[-1], *[lvars[x] for x in vin])

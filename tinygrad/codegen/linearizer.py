@@ -13,7 +13,7 @@ from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode
 VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); DEFINE_GLOBAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
+class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); DEFINE_GLOBAL = auto(); LOAD = auto(); ALU = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
                   SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
@@ -113,14 +113,19 @@ def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
 class MemOp(NamedTuple):
   name: str
   idx: Variable
-  valid: Variable
-  dtype: DType
   local: bool
+  memory_dtype: DType
+
+  # shared
+  valid: Variable
+  invalid_value: Union[float, int] = 0.0
 
 class ConstOp(NamedTuple):
   value: float
-  dtype: DType
+
+  # shared
   valid: Variable
+  invalid_value: Union[float, int] = 0.0
 
 class UOp(NamedTuple):
   uop: UOps
@@ -239,8 +244,8 @@ class Linearizer:
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer)) if const is None else \
-                     self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], ConstOp(const, self.bufs[i].dtype, valid))
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, 0.0 if not dtypes.is_int(self.bufs[i].dtype) else 0)) if const is None else \
+                     self.uop(UOps.LOAD, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], ConstOp(const, valid))
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
     return ret
 
@@ -272,7 +277,7 @@ class Linearizer:
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-      self.uop(UOps.STORE, None, [var], MemOp(self.get_buffer_name(i), idx, valid, self.bufs[i].dtype, self.bufs[i].__class__ is LocalBuffer))
+      self.uop(UOps.STORE, None, [var], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid))
 
   def linearize(self):
     # uops
