@@ -341,7 +341,6 @@ class Tensor:
 
   # TODO: make this nicer with syntactic sugar in slice
   def chunk(self, num, dim):
-    dim = (dim + self.ndim) if dim < 0 else dim
     slice_params = [[slice(None) for s in self.shape] for _ in range(num)]
     for i, k in enumerate(range(0, self.shape[dim], ceil(self.shape[dim]/num))):
       slice_params[i][dim] = slice(k, k + ceil(self.shape[dim]/num))
