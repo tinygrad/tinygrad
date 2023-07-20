@@ -198,10 +198,16 @@ class CStyleCodegen(Linearizer):
   def codegen(self):
     self.process()
     self.hand_coded_optimizations()
+    print(self.full_shape)
     self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
+    print(self.full_shape)
+    # Check device dim limit
+    # self.reshape_and_permute(None, someting)
     self.linearize()
 
+    print(*self.uops, sep='\n')
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.lang)
+    print(global_size, local_size)
 
     # painfully name the function something unique
     if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]

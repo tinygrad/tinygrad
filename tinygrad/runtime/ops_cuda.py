@@ -70,6 +70,7 @@ class CUDAProgram:
     self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
 
   def __call__(self, global_size, local_size, *args, wait=False):
+    print(global_size)
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
@@ -82,6 +83,7 @@ class CUDAProgram:
 class CUDACodegen(CStyleCodegen):
   lang = CStyleLanguage(
     kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
+    # add global_dim_limit
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
     half_prekernel = """

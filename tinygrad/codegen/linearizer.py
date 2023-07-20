@@ -5,7 +5,7 @@ from enum import Enum, auto
 
 from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
-from tinygrad.lazy import LazyBuffer
+from tinygrad.lazy import LazyBuffer, Device
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst, buf_is_kernel_arg
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
@@ -604,7 +604,18 @@ class Linearizer:
     # NOTE: this might make multiview shapetrackers
     if limit and (self.first_reduce-self.local_dims) > limit:
       num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
+      # print(prod(self.full_shape[0:num_to_merge]))
+      # print(self.full_shape[num_to_merge:]) 
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
+      if Device.DEFAULT == "CUDA":
+        print("check device limit")
+        print(self.full_shape)
+        # TODO Add DeviceInfo
+        global_dim = (65535, 65535, 2147483647)
+        p = list(range(len(self.full_shape)))
+        swap = self.full_shape.index(max(self.full_shape))
+        p[swap], p[2] = p[2], p[swap]
+        self.reshape_and_permute(None, p)
       if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
 
   def alias_buffer(self, i, pattern):
