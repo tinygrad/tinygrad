@@ -186,6 +186,7 @@ class LazyBuffer:
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
+    assert self.dtype.np, "numpy dtype is required for toCPU"
     realized = self.cast(dtypes.from_np(self.dtype.np)).contiguous().realize().realized
     ret = cast(RawBuffer, realized).toCPU().reshape(self.shape)
     return ret
@@ -368,7 +369,7 @@ def _realize_empty(buffer: LazyBuffer) -> None:
 
 def _realize_rand(buffer: LazyBuffer) -> None:
   rng = np.random.default_rng(buffer.op.arg)
-  buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=buffer.shape, dtype=buffer.dtype.np), **buffer._device_extra_args()) # type: ignore
+  buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=buffer.shape, dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args()) # type: ignore
 
 def _realize_const(buffer: LazyBuffer) -> None:
   if hasattr(Device[buffer.device].codegen, 'supports_constant_folding'):
