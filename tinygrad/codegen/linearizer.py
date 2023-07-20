@@ -390,10 +390,10 @@ class Linearizer:
           self.uop(UOps.BARRIER, None, [], ())
 
         # load earlybufs
-        loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
+        loaded_buffers.update({b:tuple(self.global_load(self.bufs.index(self.local_alias[i])) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
 
         # run early AST (with reduce)
-        self.ast_parse(self.reduceop, [acc[off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True)
+        self.ast_parse(self.reduceop.map_buffers(loaded_buffers), [acc[off] for off in self.acc_offsets(self.full_buf_index)], ssa, do_reduce=True)
 
       # end the reduce loop
       self.uop(UOps.ENDLOOP, None, [], (reduce_idxs, "reduce"))
@@ -427,19 +427,19 @@ class Linearizer:
         self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
         # load localbufs
-        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs)
+        loaded_buffers[self.bufs[-1]] = self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
-        self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True) # type: ignore
+        self.ast_parse(LazyOp(self.reduceop.op.map_buffers(loaded_buffers), (self.bufs[-1],)), [acc[off] for off in self.acc_offsets(-1)], ssa, do_reduce=True) # type: ignore
 
         # end the late reduce loop
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})
+    loaded_buffers.update({b:tuple(self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})
 
     # run late AST
-    val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
+    val = self.ast_parse(self.ast, acc, ssa)
 
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa)
@@ -457,9 +457,9 @@ class Linearizer:
     if DEBUG >= 4: print(self.uops[-1])
     return out
 
-  def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
-    if x.__class__ is not LazyOp: return loaded_buffers[x]
-    if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa)  # cast isn't an ALU op
+  def ast_parse(self, x, acc, ssa, do_reduce=False) -> List[Token]:
+    if x.__class__ is not LazyOp: return x
+    if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, ssa)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
     # MULACC fusion. TODO: this is copied from Interpreted
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
@@ -471,7 +471,7 @@ class Linearizer:
       srcs = sorted(x.src, key=lambda x: (x.realized.__class__ != RawConst) if x.__class__ == LazyBuffer else 0)
       x.src = tuple(srcs)
     if x not in self.saved_exprs:
-      values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
+      values = [self.ast_parse(v, acc, ssa) for v in x.src]
       ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
       if x.op in ops:
         ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), ops[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
