@@ -180,7 +180,7 @@ class Compiled:
 
     def apply_opt(k, x):
       for axis, amt, typ in x:
-        if axis is None: continue
+        if axis is None or amt == 1: continue
         if typ == "R":
           typ = "U"
           axis += k.first_reduce
@@ -210,8 +210,8 @@ class Compiled:
         return 100000
 
     # this is the default now
-    UPCASTS = [2,3,4,5,6,7,8]
-    LOCALS = [2,3,4,5,6,7,8,16,24,32]
+    UPCASTS = [1,2,3,4,5,6,7,8]
+    LOCALS = [1,2,3,4,5,6,7,8,16,24,32]
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
       if k.key not in self.method_cache:
         if getenv("KOPT"):
@@ -220,14 +220,15 @@ class Compiled:
           opts = []
           for i in range(k.first_reduce):
             # TODO: the upcast always happen first, you might want to reverse this?
-            opts.append(ng.p.TransitionChoice([(None, None, None)] + [(i,s,"U") for s in UPCASTS if k.full_shape[i]%s == 0]))
-            opts.append(ng.p.TransitionChoice([(None, None, None)] + [(i,s,"L") for s in LOCALS if k.full_shape[i]%s == 0]))
+            opts.append(ng.p.TransitionChoice([(i,s,"U") for s in UPCASTS if k.full_shape[i]%s == 0]))
+            opts.append(ng.p.TransitionChoice([(i,s,"L") for s in LOCALS if k.full_shape[i]%s == 0]))
           for i in range(k.shape_len-k.first_reduce):
-            opts.append(ng.p.TransitionChoice([(None, None, None)] + [(i,s,"R") for s in UPCASTS if k.full_shape[k.first_reduce+i]%s == 0]))
-          optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=20*len(opts))
+            opts.append(ng.p.TransitionChoice([(i,s,"R") for s in UPCASTS if k.full_shape[k.first_reduce+i]%s == 0]))
+          search_space = prod([len(x.choices) for x in opts])
+          optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, 100))
           recommendation = optimizer.minimize(opt)
           apply_opt(k, recommendation.value)
-          if DEBUG >= 1: print("optimizer hit", k.colored_shape())
+          if DEBUG >= 1: print("optimizer hit", k.colored_shape(), "in search space", search_space)
           self.method_cache[k.key] = k.codegen().build(self.runtime)
         else:
           self.method_cache[k.key] = k.codegen().build(self.runtime)
