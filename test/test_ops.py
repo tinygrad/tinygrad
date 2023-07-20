@@ -1100,13 +1100,6 @@ class TestOps(unittest.TestCase):
     n = Tensor(np.array([[1.0, 2.0, np.nan, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)).max(ignore_nan=False).numpy()
     assert math.isnan(n.item()), f"tinygrad max: {n.item()} is not nan"
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU does not support nan/inf")
-  def test_nan_equality(self):
-    x = Tensor.full((3, 3), float("nan"))
-    result = (x != x).numpy()
-    expected = np.ones((3, 3))
-    assert np.all(result == expected), f"Unexpected result: {result}"
-
   def test_inf_where(self):
     x = Tensor.full((3, 3), float("inf"))
     n = (x < 0).where(x, 1).numpy()

@@ -380,8 +380,7 @@ class Tensor:
 
   def sum(self, axis=None, keepdim=False): return self._reduce(mlops.Sum, axis, keepdim)
   def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
-  def max(self, axis=None, keepdim=False, ignore_nan=True): return self._reduce(mlops.Max, axis, keepdim) if ignore_nan else Tensor(np.where(self._reduce(mlops.Max, axis, keepdim).isnan(), np.nan, self._reduce(mlops.Max, axis, keepdim)))
-
+  def max(self, axis=None, keepdim=False, ignore_nan=True): return self._reduce(mlops.Max, axis, keepdim) if ignore_nan else self._reduce(mlops.Max, axis, keepdim) + (self.isnan() * np.nan).sum()
 
   def mean(self, axis=None, keepdim=False):
     out = self.sum(axis=axis, keepdim=keepdim)
