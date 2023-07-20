@@ -355,9 +355,9 @@ def _realize_from(buffer: LazyBuffer) -> None:
     buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
     rawbuf.realized.readinto(cast(RawBufferMapped, buffer.realized)._buffer())
   # TODO: make this generic as well
-  elif isinstance(rawbuf.realized, RawBufferCopyInOut) and Device[buffer.device].buffer is RawShmBuffer:
-    buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
-    rawbuf.realized._copyout(np.frombuffer(cast(RawBufferMapped, buffer.realized)._buffer(), dtype=buffer.dtype.np))
+  # elif isinstance(rawbuf.realized, RawBufferCopyInOut) and Device[buffer.device].buffer is RawShmBuffer:
+  #   buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
+  #   rawbuf.realized._copyout(np.frombuffer(cast(RawBufferMapped, buffer.realized)._buffer(), dtype=buffer.dtype.np))
   elif isinstance(rawbuf.realized, RawBufferTransfer) and issubclass(Device[buffer.device].buffer, RawBufferTransfer):
     buffer.realized = cast(RawBufferTransfer, Device[buffer.device].buffer).transfer(rawbuf.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
   else:
