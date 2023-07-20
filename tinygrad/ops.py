@@ -201,13 +201,12 @@ class Compiled:
         apply_opt(k, x)
         prg = k.codegen().build(self.runtime)
         tm = min([prg.exec(k.bufs, force_wait=True) for _ in range(3)])*1000
-        #print(x, tm)
         return tm
       except Exception:
         if DEBUG >= 3:
           import traceback
           traceback.print_exc()
-        return 100000
+        return 10000000   # 10000 seconds is infinity
 
     # this is the default now
     UPCASTS = [1,2,3,4,5,6,7,8]
