@@ -43,6 +43,7 @@ def kernel_optimize(k, create_k, runtime):
     opts.append(ng.p.TransitionChoice([(i,s,"L") for s in LOCALS if k.full_shape[i]%s == 0]))
   for i in range(k.shape_len-k.first_reduce):
     opts.append(ng.p.TransitionChoice([(i,s,"R") for s in UPCASTS if k.full_shape[k.first_reduce+i]%s == 0]))
+  if len(opts) == 0: return
   search_space = prod([len(x.choices) for x in opts])
   optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, 200))
   recommendation = optimizer.minimize(opt)
