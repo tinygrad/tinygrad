@@ -15,8 +15,10 @@ def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed):
   tms = []
   for _ in range(4):
     GlobalCounters.reset()
+    Device[Device.DEFAULT].synchronize()
     st = time.perf_counter_ns()
     train(*gen())
+    Device[Device.DEFAULT].synchronize()
     tms.append(time.perf_counter_ns() - st)
 
   kernels_used = len(train.jit_cache) if hasattr(train, "jit_cache") else None
