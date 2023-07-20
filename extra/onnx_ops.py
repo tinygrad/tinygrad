@@ -208,10 +208,6 @@ def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_p
     div = _padding(Tensor.ones(*X.shape), pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations).avg_pool2d(kernel_shape, stride=strides)
     return padding_included / div
 
-def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
-  reshape_arg = [1]*input.ndim + [input.shape[-1]]
-  return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]))*input).sum(indices.ndim)
-
 def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
   if ceil_mode: auto_pad = "SAME_UPPER"
   ret = _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-len(kernel_shape):], strides=strides, kernel_shape=kernel_shape, dilations=dilations)
@@ -229,7 +225,7 @@ def MaxUnpool(xT, xI, outshape=None, kernel_shape=None, pads=None, strides=None)
   xI = xI.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
   arange = Tensor.arange(outlength).reshape(1, outlength).expand(xI.shape)
   xT = xT.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
-  ret = ((xI == arange) * xT).sum(0).reshape([1, 1] + out_sh) # TODO THIS MIGHT NOT BE [1, 1], should depend on kernel shape?
+  ret = ((xI == arange) * xT).sum(0).reshape([1, 1] + out_sh) # TODO THIS MIGHT NOT BE [1, 1], or might it?
   if outshape:
     outshape = safe_numpy(outshape).tolist()
     if outshape != ret.shape:
@@ -346,18 +342,7 @@ def ReduceLogSum(data, axes=None, keepdims=1, noop_with_empty_axes=0): return da
 def ReduceLogSumExp(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
 
 
-def GlobalAveragePool(X): 
-  # print(X[:, -9:-8, :, :].numpy())
-  # print((X[:, -9:-8, :, :] == X[:, -8:-7, :, :]).numpy())
-  ret = X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
-  haha = X[:, -50:, :, :].mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
-  print(haha.numpy())
-  print("fuck")
-  # print((ret[:, :, :, :] == ret[:, -8:-7, :, :]).numpy())
-  # print(ret)
-  # print(ret.numpy())
-  # print(ret)
-  return ret
+def GlobalAveragePool(X): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def OptionalHasElement(x: Tensor=None): return Tensor(x is not None and x.numel() > 0, dtype=dtypes.bool)
 def OptionalGetElement(x: Tensor=None): return x if x is not None else Tensor([], dtype=dtypes.float32)
@@ -424,9 +409,15 @@ def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, red
   elif reduction == "sum": return loss.sum()
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
 
-def SoftmaxCrossEntropyLoss(input, target, weights=None, ignore_index=None, reduction="mean"):
-  # rng = np.random.RandomState(seed)
-  N, C, i_shape = input.shape[0], input.shape[1], input.shape
+def SoftmaxCrossEntropyLoss(scores, labels, weights=None, ignore_index=None, reduction="mean"):
+  N, C, *s_dimensions = scores.shape
+  N_, *s_dimensions_ = labels.shape
+  assert N == N_ and s_dimensions == s_dimensions_, "oh fuck"
+  scores = Gather(scores, labels, axis=1)
+  y = -scores.softmax().log().transpose(0,1)
+  print(y.shape)
+  print(y.numpy())
+  return
   ...
 
 def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
@@ -436,33 +427,18 @@ def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
 def Gather(input, indices, axis=0):
   input_sh = list(input.shape)
   ret_shape = input_sh[:axis] + list(indices.shape) + input_sh[axis+1:]
-  if indices.ndim < 6: # shrinking and cating hits a weird recursion limit with VERY LARGE indices (only 1 test)
+  ishape = prod(indices.shape)
+  if ishape < 50: # NOT SURE YET FOR THE EXACT NUMBER, NEED TO TEST THIS
+    # faster gather with smaller indices SOMETHING SOMETHING O(SOMETHING) IDK IM STUPID
     if indices.ndim > 1: indices = indices.flatten()
     indices = [input_sh[axis]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
     args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(input_sh)] for i in indices]
     return input.shrink(arg=tuple(args[0])).cat(*[input.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
-  else: # previous implementation that uses too many kernels TODO improve this
+  else:
+    # faster gather with larger indices probably
     indices = (indices < 0).where(indices+input.shape[axis], indices)
-    indices_shape = list(indices.shape)
-    indices = indices.flatten()
-    input = input.transpose(ax1=0, ax2=axis)
-    if input.ndim > 1:
-      rem_shape = list(input.shape)[1:]
-      input = input.reshape(input.shape[0], -1).T
-      repeat_arg = [1]*(input.ndim-1) + [input.shape[-2]]
-      indices = indices.unsqueeze(indices.ndim).repeat(repeat_arg)
-      ret = _gather(input, indices)
-      if rem_shape: ret = ret.reshape(*[indices.shape[0]] + rem_shape)
-    else:
-      ret = _gather(input, indices)
-    reshape_arg = []
-    ret = ret.transpose(ax1=axis, ax2=0)
-    for idx, shape in enumerate(ret.shape):
-      if idx == axis:
-        reshape_arg.extend(indices_shape)
-      else:
-        reshape_arg.append(shape)
-    return ret.reshape(*reshape_arg)
+    sshape = input.shape[axis]
+    return (input.unsqueeze(axis+1).expand(list(input.shape[:axis+1]) + [ishape] + list(input.shape[axis+1:])) * (Tensor.arange(sshape).reshape(sshape,1).expand(sshape,ishape) == indices.flatten().reshape(1, ishape).expand(sshape, ishape)).reshape([1]*len(list(input.shape[:axis])) + [sshape,ishape] + [1]*len(list(input.shape[axis+1:]))).expand(list(input.shape[:axis+1]) + [ishape] + list(input.shape[axis+1:]))).sum(axis).reshape(ret_shape)
 
 def GatherElements(input, indices, axis):
   indices = (indices < 0).where(indices+input.shape[axis], indices)
