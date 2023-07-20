@@ -342,8 +342,10 @@ class Tensor:
   # TODO: make this nicer with syntactic sugar in slice
   def chunk(self, num, dim):
     dim = (dim + self.ndim) if dim < 0 else dim
-    slices = [tuple([slice(None) if i != dim else slice(j, j+ceil(self.shape[dim]/num)) for i in range(self.ndim)]) for j in range(0, self.shape[dim], ceil(self.shape[dim]/num))]
-    return [self[sl] for sl in slices]
+    slice_params = [[slice(None) for s in self.shape] for _ in range(num)]
+    for i, k in enumerate(range(0, self.shape[dim], ceil(self.shape[dim]/num))):
+      slice_params[i][dim] = slice(k, k + ceil(self.shape[dim]/num))
+    return [self[tuple(sl)] for sl in slice_params]
 
   def squeeze(self, dim=None):
     if dim is None: return self if 1 not in self.shape else self.reshape(*[size for size in self.shape if size != 1])
