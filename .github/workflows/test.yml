@@ -204,8 +204,10 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
-      - name: Set pip cache permissions
-        run: chmod -R 777 /github/home/.cache/pip
+      - name: Set up pip cache dir
+        run: |
+          mkdir -p /github/home/.cache/pip/wheels
+          chmod -R 777 /github/home/.cache/pip
       - name: Cache pip
         uses: actions/cache@v3
         with:
