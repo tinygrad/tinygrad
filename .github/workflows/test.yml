@@ -201,8 +201,12 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
       - name: Install tinygrad dependencies
-        run: pip install -e . --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install -e '.[testing,cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
         run: FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python3 -m pytest -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"
 
