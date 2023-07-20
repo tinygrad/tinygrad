@@ -5,7 +5,7 @@ from enum import Enum, auto
 
 from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
-from tinygrad.lazy import LazyBuffer, Device
+from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst, buf_is_kernel_arg
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
@@ -612,8 +612,8 @@ class Linearizer:
         num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
         self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
         if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
-      # global_dims = self.first_reduce-self.local_dims
-      # self.reshape_and_permute(lambda x: x[0:global_dims][::-1]+x[global_dims:], None)
+      global_dims = self.first_reduce-self.local_dims
+      self.reshape_and_permute(lambda x: x[0:global_dims][::-1]+x[global_dims:], None)
 
   def alias_buffer(self, i, pattern):
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"

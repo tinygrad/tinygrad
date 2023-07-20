@@ -95,11 +95,6 @@ class CStyleLanguage(NamedTuple):
     return f"{buf_name}[{idx.render(render_cl)}] = {var_name};"
 
 def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:List[str]):
-  # if var.max == 65535:
-    # print(local_size)
-    # print(var)
-    # print(var.max)
-    # print(xid)
   # for M1 tensor core stuff, support > 3 dims
   if i >= 2 and len(args[0]) > len(xid):
     # do this on the x dim for warps
@@ -110,9 +105,6 @@ def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:Li
     assert lidx.max == var.max and lidx.min == var.min
     return f"{{ {prefix} {var.expr} = {lidx.render(render_cl)};  /* {var.max+1} */"
   local_size.append(var.max+1)
-  # if var.max == 65535:
-  #   print(local_size)
-  #   print(f"{{ {prefix} {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */")
   return f"{{ {prefix} {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
 def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
@@ -132,12 +124,6 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
           kk("{")
         else:
           if args[1] == "global" and lang.gid:
-            # print(lang.size_prefix)
-            # print(args)
-            # print(i)
-            # print(var)
-            # print(global_size)
-            # print(lang.gid)
             kk(add_gl_dimension(lang.size_prefix, args, i, var, global_size, lang.gid))
           elif args[1] == "local" and lang.lid:
             kk(add_gl_dimension(lang.size_prefix, args, i, var, local_size, lang.lid))
@@ -196,12 +182,6 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
       bufs.append(args)
     else:
       raise RuntimeError(f"failed to render {uop}")
-    # print(uop)
-    # print(newvar)
-    # print(vin)
-    # print(args)
-    # print("global:", global_size)
-    # print("local:", local_size)
 
   return lang.render_kernel(kernel, bufs, global_size, local_size, prekernel)
 
@@ -218,13 +198,10 @@ class CStyleCodegen(Linearizer):
   def codegen(self):
     self.process()
     self.hand_coded_optimizations()
-    # print(self.full_shape)
     self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
-    # print(self.full_shape)
     self.linearize()
 
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.lang)
-    # print(global_size, local_size)
 
     # painfully name the function something unique
     if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]
