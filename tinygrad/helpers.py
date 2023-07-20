@@ -101,6 +101,9 @@ class dtypes:
   uint32: Final[DType] = DType(1, 4, "unsigned int", np.uint32)
   uint64: Final[DType] = DType(2, 8, "unsigned long", np.uint64)
 
+  # NOTE: bfloat16 isn't supported in numpy
+  bfloat16: Final[DType] = DType(0, 2, "__bf16", None)
+
   # NOTE: these are internal dtypes, should probably check for that
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
   _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)

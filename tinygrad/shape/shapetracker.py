@@ -38,10 +38,10 @@ class ViewInternal(NamedTuple):
 @functools.lru_cache(maxsize=None)
 class View(ViewInternal):
   def __new__(cls, shape, strides=None, offset=0, mask=None):
-    strides_from_shape = strides_for_shape(shape) 
+    strides_from_shape = strides_for_shape(shape)
     strides = strides_from_shape if not strides else filter_strides(shape, strides)
     contiguous = offset == 0 and is_contiguous(shape, strides) and mask is None
-    return super().__new__(cls, shape, strides, offset, mask, contiguous, to_shape_strides(shape, strides))  
+    return super().__new__(cls, shape, strides, offset, mask, contiguous, to_shape_strides(shape, strides))
   def __init__(self, shape, strides=None, offset=0, mask=None, contiguous=False, shape_strides=()): super().__init__()
 
   def expr_node_mask(self, idx, valid=None) -> Node:
@@ -68,7 +68,7 @@ class View(ViewInternal):
   def expr_idxs(self, idxs) -> Node:
     assert len(idxs) == len(self.shape), f"need an idx for all dimensions {idxs} vs {self.shape}"
     return Variable.sum([Variable.num(self.offset)] + [idx*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
-  
+
 @functools.lru_cache(maxsize=None)
 def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
   assert len(idxs) == len(shape), "need an idx for all dimensions"
