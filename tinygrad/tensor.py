@@ -343,7 +343,7 @@ class Tensor:
   def chunk(self, num, dim):
     slice_params = [[slice(None) for s in self.shape] for _ in range(ceil(self.shape[dim]/ceil(self.shape[dim]/num)))]
     for i, k in enumerate(range(0, self.shape[dim], ceil(self.shape[dim]/num))):
-        slice_params[i][dim] = slice(k, k + ceil(self.shape[dim]/num))
+      slice_params[i][dim] = slice(k, k + ceil(self.shape[dim]/num))
     return [self[tuple(sl)] for sl in slice_params]
 
   def squeeze(self, dim=None):
