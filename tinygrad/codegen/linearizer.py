@@ -42,6 +42,7 @@ class LocalBuffer(NamedTuple):
   dtype: DType = dtypes.float32
   realized: None = None
   def __str__(self): return f"localbuffer<{self.name}[{self.size}]>"
+  def map_buffers(self, real_srcs: Dict[Any, Any]): return real_srcs.get(self, self)
 
 class Token(NamedTuple):
   name: str
@@ -390,7 +391,7 @@ class Linearizer:
           self.uop(UOps.BARRIER, None, [], ())
 
         # load earlybufs
-        loaded_buffers.update({b:tuple(self.global_load(self.bufs.index(self.local_alias[i])) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
+        loaded_buffers.update({b:tuple(self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs)) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
 
         # run early AST (with reduce)
         self.ast_parse(self.reduceop.map_buffers(loaded_buffers), [acc[off] for off in self.acc_offsets(self.full_buf_index)], ssa, do_reduce=True)
@@ -427,7 +428,7 @@ class Linearizer:
         self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
         # load localbufs
-        loaded_buffers[self.bufs[-1]] = self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs)
+        loaded_buffers[self.bufs[-1]] = tuple(self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs))
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
         self.ast_parse(LazyOp(self.reduceop.op.map_buffers(loaded_buffers), (self.bufs[-1],)), [acc[off] for off in self.acc_offsets(-1)], ssa, do_reduce=True) # type: ignore
