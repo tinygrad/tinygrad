@@ -667,7 +667,7 @@ if __name__ == '__main__':
   parser.add_argument("--out_path", default=None, help="Specify the full output path. Overrides the --out_dir and --name parameter.")
   parser.add_argument("--out_dir", default=str(Path(__file__).parent.parent / "temp"), help="Specify the output path.")
   parser.add_argument("--base_name", default="test", help="Specify the base of the output file name. Default is 'test'.")
-  parser.add_argument("--text_to_synthesize", default="""Hello person. If the code you are contributing isn't some of the highest quality code you've written in your life, either put in the effort to make it great, or don't bother.""", help="Specify the text to synthesize. Default is a greeting message.")
+  parser.add_argument("--text_to_synthesize", default="""Hello person. If the code you are contributing""", help="Specify the text to synthesize. Default is a greeting message.")
   parser.add_argument("--noise_scale", type=float, default=0.667, help="Specify the noise scale. Default is 0.667.")
   parser.add_argument("--noise_scale_w", type=float, default=0.8, help="Specify the noise scale w. Default is 0.8.")
   parser.add_argument("--length_scale", type=float, default=1, help="Specify the length scale. Default is 1.")
@@ -675,7 +675,7 @@ if __name__ == '__main__':
   parser.add_argument("--num_channels", type=int, default=1, help="Specify the number of audio output channels. Default is 1.")
   parser.add_argument("--sample_width", type=int, default=2, help="Specify the number of bytes per sample, adjust if necessary. Default is 2.")
   parser.add_argument("--emotion_path", type=str, default=None, help="Specify the path to emotion reference.")
-  parser.add_argument("--estimate_max_y_length", type=str, default=True, help="If true, overestimate the output length and then trim it to the correct length, to prevent premature realization. Default is True.")
+  parser.add_argument("--estimate_max_y_length", type=str, default=False, help="If true, overestimate the output length and then trim it to the correct length, to prevent premature realization, much more performant for larger inputs, for smaller inputs not so much. Default is False.")
   args = parser.parse_args()
 
   model_config = MODELS[args.model_to_use]
