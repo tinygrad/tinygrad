@@ -573,7 +573,6 @@ class TextMapper: # Based on https://github.com/keithito/tacotron
         if not cleaner: raise ModuleNotFoundError('Unknown cleaner: %s' % name)
         text = cleaner(text)
     else: text = text.strip()
-    print(text)
     return [self._symbol_to_id[symbol] for symbol in text]
   def get_text(self, text, add_blank=False, cleaners=('english_cleaners',)):
     text_norm = self.text_to_sequence(text, cleaners)
