@@ -107,6 +107,10 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
       assert args.valid.min == 1, "store must be valid"
       idx = args.idx.render(render_llvm, bb[-1])
       element = lvars[vin[0]]
+      print("--")
+      print(func_dtypes[0])
+      print(func_dtypes[1])
+      print("--")
       if func_dtypes[0] != ir.FloatType():
         if dtypes.is_int(buf_to_dtype[args.name]):
           element = bb[-1].fptoui(element, func_dtypes[0]) if dtypes.is_unsigned(buf_to_dtype[args.name]) else bb[-1].fptosi(element, func_dtypes[0])

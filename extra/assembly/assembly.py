@@ -171,6 +171,11 @@ class AssemblyCodegen(Linearizer):
           skipload_branch += 1
       elif uop == UOps.STORE:
         idx, treg, off = addr_w_offset(args)
+        print("---")
+        print(args)
+        print(f" {idx}, {treg} {off}") # %b2, None 0
+        print("---")
+        #ins.append(AssemblyInstruction(UOps.CAST, out, [pred_reg], args))
         ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global'))) #if args.i != -1 else 'shared')
 
     # define registers
