@@ -202,13 +202,14 @@ class Compiled:
         #print(x, tm)
         return tm
       except Exception:
-        if DEBUG >= 2:
+        if DEBUG >= 3:
           import traceback
           traceback.print_exc()
         return 100000
 
     # this is the default now
-    UPCASTS = [2,3,4,5,6,8,16,24,32]
+    UPCASTS = [2,3,4,5,6,8]
+    LOCALS = [2,3,4,5,6,8,16,24,32]
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
       if k.key not in self.method_cache:
         if getenv("KOPT"):
@@ -217,7 +218,7 @@ class Compiled:
           opts = []
           for i in range(k.first_reduce):
             opts.append(ng.p.TransitionChoice([(None, None, None)] + [(i,s,"U") for s in UPCASTS if k.full_shape[i]%s == 0]))
-            opts.append(ng.p.TransitionChoice([(None, None, None)] + [(i,s,"L") for s in UPCASTS if k.full_shape[i]%s == 0]))
+            opts.append(ng.p.TransitionChoice([(None, None, None)] + [(i,s,"L") for s in LOCALS if k.full_shape[i]%s == 0]))
           for i in range(k.shape_len-k.first_reduce):
             opts.append(ng.p.TransitionChoice([(None, None, None)] + [(i,s,"R") for s in UPCASTS if k.full_shape[k.first_reduce+i]%s == 0]))
           optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=20*len(opts))
