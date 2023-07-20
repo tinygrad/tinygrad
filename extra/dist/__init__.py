@@ -1,36 +1,38 @@
 # this file needs to be very careful with its imports as to not accidentally initialize the runtimes
-import os
+from multiprocessing.connection import Connection
+from typing import Any, Callable, List, Tuple
 import multiprocessing as mp
+import os
 
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, getenv
 
-# this needs to be called before everything else if you are using multidevice
+# this needs to be called before everything else if you are using distributed
 def preinit():
-  os.environ["DELAYED_RUNTIME_INIT"] = "1" # TODO: this is kinda cursed, find a way to do this without env vars
+  os.environ["DELAYED_RUNTIME_INIT"] = "1"
   mp.set_start_method("spawn")
 
 class _OOB:
-  def __init__(self, pipes):
+  def __init__(self, pipes:List[Tuple[Connection, Connection]]):
     self.pipes = pipes
-  def send(self, data, target_rank):
-    self.pipes[RANK * WORLD_SIZE + target_rank][1].send(data)
-  def recv(self, target_rank):
-    return self.pipes[target_rank * WORLD_SIZE + RANK][0].recv()
+  def send(self, data:Any, target_rank:int):
+    self.pipes[getenv("RANK") * getenv("WORLD_SIZE") + target_rank][1].send(data)
+  def recv(self, target_rank:int) -> Any:
+    return self.pipes[target_rank * getenv("WORLD_SIZE") + getenv("RANK")][0].recv()
 OOB = None
 
-def init_oob(world_size):
-  return [mp.Pipe(False) for _ in range(world_size * world_size)]
+def init_oob(world_size:int):
+  os.environ["WORLD_SIZE"] = str(world_size)
 
-RANK = -1
-WORLD_SIZE = -1
-def _process_wrap(rank, world_size, device, oob, fn, args=()):
+  global OOB
+  OOB = _OOB([mp.Pipe(False) for _ in range(world_size * world_size)])
+
+def _process_wrap(rank:int, device:str, oob:_OOB, fn:Callable, args=()):
   # setup the rank
-  global RANK, WORLD_SIZE
-  RANK, WORLD_SIZE = rank, world_size
+  os.environ["RANK"] = str(rank)
 
   # setup out of band communication
   global OOB
-  OOB = _OOB(oob)
+  OOB = oob
 
   # initialize the runtime
   from tinygrad.lazy import Device
@@ -43,9 +45,9 @@ def _process_wrap(rank, world_size, device, oob, fn, args=()):
   # convert device to be process specific
   Device.DEFAULT = device.split(":")[0]
 
-  fn(rank, world_size, Device.DEFAULT, *args)
+  fn(*args)
 
 # wrapper around mp.Process that initializes the runtime
-def spawn(rank, world_size, device, oob, fn, args=()):
-  (p := mp.Process(target=_process_wrap, args=(rank, world_size, device, oob, fn, args))).start()
+def spawn(rank:int, device:str, fn:Callable, args=()) -> mp.Process:
+  (p := mp.Process(target=_process_wrap, args=(rank, device, OOB, fn, args))).start()
   return p
