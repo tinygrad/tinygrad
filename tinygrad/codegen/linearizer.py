@@ -391,7 +391,7 @@ class Linearizer:
           self.uop(UOps.BARRIER, None, [], ())
 
         # load earlybufs
-        earlybuf_cache = defaultdict(dict)
+        earlybuf_cache: Dict[Any, Dict[str, Token]] = defaultdict(dict)
         loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs, load_cache=earlybuf_cache) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
 
         # run early AST (with reduce)
@@ -438,7 +438,7 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    latebuf_cache = defaultdict(dict)
+    latebuf_cache: Dict[Any, Dict[str, Token]] = defaultdict(dict)
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, load_cache=latebuf_cache) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})
 
     # run late AST
