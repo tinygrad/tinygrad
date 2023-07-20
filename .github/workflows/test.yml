@@ -56,7 +56,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ~/.cache/pip
-        key: testing
+        key: cpu
     - name: Install Dependencies
       run: pip install --use-feature=fast-deps -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test Docs
@@ -88,7 +88,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ~/.cache/pip
-        key: testing
+        key: torch
     - name: Install Dependencies
       run: pip install --use-feature=fast-deps -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
@@ -123,7 +123,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: testing
+          key: opencl
       - name: Install Dependencies
         run: pip install --use-feature=fast-deps -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - if: ${{ matrix.task == 'optimage' }}
