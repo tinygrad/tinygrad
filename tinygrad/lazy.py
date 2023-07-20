@@ -217,8 +217,11 @@ class LazyBuffer:
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if prod(self.shape) // prod(new_shape) > 8192:
-      reduced_dimensions = [(i, math.gcd(256, old), stride) for i, (old, new, stride) in enumerate(zip(self.shape, new_shape, self.st.real_strides())) if old != new]
-      dimension_to_split, divisor, _ = max(reduced_dimensions, key=lambda v: v[1]//(v[2] or math.inf) ) # heuristic -> choose largest divisor to split on, penalize large strides
+      reduced_dimensions = [(i, divisor := math.gcd(256, old), divisor/(stride or math.inf)) for i, (old, new, stride) in enumerate(zip(self.shape, new_shape, self.st.real_strides())) if old != new]
+
+      # heuristic -> choose largest divisor to split on, penalize large strides
+      dimension_to_split, divisor, heuristic = max(reduced_dimensions, key=lambda v: v[2])
+      if heuristic < 1: return self._reduce_op(op, new_shape)
 
       intermediate_input_shape = self.shape[:dimension_to_split] + (self.shape[dimension_to_split]//divisor, divisor) + self.shape[dimension_to_split+1:]
       intermediate_output_shape = self.shape[:dimension_to_split] + (self.shape[dimension_to_split]//divisor, 1) + self.shape[dimension_to_split+1:]
