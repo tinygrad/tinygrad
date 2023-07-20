@@ -133,10 +133,10 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg, **self.runtime_args)
     return self
 
-  def exec(self, bufs) -> Optional[float]:
+  def exec(self, bufs, force_wait=False) -> Optional[float]:
     rawbufs = dedup([x.realized for x in bufs if buf_is_kernel_arg(x)])
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
-    return self(rawbufs)
+    return self(rawbufs, force_wait=force_wait)
 
   def __call__(self, rawbufs:List[RawBuffer], jit=False, force_wait=False) -> Optional[float]:
     if et := self.clprg((self.global_size + [1]*(3-len(self.global_size))) if self.global_size is not None else None,
@@ -178,9 +178,55 @@ class Compiled:
     # compilation time
     k = self.codegen(ast, output)
 
+    def apply_opt(k, x):
+      for axis, amt, typ in x:
+        if axis is None: continue
+        if typ == "R":
+          typ = "U"
+          axis += k.first_reduce
+        if typ == "U":
+          k.shift_to(axis, amt)
+          k.upcast()
+        elif typ == "L":
+          k.shift_to(axis, amt, insert_before=k.first_reduce)
+          k.local_dims += 1
+
+    # optimization
+    def opt(x):
+      try:
+        k = self.codegen(ast, output)
+        k.process()
+        apply_opt(k, x)
+        prg = k.codegen().build(self.runtime)
+        tm = min([prg.exec(k.bufs, force_wait=True) for _ in range(3)])*1000
+        #print(x, tm)
+        return tm
+      except Exception:
+        if DEBUG >= 2:
+          import traceback
+          traceback.print_exc()
+        return 100000
+
     # this is the default now
+    UPCASTS = [2,3,4,5,6,8,16,24,32]
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
-      if k.key not in self.method_cache: self.method_cache[k.key] = k.codegen().build(self.runtime)
+      if k.key not in self.method_cache:
+        if getenv("KOPT"):
+          k.process()
+          import nevergrad as ng
+          opts = []
+          for i in range(k.first_reduce):
+            opts.append(ng.p.TransitionChoice([(None, None, None)] + [(i,s,"U") for s in UPCASTS if k.full_shape[i]%s == 0]))
+            opts.append(ng.p.TransitionChoice([(None, None, None)] + [(i,s,"L") for s in UPCASTS if k.full_shape[i]%s == 0]))
+          for i in range(k.shape_len-k.first_reduce):
+            opts.append(ng.p.TransitionChoice([(None, None, None)] + [(i,s,"R") for s in UPCASTS if k.full_shape[k.first_reduce+i]%s == 0]))
+          optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=20*len(opts))
+          recommendation = optimizer.minimize(opt)
+          apply_opt(k, recommendation.value)
+          if DEBUG >= 1: print("optimizer hit", k.colored_shape())
+          self.method_cache[k.key] = k.codegen().build(self.runtime)
+        else:
+          self.method_cache[k.key] = k.codegen().build(self.runtime)
       elif DEBUG >= 5: print(f"method cache hit : {k.key}")
       prg = self.method_cache[k.key]
     else:
