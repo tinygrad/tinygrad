@@ -440,7 +440,7 @@ class Linearizer:
     loaded_buffers.update({b:tuple(self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})
 
     # run late AST
-    val = self.ast_parse(self.ast, acc, ssa)
+    val = self.ast_parse(self.ast.map_buffers(loaded_buffers), acc, ssa)
 
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa)
