@@ -184,12 +184,14 @@ class Compiled:
         if typ == "R":
           typ = "U"
           axis += k.first_reduce
+        assert k.full_shape[axis] % amt == 0, "no longer valid shift"
         if typ == "U":
           k.shift_to(axis, amt)
           k.upcast()
         elif typ == "L":
           k.shift_to(axis, amt, insert_before=k.first_reduce)
           k.local_dims += 1
+      k.simplify_ones()
 
     # optimization
     def opt(x):
@@ -208,8 +210,8 @@ class Compiled:
         return 100000
 
     # this is the default now
-    UPCASTS = [2,3,4,5,6,8]
-    LOCALS = [2,3,4,5,6,8,16,24,32]
+    UPCASTS = [2,3,4,5,6,7,8]
+    LOCALS = [2,3,4,5,6,7,8,16,24,32]
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
       if k.key not in self.method_cache:
         if getenv("KOPT"):
@@ -217,6 +219,7 @@ class Compiled:
           import nevergrad as ng
           opts = []
           for i in range(k.first_reduce):
+            # TODO: the upcast always happen first, you might want to reverse this?
             opts.append(ng.p.TransitionChoice([(None, None, None)] + [(i,s,"U") for s in UPCASTS if k.full_shape[i]%s == 0]))
             opts.append(ng.p.TransitionChoice([(None, None, None)] + [(i,s,"L") for s in LOCALS if k.full_shape[i]%s == 0]))
           for i in range(k.shape_len-k.first_reduce):
