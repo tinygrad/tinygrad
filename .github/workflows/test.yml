@@ -198,22 +198,11 @@ jobs:
     timeout-minutes: 20
     container:
       image: cheeetoo/tinygrad-cuda-ubuntu:latest
-      volumes:
-        - /home/runner/.cache/pip:/github/home/.cache/pip
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
-      - name: Set up pip cache dir
-        run: |
-          mkdir -p /github/home/.cache/pip/wheels
-          chmod -R 777 /github/home/.cache/pip
-      - name: Cache pip
-        uses: actions/cache@v3
-        with:
-          path: /home/runner/.cache/pip
-          key: cuda
       - name: Install tinygrad dependencies
-        run: pip install -e '.[testing, cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install -e . --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
         run: FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python3 -m pytest -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"
 
