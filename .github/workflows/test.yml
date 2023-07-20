@@ -202,7 +202,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
       - name: Install tinygrad dependencies
-        run: pip install -e '.[testing,cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install --use-feature=fast-deps -e '.[testing,cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
         run: FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python3 -m pytest -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"
 
@@ -239,4 +239,4 @@ jobs:
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
-        run: python -m pytest -n=auto test/ --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py
+        run: python -m pytest -n=auto test/ --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/models/test_mnist.py

@@ -24,6 +24,6 @@ RUN \
   ninja install && \
   rm -rf /gpuocelot
 
-RUN \
-  pip install torch pytest pytest-xdist onnx onnx2torch opencv-python tabulate safetensors types-PyYAML cloudpickle \
-  pycuda
+# RUN \
+#   pip install torch pytest pytest-xdist onnx onnx2torch opencv-python tabulate safetensors types-PyYAML cloudpickle \
+#   pycuda
