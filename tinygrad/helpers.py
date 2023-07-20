@@ -9,6 +9,7 @@ from math import prod # noqa: F401 # pylint:disable=unused-import
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
+CI = os.getenv("CI", "") != ""
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x):
