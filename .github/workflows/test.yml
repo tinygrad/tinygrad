@@ -199,8 +199,7 @@ jobs:
     container:
       image: cheeetoo/tinygrad-cuda-ubuntu:latest
       volumes:
-        - ${{ github.workspace }}/.cache/pip:/github/home/.cache/pip
-
+        - /home/runner/.cache/pip:/github/home/.cache/pip
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
