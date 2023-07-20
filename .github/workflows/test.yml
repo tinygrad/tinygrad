@@ -199,11 +199,13 @@ jobs:
     container:
       image: cheeetoo/tinygrad-cuda-ubuntu:latest
       volumes:
-        - ${{ github.workspace }}/.cache/pip:/root/.cache/pip
+        - ${{ github.workspace }}/.cache/pip:/github/home/.cache/pip
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+      - name: Set pip cache permissions
+        run: chmod -R 777 /github/home/.cache/pip
       - name: Cache pip
         uses: actions/cache@v3
         with:
