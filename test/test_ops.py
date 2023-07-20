@@ -102,8 +102,14 @@ class TestOps(unittest.TestCase):
     tor = Tensor.arange(13).repeat((8, 1)).chunk(6, 1)
     for i in range(len(ten)):
       helper_test_op([], lambda: ten[i], lambda: tor[i], forward_only=True)
+
     ten = torch.arange(13).repeat(8, 1).chunk(6, 0)
     tor = Tensor.arange(13).repeat((8, 1)).chunk(6, 0)
+    for i in range(len(ten)):
+      helper_test_op([], lambda: ten[i], lambda: tor[i], forward_only=True)
+
+    ten = torch.arange(13).repeat(8, 1).chunk(3, -1)
+    tor = Tensor.arange(13).repeat((8, 1)).chunk(3, -1)
     for i in range(len(ten)):
       helper_test_op([], lambda: ten[i], lambda: tor[i], forward_only=True)
 
