@@ -602,21 +602,13 @@ class Linearizer:
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
     # NOTE: this might make multiview shapetrackers
-    if limit and (self.first_reduce-self.local_dims) > limit:
-      num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
-      # print(prod(self.full_shape[0:num_to_merge]))
-      # print(self.full_shape[num_to_merge:]) 
-      self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
-      if Device.DEFAULT == "CUDA":
-        print("check device limit")
-        print(self.full_shape)
-        # TODO Add DeviceInfo
-        global_dim = (65535, 65535, 2147483647)
-        p = list(range(len(self.full_shape)))
-        swap = self.full_shape.index(max(self.full_shape))
-        p[swap], p[2] = p[2], p[swap]
-        self.reshape_and_permute(None, p)
-      if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
+    if limit:  
+      if (self.first_reduce-self.local_dims) > limit:
+        num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
+        self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
+        if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
+      # global_dims = self.first_reduce-self.local_dims
+      # self.reshape_and_permute(lambda x: x[0:global_dims][::-1]+x[global_dims:], None)
 
   def alias_buffer(self, i, pattern):
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
