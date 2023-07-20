@@ -26,6 +26,23 @@ def _test_add_upcast(a:Tensor, b:Tensor, target_dtype:DType, target): _test_op(l
 def _test_mul_upcast(a:Tensor, b:Tensor, target_dtype:DType, target): _test_op(lambda: a*b, target_dtype, target)
 def _test_matmul_upcast(a:Tensor, b:Tensor, target_dtype:DType, target): _test_op(lambda: a@b, target_dtype, target)
 
+
+class TestBFloat16DType(unittest.TestCase):
+  def test_bf16_cant_be_created(self):
+    with self.assertRaises(AssertionError):
+      t = Tensor([100000.], dtype=dtypes.bfloat16)
+
+  @unittest.skipIf(Device.DEFAULT not in ["LLVM"], "bf16 only on LLVM")
+  def test_bf16(self):
+    t = Tensor([10000]).cast(dtypes.bfloat16)
+    t.realize()
+    back = t.cast(dtypes.float32)
+    assert back.numpy()[0] == 9984.
+
+  #def test_bf16_to_float(self): _test_cast(Tensor([100000], dtype=dtypes.bfloat16), dtypes.float32, [100000])
+  #def test_float_to_bf16(self): _test_cast(Tensor([100000], dtype=dtypes.float32), dtypes.bfloat16, [100000])
+
+
 # for GPU, cl_khr_fp16 isn't supported (except now we don't need it!)
 # for LLVM, it segfaults because it can't link to the casting function
 @unittest.skipIf((getenv("CI", "") != "" and Device.DEFAULT in ["LLVM"]) or Device.DEFAULT == "WEBGPU", "float16 broken in some CI backends")

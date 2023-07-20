@@ -41,7 +41,7 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
   buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
 
   # create llvm function
-  dtype_to_llvm_dtype = {dtypes.float16:ir.HalfType(), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32)}
+  dtype_to_llvm_dtype = {dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32)}
   func_dtypes = [dtype_to_llvm_dtype[dtype] for dtype in buf_to_dtype.values()]
   func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in func_dtypes]), name='exec')
 
@@ -104,6 +104,10 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
         if args.memory_dtype != newvar.dtype:
           if dtypes.is_int(args.memory_dtype):
             val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(args.memory_dtype) else bb[-1].sitofp(val, ir.FloatType())
+          elif args.memory_dtype == dtypes.bfloat16:
+            val = bb[-1].sext(val, ir.IntType(32))
+            val = bb[-1].shl(val, ir.Constant(ir.IntType(32), 16))
+            val = bb[-1].bitcast(val, ir.FloatType())
           else:
             val = bb[-1].fpext(val, ir.FloatType())
       lvars[newvar] = val
@@ -114,6 +118,10 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
       if args.memory_dtype != vin[0].dtype:
         if dtypes.is_int(args.memory_dtype):
           element = bb[-1].fptoui(element, dtype_to_llvm_dtype[args.memory_dtype]) if dtypes.is_unsigned(args.memory_dtype) else bb[-1].fptosi(element, dtype_to_llvm_dtype[args.memory_dtype])
+        elif args.memory_dtype == dtypes.bfloat16:
+          element = bb[-1].bitcast(element, ir.IntType(32))
+          element = bb[-1].lshr(element, ir.Constant(ir.IntType(32), 16))
+          element = bb[-1].trunc(element, ir.IntType(16))
         else:
           element = bb[-1].fptrunc(element, dtype_to_llvm_dtype[args.memory_dtype])
       bb[-1].store(element, bb[-1].gep(func.args[buf_index[args.name]], [idx], inbounds=True))

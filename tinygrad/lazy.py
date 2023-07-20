@@ -185,6 +185,7 @@ class LazyBuffer:
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
+    assert self.dtype.np, "numpy dtype is required for toCPU"
     realized = self.cast(dtypes.from_np(self.dtype.np)).contiguous().realize().realized
     ret = cast(RawBuffer, realized).toCPU().reshape(self.shape)
     return ret

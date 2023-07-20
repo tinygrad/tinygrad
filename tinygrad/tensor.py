@@ -63,10 +63,10 @@ class Tensor:
       return
 
     if data.__class__ is list:
+      assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
       data = np.array(data, dtype=(dtype or Tensor.default_type).np)
 
-    if data.__class__ is np.ndarray:
-      data = cast(np.ndarray, data)
+    if isinstance(data, np.ndarray):
       data = LazyBuffer.fromCPU(data)
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
