@@ -197,7 +197,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
-      image: cheeetoo/tinygrad-cuda-ubuntu:latest
+      image: ghcr.io/cheeetoo/tinygrad-cuda-ubuntu:latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
