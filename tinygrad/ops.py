@@ -220,18 +220,17 @@ class Compiled:
           opts = []
           for i in range(k.first_reduce):
             # TODO: the upcast always happen first, you might want to reverse this?
+            # TODO: the order of the locals might improve things too
             opts.append(ng.p.TransitionChoice([(i,s,"U") for s in UPCASTS if k.full_shape[i]%s == 0]))
             opts.append(ng.p.TransitionChoice([(i,s,"L") for s in LOCALS if k.full_shape[i]%s == 0]))
           for i in range(k.shape_len-k.first_reduce):
             opts.append(ng.p.TransitionChoice([(i,s,"R") for s in UPCASTS if k.full_shape[k.first_reduce+i]%s == 0]))
           search_space = prod([len(x.choices) for x in opts])
-          optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, 100))
+          optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, 200))
           recommendation = optimizer.minimize(opt)
           apply_opt(k, recommendation.value)
           if DEBUG >= 1: print("optimizer hit", k.colored_shape(), "in search space", search_space)
-          self.method_cache[k.key] = k.codegen().build(self.runtime)
-        else:
-          self.method_cache[k.key] = k.codegen().build(self.runtime)
+        self.method_cache[k.key] = k.codegen().build(self.runtime)
       elif DEBUG >= 5: print(f"method cache hit : {k.key}")
       prg = self.method_cache[k.key]
     else:
