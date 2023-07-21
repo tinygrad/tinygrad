@@ -354,7 +354,7 @@ def Tile(input, repeats):
   final_shape = [r*s for r,s in zip(repeats_, input.shape)]
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
-def Range(start, limit, delta): return Tensor.arange(int(safe_numpy(limit)), int(safe_numpy(start)), int(safe_numpy(delta)), dtype=delta.dtype) # TODO negative delta
+def Range(start, limit, delta): return Tensor.arange(safe_numpy(start)[0], safe_numpy(limit)[0], step=safe_numpy(delta)[0])
 def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
 
 def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
@@ -362,12 +362,9 @@ def Or(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.ones(*x.shape)).cast(
 def Xor(x:Tensor, y:Tensor): return Where((x==y), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
 def Not(x:Tensor): return Where((x==1), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
 
-def Floor(x:Tensor): return x.floor()
-def Ceil(x:Tensor): return x.ceil()
-
-def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1): 
-  k = int(k.numpy().item()) if k != 0 else 0 # onnx passes k as a tensor int64 with one element, default is 0
-  return x.triu(k).cast(x.dtype) if upper else x.tril(k).cast(x.dtype)
+def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
+  k = int(k.numpy().item()) if k is not 0 else 0 # onnx passes k as a tensor int64 with one element, default is 0
+  return x.triu(k) if upper else x.tril(k)
 
 def ConstantOfShape(input, value:Tensor=None):
   if value is None: value=Tensor([0.0])
@@ -398,13 +395,13 @@ def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, red
     input = input.reshape((N, C, -1))
     target = target.reshape((N, -1))
   if weight is not None:
-    mask = target.unsqueeze(-1) == Tensor.arange(C,dtype=dtypes.int64).repeat((N, 1, 1)) 
+    mask = target.unsqueeze(-1) == Tensor.arange(C,dtype=dtypes.int64).repeat((N, 1, 1))
     weight = (mask * weight).sum(axis=-1)
   if ignore_index is not None:
     cond = (target == ignore_index)
-    weight = cond.where(0, weight) if weight is not None else cond.where(Tensor.zeros(*target.shape), 1) 
-  mask = target[:, None, :] ==  Tensor.arange(C).reshape([1, C] + [1]*(len(input.shape) -2)) 
-  loss = (-mask * input).sum(axis=1) * (1 if weight is None else weight)  
+    weight = cond.where(0, weight) if weight is not None else cond.where(Tensor.zeros(*target.shape), 1)
+  mask = target[:, None, :] ==  Tensor.arange(C).reshape([1, C] + [1]*(len(input.shape) -2))
+  loss = (-mask * input).sum(axis=1) * (1 if weight is None else weight)
   if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
   elif reduction == "sum": return loss.sum()
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
@@ -614,5 +611,5 @@ def OneHot(indices, depth, values, axis=-1):
   if axis < 0: axis += rank + 1
   ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
   cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
-  return cond.where(values[1], values[0]).cast(values.dtype) 
+  return cond.where(values[1], values[0]).cast(values.dtype)
 

@@ -95,7 +95,7 @@ def get_run_onnx(onnx_model: ModelProto):
   attribute_dict = {}
   for num,n in enumerate(onnx_model.graph.node):
     attribute_dict[num] = attribute_to_dict(n.attribute)
-  
+
   onnx_model_version = onnx_model.opset_import[0].version
 
   def run_onnx(inputs={}, debug=False):
@@ -241,7 +241,7 @@ def get_run_onnx(onnx_model: ModelProto):
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       if debug: print([x.shape if isinstance(x, Tensor) else None for x in ret])
       if debug: print("outputs:")
-      for i in range(len(n.output)): 
+      for i in range(len(n.output)):
         if debug: print(f"\t{n.output[i]} - {ret[i]}")
         # if debug: print(f"{ret[i].numpy() if isinstance(ret[i], Tensor) else type(ret[i])}")
         intermediate_tensors[n.output[i]] = ret[i]

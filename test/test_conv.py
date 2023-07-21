@@ -104,7 +104,7 @@ class TestConv(unittest.TestCase):
     x = x.conv2d(w, groups=32)
     out = x.numpy()
     Tensor.no_grad = False
-  
+
   def test_multiadd(self):
     w = Tensor.ones(32)
     x = Tensor.ones(32).relu()
