@@ -180,10 +180,12 @@ class Compiled:
 
     # this is the default now
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
+      from tinygrad.codegen.optimizer import kernel_optimize, hand_coded_optimizations
       if k.key not in self.method_cache:
         if getenv("KOPT"):
-          from tinygrad.codegen.optimizer import kernel_optimize
           kernel_optimize(k, lambda: self.codegen(ast, output), self.runtime)
+        elif not getenv("NOOPT"):
+          hand_coded_optimizations(k)
         self.method_cache[k.key] = k.codegen().build(self.runtime)
       elif DEBUG >= 5: print(f"method cache hit : {k.key}")
       prg = self.method_cache[k.key]
