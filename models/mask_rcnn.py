@@ -40,7 +40,7 @@ def topk(input_, k, dim=-1, largest=True, sorted=False):
   ind_part = np.argsort(input_, axis=dim)
   ind = np.take_along_axis(ind, ind_part, axis=dim)
   if largest: input_ *= -1
-  val = np.take_along_axis(input_, ind_part, axis=dim) 
+  val = np.take_along_axis(input_, ind_part, axis=dim)
   return Tensor(val), ind
 
 # This is very slow for large arrays, or indices
@@ -48,12 +48,12 @@ def _gather(array, indices):
   indices = indices.float().to(array.device)
   reshape_arg = [1]*array.ndim + [array.shape[-1]]
   return Tensor.where(
-    indices.unsqueeze(indices.ndim).expand(*indices.shape, array.shape[-1]) == Tensor.arange(array.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, array.shape[-1]), 
+    indices.unsqueeze(indices.ndim).expand(*indices.shape, array.shape[-1]) == Tensor.arange(array.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, array.shape[-1]),
     array, 0,
   ).sum(indices.ndim)
 
 # TODO: replace npgather with a faster gather using tinygrad only
-# NOTE: this blocks the gradient 
+# NOTE: this blocks the gradient
 def npgather(array,indices):
   if isinstance(array, Tensor): array = array.numpy()
   if isinstance(indices, Tensor): indices = indices.numpy()
@@ -98,7 +98,7 @@ def tensor_gather(tensor, indices):
   return ret
 
 
-class LastLevelMaxPool: 
+class LastLevelMaxPool:
   def __call__(self, x): return [Tensor.max_pool2d(x, 1, 2)]
 
 
@@ -853,7 +853,7 @@ def _bilinear_interpolate(
   w2 = outer_prod(hy, lx)
   w3 = outer_prod(ly, hx)
   w4 = outer_prod(ly, lx)
-  
+
   val = w1*v1 + w2*v2 + w3*v3 + w4*v4
   return val
 
@@ -861,41 +861,41 @@ def _bilinear_interpolate(
 def _roi_align(input, rois, spatial_scale, pooled_height, pooled_width, sampling_ratio, aligned):
   orig_dtype = input.dtype
   _, _, height, width = input.shape
-  ph = Tensor.arange(pooled_height, device=input.device)  
-  pw = Tensor.arange(pooled_width, device=input.device) 
+  ph = Tensor.arange(pooled_height, device=input.device)
+  pw = Tensor.arange(pooled_width, device=input.device)
 
-  roi_batch_ind = rois[:, 0].cast(dtypes.int32).contiguous() 
+  roi_batch_ind = rois[:, 0].cast(dtypes.int32).contiguous()
   offset = 0.5 if aligned else 0.0
   roi_start_w = rois[:, 1] * spatial_scale - offset
   roi_start_h = rois[:, 2] * spatial_scale - offset
-  roi_end_w = rois[:, 3] * spatial_scale - offset 
+  roi_end_w = rois[:, 3] * spatial_scale - offset
   roi_end_h = rois[:, 4] * spatial_scale - offset
 
-  roi_width = roi_end_w - roi_start_w 
-  roi_height = roi_end_h - roi_start_h 
+  roi_width = roi_end_w - roi_start_w
+  roi_height = roi_end_h - roi_start_h
   if not aligned:
-    roi_width = roi_width.maximum(1.0) 
-    roi_height = roi_height.maximum(1.0) 
+    roi_width = roi_width.maximum(1.0)
+    roi_height = roi_height.maximum(1.0)
 
-  bin_size_h = roi_height / pooled_height  
-  bin_size_w = roi_width / pooled_width  
+  bin_size_h = roi_height / pooled_height
+  bin_size_w = roi_width / pooled_width
 
   exact_sampling = sampling_ratio > 0
-  roi_bin_grid_h = sampling_ratio if exact_sampling else (roi_height / pooled_height).ceil() 
+  roi_bin_grid_h = sampling_ratio if exact_sampling else (roi_height / pooled_height).ceil()
   roi_bin_grid_w = sampling_ratio if exact_sampling else (roi_width / pooled_width).ceil()
 
   if exact_sampling:
-    count = max(roi_bin_grid_h * roi_bin_grid_w, 1)  
-    iy = Tensor.arange(roi_bin_grid_h, device=input.device) 
-    ix = Tensor.arange(roi_bin_grid_w, device=input.device) 
+    count = max(roi_bin_grid_h * roi_bin_grid_w, 1)
+    iy = Tensor.arange(roi_bin_grid_h, device=input.device)
+    ix = Tensor.arange(roi_bin_grid_w, device=input.device)
     ymask = None
     xmask = None
   else:
     count = (roi_bin_grid_h * roi_bin_grid_w).maximum(1)
-    iy = Tensor.arange(height, device=input.device)  
-    ix = Tensor.arange(width, device=input.device)  
-    ymask = iy[None, :] < roi_bin_grid_h[:, None] 
-    xmask = ix[None, :] < roi_bin_grid_w[:, None] 
+    iy = Tensor.arange(height, device=input.device)
+    ix = Tensor.arange(width, device=input.device)
+    ymask = iy[None, :] < roi_bin_grid_h[:, None]
+    xmask = ix[None, :] < roi_bin_grid_w[:, None]
 
   def from_K(t):
     return t[:, None, None]
