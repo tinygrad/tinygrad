@@ -614,8 +614,8 @@ if __name__ == "__main__":
 
   def get_model_output(latent, timestep):
     # put into diffuser
-    unconditional_latent = model.model.diffusion_model(latent, timestep, unconditional_context)
-    latent = model.model.diffusion_model(latent, timestep, context)
+    latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep.expand(2, *timestep.shape[1:]), unconditional_context.cat(context, dim=0))
+    unconditional_latent, latent = latents[0:1], latents[1:2]
 
     unconditional_guidance_scale = 7.5
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
