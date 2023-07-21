@@ -1097,6 +1097,27 @@ class TestOps(unittest.TestCase):
     x = Tensor.full((3, 3), float("inf"))
     n = (x < 0).where(x, 1).numpy()
     assert np.all(n == 1.)
+  
+  def test_gather(self):
+    c = np.random.randn(4,5,6,9,5).astype(np.float32)
+    a = Tensor(c)
+    b = torch.tensor(c)
+
+    # for cases where indices is vector (indices.ndim == 1)
+    va = Tensor([0,1,2,3,3,0])
+    vb = torch.tensor([0,1,2,3,3,0])
+    for dim in range(c.ndim):
+      with self.subTest(torch.index_select.__name__, dim=dim):
+        helper_test_op([], lambda: torch.index_select(input=b, index=vb, dim=dim), lambda: a.gather(va, dim=dim), forward_only=True)
+
+    # for cases where indices is matrix (indices.ndim > 1)
+    mc = np.random.randint(4, size=[3,4,5])
+    ma = Tensor(mc)
+    for dim in range(c.ndim):
+      with self.subTest(np.take.__name__, dim=dim):
+        x = np.take(c, mc, dim)
+        y = a.gather(ma, dim=dim).numpy()
+        np.testing.assert_allclose(x,y,atol=1e-6, rtol=1e-3)
 
 if __name__ == '__main__':
   np.random.seed(1337)
