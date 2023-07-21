@@ -20,7 +20,7 @@ class Function:
     if self.requires_grad: self.parents = tensors
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
-  def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
+  def backward(self, *args, **kwargs): raise NotImplementedError(f"backward not implemented for {type(self)}")
 
   @classmethod
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
