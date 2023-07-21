@@ -598,13 +598,12 @@ class Linearizer:
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
     # NOTE: this might make multiview shapetrackers
-    if limit:  
-      if (self.first_reduce-self.local_dims) > limit:
-        num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
-        self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
-        if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
-      global_dims = self.first_reduce-self.local_dims
-      self.reshape_and_permute(lambda x: x[0:global_dims][::-1]+x[global_dims:], None)
+    if (self.first_reduce-self.local_dims) > limit:
+      num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
+      self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
+    global_dims = self.first_reduce-self.local_dims
+    self.reshape_and_permute(lambda x: x[0:global_dims][::-1]+x[global_dims:], None)
+    if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
 
   def alias_buffer(self, i, pattern):
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
