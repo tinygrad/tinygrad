@@ -55,7 +55,6 @@ def _test_casts_to(tensor_contents:List, source_dtypes:List[DType], target_dtype
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype:DType):
   _assert_eq(
     Tensor([1,2,3,4], dtype=a_dtype) + Tensor([1,2,3,4], dtype=b_dtype),
-   
     target_dtype, [2,4,6,8]
   )
   _assert_eq(
