@@ -15,9 +15,7 @@ def _test_to_np(a:Tensor, np_dtype, target):
     assert na.dtype == np_dtype
     np.testing.assert_allclose(na, target)
   except AssertionError as e:
-    raise AssertionError(
-      f"\ntensor {a.numpy()} does not match target {target} with np_dtype {np_dtype}"
-    ) from e
+    raise AssertionError(f"\ntensor {a.numpy()} does not match target {target} with np_dtype {np_dtype}") from e
 
 def _assert_eq(tensor:Tensor, target_dtype:DType, target):
   if DEBUG >= 2: print(tensor.numpy())
@@ -25,9 +23,7 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
     assert tensor.dtype == target_dtype
     np.testing.assert_allclose(tensor.numpy(), target)
   except AssertionError as e:
-    raise AssertionError(
-      f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}"
-    ) from e
+    raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 
 def _test_op(fxn, target_dtype:DType, target): _assert_eq(fxn(), target_dtype, target)
 def _test_cast(a:Tensor, target_dtype:DType, target): _test_op(lambda: a.cast(target_dtype), target_dtype, target)
