@@ -1097,7 +1097,7 @@ class TestOps(unittest.TestCase):
     x = Tensor.full((3, 3), float("inf"))
     n = (x < 0).where(x, 1).numpy()
     assert np.all(n == 1.)
- 
+
   def test_gather(self):
     c = np.random.randn(4,5,6,9,5).astype(np.float32)
     a = Tensor(c)
@@ -1105,7 +1105,7 @@ class TestOps(unittest.TestCase):
 
     # for cases where indices is vector (indices.ndim == 1)
     va = Tensor([0,1,2,3,3,0])
-    vb = torch.tensor([0,1,2,3,3,0])
+    vb = torch.tensor([0,1,2,3,3,0], dtype=torch.float32)
     for dim in range(c.ndim):
       with self.subTest(torch.index_select.__name__, dim=dim):
         helper_test_op([], lambda: torch.index_select(input=b, index=vb, dim=dim), lambda: a.gather(va, dim=dim), forward_only=True)
