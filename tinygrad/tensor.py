@@ -543,17 +543,14 @@ class Tensor:
     if reverse: x, y = y, x
     if x.shape == y.shape: return fxn.apply(x, y)
 
-    len_x_shape, len_y_shape = len(x.shape), len(y.shape)
-    max_shape = max(len_x_shape, len_y_shape)
+    tensors = [x, y]
+    max_shape = max([t.ndim for t in tensors])
+    tensors = [t.reshape((1,) * (max_shape - t.ndim) + t.shape) if t.ndim != max_shape else t for t in tensors]
 
-    if len_x_shape != max_shape: x = x.reshape((1,) * (max_shape - len_x_shape) + x.shape)
-    if len_y_shape != max_shape: y = y.reshape((1,) * (max_shape - len_y_shape) + y.shape)
+    shape_ret = tuple([max(shp) for shp in zip(*[t.shape for t in tensors])])
+    tensors = [ten.expand(shape_ret) if ten.shape != shape_ret else ten for ten in tensors]
 
-    shape_ret = tuple([max(x, y) for x, y in zip(x.shape, y.shape)])
-    if x.shape != shape_ret: x = x.expand(shape_ret)
-    if y.shape != shape_ret: y = y.expand(shape_ret)
-
-    return fxn.apply(x, y)
+    return fxn.apply(*tensors)
 
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ is Tensor or x else self
   def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if x.__class__ is Tensor or x or reverse else self
@@ -588,20 +585,14 @@ class Tensor:
     z: Tensor = Tensor(cast(float, other), device=self.device, requires_grad=False, dtype=dtype) if other.__class__ is not Tensor else cast(Tensor, other)
     if x.shape == y.shape and y.shape == z.shape: return mlops.Where.apply(x, y, z)
 
-    # TODO refactor this code along with the binary version above
-    len_x_shape, len_y_shape, len_z_shape = len(x.shape), len(y.shape), len(z.shape)
-    max_shape = max(len_x_shape, len_y_shape, len_z_shape)
+    tensors = [x, y, z]
+    max_shape = max([t.ndim for t in tensors])
+    tensors = [t.reshape((1,) * (max_shape - t.ndim) + t.shape) if t.ndim != max_shape else t for t in tensors]
 
-    if len_x_shape != max_shape: x = x.reshape((1,) * (max_shape - len_x_shape) + x.shape)
-    if len_y_shape != max_shape: y = y.reshape((1,) * (max_shape - len_y_shape) + y.shape)
-    if len_z_shape != max_shape: z = z.reshape((1,) * (max_shape - len_z_shape) + z.shape)
+    shape_ret = tuple(max(shp) for shp in zip(*[t.shape for t in tensors]))
+    tensors = [ten.expand(shape_ret) if ten.shape != shape_ret else ten for ten in tensors]
 
-    shape_ret = tuple([max(x, y, z) for x, y, z in zip(x.shape, y.shape, z.shape)])
-    if x.shape != shape_ret: x = x.expand(shape_ret)
-    if y.shape != shape_ret: y = y.expand(shape_ret)
-    if z.shape != shape_ret: z = z.expand(shape_ret)
-
-    return mlops.Where.apply(x, y, z)
+    return mlops.Where.apply(*tensors)
 
   # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
 
