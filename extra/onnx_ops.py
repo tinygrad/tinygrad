@@ -362,8 +362,10 @@ def Or(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.ones(*x.shape)).cast(
 def Xor(x:Tensor, y:Tensor): return Where((x==y), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
 def Not(x:Tensor): return Where((x==1), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
 
+def Floor(x:Tensor): return x.floor()
+def Ceil(x:Tensor): return x.ceil()
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
-  k = int(k.numpy().item()) if k is not 0 else 0 # onnx passes k as a tensor int64 with one element, default is 0
+  k = int(k.numpy().item()) if k != 0 else 0 # onnx passes k as a tensor int64 with one element, default is 0
   return x.triu(k) if upper else x.tril(k)
 
 def ConstantOfShape(input, value:Tensor=None):
@@ -407,17 +409,11 @@ def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, red
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
 
 def SoftmaxCrossEntropyLoss(scores, labels, weights=None, ignore_index=None, reduction="mean"):
+  '''
   N, C, *s_dimensions = scores.shape
   N_, *s_dimensions_ = labels.shape
-  assert N == N_ and s_dimensions == s_dimensions_, "oh fuck"
-  scores = Gather(scores, labels, axis=1)
-  '''
   y = -scores.softmax().log().transpose(0,1)
-  print(y.shape)
-  print(y.numpy())
   '''
-  return
-  ...
 
 def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
   reshape_arg = [1]*input.ndim + [input.shape[-1]]
@@ -434,6 +430,10 @@ def Gather(input, indices, axis=0):
     return input.shrink(arg=tuple(args[0])).cat(*[input.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
   else:
     # faster gather with larger indices probably, fixed number of kernels, so O(n)??? n dependent on tensor size? haha
+    # 1 liner implementation, but unreadable
+    indices = (indices < 0).where(indices+input.shape[axis], indices)
+    return (input.reshape(list(input.shape[:axis+1]) + [1]*indices.ndim + list(input.shape[axis+1:])).expand(list(input.shape[:axis+1]) + list(indices.shape) + list(input.shape[axis+1:])) * (Tensor.arange(input.shape[axis]).reshape([input.shape[axis]] + [1]*indices.ndim).expand([input.shape[axis]] + list(indices.shape)) == indices.unsqueeze(0).expand([input.shape[axis]] + list(indices.shape))).reshape([1]*axis + [input.shape[axis]] + list(indices.shape) + [1]*(input.ndim-axis-1)).expand(list(input.shape[:axis+1]) + list(indices.shape) + list(input.shape[axis+1:]))).sum(axis)
+    # readable
     indices = (indices < 0).where(indices+input.shape[axis], indices)
     input_shape = list(input.shape)
     indices_shape = list(indices.shape)
@@ -442,9 +442,6 @@ def Gather(input, indices, axis=0):
     indices_ = indices.unsqueeze(0).expand([input.shape[axis]] + indices_shape)
     mask = (arange == indices_).reshape([1]*axis + [input.shape[axis]] + indices_shape + [1]*(input.ndim-axis-1)).expand(input_shape[:axis+1] + indices_shape + input_shape[axis+1:])
     return (input_expanded*mask).sum(axis)
-    # 1 liner implementation, but unreadable
-    # indices = (indices < 0).where(indices+input.shape[axis], indices)
-    # return (input.reshape(list(input.shape[:axis+1]) + [1]*indices.ndim + list(input.shape[axis+1:])).expand(list(input.shape[:axis+1]) + list(indices.shape) + list(input.shape[axis+1:])) * (Tensor.arange(input.shape[axis]).reshape([input.shape[axis]] + [1]*indices.ndim).expand([input.shape[axis]] + list(indices.shape)) == indices.unsqueeze(0).expand([input.shape[axis]] + list(indices.shape))).reshape([1]*axis + [input.shape[axis]] + list(indices.shape) + [1]*(input.ndim-axis-1)).expand(list(input.shape[:axis+1]) + list(indices.shape) + list(input.shape[axis+1:]))).sum(axis)
 
 
 def GatherElements(input, indices, axis):

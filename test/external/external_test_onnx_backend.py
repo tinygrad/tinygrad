@@ -38,9 +38,6 @@ class TinygradBackend(Backend):
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
-# add support for SoftmaxCrossEntropyLoss and NegativeLogLikelihoodLoss
-backend_test.exclude('test_sce_*')
-
 # no support for reduce with multiply (needs llop)
 backend_test.exclude('test_reduce_prod_*')
 
