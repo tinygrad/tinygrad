@@ -9,7 +9,7 @@ from collections import namedtuple
 
 from tqdm import tqdm
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import dtypes, GlobalCounters
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from extra.utils import download_file
 from tinygrad.state import torch_load, load_state_dict
@@ -647,6 +647,7 @@ if __name__ == "__main__":
 
   # this is diffusion
   for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
+    GlobalCounters.reset()
     t.set_description("%3d %3d" % (index, timestep))
     e_t = get_model_output(latent, Tensor([timestep]))
     x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t, index)
