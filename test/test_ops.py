@@ -4,7 +4,7 @@ import math
 import numpy as np
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, IMAGE, DEBUG
+from tinygrad.helpers import getenv, IMAGE, DEBUG, dtypes
 from tinygrad.lazy import Device
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
@@ -1112,7 +1112,7 @@ class TestOps(unittest.TestCase):
 
     # for cases where indices is matrix (indices.ndim > 1)
     mc = np.random.randint(4, size=[3,4,5]).astype(np.int32)
-    ma = Tensor(mc)
+    ma = Tensor(mc, dtype=dtypes.float32)
     for dim in range(c.ndim):
       with self.subTest(np.take.__name__, dim=dim):
         x = np.take(c, mc, dim).astype(np.float32)
