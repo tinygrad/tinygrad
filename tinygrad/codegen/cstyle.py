@@ -30,6 +30,8 @@ class CStyleLanguage(NamedTuple):
     UnaryOps.LOG2: lambda x: f"log2({x})",
     UnaryOps.SIN: lambda x: f"sin({x})",
     UnaryOps.SQRT: lambda x: f"sqrt({x})",
+    UnaryOps.RSQRT: lambda x: f"rsqrt({x})",
+    UnaryOps.RECIP: lambda x: f"1.0/{x}",
     BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
     BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
     BinaryOps.MAX: lambda a,b: f"max({a},{b})",

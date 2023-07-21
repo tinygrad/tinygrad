@@ -64,6 +64,16 @@ class Sqrt(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.binary_op(BinaryOps.DIV, self.ret.binary_op(BinaryOps.MUL, self.ret.const_like(2)))
 
+class Reciprocal(Function):
+  __slots__ = "ret"
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.ret = x.unary_op(UnaryOps.RECIP)
+    return self.ret
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+      # g * -1 / x^2
+      return grad_output.binary_op(BinaryOps.MUL, self.ret.const_like(-1).binary_op(BinaryOps.DIV, self.ret.binary_op(BinaryOps.MUL, self.ret)))
+
 # NOTE: the implicit derivative of sigmoid is not stable
 # https://towardsdatascience.com/derivative-of-the-sigmoid-function-536880cf918e
 # TODO: have the backend automatically find this

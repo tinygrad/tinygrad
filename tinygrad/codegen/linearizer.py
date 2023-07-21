@@ -470,6 +470,19 @@ class Linearizer:
       # Reorder sources to put constants first so get_grouped_maybe_float4 can fold the op
       srcs = sorted(x.src, key=lambda x: (x.realized.__class__ != RawConst) if x.__class__ == LazyBuffer else 0)
       x.src = tuple(srcs)
+    if x.op == UnaryOps.SQRT and x.src[0].__class__ is LazyOp:
+        #user code: 1.0/sqrt(x)
+        if x.src[0].op == BinaryOps.DIV and x.src[0].src[0].realized.__class__ is RawConst and x.src[0].src[0].realized._buf == 1.0:
+            x = LazyOp(UnaryOps.RSQRT, x.src[0].src[1:], None)
+        #user code: x.reciprocal().sqrt()
+        if x.src[0].op == UnaryOps.RECIP:
+            x = LazyOp(UnaryOps.RSQRT, x.src[0].src[0:], None)
+    if x.op == BinaryOps.DIV and x.src[1].__class__ is LazyOp and x.src[1].op == UnaryOps.SQRT:
+        #user code: x / y.sqrt()
+        x = LazyOp(BinaryOps.MUL, (x.src[0], LazyOp(UnaryOps.RSQRT, x.src[1].src, None)), None)
+    if x.op == BinaryOps.DIV and x.src[1].__class__ is LazyOp and x.src[1].op == UnaryOps.RECIP:
+        #user code: x / ( 1 / y )
+        x = LazyOp(BinaryOps.MUL, (x.src[0],x.src[1].src[0]), x.arg)
     if x not in self.saved_exprs:
       values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
       ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
