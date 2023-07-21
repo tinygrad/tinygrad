@@ -226,7 +226,7 @@ class TestOps(unittest.TestCase):
   def test_mul_number(self):
     helper_test_op([(), ()], lambda x,y: x*y, Tensor.mul)
   def test_mul_const(self):
-    helper_test_op([(45,65)], lambda x: x*2,  lambda x: x*2)
+    helper_test_op([(45,65)], lambda x: x*2, lambda x: x*2)
     helper_test_op([(45,65)], lambda x: x*-1, lambda x: x*-1)
     helper_test_op([(45,65)], lambda x: 255*x, lambda x: 255*x)
   def test_div(self):
@@ -242,17 +242,17 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: 2/x, lambda x: 2/x)
   @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "WEBGPU does not have support for inf/nan, METAL has issues with -inf")
   def test_mul_const_naninf(self):
-    helper_test_op([(45,65)], lambda x: x*float("inf"),  lambda x: x*float("inf"))
+    helper_test_op([(45,65)], lambda x: x*float("inf"), lambda x: x*float("inf"))
     helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x*-float("inf"))
-    helper_test_op([(45,65)], lambda x: x*float("nan"),  lambda x: x*float("nan"))
+    helper_test_op([(45,65)], lambda x: x*float("nan"), lambda x: x*float("nan"))
   @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "WEBGPU does not have support for inf/nan, METAL has issues with -inf")
   def test_div_const_naninf(self):
-    helper_test_op([(45,65)], lambda x: x/float("inf"),  lambda x: x/float("inf"))
+    helper_test_op([(45,65)], lambda x: x/float("inf"), lambda x: x/float("inf"))
     helper_test_op([(45,65)], lambda x: x/-float("inf"), lambda x: x/-float("inf"))
-    helper_test_op([(45,65)], lambda x: x/float("nan"),  lambda x: x/float("nan"))
-    helper_test_op([(45,65)], lambda x: float("inf")/x,    lambda x: float("inf")/x)
+    helper_test_op([(45,65)], lambda x: x/float("nan"), lambda x: x/float("nan"))
+    helper_test_op([(45,65)], lambda x: float("inf")/x, lambda x: float("inf")/x)
     helper_test_op([(45,65)], lambda x: (-float("inf"))/x, lambda x: (-float("inf"))/x)
-    helper_test_op([(45,65)], lambda x: float("nan")/x,    lambda x: float("nan")/x)
+    helper_test_op([(45,65)], lambda x: float("nan")/x, lambda x: float("nan")/x)
   def test_pow(self):
     # TODO: why is a=0 for these tests?
     helper_test_op([(45,65)], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
@@ -600,7 +600,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,2,3,4)], lambda x: x.movedim((3,0,2,1),(0,1,2,3)), lambda x: x.permute(order=(3,0,2,1)))
     helper_test_op([(3,4,5,6)], lambda x: x.movedim((3,2,1,0),(0,1,2,3)), lambda x: x.permute(order=(3,2,1,0)))
     helper_test_op([()], lambda x: x.permute(()), lambda x: x.permute(()))
-
 
   def test_reshape(self):
     helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,3,6,6)), lambda x: x.reshape(shape=(-1,3,6,6)))
@@ -971,8 +970,7 @@ class TestOps(unittest.TestCase):
   def test_padding_add(self):
     helper_test_op([(64,64), (60,60)],
       lambda x,w: x+torch.nn.functional.pad(w, (2,2,2,2)),
-      lambda x,w: x+w.pad2d((2,2,2,2)),
-    )
+      lambda x,w: x+w.pad2d((2,2,2,2)))
 
   def test_dilated_conv2d(self):
     bs = 4

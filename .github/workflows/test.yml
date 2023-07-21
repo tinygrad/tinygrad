@@ -25,7 +25,7 @@ jobs:
     - name: Lint with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with flake8
-      run: flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E203,E304,E502,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
+      run: flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E117,E124,E203,E272,E303,E304,E502,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
     - name: Lint tinygrad with pylint
       run: pylint tinygrad/
     - name: Run mypy

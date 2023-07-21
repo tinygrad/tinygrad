@@ -1,0 +1,5 @@
+[flake8] # https://flake8.pycqa.org/en/6.0.0/user/options.html#cmdoption-flake8-select
+filename=tinygrad/*.py
+select=F,W6
+select-extend=E112,E113,E117,E124,E203,E272,E303,E304,E502,E702,E703,E71,E72,E731,W191
+indent-size=2
