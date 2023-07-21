@@ -1,5 +1,5 @@
 from typing import Callable
-import itertools
+import itertools, time
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType
 from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.linearizer import Linearizer
@@ -22,9 +22,7 @@ def apply_opt(k, x):
 
 UPCASTS = [1,2,3,4,5,6,7,8]
 LOCALS = [1,2,3,4,5,6,7,8,16,24,32]
-
-# optimization
-def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], runtime):
+def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], runtime, baseline):
   import nevergrad as ng
   def opt(x):
     try:
@@ -32,14 +30,15 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], runtime):
       k.process()
       apply_opt(k, x)
       prg = k.codegen().build(runtime)
-      tm = min([prg.exec(k.bufs, force_wait=True) for _ in range(3)])*1000
+      first_tm = prg.exec(k.bufs, force_wait=True)
+      if baseline*5 < first_tm*1000: return first_tm*1000  # very slow
+      tm = min([first_tm]+[prg.exec(k.bufs, force_wait=True) for _ in range(2)])*1000
       return tm
     except Exception:
       if DEBUG >= 3:
         import traceback
         traceback.print_exc()
       return 10000_000   # 10000 seconds is infinity
-  k.process()
   opts = []
   for i in range(k.first_reduce):
     # TODO: the upcast always happen first, you might want to reverse this?
@@ -48,12 +47,43 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], runtime):
     opts.append(ng.p.TransitionChoice([(i,s,"L") for s in LOCALS if k.full_shape[i]%s == 0]))
   for i in range(k.shape_len-k.first_reduce):
     opts.append(ng.p.TransitionChoice([(i,s,"R") for s in UPCASTS if k.full_shape[k.first_reduce+i]%s == 0]))
-  if len(opts) == 0: return
+  if len(opts) == 0: return "BASELINE"
   search_space = prod([len(x.choices) for x in opts])
+  st = time.perf_counter()
   optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, 200))
   recommendation = optimizer.minimize(opt)
-  apply_opt(k, recommendation.value)
-  if DEBUG >= 1: print("optimizer hit", k.colored_shape(), "in search space", search_space)
+  et = time.perf_counter() - st
+  if DEBUG >= 1: print(f"optimizer({et:6.2f} s to search) space {search_space:8d} with tm {recommendation.loss:5.2f} ms vs baseline {baseline:5.2f} ms, a {baseline/recommendation.loss:5.2f}x gain : {k.colored_shape()}")
+  return recommendation.value if recommendation.loss < baseline else "BASELINE"
+
+# optimization
+global_db = None
+def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], runtime):
+  global global_db
+
+  k.process()
+  skey = str(k.key)
+
+  if getenv("KOPT") == 2 and global_db is None:
+    import shelve
+    global_db = shelve.open("/tmp/kopt_cache")
+
+  if global_db is not None and skey in global_db:
+    choice = global_db[skey]
+  else:
+    # get baseline
+    def get_baseline():
+      k = create_k()
+      hand_coded_optimizations(k)
+      prg = k.codegen().build(runtime)
+      return min([prg.exec(k.bufs, force_wait=True) for _ in range(5)])*1000
+    choice = kernel_optimize_search(k, create_k, runtime, get_baseline())
+    if global_db is not None:
+      global_db[skey] = choice
+      global_db.sync()
+
+  if choice == "BASELINE": hand_coded_optimizations(k)
+  else: apply_opt(k, choice)
 
 def required_optimizations(k:Linearizer, early_only=False):
   for buf_index,buf in enumerate(k.bufs):
