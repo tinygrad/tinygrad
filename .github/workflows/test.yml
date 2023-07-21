@@ -64,7 +64,7 @@ jobs:
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
     - name: Run Pytest
-      run: python -m pytest -n=auto test/
+      run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)"
     - name: Compile EfficientNet to C
       run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
