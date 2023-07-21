@@ -29,11 +29,9 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
       f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}"
     ) from e
 
-def _test_op(fxn, target_dtype:DType, target):
-  _assert_eq(fxn(), target_dtype, target)
+def _test_op(fxn, target_dtype:DType, target): _assert_eq(fxn(), target_dtype, target)
+def _test_cast(a:Tensor, target_dtype:DType, target): _test_op(lambda: a.cast(target_dtype), target_dtype, target)
 
-def _test_cast(a:Tensor, target_dtype:DType, target):
-  _test_op(lambda: a.cast(target_dtype), target_dtype, target)
 # tests no-op casts from source_dtype to target_dtypes
 def _test_casts_from(tensor_contents:List, source_dtype:DType, target_dtypes:List[DType], target_contents:Optional[List]=None):
   if target_contents is None: target_contents = copy.deepcopy(tensor_contents)
@@ -50,18 +48,9 @@ def _test_casts_to(tensor_contents:List, source_dtypes:List[DType], target_dtype
   ))
 
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype:DType):
-  _assert_eq(
-    Tensor([1,2,3,4], dtype=a_dtype) + Tensor([1,2,3,4], dtype=b_dtype),
-    target_dtype, [2,4,6,8]
-  )
-  _assert_eq(
-    Tensor([1,2,3,4], dtype=a_dtype) * Tensor([1,2,3,4], dtype=b_dtype),
-    target_dtype, [1,4,9,16]
-  )
-  _assert_eq(
-    Tensor([[1,2],[3,4]], dtype=a_dtype) @ Tensor.eye(2, dtype=b_dtype),
-    target_dtype, [[1,2],[3,4]]
-  )
+  _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)+Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [2,4,6,8])
+  _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)*Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [1,4,9,16])
+  _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
 
 
 
@@ -121,7 +110,6 @@ class TestInt8Dtype(unittest.TestCase):
   def test_int64_ops(self): _test_ops(a_dtype=dtypes.int64, b_dtype=dtypes.int64, target_dtype=dtypes.int64)
   def test_int8_upcast_float(self): _test_ops(a_dtype=dtypes.int8, b_dtype=dtypes.float32, target_dtype=dtypes.float32)
   def test_int8_upcast_int64(self): _test_ops(a_dtype=dtypes.int8, b_dtype=dtypes.int64, target_dtype=dtypes.int64)
-
 
   @unittest.skipIf(getenv("CUDA",0)==1, "cuda saturation works differently")
   def test_int8_to_uint8_negative(self): _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint8), dtypes.uint8, [255, 254, 253, 252])
