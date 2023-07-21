@@ -4,7 +4,7 @@ import math
 import numpy as np
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, IMAGE, DEBUG, dtypes
+from tinygrad.helpers import getenv, IMAGE, DEBUG
 from tinygrad.lazy import Device
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
@@ -1104,14 +1104,14 @@ class TestOps(unittest.TestCase):
     b = torch.tensor(c)
 
     # for cases where indices is vector (indices.ndim == 1)
-    va = Tensor([0,1,2,3,3,0], dtype=dtypes.int32)
-    vb = torch.tensor([0,1,2,3,3,0], dtype=torch.int32)
+    va = Tensor([0,1,2,3,3,0])
+    vb = torch.tensor([0,1,2,3,3,0])
     for dim in range(c.ndim):
       with self.subTest(torch.index_select.__name__, dim=dim):
         helper_test_op([], lambda: torch.index_select(input=b, index=vb, dim=dim), lambda: a.gather(va, dim=dim), forward_only=True)
 
     # for cases where indices is matrix (indices.ndim > 1)
-    mc = np.random.randint(4, size=[3,4,5]).astype(np.float32)
+    mc = np.random.randint(4, size=[3,4,5]).astype(np.int32)
     ma = Tensor(mc)
     for dim in range(c.ndim):
       with self.subTest(np.take.__name__, dim=dim):
