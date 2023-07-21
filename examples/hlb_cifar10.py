@@ -140,32 +140,41 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   optimizer = optim.SGD(get_parameters(model_fp32), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, 
                             total_steps=STEPS, pct_start=PCT_START)
-
-  def train_step(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
+  
+  @TinyJit
+  def preprocess_step(Xr, Xl, Yr, Yl, mixup_prob):
     Xr = (Xr - cifar10_mean) / cifar10_std
     Xl = (Xl - cifar10_mean) / cifar10_std
     X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
     X = Tensor.where(Tensor.rand(X.shape[0],1,1,1, dtype=X.dtype) < 0.5, X[..., ::-1], X) # flip augmentation
-    copy_weights(model_fp32, model_fp16) # copy weights from master copy
-    out = model_fp16(X)
-    loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
-    loss = loss/LOSS_SCALE
-    if not getenv("DISABLE_BACKWARD"):
-      optimizer.init_params(get_parameters(model_fp16))
-      optimizer.zero_grad() # Zero grad needs to be called with fp16 params
-      optimizer.init_params(get_parameters(model_fp32))
-      loss.backward()
-      copy_weights(model_fp16, model_fp32)
-      optimizer.step()
-      copy_weights(model_fp32, model_fp16) # TODO: is this needed?
-      lr_scheduler.step()
-    loss = loss * LOSS_SCALE
-    return loss.realize()
+    return X.realize(), Y.realize()
   
-  # JIT at every run
-  @TinyJit 
-  def train_step_jitted(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
-    return train_step(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
+  def run_forward(model, X, Y):
+    out = model(X)
+    loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
+    if not getenv("DISABLE_BACKWARD"):
+      loss = loss/LOSS_SCALE
+    return loss.realize()
+
+  def run_backward(model_fp16, model_fp32, loss, optimizer, lr_scheduler,):
+    optimizer.init_params(get_parameters(model_fp16))
+    optimizer.zero_grad() # Zero grad needs to be called with fp16 params
+    optimizer.init_params(get_parameters(model_fp32))
+    loss.backward()
+    copy_weights(model_fp16, model_fp32)
+    optimizer.step()
+    copy_weights(model_fp32, model_fp16) # TODO: is this needed?
+    lr_scheduler.step()
+    loss = loss * LOSS_SCALE
+
+
+  def train_step(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
+    X, Y = preprocess_step(Xr, Xl, Yr, Yl, mixup_prob)
+    copy_weights(model_fp32, model_fp16) # copy weights from master copy
+    loss = run_forward(model_fp16, X, Y)
+    if not getenv("DISABLE_BACKWARD"):
+      run_backward(model_fp16, model_fp32, loss, optimizer, lr_scheduler)
+    return loss.realize()
   
   def eval_step(model_fp32, X, Y):
     out = model_fp32(X, training=False)
@@ -207,13 +216,12 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
         print(f"eval {sum(corrects)}/{len(corrects)} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
     if STEPS == 0 or i==STEPS: break
     # TODO: JIT is broken with mixed precision training 
-    train_func = train_step_jitted if getenv('JIT', 1) == 1 else train_step
     GlobalCounters.reset()
     st = time.monotonic()
     (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
     Xr, Xl, Yr, Yl = Tensor(Xr), Tensor(Xl), Tensor(Yr), Tensor(Yl)
     lt = time.monotonic()
-    loss = train_func(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
+    loss = train_step(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
     et = time.monotonic()
     loss_cpu = loss.numpy() 
     cl = time.monotonic()
