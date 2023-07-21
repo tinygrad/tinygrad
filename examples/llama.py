@@ -196,40 +196,25 @@ def concat_weights(models):
 
 # **** main code ****
 
-if __name__ == "__main__":
-  Tensor.no_grad = True
-  print(f"using {Device.DEFAULT} backend")
+def sp_model():
   from sentencepiece import SentencePieceProcessor
   sp_model = SentencePieceProcessor(model_file=str(TOKENIZER_FILENAME))
   assert sp_model.vocab_size() == VOCAB_SIZE
+  return sp_model
 
-  parser = argparse.ArgumentParser(description='Run LLaMA 7B in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  # test: python3 examples/llama.py --prompt="Hello." --temperature=0
-  # Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
-  parser.add_argument('--prompt', type=str, default=None, help="Phrase to start with. Without this, it goes into chatbot mode")
-  parser.add_argument('--count', type=int, default=1000, help="Max number of tokens to generate")
-  parser.add_argument('--personality', type=str, default="Stacy", help="Personality, can be Stacy, George, Gary, or Lexie")
-
-  parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
-  parser.add_argument('--timing', action='store_true', help="Print timing per token")
-  parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
-  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B]")
-
-  args = parser.parse_args()
-  chatbot = args.prompt == None
-
+def load_model(size:str):
   from tinygrad.state import torch_load, load_state_dict
-  if args.size == "65B":
+  if size == "65B":
     print("using 65B model")
     model = Transformer(**args_65B)
     weights = [torch_load(filename) for filename in WEIGHTS_65B_FILENAMES]
     load_state_dict(model, concat_weights(weights), strict=False)
-  elif args.size == "30B":
+  elif size == "30B":
     print("using 30B model")
     model = Transformer(**args_30B)
     weights = [torch_load(filename) for filename in WEIGHTS_30B_FILENAMES]
     load_state_dict(model, concat_weights(weights), strict=False)
-  elif args.size == "13B":
+  elif size == "13B":
     print("using 13B model")
     model = Transformer(**args_13B)
     weights = [torch_load(filename) for filename in WEIGHTS_13B_FILENAMES]
@@ -238,10 +223,11 @@ if __name__ == "__main__":
     print("using 7B model")
     model = Transformer(**args_7B)
     load_state_dict(model, torch_load(WEIGHTS_7B_FILENAME), strict=False)
+  return model
 
+def encode_chatbot_preprompt(model, sp_model, personality):
   # *** prompt engineers work here ****
-
-  if args.personality.lower() == "stacy":
+  if personality.lower() == "stacy":
     pre_prompt = f"""Consider that the following is conversation between an AI assistant named Stacy and User
 You are Stacy!
 You have been a rapper your whole life who struggled with bipolar disorder. You called yourself lil stacy.
@@ -261,7 +247,7 @@ After you are done speaking, output [EOS]. You are not the User.
     resp_delim = "Stacy: "
     end_delim = " [EOS]\n"
     pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
-  elif args.personality.lower() == "george":
+  elif personality.lower() == "george":
     print("WARNING: AI George Hotz is terrible and is completely disowned by the real George Hotz. Stacy is much smarter.")
     pre_prompt = f"""Consider that the following is conversation between an AI assistant named George and User
 You are an AI version of George Hotz. You act as much as you can like George.
@@ -285,7 +271,7 @@ After you are done speaking, output [EOS]. You are not the User.
     resp_delim = "George: "
     end_delim = " [EOS]\n"
     pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
-  elif args.personality.lower() == "gary":
+  elif personality.lower() == "gary":
     pre_prompt = f"""Consider that the following is conversation between an AI assistant named Gary and User
 You are Gary!
 You have sold used cars your entire life. You are defensive about this fact, because your family belittles you.
@@ -304,7 +290,7 @@ After you are done speaking, output [EOS]. You are not the User.
     resp_delim = "Gary: "
     end_delim = " [EOS]\n"
     pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
-  elif args.personality.lower() == "lexie":
+  elif personality.lower() == "lexie":
     pre_prompt = f"""Consider that the following is conversation between an attractive young girl named Lexie and a handsome man named Chad
 You are Lexie!
 You grew up in Ohio, but moved out to LA after college to try to become an actress.
@@ -325,21 +311,47 @@ After you are done speaking, output [EOS]. You are not Chad.
     resp_delim = "Lexie: "
     end_delim = " [EOS]\n"
     pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
-
   # *** prompt engineers stop here ****
 
-  if chatbot:
-    # encode pre prompt
-    toks = [sp_model.bos_id()] + sp_model.encode(pre_prompt)
+  # encode pre prompt
+  toks = [sp_model.bos_id()] + sp_model.encode(pre_prompt)
 
-    print(f"Preparing KV cache for chatbot with personality {args.personality}...")
-    with Timing():
-      model(Tensor([toks]), 0).realize()  # NOTE: output logits are not used
-    start_pos = len(toks)
+  print(f"Preparing KV cache for chatbot with personality {personality}...")
+  with Timing():
+    model(Tensor([toks]), 0).realize()  # NOTE: output logits are not used
+
+  return toks, len(toks), user_delim, end_delim
+
+def encode_prompt(sp_model, prompt):
+  toks = [sp_model.bos_id()] + sp_model.encode(args.prompt)
+  return toks, 0
+
+if __name__ == "__main__":
+  Tensor.no_grad = True
+  print(f"using {Device.DEFAULT} backend")
+  sp_model = sp_model()
+
+  parser = argparse.ArgumentParser(description='Run LLaMA 7B in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  # test: python3 examples/llama.py --prompt="Hello." --temperature=0
+  # Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
+  parser.add_argument('--prompt', type=str, default=None, help="Phrase to start with. Without this, it goes into chatbot mode")
+  parser.add_argument('--count', type=int, default=1000, help="Max number of tokens to generate")
+  parser.add_argument('--personality', type=str, default="Stacy", help="Personality, can be Stacy, George, Gary, or Lexie")
+
+  parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
+  parser.add_argument('--timing', action='store_true', help="Print timing per token")
+  parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
+  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B]")
+
+  args = parser.parse_args()
+  chatbot = args.prompt == None
+
+  model = load_model(args.size)
+
+  if chatbot:
+    toks, start_pos, user_delim, end_delim = encode_chatbot_preprompt(model, sp_model, args.personality)
   else:
-    # non chat bot mode
-    toks = [sp_model.bos_id()] + sp_model.encode(args.prompt)
-    start_pos = 0
+    toks, start_pos = encode_prompt(sp_model, args.prompt)
 
   # print prompt
   outputted = sp_model.decode(toks)

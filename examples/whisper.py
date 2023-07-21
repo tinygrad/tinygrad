@@ -175,6 +175,19 @@ def img(x):
   plt.imshow(x.numpy())
   plt.show()
 
+def load_model_and_enc(small):
+  if small:
+    fn = BASE / "whisper-small.en.pt"
+    download_file("https://openaipublic.azureedge.net/main/whisper/models/f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872/small.en.pt", fn)
+  else:
+    fn = BASE / "whisper-tiny.en.pt"
+    download_file("https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt", fn)
+  state = torch_load(fn)
+  model = Whisper(state['dims'])
+  load_state_dict(model, state['model_state_dict'])
+  enc = get_encoding(state['dims']['n_vocab'])
+  return model, enc
+
 RATE = 16000
 CHUNK = 1600
 RECORD_SECONDS = 10
@@ -192,16 +205,7 @@ def listener(q):
   print("done listening")
 
 if __name__ == "__main__":
-  if getenv("SMALL"):
-    fn = BASE / "whisper-small.en.pt"
-    download_file("https://openaipublic.azureedge.net/main/whisper/models/f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872/small.en.pt", fn)
-  else:
-    fn = BASE / "whisper-tiny.en.pt"
-    download_file("https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt", fn)
-  state = torch_load(fn)
-  model = Whisper(state['dims'])
-  load_state_dict(model, state['model_state_dict'])
-  enc = get_encoding(state['dims']['n_vocab'])
+  model, enc = load_model_and_enc(getenv("SMALL"))
 
   if len(sys.argv) > 1:
     # offline
