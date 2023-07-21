@@ -102,7 +102,6 @@ class Decoder:
 
     return self.conv_out(self.norm_out(x).swish())
 
-
 class Encoder:
   def __init__(self):
     sz = [(128, 128), (128, 256), (256, 512), (512, 512)]
@@ -338,7 +337,6 @@ class UNetModel:
       for bb in b:
         x = run(x, bb)
       saved_inputs.append(x)
-      x.realize()
     for bb in self.middle_block:
       x = run(x, bb)
     for i,b in enumerate(self.output_blocks):
@@ -346,7 +344,6 @@ class UNetModel:
       x = x.cat(saved_inputs.pop(), dim=1)
       for bb in b:
         x = run(x, bb)
-      x.realize()
     return x.sequential(self.out)
 
 class CLIPMLP:
@@ -586,8 +583,6 @@ class StableDiffusion:
 # cond_stage_model.transformer.text_model
 
 # this is sd-v1-4.ckpt
-#FILENAME = "/Users/kafka/fun/mps/stable-diffusion/models/ldm/stable-diffusion-v1/model.ckpt"
-#FILENAME = "/home/kafka/model.ckpt"
 FILENAME = Path(__file__).parent.parent / "weights/sd-v1-4.ckpt"
 
 if __name__ == "__main__":
@@ -619,8 +614,8 @@ if __name__ == "__main__":
 
   def get_model_output(latent, timestep):
     # put into diffuser
-    unconditional_latent = model.model.diffusion_model(latent, timestep, unconditional_context).realize()
-    latent = model.model.diffusion_model(latent, timestep, context).realize()
+    unconditional_latent = model.model.diffusion_model(latent, timestep, unconditional_context)
+    latent = model.model.diffusion_model(latent, timestep, context)
 
     unconditional_guidance_scale = 7.5
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
@@ -636,7 +631,6 @@ if __name__ == "__main__":
     a_t, a_prev = alphas[index], alphas_prev[index]
     sigma_t = 0
     sqrt_one_minus_at = math.sqrt(1-a_t)
-    sqrt_one_minus_at = Tensor([sqrt_one_minus_at]).realize()  # don't constant fold this
     #print(a_t, a_prev, sigma_t, sqrt_one_minus_at)
 
     pred_x0 = (x - sqrt_one_minus_at * e_t) / math.sqrt(a_t)
