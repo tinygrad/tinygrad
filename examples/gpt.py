@@ -22,7 +22,7 @@ max_iters = 5000
 eval_interval = 500
 learning_rate = 3e-4
 eval_iters = 200
-n_embd = 384
+n_embd = 32
 n_head = 6
 n_layer = 6
 dropout = 0.2
@@ -62,13 +62,19 @@ def get_batch(split):
 class BigramLanguageModel():
   def __init__(self, vocab_size):
     # each token directly reads off the logits for the next token from a lookup table
-    self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+    self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+    self.position_embedding_table = nn.Embedding(block_size, n_embd)
+    self.lm_head = nn.Linear(n_embd, vocab_size)
 
   #def __call__(self, idx, targets=None):
   def __call__(self, idx, targets=None):
+    B, T = idx.shape
 
     # idx and targets are both (B,T) tensor of integers
-    logits = self.token_embedding_table(idx)  # (B,T,C)
+    tok_emb = self.token_embedding_table(idx) # (B,T,C)
+    pos_emb = self.position_embedding_table(Tensor.arange(T, dtype=dtypes.int8).reshape(1,T)) # (T,C)
+    x = tok_emb + pos_emb # (B,T,C)
+    logits = self.lm_head(x) # (B,T,vocab_size)
     
     if targets is None:
       loss = None
@@ -147,7 +153,7 @@ if __name__ == "__main__":
     optimizer.zero_grad()
     loss.backward()        
     optimizer.step()
-    if (epoch % 100 == 0):
+    if (epoch % 50 == 0):
       print("epoch: {0} loss: {1}".format(epoch, loss.numpy()))
   
   print("final loss: {0}".format(loss.numpy()))
