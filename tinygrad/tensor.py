@@ -544,12 +544,11 @@ class Tensor:
     if x.shape == y.shape: return fxn.apply(x, y)
 
     tensors = [x, y]
-    max_shape = max([t.ndim for t in tensors])
+    max_shape = max((t.ndim for t in tensors))
     tensors = [t.reshape((1,) * (max_shape - t.ndim) + t.shape) if t.ndim != max_shape else t for t in tensors]
 
     shape_ret = tuple([max(shp) for shp in zip(*[t.shape for t in tensors])])
     tensors = [ten.expand(shape_ret) if ten.shape != shape_ret else ten for ten in tensors]
-
     return fxn.apply(*tensors)
 
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ is Tensor or x else self
@@ -586,12 +585,11 @@ class Tensor:
     if x.shape == y.shape and y.shape == z.shape: return mlops.Where.apply(x, y, z)
 
     tensors = [x, y, z]
-    max_shape = max([t.ndim for t in tensors])
+    max_shape = max((t.ndim for t in tensors))
     tensors = [t.reshape((1,) * (max_shape - t.ndim) + t.shape) if t.ndim != max_shape else t for t in tensors]
 
     shape_ret = tuple(max(shp) for shp in zip(*[t.shape for t in tensors]))
     tensors = [ten.expand(shape_ret) if ten.shape != shape_ret else ten for ten in tensors]
-
     return mlops.Where.apply(*tensors)
 
   # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
