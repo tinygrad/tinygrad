@@ -565,9 +565,9 @@ class Linearizer:
     # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride
     if self.shape_len == 0: return
-    all_ones = [all(st.shape[i]==1 for st in self.sts) for i in range(self.shape_len)]
-    # keep at least 1 one
-    if all(all_ones): all_ones[-1] = False
+    all_ones = [s==1 for s in self.full_shape]
+    self.local_dims -= sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce])
+    self.upcasted -= sum(all_ones[self.shape_len-self.upcasted:])
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
 
   def simplify_merge_adjacent(self):
@@ -594,15 +594,6 @@ class Linearizer:
 
   # ******************** GPU simplifiers ********************
 
-  def required_optimizations(self, early_only=False):
-    for buf_index,buf in enumerate(self.bufs):
-      unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes(ignore_valid=True) if self.sts[buf_index].shape[i]%4 == 0]
-      if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype.__class__ is ImageDType:
-        assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
-        if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
-          self.shift_to(unit_stride_axes_mul_4[0], 4)
-          self.upcast()
-
   def limit_global_dims(self, limit):
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
@@ -628,6 +619,15 @@ class Linearizer:
     self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
+
+  def required_optimizations(self, early_only=False):
+    for buf_index,buf in enumerate(self.bufs):
+      unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes(ignore_valid=True) if self.sts[buf_index].shape[i]%4 == 0]
+      if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype.__class__ is ImageDType:
+        assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
+        if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
+          self.shift_to(unit_stride_axes_mul_4[0], 4)
+          self.upcast()
 
   def hand_coded_optimizations(self):
     if getenv("NOOPT"): return
