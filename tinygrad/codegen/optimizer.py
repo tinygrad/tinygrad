@@ -1,5 +1,5 @@
 from typing import Callable
-import itertools
+import itertools, time
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType
 from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.linearizer import Linearizer
@@ -49,9 +49,11 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], runt
     opts.append(ng.p.TransitionChoice([(i,s,"R") for s in UPCASTS if k.full_shape[k.first_reduce+i]%s == 0]))
   if len(opts) == 0: return "BASELINE"
   search_space = prod([len(x.choices) for x in opts])
+  st = time.perf_counter()
   optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, 200))
   recommendation = optimizer.minimize(opt)
-  if DEBUG >= 1: print(f"optimizer space {search_space:8d} with tm {recommendation.loss:5.2f} ms vs baseline {baseline:5.2f} ms, a {baseline/recommendation.loss:5.2f}x gain : {k.colored_shape()}")
+  et = time.perf_counter() - st
+  if DEBUG >= 1: print(f"optimizer({et:6.2f} s to search) space {search_space:8d} with tm {recommendation.loss:5.2f} ms vs baseline {baseline:5.2f} ms, a {baseline/recommendation.loss:5.2f}x gain : {k.colored_shape()}")
   return recommendation.value if recommendation.loss < baseline else "BASELINE"
 
 # optimization
