@@ -257,4 +257,4 @@ jobs:
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
-        run: python -m pytest -n=auto test/ '${{matrix.backend!='clang'&&'-k "not (test_efficientnet and models/test_train.py)"'||''}}' --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/models/test_mnist.py --ignore=test/models/test_onnx.py ${{matrix.backend=='cuda'&&'--ignore=test/external --ignore=test/models --ignore=test/test_specific_conv.py --ignore=test/test_nn.py -k "not half"'||''}}
+        run: python -m pytest -n=auto test/ --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/models/test_mnist.py --ignore=test/models/test_onnx.py ${{matrix.backend=='cuda'&&'--ignore=test/external --ignore=test/models --ignore=test/test_specific_conv.py --ignore=test/test_nn.py -k "not half"'||''}}
