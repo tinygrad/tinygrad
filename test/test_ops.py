@@ -1099,7 +1099,7 @@ class TestOps(unittest.TestCase):
     assert np.all(n == 1.)
 
   def test_gather(self):
-    c = np.random.randn(4,5,6,9,5).astype(np.float16)
+    c = np.random.randn(4,5,6,9,5).astype(np.float32)
     a = Tensor(c)
     b = torch.tensor(c)
 
@@ -1115,7 +1115,7 @@ class TestOps(unittest.TestCase):
     ma = Tensor(mc)
     for dim in range(c.ndim):
       with self.subTest(np.take.__name__, dim=dim):
-        x = np.take(c, mc, dim)
+        x = np.take(c, mc, dim).astype(np.float32)
         y = a.gather(ma, dim=dim).numpy()
         np.testing.assert_allclose(x,y,atol=1e-6, rtol=1e-3)
 
