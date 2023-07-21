@@ -414,9 +414,11 @@ def SoftmaxCrossEntropyLoss(scores, labels, weights=None, ignore_index=None, red
   N_, *s_dimensions_ = labels.shape
   assert N == N_ and s_dimensions == s_dimensions_, "oh fuck"
   scores = Gather(scores, labels, axis=1)
+  '''
   y = -scores.softmax().log().transpose(0,1)
   print(y.shape)
   print(y.numpy())
+  '''
   return
   ...
 
@@ -427,20 +429,16 @@ def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
 def Gather(input, indices, axis=0):
   input_sh = list(input.shape)
   ret_shape = input_sh[:axis] + list(indices.shape) + input_sh[axis+1:]
-  i_numel = indices.numel()
-  if i_numel < 50: # TODO NOT SURE YET FOR THE EXACT NUMBER, NEED TO TEST THIS
+  if indices.numel() < 5: # TODO NOT SURE YET FOR THE EXACT NUMBER, NEED TO TEST THIS
     # faster gather with smaller indices SOMETHING SOMETHING O(?) IDK I DIDN'T GO TO SCHOOL FOR THIS but kernel number increases depending on size of indices
     if indices.ndim > 1: indices = indices.flatten()
     indices = [input_sh[axis]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
     args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(input_sh)] for i in indices]
     return input.shrink(arg=tuple(args[0])).cat(*[input.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
   else:
-    # faster gather with larger indices probably, fixed number of kernels
-    # TODO is it possible to optimize this further by not indices.flatten()????
+    # faster gather with larger indices probably, fixed number of kernels, so O(n)??? n dependent on tensor size? haha
     indices = (indices < 0).where(indices+input.shape[axis], indices)
-    inp_shape = input.shape[axis]
-    expand_arg = list(input.shape[:axis+1]) + [i_numel] + list(input.shape[axis+1:])
-    return (input.unsqueeze(axis+1).expand(expand_arg) * (Tensor.arange(inp_shape).reshape(inp_shape,1).expand(inp_shape,i_numel) == indices.flatten().reshape(1, i_numel).expand(inp_shape, i_numel)).reshape([1]*axis + [inp_shape,i_numel] + [1]*(input.ndim-axis-1))).expand(expand_arg).sum(axis).reshape(ret_shape)
+    return (input.reshape(list(input.shape[:axis+1]) + [1]*indices.ndim + list(input.shape[axis+1:])).expand(list(input.shape[:axis+1]) + list(indices.shape) + list(input.shape[axis+1:])) * (Tensor.arange(input.shape[axis]).reshape([input.shape[axis]] + [1]*indices.ndim).expand([input.shape[axis]] + list(indices.shape)) == indices.unsqueeze(0).expand([input.shape[axis]] + list(indices.shape))).reshape([1]*axis + [input.shape[axis]] + list(indices.shape) + [1]*(input.ndim-axis-1)).expand(list(input.shape[:axis+1]) + list(indices.shape) + list(input.shape[axis+1:]))).sum(axis)
 
 def GatherElements(input, indices, axis):
   indices = (indices < 0).where(indices+input.shape[axis], indices)
@@ -510,7 +508,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   def _bicubic_interpolation(pixels, x, y):
     ret = [_cubic_interpolation(pixels[0], y), _cubic_interpolation(pixels[1], y), _cubic_interpolation(pixels[2], y), _cubic_interpolation(pixels[3], y)]
     return _cubic_interpolation(ret, x)
-      
   if roi:
     roi = safe_numpy(roi)
     roi = [(st,ed) for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])]
@@ -544,7 +541,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       scale = max(scales)
       sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, "round_up") # lol, maybe don't use Tensor here?
       sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
-
   output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)] 
   output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
   # bs,c,py,px = X.shape
@@ -552,7 +548,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   x_out = Tensor.arange(output_shape[-1])
   y_out = Tensor.arange(output_shape[-2])
   print(output_shape, "output shape")
-
   if mode == "nearest":
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol, roi)
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
