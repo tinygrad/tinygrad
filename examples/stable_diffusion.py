@@ -7,10 +7,9 @@ import gzip, argparse, math, re
 from functools import lru_cache
 from collections import namedtuple
 
-import numpy as np
 from tqdm import tqdm
-
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import dtypes
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from extra.utils import download_file
 from tinygrad.state import torch_load, load_state_dict
@@ -627,7 +626,7 @@ if __name__ == "__main__":
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
     return e_t
 
-  timesteps = list(np.arange(1, 1000, 1000//args.steps))
+  timesteps = list(range(1, 1000, 1000//args.steps))
   print(f"running for {timesteps} timesteps")
   alphas = [model.alphas_cumprod.numpy()[t] for t in timesteps]
   alphas_prev = [1.0] + alphas[:-1]
@@ -669,13 +668,12 @@ if __name__ == "__main__":
 
   # make image correct size and scale
   x = (x + 1.0) / 2.0
-  x = x.reshape(3,512,512).permute(1,2,0)
-  dat = (x.detach().numpy().clip(0, 1)*255).astype(np.uint8)
-  print(dat.shape)
+  x = (x.reshape(3,512,512).permute(1,2,0).clip(0,1)*255).cast(dtypes.uint8)
+  print(x.shape)
 
   # save image
   from PIL import Image
-  im = Image.fromarray(dat)
+  im = Image.fromarray(x.numpy())
   print(f"saving {args.out}")
   im.save(args.out)
   # Open image.
