@@ -88,6 +88,7 @@ class CUDACodegen(CStyleCodegen):
       #include <cuda_fp16.h>
       struct __align__(8) half4 {
         half2 x, y;
+        __device__ __forceinline__ explicit half4(const float4& a): x(make_half2(__float2half(a.x), __float2half(a.y))), y(make_half2(__float2half(a.z),__float2half(a.w))) {}
         __device__ __forceinline__ explicit operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
       };
     """)

@@ -84,7 +84,14 @@ class SpeedyResNet:
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
   def __call__(self, x, training=True):
     if not training and getenv('TTA', 0)==1: return ((x.sequential(self.net) * 0.5) + (x[..., ::-1].sequential(self.net) * 0.5)).log_softmax()
-    return x.sequential(self.net).log_softmax()
+    out = x
+    for layer in self.net:
+      out = layer(out)
+      if getenv('LOG_GRADS'):
+        out_sum = out.sum().numpy()
+        if out_sum != out_sum:
+          raise Exception(f'NaNs detected in fp! found NaNs in {out_sum.shape} {layer}')
+    return out.log_softmax()
 
 def fetch_batches(all_X, all_Y, BS, seed, is_train=False):
   def _shuffle(all_X, all_Y):
@@ -139,7 +146,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     Xl = (Xl - cifar10_mean) / cifar10_std
     X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
     X = Tensor.where(Tensor.rand(X.shape[0],1,1,1, dtype=X.dtype) < 0.5, X[..., ::-1], X) # flip augmentation
-    copy_weights(model_fp32, model_fp16)
+    copy_weights(model_fp32, model_fp16) # copy weights from master copy
     out = model_fp16(X)
     loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
     loss = loss/LOSS_SCALE

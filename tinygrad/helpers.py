@@ -9,6 +9,7 @@ from math import prod # noqa: F401 # pylint:disable=unused-import
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
+CI = os.getenv("CI", "") != ""
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x):
@@ -104,6 +105,8 @@ class dtypes:
   uint8: Final[DType] = DType(0, 1, "unsigned char", np.uint8)
   uint32: Final[DType] = DType(2, 4, "unsigned int", np.uint32)
   uint64: Final[DType] = DType(3, 8, "unsigned long", np.uint64)
+  # NOTE: bfloat16 isn't supported in numpy
+  bfloat16: Final[DType] = DType(0, 2, "__bf16", None)
   @staticmethod
   def get_vector_type(x:DType, amt=4):
     return dtypes.__dict__.get(f"_{x.name}{amt}", x if x.is_vector_type else dtypes._float4)

@@ -48,7 +48,11 @@ class SGD(Optimizer):
     global global_steps
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      if getenv('LOG_GRADS', 0) == 1: log_grad(i, t.grad)
+      if getenv('LOG_GRADS'):
+        log_grad(i, t.grad)
+        grad_sum = t.grad.sum().numpy()
+        if grad_sum != grad_sum:
+          raise Exception(f'NaNs detected in bp! found NaNs in {t.shape}')
       g = t.grad.realize() + self.wd * t.detach()
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g).realize()  # NOTE: self.b[i] is zero on the first run, no if required

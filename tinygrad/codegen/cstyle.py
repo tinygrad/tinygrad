@@ -1,6 +1,6 @@
 from typing import Final, Dict, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Union
 import math, collections
-from tinygrad.codegen.linearizer import Linearizer, UOps, UOp
+from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, MemOp, ConstOp
 from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, colored, getenv, prod, DType
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
@@ -25,6 +25,7 @@ class CStyleLanguage(NamedTuple):
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
   external_local_bufs: bool = False
+  uses_ptr_arithmetic: bool = False
   code_for_op: Dict = {
     UnaryOps.EXP2: lambda x: f"exp2({x})",
     UnaryOps.LOG2: lambda x: f"log2({x})",
@@ -47,7 +48,7 @@ class CStyleLanguage(NamedTuple):
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    else: val = f"{x}" + ("" if dtypes.is_int(var_dtype) else "f")
+    else: val = f"{x}" + ("f" if isinstance(x, float) else "")
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
 
   # returns a str expression of the loaded value with the output type
@@ -59,11 +60,11 @@ class CStyleLanguage(NamedTuple):
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx.render(render_cl, strip_parens=True)})"
     if output_dtype.sz > 1:
       return f"({output_dtype.name})(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})))"
-    return f"{buf_name}[{idx.render(render_cl)}]"
-  
-  def render_local(self, name:str, size:int, dtype:str = 'float'): 
+    return f"*({buf_name}+{idx.render(render_cl, strip_parens=True)})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx.render(render_cl)}]"
+
+  def render_local(self, name:str, size:int, dtype: str = float):
     return self.smem_prefix + f"{dtype} {name}[{size}];"
-  
+
   def render_for(self, expr: str, _min:int, _max:int) -> str:
     return f"for (int {expr} = {_min}; {expr} <= {_max}; ++{expr}) {{"
 
@@ -90,7 +91,7 @@ class CStyleLanguage(NamedTuple):
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx.render(render_cl, strip_parens=True)});"
     if var_dtype.sz > 1:
       return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
-    return f"{buf_name}[{idx.render(render_cl)}] = {var_name};"
+    return f"*({buf_name}+{idx.render(render_cl, strip_parens=True)}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx.render(render_cl)}] = {var_name};"
 
 def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:List[str]):
   # for M1 tensor core stuff, support > 3 dims
@@ -154,21 +155,21 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
     elif uop == UOps.ALU:
       assert newvar is not None
       kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")
-    elif uop in [UOps.LOAD, UOps.CONST]:
-      assert newvar is not None
+    elif uop == UOps.LOAD:
+      assert newvar is not None and isinstance(args, (MemOp, ConstOp))
       # valids are handled here
       if args.valid.max == 0:
-        val = lang.render_const(0.0, newvar.dtype)
-      elif uop == UOps.CONST:
+        val = lang.render_const(args.invalid_value, newvar.dtype)
+      elif isinstance(args, ConstOp):
         val = lang.render_const(args.value, newvar.dtype)
       else:
-        val = lang.render_load(newvar.dtype, args.name, args.dtype, args.idx, args.local)
-      if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(0.0, newvar.dtype))
+        val = lang.render_load(newvar.dtype, args.name, args.memory_dtype, args.idx, args.local)
+      if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(args.invalid_value, newvar.dtype))
       kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = {val};")
     elif uop == UOps.STORE:
-      assert args.valid.min == 1, "store must be valid"
+      assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
       # TODO: instead of dtypes.float, a base type
-      kk(lang.render_store(args.name, args.dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, args.local))
+      kk(lang.render_store(args.name, args.memory_dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, args.local))
     elif uop == UOps.CAST and newvar is not None:
       kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
     elif uop == UOps.DEFINE_LOCAL:
@@ -197,8 +198,8 @@ class CStyleCodegen(Linearizer):
 
   def codegen(self):
     self.process()
-    self.hand_coded_optimizations()
-    self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
+    if not getenv("KOPT"): self.hand_coded_optimizations()
+    #self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
     self.linearize()
 
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.lang)
