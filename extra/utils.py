@@ -14,7 +14,7 @@ WINDOWS = platform.system() == "Windows"
 def temp(x:str) -> str: return os.path.join(tempfile.gettempdir(), x)
 
 def fetch(url):
-  if url.startswith("/"):
+  if url.startswith("/") or url.startswith("./"):
     with open(url, "rb") as f:
       return f.read()
   import hashlib
@@ -24,7 +24,7 @@ def fetch(url):
     return f.read()
 
 def fetch_as_file(url):
-  if url.startswith("/"):
+  if url.startswith("/") or url.startswith("./"):
     with open(url, "rb") as f:
       return f.read()
   import hashlib
