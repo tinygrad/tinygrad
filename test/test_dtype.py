@@ -41,14 +41,14 @@ def _test_casts_from(tensor_contents:List, source_dtype:DType, target_dtypes:Lis
                      ):
   if target_contents is None: target_contents = copy.deepcopy(tensor_contents)
   list(map(
-    lambda t_dtype: _test_cast(Tensor(copy.deepcopy(tensor_contents), dtype=source_dtype), t_dtype, copy.deepcopy(tensor_contents)),
+    lambda t_dtype: _test_cast(Tensor(tensor_contents, dtype=source_dtype), t_dtype, copy.deepcopy(tensor_contents)),
     target_dtypes
   ))
 # tests no-op casts from source_dtypes to target_dtype
 def _test_casts_to(tensor_contents:List, source_dtypes:List[DType], target_dtype:DType, target_contents:Optional[List]=None):
   if target_contents is None: target_contents = copy.deepcopy(tensor_contents)
   list(map(
-    lambda s_dtype: _test_cast(Tensor(copy.deepcopy(tensor_contents), dtype=s_dtype), target_dtype, target_contents),
+    lambda s_dtype: _test_cast(Tensor(tensor_contents, dtype=s_dtype), target_dtype, target_contents),
     source_dtypes
   ))
 
