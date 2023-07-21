@@ -1,0 +1,1 @@
+#Code for web element to do stable diffusion through browser with local hardware
