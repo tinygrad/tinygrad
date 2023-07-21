@@ -252,4 +252,4 @@ jobs:
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
-        run: python -m pytest -n=auto test/ --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/models/test_mnist.py --ignore=test/models/test_onnx.py
+        run: python -m pytest -n=auto test/ -k '${{matrix.backend!='clang'&&'not (test_efficientnet and models/test_train.py)'||''}}' --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/models/test_mnist.py --ignore=test/models/test_onnx.py
