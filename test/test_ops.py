@@ -1099,8 +1099,8 @@ class TestOps(unittest.TestCase):
     assert np.all(n == 1.)
 
   def test_gather(self):
-    c = np.random.randn(4,5,6,9,5).astype(np.float32)
-    a = Tensor(c)
+    c = np.random.randn(4,5,6,9,5)
+    a = Tensor(c, dtype=dtypes.float32)
     b = torch.tensor(c)
 
     # for cases where indices is vector (indices.ndim == 1)
