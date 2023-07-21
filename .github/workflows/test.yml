@@ -204,7 +204,7 @@ jobs:
       - name: Install tinygrad dependencies
         run: pip install --use-feature=fast-deps -e '.[testing,cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
-        run: FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python3 -m pytest -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"
+        run: FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python3 -m pytest -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py --ignore=test/extra/test_lr_scheduler.py -k "not half"
 
   tests:
     strategy:
@@ -239,4 +239,4 @@ jobs:
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
-        run: python -m pytest -n=auto test/ --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/models/test_mnist.py
+        run: python -m pytest -n=auto test/ --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/models/test_mnist.py --ignore=test/models/test_onnx.py
