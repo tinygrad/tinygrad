@@ -30,8 +30,8 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], runt
       k.process()
       apply_opt(k, x)
       prg = k.codegen().build(runtime)
-      first_tm = prg.exec(k.bufs, force_wait=True)*1000
-      if baseline*5 < first_tm: return first_tm  # very slow
+      first_tm = prg.exec(k.bufs, force_wait=True)
+      if baseline*5 < first_tm*1000: return first_tm*1000  # very slow
       tm = min([first_tm]+[prg.exec(k.bufs, force_wait=True) for _ in range(2)])*1000
       return tm
     except Exception:
