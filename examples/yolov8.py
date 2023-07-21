@@ -296,7 +296,7 @@ class SPPF:
 class DFL:
   def __init__(self, c1=16):
     self.conv = Conv2d(c1, 1, 1, bias=False)
-    x = Tensor.arange(c1)
+    x = Tensor.arange(stop=c1)
     self.conv.weight.assign(x.reshape(1, c1, 1, 1))
     self.c1 = c1
 

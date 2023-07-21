@@ -179,7 +179,7 @@ def get_run_onnx(onnx_model: ModelProto):
         assert onnx_model_version >= 10, f'only onnx version >= 10 supported for slice'
         arg = [(0,x) for x in inp[0].shape]
         starts, ends = inp[1:3]
-        axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3])
+        axes = safe_numpy(Tensor.arange(stop=inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3])
         steps = safe_numpy(inp[4])[0] if len(inp) > 4 else 1
         starts, ends = safe_numpy(starts.cast(dtypes.int32)).tolist(), safe_numpy(ends.cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
         for i,axis in enumerate(axes.tolist()):

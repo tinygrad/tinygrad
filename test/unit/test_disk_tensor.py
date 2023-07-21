@@ -111,7 +111,7 @@ class TestDiskTensor(unittest.TestCase):
 
   def test_slice(self):
     pathlib.Path(temp("dt3")).unlink(missing_ok=True)
-    Tensor.arange(10, device="CPU").to(f"disk:{temp('dt3')}").realize()
+    Tensor.arange(stop=10, device="CPU").to(f"disk:{temp('dt3')}").realize()
 
     slice_me = Tensor.empty(10, device=f"disk:{temp('dt3')}")
     print(slice_me)
@@ -120,7 +120,7 @@ class TestDiskTensor(unittest.TestCase):
 
   def test_slice_2d(self):
     pathlib.Path(temp("dt5")).unlink(missing_ok=True)
-    Tensor.arange(100, device="CPU").to(f"disk:{temp('dt5')}").realize()
+    Tensor.arange(stop=100, device="CPU").to(f"disk:{temp('dt5')}").realize()
     slice_me = Tensor.empty(10, 10, device=f"disk:{temp('dt5')}")
     tst = slice_me[1].numpy()
     print(tst)
@@ -128,7 +128,7 @@ class TestDiskTensor(unittest.TestCase):
 
   def test_assign_slice(self):
     pathlib.Path(temp("dt4")).unlink(missing_ok=True)
-    cc = Tensor.arange(10, device="CPU").to(f"disk:{temp('dt4')}").realize()
+    cc = Tensor.arange(stop=10, device="CPU").to(f"disk:{temp('dt4')}").realize()
 
     #cc.assign(np.ones(10)).realize()
     print(cc[3:5].numpy())
