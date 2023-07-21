@@ -107,7 +107,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   state_dict = get_state_dict(model)
 
   # JIT at every run
-  # @TinyJit
+  @TinyJit
   def train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
     X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
     X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < 0.5, X[..., ::-1], X) # flip augmentation
@@ -118,9 +118,9 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
       loss.backward()
 
       # sync gradients across ranks
-      for _, v in state_dict.items():
+      for k, v in state_dict.items():
         if v.grad is not None:
-          v.grad.assign(collectives.allreduce(v.grad)).realize()
+          v.grad.assign(collectives.allreduce(v.grad, cache_id=k) / getenv("WORLD_SIZE"))
 
       optimizer.step()
       lr_scheduler.step()
