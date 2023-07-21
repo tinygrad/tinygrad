@@ -152,7 +152,7 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
 
   @staticmethod
-  def arange(start=0, stop=None, step=1, **kwargs):
+  def arange(start, stop=None, step=1, **kwargs):
     if stop is None:
       stop = start
       start = 0
