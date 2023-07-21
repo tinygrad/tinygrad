@@ -175,8 +175,8 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
   assert feats is not None
   for i, stride in enumerate(strides):
     _, _, h, w = feats[i].shape
-    sx = Tensor.arange(stop=w) + grid_cell_offset  
-    sy = Tensor.arange(stop=h) + grid_cell_offset 
+    sx = Tensor.arange(w) + grid_cell_offset  
+    sy = Tensor.arange(h) + grid_cell_offset 
     
     # this is np.meshgrid but in tinygrad 
     sx = sx.reshape(1, -1).repeat([h, 1]).reshape(-1)
