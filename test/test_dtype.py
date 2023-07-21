@@ -7,11 +7,10 @@ from typing import List, Optional
 from extra.utils import OSX, temp
 import copy
 
-
 def _test_to_np(a:Tensor, np_dtype, target):
-  print(a)
+  if DEBUG >= 2: print(a)
   na = a.numpy()
-  print(na, na.dtype, a.lazydata.realized)
+  if DEBUG >= 2: print(na, na.dtype, a.lazydata.realized)
   try:
     assert na.dtype == np_dtype
     np.testing.assert_allclose(na, target)
@@ -31,14 +30,12 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
     ) from e
 
 def _test_op(fxn, target_dtype:DType, target):
-  c = fxn()
-  _assert_eq(c, target_dtype, target)
+  _assert_eq(fxn(), target_dtype, target)
 
 def _test_cast(a:Tensor, target_dtype:DType, target):
   _test_op(lambda: a.cast(target_dtype), target_dtype, target)
 # tests no-op casts from source_dtype to target_dtypes
-def _test_casts_from(tensor_contents:List, source_dtype:DType, target_dtypes:List[DType], target_contents:Optional[List]=None
-                     ):
+def _test_casts_from(tensor_contents:List, source_dtype:DType, target_dtypes:List[DType], target_contents:Optional[List]=None):
   if target_contents is None: target_contents = copy.deepcopy(tensor_contents)
   list(map(
     lambda t_dtype: _test_cast(Tensor(tensor_contents, dtype=source_dtype), t_dtype, target_contents),
