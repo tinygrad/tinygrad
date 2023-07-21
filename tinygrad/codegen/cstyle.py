@@ -25,6 +25,7 @@ class CStyleLanguage(NamedTuple):
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
   external_local_bufs: bool = False
+  uses_ptr_arithmetic: bool = False
   code_for_op: Dict = {
     UnaryOps.EXP2: lambda x: f"exp2({x})",
     UnaryOps.LOG2: lambda x: f"log2({x})",
@@ -61,7 +62,7 @@ class CStyleLanguage(NamedTuple):
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx.render(render_cl, strip_parens=True)})"
     if output_dtype.sz > 1:
       return f"({output_dtype.name})(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})))"
-    return f"{buf_name}[{idx.render(render_cl)}]"
+    return f"*({buf_name}+{idx.render(render_cl, strip_parens=True)})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx.render(render_cl)}]"
 
   def render_local(self, name:str, size:int):
     return self.smem_prefix + f"float {name}[{size}];"
@@ -92,7 +93,7 @@ class CStyleLanguage(NamedTuple):
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx.render(render_cl, strip_parens=True)});"
     if var_dtype.sz > 1:
       return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
-    return f"{buf_name}[{idx.render(render_cl)}] = {var_name};"
+    return f"*({buf_name}+{idx.render(render_cl, strip_parens=True)}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx.render(render_cl)}] = {var_name};"
 
 def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:List[str]):
   # for M1 tensor core stuff, support > 3 dims
@@ -197,8 +198,8 @@ class CStyleCodegen(Linearizer):
 
   def codegen(self):
     self.process()
-    self.hand_coded_optimizations()
-    self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
+    if not getenv("KOPT"): self.hand_coded_optimizations()
+    #self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
     self.linearize()
 
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.lang)

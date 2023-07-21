@@ -133,10 +133,10 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg, **self.runtime_args)
     return self
 
-  def exec(self, bufs) -> Optional[float]:
+  def exec(self, bufs, force_wait=False) -> Optional[float]:
     rawbufs = dedup([x.realized for x in bufs if buf_is_kernel_arg(x)])
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
-    return self(rawbufs)
+    return self(rawbufs, force_wait=force_wait)
 
   def __call__(self, rawbufs:List[RawBuffer], jit=False, force_wait=False) -> Optional[float]:
     if et := self.clprg((self.global_size + [1]*(3-len(self.global_size))) if self.global_size is not None else None,
@@ -180,7 +180,11 @@ class Compiled:
 
     # this is the default now
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
-      if k.key not in self.method_cache: self.method_cache[k.key] = k.codegen().build(self.runtime)
+      if k.key not in self.method_cache:
+        if getenv("KOPT"):
+          from tinygrad.codegen.optimizer import kernel_optimize
+          kernel_optimize(k, lambda: self.codegen(ast, output), self.runtime)
+        self.method_cache[k.key] = k.codegen().build(self.runtime)
       elif DEBUG >= 5: print(f"method cache hit : {k.key}")
       prg = self.method_cache[k.key]
     else:
