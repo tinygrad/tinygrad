@@ -90,7 +90,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 8)*1, 0, 8, "a")
 
   def test_mul_neg_1(self):
-    self.helper_test_variable((Variable("a", 0, 2)*-1)//3, -1, 0, "((((a*-1)+3)//3)+-1)")
+    self.helper_test_variable((Variable("a", 0, 2)*-1)//3, -1, 0, "((a*-1)//3)")
 
   def test_mul_2(self):
     self.helper_test_variable(Variable("a", 0, 8)*2, 0, 16, "(a*2)")
@@ -107,8 +107,30 @@ class TestSymbolic(unittest.TestCase):
   def test_div_min_max(self):
     self.helper_test_variable(Variable("a", 0, 7) // 2, 0, 3, "(a//2)")
 
-  def test_div_neg_min_max(self):
-    self.helper_test_variable(Variable("a", 0, 7) // -2, -3, 0, "((a//2)*-1)")
+  # NOTE: negative rhs not supported by floor divisions
+  # def test_div_neg_min_max(self):
+    # round toward -infinity
+    # self.helper_test_variable(Variable("a", 0, 7) // -2, -4, 0, "((a//-2))")
+    # self.helper_test_variable(Variable("a", 0, 7) // -2, -4, 0, "((-a//2))")
+
+  def test_pos_div_too_big(self):
+    self.helper_test_variable(Variable("a", 0, 9) // 10, 0, 0, "0")
+
+  def test_neg_div_too_big(self):
+    self.helper_test_variable(Variable("a", -9, -1) // 10, -1, -1, "-1")
+
+  def test_pos_mod_too_big(self):
+    self.helper_test_variable(Variable("a", 0, 9) % 10, 0, 9, "a")
+
+  def test_neg_mod_too_big(self):
+    self.helper_test_variable(Variable("a", -9, -1) % 10, 1, 9, "(10+a)")
+
+  def test_div_mul_factor(self):
+    self.helper_test_variable((Variable("a", -5, 10)*5)//10, -3, 5, "(a//2)")
+    self.helper_test_variable((Variable("a", -5, 10)*-1)//10, -1, 0, "((a*-1)//10)")
+
+  def test_mul_div_factor(self):
+    self.helper_test_variable((Variable("a", -5, 10)*10)//5, -10, 20, "(a*2)")
 
   def test_sum_div_min_max(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 2, 0, 5, "((a+b)//2)")
@@ -158,7 +180,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6)%100, 0, 6, "a")
 
   def test_big_mod(self):
-    # NOTE: we no longer support negative variables
+    # NOTE: negative rhs is not supported
     #self.helper_test_variable(Variable("a", -20, 20)%10, -9, 9, "(a%10)")
     #self.helper_test_variable(Variable("a", -20, 0)%10, -9, 0, "(a%10)")
     #self.helper_test_variable(Variable("a", -20, 1)%10, -9, 1, "(a%10)")
@@ -205,16 +227,14 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable.sum([Variable("idx0", 0, 127)*4, Variable("idx2", 0, 3)])//4, 0, 127, "idx0")
 
   def test_div_numerator_negative(self):
-    self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "((((idx*-10)+99)//11)+-9)")
+    self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "((idx*-10)//11)")
 
   def test_div_into_mod(self):
     self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
-    # TODO: why are the negative tests broken? (even if we did support negative variables)
-    #MIN, MAX = -10, 10
-    MIN, MAX = 0, 10
+    MIN, MAX = -10, 10
     # one number
     for i in range(MIN, MAX):
       v = f(Variable.num(i))
@@ -222,8 +242,7 @@ class TestSymbolicNumeric(unittest.TestCase):
       self.assertEqual(v.min, v.max)
       self.assertEqual(v.min, f(i))
     for kmin in range(MIN, MAX):
-      for kmax in range(MIN, MAX):
-        if kmin > kmax: continue
+      for kmax in range(kmin, MAX):
         v = f(Variable("tmp", kmin, kmax))
         values = [f(rv) for rv in range(kmin, kmax+1)]
         # the min and max may not be exact
@@ -235,10 +254,14 @@ class TestSymbolicNumeric(unittest.TestCase):
   def test_plus_1_div_2(self): self.helper_test_numeric(lambda x: (x+1)//2)
   def test_plus_1_mod_2(self): self.helper_test_numeric(lambda x: (x+1)%2)
   def test_times_2(self): self.helper_test_numeric(lambda x: x*2)
+  def test_times_2_div_4(self): self.helper_test_numeric(lambda x: (x*2)//4)
+  def test_times_2_mod_4(self): self.helper_test_numeric(lambda x: (x*2)%4)
   def test_times_2_plus_3(self): self.helper_test_numeric(lambda x: x*2 + 3)
   def test_times_2_plus_3_mod_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)%4)
   def test_times_2_plus_3_div_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)//4)
   def test_times_2_plus_3_div_4_mod_4(self): self.helper_test_numeric(lambda x: ((x*2 + 3)//4)%4)
+  def test_sum_mod_4(self): self.helper_test_numeric(lambda x: ((x*2 + 3) + x*3)%4)
+  def test_sum_div_4(self): self.helper_test_numeric(lambda x: ((x*2 + 3) + x*3)//4)
 
 if __name__ == '__main__':
   unittest.main()

@@ -6,7 +6,8 @@ from tinygrad.helpers import partition
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional
 
 # NOTE: Python has different behavior for negative mod and floor div than c
-# symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
+# symbolic matches the Python behavior (round towards -infinity)
+# programs that evaluate the rendered expressions should also match the Python behavior
 
 class Node:
   b: int
@@ -54,24 +55,14 @@ class Node:
 
   # *** complex ops ***
 
-  def __floordiv__(self, b:int, factoring_allowed=True):
-    assert b != 0
-    if b < 0: return (self//-b)*-1
-    if b == 1: return self
-
-    # the numerator of div is not allowed to be negative
-    if self.min < 0:
-      offset = self.min//b
-      # factor out an "offset" to make the numerator positive. don't allowing factoring again
-      return (self + -offset*b).__floordiv__(b, factoring_allowed=False) + offset
-    return create_node(DivNode(self, b))
+  # b < 0 not allowed
+  def __floordiv__(self, b:int):
+    ret, done = common_floordiv(self, b)
+    return create_node(DivNode(self, b)) if not done else ret
 
   def __mod__(self, b:int):
-    assert b > 0
-    if b == 1: return NumNode(0)
-    if self.min >= 0 and self.max < b: return self
-    if self.min < 0: return (self - ((self.min//b)*b)) % b
-    return create_node(ModNode(self, b))
+    ret, done = common_mod(self, b)
+    return create_node(ModNode(self, b)) if not done else ret
 
   @staticmethod
   def num(num:int) -> NumNode: return NumNode(num)
@@ -121,7 +112,8 @@ class Node:
 
 class Variable(Node):
   def __new__(cls, expr:Optional[str], nmin:int, nmax:int):
-    assert nmin >= 0 and nmin <= nmax
+    # NOTE: negative variables are now supported
+    assert nmin <= nmax
     if nmin == nmax: return NumNode(nmin)
     return super().__new__(cls)
 
@@ -148,33 +140,37 @@ class OpNode(Node):
 
 class LtNode(OpNode):
   def __mul__(self, b: int): return (self.a*b) < (self.b*b)
-  def __floordiv__(self, b: int, _=False): return (self.a//b) < (self.b//b)
+  def __floordiv__(self, b: int): return (self.a//b) < (self.b//b)
   def get_bounds(self) -> Tuple[int, int]: return int(self.a.max < self.b), int(self.a.min < self.b)
 
 class MulNode(OpNode):
   def __mul__(self, b: int): return self.a*(self.b*b) # two muls in one mul
-  def __floordiv__(self, b: int, factoring_allowed=False): # NOTE: mod negative isn't handled right
+  def __floordiv__(self, b: int):
+    ret, done = common_floordiv(self, b)
+    if done: return ret
     if self.b % b == 0: return self.a*(self.b//b)
-    if b % self.b == 0 and self.b > 0: return self.a//(b//self.b)
-    return Node.__floordiv__(self, b, factoring_allowed)
+    if self.b > 0 and b % self.b == 0: return self.a//(b//self.b)
+    return create_node(DivNode(self, b))
   def __mod__(self, b: int):
+    ret, done = common_mod(self, b)
+    if done: return ret
     a = (self.a * (self.b%b))
     return Node.__mod__(a, b)
   def get_bounds(self) -> Tuple[int, int]:
     return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
 
 class DivNode(OpNode):
-  def __floordiv__(self, b: int, _=False): return self.a//(self.b*b) # two divs is one div
+  def __floordiv__(self, b: int): return self.a//(self.b*b) # two divs is one div
   def get_bounds(self) -> Tuple[int, int]:
-    assert self.a.min >= 0
     return self.a.min//self.b, self.a.max//self.b
 
 class ModNode(OpNode):
-  def __floordiv__(self, b: int, factoring_allowed=True):
+  def __floordiv__(self, b: int):
+    ret, done = common_floordiv(self, b)
+    if done: return ret
     if (self.b % b == 0): return (self.a//b) % (self.b//b) # put the div inside mod
-    return Node.__floordiv__(self, b, factoring_allowed)
+    return create_node(DivNode(self, b))
   def get_bounds(self) -> Tuple[int, int]:
-    assert self.a.min >= 0
     return (0, self.b-1) if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b) else (self.a.min%self.b, self.a.max%self.b)
 
 class RedNode(Node):
@@ -184,8 +180,9 @@ class RedNode(Node):
 class SumNode(RedNode):
   def __mul__(self, b: int): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
   def __floordiv__(self, b: int, factoring_allowed=True):
+    assert b > 0
     if b == 1: return self
-    if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
+    if not factoring_allowed: return Node.__floordiv__(self, b)
     fully_divided: List[Node] = []
     rest: List[Node] = []
     _gcd = b
@@ -205,6 +202,8 @@ class SumNode(RedNode):
     return Node.sum(fully_divided) + Node.__floordiv__(Node.sum(rest), b)
 
   def __mod__(self, b: int):
+    ret, done = common_mod(self, b)
+    if done: return ret
     new_nodes: List[Node] = []
     for x in self.nodes:
       if x.__class__ is NumNode: new_nodes.append(Variable.num(x.b%b))
@@ -220,7 +219,22 @@ class SumNode(RedNode):
 
 class AndNode(RedNode):
   def __mul__(self, b: int): Variable.ands([x*b for x in self.nodes])
-  def __floordiv__(self, b: int, _=True): return Variable.ands([x//b for x in self.nodes])
+  def __floordiv__(self, b: int): return Variable.ands([x//b for x in self.nodes])
+
+# perform common optimizations and return True if no more optimization can be done
+def common_floordiv(node:Node, b:int) -> Tuple[Node, bool]:
+  assert b > 0
+  if b == 1: return node, True
+  if node.min >= 0 and  b  > node.max: return NumNode(0), True
+  if node.max <  0 and -b <= node.min: return NumNode(-1), True
+  return node, False
+
+def common_mod(node:Node, b:int) -> Tuple[Node, bool]:
+  assert b > 0 # thus mod's result is >=0 always
+  if b == 1: return NumNode(0), True
+  if node.min >= 0  and node.max < b: return node, True
+  if -b <= node.min and node.max < 0: return node + b, True
+  return node, False
 
 def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   ret = typ(nodes)
