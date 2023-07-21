@@ -192,37 +192,10 @@ jobs:
     - name: Test Docker
       run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
 
-  testcuda:
-    name: CUDA Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-      - name: Cache Docker image
-        id: cache
-        uses: actions/cache@v3
-        with:
-          path: ${{github.workspace}}/image.tar
-          key: docker-image-tar
-      - name: Pull Docker image
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          docker pull ghcr.io/cheeetoo/tinygrad-cuda-ubuntu:latest
-          docker save ghcr.io/cheeetoo/tinygrad-cuda-ubuntu:latest -o image.tar
-      - name: Run Docker container
-        run: |
-          docker load -i image.tar
-          docker run -d --name tinygrad --volume ${{github.workspace}}:/tinygrad --workdir /tinygrad ghcr.io/cheeetoo/tinygrad-cuda-ubuntu:latest tail -f /dev/null
-      - name: Install tinygrad
-        run: docker exec tinygrad pip install -e .
-      - name: Run pytest
-        run: docker exec tinygrad bash -c 'FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python3 -m pytest -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py --ignore=test/extra/test_lr_scheduler.py -k "not half"'
-
   tests:
     strategy:
       matrix:
-        backend: [llvm, clang, gpu]
+        backend: [llvm, clang, gpu, cuda]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || matrix.backend=='clang'&&'windows-latest'|| 'ubuntu-latest' }}
@@ -241,7 +214,7 @@ jobs:
           path: ${{ matrix.backend=='clang'&&'~\AppData\Local\pip\cache'||'~/.cache/pip' }}
           key: ${{ matrix.backend }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1'}}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n'}}" >> $GITHUB_ENV
       - name: Install packages (gpu)
         if: matrix.backend == 'gpu'
         run: |
@@ -249,7 +222,39 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt-get update
           sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl 
+      - name: Install packages (cuda)
+        if: matrix.backend == 'cuda'
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+      - name: Cache gpuocelot
+        if: matrix.backend == 'cuda'
+        id: cache-build
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-gpuocelot-build
+        with:
+          path: ${{ github.workspace }}/gpuocelot/ocelot/
+          key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
+          restore-keys: |
+            ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
+      - name: Clone/compile gpuocelot
+        if: matrix.backend == 'cuda' && steps.cache-build.outputs.cache-hit != 'true'
+        run: |
+          git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
+          cd ${{ github.workspace }}/gpuocelot/ocelot
+          git checkout 19626fc00b6ee321638c3111074269c69050e091
+          mkdir build
+          cd build
+          cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
+          ninja
+      - name: Install gpuocelot
+        if: matrix.backend == 'cuda'
+        run: |
+          cd ${{ github.workspace }}/gpuocelot/ocelot/build
+          sudo ninja install
       - name: Install dependencies
-        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
         run: python -m pytest -n=auto test/ -k '${{matrix.backend!='clang'&&'not (test_efficientnet and models/test_train.py)'||''}}' --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/models/test_mnist.py --ignore=test/models/test_onnx.py
