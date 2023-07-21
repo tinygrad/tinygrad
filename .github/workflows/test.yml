@@ -256,5 +256,9 @@ jobs:
           sudo ninja install
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Run pytest
-        run: python -m pytest -n=auto test/ -k '${{matrix.backend=='cuda'&&'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)'||'test'}} ${{matrix.backend=='llvm'&&' and not (test_nn.py and test_conv_transpose2d)'||''}}' ${{(matrix.backend!='clang'&&matrix.backend!='llvm')&&'--ignore=test/models/test_train.py --ignore=test/extra/test_lr_scheduler.py'||''}} ${{matrix.backend!='llvm'&&'--ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/models/test_mnist.py --ignore=test/models/test_onnx.py'||''}} ${{matrix.backend=='cuda'&&'--ignore=test/external --ignore=test/models --ignore=test/test_specific_conv.py --ignore=test/test_nn.py --ignore=test/test_optim.py --ignore=test/test_conv.py'||''}}
+      - name: Run pytest (not cuda)
+        if: matrix.backend!='cuda'
+        run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||''}}' ${{matrix.backend=='gpu'&&'--ignore=test/models/test_train.py --ignore=test/extra/test_lr_scheduler.py'||''}} ${{matrix.backend!='llvm'&&'--ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/models/test_mnist.py --ignore=test/models/test_onnx.py'||''}}
+      - name: Run pytest (cuda)
+        if: matrix.backend=='cuda'
+        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' --ignore=test/models/test_train.py --ignore=test/extra/test_lr_scheduler.py --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/models/test_mnist.py --ignore=test/models/test_onnx.py --ignore=test/external --ignore=test/models --ignore=test/test_specific_conv.py --ignore=test/test_nn.py --ignore=test/test_optim.py --ignore=test/test_conv.py
