@@ -63,15 +63,12 @@ class Tensor:
       return
 
     if data.__class__ is list:
+      assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
       data = np.array(data, dtype=(dtype or Tensor.default_type).np)
 
-    if data.__class__ is np.ndarray:
-      data = cast(np.ndarray, data)
-      if data.size == 1: # constant fold
-        self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtypes.from_np(data.dtype), device, data.flat[0]).reshape(data.shape)
-      else:
-        data = LazyBuffer.fromCPU(data)
-        self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
+    if isinstance(data, np.ndarray):
+      data = LazyBuffer.fromCPU(data)
+      self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
 
     raise RuntimeError(f"can't create Tensor from {data}")
@@ -170,7 +167,9 @@ class Tensor:
   def ones_like(tensor, **kwargs): return Tensor.full_like(tensor, 1, **kwargs)
 
   @staticmethod
-  def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
+  def eye(dim:int, **kwargs):
+    return Tensor([1], **kwargs).pad(((0,dim),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
+
 
   # ***** rng hlops *****
 
@@ -343,10 +342,10 @@ class Tensor:
 
   # TODO: make this nicer with syntactic sugar in slice
   def chunk(self, num, dim):
-    slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
-    for i,k in enumerate(range(0, self.shape[dim], self.shape[dim]//num)):
-      slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
-    return [self.slice(p) for p in slice_params]
+    slice_params = [[slice(None) for s in self.shape] for _ in range(ceil(self.shape[dim]/ceil(self.shape[dim]/num)))]
+    for i, k in enumerate(range(0, self.shape[dim], ceil(self.shape[dim]/num))):
+      slice_params[i][dim] = slice(k, k + ceil(self.shape[dim]/num))
+    return [self[tuple(sl)] for sl in slice_params]
 
   def squeeze(self, dim=None):
     if dim is None: return self if 1 not in self.shape else self.reshape(*[size for size in self.shape if size != 1])
