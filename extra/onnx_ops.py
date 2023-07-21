@@ -429,7 +429,7 @@ def _gather(input: Tensor, indices: Tensor): # COMPARE, EXPAND, MULTIPLY, SUM
 def Gather(input, indices, axis=0):
   input_sh = list(input.shape)
   ret_shape = input_sh[:axis] + list(indices.shape) + input_sh[axis+1:]
-  if indices.numel() < 5: # TODO NOT SURE YET FOR THE EXACT NUMBER, NEED TO TEST THIS
+  if indices.numel() < 9: # TODO NOT SURE YET FOR THE EXACT NUMBER, NEED TO TEST THIS
     # faster gather with smaller indices SOMETHING SOMETHING O(?) IDK I DIDN'T GO TO SCHOOL FOR THIS but kernel number increases depending on size of indices
     if indices.ndim > 1: indices = indices.flatten()
     indices = [input_sh[axis]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
@@ -438,7 +438,17 @@ def Gather(input, indices, axis=0):
   else:
     # faster gather with larger indices probably, fixed number of kernels, so O(n)??? n dependent on tensor size? haha
     indices = (indices < 0).where(indices+input.shape[axis], indices)
-    return (input.reshape(list(input.shape[:axis+1]) + [1]*indices.ndim + list(input.shape[axis+1:])).expand(list(input.shape[:axis+1]) + list(indices.shape) + list(input.shape[axis+1:])) * (Tensor.arange(input.shape[axis]).reshape([input.shape[axis]] + [1]*indices.ndim).expand([input.shape[axis]] + list(indices.shape)) == indices.unsqueeze(0).expand([input.shape[axis]] + list(indices.shape))).reshape([1]*axis + [input.shape[axis]] + list(indices.shape) + [1]*(input.ndim-axis-1)).expand(list(input.shape[:axis+1]) + list(indices.shape) + list(input.shape[axis+1:]))).sum(axis)
+    input_shape = list(input.shape)
+    indices_shape = list(indices.shape)
+    input_expanded = input.reshape(input_shape[:axis+1] + [1]*indices.ndim + input_shape[axis+1:]).expand(input_shape[:axis+1] + indices_shape + input_shape[axis+1:])
+    arange = Tensor.arange(input.shape[axis]).reshape([input.shape[axis]] + [1]*indices.ndim).expand([input.shape[axis]] + indices_shape)
+    indices_ = indices.unsqueeze(0).expand([input.shape[axis]] + indices_shape)
+    mask = (arange == indices_).reshape([1]*axis + [input.shape[axis]] + indices_shape + [1]*(input.ndim-axis-1)).expand(input_shape[:axis+1] + indices_shape + input_shape[axis+1:])
+    return (input_expanded*mask).sum(axis)
+    # 1 liner implementation, but unreadable
+    # indices = (indices < 0).where(indices+input.shape[axis], indices)
+    # return (input.reshape(list(input.shape[:axis+1]) + [1]*indices.ndim + list(input.shape[axis+1:])).expand(list(input.shape[:axis+1]) + list(indices.shape) + list(input.shape[axis+1:])) * (Tensor.arange(input.shape[axis]).reshape([input.shape[axis]] + [1]*indices.ndim).expand([input.shape[axis]] + list(indices.shape)) == indices.unsqueeze(0).expand([input.shape[axis]] + list(indices.shape))).reshape([1]*axis + [input.shape[axis]] + list(indices.shape) + [1]*(input.ndim-axis-1)).expand(list(input.shape[:axis+1]) + list(indices.shape) + list(input.shape[axis+1:]))).sum(axis)
+
 
 def GatherElements(input, indices, axis):
   indices = (indices < 0).where(indices+input.shape[axis], indices)
