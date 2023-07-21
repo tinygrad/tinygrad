@@ -156,7 +156,7 @@ class Tensor:
 
   @staticmethod
   def arange(start=0, stop=None, step=1, **kwargs):
-    assert stop is not None
+    assert stop is not None, "stop is a required parameter"
     return Tensor.full((ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
 
   @staticmethod
