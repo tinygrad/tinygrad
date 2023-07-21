@@ -242,12 +242,12 @@ def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, red
     input = input.reshape((N, C, -1))
     target = target.reshape((N, -1))
   if weight is not None:
-    mask = target.unsqueeze(-1) == Tensor.arange(stop=C,dtype=dtypes.int64).repeat((N, 1, 1)) 
+    mask = target.unsqueeze(-1) == Tensor.arange(C,dtype=dtypes.int64).repeat((N, 1, 1)) 
     weight = (mask * weight).sum(axis=-1)
   if ignore_index is not None:
     cond = (target == ignore_index)
     weight = cond.where(0, weight) if weight is not None else cond.where(Tensor.zeros(*target.shape), 1) 
-  mask = target[:, None, :] ==  Tensor.arange(stop=C).reshape([1, C] + [1]*(len(input.shape) -2)) 
+  mask = target[:, None, :] ==  Tensor.arange(C).reshape([1, C] + [1]*(len(input.shape) -2)) 
   loss = (-mask * input).sum(axis=1) * (1 if weight is None else weight)  
   if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
   elif reduction == "sum": return loss.sum()
@@ -258,7 +258,7 @@ def OneHot(indices, depth, values, axis=-1):
   indices, rank = (indices.cast(dtypes.float32) < 0).where(indices+depth, indices), len(indices.shape)
   if axis < 0: axis += rank + 1
   ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
-  cond = indices[:,None] == Tensor.arange(stop=depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
+  cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
   return cond.where(values[1], values[0]).cast(values.dtype) 
 
 def Floor(x:Tensor): return x.floor()
