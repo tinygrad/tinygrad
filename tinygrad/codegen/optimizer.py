@@ -1,6 +1,6 @@
 from typing import Callable
 import itertools
-from tinygrad.helpers import DEBUG, prod, getenv
+from tinygrad.helpers import DEBUG, prod, getenv, ImageDType
 from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.lazy import LazyBuffer
@@ -55,11 +55,20 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], runtime):
   apply_opt(k, recommendation.value)
   if DEBUG >= 1: print("optimizer hit", k.colored_shape(), "in search space", search_space)
 
+def required_optimizations(k:Linearizer, early_only=False):
+  for buf_index,buf in enumerate(k.bufs):
+    unit_stride_axes_mul_4 = [i for i in k.sts[buf_index].unit_stride_axes(ignore_valid=True) if k.sts[buf_index].shape[i]%4 == 0]
+    if (not early_only or buf in k.earlybufs) and k.bufs[buf_index].dtype.__class__ is ImageDType:
+      assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {k.bufs[buf_index]}"
+      if all(x < (k.shape_len-k.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in k.upcast_in_mid_reduce_axes:
+        k.shift_to(unit_stride_axes_mul_4[0], 4)
+        k.upcast()
+
 def hand_coded_optimizations(k:Linearizer):
   k.process()
 
   # if there's images in the earlybufs, we have to make an axis the 4 loading one
-  k.required_optimizations(early_only=True)
+  required_optimizations(k, early_only=True)
 
   # simplify
   k.simplify_ones()
@@ -121,25 +130,26 @@ def hand_coded_optimizations(k:Linearizer):
       # early exit
       return
 
-  # are we grouping? (requires local shape support)
-  if not k.float4_axis(0) and k.first_reduce <= 2 and k.first_reduce + 1 <= k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
-    # TODO: use 1024 if it's allowed in a smarter way
-    for sz in (([256, 16]) if prod(k.sts[0].shape[:k.first_reduce]) <= 32 else [16]):
-      if all(st.shape[k.first_reduce] % sz == 0 or st.shape[k.first_reduce] == 1 for st in k.sts):
-        k.shift_to(k.first_reduce, sz, top=True, insert_before=k.first_reduce + len(k.group_for_reduce))
-        k.group_for_reduce.append(sz)
-        break
+  if hasattr(k, 'lang') and len(k.lang.smem_prefix):
+    # are we grouping? (requires local shape support)
+    if not k.float4_axis(0) and k.first_reduce <= 2 and k.first_reduce + 1 <= k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
+      # TODO: use 1024 if it's allowed in a smarter way
+      for sz in (([256, 16]) if prod(k.sts[0].shape[:k.first_reduce]) <= 32 else [16]):
+        if all(st.shape[k.first_reduce] % sz == 0 or st.shape[k.first_reduce] == 1 for st in k.sts):
+          k.shift_to(k.first_reduce, sz, top=True, insert_before=k.first_reduce + len(k.group_for_reduce))
+          k.group_for_reduce.append(sz)
+          break
 
-  # are we upcasting in mid reduce? (only for images)
-  if k.bufs[0].dtype.name.startswith('image') and not k.float4_axis(0) and k.group_for_reduce and k.first_reduce <= 2 and prod(k.sts[0].shape) > 1:
-    axes = k.sts[0].unit_stride_axes()
-    assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
-    if k.sts[0].shape[axes[0]]%4 == 0:
-      k.shift_to(axes[0], 4, insert_before=k.first_reduce + len(k.group_for_reduce))   # insert at the end of the grouped axis
-      k.group_for_reduce.append(4)
+    # are we upcasting in mid reduce? (only for images)
+    if k.bufs[0].dtype.name.startswith('image') and not k.float4_axis(0) and k.group_for_reduce and k.first_reduce <= 2 and prod(k.sts[0].shape) > 1:
+      axes = k.sts[0].unit_stride_axes()
+      assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
+      if k.sts[0].shape[axes[0]]%4 == 0:
+        k.shift_to(axes[0], 4, insert_before=k.first_reduce + len(k.group_for_reduce))   # insert at the end of the grouped axis
+        k.group_for_reduce.append(4)
 
   # now do everything required
-  k.required_optimizations()
+  required_optimizations(k)
 
   # simplify (sets first_reduce)
   k.simplify_ones()
@@ -197,14 +207,15 @@ def hand_coded_optimizations(k:Linearizer):
 
   # **** local groups ****
 
-  for axis in range(k.first_reduce - k.local_dims - 1, -1, -1):
-    local_size = prod(k.full_shape[k.first_reduce-k.local_dims:k.first_reduce])
-    if k.full_shape[axis] == 1: continue
-    last_try = k.local_dims == 0 and axis == 0
-    if any(k.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(k.sts))) or last_try:
-      for sz in [x for x in (([32] if last_try else []) + [16,8,4,3]) if k.full_shape[axis] % x == 0 and local_size*x <= 128]:
-        k.shift_to(axis, sz, insert_before=k.first_reduce-k.local_dims)
-        k.local_dims += 1
-        break
-    if k.local_dims >= 3: break
+  if hasattr(k, 'lang') and len(k.lang.lid):
+    for axis in range(k.first_reduce - k.local_dims - 1, -1, -1):
+      local_size = prod(k.full_shape[k.first_reduce-k.local_dims:k.first_reduce])
+      if k.full_shape[axis] == 1: continue
+      last_try = k.local_dims == 0 and axis == 0
+      if any(k.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(k.sts))) or last_try:
+        for sz in [x for x in (([32] if last_try else []) + [16,8,4,3]) if k.full_shape[axis] % x == 0 and local_size*x <= 128]:
+          k.shift_to(axis, sz, insert_before=k.first_reduce-k.local_dims)
+          k.local_dims += 1
+          break
+      if k.local_dims >= 3: break
   k.simplify_ones()
