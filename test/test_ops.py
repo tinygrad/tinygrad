@@ -1111,7 +1111,7 @@ class TestOps(unittest.TestCase):
         helper_test_op([], lambda: torch.index_select(input=b, index=vb, dim=dim), lambda: a.gather(va, dim=dim), forward_only=True)
 
     # for cases where indices is matrix (indices.ndim > 1)
-    mc = np.random.randint(4, size=[3,4,5]).astype(np.float32)
+    mc = np.random.randint(4, size=[3,4,5]).astype(np.int8)
     ma = Tensor(mc)
     for dim in range(c.ndim):
       with self.subTest(np.take.__name__, dim=dim):
