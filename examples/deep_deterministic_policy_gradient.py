@@ -114,8 +114,8 @@ class DeepDeterministicPolicyGradient:
       noise_stddev: The standard deviation of the exploration noise.
 
   Note:
-      In contrast to the original paper, actions are already included in the first layer 
-      of the Critic and we use a Gaussian distribution instead of an Ornstein Uhlenbeck 
+      In contrast to the original paper, actions are already included in the first layer
+      of the Critic and we use a Gaussian distribution instead of an Ornstein Uhlenbeck
       process for exploration noise.
 
   """
@@ -203,7 +203,7 @@ class DeepDeterministicPolicyGradient:
         next_state_batch,
         done_batch,
     ) = self.memory.sample()
- 
+
     target_actions = self.target_actor.forward(next_state_batch, self.max_action)
     y = reward_batch + self.gamma * self.target_critic.forward(
         next_state_batch, target_actions.detach()
