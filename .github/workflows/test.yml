@@ -18,11 +18,11 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
-    - name: Cache pip
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: linting
+    # - name: Cache pip
+    #   uses: actions/cache@v3
+    #   with:
+    #     path: ~/.cache/pip
+    #     key: linting
     - name: Install dependencies
       run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Repo line count
@@ -52,11 +52,11 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
-    - name: Cache pip
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: cpu
+    # - name: Cache pip
+    #   uses: actions/cache@v3
+    #   with:
+    #     path: ~/.cache/pip
+    #     key: cpu
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test Docs
@@ -88,11 +88,11 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
-    - name: Cache pip
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: torch
+    # - name: Cache pip
+    #   uses: actions/cache@v3
+    #   with:
+    #     path: ~/.cache/pip
+    #     key: torch
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
@@ -123,11 +123,11 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: 3.8
-      - name: Cache pip
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: opencl
+      # - name: Cache pip
+      #   uses: actions/cache@v3
+      #   with:
+      #     path: ~/.cache/pip
+      #     key: opencl
       - name: Install Dependencies
         run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - if: ${{ matrix.task == 'optimage' }}
@@ -164,11 +164,11 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.11
-    - name: Cache pip
-      uses: actions/cache@v3
-      with:
-        path: ~/Library/Caches/pip
-        key: metalwebgpu
+    # - name: Cache pip
+    #   uses: actions/cache@v3
+    #   with:
+    #     path: ~/Library/Caches/pip
+    #     key: metalwebgpu
     - name: Install Dependencies
       run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test LLaMA compile speed
@@ -215,11 +215,11 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: 3.8
-      - name: Cache pip
-        uses: actions/cache@v3
-        with:
-          path: ${{ matrix.backend=='clang'&&'~\AppData\Local\pip\cache'||'~/.cache/pip' }}
-          key: ${{ matrix.backend }}
+      # - name: Cache pip
+      #   uses: actions/cache@v3
+      #   with:
+      #     path: ${{ matrix.backend=='clang'&&'~\AppData\Local\pip\cache'||'~/.cache/pip' }}
+      #     key: ${{ matrix.backend }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n'}}" >> $GITHUB_ENV
       - name: Install packages (gpu)
