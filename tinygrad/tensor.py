@@ -170,6 +170,7 @@ class Tensor:
   def eye(dim:int, **kwargs):
     return Tensor([1], **kwargs).pad(((0,dim),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
 
+
   # ***** rng hlops *****
 
   @staticmethod
