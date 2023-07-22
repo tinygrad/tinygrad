@@ -231,13 +231,10 @@ jobs:
           sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl 
       - name: Install packages (cuda)
         if: matrix.backend == 'cuda'
-        # run: |
-        #   export DEBIAN_FRONTEND=noninteractive
-        #   sudo apt-get update -y
-        #   sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
         run: |
-          /bin/bash -c "$(curl -sL https://git.io/vokNn)"
-          sudo apt-fast install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
       - name: Cache gpuocelot
         if: matrix.backend == 'cuda'
         id: cache-build
