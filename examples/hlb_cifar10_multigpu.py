@@ -118,9 +118,29 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
       loss.backward()
 
       # sync gradients across ranks
+      # bucket grads into buckets in order to optimize allreduce performance
+      bucket_meta = {}
+      bucket = []
       for k, v in state_dict.items():
         if v.grad is not None:
-          v.grad.assign(collectives.allreduce(v.grad, cache_id=k) / getenv("WORLD_SIZE"))
+          bucket_meta[k] = (v.numel(), v.shape)
+          bucket.append(v.grad.flatten())
+        if len(bucket) == getenv("BUCKET_SIZE", 4):
+          grads = collectives.allreduce(Tensor.cat(*bucket), cache_id=k)
+          offset = 0
+          for k in bucket_meta:
+            size = bucket_meta[k][0]
+            state_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]) / getenv("WORLD_SIZE"))
+            offset += size
+          bucket = []
+          bucket_meta = {}
+      if len(bucket) > 0:
+        grads = collectives.allreduce(Tensor.cat(*bucket), cache_id="last")
+        offset = 0
+        for k in bucket_meta:
+          size = bucket_meta[k][0]
+          state_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]) / getenv("WORLD_SIZE"))
+          offset += size
 
       optimizer.step()
       lr_scheduler.step()
