@@ -4,14 +4,35 @@ from llvmlite import ir  # type: ignore
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token, MemOp, ConstOp
 from tinygrad.helpers import dtypes
 from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, TernaryOps
-
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
+
 def int_const(x): return ir.Constant(ir.IntType(64), x)
+
+# NOTE: symbolic produces expressions that require div/mod (round towards -infinity)
+#       but llvm's sdiv/srem rounds towards zero (called quotient/remainder)
+# div's cost is 1+1+6 instructions
+zero = int_const(0)
+def quot_to_div(a, b, ctx):
+  # div(a, b) => quot(a, b) - (a<0 xor b<0) given rem(a,b) != 0
+  # NOTE: b<0 check skipped because symbolic asserts it
+  quot = ctx.sdiv(a, b)
+  rem = ctx.srem(a, b)
+  offset = ctx.mul(ctx.zext(ctx.icmp_signed("<", a, zero), zero.type),
+                   ctx.zext(ctx.icmp_signed("!=", rem, zero), zero.type))
+  return ctx.sub(quot, offset)
+
+# mod's cost is 1+1+4 instructions
+def rem_to_mod(a, b, ctx):
+  # mod(a, b) => rem(a, b) + (a>0 xor b>0)*b given rem(a,b) != 0
+  rem = ctx.srem(a, b)
+  offset = ctx.mul(ctx.zext(ctx.icmp_signed("<", a, zero), zero.type), b)
+  return ctx.srem(ctx.add(rem, offset), b)
+
 render_llvm = {
   NumNode: lambda self,ops,ctx: int_const(self.b),
   MulNode: lambda self,ops,ctx: ctx.mul(self.a.render(ops,ctx), int_const(self.b)),
-  DivNode: lambda self,ops,ctx: ctx.sdiv(self.a.render(ops,ctx), int_const(self.b)),
-  ModNode: lambda self,ops,ctx: ctx.srem(self.a.render(ops,ctx), int_const(self.b)),
+  DivNode: lambda self,ops,ctx: quot_to_div(self.a.render(ops,ctx), int_const(self.b), ctx),
+  ModNode: lambda self,ops,ctx: rem_to_mod(self.a.render(ops,ctx), int_const(self.b), ctx),
   LtNode: lambda self,ops,ctx: ctx.icmp_signed("<", self.a.render(ops,ctx), int_const(self.b)),
   SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.add(a,b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.and_(a,b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx))
