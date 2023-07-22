@@ -2,7 +2,7 @@ from typing import Final, Dict, Callable, Any, List, Optional
 import functools
 from llvmlite import ir  # type: ignore
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token, MemOp, ConstOp
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import dtypes, DType
 from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, TernaryOps
 
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
@@ -125,9 +125,13 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
         else:
           element = bb[-1].fptrunc(element, dtype_to_llvm_dtype[args.memory_dtype])
       bb[-1].store(element, bb[-1].gep(func.args[buf_index[args.name]], [idx], inbounds=True))
+    if uop == UOps.BITCAST:
+      assert newvar is not None and isinstance(args, DType), "bitcast must specify datatype"
+      val = lvars[vin[0]]
+      lvars[newvar] = bb[-1].bitcast(val, dtype_to_llvm_dtype[args])
     if uop == UOps.ALU:
       lvars[newvar] = code_for_op[args](bb[-1], *[lvars[x] for x in vin])
-
+  
   bb[-1].ret_void()
   return str(module)
 

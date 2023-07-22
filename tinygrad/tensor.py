@@ -662,6 +662,7 @@ class Tensor:
   def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
   def float(self) -> Tensor: return self.cast(dtypes.float32)
   def half(self) -> Tensor: return self.cast(dtypes.float16)
+  def bitcast(self, dtype:DType) -> Tensor: return mlops.Bitcast.apply(self, dtype=dtype) if self.dtype != dtype else self
 
   # ***** Convenience stuff *****
   @property
