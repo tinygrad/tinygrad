@@ -11,7 +11,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI
 import pytest
 
-pytestmark = [pytest.mark.gpu, pytest.mark.clang]
+pytestmark = [pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
 
 def run_onnx_torch(onnx_model, inputs):
   import torch

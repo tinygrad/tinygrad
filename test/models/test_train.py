@@ -13,7 +13,7 @@ from models.vit import ViT
 from models.resnet import ResNet18
 import pytest
 
-pytestmark = pytest.mark.gpu
+pytestmark = pytest.mark.exclude_gpu
 
 BS = getenv("BS", 2)
 
