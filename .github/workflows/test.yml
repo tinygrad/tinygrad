@@ -36,7 +36,7 @@ jobs:
     - name: Run mypy
       run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
     - name: Install SLOCCount
-      run: sudo apt-get install sloccount
+      run: sudo apt install sloccount
     - name: Check <5000 lines
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
 
@@ -115,10 +115,10 @@ jobs:
         run: |
           wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
           echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-          sudo apt-get update
+          sudo apt update
       - name: Install OpenCL
         #run: sudo apt-get install -y pocl-opencl-icd
-        run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
+        run: sudo apt install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
       - name: Set up Python 3.8
         uses: actions/setup-python@v4
         with:
@@ -227,14 +227,14 @@ jobs:
         run: |
           wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
           echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-          sudo apt-get update
-          sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl 
+          sudo apt update
+          sudo apt install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl 
       - name: Install packages (cuda)
         if: matrix.backend == 'cuda'
         run: |
           export DEBIAN_FRONTEND=noninteractive
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+          sudo apt update -y
+          sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
       - name: Cache gpuocelot
         if: matrix.backend == 'cuda'
         id: cache-build
