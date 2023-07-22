@@ -1100,7 +1100,7 @@ class TestOps(unittest.TestCase):
 
   def test_gather(self):
     c = np.random.randn(4,5,6,9,5).astype(np.float32)
-    a = Tensor(c)
+    a = Tensor(c, dtype=dtypes.float32)
     b = torch.tensor(c)
 
     # for cases where indices is vector (indices.ndim == 1)
@@ -1112,12 +1112,18 @@ class TestOps(unittest.TestCase):
 
     # for cases where indices is matrix (indices.ndim > 1)
     mc = np.random.randint(4, size=[3,4,5])
-    ma = Tensor(mc, dtype=dtypes.int8)
+    test = np.random.randint(4, size=[3,4,5]).astype(np.int16)
+    ma = Tensor(test, dtype=dtypes.int8)
+    mb = torch.tensor(mc)
     for dim in range(c.ndim):
       with self.subTest(np.take.__name__, dim=dim):
-        x = np.take(c, mc.astype(np.int16), dim).astype(np.float32)
+        x = np.take(c, mc.astype(np.int16), dim).astype(np.float32) # no torch api for this
         y = a.gather(ma, dim=dim).numpy()
         np.testing.assert_allclose(x,y,atol=1e-6, rtol=1e-3)
+
+    # for torch.take() usage
+    helper_test_op([], lambda: torch.take(input=b, index=mb), lambda: a.flatten().gather(ma, dim=0), forward_only=True)
+    
 
 if __name__ == '__main__':
   np.random.seed(1337)
