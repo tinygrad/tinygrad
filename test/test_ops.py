@@ -1112,7 +1112,7 @@ class TestOps(unittest.TestCase):
 
     # for cases where indices is matrix (indices.ndim > 1)
     mc = np.random.randint(4, size=[3,4,5])
-    test = np.random.randint(4, size=[3,4,5]).astype(np.int16)
+    test = np.random.randint(4, size=[3,4,5]).astype(np.int8)
     ma = Tensor(test, dtype=dtypes.int8)
     mb = torch.tensor(mc)
     for dim in range(c.ndim):
@@ -1123,7 +1123,6 @@ class TestOps(unittest.TestCase):
 
     # for torch.take() usage
     helper_test_op([], lambda: torch.take(input=b, index=mb), lambda: a.flatten().gather(ma, dim=0), forward_only=True)
-    
 
 if __name__ == '__main__':
   np.random.seed(1337)
