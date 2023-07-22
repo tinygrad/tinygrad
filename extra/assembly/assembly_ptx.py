@@ -1,8 +1,9 @@
 import struct
 from tinygrad.codegen.assembly import AssemblyCodegen
-from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
 from tinygrad.codegen.linearizer import UOps
 from tinygrad.helpers import dtypes
+from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
+from tinygrad.runtime.ops_cuda import arch
 
 dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "u16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32"}
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
@@ -12,13 +13,13 @@ class PTXCodegen(AssemblyCodegen):
   #supports_constant_folding: bool = True
 
   def specialize(self, asm):
-    ins = [".version 7.8", ".target sm_86", ".address_size 64",
+    ins = [".version 8.2", ".target " + arch(), ".address_size 64",
            f".visible .entry test({', '.join(f'.param .u64 buf{i}' for i in range(len(self.bufs)))}) {{"]
 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.eq", UnaryOps.SQRT: "sqrt.approx",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
-           FusedOps.MULACC: "fma.rn"}
+           TernaryOps.MULACC: "fma.rn"}
 
     for uop, out, vin, arg in asm:
       if uop == UOps.DEFINE_REGISTER:

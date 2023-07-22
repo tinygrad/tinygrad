@@ -96,23 +96,55 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.ones_like(b), lambda: Tensor.ones_like(a), forward_only=True)
   def test_eye(self):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
+    helper_test_op([], lambda: torch.eye(1), lambda: Tensor.eye(1), forward_only=True)
+
+  def test_chunk(self):
+    tor = torch.arange(13).repeat(8, 1).chunk(6, 1)
+    ten = Tensor.arange(13).repeat((8, 1)).chunk(6, 1)
+    assert len(tor) == len(ten)
+    for i in range(len(tor)):
+      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
+
+    tor = torch.arange(13).repeat(8, 1).chunk(6, 0)
+    ten = Tensor.arange(13).repeat((8, 1)).chunk(6, 0)
+    assert len(tor) == len(ten)
+    for i in range(len(tor)):
+      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
+
+    tor = torch.arange(13).repeat(8, 1).chunk(3, -1)
+    ten = Tensor.arange(13).repeat((8, 1)).chunk(3, -1)
+    assert len(tor) == len(ten)
+    for i in range(len(tor)):
+      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
+
+    tor = torch.arange(13).repeat(8, 3, 3).chunk(3, -2)
+    ten = Tensor.arange(13).repeat((8, 3, 3)).chunk(3, -2)
+    assert len(tor) == len(ten)
+    for i in range(len(tor)):
+      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
 
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
-    helper_test_op([], lambda: torch.arange(5, 10, 3), lambda: Tensor.arange(10, 5, 3), forward_only=True)
-    helper_test_op([], lambda: torch.arange(10, 5, -3), lambda: Tensor.arange(5, 10, -3), forward_only=True)
-    helper_test_op([], lambda: torch.arange(11, 5, -3), lambda: Tensor.arange(5, 11, -3), forward_only=True)
+    helper_test_op([], lambda: torch.arange(5, 10, 3), lambda: Tensor.arange(5, 10, 3), forward_only=True)
+    helper_test_op([], lambda: torch.arange(10, 5, -3), lambda: Tensor.arange(10, 5, -3), forward_only=True)
+    helper_test_op([], lambda: torch.arange(11, 5, -3), lambda: Tensor.arange(11, 5, -3), forward_only=True)
   def test_where(self):
     helper_test_op(
       [(100,)],
       lambda x: torch.where(x > 0.5, 4, 2),
       lambda x: (x > 0.5).where(4, 2), forward_only=True)
 
-    for shps in [[(10,),(1,),(1,)], [(10,10),(10,),(10,)], [(100,)]*3, [(10,10)]*3]:
+    for shps in [[(8,),(1,),(1,)], [(10,10),(10,),(10,)], [(100,)]*3, [(10,10)]*3]:
       helper_test_op(
         shps,
         lambda x, a, b: torch.where(x > 0.5, a, b),
         lambda x, a, b: (x > 0.5).where(a, b), forward_only=True)
+
+  def test_where_permute(self):
+    helper_test_op(
+      [(5, 5)],
+      lambda x: torch.where(x > 0.5, 4, 2).permute((1, 0)),
+      lambda x: (x > 0.5).where(4, 2).permute((1, 0)), forward_only=True)
 
   def _test_cmp(self, fxn, reverse=True):
     for shps in [[(3, 4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
@@ -338,6 +370,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
     helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=1), lambda x: Tensor.cumsum(x, axis=1), atol=1e-6)
     helper_test_op([(20,30,40)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2), atol=1e-6)
+    helper_test_op([(20,30,40)], lambda x: torch.cumsum(x, dim=-1), lambda x: Tensor.cumsum(x, axis=-1), atol=1e-6)
   def test_matmul_simple(self):
     helper_test_op([(4), (4,4)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_matmul(self):
@@ -567,6 +600,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,2,3,4)], lambda x: x.movedim((3,0,2,1),(0,1,2,3)), lambda x: x.permute(order=(3,0,2,1)))
     helper_test_op([(3,4,5,6)], lambda x: x.movedim((3,2,1,0),(0,1,2,3)), lambda x: x.permute(order=(3,2,1,0)))
     helper_test_op([()], lambda x: x.permute(()), lambda x: x.permute(()))
+
 
   def test_reshape(self):
     helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,3,6,6)), lambda x: x.reshape(shape=(-1,3,6,6)))
@@ -1059,7 +1093,6 @@ class TestOps(unittest.TestCase):
     n = Tensor([1, float("nan")]).max().numpy()
     assert math.isnan(n.item()), f"{n.item()} is not nan"
 
-  @unittest.skip("this test is broken #942")
   def test_inf_where(self):
     x = Tensor.full((3, 3), float("inf"))
     n = (x < 0).where(x, 1).numpy()

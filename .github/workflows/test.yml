@@ -28,7 +28,7 @@ jobs:
     - name: Repo line count
       run: python3 sz.py
     - name: Lint with pylint
-      run: python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
+      run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with flake8
       run: flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E203,E304,E502,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
     - name: Lint tinygrad with pylint
@@ -65,6 +65,10 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
     - name: Run Pytest
       run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)"
+    - name: Fuzz Test symbolic
+      run: DEBUG=1 python test/external/fuzz_symbolic.py
+    - name: Fuzz Test shapetracker
+      run: PYTHONPATH="." DEBUG=1 python test/external/fuzz_shapetracker.py
     - name: Compile EfficientNet to C
       run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
@@ -171,9 +175,12 @@ jobs:
       run: PYTHONPATH="." METAL=1 python3 test/external/external_test_speed_llama.py
     #- name: Run dtype test
     #  run: DEBUG=4 METAL=1 python -m pytest test/test_dtype.py
-    - name: Run metal ops test
-      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
     # dtype test has issues on test_half_to_int8
+    - name: Run metal ops test
+      run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
+    - name: Run JIT test
+      run: DEBUG=2 METAL=1 python -m pytest test/test_jit.py
+    # TODO: why not testing the whole test/?
     - name: Run webgpu pytest
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_ops.py test/test_speed_v_torch.py test/test_nn.py test/test_jit.py test/test_randomness.py test/test_tensor.py test/test_assign.py test/test_conv.py test/test_nn.py test/test_custom_function.py test/test_conv_shapetracker.py
     - name: Build WEBGPU Efficientnet
