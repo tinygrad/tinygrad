@@ -16,6 +16,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.helpers import colored, getenv, DEBUG, CI
 from tinygrad.jit import TinyJit
+import pytest
+
+pytestmark = [pytest.mark.cuda, pytest.mark.gpu, pytest.mark.clang]
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 

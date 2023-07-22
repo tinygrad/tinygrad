@@ -5,6 +5,9 @@ import pstats
 import unittest
 import torch
 from tinygrad.tensor import Tensor, Device
+import pytest
+
+pytestmark = [pytest.mark.cuda, pytest.mark.gpu, pytest.mark.clang]
 
 def start_profile():
   import time
