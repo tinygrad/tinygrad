@@ -236,10 +236,8 @@ jobs:
         #   sudo apt-get update -y
         #   sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
         run: |
-          sudo add-apt-repository ppa:apt-fast/stable
-          sudo apt-get update -y
-          sudo apt-get -y install apt-fast
-          sudo apt-fast install -y git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+          /bin/bash -c "$(curl -sL https://git.io/vokNn)"
+          sudo apt-fast install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
       - name: Cache gpuocelot
         if: matrix.backend == 'cuda'
         id: cache-build
