@@ -120,5 +120,15 @@ class TestInt32Dtype(unittest.TestCase):
   def test_int32_upcast_float32(self): _test_ops(a_dtype=dtypes.int32, b_dtype=dtypes.float32, target_dtype=dtypes.float32)
   def test_int32_upcast_int64(self): _test_ops(a_dtype=dtypes.int32, b_dtype=dtypes.int64, target_dtype=dtypes.int64)
 
+class MyTest(unittest.TestCase):
+  def simple_cast_to_half(self):
+    #_test_cast(Tensor([1,2,3,4,5,6,7,8,9,10,11,12,13,14], dtype=dtypes.float16), dtypes.uint8, [1,2,3,4,5,6,7,8,9,10,11,12,13,14]) 
+    # _test_cast(Tensor(list(range(32)), dtype=dtypes.float16), dtypes.uint8, list(range(32)))
+    # _test_cast(Tensor(list(range(16)), dtype=dtypes.float16), dtypes.uint8, list(range(16)))
+    _test_cast(Tensor(list(range(8)), dtype=dtypes.float16), dtypes.uint8, list(range(8)))
+    _test_cast(Tensor(list(range(4)), dtype=dtypes.float16), dtypes.uint8, list(range(4)))
+    # _test_cast(Tensor(list(range(2)), dtype=dtypes.float16), dtypes.uint8, list(range(2)))
+    # _test_cast(Tensor(list(range(1)), dtype=dtypes.float16), dtypes.uint8, list(range(1)))
+    
 if __name__ == '__main__':
   unittest.main()
