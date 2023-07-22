@@ -3,11 +3,12 @@ import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, MemOp, ConstOp
 from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, colored, getenv, prod, DType
-from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
+from tinygrad.shape.symbolic import NumNode, Variable, DivNode, ModNode, AndNode, render_python
 
 # div is different in cl than python
 render_cl = render_python.copy()
-render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops, ctx)}/{self.b})"
+render_cl[DivNode] = lambda self,ops,ctx: "( {0}/{1} - ({0}<0 && {0}%{1}!=0) )".format(self.a.render(ops,ctx), self.b)
+render_cl[ModNode] = lambda self,ops,ctx: "( ({0}%{1} + ({0}<0)*{1})%{1} )".format(self.a.render(ops,ctx), self.b)
 render_cl[AndNode] = lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
 
 class CStyleLanguage(NamedTuple):

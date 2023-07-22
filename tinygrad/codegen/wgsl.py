@@ -5,6 +5,11 @@ from typing import List, Union
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 import math
 from typing import Tuple
+from tinygrad.shape.symbolic import DivNode, ModNode
+
+# wgsl requires explicit cast
+render_cl[DivNode] = lambda self,ops,ctx: "( {0}/{1} - i32({0}<0 && {0}%{1}!=0) )".format(self.a.render(ops,ctx), self.b)
+render_cl[ModNode] = lambda self,ops,ctx: "( ({0}%{1} + i32({0}<0)*{1})%{1} )".format(self.a.render(ops,ctx), self.b)
 
 type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
 class WGSLLanguage(CStyleLanguage):
