@@ -1,6 +1,6 @@
 import itertools
 import random
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, CI
 from tinygrad.shape.symbolic import Variable
 random.seed(42)
 
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     rngs = []
     for t in tape:
       expr, rng = t(expr)
-      if DEBUG >= 1: print(t.__name__, rng)
+      if DEBUG >= 1 and not CI: print(t.__name__, rng)
       rngs.append(rng)
     if DEBUG >=1: print(expr)
     space = list(itertools.product(range(u1.min, u1.max+1), range(u2.min, u2.max+1), range(u3.min, u3.max+1)))
@@ -59,4 +59,4 @@ if __name__ == "__main__":
       for t,r in zip(tape, rngs): rn, _ = t(rn, r)
       num = eval(expr.render())
       assert num == rn, f"mismatched {expr.render()} at {v1=} {v2=} {v3=} = {num} != {rn}"
-      if DEBUG >= 1: print(f"matched {expr.render()} at {v1=} {v2=} {v3=} = {num} == {rn}")
+      if DEBUG >= 1 and not CI: print(f"matched {expr.render()} at {v1=} {v2=} {v3=} = {num} == {rn}")

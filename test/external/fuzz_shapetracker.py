@@ -1,5 +1,5 @@
 import random
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG,CI
 from test.unit.test_shapetracker import CheckingShapeTracker
 random.seed(42)
 
@@ -7,13 +7,13 @@ def do_permute(st):
   perm = list(range(0, len(st.shape)))
   random.shuffle(perm)
   perm = tuple(perm)
-  if DEBUG >= 1: print("st.permute(", perm, ")")
+  if DEBUG >= 1 and not CI: print("st.permute(", perm, ")")
   st.permute(perm)
 
 def do_pad(st):
   c = random.randint(0, len(st.shape)-1)
   pad = tuple((random.randint(0,2), random.randint(0,2)) if i==c else (0,0) for i in range(len(st.shape)))
-  if DEBUG >= 1: print("st.pad(", pad, ")")
+  if DEBUG >= 1 and not CI: print("st.pad(", pad, ")")
   st.pad(pad)
 
 def do_reshape_split_one(st):
@@ -21,14 +21,14 @@ def do_reshape_split_one(st):
   poss = [n for n in [1,2,3,4,5] if st.shape[c]%n == 0]
   spl = random.choice(poss)
   shp = st.shape[0:c] + (st.shape[c]//spl, spl) + st.shape[c+1:]
-  if DEBUG >= 1: print("st.reshape(", shp, ")")
+  if DEBUG >= 1 and not CI: print("st.reshape(", shp, ")")
   st.reshape(shp)
 
 def do_reshape_combine_two(st):
   if len(st.shape) < 2: return
   c = random.randint(0, len(st.shape)-2)
   shp = st.shape[:c] + (st.shape[c] * st.shape[c+1], ) + st.shape[c+2:]
-  if DEBUG >= 1: print("st.reshape(", shp, ")")
+  if DEBUG >= 1 and not CI: print("st.reshape(", shp, ")")
   st.reshape(shp)
 
 def do_shrink(st):
@@ -36,13 +36,13 @@ def do_shrink(st):
   while 1:
     shrink = tuple((random.randint(0,s), random.randint(0,s)) if i == c else (0,s) for i,s in enumerate(st.shape))
     if all(x<y for (x,y) in shrink): break
-  if DEBUG >= 1: print("st.shrink(", shrink, ")")
+  if DEBUG >= 1 and not CI: print("st.shrink(", shrink, ")")
   st.shrink(shrink)
 
 def do_stride(st):
   c = random.randint(0, len(st.shape)-1)
   stride = tuple(random.choice([-2,-1,2]) if i==c else 1 for i in range(len(st.shape)))
-  if DEBUG >= 1: print("st.stride(", stride, ")")
+  if DEBUG >= 1 and not CI: print("st.stride(", stride, ")")
   st.stride(stride)
 
 def do_expand(st):
@@ -50,7 +50,7 @@ def do_expand(st):
   if len(c) == 0: return
   c = random.choice(c)
   expand = tuple(random.choice([2,3,4]) if i==c else s for i,s in enumerate(st.shape))
-  if DEBUG >= 1: print("st.expand(", expand, ")")
+  if DEBUG >= 1 and not CI: print("st.expand(", expand, ")")
   st.expand(expand)
 
 if __name__ == "__main__":
