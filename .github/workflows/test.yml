@@ -272,9 +272,9 @@ jobs:
     - name: Update packages
       run: |
         export DEBIAN_FRONTEND=noninteractive
-        sudo apt-get update -y
+        sudo apt update -y
     - name: Install packages
-      run: sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+      run: sudo apt install -y curl wget sudo && /bin/bash -c "$(curl -sL https://git.io/vokNn)" && sudo apt-fast install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
     - name: Cache gpuocelot
       id: cache-build
       uses: actions/cache@v3
