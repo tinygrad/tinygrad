@@ -18,14 +18,14 @@ Tensor.manual_seed(31337)
 # hyperparameters
 batch_size = 32 # how many independent sequences will we process in parallel?
 block_size = 8 # what is the maximum context length for predictions?
-max_iters = 5000
-eval_interval = 500
-learning_rate = 3e-4
-eval_iters = 200
+max_iters = 1000
+# eval_interval = 500
+learning_rate = 1e-3
+# eval_iters = 200
 n_embd = 32
-n_head = 6
-n_layer = 6
-dropout = 0.2
+# n_head = 6
+# n_layer = 6
+# dropout = 0.2
 
 def tempestLoop():
   pass
@@ -58,12 +58,35 @@ def get_batch(split):
   y = Tensor.stack([data[i+1:i+block_size+1] for i in ix.numpy()])
   return x, y
 
+class Head():
+  """ one head of self-attention """
 
-class BigramLanguageModel():
+  def __init__(self, head_size):
+    self.key = nn.Linear(n_embd, head_size, bias=False)
+    self.query = nn.Linear(n_embd, head_size, bias=False)
+    self.value = nn.Linear(n_embd, head_size, bias=False)
+
+  def __call__(self, x):
+    B,T,C = x.shape
+    k = self.key(x)   # (B,T,C)
+    q = self.query(x) # (B,T,C)
+    # compute attention scores ("affinities")
+    wei = q @ Tensor.transpose(k, -2, -1) * C**-0.5 # (B, T, hs) @ (B, hs, T) -> (B, T, T)
+    # equal to a lower triangular matrix (tril) masked_fill in pytorch when added to wei
+    mask = Tensor(np.triu(np.ones((T,T), dtype=np.float32) * -np.inf, k=1))
+    wei = wei + mask
+    wei = wei.softmax(-1)
+    # perform the weighted aggregation of the values
+    v = self.value(x) # (B,T,hs)
+    out = wei @ v  # (B, T, T) @ (B, T, hs) -> (B, T, hs)
+    return out
+
+class GPTLanguageModel():
   def __init__(self, vocab_size):
     # each token directly reads off the logits for the next token from a lookup table
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
     self.position_embedding_table = nn.Embedding(block_size, n_embd)
+    self.sa_head = Head(n_embd)
     self.lm_head = nn.Linear(n_embd, vocab_size)
 
   #def __call__(self, idx, targets=None):
@@ -74,6 +97,7 @@ class BigramLanguageModel():
     tok_emb = self.token_embedding_table(idx) # (B,T,C)
     pos_emb = self.position_embedding_table(Tensor.arange(T, dtype=dtypes.int8).reshape(1,T)) # (T,C)
     x = tok_emb + pos_emb # (B,T,C)
+    x = self.sa_head(x) # apply one head of self-attention (B,T,C)
     logits = self.lm_head(x) # (B,T,vocab_size)
     
     if targets is None:
@@ -84,12 +108,13 @@ class BigramLanguageModel():
       loss = cross_entropy(predictions, targets.numpy())
     return logits, loss
 
-
   def generate(self, idx, max_new_tokens):
     # idx is (B, T) array of indices in the current context
     for _ in range(max_new_tokens):
+      # crop idx to the last block_size tokens
+      idx_cond = idx[:, -block_size:]
       # get the predictions
-      logits, _ = self(idx)
+      logits, _ = self(idx_cond)
       # focus only on the last time step
       logits = logits[:, -1, :] # becomes (B, C)
       # apply softmax to get probabilities
@@ -138,13 +163,13 @@ if __name__ == "__main__":
   train_data = data[:n]
   val_data = data[n:]
       
-  m = BigramLanguageModel(vocab_size)
+  m = GPTLanguageModel(vocab_size)
   
   parameters = get_parameters(m)
   optimizer = optim.AdamW(parameters, lr=1e-3)
 
   Tensor.training = True
-  for epoch in range(1000):
+  for iter in range(max_iters):
     # sample a batch of data
     xb, yb = get_batch("train")
 
@@ -153,10 +178,11 @@ if __name__ == "__main__":
     optimizer.zero_grad()
     loss.backward()        
     optimizer.step()
-    if (epoch % 50 == 0):
-      print("epoch: {0} loss: {1}".format(epoch, loss.numpy()))
+    if (iter % 50 == 0):
+      print("epoch: {0} loss: {1}".format(iter, loss.numpy()))
   
   print("final loss: {0}".format(loss.numpy()))
 
   Tensor.training = False
-  print(decode(m.generate(Tensor.zeros((1, 1), dtypes.int64), max_new_tokens=500).numpy()[0]))
+  context = Tensor.zeros((1, 1), dtypes.int64)
+  print(decode(m.generate(context, max_new_tokens=500).numpy()[0]))
