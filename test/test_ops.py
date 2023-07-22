@@ -1099,8 +1099,8 @@ class TestOps(unittest.TestCase):
     assert np.all(n == 1.)
 
   def test_gather(self):
-    c = np.random.randn(4,5,6,9,5)
-    a = Tensor(c, dtype=dtypes.float32)
+    c = np.random.randn(4,5,6,9,5).astype(np.float32)
+    a = Tensor(c)
     b = torch.tensor(c)
 
     # for cases where indices is vector (indices.ndim == 1)
@@ -1111,11 +1111,11 @@ class TestOps(unittest.TestCase):
         helper_test_op([], lambda: torch.index_select(input=b, index=vb, dim=dim), lambda: a.gather(va, dim=dim), forward_only=True)
 
     # for cases where indices is matrix (indices.ndim > 1)
-    mc = np.random.randint(4, size=[3,4,5]).astype(np.int32)
+    mc = np.random.randint(4, size=[3,4,5])
     ma = Tensor(mc, dtype=dtypes.float32)
     for dim in range(c.ndim):
       with self.subTest(np.take.__name__, dim=dim):
-        x = np.take(c, mc, dim).astype(np.float32)
+        x = np.take(c, mc.astype(np.int16), dim).astype(np.float32)
         y = a.gather(ma, dim=dim).numpy()
         np.testing.assert_allclose(x,y,atol=1e-6, rtol=1e-3)
 
