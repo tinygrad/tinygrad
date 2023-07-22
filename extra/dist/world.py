@@ -23,11 +23,10 @@ def send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
   rb = RawShmBuffer(x.size, x.dtype, device=device)
   # we only support copyout buffers right now
   x._copyout(np.frombuffer(rb._buffer(), dtype=x.dtype.np))
+  dist.OOB.send((shm_name, cache_id), target_rank)
 
   # jit support
   if GlobalCounters.cache is not None: GlobalCounters.cache.append((jit_send_rb, [x, rb, target_rank]))
-
-  dist.OOB.send((shm_name, cache_id), target_rank)
 setattr(send_rb, "shared_memory_cache", {})
 
 # receive a rawbuffer from the target rank
@@ -37,12 +36,12 @@ def recv_rb(x:RawBuffer, target_rank:int):
   rb = RawShmBuffer(x.size, x.dtype, device=device)
   x._copyin(rb.toCPU())
 
-  # jit support
-  if GlobalCounters.cache is not None: GlobalCounters.cache.append((jit_recv_rb, [x, rb, target_rank]))
-
   if extra[1] is None:
     (s := shared_memory.SharedMemory(name=extra[0])).close()
     s.unlink()
+
+  # jit support
+  if GlobalCounters.cache is not None: GlobalCounters.cache.append((jit_recv_rb, [x, rb, target_rank]))
 
 # fake the function signature of ASTRunner so we can put it in the cache
 def jit_send_rb(args:Tuple[RawBuffer, RawShmBuffer, int], jit=False, force_wait=False):
