@@ -18,7 +18,7 @@ from tinygrad.helpers import colored, getenv, DEBUG, CI
 from tinygrad.jit import TinyJit
 import pytest
 
-pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
+pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exclude_clang, pytest.mark.webgpu]
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 

@@ -6,6 +6,9 @@ import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
 from tinygrad.lazy import Device
+import pytest
+
+pytestmark = pytest.mark.webgpu
 
 if CI:
   import warnings

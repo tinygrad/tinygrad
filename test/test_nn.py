@@ -9,7 +9,7 @@ from tinygrad.nn import BatchNorm2d, Conv1d, ConvTranspose1d, Conv2d, ConvTransp
 import torch
 import pytest
 
-pytestmark = pytest.mark.exclude_cuda
+pytestmark = [pytest.mark.exclude_cuda, pytest.mark.webgpu]
 
 class TestNN(unittest.TestCase):
 
