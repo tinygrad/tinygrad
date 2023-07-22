@@ -2,8 +2,8 @@
 filename =
     */tinygrad/*.py,
     */test/*.py
-select=F,W6
-select-extend=E112,E113,E117,E124,E203,E272,E303,E304,E502,E702,E703,E71,E72,E731,W191
+select=F,W6,E71,E72
+select-extend=E112,E113,E117,E124,E203,E272,E303,E304,E502,E702,E703,E731,W191
 indent-size=2
 per-file-ignores =
-    test/*: F401, F403, F405, F541, F811, F821, F841
+    test/*: F401, F403, F405, F541, E722, F811, F821, F841
