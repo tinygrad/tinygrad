@@ -66,9 +66,9 @@ jobs:
     - name: Run Pytest
       run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)"
     - name: Fuzz Test symbolic
-      run: DEBUG=1 python test/external/fuzz_symbolic.py
+      run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
-      run: PYTHONPATH="." DEBUG=1 python test/external/fuzz_shapetracker.py
+      run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
     - name: Compile EfficientNet to C
       run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
