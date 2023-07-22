@@ -1112,7 +1112,7 @@ class TestOps(unittest.TestCase):
 
     # for cases where indices is matrix (indices.ndim > 1)
     mc = np.random.randint(4, size=[3,4,5])
-    ma = Tensor(mc, dtype=dtypes.float32)
+    ma = Tensor(mc, dtype=dtypes.int8)
     for dim in range(c.ndim):
       with self.subTest(np.take.__name__, dim=dim):
         x = np.take(c, mc.astype(np.int16), dim).astype(np.float32)
