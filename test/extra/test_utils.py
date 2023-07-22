@@ -25,6 +25,27 @@ class TestFetch(unittest.TestCase):
     pimg = Image.open(io.BytesIO(img))
     assert pimg.size == (705, 1024)
 
+class TestFetchRelative(unittest.TestCase):
+  def setUp(self):
+    # for testing ./
+    with open('test_file.txt', 'x') as f:
+      f.write("12345")
+    # for testing ../
+    os.mkdir('test_file_path')
+
+  def tearDown(self):
+    os.remove('test_file.txt')
+    os.rmdir('test_file_path')
+  
+  #test ./
+  def test_fetch_relative_dotslash(self):
+    self.assertEqual(b'12345', fetch("./test_file.txt"))
+  
+  #test ../
+  def test_fetch_relative_dotdotslash(self):
+    os.chdir('test_file_path')
+    self.assertEqual(b'12345', fetch("../test_file.txt"))
+    os.chdir('../')
 
 class TestDownloadFile(unittest.TestCase):
   def setUp(self):
