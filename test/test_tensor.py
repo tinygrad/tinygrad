@@ -5,6 +5,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, OpType
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
+import pytest
+
+pytestmark = pytest.mark.webgpu
 
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)

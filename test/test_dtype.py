@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad.helpers import getenv, DType, DEBUG
+from tinygrad.helpers import getenv, DType, DEBUG, CI
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor, dtypes
 from extra.utils import OSX
