@@ -12,28 +12,28 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install dependencies
-      run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Repo line count
-      run: python3 sz.py
-    - name: Lint with pylint
-      run: python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
-    - name: Lint with flake8
-      run: flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E203,E304,E502,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
-    - name: Lint tinygrad with pylint
-      run: pylint tinygrad/
-    - name: Run mypy
-      run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
-    - name: Install SLOCCount
-      run: sudo apt-get install sloccount
-    - name: Check <5000 lines
-      run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Install dependencies
+        run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Repo line count
+        run: python3 sz.py
+      - name: Lint with pylint
+        run: python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
+      - name: Lint with flake8
+        run: flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E203,E304,E502,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
+      - name: Lint tinygrad with pylint
+        run: pylint tinygrad/
+      - name: Run mypy
+        run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
+      - name: Install SLOCCount
+        run: sudo apt-get install sloccount
+      - name: Check <5000 lines
+        run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
 
   testcpu:
     name: CPU Tests
@@ -41,40 +41,40 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Test Docs
-      run: python docs/abstractions.py
-    - name: Test Quickstart
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
-    - name: Run Pytest
-      run: python -m pytest -s -v -n=auto test/
-  
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Install Dependencies
+        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Test Docs
+        run: python docs/abstractions.py
+      - name: Test Quickstart
+        run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
+      - name: Run Pytest
+        run: python -m pytest -s -v -n=auto test/
+
   testwebgpu:
     name: WebGPU Tests
     runs-on: macos-13
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e '.[testing,webgpu]' --extra-index-url https://download.pytorch.org/whl/cpu
-    # - name: Set Env
-    #   run: printf "WEBGPU=1\nWGPU_BACKEND_TYPE=D3D12\n" >> $GITHUB_ENV
-    - name: Run Pytest
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -s -v -n=auto test/test_ops.py test/test_speed_v_torch.py test/test_nn.py test/test_jit.py test/test_randomness.py test/test_tensor.py test/test_assign.py test/test_conv.py test/test_nn.py test/test_custom_function.py test/test_conv_shapetracker.py
-    - name: Build WEBGPU Efficientnet
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.webgpu.compile_webgpu
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Install Dependencies
+        run: pip install -e '.[testing,webgpu]' --extra-index-url https://download.pytorch.org/whl/cpu
+      # - name: Set Env
+      #   run: printf "WEBGPU=1\nWGPU_BACKEND_TYPE=D3D12\n" >> $GITHUB_ENV
+      - name: Run Pytest
+        run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -s -v -n=auto test/test_ops.py test/test_speed_v_torch.py test/test_nn.py test/test_jit.py test/test_randomness.py test/test_tensor.py test/test_assign.py test/test_conv.py test/test_nn.py test/test_custom_function.py test/test_conv_shapetracker.py
+      - name: Build WEBGPU Efficientnet
+        run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.webgpu.compile_webgpu
     # - name: Install Puppeteer
     #   run: npm install puppeteer
     # - name: Run Efficientnet
@@ -85,20 +85,20 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e .
-    - name: Compile EfficientNet to C
-      run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
-    - name: Compile C to native
-      run: clang -O2 recognize.c -lm -o recognize
-    - name: Test EfficientNet
-      run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Install Dependencies
+        run: pip install -e .
+      - name: Compile EfficientNet to C
+        run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
+      - name: Compile C to native
+        run: clang -O2 recognize.c -lm -o recognize
+      - name: Test EfficientNet
+        run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
 
   testllvm:
     name: LLVM Tests
@@ -106,16 +106,16 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e '.[llvm,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Run Pytest
-      run: ENABLE_METHOD_CACHE=1 LLVM=1 python -m pytest -s -v -n=auto test/
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Install Dependencies
+        run: pip install -e '.[llvm,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Run Pytest
+        run: ENABLE_METHOD_CACHE=1 LLVM=1 python -m pytest -s -v -n=auto test/
 
   testclang:
     strategy:
@@ -125,18 +125,18 @@ jobs:
     name: CLANG Tests ${{ matrix.os }} (w method cache)
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Set env
-      run: printf "CI=1\nCLANG=1\nENABLE_METHOD_CACHE=1" >> $GITHUB_ENV
-    - name: Run Pytest
-      run: python -m pytest -s -v -n=auto test/
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Install Dependencies
+        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Set env
+        run: printf "CI=1\nCLANG=1\nENABLE_METHOD_CACHE=1" >> $GITHUB_ENV
+      - name: Run Pytest
+        run: python -m pytest -s -v -n=auto test/
 
   testtorch:
     name: Torch Tests
@@ -144,18 +144,18 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Run Pytest
-      run: TORCH=1 python -m pytest -s -v -n=auto test/
-    - name: Run ONNX
-      run: TORCH=1 python -m pytest test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Install Dependencies
+        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Run Pytest
+        run: TORCH=1 python -m pytest -s -v -n=auto test/
+      - name: Run ONNX
+        run: TORCH=1 python -m pytest test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
 
   testgpu:
     name: GPU Tests
@@ -163,28 +163,28 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Update packages
-      run: |
-        wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
-        echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-        sudo apt-get update
-    - name: Install OpenCL
-      #run: sudo apt-get install -y pocl-opencl-icd
-      run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Run Optimizer Test (OPT 2 and 3)
-      run: |
-        PYTHONPATH="." OPT=2 GPU=1 python test/external/external_test_opt.py
-        PYTHONPATH="." OPT=3 GPU=1 python test/external/external_test_opt.py
-    - name: Run Pytest (default)
-      run: GPU=1 python -m pytest -s -v -n=auto test/
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Update packages
+        run: |
+          wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt-get update
+      - name: Install OpenCL
+        #run: sudo apt-get install -y pocl-opencl-icd
+        run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Install Dependencies
+        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Run Optimizer Test (OPT 2 and 3)
+        run: |
+          PYTHONPATH="." OPT=2 GPU=1 python test/external/external_test_opt.py
+          PYTHONPATH="." OPT=3 GPU=1 python test/external/external_test_opt.py
+      - name: Run Pytest (default)
+        run: GPU=1 python -m pytest -s -v -n=auto test/
 
   testopencl:
     name: openpilot (OpenCL) Test
@@ -192,34 +192,34 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Update packages
-      run: |
-        wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
-        echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-        sudo apt-get update
-    - name: Install OpenCL
-      #run: sudo apt-get install -y pocl-opencl-icd
-      run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Test openpilot model compile and size
-      run: |
-        DEBUG=2 ALLOWED_KERNEL_COUNT=199 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
-        python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
-    - name: Test GPU IMAGE ops
-      run: |
-        GPU=1 IMAGE=1 python3 test/test_ops.py
-        FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 test/test_ops.py
-    - name: Test openpilot model correctness (float32)
-      run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
-    - name: Test tensor core ops
-      run: GPU=1 TC=2 python3 test/test_ops.py
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Update packages
+        run: |
+          wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt-get update
+      - name: Install OpenCL
+        #run: sudo apt-get install -y pocl-opencl-icd
+        run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Install Dependencies
+        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Test openpilot model compile and size
+        run: |
+          DEBUG=2 ALLOWED_KERNEL_COUNT=199 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+          python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
+      - name: Test GPU IMAGE ops
+        run: |
+          GPU=1 IMAGE=1 python3 test/test_ops.py
+          FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 test/test_ops.py
+      - name: Test openpilot model correctness (float32)
+        run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+      - name: Test tensor core ops
+        run: GPU=1 TC=2 python3 test/test_ops.py
 
   testmetal:
     name: Metal Tests
@@ -227,20 +227,20 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.11
-    - name: Install Dependencies
-      run: pip install -e '.[metal,testing]'
-    - name: Test LLaMA compile speed
-      run: PYTHONPATH="." METAL=1 python3 test/external/external_test_speed_llama.py
-    #- name: Run dtype test
-    #  run: DEBUG=4 METAL=1 python -m pytest test/test_dtype.py
-    - name: Run ops test
-      run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+      - name: Install Dependencies
+        run: pip install -e '.[metal,testing]'
+      - name: Test LLaMA compile speed
+        run: PYTHONPATH="." METAL=1 python3 test/external/external_test_speed_llama.py
+      #- name: Run dtype test
+      #  run: DEBUG=4 METAL=1 python -m pytest test/test_dtype.py
+      - name: Run ops test
+        run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
     # dtype test has issues on test_half_to_int8
 
   testdocker:
@@ -249,13 +249,23 @@ jobs:
     if: ${{ false }}
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Build Docker
-      run: docker build -t tinygrad -f test/Dockerfile .
-    - name: Test Docker
-      run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Build Docker
+        run: docker build -t tinygrad -f test/Dockerfile .
+      - name: Test Docker
+        run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
 
+  testarm64:
+    name: arm64 Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Build arm64 machine
+        run: docker build -t tinygrad-arm64 -f test/extra/arm64_dockerfile .
+      - name: Test arm64
+        run: docker run -e CLANG=1 -e ARM=1 -it tinygrad-arm64 python -m pytest -s -v -n=auto test
 
   testcuda:
     name: (emulated) cuda test
@@ -263,51 +273,51 @@ jobs:
     timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Update packages
-      run: |
-        export DEBIAN_FRONTEND=noninteractive
-        sudo apt-get update -y
-    - name: Install packages
-      run: sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
-    - name: Cache gpuocelot
-      id: cache-build
-      uses: actions/cache@v3
-      env:
-        cache-name: cache-gpuocelot-build
-      with:
-        path: ${{ github.workspace }}/gpuocelot/ocelot/
-        key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
-        restore-keys: |
-          ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
-    - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
-      name: Clone gpuocelot
-      uses: actions/checkout@v3
-      with:
-        repository: gpuocelot/gpuocelot
-        ref: 19626fc00b6ee321638c3111074269c69050e091
-        path: ${{ github.workspace }}/gpuocelot
-        submodules: true
-    - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
-      name: Compile gpuocelot
-      run: |
-        cd ${{ github.workspace }}/gpuocelot/ocelot
-        mkdir build
-        cd build
-        cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
-        ninja
-    - name: Install gpuocelot
-      run: |
-        cd ${{ github.workspace }}/gpuocelot/ocelot/build
-        sudo ninja install
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-        cache: 'pip'
-        cache-dependency-path: setup.py
-    - name: Install tinygrad dependencies
-      run: pip install -e '.[testing, cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Run pytest
-      run: FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Update packages
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -y
+      - name: Install packages
+        run: sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+      - name: Cache gpuocelot
+        id: cache-build
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-gpuocelot-build
+        with:
+          path: ${{ github.workspace }}/gpuocelot/ocelot/
+          key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
+          restore-keys: |
+            ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
+      - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
+        name: Clone gpuocelot
+        uses: actions/checkout@v3
+        with:
+          repository: gpuocelot/gpuocelot
+          ref: 19626fc00b6ee321638c3111074269c69050e091
+          path: ${{ github.workspace }}/gpuocelot
+          submodules: true
+      - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
+        name: Compile gpuocelot
+        run: |
+          cd ${{ github.workspace }}/gpuocelot/ocelot
+          mkdir build
+          cd build
+          cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
+          ninja
+      - name: Install gpuocelot
+        run: |
+          cd ${{ github.workspace }}/gpuocelot/ocelot/build
+          sudo ninja install
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+          cache: "pip"
+          cache-dependency-path: setup.py
+      - name: Install tinygrad dependencies
+        run: pip install -e '.[testing, cuda]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Run pytest
+        run: FORWARD_ONLY=1 JIT=1 OPT=2 CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test --ignore=test/external --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_specific_conv.py --ignore=test/test_net_speed.py --ignore=test/test_nn.py -k "not half"
