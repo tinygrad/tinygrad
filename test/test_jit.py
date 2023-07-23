@@ -101,7 +101,17 @@ class TestJit(unittest.TestCase):
     def f(a, b): return (a+b).realize()
     a = Tensor([1, 2, 3])
     for i in range(5):
-      np.testing.assert_equal(f(a, Tensor([i])).cpu().numpy(), (a+i).cpu().numpy())
+      np.testing.assert_equal(f(a, Tensor([i], force_buffer=True)).cpu().numpy(), (a+i).cpu().numpy())
+    assert len(f.jit_cache) == 1
+
+  def test_jit_size1_input_fail(self):
+    @TinyJit
+    def f(a, b): return (a+b).realize()
+    a = Tensor([1, 2, 3])
+    # this fails because the input folds into constant and becomes non-updatable in jit
+    with self.assertRaises(AssertionError):
+      for i in range(5):
+        np.testing.assert_equal(f(a, Tensor([i])).cpu().numpy(), (a+i).cpu().numpy())
     assert len(f.jit_cache) == 1
 
   def test_jit_output_non_tensor_fail(self):
