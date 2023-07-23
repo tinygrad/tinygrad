@@ -20,6 +20,7 @@ from examples.train_resnet import ComposeTransforms
 def set_seed(seed):
   Tensor.manual_seed(getenv('SEED', seed)) # Deterministic
   np.random.seed(getenv('SEED', seed))
+  random.seed(getenv('SEED', seed))
 
 num_classes = 10
 
@@ -60,39 +61,24 @@ class SpeedyResNet:
     return x.sequential(self.net).log_softmax()
 
 transform = ComposeTransforms([
-    lambda x: x / 255.0,
+    # lambda x: x / 255.0,
     lambda x: (x - Tensor(cifar_mean).reshape((1,3,1,1)))/ Tensor(cifar_std).reshape((1,3,1,1)),
 ])
 
-def fetch_batches(X, Y, BS, is_train=False):
+def fetch_batches(X, Y, BS, seed, is_train=False):
   while True:
+    set_seed(seed)
+    order = list(range(0, X.shape[0], BS))
+    random.shuffle(order)
     for i in range(0, X.shape[0], BS):
-      # Move from disk/cache to device
-      x = transform(X[i:i+BS,:].to(device=Device.DEFAULT).float())
-      # One-hot encoding Y
-      y = Tensor(np.eye(10, dtype=np.float32)[Y[i:i+BS].numpy()])
+      # padding for matching buffer size during JIT
+      batch_end = min(i+BS, Y.shape[0])
+      x = transform(X[batch_end-BS:batch_end,:].to(device=Device.DEFAULT).float())
+      # NOTE -10 was used instead of 1 as labels
+      y = Tensor(-10*np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()])
       yield x, y
     if not is_train: break
-
-# def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
-#   def _shuffle(all_X, all_Y):
-#     if is_train:
-#       ind = np.arange(all_Y.shape[0])
-#       np.random.shuffle(ind)
-#       all_X, all_Y = all_X[ind, ...], all_Y[ind, ...]
-#     return all_X, all_Y
-#   while True:
-#     set_seed(seed)
-#     all_X, all_Y = _shuffle(all_X, all_Y)
-#     for batch_start in range(0, all_Y.shape[0], BS):
-#       batch_end = min(batch_start+BS, all_Y.shape[0])
-#       X = Tensor(all_X[batch_end-BS:batch_end]) # batch_end-BS for padding
-#       Y = np.zeros((BS, num_classes), np.float32)
-#       Y[range(BS),all_Y[batch_end-BS:batch_end]] = -1.0*num_classes
-#       Y = Tensor(Y.reshape(BS, num_classes))
-#       yield X, Y
-#     if not is_train: break
-#     seed += 1
+    seed += 1
 
 def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.0546875, momentum=0.8, wd=0.15, label_smoothing=0., mixup_alpha=0.025, seed=6):
   set_seed(seed)
@@ -108,12 +94,11 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     Y_train = np.random.randint(0,10,size=(N), dtype=np.int32)
     X_test, Y_test = X_train, Y_train
   else:
-    X_train, Y_train, X_test, Y_test = fetch_cifar()
+    X_train, Y_train, X_test, Y_test = fetch_cifar()    # they are disk tensor now
   
   model = SpeedyResNet()
   optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
-  lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR,
-                            total_steps=STEPS, pct_start=PCT_START)
+  lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
 
   # JIT at every run
   @TinyJit
@@ -135,7 +120,8 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     loss = out.mul(Y).mean()
     return out.realize(), loss.realize()
 
-  # 97 steps in 2 seconds = 20ms / step
+  # 97 steps in 2 seconds = 20ms / step  Tensor.training = True
+
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
   # 4 seconds for tfloat32 ~ 28 TFLOPS, 41% of max 68
   # 6.4 seconds for float32 ~ 17 TFLOPS, 50% of max 34.1
@@ -145,18 +131,15 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
   best_eval = -1
   i = 0
-  # left_batcher, right_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True), fetch_batches(X_train, Y_train, BS=BS, seed=seed+1, is_train=True)
-  # print(X_train)
-  # print(Y_train)
-  left_batcher, right_batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True), fetch_batches(X_train, Y_train, BS=BS, is_train=True)
+  left_batcher, right_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True), fetch_batches(X_train, Y_train, BS=BS, seed=seed+1, is_train=True)
   while i <= STEPS:
     (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
     mixup_prob = Tensor(np.random.beta(MIXUP_ALPHA, MIXUP_ALPHA, (1, )).astype(np.float32)).contiguous() if MIXUP_ALPHA > 0 else Tensor.ones(Xr.shape[0], 1, 1, 1)
-    if i%50 == 0 and i > 1:
+    if i%100 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
       losses = []
-      for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
+      for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
         out, loss = eval_step_jitted(model, Xt, Yt)
         outs = out.numpy().argmax(axis=1)
         correct = outs == Yt.numpy().argmin(axis=1)
@@ -173,8 +156,12 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     et = time.monotonic()
     loss_cpu = loss.numpy()
     cl = time.monotonic()
+    # if i%100 == 0 and i > 1:
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
 
 if __name__ == "__main__":
+  # for seed in range(1,50):
+    # print("SEED=", seed)
+    # train_cifar(seed=seed)
   train_cifar()
