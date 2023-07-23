@@ -26,7 +26,7 @@ class TestFetch(unittest.TestCase):
     pimg = Image.open(io.BytesIO(img))
     assert pimg.size == (705, 1024)
 
-class TestFetchRelative(unittest.TestCase):
+class TestFetchLocalFile(unittest.TestCase):
   def setUp(self):
     self.working_dir = os.getcwd()
     self.tempdir = tempfile.TemporaryDirectory()
@@ -47,6 +47,11 @@ class TestFetchRelative(unittest.TestCase):
       os.mkdir('test_file_path')
       os.chdir('test_file_path')
       self.assertEqual(b'12345', fetch("../test_file.txt"))
+  
+  #test /
+  def test_fetch_slash(self):
+      print(self.tempdir.name + "/test_file.txt")
+      self.assertEqual(b'12345', fetch(self.tempdir.name + "/test_file.txt"))
 
 class TestDownloadFile(unittest.TestCase):
   def setUp(self):
