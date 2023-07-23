@@ -3,7 +3,7 @@ FROM arm64v8/python:3.8-slim-buster
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y git clang ocl-icd-opencl-dev ocl-icd-libopencl1 opencl-headers pocl-opencl-icd  && \
+    apt-get install -y git clang ocl-icd-opencl-dev g++ && \
     rm -rf /var/lib/apt/lists/*
 
 RUN git clone https://github.com/tinygrad/tinygrad.git
