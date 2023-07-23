@@ -1,0 +1,164 @@
+====== failing, upcast, vload_half, range(4) =======
+UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
+UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
+UOps.LOOP           :                           []                               ([], 'global')
+UOps.LOOP           :                           []                               ([], 'local')
+UOps.LOAD           : <val1_0:float4:None>      []                               MemOp(name='data1', idx=<0>, local=False, memory_dtype=dtypes.half, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0:float4:0>]              MemOp(name='data0', idx=<0>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0:float4:1>]              MemOp(name='data0', idx=<1>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0:float4:2>]              MemOp(name='data0', idx=<2>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0:float4:3>]              MemOp(name='data0', idx=<3>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.ENDLOOP        :                           []                               ([], 'global+local')
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+__kernel void E_4(__global unsigned char* data0, const __global half* data1) {
+    float4 val1_0 = vload_half4(0, data1+0);
+    data0[0] = val1_0.x;
+    data0[1] = val1_0.y;
+    data0[2] = val1_0.z;
+    data0[3] = val1_0.w;
+   /* global+local */
+}
+
+====== passing, no upcast, vload_half, range(4) =======
+UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
+UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
+UOps.LOOP           :                           []                               ([], 'global')
+UOps.LOOP           :                           []                               ([<lidx0[0-3]>], 'local')
+UOps.LOAD           : <val1_0>                  []                               MemOp(name='data1', idx=<lidx0[0-3]>, local=False, memory_dtype=dtypes.half, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0>]                       MemOp(name='data0', idx=<lidx0[0-3]>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.ENDLOOP        :                           []                               ([<lidx0[0-3]>], 'global+local')
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+__kernel void E_4(__global unsigned char* data0, const __global half* data1) {
+  { int lidx0 = get_local_id(0);  /* 4 */
+    float val1_0 = vload_half(0, data1+lidx0);
+    data0[lidx0] = val1_0;
+  } /* global+local */
+}
+
+
+===== failing, upcast, vload_half4, range(8) =======
+UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
+UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
+UOps.LOOP           :                           []                               ([<gidx0[0-1]>], 'global')
+UOps.LOOP           :                           []                               ([], 'local')
+UOps.LOAD           : <val1_0:float4:None>      []                               MemOp(name='data1', idx=<(gidx0[0-1]*4)>, local=False, memory_dtype=dtypes.half, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0:float4:0>]              MemOp(name='data0', idx=<(gidx0[0-1]*4)>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0:float4:1>]              MemOp(name='data0', idx=<((gidx0[0-1]*4)+1)>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0:float4:2>]              MemOp(name='data0', idx=<((gidx0[0-1]*4)+2)>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0:float4:3>]              MemOp(name='data0', idx=<((gidx0[0-1]*4)+3)>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.ENDLOOP        :                           []                               ([<gidx0[0-1]>], 'global+local')
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+__kernel void E_2_4(__global unsigned char* data0, const __global half* data1) {
+{ int gidx0 = get_group_id(0);  /* 2 */
+    float4 val1_0 = vload_half4(0, data1+gidx0*4);
+    data0[(gidx0*4)] = val1_0.x;
+    data0[((gidx0*4)+1)] = val1_0.y;
+    data0[((gidx0*4)+2)] = val1_0.z;
+    data0[((gidx0*4)+3)] = val1_0.w;
+  } /* global+local */
+}
+
+
+
+====== passing, no upcast, vload_half, range(8) =======
+UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
+UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
+UOps.LOOP           :                           []                               ([], 'global')
+UOps.LOOP           :                           []                               ([<lidx0[0-7]>], 'local')
+UOps.LOAD           : <val1_0>                  []                               MemOp(name='data1', idx=<lidx0[0-7]>, local=False, memory_dtype=dtypes.half, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0>]                       MemOp(name='data0', idx=<lidx0[0-7]>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.ENDLOOP        :                           []                               ([<lidx0[0-7]>], 'global+local')
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+__kernel void E_8(__global unsigned char* data0, const __global half* data1) {
+  { int lidx0 = get_local_id(0);  /* 8 */
+    float val1_0 = vload_half(0, data1+lidx0);
+    data0[lidx0] = val1_0;
+  } /* global+local */
+}
+.
+----------------------------------------------------------------------
+
+
+
+===== passing, upcast, vload_half4, range(12) =====
+UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
+UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
+UOps.LOOP           :                           []                               ([], 'global')
+UOps.LOOP           :                           []                               ([<lidx0[0-2]>], 'local')
+UOps.LOAD           : <val1_0:float4:None>      []                               MemOp(name='data1', idx=<(lidx0[0-2]*4)>, local=False, memory_dtype=dtypes.half, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0:float4:0>]              MemOp(name='data0', idx=<(lidx0[0-2]*4)>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0:float4:1>]              MemOp(name='data0', idx=<((lidx0[0-2]*4)+1)>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0:float4:2>]              MemOp(name='data0', idx=<((lidx0[0-2]*4)+2)>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0:float4:3>]              MemOp(name='data0', idx=<((lidx0[0-2]*4)+3)>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.ENDLOOP        :                           []                               ([<lidx0[0-2]>], 'global+local')
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+__kernel void E_3_4(__global unsigned char* data0, const __global half* data1) {
+  { int lidx0 = get_local_id(0);  /* 3 */
+    float4 val1_0 = vload_half4(0, data1+lidx0*4);
+    data0[(lidx0*4)] = val1_0.x;
+    data0[((lidx0*4)+1)] = val1_0.y;
+    data0[((lidx0*4)+2)] = val1_0.z;
+    data0[((lidx0*4)+3)] = val1_0.w;
+  } /* global+local */
+}
+
+
+===== passing, no upcast, vload_half, range(12) ======
+UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
+UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
+UOps.LOOP           :                           []                               ([<gidx0[0-2]>], 'global')
+UOps.LOOP           :                           []                               ([<lidx1[0-3]>], 'local')
+UOps.LOAD           : <val1_0>                  []                               MemOp(name='data1', idx=<((gidx0[0-2]*4)+lidx1[0-3])>, local=False, memory_dtype=dtypes.half, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0>]                       MemOp(name='data0', idx=<((gidx0[0-2]*4)+lidx1[0-3])>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.ENDLOOP        :                           []                               ([<gidx0[0-2]>, <lidx1[0-3]>], 'global+local')
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+__kernel void E_3_4(__global unsigned char* data0, const __global half* data1) {
+{ int gidx0 = get_group_id(0);  /* 3 */
+  { int lidx1 = get_local_id(0);  /* 4 */
+    float val1_0 = vload_half(0, data1+(gidx0*4)+lidx1);
+    data0[((gidx0*4)+lidx1)] = val1_0;
+  }} /* global+local */
+}
+.
+
+
+
+==== passing, upcast, range(5) ====
+UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
+UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
+UOps.LOOP           :                           []                               ([<gidx0[0-4]>], 'global')
+UOps.LOOP           :                           []                               ([], 'local')
+UOps.LOAD           : <val1_0>                  []                               MemOp(name='data1', idx=<gidx0[0-4]>, local=False, memory_dtype=dtypes.half, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0>]                       MemOp(name='data0', idx=<gidx0[0-4]>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.ENDLOOP        :                           []                               ([<gidx0[0-4]>], 'global+local')
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+__kernel void E_5(__global unsigned char* data0, const __global half* data1) {
+{ int gidx0 = get_group_id(0);  /* 5 */
+    float val1_0 = vload_half(0, data1+gidx0);
+    data0[gidx0] = val1_0;
+  } /* global+local */
+}
+.
+
+
+==== passing, no upcast, range(5) ===
+UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
+UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
+UOps.LOOP           :                           []                               ([<gidx0[0-4]>], 'global')
+UOps.LOOP           :                           []                               ([], 'local')
+UOps.LOAD           : <val1_0>                  []                               MemOp(name='data1', idx=<gidx0[0-4]>, local=False, memory_dtype=dtypes.half, valid=<1>, invalid_value=0.0)
+UOps.STORE          :                           [<val1_0>]                       MemOp(name='data0', idx=<gidx0[0-4]>, local=False, memory_dtype=dtypes.unsigned char, valid=<1>, invalid_value=0.0)
+UOps.ENDLOOP        :                           []                               ([<gidx0[0-4]>], 'global+local')
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+__kernel void E_5(__global unsigned char* data0, const __global half* data1) {
+{ int gidx0 = get_group_id(0);  /* 5 */
+    float val1_0 = vload_half(0, data1+gidx0);
+    data0[gidx0] = val1_0;
+  } /* global+local */
+}
+.
+
+
+
+
+
