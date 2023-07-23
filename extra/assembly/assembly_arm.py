@@ -92,18 +92,16 @@ class ARMCodegen(AssemblyCodegen):
         reg_out = 's0' if dtypes.is_float(out[1]) else 'x0'
         reg_in = _type_to_reg[arg[2] if len(arg) == 3 else out[1]] + '0'
         ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
-        # Manually offset when it can't fix
-        if reg == 's0' and arg[0] < -255:
-          ins.append(f"mov x2, #{abs(arg[0])}")
-          ins.append("sub x1, x1, x2")
-        else:
-          ins.append(f"ldr{'sb' if len(arg) == 3 and arg[2] in [dtypes.int8, dtypes.uint8] else ''} {reg_in}, [x1{',#' + arg[0] if reg == 's0' and arg[0] < -255 else ''}]")
-          if len(arg) == 3:
-            if arg[2] == dtypes.half:
-              ins.append(f"fcvt s0, {reg_in}")
-            elif dtypes.is_int(arg[2]) or dtypes.is_unsigned(arg[2]):
-              ins.append(f"scvtf s0, {reg_in}")
-          ins.append(f"str {reg_out}, {reg_map[out.nm]}")
+        # Manually offset in case it can't fix in imm
+        ins.append(f"mov x2, #{abs(arg[0])}")
+        ins.append(f"{'sub' if arg[0] < 0 else 'add'} x1, x1, x2")
+        ins.append(f"ldr{'sb' if len(arg) == 3 and arg[2] in [dtypes.int8, dtypes.uint8] else ''} {reg_in}, [x1]")
+        if len(arg) == 3:
+          if arg[2] == dtypes.half:
+            ins.append(f"fcvt s0, {reg_in}")
+          elif dtypes.is_int(arg[2]) or dtypes.is_unsigned(arg[2]):
+            ins.append(f"scvtf s0, {reg_in}")
+        ins.append(f"str {reg_out}, {reg_map[out.nm]}")
       elif uop == UOps.STORE:
         ins.append(f"ldr s0, {reg_map[vin[1].nm]}")
         reg_out = (_type_to_reg[arg[2]] if len(arg) == 3 else "s") + '0' 
