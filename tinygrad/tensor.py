@@ -313,7 +313,7 @@ class Tensor:
         final_shape.append(1)
     return sliced_tensor.reshape(tuple(final_shape))  # Reshape
 
-  def gather(self: Tensor, idx: Tensor, dim: int) -> Tensor: 
+  def gather(self, idx, dim):
     idx = (idx < 0).where(idx+self.shape[dim], idx) # Turn neg idx pos
     new_shape = [*self.shape[:dim+1], *idx.shape, *self.shape[dim+1:]]
     new_self = self.reshape(*self.shape[:dim+1], *[1]*idx.ndim, *self.shape[dim+1:]).expand(new_shape)
