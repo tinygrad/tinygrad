@@ -31,7 +31,7 @@ def tempestLoop():
   pass
 
 def get_input_text(url, file_path, clean):
-  """Fetch and return tiny Shakespear input text"""
+  """ fetch and return tiny Shakespear input text """
   urllib.request.urlretrieve(url, file_path)
   with open(file_path, 'r') as f:
     text = f.read()
@@ -40,7 +40,7 @@ def get_input_text(url, file_path, clean):
   return text
 
 def cross_entropy(out, Y):
-  """Negative Log Loss function"""
+  """ negative Log Loss function """
   num_classes = out.shape[-1]
   YY = Y.flatten().astype(np.int32)
   y = np.zeros((YY.shape[0], num_classes), np.float32)
@@ -60,6 +60,7 @@ def get_batch(split):
 
 class Head():
   """ one head of self-attention """
+
   def __init__(self, head_size):
     self.key = nn.Linear(n_embd, head_size, bias=False)
     self.query = nn.Linear(n_embd, head_size, bias=False) # usually bias term is added on q
@@ -81,6 +82,7 @@ class Head():
     return out
 
 class MultiHeadAttention():
+
   """ multiple heads of self-attention in parallel """
   def __init__(self, num_heads, head_size):
     self.heads = [Head(head_size) for _ in range(num_heads)]
@@ -88,15 +90,26 @@ class MultiHeadAttention():
   def __call__(self, x):
     return self.heads[0](x).cat(*[h(x) for h in self.heads[1:]], dim=-1)
 
+class FeedForward():
+  """ a simple linear layer followed by a non-linearity """
+
+  def __init__(self, n_embd):
+    self.net = [nn.Linear(n_embd, n_embd), Tensor.relu]
+
+  def __call__(self, x):
+    return x.sequential(self.net)
+
 class GPTLanguageModel():
+  """ a decoder only transformer """
+
   def __init__(self, vocab_size):
     # each token directly reads off the logits for the next token from a lookup table
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
     self.position_embedding_table = nn.Embedding(block_size, n_embd)
     self.sa_heads = MultiHeadAttention(4, n_embd//4) # i.e. 4 heads 8-dimensional self-attention
+    self.ffwd = FeedForward(n_embd)
     self.lm_head = nn.Linear(n_embd, vocab_size)
 
-  #def __call__(self, idx, targets=None):
   def __call__(self, idx, targets=None):
     B, T = idx.shape
 
@@ -105,6 +118,7 @@ class GPTLanguageModel():
     pos_emb = self.position_embedding_table(Tensor.arange(T, dtype=dtypes.int8).reshape(1,T)) # (T,C)
     x = tok_emb + pos_emb # (B,T,C)
     x = self.sa_heads(x) # apply multi-head self-attention (B,T,C)
+    x = self.ffwd(x) # (B,T,C)
     logits = self.lm_head(x) # (B,T,vocab_size)
     
     if targets is None:
@@ -146,6 +160,7 @@ if __name__ == "__main__":
       YouTube : https://youtu.be/kCc8FmEb1nY
       Github  : https://github.com/karpathy/ng-video-lecture/tree/master
   """
+
   parser = argparse.ArgumentParser(description="""Tiny Shakespeare GPT""")
   parser.add_argument('--path', default=os.path.join(os.path.sep, 'tmp', 'input.txt'), 
                       help='Location to save the input text, defaults to /tmp/input.txt')
@@ -194,4 +209,4 @@ if __name__ == "__main__":
   Tensor.training = False
   context = Tensor.zeros((1, 1), dtypes.int64)
   print("-- hark! --")
-  m.generate(context, max_new_tokens=100).numpy()[0]
+  m.generate(context, max_new_tokens=500).numpy()[0]
