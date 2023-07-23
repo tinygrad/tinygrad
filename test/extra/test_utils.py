@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import io, unittest
 import os
+import tempfile
 from unittest.mock import patch, MagicMock
 
 import torch
@@ -9,6 +10,7 @@ from tinygrad.helpers import getenv
 from extra.utils import fetch, temp, download_file
 from tinygrad.state import torch_load
 from PIL import Image
+
 
 @unittest.skipIf(getenv("CI", "") != "", "no internet tests in CI")
 class TestFetch(unittest.TestCase):
@@ -27,25 +29,25 @@ class TestFetch(unittest.TestCase):
 
 class TestFetchRelative(unittest.TestCase):
   def setUp(self):
-    # for testing ./
+    self.working_dir = os.getcwd()
+    self.tempdir = tempfile.TemporaryDirectory()
+    os.chdir(self.tempdir.name)
     with open('test_file.txt', 'x') as f:
-      f.write("12345")
-    # for testing ../
-    os.mkdir('test_file_path')
-
-  def tearDown(self):
-    os.remove('test_file.txt')
-    os.rmdir('test_file_path')
+        f.write("12345")
   
+  def tearDown(self):
+    os.chdir(self.working_dir)
+    self.tempdir.cleanup()
+
   #test ./
   def test_fetch_relative_dotslash(self):
     self.assertEqual(b'12345', fetch("./test_file.txt"))
   
   #test ../
   def test_fetch_relative_dotdotslash(self):
-    os.chdir('test_file_path')
-    self.assertEqual(b'12345', fetch("../test_file.txt"))
-    os.chdir('../')
+      os.mkdir('test_file_path')
+      os.chdir('test_file_path')
+      self.assertEqual(b'12345', fetch("../test_file.txt"))
 
 class TestDownloadFile(unittest.TestCase):
   def setUp(self):
