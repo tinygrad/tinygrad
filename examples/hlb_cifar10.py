@@ -17,6 +17,8 @@ from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
 from examples.train_resnet import ComposeTransforms
 
+import torch
+
 def set_seed(seed):
   Tensor.manual_seed(getenv('SEED', seed)) # Deterministic
   np.random.seed(getenv('SEED', seed))
@@ -42,10 +44,10 @@ class ConvGroup:
     return x + residual
 
 class SpeedyResNet:
-  def __init__(self):
-    # TODO: add whitening
+  def __init__(self, W):
+    self.whitening = Tensor(W, requires_grad=False)
     self.net = [
-      nn.Conv2d(3, 64, kernel_size=1),
+      nn.Conv2d(12, 64, kernel_size=1),
       nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
       lambda x: x.relu(),
       ConvGroup(64, 128, short=False),
@@ -58,20 +60,28 @@ class SpeedyResNet:
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
   def __call__(self, x, training=True):
     if not training and getenv('TTA', 0)==1: return ((x.sequential(self.net) * 0.5) + (x[..., ::-1].sequential(self.net) * 0.5)).log_softmax()
-    return x.sequential(self.net).log_softmax()
+    return x.conv2d(self.whitening, stride=1).sequential(self.net).log_softmax()
 
-# def whitening_matrix(X):
-#   _transform = ComposeTransforms([
-#     lambda x: x.to(device=Device.DEFAULT).float(),
-#     lambda x: x / 255.0,
-#     lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1),
-#   ])
-#   X = _transform(X).numpy()
-#   Xcov = np.dot(X.T,X)
-#   d, V = np.linalg.eigh(Xcov)
-#   D = np.diag(1. / np.sqrt(d+1E-18))
-#   W = np.dot(np.dot(V, D), V.T).astype(np.float32)
-#   return Tensor(W)
+def whitening(X):
+  def cov(X):
+      X = X/np.sqrt(X.size(0) - 1)
+      return X.t() @ X
+
+  def patches(data, patch_size=(2, 2)):
+      h, w = patch_size
+      c = data.size(1)
+      return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w) 
+
+  def eigens(patches):
+      n,c,h,w = patches.shape
+      Σ = cov(patches.reshape(n, c*h*w))
+      Λ, V = torch.linalg.eigh(Σ)
+      return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
+  X = torch.tensor(transform(X).numpy())
+  Λ, V = eigens(patches(X))
+  W = (V/torch.sqrt(Λ+1e-2)[:,None,None,None]).numpy()
+
+  return W
 
 transform = ComposeTransforms([
     lambda x: x.to(device=Device.DEFAULT).float(),
@@ -89,7 +99,6 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
       # padding for matching buffer size during JIT
       batch_end = min(i+BS, Y.shape[0])
       x = transform(X[batch_end-BS:batch_end,:])
-      # x= x.dot(W).reshape((-1,3,32,32))
       # NOTE -10 was used instead of 1 as labels
       y = Tensor(-10*np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()])
       yield x, y
@@ -97,7 +106,7 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     seed += 1
 
 def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, 
-                pct_start=0.055, momentum=0.8, wd=0.15, label_smoothing=0., mixup_alpha=0.025, seed=6):
+                pct_start=0.05, momentum=0.8, wd=0.15, label_smoothing=0., mixup_alpha=0.025, seed=6):
   set_seed(seed)  
   Tensor.training = True
 
@@ -113,12 +122,11 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   else:
     X_train, Y_train, X_test, Y_test = fetch_cifar()    # they are disk tensor now
  
-  # Compute Whitening Matrix
-  # W = whitening_matrix(X_train)
-  # print(W)
+  # compute whitening patches
+  W = whitening(X_train)
  
-  model = SpeedyResNet()
-  optimizer = optim.SGD(get_parameters(model), lr=0.005, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  model = SpeedyResNet(W)
+  optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
   # JIT at every run
   @TinyJit
