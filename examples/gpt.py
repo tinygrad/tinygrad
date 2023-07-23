@@ -60,11 +60,10 @@ def get_batch(split):
 
 class Head():
   """ one head of self-attention """
-
   def __init__(self, head_size):
     self.key = nn.Linear(n_embd, head_size, bias=False)
-    self.query = nn.Linear(n_embd, head_size, bias=False)
-    self.value = nn.Linear(n_embd, head_size, bias=False)
+    self.query = nn.Linear(n_embd, head_size, bias=False) # usually bias term is added on q
+    self.value = nn.Linear(n_embd, head_size, bias=False) # usually bias term is added on v
 
   def __call__(self, x):
     B,T,C = x.shape
@@ -72,9 +71,9 @@ class Head():
     q = self.query(x) # (B,T,C)
     # compute attention scores ("affinities")
     wei = q @ Tensor.transpose(k, -2, -1) * C**-0.5 # (B, T, hs) @ (B, hs, T) -> (B, T, T)
-    # equal to a lower triangular matrix (tril) masked_fill in pytorch when added to wei
-    mask = Tensor(np.triu(np.ones((T,T), dtype=np.float32) * -np.inf, k=1))
-    wei = wei + mask
+    # equal to a lower triangular matrix (tril) masked_fill in pytorch
+    mask = Tensor.triu(Tensor.full((T, T), float("-inf")), k=1) + 1
+    wei = Tensor.where(mask != float('-inf'), wei, mask)
     wei = wei.softmax(-1)
     # perform the weighted aggregation of the values
     v = self.value(x) # (B,T,hs)
