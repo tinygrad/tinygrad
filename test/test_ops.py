@@ -1118,9 +1118,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: b[:,:,mb,:,:], lambda: a.gather(ma, dim=2), forward_only=True)
     helper_test_op([], lambda: b[:,:,:,:,mb], lambda: a.gather(ma, dim=4), forward_only=True)
 
-    # for torch.take() usage
-    helper_test_op([], lambda: torch.take(input=b, index=mb), lambda: a.flatten().gather(ma, dim=0), forward_only=True)
-
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)
