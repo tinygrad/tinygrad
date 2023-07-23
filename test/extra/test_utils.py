@@ -11,7 +11,6 @@ from extra.utils import fetch, temp, download_file
 from tinygrad.state import torch_load
 from PIL import Image
 
-
 @unittest.skipIf(getenv("CI", "") != "", "no internet tests in CI")
 class TestFetch(unittest.TestCase):
   def test_fetch_bad_http(self):
