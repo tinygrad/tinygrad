@@ -72,20 +72,28 @@ class Head():
     # compute attention scores ("affinities")
     wei = q @ Tensor.transpose(k, -2, -1) * C**-0.5 # (B, T, hs) @ (B, hs, T) -> (B, T, T)
     # equal to a lower triangular matrix (tril) masked_fill in pytorch
-    mask = Tensor.triu(Tensor.full((T, T), float("-inf")), k=1) + 1
-    wei = Tensor.where(mask != float('-inf'), wei, mask)
+    mask = Tensor(np.triu(np.ones((T,T), dtype=np.float32) * -np.inf, k=1))
+    wei = wei + mask
     wei = wei.softmax(-1)
     # perform the weighted aggregation of the values
     v = self.value(x) # (B,T,hs)
     out = wei @ v  # (B, T, T) @ (B, T, hs) -> (B, T, hs)
     return out
 
+class MultiHeadAttention():
+  """ multiple heads of self-attention in parallel """
+  def __init__(self, num_heads, head_size):
+    self.heads = [Head(head_size) for _ in range(num_heads)]
+
+  def __call__(self, x):
+    return self.heads[0](x).cat(*[h(x) for h in self.heads[1:]], dim=-1)
+
 class GPTLanguageModel():
   def __init__(self, vocab_size):
     # each token directly reads off the logits for the next token from a lookup table
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
     self.position_embedding_table = nn.Embedding(block_size, n_embd)
-    self.sa_head = Head(n_embd)
+    self.sa_heads = MultiHeadAttention(4, n_embd//4) # i.e. 4 heads 8-dimensional self-attention
     self.lm_head = nn.Linear(n_embd, vocab_size)
 
   #def __call__(self, idx, targets=None):
@@ -96,7 +104,7 @@ class GPTLanguageModel():
     tok_emb = self.token_embedding_table(idx) # (B,T,C)
     pos_emb = self.position_embedding_table(Tensor.arange(T, dtype=dtypes.int8).reshape(1,T)) # (T,C)
     x = tok_emb + pos_emb # (B,T,C)
-    x = self.sa_head(x) # apply one head of self-attention (B,T,C)
+    x = self.sa_heads(x) # apply multi-head self-attention (B,T,C)
     logits = self.lm_head(x) # (B,T,vocab_size)
     
     if targets is None:
@@ -125,6 +133,7 @@ class GPTLanguageModel():
       idx_next = Tensor(idx_next)
       # append sampled index to the running sequence
       idx = Tensor.cat(idx, idx_next, dim=1) # (B, T+1)
+      print(decode(idx_next.numpy()[0]), end='')
     return idx
 
 
@@ -184,4 +193,5 @@ if __name__ == "__main__":
 
   Tensor.training = False
   context = Tensor.zeros((1, 1), dtypes.int64)
-  print(decode(m.generate(context, max_new_tokens=500).numpy()[0]))
+  print("-- hark! --")
+  m.generate(context, max_new_tokens=100).numpy()[0]
