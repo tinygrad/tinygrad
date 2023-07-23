@@ -40,6 +40,9 @@ def _process_wrap(rank:int, device:str, oob:_OOB, fn:Callable, args=()):
   if "GPU" in device:
     from tinygrad.runtime.ops_gpu import CL
     CL.post_init(device_num)
+  elif "HIP" in device:
+    import extra.hip_wrapper as hip
+    hip.hipSetDevice(device_num)
   if DEBUG >= 1: print(f"DDPProcess {rank} initialized runtime for device {device}")
 
   # convert device to be process specific
