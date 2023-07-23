@@ -69,6 +69,7 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
       np.random.shuffle(ind)
       all_X, all_Y = all_X[ind, ...], all_Y[ind, ...]
     return all_X, all_Y
+  rank, world_size = getenv("RANK"), getenv("WORLD_SIZE")
   while True:
     set_seed(seed)
     all_X, all_Y = _shuffle(all_X, all_Y)
@@ -78,12 +79,15 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
       Y = np.zeros((BS, num_classes), np.float32)
       Y[range(BS),all_Y[batch_end-BS:batch_end]] = -1.0*num_classes
       Y = Tensor(Y.reshape(BS, num_classes))
+      # divide into rank subsets
+      X = X[BS*rank//world_size:BS*(rank+1)//world_size]
+      Y = Y[BS*rank//world_size:BS*(rank+1)//world_size]
       yield X, Y
     if not is_train: break
     seed += 1
 
-def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.011, pct_start=0.0546875, momentum=0.8, wd=0.16, label_smoothing=0., mixup_alpha=0.025, seed=10069):
-  seed = seed * getenv("RANK")
+def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.014, pct_start=0.0546875, momentum=0.7, wd=0.16, label_smoothing=0., mixup_alpha=0.025, seed=9):
+  rank = getenv("RANK")
   set_seed(seed)
   Tensor.training = True
 
@@ -130,7 +134,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
           offset = 0
           for k in bucket_meta:
             size = bucket_meta[k][0]
-            state_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]) / getenv("WORLD_SIZE"))
+            state_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]))
             offset += size
           bucket = []
           bucket_meta = {}
@@ -139,7 +143,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
         offset = 0
         for k in bucket_meta:
           size = bucket_meta[k][0]
-          state_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]) / getenv("WORLD_SIZE"))
+          state_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]))
           offset += size
 
       optimizer.step()
@@ -157,6 +161,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   # 4 seconds for tfloat32 ~ 28 TFLOPS, 41% of max 68
   # 6.4 seconds for float32 ~ 17 TFLOPS, 50% of max 34.1
   # 4.7 seconds for float32 w/o channels last. 24 TFLOPS. we get 50ms then i'll be happy. only 64x off
+  from extra.dist import OOB
 
   # https://www.anandtech.com/show/16727/nvidia-announces-geforce-rtx-3080-ti-3070-ti-upgraded-cards-coming-in-june
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
@@ -176,10 +181,18 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
         correct = outs == Yt.numpy().argmin(axis=1)
         losses.append(loss.numpy().tolist())
         corrects.extend(correct.tolist())
-      acc = sum(corrects)/len(corrects)*100.0
+
+      correct = sum(corrects)
+      # collect accuracy calculations from all ranks
+      if rank == 0:
+        correct += OOB.recv(1)
+      elif rank == 1:
+        OOB.send(correct, 0)
+
+      acc = correct/(len(corrects)*getenv("WORLD_SIZE"))*100.0
       if acc > best_eval:
         best_eval = acc
-        print(f"eval {sum(corrects)}/{len(corrects)} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
+        print(f"eval {correct}/{len(corrects)*getenv('WORLD_SIZE')} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
     if STEPS == 0 or i==STEPS: break
     GlobalCounters.reset()
     st = time.monotonic()
