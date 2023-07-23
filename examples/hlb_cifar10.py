@@ -60,9 +60,24 @@ class SpeedyResNet:
     if not training and getenv('TTA', 0)==1: return ((x.sequential(self.net) * 0.5) + (x[..., ::-1].sequential(self.net) * 0.5)).log_softmax()
     return x.sequential(self.net).log_softmax()
 
+# def whitening_matrix(X):
+#   _transform = ComposeTransforms([
+#     lambda x: x.to(device=Device.DEFAULT).float(),
+#     lambda x: x / 255.0,
+#     lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1),
+#   ])
+#   X = _transform(X).numpy()
+#   Xcov = np.dot(X.T,X)
+#   d, V = np.linalg.eigh(Xcov)
+#   D = np.diag(1. / np.sqrt(d+1E-18))
+#   W = np.dot(np.dot(V, D), V.T).astype(np.float32)
+#   return Tensor(W)
+
 transform = ComposeTransforms([
-    # lambda x: x / 255.0,
-    lambda x: (x - Tensor(cifar_mean).reshape((1,3,1,1)))/ Tensor(cifar_std).reshape((1,3,1,1)),
+    lambda x: x.to(device=Device.DEFAULT).float(),
+    lambda x: x / 255.0,
+    lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1),
+    lambda x: x.reshape((-1,3,32,32))
 ])
 
 def fetch_batches(X, Y, BS, seed, is_train=False):
@@ -70,18 +85,20 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     set_seed(seed)
     order = list(range(0, X.shape[0], BS))
     random.shuffle(order)
-    for i in range(0, X.shape[0], BS):
+    for i in order:
       # padding for matching buffer size during JIT
       batch_end = min(i+BS, Y.shape[0])
-      x = transform(X[batch_end-BS:batch_end,:].to(device=Device.DEFAULT).float())
+      x = transform(X[batch_end-BS:batch_end,:])
+      # x= x.dot(W).reshape((-1,3,32,32))
       # NOTE -10 was used instead of 1 as labels
       y = Tensor(-10*np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()])
       yield x, y
     if not is_train: break
     seed += 1
 
-def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, pct_start=0.0546875, momentum=0.8, wd=0.15, label_smoothing=0., mixup_alpha=0.025, seed=6):
-  set_seed(seed)
+def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, 
+                pct_start=0.055, momentum=0.8, wd=0.15, label_smoothing=0., mixup_alpha=0.025, seed=6):
+  set_seed(seed)  
   Tensor.training = True
 
   BS, EVAL_BS, STEPS = getenv("BS", bs), getenv('EVAL_BS', eval_bs), getenv("STEPS", steps)
@@ -95,11 +112,14 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     X_test, Y_test = X_train, Y_train
   else:
     X_train, Y_train, X_test, Y_test = fetch_cifar()    # they are disk tensor now
-  
+ 
+  # Compute Whitening Matrix
+  # W = whitening_matrix(X_train)
+  # print(W)
+ 
   model = SpeedyResNet()
-  optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  optimizer = optim.SGD(get_parameters(model), lr=0.005, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
-
   # JIT at every run
   @TinyJit
   def train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
@@ -161,7 +181,4 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     i += 1
 
 if __name__ == "__main__":
-  # for seed in range(1,50):
-    # print("SEED=", seed)
-    # train_cifar(seed=seed)
   train_cifar()

@@ -20,7 +20,7 @@ def fetch_cifar(shuffle=False):
     idx=0
     X, Y = None, None
     for db in db_list:
-      x = db[b'data'].reshape((-1, 3, 32, 32))
+      x = db[b'data']
       y = np.array(db[b'labels'])
       order = list(range(0, len(y)))
       if shuffle: random.shuffle(order)
