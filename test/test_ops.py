@@ -1111,13 +1111,13 @@ class TestOps(unittest.TestCase):
         helper_test_op([], lambda: torch.index_select(input=b, index=vb, dim=dim), lambda: a.gather(va, dim=dim), forward_only=True)
 
     # for cases where indices is matrix (indices.ndim > 1)
-    mc = np.random.randint(4, size=[3,4,5])
+    mc = np.random.randint(4, size=[3,4,5]).astype(np.int32)
     ma = Tensor(mc)
     mb = torch.tensor(mc)
     helper_test_op([], lambda: b[mb,:,:,:,:], lambda: a.gather(ma, dim=0), forward_only=True)
     helper_test_op([], lambda: b[:,:,mb,:,:], lambda: a.gather(ma, dim=2), forward_only=True)
     helper_test_op([], lambda: b[:,:,:,:,mb], lambda: a.gather(ma, dim=4), forward_only=True)
-         
+
     # for torch.take() usage
     helper_test_op([], lambda: torch.take(input=b, index=mb), lambda: a.flatten().gather(ma, dim=0), forward_only=True)
 
