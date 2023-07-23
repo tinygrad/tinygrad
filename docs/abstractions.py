@@ -6,7 +6,7 @@ this file will take you on a whirlwind journey from a Tensor all the way down
 tinygrad has been aggressively refactored in the 2.5 years it's been worked on.
 what you see here is a refined library (with more refining to go still!)
 
-the whole tinygrad is ~2300 lines, so while it's readable in an evening or two,
+the whole tinygrad is ~3600 lines, so while it's readable in an evening or two,
 this documentation will help with entry points and understanding the abstraction stack
 """
 
