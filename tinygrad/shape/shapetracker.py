@@ -4,7 +4,7 @@ from enum import Enum, auto
 import functools
 from typing import Dict, Tuple, Union, List, Optional, Callable, cast, NamedTuple
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode
+from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, is_sym_int
 
 # these ops live here
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
@@ -86,8 +86,8 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   return tuple([st if s != 1 else 0 for st, s in zip(strides, shape)])
 
 @functools.lru_cache(maxsize=None)
-def view_from_shape(shape:Tuple[int, ...]) -> View:
-  assert all(isinstance(x, int) for x in shape)
+def view_from_shape(shape:Tuple[Union[Node, int], ...]) -> View:
+  assert all(is_sym_int(x) for x in shape)
   return View(tuple(shape), strides_for_shape(shape))
 
 @functools.lru_cache(maxsize=None)
@@ -158,11 +158,11 @@ class ShapeTracker:
     return real_offset.b
 
   # NOTE: if a stride is not always valid, it will be None
-  def real_strides(self, ignore_valid=False) -> Tuple[Optional[int], ...]:
+  def real_strides(self, ignore_valid=False) -> Tuple[Optional[Union[Node, int]], ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx, valid = self.expr_idxs(idxs)
-    ret: List[Optional[int]] = [None] * len(self.views[-1].shape)
+    ret: List[Optional[Union[Node, int]]] = [None] * len(self.views[-1].shape)
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
       if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
         ret[idxs.index(this_dim.a)] = this_dim.b
@@ -235,8 +235,10 @@ class ShapeTracker:
 
   def reshape(self, new_shape: Tuple[int, ...]):
     if self.views[-1].shape == new_shape: return self
-    assert all(isinstance(x, int) and x > 0 for x in new_shape), f"shape must be ints and can't contain 0 or negative numbers {new_shape}"
-    assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
+    assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
+    # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
+    if all(isinstance(s, int) for s in self.shape) and all(isinstance(s, int) for s in new_shape):
+      assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
     new_view, extra = _reshape(self.views[-1], new_shape)
     if extra: self.views.append(new_view)
     else: self.views[-1] = new_view
