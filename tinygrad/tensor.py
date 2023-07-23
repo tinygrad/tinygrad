@@ -313,9 +313,7 @@ class Tensor:
         final_shape.append(1)
     return sliced_tensor.reshape(tuple(final_shape))  # Reshape
 
-  def gather(self, indices, dim):
-    indices = (indices < 0).where(indices+self.shape[dim], indices)
-    return (self.reshape(*self.shape[:dim+1], *[1]*indices.ndim, *self.shape[dim+1:]).expand(*self.shape[:dim+1], *indices.shape, *self.shape[dim+1:]) * (Tensor.arange(self.shape[dim]).reshape(self.shape[dim], *[1]*indices.ndim).expand(self.shape[dim], *indices.shape) == indices.unsqueeze(0).expand(self.shape[dim], *indices.shape)).reshape(*[1]*dim, self.shape[dim], *indices.shape, *[1]*(self.ndim-dim-1)).expand(*self.shape[:dim+1], *indices.shape, *self.shape[dim+1:])).sum(dim)
+  def gather(self, indices, dim): return (self.reshape(*self.shape[:dim+1], *[1]*indices.ndim, *self.shape[dim+1:]).expand(*self.shape[:dim+1], *indices.shape, *self.shape[dim+1:]) * (Tensor.arange(self.shape[dim], dtype=dtypes.int32).reshape(self.shape[dim], *[1]*indices.ndim).expand(self.shape[dim], *indices.shape) == (indices < 0).where(indices+self.shape[dim], indices).unsqueeze(0).expand(self.shape[dim], *indices.shape)).reshape(*[1]*dim, self.shape[dim], *indices.shape, *[1]*(self.ndim-dim-1)).expand(*self.shape[:dim+1], *indices.shape, *self.shape[dim+1:])).sum(dim)
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim

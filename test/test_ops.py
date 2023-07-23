@@ -1100,7 +1100,7 @@ class TestOps(unittest.TestCase):
 
   def test_gather(self):
     c = np.random.randn(4,5,6,9,5).astype(np.float32)
-    a = Tensor(c, dtype=dtypes.float32)
+    a = Tensor(c)
     b = torch.tensor(c)
 
     # for cases where indices is vector (indices.ndim == 1)
@@ -1112,15 +1112,12 @@ class TestOps(unittest.TestCase):
 
     # for cases where indices is matrix (indices.ndim > 1)
     mc = np.random.randint(4, size=[3,4,5])
-    test = np.random.randint(4, size=[3,4,5]).astype(np.int8)
-    ma = Tensor(test, dtype=dtypes.int8)
+    ma = Tensor(mc)
     mb = torch.tensor(mc)
-    for dim in range(c.ndim):
-      with self.subTest(np.take.__name__, dim=dim):
-        x = np.take(c, mc.astype(np.int16), dim).astype(np.float32) # no torch api for this
-        y = a.gather(ma, dim=dim).numpy()
-        np.testing.assert_allclose(x,y,atol=1e-6, rtol=1e-3)
-
+    helper_test_op([], lambda: b[mb,:,:,:,:], lambda: a.gather(ma, dim=0), forward_only=True)
+    helper_test_op([], lambda: b[:,:,mb,:,:], lambda: a.gather(ma, dim=2), forward_only=True)
+    helper_test_op([], lambda: b[:,:,:,:,mb], lambda: a.gather(ma, dim=4), forward_only=True)
+         
     # for torch.take() usage
     helper_test_op([], lambda: torch.take(input=b, index=mb), lambda: a.flatten().gather(ma, dim=0), forward_only=True)
 
