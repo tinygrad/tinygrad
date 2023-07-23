@@ -260,12 +260,15 @@ jobs:
     name: arm64 Test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-      - name: Build arm64 machine
-        run: docker build -t tinygrad-arm64 -f test/extra/arm64_dockerfile .
-      - name: Test arm64
-        run: docker run -e CLANG=1 -e ARM=1 -it tinygrad-arm64 python -m pytest -s -v -n=auto test
+      - uses: actions/checkout@v2
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      - name: Build Docker image
+        run: docker buildx build --platform linux/arm64 --load -t tinygrad-arm64 -f test/extra/arm64_dockerfile .
+      - name: Run Docker image
+        run: docker run -e CLANG=1 -e ARM=1 tinygrad-arm64 python -m pytest -s -v -n=auto test
 
   testcuda:
     name: (emulated) cuda test
