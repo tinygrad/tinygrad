@@ -59,15 +59,17 @@ class SpeedyResNet:
 
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
   def __call__(self, x, training=True):
-    if not training and getenv('TTA', 0)==1: return ((x.sequential(self.net) * 0.5) + (x[..., ::-1].sequential(self.net) * 0.5)).log_softmax()
-    return x.conv2d(self.whitening, stride=1).sequential(self.net).log_softmax()
+    # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to do the rest conv layers
+    forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
+    if not training and getenv('TTA', 0)==1: return ((forward(x)*0.5) + (forward(x[..., ::-1])*0.5)).log_softmax()
+    return forward(x).log_softmax()
 
 def whitening(X):
   def cov(X):
       X = X/np.sqrt(X.size(0) - 1)
       return X.t() @ X
 
-  def patches(data, patch_size=(2, 2)):
+  def patches(data, patch_size=(2,2)):
       h, w = patch_size
       c = data.size(1)
       return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w) 
@@ -105,8 +107,9 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     if not is_train: break
     seed += 1
 
-def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.01, 
-                pct_start=0.05, momentum=0.8, wd=0.15, label_smoothing=0., mixup_alpha=0.025, seed=6):
+def train_cifar(bs=512, eval_bs=500, steps=1000, 
+                # training hyper-parameters
+                div_factor=1e16, final_lr_ratio=0.001, max_lr=0.02, pct_start=0.05, momentum=0.8, wd=0.15, label_smoothing=0., mixup_alpha=0.025, seed=6):
   set_seed(seed)  
   Tensor.training = True
 
@@ -126,7 +129,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   W = whitening(X_train)
  
   model = SpeedyResNet(W)
-  optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  optimizer = optim.SGD(get_parameters(model), lr=0.02, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
   # JIT at every run
   @TinyJit
