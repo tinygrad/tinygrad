@@ -22,7 +22,6 @@ class ARMCodegen(AssemblyCodegen):
     reg_map = {}
     var_size = 0
     buf_to_dtype = {int(arg[4:]):out.dtype for uop,out,_,arg in asm if uop == UOps.DEFINE_GLOBAL}
-    all_bufs_dtype = {x.name:all(dtype == x for dtype in buf_to_dtype.values()) for x in [dtypes.half, dtypes.float, dtypes.int8, dtypes.int32, dtypes.int64]}
     for i, (uop, out, vin, arg) in enumerate(asm):
       if uop == UOps.DEFINE_REGISTER: 
         for i in range(arg[2]):
@@ -37,6 +36,7 @@ class ARMCodegen(AssemblyCodegen):
         if arg.__class__ is int and arg > 65535:
           ins.append(f"movk w0, #{(arg >> 16) & 0xffff}, lsl #16")
           ins.append("sxtw x0, w0")
+        #TODO: 
         elif arg.__class__ is float or dtypes.is_float(out.dtype):
           ins.append("fmov s0, w0")
         ins.append(f"str {'s' if arg.__class__ is float else 'x'}0, {reg_map[out.nm]}")
@@ -50,15 +50,9 @@ class ARMCodegen(AssemblyCodegen):
         ins.append(f"str {'s' if dtypes.is_float(out[1]) else 'x'}0, {reg_map[out.nm]}")
       elif uop == UOps.ALU:
         reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
-
-        # Cast to float if needed 
         if reg == 's':
-          #NOTE: can I reuse ldr?
-          ldr_reg = [v for k,v in {'int': 's', 'half': 'h', 'long': 'x', 'char':'w', 'float':'s'}.items() if all_bufs_dtype[k]][0] 
           for i in range(len(vin)):
-            ins.append(f"ldr{'sb' if ldr_reg == 'w' else ''} {ldr_reg}{i}, {reg_map[vin[i].nm]}")
-            if not all_bufs_dtype['float']:
-              ins.append(f"{'fcvt' if ldr_reg == 'h' else 'scvtf'} s{i}, {ldr_reg}{i}")
+            ins.append(f"ldr s{i}, {reg_map[vin[i].nm]}")
         else:
           ins.append(f"ldr {reg}0, {reg_map[vin[0].nm]}")
           if len(vin) >= 2:
@@ -93,51 +87,34 @@ class ARMCodegen(AssemblyCodegen):
           ins.append("msub x2, x2, x1, x0")
         else:
           ins.append(f"{'f' if reg == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {reg}0, {reg}0, {reg}1")
-        # Cast back to buf dtype if needed
-        if all_bufs_dtype['half'] and reg == 's':
-          ins.append(f"fcvt h0, s0")
-          ins.append(f"str h{'2' if arg == BinaryOps.MOD else '0'}, {reg_map[out.nm]}")
-        elif any(all_bufs_dtype[x] for x in ['int', 'char', 'long']) and reg == 's':
-          ins.append(f"fcvtzs {'x' if all_bufs_dtype['long'] else 'w'}0, s0")
-          ins.append(f"str{'b' if all_bufs_dtype['char'] else ''} {'x' if all_bufs_dtype['long'] else 'w'}{'2' if arg == BinaryOps.MOD else '0'}, {reg_map[out.nm]}")
-        else:
-          ins.append(f"str {reg}{'2' if arg == BinaryOps.MOD else '0'}, {reg_map[out.nm]}")
+        ins.append(f"str {reg}{'2' if arg == BinaryOps.MOD else '0'}, {reg_map[out.nm]}")
       elif uop == UOps.LOAD:
-        reg = 's0' if dtypes.is_float(out[1]) and not all_bufs_dtype['long'] else 'x0'
+        reg_out = 's0' if dtypes.is_float(out[1]) else 'x0'
+        reg_in = _type_to_reg[arg[2] if len(arg) == 3 else out[1]] + '0'
         ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
         # Manually offset when it can't fix
         if reg == 's0' and arg[0] < -255:
           ins.append(f"mov x2, #{abs(arg[0])}")
           ins.append("sub x1, x1, x2")
-          ins.append(f"ldr {reg}, [x1]")
         else:
-          ins.append(f"ldr {reg}, [x1, #{arg[0]}]")
-        ins.append(f"str {reg}, {reg_map[out.nm]}")
+          ins.append(f"ldr{'sb' if len(arg) == 3 and arg[2] in [dtypes.int8, dtypes.uint8] else ''} {reg_in}, [x1{',#' + arg[0] if reg == 's0' and arg[0] < -255 else ''}]")
+          if len(arg) == 3:
+            if arg[2] == dtypes.half:
+              ins.append(f"fcvt s0, {reg_in}")
+            elif dtypes.is_int(arg[2]) or dtypes.is_unsigned(arg[2]):
+              ins.append(f"scvtf s0, {reg_in}")
+          ins.append(f"str {reg_out}, {reg_map[out.nm]}")
       elif uop == UOps.STORE:
-        # TODO: Ugh improve this
-        ins.append(f"ldr{'sb' if buf_to_dtype[1] in [dtypes.int8, dtypes.uint8] else ''} {_type_to_reg[buf_to_dtype[1]]}0, {reg_map[vin[1].nm]}")
-        if len(buf_to_dtype) == 2 and buf_to_dtype[0] != buf_to_dtype[1]:
-          if buf_to_dtype[1] == dtypes.half:
-            ins.append(f"fcvt s0, {_type_to_reg[buf_to_dtype[1]]}0")
-            if dtypes.is_int(buf_to_dtype[0]) or dtypes.is_unsigned(buf_to_dtype[0]):
-              ins.append(f"fcvtzs {_type_to_reg[buf_to_dtype[0]]}0, s0")
-          elif buf_to_dtype[1] == dtypes.float:
-            if buf_to_dtype[0] == dtypes.half:
-              ins.append(f"fcvt {_type_to_reg[buf_to_dtype[0]]}0, {_type_to_reg[buf_to_dtype[1]]}0")
-            else:
-              ins.append(f"fcvtzs {_type_to_reg[buf_to_dtype[0]]}0, {_type_to_reg[buf_to_dtype[1]]}0")
-          elif buf_to_dtype[1] in [dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64]:
-            if buf_to_dtype[0] == dtypes.float:
-              ins.append(f"scvtf {_type_to_reg[buf_to_dtype[0]]}0, {_type_to_reg[buf_to_dtype[1]]}0")
-            elif buf_to_dtype[0] == dtypes.half:
-              ins.append(f"scvtf s0, {_type_to_reg[buf_to_dtype[1]]}0")
-              ins.append(f"fcvt {_type_to_reg[buf_to_dtype[0]]}0, s0")
-            elif buf_to_dtype[0] in [dtypes.int64, dtypes.int32]:
-              ins.append(f"scvtf s0, {_type_to_reg[buf_to_dtype[1]]}0")
-              ins.append(f"fcvtzs {_type_to_reg[buf_to_dtype[0]]}0, s0")
+        ins.append(f"ldr s0, {reg_map[vin[1].nm]}")
+        reg_out = (_type_to_reg[arg[2]] if len(arg) == 3 else "s") + '0' 
+        if len(arg) == 3:
+          if arg[2] == dtypes.half:
+            ins.append(f"fcvt {reg_out}, s0")
+          elif dtypes.is_int(arg[2]) or dtypes.is_unsigned(arg[2]):
+            ins.append(f"fcvtzs {reg_out}, s0")
         ins.append(f"mov x3, #{arg[0]}")
         ins.append(f"ldr x2, {reg_map[vin[0].nm]}")
-        ins.append(f"str {_type_to_reg[buf_to_dtype[0]]}0, [x2, x3, lsl {'#3' if buf_to_dtype[0] == dtypes.int64 else '#1' if  buf_to_dtype[0] == dtypes.half else '#2' if buf_to_dtype[0] in [dtypes.int8, dtypes.uint8] else '#0'}]")
+        ins.append(f"str {reg_out}, [x2, x3, lsl {'#3' if buf_to_dtype[0] == dtypes.int64 else '#1' if  buf_to_dtype[0] == dtypes.half else '#2' if buf_to_dtype[0] in [dtypes.int8, dtypes.uint8] else '#0'}]")
       elif uop == UOps.COND_BRANCH:
         ins.append(f"b.{'lt' if arg[1]==True else 'ge'} {arg[0][1:]}")
       elif uop == UOps.LABEL:

@@ -100,9 +100,11 @@ class AssemblyCodegen(Linearizer):
       reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[args[0]], dtype=dtypes.uint64)
       return reg, None, off
 
+    buf_to_dtype = {args[0]:args[1] for uop,_,_,args in self.uops if uop == UOps.DEFINE_GLOBAL}
+    buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
     ins = []
     #ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=self.bufs[i].dtype, scalar=True, bufsize=math.prod(self.bufs[i].shape)), [], f"buf{i}") for i in range(len(self.bufs))]
-    ins += [AssemblyInstruction(UOps.DEFINE_GLOBAL, newreg(args[0], dtype=args[1], scalar=True), [], args[0]) for uop,_,_,args in self.uops if uop == UOps.DEFINE_GLOBAL]
+    ins += [AssemblyInstruction(UOps.DEFINE_GLOBAL, newreg(args[0], dtype=dtypes.uint64, scalar=True), [], args[0]) for uop,_,_,args in self.uops if uop == UOps.DEFINE_GLOBAL]
 
     global_size, local_size = [], []
     skipload_branch = 0
@@ -165,18 +167,19 @@ class AssemblyCodegen(Linearizer):
             ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
         if args.valid.max == 1:
           # NOTE: you can't compute the index in here, because it assumes it's all available later
-          ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' ))) #if args.i != -1 else 'shared')
+          if buf_to_dtype[args.name] != dtypes.float: 
+            ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global', args.dtype))) #if args.i != -1 else 'shared')
+          else:
+            ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' ))) #if args.i != -1 else 'shared')
         if args.valid.min == 0 and args.valid.max == 1:
           ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
           skipload_branch += 1
       elif uop == UOps.STORE:
         idx, treg, off = addr_w_offset(args)
-        print("---")
-        print(args)
-        print(f" {idx}, {treg} {off}") # %b2, None 0
-        print("---")
-        #ins.append(AssemblyInstruction(UOps.CAST, out, [pred_reg], args))
-        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global'))) #if args.i != -1 else 'shared')
+        if buf_to_dtype['data0'] != dtypes.float: 
+          ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global', args.dtype))) #if args.i != -1 else 'shared')
+        else:
+          ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global'))) #if args.i != -1 else 'shared')
 
     # define registers
     ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)) for dtype,c in cnts.items()] + ins
