@@ -268,7 +268,7 @@ jobs:
       - name: Build Docker image
         run: docker buildx build --platform linux/arm64 --load -t tinygrad-arm64 -f test/extra/arm64_dockerfile .
       - name: Run Docker image
-        run: docker run -e CLANG=1 -e ARM=1 tinygrad-arm64 python -m pytest -s -v -n=auto test
+        run: docker run -e CI=1 -e ENABLE_METHOD_CACHE=1 -e FORWARD_ONLY=1 -e CLANG=1 -e ARM=1 tinygrad-arm64 python -m pytest -s -v -n=auto test
 
   testcuda:
     name: (emulated) cuda test
