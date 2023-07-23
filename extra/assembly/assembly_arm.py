@@ -91,7 +91,7 @@ class ARMCodegen(AssemblyCodegen):
         # Manually offset in case it can't fix in imm
         ins.append(f"mov x2, #{abs(arg[0])}")
         ins.append(f"{'sub' if arg[0] < 0 else 'add'} x1, x1, x2")
-        ins.append(f"ldr{'sb' if need_cast in (dtypes.int8, dtypes.uint8) else ''} {reg_in}, [x1]")
+        ins.append(f"ldr{'sb' if need_cast and arg[2] in (dtypes.int8, dtypes.uint8) else ''} {reg_in}, [x1]")
         if need_cast:
           if arg[2] == dtypes.half:
             ins.append(f"fcvt s0, {reg_in}")
@@ -104,10 +104,7 @@ class ARMCodegen(AssemblyCodegen):
         ins.append(f"ldr s0, {reg_map[vin[1].nm]}")
         reg_out = (type_to_reg[arg[2]] if need_cast else "s") + '0' 
         if need_cast:
-          if arg[2] == dtypes.half:
-            ins.append(f"fcvt {reg_out}, s0")
-          elif dtypes.is_int(arg[2]) or dtypes.is_unsigned(arg[2]):
-            ins.append(f"fcvtzs {reg_out}, s0")
+          ins.append(f"fcvt{'zs' if arg[2] != dtypes.half else '' } {reg_out}, s0")
         ins.append(f"mov x3, #{arg[0]}")
         ins.append(f"ldr x2, {reg_map[vin[0].nm]}")
         ins.append(f"str {reg_out}, [x2, x3, lsl {shifts[arg[2]] if need_cast and arg[2] in shifts else '#0'}]")
