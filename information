@@ -1,4 +1,4 @@
-====== failing, upcast, vload_half, range(4) =======
+====== failing, free upcast on, range(4) =======
 UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
 UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
 UOps.LOOP           :                           []                               ([], 'global')
@@ -19,7 +19,7 @@ __kernel void E_4(__global unsigned char* data0, const __global half* data1) {
    /* global+local */
 }
 
-====== passing, no upcast, vload_half, range(4) =======
+====== passing, no upcast, range(4) =======
 UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
 UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
 UOps.LOOP           :                           []                               ([], 'global')
@@ -36,7 +36,7 @@ __kernel void E_4(__global unsigned char* data0, const __global half* data1) {
 }
 
 
-===== failing, upcast, vload_half4, range(8) =======
+===== failing, free upcast on, vload_half4, range(8) =======
 UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
 UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
 UOps.LOOP           :                           []                               ([<gidx0[0-1]>], 'global')
@@ -80,7 +80,7 @@ __kernel void E_8(__global unsigned char* data0, const __global half* data1) {
 
 
 
-===== passing, upcast, vload_half4, range(12) =====
+===== passing, free upcast on, range(12) =====
 UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
 UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
 UOps.LOOP           :                           []                               ([], 'global')
@@ -103,7 +103,7 @@ __kernel void E_3_4(__global unsigned char* data0, const __global half* data1) {
 }
 
 
-===== passing, no upcast, vload_half, range(12) ======
+===== passing, no upcast, range(12) ======
 UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
 UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
 UOps.LOOP           :                           []                               ([<gidx0[0-2]>], 'global')
@@ -123,7 +123,7 @@ __kernel void E_3_4(__global unsigned char* data0, const __global half* data1) {
 
 
 
-==== passing, upcast, range(5) ====
+==== passing, free upcast on, range(5) ====
 UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.unsigned char)
 UOps.DEFINE_GLOBAL  :                           []                               ('data1', dtypes.half)
 UOps.LOOP           :                           []                               ([<gidx0[0-4]>], 'global')
