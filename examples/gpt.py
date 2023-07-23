@@ -18,12 +18,12 @@ Tensor.manual_seed(31337)
 # hyperparameters
 batch_size = 32 # how many independent sequences will we process in parallel?
 block_size = 8 # what is the maximum context length for predictions?
-max_iters = 1000
+max_iters = 2000
 # eval_interval = 500
 learning_rate = 1e-3
 # eval_iters = 200
 n_embd = 32
-# n_head = 6
+n_head = 4
 # n_layer = 6
 # dropout = 0.2
 
@@ -58,6 +58,7 @@ def get_batch(split):
   y = Tensor.stack([data[i+1:i+block_size+1] for i in ix.numpy()])
   return x, y
 
+
 class Head():
   """ one head of self-attention """
 
@@ -81,23 +82,47 @@ class Head():
     out = wei @ v  # (B, T, T) @ (B, T, hs) -> (B, T, hs)
     return out
 
+
 class MultiHeadAttention():
 
   """ multiple heads of self-attention in parallel """
   def __init__(self, num_heads, head_size):
     self.heads = [Head(head_size) for _ in range(num_heads)]
+    self.proj = nn.Linear(n_embd, n_embd)
 
   def __call__(self, x):
-    return self.heads[0](x).cat(*[h(x) for h in self.heads[1:]], dim=-1)
+    out = self.heads[0](x).cat(*[h(x) for h in self.heads[1:]], dim=-1)
+    out = self.proj(out)
+    return out
+
 
 class FeedForward():
   """ a simple linear layer followed by a non-linearity """
 
   def __init__(self, n_embd):
-    self.net = [nn.Linear(n_embd, n_embd), Tensor.relu]
+    self.net = [
+      nn.Linear(n_embd, 4 * n_embd),
+      Tensor.relu,
+      nn.Linear(4 * n_embd, n_embd)
+    ]
 
   def __call__(self, x):
     return x.sequential(self.net)
+
+
+class Block():
+  """ transformer block: communication followed by computation """
+  def __init__(self, n_embd, n_head):
+    # n_embd: embedding dimension, n_head: the number of heads we'd like
+    head_size = n_embd // n_head
+    self.sa = MultiHeadAttention(n_head, head_size)
+    self.ffwd = FeedForward(n_embd)
+
+  def __call__(self, x):
+    x = x + self.sa(x)
+    x = x + self.ffwd(x)
+    return x
+
 
 class GPTLanguageModel():
   """ a decoder only transformer """
@@ -106,8 +131,11 @@ class GPTLanguageModel():
     # each token directly reads off the logits for the next token from a lookup table
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
     self.position_embedding_table = nn.Embedding(block_size, n_embd)
-    self.sa_heads = MultiHeadAttention(4, n_embd//4) # i.e. 4 heads 8-dimensional self-attention
-    self.ffwd = FeedForward(n_embd)
+    self.blocks = [
+      Block(n_embd, n_head),
+      Block(n_embd, n_head),
+      Block(n_embd, n_head)
+    ]
     self.lm_head = nn.Linear(n_embd, vocab_size)
 
   def __call__(self, idx, targets=None):
@@ -117,8 +145,7 @@ class GPTLanguageModel():
     tok_emb = self.token_embedding_table(idx) # (B,T,C)
     pos_emb = self.position_embedding_table(Tensor.arange(T, dtype=dtypes.int8).reshape(1,T)) # (T,C)
     x = tok_emb + pos_emb # (B,T,C)
-    x = self.sa_heads(x) # apply multi-head self-attention (B,T,C)
-    x = self.ffwd(x) # (B,T,C)
+    for block in self.blocks: x = block(x)
     logits = self.lm_head(x) # (B,T,vocab_size)
     
     if targets is None:
