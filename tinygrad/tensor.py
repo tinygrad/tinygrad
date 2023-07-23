@@ -62,7 +62,7 @@ class Tensor:
       if not force_buffer:
         self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
         return
-      data = np.array(data, dtype=type(data))
+      data = np.array(data, dtype=(dtype or Tensor.default_type).np)
 
     if data.__class__ is list:
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"

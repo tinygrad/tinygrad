@@ -214,5 +214,16 @@ class TestTinygrad(unittest.TestCase):
     self.assertEqual(Tensor([[3]]).shape, (1, 1))
     self.assertEqual(Tensor([[[3]]]).shape, (1, 1, 1))
 
+  def test_size1_input_has_same_dtype(self):
+    for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
+      a = Tensor([1], dtype=datatype)
+      assert a.dtype == datatype, f"a.dtype should be {datatype}"
+      a = Tensor(1, dtype=datatype)
+      assert a.dtype == datatype, f"a.dtype should be {datatype}"
+      a = Tensor([1], dtype=datatype, force_buffer=True)
+      assert a.dtype == datatype, f"a.dtype should be {datatype}"
+      a = Tensor(1, dtype=datatype, force_buffer=True)
+      assert a.dtype == datatype, f"a.dtype should be {datatype}"
+
 if __name__ == '__main__':
   unittest.main()
