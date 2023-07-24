@@ -93,7 +93,7 @@ def Cutmix(X, Y, mask_size=3, p=0.5):
   center_max = X.shape[-2]-mask_size//2-is_even
   center_min = mask_size//2-is_even
   center = Tensor.rand(X.shape[0])*(center_max-center_min)+center_min
-  
+
   d_y = Tensor.arange(0, X.shape[-2]).reshape((1,1,X.shape[-2],1))
   d_x = Tensor.arange(0, X.shape[-1]).reshape((1,1,1,X.shape[-1]))
   d_y = d_y - center.reshape((-1,1,1,1))
@@ -110,7 +110,7 @@ def Cutmix(X, Y, mask_size=3, p=0.5):
   Y_cutmix = Y[::-1]
   mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
   Y_cutmix = mix_portion * Y_cutmix + (1. - mix_portion) * Y
-  
+
   return X_cutmix, Y_cutmix
 
 transform = ComposeTransforms([
@@ -146,7 +146,7 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     if not is_train: break
     seed += 1
 
-def train_cifar(bs=512, eval_bs=500, steps=1000, 
+def train_cifar(bs=512, eval_bs=500, steps=1000,
                 # training hyper-parameters (if including model sizes)
                 div_factor=1e16, final_lr_ratio=0.004560827731448039, max_lr=0.01040497290691913, pct_start=0.22817715646040532, momentum=0.8468770654506089, wd=0.17921940728200592, label_smoothing=0.2, seed=32):
   set_seed(seed)
@@ -157,7 +157,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   MOMENTUM, WD = getenv('MOMENTUM', momentum), getenv("WD", wd)
   # For LR Scheduler
   MAX_LR, PCT_START, DIV_FACTOR = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start), getenv('DIV_FACTOR', div_factor)
-  FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio)) 
+  FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio))
   # Others
   LABEL_SMOOTHING = getenv('LABEL_SMOOTHING', label_smoothing)
 
@@ -168,7 +168,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
     X_test, Y_test = X_train, Y_train
   else:
     X_train, Y_train, X_test, Y_test = fetch_cifar()    # they are disk tensor now
- 
+
   # precompute whitening patches
   W = whitening(X_train)
 
