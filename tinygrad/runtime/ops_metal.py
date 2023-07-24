@@ -13,10 +13,17 @@ class _METAL:
   def __init__(self):
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
+    self.dispatch_group = libdispatch.dispatch_group_create() 
     self.mtl_queue = self.device.newCommandQueue()
-  # TODO: is there a better way to do this?
+  def command_buffer(self):
+    command_buffer = self.mtl_queue.commandBuffer()
+    libdispatch.dispatch_group_enter(METAL.dispatch_group)
+    def leave(_): libdispatch.dispatch_group_leave(self.dispatch_group)
+    command_buffer.addCompletedHandler_(leave)
+    self.mtl_buffers_in_flight.append(command_buffer)
+    return command_buffer
   def synchronize(self):
-    for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
+    libdispatch.dispatch_group_wait(self.dispatch_group, libdispatch.DISPATCH_TIME_FOREVER)
     self.mtl_buffers_in_flight.clear()
 METAL = _METAL()
 
@@ -60,7 +67,7 @@ class MetalProgram:
 
   def __call__(self, global_size, local_size, *bufs, wait=False):
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
-    command_buffer = METAL.mtl_queue.commandBuffer()
+    command_buffer = METAL.command_buffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
     for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
@@ -70,7 +77,6 @@ class MetalProgram:
     if wait:
       command_buffer.waitUntilCompleted()
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
-    METAL.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalCodegen(CStyleCodegen):
   lang = CStyleLanguage(
