@@ -55,7 +55,7 @@ class Tensor:
     if data.__class__ is LazyBuffer:
       data = cast(LazyBuffer, data) # NOTE: this is a noop, it makes mypy happy
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-      self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data, symbols=data.symbols)
+      self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
 
     if isinstance(data, (int, float)):
@@ -162,7 +162,7 @@ class Tensor:
   @staticmethod
   def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
     ret = Tensor.full(tensor.shape, fill_value=fill_value, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
-    ret.lazydata.symbols.update(tensor.lazydata.symbols)
+    ret.lazydata.st.symbols.update(tensor.lazydata.st.symbols)
     return ret
 
   @staticmethod

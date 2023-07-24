@@ -132,10 +132,11 @@ def get_unsafe_resize_offset(strides, arg):
   return sum([s * x[0] for s, x in zip(strides,arg)])
 
 class ShapeTracker:
-  __slots__ = "views"
-  def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node,int], ...]], views:Optional[List[View]]=None):
+  __slots__ = "views", "symbols"
+  def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node,int], ...]], views:Optional[List[View]]=None, symbols:Optional[Dict[Variable, int]]=None):
     self.views: List[View] = views if views is not None else ([*cast(ShapeTracker, shape).views] if shape.__class__ is ShapeTracker else [view_from_shape(shape)])
-  def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
+    self.symbols: Dict[Variable, int] = shape.symbols if isinstance(shape, ShapeTracker) else symbols or {}
+  def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views}, symbols={self.symbols})"
   def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
 
   @property
@@ -144,7 +145,8 @@ class ShapeTracker:
   @property
   def shape(self) -> Tuple[int, ...]: return self.views[-1].shape # NOTE: real type is Tuple[Union[Node, int], ...] but mypy doesn't like it and symbolic shape footprint is small.
 
-  def infer_shape(self, symbols) -> Tuple[int, ...]: return tuple(sym_infer(s, symbols) for s in self.shape)
+  @property
+  def inferred_shape(self) -> Tuple[int, ...]: return tuple(sym_infer(s, self.symbols) for s in self.shape)
 
   @property
   def key(self) -> Tuple[View, ...]: return tuple(self.views)

@@ -36,21 +36,21 @@ class TestSymbolic(unittest.TestCase):
     assert st.real_strides() == (i+j+k, 1)
 
 class TestSymbolicReshape(unittest.TestCase):
-  def test_reshape_into_symbols(self):
+  def test_reshape_into_symbols_simple(self):
     for i in range(1, 10):
       vi = Variable("i", 1, 10)
       t = Tensor.rand(i, 4).reshape(vi, 4)
       assert t.shape == (vi, 4)
       assert t.inferred_shape == (i, 4)
-      assert t.lazydata.symbols == {vi: i}
+      assert t.lazydata.st.symbols == {vi: i}
       t = Tensor.rand(i, 4).reshape(vi, 4)
       assert t.shape == (vi, 4)
       assert t.inferred_shape == (i, 4)
-      assert t.lazydata.symbols == {vi: i}
+      assert t.lazydata.st.symbols == {vi: i}
       t = Tensor.rand(i, 6).reshape(vi, 2, 3)
       assert t.shape == (vi, 2, 3)
       assert t.inferred_shape == (i, 2, 3)
-      assert t.lazydata.symbols == {vi: i}
+      assert t.lazydata.st.symbols == {vi: i}
 
   def test_reshape_symbols_reshape_ints(self):
     for i in range(1, 10):
@@ -58,15 +58,15 @@ class TestSymbolicReshape(unittest.TestCase):
       t = Tensor.rand(i, 4).reshape(vi, 4).reshape(i, 4)
       assert t.shape == (i, 4)
       assert t.inferred_shape == (i, 4)
-      assert t.lazydata.symbols == {}
+      assert t.lazydata.st.symbols == {}
       t = Tensor.rand(i, 4).reshape(vi, 4).reshape(i*4,)
       assert t.shape == (i*4,)
       assert t.inferred_shape == (i*4,)
-      assert t.lazydata.symbols == {vi: i}
+      assert t.lazydata.st.symbols == {vi: i}
       t = Tensor.rand(i, 6).reshape(vi, 6).reshape(i*2, 3)
       assert t.shape == (i*2, 3)
       assert t.inferred_shape == (i*2, 3)
-      assert t.lazydata.symbols == {}
+      assert t.lazydata.st.symbols == {}
 
   def test_reshape_into_symbols_bad_shape(self):
     vi = Variable("i", 1, 10)
@@ -88,7 +88,7 @@ class TestSymbolicReshape(unittest.TestCase):
       t = Tensor.full_like(Tensor.rand(i, 4).reshape(vi, 4), 5)
       assert t.shape == (vi, 4)
       assert t.inferred_shape == (i, 4)
-      assert t.lazydata.symbols == {vi: i}
+      assert t.lazydata.st.symbols == {vi: i}
 
   def test_reshape_move_ops(self):
     for i in range(1, 10):
@@ -96,11 +96,11 @@ class TestSymbolicReshape(unittest.TestCase):
       t = Tensor.rand(i, 4).reshape(vi, 4).permute((1, 0))
       assert t.shape == (4, vi)
       assert t.inferred_shape == (4, i)
-      assert t.lazydata.symbols == {vi: i}
+      assert t.lazydata.st.symbols == {vi: i}
       t = Tensor.rand(i, 4).reshape(vi, 4).reshape(vi*4,)
       assert t.shape == (vi*4,)
       assert t.inferred_shape == (i*4,)
-      assert t.lazydata.symbols == {vi: i}
+      assert t.lazydata.st.symbols == {vi: i}
 
   def test_reshape_unary_ops(self):
     for i in range(1, 10):
@@ -108,15 +108,15 @@ class TestSymbolicReshape(unittest.TestCase):
       t = Tensor.rand(i, 4).reshape(vi, 4).contiguous()
       assert t.shape == (vi, 4)
       assert t.inferred_shape == (i, 4)
-      assert t.lazydata.symbols == {vi: i}
+      assert t.lazydata.st.symbols == {vi: i}
       t = Tensor.rand(i, 4).reshape(vi, 4).log()
       assert t.shape == (vi, 4)
       assert t.inferred_shape == (i, 4)
-      assert t.lazydata.symbols == {vi: i}
+      assert t.lazydata.st.symbols == {vi: i}
       t = Tensor.rand(i, 4).reshape(vi, 4).relu()
       assert t.shape == (vi, 4)
       assert t.inferred_shape == (i, 4)
-      assert t.lazydata.symbols == {vi: i}
+      assert t.lazydata.st.symbols == {vi: i}
 
   def test_reshape_binary_ops(self):
     for i in range(1, 10):
@@ -124,15 +124,15 @@ class TestSymbolicReshape(unittest.TestCase):
       t = Tensor.rand(i, 4).reshape(vi, 4) + Tensor.rand(i, 4).reshape(vi, 4)
       assert t.shape == (vi, 4)
       assert t.inferred_shape == (i, 4)
-      assert t.lazydata.symbols == {vi: i}
+      assert t.lazydata.st.symbols == {vi: i}
       t = Tensor.rand(i, 4).reshape(vi, 4) * Tensor.rand(i, 4).reshape(vi, 4)
       assert t.shape == (vi, 4)
       assert t.inferred_shape == (i, 4)
-      assert t.lazydata.symbols == {vi: i}
+      assert t.lazydata.st.symbols == {vi: i}
       t = Tensor.rand(4, i).reshape(4, vi) @ Tensor.rand(i, 4).reshape(vi, 4)
       assert t.shape == (4, 4)
       assert t.inferred_shape == (4, 4)
-      assert t.lazydata.symbols == {}
+      assert t.lazydata.st.symbols == {}
 
   def test_reshape_reduce_ops(self):
     for i in range(1, 10):
@@ -140,11 +140,11 @@ class TestSymbolicReshape(unittest.TestCase):
       t = Tensor.rand(i, 4).reshape(vi, 4).sum(axis=0)
       assert t.shape == (4,)
       assert t.inferred_shape == (4,)
-      assert t.lazydata.symbols == {}
+      assert t.lazydata.st.symbols == {}
       t = Tensor.rand(i, 4).reshape(vi, 4).sum(axis=1)
       assert t.shape == (vi,)
       assert t.inferred_shape == (i,)
-      assert t.lazydata.symbols == {vi: i}
+      assert t.lazydata.st.symbols == {vi: i}
 
   def test_reshape_reduce_ops_2d(self):
     for i in range(1, 10):
@@ -154,16 +154,16 @@ class TestSymbolicReshape(unittest.TestCase):
         a = Tensor.rand(i, 3).reshape(vi, 3) @ Tensor.rand(3, j).reshape(3, vj)
         assert a.shape == (vi, vj)
         assert a.inferred_shape == (i, j)
-        assert a.lazydata.symbols == {vi: i, vj: j}
+        assert a.lazydata.st.symbols == {vi: i, vj: j}
         r = a.sum(axis=0)
         assert r.shape == (vj,)
         assert r.inferred_shape == (j,)
-        assert r.lazydata.symbols == {vj: j}
+        assert r.lazydata.st.symbols == {vj: j}
         r = a.sum(axis=1)
         assert r.shape == (vi,)
         assert r.inferred_shape == (i,)
-        assert r.lazydata.symbols == {vi: i}
+        assert r.lazydata.st.symbols == {vi: i}
         r = a.sum()
         assert r.shape == ()
         assert r.inferred_shape == ()
-        assert r.lazydata.symbols == {}
+        assert r.lazydata.st.symbols == {}

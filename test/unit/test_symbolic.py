@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, Node
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, Node, sym_infer
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -239,6 +239,38 @@ class TestSymbolicNumeric(unittest.TestCase):
   def test_times_2_plus_3_mod_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)%4)
   def test_times_2_plus_3_div_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)//4)
   def test_times_2_plus_3_div_4_mod_4(self): self.helper_test_numeric(lambda x: ((x*2 + 3)//4)%4)
+
+class TestSymbolicInfer(unittest.TestCase):
+  def test_infer(self):
+    va = Variable("a", 1, 10)
+    vb = Variable("b", 1, 10)
+    vc = Variable("c", 1, 10)
+    assert va.infer({va: 5}) == 5
+    assert va.infer({va: 8}) == 8
+    assert NumNode(2).infer({va: 8}) == 2
+    assert (va+vb).infer({va: 2, vb: 4}) == 6
+    assert (va-vb).infer({va: 2, vb: 4}) == -2
+    assert (va+vb+vc).infer({va: 1, vb: 4, vc: 9}) == 14
+    assert (va*vb).infer({va: 3, vb: 7}) == 21
+    assert (va+vb*vc).infer({va: 1, vb: 4, vc: 9}) == 37
+    assert (va//2).infer({va: 5}) == 2
+    assert (va//3).infer({va: 5}) == 1
+    assert (va%2).infer({va: 8}) == 0
+    assert (va%3).infer({va: 8}) == 2
+    assert (va<2).infer({va: 5}) == False
+    assert (va<8).infer({va: 5}) == True
+    assert Variable.sum([va,vb,vc]).infer({va: 1, vb: 3, vc: 7}) == 11
+    assert Variable.ands([va,vb,vc]).infer({va: 1, vb: 4, vc: 9}) == True
+    assert Variable.ands([va,vb,vc]).infer({va: 1, vb: 4, vc: 0}) == False
+
+  def test_sym_infer(self):
+    va = Variable("a", 1, 10)
+    vb = Variable("b", 1, 10)
+    vc = Variable("c", 1, 10)
+    symbols = {va: 2, vb: 3, vc: 5}
+    for i in range(3): assert sym_infer(i, symbols) == i
+    assert sym_infer(va+vb+vc, symbols) == 10
+    with self.assertRaises(KeyError): sym_infer(va+vb+vc, {va:2})
 
 if __name__ == '__main__':
   unittest.main()
