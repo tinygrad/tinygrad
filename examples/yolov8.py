@@ -48,10 +48,10 @@ def box_area(box):
 def box_iou(box1, box2):
   lt = np.maximum(box1[:, None, :2], box2[:, :2])
   rb = np.minimum(box1[:, None, 2:], box2[:, 2:])
-  wh = np.clip(rb - lt, 0, None) 
-  inter = wh[:, :, 0] * wh[:, :, 1]  
-  area1 = box_area(box1)[:, None]  
-  area2 = box_area(box2)[None, :]  
+  wh = np.clip(rb - lt, 0, None)
+  inter = wh[:, :, 0] * wh[:, :, 1]
+  area1 = box_area(box1)[:, None]
+  area2 = box_area(box2)[None, :]
   iou = inter / (area1 + area2 - inter)
   return iou
 
@@ -66,7 +66,7 @@ def compute_nms(boxes, scores, iou_threshold):
     inds = np.where(iou.squeeze() <= iou_threshold)[0]
     order = order[inds + 1]
   return np.array(keep)
-    
+
 def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, agnostic=False, max_det=300, nc=0, max_wh=7680):
   prediction = prediction[0] if isinstance(prediction, (list, tuple)) else prediction
   bs, nc = prediction.shape[0], nc or (prediction.shape[1] - 4)
@@ -86,7 +86,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, agnostic=Fa
     c = x[:, 5:6] * (0 if agnostic else max_wh)
     boxes, scores = x[:, :4] + c, x[:, 4]
     i = compute_nms(boxes, scores, iou_thres)[:max_det]
-    output[xi] = x[i] 
+    output[xi] = x[i]
   return output
 
 def postprocess(preds, img, orig_imgs):
@@ -102,7 +102,7 @@ def postprocess(preds, img, orig_imgs):
       pred[:, :4] = scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
       all_preds.append(pred)
   return all_preds
-  
+
 def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictions, class_labels, iou_threshold=0.5):
   color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
   font = cv2.FONT_HERSHEY_SIMPLEX
@@ -159,7 +159,7 @@ def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictio
     cv2.imwrite(output_img_path, orig_img)
     print(f'saved detections at {output_img_path}')
 
-# utility functions for forward pass. 
+# utility functions for forward pass.
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
   lt, rb = distance.chunk(2, dim)
   x1y1 = anchor_points - lt
@@ -167,7 +167,7 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
   if xywh:
     c_xy = (x1y1 + x2y2) / 2
     wh = x2y2 - x1y1
-    return c_xy.cat(wh, dim=1) 
+    return c_xy.cat(wh, dim=1)
   return x1y1.cat(x2y2, dim=1)
 
 def make_anchors(feats, strides, grid_cell_offset=0.5):
@@ -175,13 +175,13 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
   assert feats is not None
   for i, stride in enumerate(strides):
     _, _, h, w = feats[i].shape
-    sx = Tensor.arange(w) + grid_cell_offset  
-    sy = Tensor.arange(h) + grid_cell_offset 
-    
-    # this is np.meshgrid but in tinygrad 
+    sx = Tensor.arange(w) + grid_cell_offset
+    sy = Tensor.arange(h) + grid_cell_offset
+
+    # this is np.meshgrid but in tinygrad
     sx = sx.reshape(1, -1).repeat([h, 1]).reshape(-1)
     sy = sy.reshape(-1, 1).repeat([1, w]).reshape(-1)
-    
+
     anchor_points.append(Tensor.stack((sx, sy), -1).reshape(-1, 2))
     stride_tensor.append(Tensor.full((h * w), stride))
   anchor_points = anchor_points[0].cat(anchor_points[1], anchor_points[2])
@@ -244,32 +244,32 @@ class Upsample:
     (b, c), _lens = x.shape[:2], len(x.shape[2:])
     tmp = x.reshape([b, c, -1] + [1] * _lens) * Tensor.ones(*[1, 1, 1] + [self.scale_factor] * _lens)
     return tmp.reshape(list(x.shape) + [self.scale_factor] * _lens).permute([0, 1] + list(chain.from_iterable([[y+2, y+2+_lens] for y in range(_lens)]))).reshape([b, c] + [x * self.scale_factor for x in x.shape[2:]])
-  
+
 class Conv_Block():
   def __init__(self, c1, c2, kernel_size=1, stride=1, groups=1, dilation=1, padding=None):
     self.conv = Conv2d(c1,c2, kernel_size, stride, padding=autopad(kernel_size, padding, dilation), bias=False, groups=groups, dilation=dilation)
     self.bn = BatchNorm2d(c2, eps=0.001)
-  
+
   def __call__(self, x):
     return self.bn(self.conv(x)).silu()
-  
+
 class Bottleneck:
   def __init__(self, c1, c2 , shortcut: bool, g=1, kernels: list = (3,3), channel_factor=0.5):
     c_ = int(c2 * channel_factor)
     self.cv1 = Conv_Block(c1, c_, kernel_size=kernels[0], stride=1, padding=None)
     self.cv2 = Conv_Block(c_, c2, kernel_size=kernels[1], stride=1, padding=None, groups=g)
     self.residual = c1 == c2 and shortcut
-    
+
   def __call__(self, x):
     return x + self.cv2(self.cv1(x)) if self.residual else self.cv2(self.cv1(x))
 
 class C2f:
-  def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5): 
-    self.c = int(c2 * e) 
+  def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
+    self.c = int(c2 * e)
     self.cv1 = Conv_Block(c1, 2 * self.c, 1,)
     self.cv2 = Conv_Block((2 + n) * self.c, c2, 1)
     self.bottleneck = [Bottleneck(self.c, self.c, shortcut, g, kernels=[(3, 3), (3, 3)], channel_factor=1.0) for _ in range(n)]
-   
+
   def __call__(self, x):
     y= list(self.cv1(x).chunk(2, 1))
     y.extend(m(y[-1]) for m in self.bottleneck)
@@ -282,17 +282,17 @@ class SPPF:
     c_ = c1 // 2  # hidden channels
     self.cv1 = Conv_Block(c1, c_, 1, 1, padding=None)
     self.cv2 = Conv_Block(c_ * 4, c2, 1, 1, padding=None)
-    
-    # TODO: this pads with 0s, whereas torch function pads with -infinity. This results in a < 2% difference in prediction which does not make a difference visually. 
+
+    # TODO: this pads with 0s, whereas torch function pads with -infinity. This results in a < 2% difference in prediction which does not make a difference visually.
     self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=k, stride=1)
-        
+
   def __call__(self, x):
     x = self.cv1(x)
     x2 = self.maxpool(x)
     x3 = self.maxpool(x2)
     x4 = self.maxpool(x3)
     return self.cv2(x.cat(x2, x3, x4, dim=1))
-  
+
 class DFL:
   def __init__(self, c1=16):
     self.conv = Conv2d(c1, 1, 1, bias=False)
@@ -303,19 +303,19 @@ class DFL:
   def __call__(self, x):
     b, c, a = x.shape # batch, channels, anchors
     return self.conv(x.reshape(b, 4, self.c1, a).transpose(2, 1).softmax(1)).reshape(b, 4, a)
-  
-#backbone                               
+
+#backbone
 class Darknet:
-  def __init__(self, w, r, d): 
+  def __init__(self, w, r, d):
     self.b1 = [Conv_Block(c1=3, c2= int(64*w), kernel_size=3, stride=2, padding=1), Conv_Block(int(64*w), int(128*w), kernel_size=3, stride=2, padding=1)]
     self.b2 = [C2f(c1=int(128*w), c2=int(128*w), n=round(3*d), shortcut=True), Conv_Block(int(128*w), int(256*w), 3, 2, 1), C2f(int(256*w), int(256*w), round(6*d), True)]
     self.b3 = [Conv_Block(int(256*w), int(512*w), kernel_size=3, stride=2, padding=1), C2f(int(512*w), int(512*w), round(6*d), True)]
     self.b4 = [Conv_Block(int(512*w), int(512*w*r), kernel_size=3, stride=2, padding=1), C2f(int(512*w*r), int(512*w*r), round(3*d), True)]
     self.b5 = [SPPF(int(512*w*r), int(512*w*r), 5)]
-    
+
   def return_modules(self):
     return [*self.b1, *self.b2, *self.b3, *self.b4, *self.b5]
-  
+
   def __call__(self, x):
     x1 = x.sequential(self.b1)
     x2 = x1.sequential(self.b2)
@@ -334,10 +334,10 @@ class Yolov8NECK:
     self.n4 = C2f(c1=int(768*w), c2=int(512*w), n=round(3*d), shortcut=False)
     self.n5 = Conv_Block(c1=int(512* w), c2=int(512 * w), kernel_size=3, stride=2, padding=1)
     self.n6 = C2f(c1=int(512*w*(1+r)), c2=int(512*w*r), n=round(3*d), shortcut=False)
-  
+
   def return_modules(self):
     return [self.n1, self.n2, self.n3, self.n4, self.n5, self.n6]
-  
+
   def __call__(self, p3, p4, p5):
     x = self.n1(self.up(p5).cat(p4, dim=1))
     head_1 = self.n2(self.up(x).cat(p3, dim=1))
@@ -345,20 +345,20 @@ class Yolov8NECK:
     head_3 = self.n6(self.n5(head_2).cat(p5, dim=1))
     return [head_1, head_2, head_3]
 
-#task specific head. 
+#task specific head.
 class DetectionHead:
   def __init__(self, nc=80, filters=()):
-    self.ch = 16 
+    self.ch = 16
     self.nc = nc  # number of classes
-    self.nl = len(filters)  
+    self.nl = len(filters)
     self.no = nc + self.ch * 4  #
     self.stride = [8, 16, 32]
     c1 = max(filters[0], self.nc)
     c2 = max((filters[0] // 4, self.ch * 4))
-    self.dfl = DFL(self.ch) 
+    self.dfl = DFL(self.ch)
     self.cv3 = [[Conv_Block(x, c1, 3), Conv_Block(c1, c1, 3), Conv2d(c1, self.nc, 1)] for x in filters]
     self.cv2 = [[Conv_Block(x, c2, 3), Conv_Block(c2, c2, 3), Conv2d(c2, 4 * self.ch, 1)] for x in filters]
-  
+
   def __call__(self, x):
     for i in range(self.nl):
       x[i] = (x[i].sequential(self.cv2[i]).cat(x[i].sequential(self.cv3[i]), dim=1))
@@ -369,7 +369,7 @@ class DetectionHead:
     dbox = dist2bbox(self.dfl(box), self.anchors.unsqueeze(0), xywh=True, dim=1) * self.strides
     z = dbox.cat(cls.sigmoid(), dim=1)
     return z
-   
+
 class YOLOv8:
   def __init__(self, w, r,  d, num_classes): #width_multiple, ratio_multiple, depth_multiple
     self.net = Darknet(w, r, d)
@@ -386,9 +386,9 @@ class YOLOv8:
     yolov8neck_modules = [12, 15, 16, 18, 19, 21]
     yolov8_head_weights = [(22, self.head)]
     return [*zip(backbone_modules, self.net.return_modules()), *zip(yolov8neck_modules, self.fpn.return_modules()), *yolov8_head_weights]
-  
+
 if __name__ == '__main__':
-  
+
   # usage : python3 yolov8.py "image_URL OR image_path" "v8 variant" (optional, n is default)
   if len(sys.argv) < 2:
     print("Error: Image URL or path not provided.")
@@ -397,7 +397,7 @@ if __name__ == '__main__':
   img_path = sys.argv[1]
   yolo_variant = sys.argv[2] if len(sys.argv) >= 3 else (print("No variant given, so choosing 'n' as the default. Yolov8 has different variants, you can choose from ['n', 's', 'm', 'l', 'x']") or 'n')
   print(f'running inference for YOLO version {yolo_variant}')
-  
+
   output_folder_path = './outputs_yolov8'
   if not os.path.exists(output_folder_path):
     os.makedirs(output_folder_path)
@@ -409,31 +409,31 @@ if __name__ == '__main__':
     print('Error in image loading. Check your image file.')
     sys.exit(1)
   pre_processed_image = preprocess(image)
-  
+
   # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/v8/yolov8.yaml
-  depth, width, ratio = get_variant_multiples(yolo_variant) 
-  yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)  
-  
+  depth, width, ratio = get_variant_multiples(yolo_variant)
+  yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
+
   weights_location = Path(__file__).parent.parent / "weights" / f'yolov8{yolo_variant}.safetensors'
   download_file(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location)
-  
+
   state_dict = safe_load(weights_location)
   load_state_dict(yolo_infer, state_dict)
-    
+
   st = time.time()
   predictions = yolo_infer(pre_processed_image)
   print(f'did inference in {int(round(((time.time() - st) * 1000)))}ms')
 
   post_predictions = postprocess(preds=predictions, img=pre_processed_image, orig_imgs=image)
-  
+
   #v8 and v3 have same 80 class names for Object Detection
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   class_labels = class_labels.decode('utf-8').split('\n')
 
   draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)
 
-# TODO for later: 
-#  1. Fix SPPF minor difference due to maxpool 
-#  2. AST exp overflow warning while on cpu 
-#  3. Make NMS faster 
+# TODO for later:
+#  1. Fix SPPF minor difference due to maxpool
+#  2. AST exp overflow warning while on cpu
+#  3. Make NMS faster
 #  4. Add video inference and webcam support

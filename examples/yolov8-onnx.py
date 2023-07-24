@@ -7,7 +7,7 @@ from tinygrad.tensor import Tensor
 
 os.chdir("/tmp")
 if not os.path.isfile("yolov8n-seg.onnx"):
-  model = YOLO("yolov8n-seg.pt") 
+  model = YOLO("yolov8n-seg.pt")
   model.export(format="onnx", imgsz=[480,640])
 onnx_model = onnx.load(open("yolov8n-seg.onnx", "rb"))
 # TODO: move get example inputs to onnx

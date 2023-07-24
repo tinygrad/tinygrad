@@ -104,12 +104,14 @@ def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:Li
     lidx = Variable(xid[0], 0, prod(x.max+1 for x in args[0][2:])-1)
     lidx = (lidx//((lidx.max+1)//local_size[-1]))%(var.max+1)
     assert lidx.max == var.max and lidx.min == var.min
-    return f"{{ {prefix} {var.expr} = {lidx.render(render_cl)};  /* {var.max+1} */"
+    return "{" if isinstance(var, NumNode) else f"{{ {prefix} {var.expr} = {lidx.render(render_cl)};  /* {var.max+1} */"
   local_size.append(var.max+1)
-  return f"{{ {prefix} {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
+  return "{" if isinstance(var, NumNode) else f"{{ {prefix} {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
 def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
-  kernel,global_size,local_size,prekernel = [],[],[],[]
+  global_size: List[int] = []
+  local_size: List[int] = []
+  kernel,prekernel = [],[]
   pend_close = None
   bufs = []
   depth = 0
@@ -118,19 +120,13 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
   for uop,newvar,vin,args in uops:
     if uop == UOps.LOOP:
       for i,var in enumerate(args[0]):
-        if isinstance(var, NumNode):
-          if args[1] == "global" and lang.gid: global_size.append(1)
-          if args[1] == "local" and lang.lid: local_size.append(1)
-          # one number, not an index
-          kk("{")
+        if args[1] == "global" and lang.gid:
+          kk(add_gl_dimension(lang.size_prefix, args, i, var, global_size, lang.gid))
+        elif args[1] == "local" and lang.lid:
+          kk(add_gl_dimension(lang.size_prefix, args, i, var, local_size, lang.lid))
         else:
-          if args[1] == "global" and lang.gid:
-            kk(add_gl_dimension(lang.size_prefix, args, i, var, global_size, lang.gid))
-          elif args[1] == "local" and lang.lid:
-            kk(add_gl_dimension(lang.size_prefix, args, i, var, local_size, lang.lid))
-          else:
-            if getenv("NOUNROLL"): kk("#pragma unroll(1)")   # prevent loop unrolling
-            kk(lang.render_for(var.expr, var.min, var.max))
+          if getenv("NOUNROLL"): kk("#pragma unroll(1)")   # prevent loop unrolling
+          kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, var.min, var.max))
       depth += 1
     elif uop == UOps.BARRIER:
       kk(lang.barrier)
@@ -198,7 +194,6 @@ class CStyleCodegen(Linearizer):
 
   def codegen(self):
     self.process()
-    if not getenv("KOPT"): self.hand_coded_optimizations()
     #self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
     self.linearize()
 
