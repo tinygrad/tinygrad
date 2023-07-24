@@ -34,7 +34,7 @@ def whitening(X):
   def _patches(data, patch_size=(2,2)):
     h, w = patch_size
     c = data.size(1)
-    return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w) 
+    return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w)
 
   def _eigens(patches):
     n,c,h,w = patches.shape
@@ -65,8 +65,9 @@ class ConvGroup:
     return x + residual
 
 class SpeedyResNet:
-  def __init__(self, W):
-    self.whitening = Tensor(W, requires_grad=False)
+  def __init__(self, W=None):
+    if W:
+      self.whitening = Tensor(W, requires_grad=False)
     self.net = [
       nn.Conv2d(12, 64, kernel_size=1),
       nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.5),
@@ -77,15 +78,14 @@ class SpeedyResNet:
       lambda x: x.max((2,3)),
       nn.Linear(512, num_classes, bias=False)
     ]
-
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to do the rest conv layers
-    forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
+    forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net) if W else lambda x: x.sequential(self.net)
     if not training and getenv('TTA', 1)==1: return ((forward(x)*0.5) + (forward(x[..., ::-1])*0.5)).log_softmax()
     return forward(x).log_softmax()
 
-def cutmix(X, Y, mask_size=3, p=0.5):
+def Cutmix(X, Y, mask_size=3, p=0.5):
   if Tensor.rand(1) > 0.5:
     return X, Y
   # create a mask
@@ -96,20 +96,18 @@ def cutmix(X, Y, mask_size=3, p=0.5):
   
   d_y = Tensor.arange(0, X.shape[-2]).reshape((1,1,X.shape[-2],1))
   d_x = Tensor.arange(0, X.shape[-1]).reshape((1,1,1,X.shape[-1]))
-
   d_y = d_y - center.reshape((-1,1,1,1))
   d_x = d_x - center.reshape((-1,1,1,1))
-
   d_y =(d_y >= -(mask_size / 2)) * (d_y <= mask_size / 2)
-  d_x =(d_x >= -(mask_size / 2)) * (d_x <= mask_size / 2) 
-
+  d_x =(d_x >= -(mask_size / 2)) * (d_x <= mask_size / 2)
   mask = d_y * d_x
-  
+  # # Tensor.rand(X.shape) would trigger error
+  # X_cutout = Tensor.where(mask, X_patch, X)
+
   # TODO shuffle instead of reverse inside tinygrad tensor, currently is not supported
-  X_patch = X[::-1,...] 
+  X_patch = X[::-1,...]
   X_cutmix = Tensor.where(mask, X_patch, X)
   Y_cutmix = Y[::-1]
-
   mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
   Y_cutmix = mix_portion * Y_cutmix + (1. - mix_portion) * Y
   
@@ -151,7 +149,7 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
 def train_cifar(bs=512, eval_bs=500, steps=1000, 
                 # training hyper-parameters (if including model sizes)
                 div_factor=1e16, final_lr_ratio=0.004560827731448039, max_lr=0.01040497290691913, pct_start=0.22817715646040532, momentum=0.8468770654506089, wd=0.17921940728200592, label_smoothing=0.2, seed=32):
-  set_seed(seed)  
+  set_seed(seed)
   Tensor.training = True
 
   BS, EVAL_BS, STEPS = getenv("BS", bs), getenv('EVAL_BS', eval_bs), getenv("STEPS", steps)
@@ -173,7 +171,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
  
   # precompute whitening patches
   W = whitening(X_train)
- 
+
   model = SpeedyResNet(W)
   optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
