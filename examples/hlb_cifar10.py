@@ -30,7 +30,7 @@ class ConvGroup:
   def __init__(self, channels_in, channels_out, short, se=True):
     self.short, self.se = short, se and not short
     self.conv = [nn.Conv2d(channels_in if i == 0 else channels_out, channels_out, kernel_size=3, padding=1, bias=False) for i in range(1 if short else 3)]
-    self.norm = [nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.8) for _ in range(1 if short else 3)]
+    self.norm = [nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.5) for _ in range(1 if short else 3)]
     if self.se: self.se1, self.se2 = nn.Linear(channels_out, channels_out//16), nn.Linear(channels_out//16, channels_out)
 
   def __call__(self, x):
@@ -48,7 +48,7 @@ class SpeedyResNet:
     self.whitening = Tensor(W, requires_grad=False)
     self.net = [
       nn.Conv2d(12, 64, kernel_size=1),
-      nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
+      nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.5),
       lambda x: x.relu(),
       ConvGroup(64, 128, short=False),
       ConvGroup(128, 256, short=True),
@@ -66,19 +66,19 @@ class SpeedyResNet:
 
 def whitening(X):
   def cov(X):
-      X = X/np.sqrt(X.size(0) - 1)
-      return X.t() @ X
+    X = X/np.sqrt(X.size(0) - 1)
+    return X.t() @ X
 
   def patches(data, patch_size=(2,2)):
-      h, w = patch_size
-      c = data.size(1)
-      return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w) 
+    h, w = patch_size
+    c = data.size(1)
+    return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w) 
 
   def eigens(patches):
-      n,c,h,w = patches.shape
-      Σ = cov(patches.reshape(n, c*h*w))
-      Λ, V = torch.linalg.eigh(Σ)
-      return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
+    n,c,h,w = patches.shape
+    Σ = cov(patches.reshape(n, c*h*w))
+    Λ, V = torch.linalg.eigh(Σ)
+    return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
   X = torch.tensor(transform(X).numpy())
   Λ, V = eigens(patches(X))
   W = (V/torch.sqrt(Λ+1e-2)[:,None,None,None]).numpy()
@@ -102,6 +102,8 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
       batch_end = min(i+BS, Y.shape[0])
       x = transform(X[batch_end-BS:batch_end,:])
       # NOTE -10 was used instead of 1 as labels
+      # TODO once this operation can by done with tinygrad.tensor, JIT should be able 
+      # to start from here
       y = Tensor(-10*np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()])
       yield x, y
     if not is_train: break
@@ -109,14 +111,19 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
 
 def train_cifar(bs=512, eval_bs=500, steps=1000, 
                 # training hyper-parameters
-                div_factor=1e16, final_lr_ratio=0.001, max_lr=0.02, pct_start=0.05, momentum=0.8, wd=0.15, label_smoothing=0., mixup_alpha=0.025, seed=6):
+                div_factor=1e16, final_lr_ratio=0.004560827731448039, max_lr=0.01040497290691913, pct_start=0.22817715646040532, momentum=0.8468770654506089, wd=0.17921940728200592, label_smoothing=0.2, mixup_alpha=0.2, seed=32):
   set_seed(seed)  
   Tensor.training = True
 
   BS, EVAL_BS, STEPS = getenv("BS", bs), getenv('EVAL_BS', eval_bs), getenv("STEPS", steps)
-  MAX_LR, PCT_START, MOMENTUM, WD = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start), getenv('MOMENTUM', momentum), getenv("WD", wd)
-  DIV_FACTOR, LABEL_SMOOTHING, MIXUP_ALPHA = getenv('DIV_FACTOR', div_factor), getenv('LABEL_SMOOTHING', label_smoothing), getenv('MIXUP_ALPHA', mixup_alpha)
-  FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio))
+  # For SGD
+  MOMENTUM, WD = getenv('MOMENTUM', momentum), getenv("WD", wd)
+  # For LR Scheduler
+  MAX_LR, PCT_START, DIV_FACTOR = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start), getenv('DIV_FACTOR', div_factor)
+  FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio)) 
+  # Others
+  LABEL_SMOOTHING, MIXUP_ALPHA = getenv('LABEL_SMOOTHING', label_smoothing), getenv('MIXUP_ALPHA', mixup_alpha)
+
   if getenv("FAKEDATA"):
     N = 2048
     X_train = np.random.default_rng().standard_normal(size=(N, 3, 32, 32), dtype=np.float32)
@@ -129,7 +136,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   W = whitening(X_train)
  
   model = SpeedyResNet(W)
-  optimizer = optim.SGD(get_parameters(model), lr=0.02, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
   # JIT at every run
   @TinyJit
@@ -187,7 +194,6 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
     et = time.monotonic()
     loss_cpu = loss.numpy()
     cl = time.monotonic()
-    # if i%100 == 0 and i > 1:
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
 
