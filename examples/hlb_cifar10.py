@@ -26,6 +26,28 @@ def set_seed(seed):
 
 num_classes = 10
 
+# TODO remove dependency on torch, mainly unfold and eigh
+def whitening(X):
+  def cov(X):
+    X = X/np.sqrt(X.size(0) - 1)
+    return X.t() @ X
+
+  def patches(data, patch_size=(2,2)):
+    h, w = patch_size
+    c = data.size(1)
+    return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w) 
+
+  def eigens(patches):
+    n,c,h,w = patches.shape
+    Σ = cov(patches.reshape(n, c*h*w))
+    Λ, V = torch.linalg.eigh(Σ)
+    return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
+  X = torch.tensor(transform(X).numpy())
+  Λ, V = eigens(patches(X))
+  W = (V/torch.sqrt(Λ+1e-2)[:,None,None,None]).numpy()
+
+  return W
+
 class ConvGroup:
   def __init__(self, channels_in, channels_out, short, se=True):
     self.short, self.se = short, se and not short
@@ -64,32 +86,46 @@ class SpeedyResNet:
     if not training and getenv('TTA', 0)==1: return ((forward(x)*0.5) + (forward(x[..., ::-1])*0.5)).log_softmax()
     return forward(x).log_softmax()
 
-def whitening(X):
-  def cov(X):
-    X = X/np.sqrt(X.size(0) - 1)
-    return X.t() @ X
+def cutout(X, mask_size=3, p=0.5):
+  if Tensor.rand(1) > 0.5:
+    return X
+  # create a mask
+  is_even = int(mask_size % 2 == 0)
+  center_max = X.shape[-2]-mask_size//2-is_even
+  center_min = mask_size//2-is_even
+  center = Tensor.rand(X.shape[0])*(center_max-center_min)+center_min
+  
+  d_y = Tensor.arange(0, X.shape[-2]).reshape((1,1,X.shape[-2],1))
+  d_x = Tensor.arange(0, X.shape[-1]).reshape((1,1,1,X.shape[-1]))
 
-  def patches(data, patch_size=(2,2)):
-    h, w = patch_size
-    c = data.size(1)
-    return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w) 
+  d_y = d_y - center.reshape((-1,1,1,1))
+  d_x = d_x - center.reshape((-1,1,1,1))
 
-  def eigens(patches):
-    n,c,h,w = patches.shape
-    Σ = cov(patches.reshape(n, c*h*w))
-    Λ, V = torch.linalg.eigh(Σ)
-    return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
-  X = torch.tensor(transform(X).numpy())
-  Λ, V = eigens(patches(X))
-  W = (V/torch.sqrt(Λ+1e-2)[:,None,None,None]).numpy()
+  d_y =(d_y >= -(mask_size / 2)) * (d_y <= mask_size / 2)
+  d_x =(d_x >= -(mask_size / 2)) * (d_x <= mask_size / 2) 
 
-  return W
+  mask = d_y * d_x
+  
+  # Tensor.rand(X.shape) would trigger error
+  X_patch = Tensor.rand(*X.shape)
+  X_cutout = Tensor.where(mask, X_patch, X)
+  
+  return X_cutout   
 
 transform = ComposeTransforms([
     lambda x: x.to(device=Device.DEFAULT).float(),
+    lambda x: x / 255.0, # scale
+    lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1), # normalize
+    lambda x: x.reshape((-1,3,32,32)),
+    lambda x: cutout(x, mask_size=3),
+    lambda x: Tensor.where(Tensor.rand(x.shape[0],1,1,1) < 0.5, x[..., ::-1], x) # flip LR
+])
+
+transform_test = ComposeTransforms([
+    lambda x: x.to(device=Device.DEFAULT).float(),
     lambda x: x / 255.0,
     lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1),
-    lambda x: x.reshape((-1,3,32,32))
+    lambda x: x.reshape((-1,3,32,32)),
 ])
 
 def fetch_batches(X, Y, BS, seed, is_train=False):
@@ -100,6 +136,8 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     for i in order:
       # padding for matching buffer size during JIT
       batch_end = min(i+BS, Y.shape[0])
+      if not is_train:
+        x = transform_test(X[batch_end-BS:batch_end,:])
       x = transform(X[batch_end-BS:batch_end,:])
       # NOTE -10 was used instead of 1 as labels
       # TODO once this operation can by done with tinygrad.tensor, JIT should be able 
@@ -110,8 +148,8 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     seed += 1
 
 def train_cifar(bs=512, eval_bs=500, steps=1000, 
-                # training hyper-parameters
-                div_factor=1e16, final_lr_ratio=0.004560827731448039, max_lr=0.01040497290691913, pct_start=0.22817715646040532, momentum=0.8468770654506089, wd=0.17921940728200592, label_smoothing=0.2, mixup_alpha=0.2, seed=32):
+                # training hyper-parameters (if including model sizes)
+                div_factor=1e16, final_lr_ratio=0.004560827731448039, max_lr=0.01040497290691913, pct_start=0.22817715646040532, momentum=0.8468770654506089, wd=0.17921940728200592, label_smoothing=0.2, seed=32):
   set_seed(seed)  
   Tensor.training = True
 
@@ -122,7 +160,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   MAX_LR, PCT_START, DIV_FACTOR = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start), getenv('DIV_FACTOR', div_factor)
   FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio)) 
   # Others
-  LABEL_SMOOTHING, MIXUP_ALPHA = getenv('LABEL_SMOOTHING', label_smoothing), getenv('MIXUP_ALPHA', mixup_alpha)
+  LABEL_SMOOTHING, MIXUP_ALPHA = getenv('LABEL_SMOOTHING', label_smoothing)
 
   if getenv("FAKEDATA"):
     N = 2048
@@ -132,7 +170,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   else:
     X_train, Y_train, X_test, Y_test = fetch_cifar()    # they are disk tensor now
  
-  # compute whitening patches
+  # precompute whitening patches
   W = whitening(X_train)
  
   model = SpeedyResNet(W)
@@ -140,9 +178,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
   # JIT at every run
   @TinyJit
-  def train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
-    X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
-    X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < 0.5, X[..., ::-1], X) # flip augmentation
+  def train_step_jitted(model, optimizer, lr_scheduler, X, Y):
     out = model(X)
     loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
     if not getenv("DISABLE_BACKWARD"):
@@ -169,10 +205,9 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
   best_eval = -1
   i = 0
-  left_batcher, right_batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True), fetch_batches(X_train, Y_train, BS=BS, seed=seed+1, is_train=True)
+  batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
   while i <= STEPS:
-    (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
-    mixup_prob = Tensor(np.random.beta(MIXUP_ALPHA, MIXUP_ALPHA, (1, )).astype(np.float32)).contiguous() if MIXUP_ALPHA > 0 else Tensor.ones(Xr.shape[0], 1, 1, 1)
+    X, Y = next(batcher)
     if i%100 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
@@ -190,7 +225,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
     if STEPS == 0 or i==STEPS: break
     GlobalCounters.reset()
     st = time.monotonic()
-    loss = train_step_jitted(model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
+    loss = train_step_jitted(model, optimizer, lr_scheduler, X, Y)
     et = time.monotonic()
     loss_cpu = loss.numpy()
     cl = time.monotonic()
