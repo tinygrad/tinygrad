@@ -155,7 +155,12 @@ class AssemblyCodegen(Linearizer):
           ins.append(AssemblyInstruction(UOps.ALU, out, [tor[x] for x in vin], args))
       elif uop == UOps.LOAD and newvar is not None and isinstance(args, (MemOp, ConstOp)):
         if isinstance(args, ConstOp):
-          ins.append(AssemblyInstruction(UOps.LOAD, newreg(newvar, dtype=newvar.dtype), [], args))
+          valid = args.valid.render(render_ops)
+          if args.valid.min == 0 and args.valid.max == 1:
+            val = args.value if valid else args.invalid_value
+          else:
+            val = args.value if args.valid.min == 1 else args.invalid_value
+          ins.append(AssemblyInstruction(UOps.LOAD, newreg(newvar, dtype=newvar.dtype), [], val))
         else:
           idx, treg, off = addr_w_offset(args)
           reg = newreg(newvar, dtype=newvar.dtype, scalar=(idx.scalar and (not isinstance(treg, Register) or treg.scalar))) # and not dtypes.is_float(newvar.dtype)))
