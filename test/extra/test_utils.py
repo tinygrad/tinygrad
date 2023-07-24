@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import io, unittest
 import os
-import tempfile
 from unittest.mock import patch, MagicMock
 
 import torch
@@ -26,27 +25,6 @@ class TestFetch(unittest.TestCase):
     pimg = Image.open(io.BytesIO(img))
     assert pimg.size == (705, 1024)
 
-class TestFetchRelative(unittest.TestCase):
-  def setUp(self):
-    self.working_dir = os.getcwd()
-    self.tempdir = tempfile.TemporaryDirectory()
-    os.chdir(self.tempdir.name)
-    with open('test_file.txt', 'x') as f:
-        f.write("12345")
-  
-  def tearDown(self):
-    os.chdir(self.working_dir)
-    self.tempdir.cleanup()
-
-  #test ./
-  def test_fetch_relative_dotslash(self):
-    self.assertEqual(b'12345', fetch("./test_file.txt"))
-  
-  #test ../
-  def test_fetch_relative_dotdotslash(self):
-      os.mkdir('test_file_path')
-      os.chdir('test_file_path')
-      self.assertEqual(b'12345', fetch("../test_file.txt"))
 
 class TestDownloadFile(unittest.TestCase):
   def setUp(self):

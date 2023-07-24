@@ -73,5 +73,5 @@ class TestYOLOv8(unittest.TestCase):
     np.testing.assert_allclose(onnx_output[0], tiny_output.cpu().numpy(), atol=5e-4, rtol=0.025)
     
 if __name__ == '__main__':
-  unittest.main()
+    unittest.main()
     

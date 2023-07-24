@@ -7,9 +7,6 @@ from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import BatchNorm2d, Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm
 import torch
-import pytest
-
-pytestmark = [pytest.mark.exclude_cuda, pytest.mark.webgpu]
 
 class TestNN(unittest.TestCase):
 

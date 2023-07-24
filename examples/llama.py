@@ -3,7 +3,6 @@
 #import typeguard.importhook
 #typeguard.importhook.install_import_hook('tinygrad')
 
-import functools
 from pathlib import Path
 import sys, argparse, math, platform
 import numpy as np
@@ -11,7 +10,7 @@ from tqdm import tqdm
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple
 
-from tinygrad.helpers import Timing, getenv, DEBUG, dtypes
+from tinygrad.helpers import Timing, getenv, DEBUG
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
@@ -143,8 +142,16 @@ class Transformer:
 
     # get only the part we are using. making it contiguous avoids more kernel calls
     freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen].contiguous().realize()
-    mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
-    h = h.sequential([functools.partial(layer, start_pos=start_pos, freqs_cis=freqs_cis, mask=mask) for layer in self.layers])
+    if seqlen > 1:
+      mask = np.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=np.float32)
+      mask = np.triu(mask, k=start_pos + 1)  # TODO: this is hard to do in tinygrad
+      mask = Tensor(mask)
+    else:
+      mask = None
+    # mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1) if seqlen > 1 else None #TODO: Pending(#942)
+    for layer in self.layers:
+      h.realize()  # TODO: why do i need this?
+      h = layer(h, start_pos, freqs_cis, mask)
 
     return self.output(self.norm(h)[:, -1, :])
 
@@ -159,14 +166,10 @@ args_small = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm
 args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
 WEIGHTS_7B_FILENAME = WEIGHTS_DIR / "7B/consolidated.00.pth"
 
+# TODO: make this model work
 args_13B = {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_13B_FILENAMES = [WEIGHTS_DIR / "13B/consolidated.00.pth", WEIGHTS_DIR / "13B/consolidated.01.pth"]
-
-args_30B = {"dim": 6656, "multiple_of": 256, "n_heads": 52, "n_layers": 60, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_30B_FILENAMES = [WEIGHTS_DIR / "30B/consolidated.00.pth", WEIGHTS_DIR / "30B/consolidated.01.pth", WEIGHTS_DIR / "30B/consolidated.02.pth", WEIGHTS_DIR / "30B/consolidated.03.pth"]
-
-args_65B = {"dim": 8192, "multiple_of": 256, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE}
-WEIGHTS_65B_FILENAMES = [WEIGHTS_DIR / "65B/consolidated.00.pth", WEIGHTS_DIR / "65B/consolidated.01.pth", WEIGHTS_DIR / "65B/consolidated.02.pth", WEIGHTS_DIR / "65B/consolidated.03.pth", WEIGHTS_DIR / "65B/consolidated.04.pth", WEIGHTS_DIR / "65B/consolidated.05.pth", WEIGHTS_DIR / "65B/consolidated.06.pth", WEIGHTS_DIR / "65B/consolidated.07.pth"]
+WEIGHTS_13B_0_FILENAME = WEIGHTS_DIR / "13B/consolidated.00.pth"
+WEIGHTS_13B_1_FILENAME = WEIGHTS_DIR / "13B/consolidated.01.pth"
 
 # **** helper functions ****
 def sample(logits, temperature):
@@ -177,22 +180,6 @@ def sample(logits, temperature):
     probs = (logits / temperature).softmax()
     probs = probs.numpy().flatten()
     return int(np.random.choice(len(probs), p=probs))
-
-def concat_weights(models):
-  def convert(name) -> Tensor:
-    disk_tensors = [model[name] for model in models]
-    if len(disk_tensors) == 1:
-      return disk_tensors[0]
-    if len(disk_tensors[0].shape) == 1:
-      return disk_tensors[0]
-    if name.startswith('tok_embeddings.') or name.endswith('.attention.wo.weight') or name.endswith('.feed_forward.w2.weight'):
-      axis = 1
-    else:
-      axis = 0
-    lazy_tensors = [data.to(device=Device.DEFAULT) for data in disk_tensors]
-    first, rest = lazy_tensors[0], lazy_tensors[1:]
-    return first.cat(*rest, dim=axis)
-  return {name: convert(name) for name in {name: None for model in models for name in model}}
 
 # **** main code ****
 
@@ -213,31 +200,73 @@ if __name__ == "__main__":
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
   parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
-  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B]")
-
+  parser.add_argument('--large', action='store_true', help="Use the 13B model instead of the 7B one")
+  parser.add_argument('--tinyfake', action='store_true', help="Use the fake very small model")
   args = parser.parse_args()
   chatbot = args.prompt == None
 
-  from tinygrad.state import torch_load, load_state_dict
-  if args.size == "65B":
-    print("using 65B model")
-    model = Transformer(**args_65B)
-    weights = [torch_load(filename) for filename in WEIGHTS_65B_FILENAMES]
-    load_state_dict(model, concat_weights(weights), strict=False)
-  elif args.size == "30B":
-    print("using 30B model")
-    model = Transformer(**args_30B)
-    weights = [torch_load(filename) for filename in WEIGHTS_30B_FILENAMES]
-    load_state_dict(model, concat_weights(weights), strict=False)
-  elif args.size == "13B":
-    print("using 13B model")
+  """
+  # load model (you have to find the weights yourself)
+  from extra.utils import fake_torch_load_zipped, get_child
+
+  if args.large:
     model = Transformer(**args_13B)
-    weights = [torch_load(filename) for filename in WEIGHTS_13B_FILENAMES]
-    load_state_dict(model, concat_weights(weights), strict=False)
+    with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
+      weights0 = fake_torch_load_zipped(open(WEIGHTS_13B_0_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
+      weights1 = fake_torch_load_zipped(open(WEIGHTS_13B_1_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
+    # eww, this makes a copy
+    print("concatenating weights")
+    from tqdm import tqdm
+    assert set(weights0.keys()) == set(weights1.keys())
+    for k,v in (t := tqdm(weights0.items())):
+      # assert GlobalCounters.mem_used/1e9 < 28, "used over 28 GB"
+      t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
+      if 'rope.freqs' in k: continue  # no rope today
+      mv = get_child(model, k)
+      w0, w1 = v, weights1[k]
+
+      # if the weight is copied across models, it's simple
+      # TODO: assert they are the same
+      if w0.shape == mv.shape:
+        mv.assign(w0)
+        mv.realize()
+        w1.lazydata.realized._buf = None
+        continue
+
+      if w0.shape[0] != mv.shape[0]: mv.assign(w0.cat(w1, dim=0))
+      elif w0.shape[1] != mv.shape[1]: mv.assign(w0.cat(w1, dim=1))
+      else: raise RuntimeError("what axis mismatch?")
+      mv.realize()
+
+      # rug the small tensor pieces
+      w0.lazydata.realized._buf = None
+      w1.lazydata.realized._buf = None
+
+    del weights0
+    del weights1
+  elif args.tinyfake:
+    # GRAPH=1 python3 examples/llama.py --timing --prompt "Hello." --temperature=0 --tinyfake --count 1
+    model = Transformer(**args_small)
+    from tinygrad.nn.optim import get_parameters
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
   else:
-    print("using 7B model")
     model = Transformer(**args_7B)
-    load_state_dict(model, torch_load(WEIGHTS_7B_FILENAME), strict=False)
+    with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
+      weights = fake_torch_load_zipped(open(WEIGHTS_7B_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
+
+    # assign weights (should be free)
+    for k,v in weights.items():
+      if '.inner_attention.rope.freqs' in k: continue  # no rope today
+      #state_dict[k].assign(v).realize()
+      get_child(model, k).assign(v).realize()
+
+    del weights
+  """
+
+  # disktensor loader isn't fast yet
+  model = Transformer(**args_7B)
+  from tinygrad.state import torch_load, load_state_dict
+  load_state_dict(model, torch_load(WEIGHTS_7B_FILENAME), strict=False)
 
   # *** prompt engineers work here ****
 

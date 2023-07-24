@@ -7,10 +7,11 @@ import gzip, argparse, math, re
 from functools import lru_cache
 from collections import namedtuple
 
+import numpy as np
 from tqdm import tqdm
+
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes, GlobalCounters
-from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
+from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm
 from extra.utils import download_file
 from tinygrad.state import torch_load, load_state_dict
 
@@ -101,6 +102,7 @@ class Decoder:
       x.realize()
 
     return self.conv_out(self.norm_out(x).swish())
+
 
 class Encoder:
   def __init__(self):
@@ -270,9 +272,10 @@ class Upsample:
 
 def timestep_embedding(timesteps, dim, max_period=10000):
   half = dim // 2
-  freqs = (-math.log(max_period) * Tensor.arange(half) / half).exp()
+  freqs = np.exp(-math.log(max_period) * np.arange(0, half, dtype=np.float32) / half)
   args = timesteps * freqs
-  return Tensor.cat(args.cos(), args.sin()).reshape(1, -1)
+  embedding = np.concatenate([np.cos(args), np.sin(args)])
+  return Tensor(embedding).reshape(1, -1)
 
 class UNetModel:
   def __init__(self):
@@ -337,6 +340,7 @@ class UNetModel:
       for bb in b:
         x = run(x, bb)
       saved_inputs.append(x)
+      x.realize()
     for bb in self.middle_block:
       x = run(x, bb)
     for i,b in enumerate(self.output_blocks):
@@ -344,6 +348,7 @@ class UNetModel:
       x = x.cat(saved_inputs.pop(), dim=1)
       for bb in b:
         x = run(x, bb)
+      x.realize()
     return x.sequential(self.out)
 
 class CLIPMLP:
@@ -431,11 +436,19 @@ class CLIPEncoder:
 
 class CLIPTextEmbeddings:
   def __init__(self):
-    self.token_embedding = Embedding(49408, 768)
-    self.position_embedding = Embedding(77, 768)
+    #self.position_ids = Tensor.empty(1, 77)  # what is this?
+    self.token_embedding = {"weight": Tensor.empty(49408, 768)}
+    self.position_embedding = {"weight": Tensor.empty(77, 768)}
 
   def __call__(self, input_ids, position_ids):
-    return self.token_embedding(input_ids) + self.position_embedding(position_ids)
+    # TODO: actually support batches
+    inputs = np.zeros((1, len(input_ids), 49408), dtype=np.float32)
+    positions = np.zeros((1, len(position_ids), 77), dtype=np.float32)
+    for i,x in enumerate(input_ids): inputs[0][i][x] = 1
+    for i,x in enumerate(position_ids): positions[0][i][x] = 1
+    inputs_embeds = Tensor(inputs, device=self.token_embedding['weight'].device) @ self.token_embedding['weight']
+    position_embeddings = Tensor(positions, device=self.position_embedding['weight'].device) @ self.position_embedding['weight']
+    return inputs_embeds + position_embeddings
 
 class CLIPTextTransformer:
   def __init__(self):
@@ -444,8 +457,10 @@ class CLIPTextTransformer:
     self.final_layer_norm = LayerNorm(768)
 
   def __call__(self, input_ids):
-    x = self.embeddings(input_ids, Tensor.arange(input_ids.shape[1]).reshape(1, -1))
-    x = self.encoder(x, Tensor.full((1, 1, 77, 77), float("-inf")).triu(1))
+    x = self.embeddings(input_ids, list(range(len(input_ids))))
+    causal_attention_mask = np.triu(np.ones((1,1,77,77), dtype=np.float32) * -np.inf, k=1)
+    x = self.encoder(x, Tensor(causal_attention_mask, device=x.device))
+    # x = self.encoder(x, Tensor.full((1, 1, 77, 77), float("-inf")).triu(1)) # TODO: Pending(#942)
     return self.final_layer_norm(x)
 
 # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
@@ -583,6 +598,8 @@ class StableDiffusion:
 # cond_stage_model.transformer.text_model
 
 # this is sd-v1-4.ckpt
+#FILENAME = "/Users/kafka/fun/mps/stable-diffusion/models/ldm/stable-diffusion-v1/model.ckpt"
+#FILENAME = "/home/kafka/model.ckpt"
 FILENAME = Path(__file__).parent.parent / "weights/sd-v1-4.ckpt"
 
 if __name__ == "__main__":
@@ -601,27 +618,27 @@ if __name__ == "__main__":
 
   # run through CLIP to get context
   tokenizer = ClipTokenizer()
-  prompt = Tensor([tokenizer.encode(args.prompt)])
+  prompt = tokenizer.encode(args.prompt)
   context = model.cond_stage_model.transformer.text_model(prompt).realize()
   print("got CLIP context", context.shape)
 
-  prompt = Tensor([tokenizer.encode("")])
+  prompt = tokenizer.encode("")
   unconditional_context = model.cond_stage_model.transformer.text_model(prompt).realize()
   print("got unconditional CLIP context", unconditional_context.shape)
 
   # done with clip model
   del model.cond_stage_model
 
-  def get_model_output(latent, timestep):
+  def get_model_output(latent, timesteps):
     # put into diffuser
-    latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep.expand(2, *timestep.shape[1:]), unconditional_context.cat(context, dim=0))
-    unconditional_latent, latent = latents[0:1], latents[1:2]
+    unconditional_latent = model.model.diffusion_model(latent, timesteps, unconditional_context).realize()
+    latent = model.model.diffusion_model(latent, timesteps, context).realize()
 
     unconditional_guidance_scale = 7.5
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
     return e_t
 
-  timesteps = list(range(1, 1000, 1000//args.steps))
+  timesteps = list(np.arange(1, 1000, 1000//args.steps))
   print(f"running for {timesteps} timesteps")
   alphas = [model.alphas_cumprod.numpy()[t] for t in timesteps]
   alphas_prev = [1.0] + alphas[:-1]
@@ -631,6 +648,7 @@ if __name__ == "__main__":
     a_t, a_prev = alphas[index], alphas_prev[index]
     sigma_t = 0
     sqrt_one_minus_at = math.sqrt(1-a_t)
+    sqrt_one_minus_at = Tensor([sqrt_one_minus_at]).realize()  # don't constant fold this
     #print(a_t, a_prev, sigma_t, sqrt_one_minus_at)
 
     pred_x0 = (x - sqrt_one_minus_at * e_t) / math.sqrt(a_t)
@@ -647,9 +665,8 @@ if __name__ == "__main__":
 
   # this is diffusion
   for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
-    GlobalCounters.reset()
     t.set_description("%3d %3d" % (index, timestep))
-    e_t = get_model_output(latent, Tensor([timestep]))
+    e_t = get_model_output(latent, timestep)
     x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t, index)
     #e_t_next = get_model_output(x_prev)
     #e_t_prime = (e_t + e_t_next) / 2
@@ -663,12 +680,13 @@ if __name__ == "__main__":
 
   # make image correct size and scale
   x = (x + 1.0) / 2.0
-  x = (x.reshape(3,512,512).permute(1,2,0).clip(0,1)*255).cast(dtypes.uint8)
-  print(x.shape)
+  x = x.reshape(3,512,512).permute(1,2,0)
+  dat = (x.detach().numpy().clip(0, 1)*255).astype(np.uint8)
+  print(dat.shape)
 
   # save image
   from PIL import Image
-  im = Image.fromarray(x.numpy())
+  im = Image.fromarray(dat)
   print(f"saving {args.out}")
   im.save(args.out)
   # Open image.

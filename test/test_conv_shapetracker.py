@@ -3,9 +3,6 @@ import unittest
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import Conv2d
 from tinygrad.ops import GlobalCounters
-import pytest
-
-pytestmark = pytest.mark.webgpu
 
 #@unittest.skipUnless(Device.DEFAULT == "GPU", "Only GPU supports cache")
 @unittest.skip("with JIT changes, you only get the raw buffer")

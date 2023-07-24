@@ -93,16 +93,12 @@ canvas {  display: none; }
 	}
 
 	const loadLet = async () => {
-		try {
-			resultText.innerHTML = "loading..."
-			labels = await getLabels();
-			const safetensor = await getSavetensorBuffer();
-			const device = await getDevice();
-			net = await timer(() => setupNet(device, safetensor), "(compilation)");
-			resultText.innerHTML = "ready"
-		} catch (e) {
-			error(e)
-		}
+		resultText.innerHTML = "loading..."
+		labels = await getLabels();
+		const safetensor = await getSavetensorBuffer();
+		const device = await getDevice();
+		net = await timer(() => setupNet(device, safetensor), "(compilation)");
+		resultText.innerHTML = "ready"
 	}
 
 	const runNet = async (data) => {

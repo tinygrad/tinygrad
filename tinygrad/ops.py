@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, time
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg
 if TYPE_CHECKING:
@@ -54,7 +54,7 @@ class LazyOp:
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
     from tinygrad.lazy import elementwise_op
-    assert self.op in BinaryOps or self.op in UnaryOps or self.op in TernaryOps
+    assert self.op in BinaryOps or self.op in UnaryOps
     return elementwise_op(self.op, *[z.replace_with_movement_ops(ops) for z in self.src], arg=self.arg)   # type: ignore
 
   @property
@@ -133,17 +133,17 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg, **self.runtime_args)
     return self
 
-  def exec(self, bufs, force_wait=False) -> Optional[float]:
-    rawbufs = dedup([x.realized for x in bufs if buf_is_kernel_arg(x)])
+  def exec(self, bufs) -> Optional[float]:
+    rawbufs = [x.realized for x in bufs if buf_is_kernel_arg(x)]
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
-    return self(rawbufs, force_wait=force_wait)
+    return self(rawbufs)
 
   def __call__(self, rawbufs:List[RawBuffer], jit=False, force_wait=False) -> Optional[float]:
     if et := self.clprg((self.global_size + [1]*(3-len(self.global_size))) if self.global_size is not None else None,
                         (self.local_size + [1]*(3-len(self.local_size))) if self.local_size is not None else None,
                         *rawbufs, wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
     if DEBUG >= 2:
-      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(33-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {int(self.op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(29-ansilen(self.display_name))) if self.display_name is not None else self.name:26s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {int(self.op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {self.mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
     GlobalCounters.kernel_count += 1
     GlobalCounters.global_ops += self.op_estimate
@@ -180,13 +180,7 @@ class Compiled:
 
     # this is the default now
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
-      from tinygrad.codegen.optimizer import kernel_optimize, hand_coded_optimizations
-      if k.key not in self.method_cache:
-        if getenv("KOPT"):
-          kernel_optimize(k, lambda: self.codegen(ast, output), self.runtime)
-        elif not getenv("NOOPT"):
-          hand_coded_optimizations(k)
-        self.method_cache[k.key] = k.codegen().build(self.runtime)
+      if k.key not in self.method_cache: self.method_cache[k.key] = k.codegen().build(self.runtime)
       elif DEBUG >= 5: print(f"method cache hit : {k.key}")
       prg = self.method_cache[k.key]
     else:

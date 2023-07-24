@@ -31,8 +31,7 @@ class LinearDisc:
     self.l4 = Tensor.scaled_uniform(256, 2)
 
   def forward(self, x):
-    # balance the discriminator inputs with const bias (.add(1))
-    x = x.dot(self.l1).add(1).leakyrelu(0.2).dropout(0.3)
+    x = x.dot(self.l1).leakyrelu(0.2).dropout(0.3)
     x = x.dot(self.l2).leakyrelu(0.2).dropout(0.3)
     x = x.dot(self.l3).leakyrelu(0.2).dropout(0.3)
     x = x.dot(self.l4).log_softmax()
@@ -40,12 +39,13 @@ class LinearDisc:
 
 def make_batch(images):
   sample = np.random.randint(0, len(images), size=(batch_size))
-  image_b = images[sample].reshape(-1, 28*28).astype(np.float32) / 127.5 - 1.0
+  image_b = images[sample].reshape(-1, 28*28).astype(np.float32) / 255.0
+  image_b = (image_b - 0.5) / 0.5
   return Tensor(image_b)
 
-def make_labels(bs, col, val=-2.0):
+def make_labels(bs, val):
   y = np.zeros((bs, 2), np.float32)
-  y[range(bs), [col] * bs] = val  # Can we do label smoothing? i.e -2.0 changed to -1.98789.
+  y[range(bs), [val] * bs] = -2.0  # Can we do label smoothin? i.e -2.0 changed to -1.98789.
   return Tensor(y)
 
 def train_discriminator(optimizer, data_real, data_fake):

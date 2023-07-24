@@ -1,4 +1,4 @@
-import subprocess, time, re, hashlib, tempfile, os
+import subprocess, time, re, hashlib, tempfile
 from typing import Optional
 import numpy as np
 from pycuda.compiler import compile as cuda_compile # type: ignore
@@ -61,7 +61,7 @@ class CUDAProgram:
     if DEBUG >= 5: print(pretty_ptx(prg))
     if DEBUG >= 6:
       try:
-        fn = os.path.join(tempfile.gettempdir(), f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}")
+        fn = f"{tempfile.gettempdir()}\\tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}"
         with open(fn + ".ptx", "wb") as f: f.write(prg.encode('utf-8'))
         subprocess.run(["ptxas", f"-arch={arch()}", "-o", fn, fn+".ptx"], check=True)
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
@@ -88,7 +88,6 @@ class CUDACodegen(CStyleCodegen):
       #include <cuda_fp16.h>
       struct __align__(8) half4 {
         half2 x, y;
-        __device__ __forceinline__ explicit half4(const float4& a): x(make_half2(__float2half(a.x), __float2half(a.y))), y(make_half2(__float2half(a.z),__float2half(a.w))) {}
         __device__ __forceinline__ explicit operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
       };
     """)

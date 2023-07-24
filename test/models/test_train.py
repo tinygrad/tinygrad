@@ -11,9 +11,6 @@ from models.efficientnet import EfficientNet
 from models.transformer import Transformer
 from models.vit import ViT
 from models.resnet import ResNet18
-import pytest
-
-pytestmark = pytest.mark.exclude_gpu
 
 BS = getenv("BS", 2)
 
