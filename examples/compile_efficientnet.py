@@ -69,7 +69,7 @@ if __name__ == "__main__":
   # the functions
   cprog += list(functions.values())
 
-  # the net 
+  # the net
   cprog += ["void net() {"] + [f"{name}({', '.join(args)});" for (name, args, _global_size) in statements] + ["}"]
 
   cprog += ["""

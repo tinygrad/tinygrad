@@ -4,8 +4,15 @@ import math
 import numpy as np
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, IMAGE, DEBUG
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
 from tinygrad.lazy import Device
+import pytest
+
+pytestmark = pytest.mark.webgpu
+
+if CI:
+  import warnings
+  warnings.filterwarnings("ignore", message="Non-empty compiler output encountered")
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 ARM64 = getenv("ARM", 0)
@@ -50,7 +57,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     for i, (t, tt) in enumerate(zip(ts, tst)):
       compare(f"backward pass tensor {i}", tt.grad.numpy(), t.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)
 
-  print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
+  if not CI: print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
 def prepare_test_op(a, b, shps, vals):
   torch.manual_seed(0)
@@ -69,7 +76,7 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(expected) as tinygrad_cm:
       tinygrad_fxn(*tst)
     if exact: self.assertEqual(str(torch_cm.exception), str(tinygrad_cm.exception))
-    print("\ntesting %40r   torch/tinygrad exception: %s / %s" % (shps, torch_cm.exception, tinygrad_cm.exception), end="")
+    if not CI: print("\ntesting %40r   torch/tinygrad exception: %s / %s" % (shps, torch_cm.exception, tinygrad_cm.exception), end="")
 
   def test_full_like(self):
     a = Tensor([[1,2,3],[4,5,6]])
@@ -97,12 +104,38 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.ones_like(b), lambda: Tensor.ones_like(a), forward_only=True)
   def test_eye(self):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
+    helper_test_op([], lambda: torch.eye(1), lambda: Tensor.eye(1), forward_only=True)
+
+  def test_chunk(self):
+    tor = torch.arange(13).repeat(8, 1).chunk(6, 1)
+    ten = Tensor.arange(13).repeat((8, 1)).chunk(6, 1)
+    assert len(tor) == len(ten)
+    for i in range(len(tor)):
+      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
+
+    tor = torch.arange(13).repeat(8, 1).chunk(6, 0)
+    ten = Tensor.arange(13).repeat((8, 1)).chunk(6, 0)
+    assert len(tor) == len(ten)
+    for i in range(len(tor)):
+      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
+
+    tor = torch.arange(13).repeat(8, 1).chunk(3, -1)
+    ten = Tensor.arange(13).repeat((8, 1)).chunk(3, -1)
+    assert len(tor) == len(ten)
+    for i in range(len(tor)):
+      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
+
+    tor = torch.arange(13).repeat(8, 3, 3).chunk(3, -2)
+    ten = Tensor.arange(13).repeat((8, 3, 3)).chunk(3, -2)
+    assert len(tor) == len(ten)
+    for i in range(len(tor)):
+      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
 
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
-    helper_test_op([], lambda: torch.arange(5, 10, 3), lambda: Tensor.arange(10, 5, 3), forward_only=True)
-    helper_test_op([], lambda: torch.arange(10, 5, -3), lambda: Tensor.arange(5, 10, -3), forward_only=True)
-    helper_test_op([], lambda: torch.arange(11, 5, -3), lambda: Tensor.arange(5, 11, -3), forward_only=True)
+    helper_test_op([], lambda: torch.arange(5, 10, 3), lambda: Tensor.arange(5, 10, 3), forward_only=True)
+    helper_test_op([], lambda: torch.arange(10, 5, -3), lambda: Tensor.arange(10, 5, -3), forward_only=True)
+    helper_test_op([], lambda: torch.arange(11, 5, -3), lambda: Tensor.arange(11, 5, -3), forward_only=True)
   def test_where(self):
     helper_test_op(
       [(100,)],
@@ -114,6 +147,12 @@ class TestOps(unittest.TestCase):
         shps,
         lambda x, a, b: torch.where(x > 0.5, a, b),
         lambda x, a, b: (x > 0.5).where(a, b), forward_only=True)
+
+  def test_where_permute(self):
+    helper_test_op(
+      [(5, 5)],
+      lambda x: torch.where(x > 0.5, 4, 2).permute((1, 0)),
+      lambda x: (x > 0.5).where(4, 2).permute((1, 0)), forward_only=True)
 
   def _test_cmp(self, fxn, reverse=True):
     for shps in [[(3, 4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
@@ -570,6 +609,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,2,3,4)], lambda x: x.movedim((3,0,2,1),(0,1,2,3)), lambda x: x.permute(order=(3,0,2,1)))
     helper_test_op([(3,4,5,6)], lambda x: x.movedim((3,2,1,0),(0,1,2,3)), lambda x: x.permute(order=(3,2,1,0)))
     helper_test_op([()], lambda x: x.permute(()), lambda x: x.permute(()))
+
 
   def test_reshape(self):
     helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,3,6,6)), lambda x: x.reshape(shape=(-1,3,6,6)))
