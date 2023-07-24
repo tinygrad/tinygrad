@@ -2,7 +2,10 @@ import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes
 from tinygrad.lazy import Device
+import pytest
 # similar to test/external/external_test_gpu_ast.py, but universal
+
+pytestmark = pytest.mark.exclude_cuda
 
 class TestSpecific(unittest.TestCase):
   # from openpilot
