@@ -24,7 +24,7 @@ learning_rate = 1e-3
 # eval_iters = 200
 n_embd = 32
 n_head = 4
-# n_layer = 6
+n_layer = 3
 # dropout = 0.2
 
 def tempestLoop():
@@ -117,10 +117,12 @@ class Block():
     head_size = n_embd // n_head
     self.sa = MultiHeadAttention(n_head, head_size)
     self.ffwd = FeedForward(n_embd)
+    self.ln1 = nn.LayerNorm(n_embd)
+    self.ln2 = nn.LayerNorm(n_embd)
 
   def __call__(self, x):
-    x = x + self.sa(x)
-    x = x + self.ffwd(x)
+    x = x + self.sa(self.ln1(x))
+    x = x + self.ffwd(self.ln2(x))
     return x
 
 
@@ -131,11 +133,8 @@ class GPTLanguageModel():
     # each token directly reads off the logits for the next token from a lookup table
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
     self.position_embedding_table = nn.Embedding(block_size, n_embd)
-    self.blocks = [
-      Block(n_embd, n_head),
-      Block(n_embd, n_head),
-      Block(n_embd, n_head)
-    ]
+    self.blocks = [Block(n_embd, n_head) for _ in range(n_layer)]
+    self.ln_f = nn.LayerNorm(n_embd) # final layer norm
     self.lm_head = nn.Linear(n_embd, vocab_size)
 
   def __call__(self, idx, targets=None):
@@ -146,6 +145,7 @@ class GPTLanguageModel():
     pos_emb = self.position_embedding_table(Tensor.arange(T, dtype=dtypes.int8).reshape(1,T)) # (T,C)
     x = tok_emb + pos_emb # (B,T,C)
     for block in self.blocks: x = block(x)
+    x = self.ln_f(x)
     logits = self.lm_head(x) # (B,T,vocab_size)
     
     if targets is None:
@@ -204,8 +204,10 @@ if __name__ == "__main__":
   stoi = { ch:i for i,ch in enumerate(chars) }
   itos = { i:ch for i,ch in enumerate(chars) }
 
-  encode = lambda s: [stoi[c] for c in s]  # encoder: take a string, output a list of integers
-  decode = lambda l: ''.join([itos[i] for i in l])  # decoder: take a list of integers, output a string
+  # encoder: take a string, output a list of integers
+  encode = lambda s: [stoi[c] for c in s]  # noqa: E731
+  # decoder: take a list of integers, output a string
+  decode = lambda l: ''.join([itos[i] for i in l])  # noqa: E731
 
   # train and test splits
   data = Tensor(encode(text), dtype=dtypes.int64, requires_grad=False)
