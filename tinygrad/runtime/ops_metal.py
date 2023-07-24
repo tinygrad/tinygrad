@@ -15,7 +15,7 @@ class _METAL:
     self.mtl_queue = self.device.newCommandQueue()
   def command_buffer(self):
     command_buffer = self.mtl_queue.commandBuffer()
-    libdispatch.dispatch_group_enter(METAL.dispatch_group)
+    libdispatch.dispatch_group_enter(self.dispatch_group)
     def leave(_): libdispatch.dispatch_group_leave(self.dispatch_group)
     command_buffer.addCompletedHandler_(leave)
     return command_buffer
