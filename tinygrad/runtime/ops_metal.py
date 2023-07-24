@@ -11,7 +11,6 @@ METAL_XCODE = getenv("METAL_XCODE")
 
 class _METAL:
   def __init__(self):
-    self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.dispatch_group = libdispatch.dispatch_group_create() 
     self.mtl_queue = self.device.newCommandQueue()
@@ -20,11 +19,9 @@ class _METAL:
     libdispatch.dispatch_group_enter(METAL.dispatch_group)
     def leave(_): libdispatch.dispatch_group_leave(self.dispatch_group)
     command_buffer.addCompletedHandler_(leave)
-    self.mtl_buffers_in_flight.append(command_buffer)
     return command_buffer
   def synchronize(self):
     libdispatch.dispatch_group_wait(self.dispatch_group, libdispatch.DISPATCH_TIME_FOREVER)
-    self.mtl_buffers_in_flight.clear()
 METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):
