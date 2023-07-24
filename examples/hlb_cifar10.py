@@ -85,9 +85,9 @@ class SpeedyResNet:
     if not training and getenv('TTA', 1)==1: return ((forward(x)*0.5) + (forward(x[..., ::-1])*0.5)).log_softmax()
     return forward(x).log_softmax()
 
-def cutout(X, mask_size=8, p=0.5):
+def cutmix(X, Y, mask_size=3, p=0.5):
   if Tensor.rand(1) > 0.5:
-    return X
+    return X, Y
   # create a mask
   is_even = int(mask_size % 2 == 0)
   center_max = X.shape[-2]-mask_size//2-is_even
@@ -105,19 +105,22 @@ def cutout(X, mask_size=8, p=0.5):
 
   mask = d_y * d_x
   
-  # Tensor.rand(X.shape) would trigger error
-  X_patch = Tensor.rand(*X.shape)
-  X_cutout = Tensor.where(mask, X_patch, X)
+  # TODO shuffle instead of reverse inside tinygrad tensor, currently is not supported
+  X_patch = X[::-1,...] 
+  X_cutmix = Tensor.where(mask, X_patch, X)
+  Y_cutmix = Y[::-1]
+
+  mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
+  Y_cutmix = mix_portion * Y_cutmix + (1. - mix_portion) * Y
   
-  return X_cutout   
+  return X_cutmix, Y_cutmix
 
 transform = ComposeTransforms([
     lambda x: x.to(device=Device.DEFAULT).float(),
     lambda x: x / 255.0, # scale
     lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1), # normalize
     lambda x: x.reshape((-1,3,32,32)),
-    lambda x: cutout(x, mask_size=3),
-    lambda x: Tensor.where(Tensor.rand(x.shape[0],1,1,1) < 0.5, x[..., ::-1], x) # flip LR
+    lambda x: Tensor.where(Tensor.rand(x.shape[0],1,1,1) < 0.5, x[..., ::-1], x), # flip LR
 ])
 
 transform_test = ComposeTransforms([
@@ -139,9 +142,8 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
         x = transform_test(X[batch_end-BS:batch_end,:])
       x = transform(X[batch_end-BS:batch_end,:])
       # NOTE -10 was used instead of 1 as labels
-      # TODO once this operation can by done with tinygrad.tensor, JIT should be able 
-      # to start from here
       y = Tensor(-10*np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()])
+      x, y = cutmix(x, y)
       yield x, y
     if not is_train: break
     seed += 1
@@ -168,8 +170,6 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
     X_test, Y_test = X_train, Y_train
   else:
     X_train, Y_train, X_test, Y_test = fetch_cifar()    # they are disk tensor now
-    # Y_train = Tensor(-10*np.eye(10, dtype=np.float32)[Y_train.numpy()])   
-    # Y_test = Tensor(-10*np.eye(10, dtype=np.float32)[Y_test.numpy()]) 
  
   # precompute whitening patches
   W = whitening(X_train)
