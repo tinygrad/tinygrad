@@ -17,7 +17,6 @@ base_fxn_for_op: Dict[Op, Callable] = {
 }
 
 def promote_types(x, y): return ret if (ret := np.promote_types(x.dtype, y.dtype)) != np.float64 else np.float32
-
 def match_types(x, y):
   up = x.dtype if dtypes.from_np(x.dtype).priority > dtypes.from_np(y.dtype).priority else y.dtype
   return x.astype(up, copy=False), y.astype(up, copy=False)
