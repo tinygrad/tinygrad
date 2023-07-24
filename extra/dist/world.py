@@ -9,6 +9,16 @@ from tinygrad.runtime.ops_shm import RawShmBuffer
 from tinygrad.tensor import Tensor, Function
 import numpy as np
 
+# fake the function signature of ASTRunner so we can put it in the cache
+def _send_rb(args:Tuple[RawBuffer, RawShmBuffer, int], jit=False, force_wait=False):
+  # we only support copyout buffers right now
+  args[0]._copyout(np.frombuffer(args[1]._buffer(), dtype=args[0].dtype.np))
+  dist.OOB.send(None, args[2])
+
+def _recv_rb(args:Tuple[RawBuffer, RawShmBuffer, int], jit=False, force_wait=False):
+  dist.OOB.recv(args[2])
+  args[0]._copyin(args[1].toCPU())
+
 # send a rawbuffer from out rank to the target rank
 def send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
   # cache the shared memory so we don't have to create it every time
@@ -26,7 +36,7 @@ def send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
   dist.OOB.send((shm_name, cache_id), target_rank)
 
   # jit support
-  if GlobalCounters.cache is not None: GlobalCounters.cache.append((jit_send_rb, [x, rb, target_rank]))
+  if GlobalCounters.cache is not None: GlobalCounters.cache.append((_send_rb, [x, rb, target_rank]))
 setattr(send_rb, "shared_memory_cache", {})
 
 # receive a rawbuffer from the target rank
@@ -41,16 +51,7 @@ def recv_rb(x:RawBuffer, target_rank:int):
     s.unlink()
 
   # jit support
-  if GlobalCounters.cache is not None: GlobalCounters.cache.append((jit_recv_rb, [x, rb, target_rank]))
-
-# fake the function signature of ASTRunner so we can put it in the cache
-def jit_send_rb(args:Tuple[RawBuffer, RawShmBuffer, int], jit=False, force_wait=False):
-  args[0]._copyout(np.frombuffer(args[1]._buffer(), dtype=args[0].dtype.np))
-  dist.OOB.send((), args[2])
-
-def jit_recv_rb(args:Tuple[RawBuffer, RawShmBuffer, int], jit=False, force_wait=False):
-  dist.OOB.recv(args[2])
-  args[0]._copyin(args[1].toCPU())
+  if GlobalCounters.cache is not None: GlobalCounters.cache.append((_recv_rb, [x, rb, target_rank]))
 
 # sends a lazybuffer from our rank to the target rank
 def send_lb(x:LazyBuffer, target_rank:int, cache_id:Optional[str]=None) -> None: send_rb(x.contiguous().realize().realized, target_rank, cache_id=cache_id)
