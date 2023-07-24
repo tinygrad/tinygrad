@@ -17,8 +17,6 @@ from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
 from examples.train_resnet import ComposeTransforms
 
-import torch
-
 def set_seed(seed):
   Tensor.manual_seed(getenv('SEED', seed)) # Deterministic
   np.random.seed(getenv('SEED', seed))
@@ -28,22 +26,23 @@ num_classes = 10
 
 # TODO remove dependency on torch, mainly unfold and eigh
 def whitening(X):
-  def cov(X):
+  import torch
+  def _cov(X):
     X = X/np.sqrt(X.size(0) - 1)
     return X.t() @ X
 
-  def patches(data, patch_size=(2,2)):
+  def _patches(data, patch_size=(2,2)):
     h, w = patch_size
     c = data.size(1)
     return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w) 
 
-  def eigens(patches):
+  def _eigens(patches):
     n,c,h,w = patches.shape
-    Σ = cov(patches.reshape(n, c*h*w))
+    Σ = _cov(patches.reshape(n, c*h*w))
     Λ, V = torch.linalg.eigh(Σ)
     return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
   X = torch.tensor(transform(X).numpy())
-  Λ, V = eigens(patches(X))
+  Λ, V = _eigens(_patches(X))
   W = (V/torch.sqrt(Λ+1e-2)[:,None,None,None]).numpy()
 
   return W
@@ -83,10 +82,10 @@ class SpeedyResNet:
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to do the rest conv layers
     forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
-    if not training and getenv('TTA', 0)==1: return ((forward(x)*0.5) + (forward(x[..., ::-1])*0.5)).log_softmax()
+    if not training and getenv('TTA', 1)==1: return ((forward(x)*0.5) + (forward(x[..., ::-1])*0.5)).log_softmax()
     return forward(x).log_softmax()
 
-def cutout(X, mask_size=3, p=0.5):
+def cutout(X, mask_size=8, p=0.5):
   if Tensor.rand(1) > 0.5:
     return X
   # create a mask
@@ -160,7 +159,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   MAX_LR, PCT_START, DIV_FACTOR = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start), getenv('DIV_FACTOR', div_factor)
   FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio)) 
   # Others
-  LABEL_SMOOTHING, MIXUP_ALPHA = getenv('LABEL_SMOOTHING', label_smoothing)
+  LABEL_SMOOTHING = getenv('LABEL_SMOOTHING', label_smoothing)
 
   if getenv("FAKEDATA"):
     N = 2048
@@ -169,6 +168,8 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
     X_test, Y_test = X_train, Y_train
   else:
     X_train, Y_train, X_test, Y_test = fetch_cifar()    # they are disk tensor now
+    # Y_train = Tensor(-10*np.eye(10, dtype=np.float32)[Y_train.numpy()])   
+    # Y_test = Tensor(-10*np.eye(10, dtype=np.float32)[Y_test.numpy()]) 
  
   # precompute whitening patches
   W = whitening(X_train)
