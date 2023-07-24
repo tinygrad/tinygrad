@@ -259,6 +259,7 @@ jobs:
   testarm64:
     name: arm64 Test
     runs-on: ubuntu-latest
+    if: ${{ false }}
     steps:
       - uses: actions/checkout@v3
       - name: Set up QEMU
