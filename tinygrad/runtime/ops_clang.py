@@ -1,6 +1,6 @@
 import os, time, ctypes, hashlib, subprocess, platform, tempfile
 from tinygrad.ops import Compiled
-from tinygrad.helpers import fromimport, getenv
+from tinygrad.helpers import fromimport, getenv, DEBUG
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
@@ -20,6 +20,7 @@ class ClangProgram:
         subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+fn+'.tmp').split(), input=prg.encode('utf-8'))
         os.rename(fn+'.tmp', fn)
     else:
+      if DEBUG >= 5: print(prg)
       subprocess.check_output(["as","-arch", "arm64", "-o", f"{fn}.o"], input=prg.encode('utf-8'))
       subprocess.check_output(["clang", "-lm", "-shared", f"{fn}.o", "-o", fn])
     self.lib = ctypes.CDLL(fn)

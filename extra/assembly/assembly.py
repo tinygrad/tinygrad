@@ -82,10 +82,7 @@ class AssemblyCodegen(Linearizer):
       AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: render_alu(BinaryOps.MUL, a, b.render(ops,ctx), dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
     def addr_w_offset(args):
-      print("--")
       idx = args.idx*args.memory_dtype.itemsize
-      print(idx)
-      print("--")
       off = 0  # TODO: should this be None?
       if isinstance(idx, SumNode):
         nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
@@ -110,8 +107,6 @@ class AssemblyCodegen(Linearizer):
     global_size, local_size = [], []
     skipload_branch = 0
     for uop,newvar,vin,args in self.uops:
-      # if uop == UOps.CONST and newvar is not None:
-      #   ins.append(AssemblyInstruction(UOps.CONST, newreg(newvar, dtype=newvar.dtype), [], args))
       if uop == UOps.DEFINE_LOCAL:
         ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
         ins.append(AssemblyInstruction(UOps.ALU, newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
@@ -127,7 +122,7 @@ class AssemblyCodegen(Linearizer):
         else:
           for var in args[0]:
             if not isinstance(var, NumNode):  # TODO: why is this coming through?
-              #ins.append(AssemblyInstruction(UOps.CONST, newreg(var, dtype=dtypes.int32, scalar=True), [], 0))
+              ins.append(AssemblyInstruction(UOps.LOAD, newreg(var, dtype=dtypes.int32, scalar=True), [], 0))
               ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
       elif uop == UOps.ENDLOOP:
         if args[1] not in ["global", "local", "global+local"] or getenv('CLANG'):
@@ -160,28 +155,24 @@ class AssemblyCodegen(Linearizer):
           ins.append(AssemblyInstruction(UOps.ALU, out, [tor[x] for x in vin], args))
       elif uop == UOps.LOAD and newvar is not None and isinstance(args, (MemOp, ConstOp)):
         if isinstance(args, ConstOp):
-          print("---")
-          print(args.value)
-          render_numnode(args)
-          continue
-        idx, treg, off = addr_w_offset(args)
-        print("---")
-        print(idx)
-        reg = newreg(newvar, dtype=newvar.dtype, scalar=(idx.scalar and (not isinstance(treg, Register) or treg.scalar))) # and not dtypes.is_float(newvar.dtype)))
-        if args.valid.min == 0:
-          #ins.append(AssemblyInstruction(UOps.CONST, reg, [], 0))
+          ins.append(AssemblyInstruction(UOps.LOAD, newreg(newvar, dtype=newvar.dtype), [], args))
+        else:
+          idx, treg, off = addr_w_offset(args)
+          reg = newreg(newvar, dtype=newvar.dtype, scalar=(idx.scalar and (not isinstance(treg, Register) or treg.scalar))) # and not dtypes.is_float(newvar.dtype)))
+          if args.valid.min == 0:
+            ins.append(AssemblyInstruction(UOps.LOAD, reg, [], 0))
+            if args.valid.max == 1:
+              pred = args.valid.render(render_ops)
+              ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
           if args.valid.max == 1:
-            pred = args.valid.render(render_ops)
-            ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
-        if args.valid.max == 1:
-          if buf_to_dtype[args.name] != dtypes.float:
-            ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global', args.memory_dtype))) #if args.i != -1 else 'shared')
-          else:
-            # NOTE: you can't compute the index in here, because it assumes it's all available later
-            ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global'))) # if args.i != -1 else 'shared'
-        if args.valid.min == 0 and args.valid.max == 1:
-          ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
-          skipload_branch += 1
+            if buf_to_dtype[args.name] != dtypes.float:
+              ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global', args.memory_dtype))) #if args.i != -1 else 'shared')
+            else:
+              # NOTE: you can't compute the index in here, because it assumes it's all available later
+              ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global'))) # if args.i != -1 else 'shared'
+          if args.valid.min == 0 and args.valid.max == 1:
+            ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
+            skipload_branch += 1
       elif uop == UOps.STORE:
         idx, treg, off = addr_w_offset(args)
         if buf_to_dtype['data0'] != dtypes.float:

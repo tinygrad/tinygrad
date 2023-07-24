@@ -85,12 +85,12 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"{'f' if reg == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {reg}0, {reg}0, {reg}1")
         ins.append(f"str {reg}{'2' if arg == BinaryOps.MOD else '0'}, {reg_map[out.nm]}")
       elif uop == UOps.LOAD:
-        if arg.__class__ is int:
+        if arg.__class__ is int or arg.__class__ is ConstOp:
           if arg.__class__ is ConstOp:
-            ins.append(f"mov x0, 0x{float_to_hex(arg.value)}")
-            ins.append("fmov s0, w0")
+              ins.append(f"mov x0, 0x{float_to_hex(arg.value)}")
+              ins.append("fmov s0, w0")
           else: mov_imm(arg, f"x0")
-          ins.append(f"str {'s' if arg.__class__ is float else 'x'}0, {reg_map[out.nm]}") 
+          ins.append(f"str {'s' if arg.__class__ is float or arg.__class__ is ConstOp else 'x'}0, {reg_map[out.nm]}") 
         else:
           need_cast = len(arg) == 3
           reg_out = 's0' if dtypes.is_float(out[1]) else 'x0'
