@@ -16,7 +16,7 @@ class TestSymbolicJit(unittest.TestCase):
       a = Tensor.rand(i, 10).reshape(ii, 10)
       b = Tensor.rand(i, 10).reshape(ii, 10)
       c = f(a, b)
-      np.testing.assert_equal(c.numpy(), a.numpy()+b.numpy())
+      np.testing.assert_equal(c.cpu().numpy(), a.numpy()+b.numpy())
     assert len(f.jit_cache) == 1
 
   def test_2d_matmul(self):
@@ -71,18 +71,18 @@ class TestSymbolicJit(unittest.TestCase):
       x = Variable("x", 1, 100)
       t = Tensor.rand(i, 5)
       t = t.reshape(x, 5)
-      assert len(t.lazydata.st.symbols) == 1
-      assert t.lazydata.st.symbols[x] == i
+      assert len(t.lazydata.symbols) == 1
+      assert t.lazydata.symbols[x] == i
 
   def test_attention_like(self):
     head_dim = 128
     @TinyJit
     def attn(q,k,v):
-      k = k.transpose(1, 2)
       q = q.transpose(1, 2)
+      k = k.transpose(1, 2)
       v = v.transpose(1, 2)
       s = q.matmul(k.transpose(2, 3)) / math.sqrt(head_dim)
-      return s.softmax().matmul(v).realize()
+      return s.realize().softmax().matmul(v).realize()
     for pos in range(3, 10):
       symbol = Variable("pos", 1, 10)
       q = Tensor.rand(1, 1, 32, 128)

@@ -133,10 +133,9 @@ def get_unsafe_resize_offset(strides, arg):
   return sum([s * x[0] for s, x in zip(strides,arg)])
 
 class ShapeTracker:
-  __slots__ = "views", "symbols"
+  __slots__ = "views"
   def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node, int], ...]], views:Optional[List[View]]=None):
     self.views: List[View] = views if views is not None else ([*cast(ShapeTracker, shape).views] if shape.__class__ is ShapeTracker else [view_from_shape(shape)])
-    self.symbols = {}
   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
   def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
 

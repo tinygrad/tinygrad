@@ -141,11 +141,13 @@ class ASTRunner:
   def exec(self, bufs, force_wait=False, symbol_info=None) -> Optional[float]:
     rawbufs = []
     buf_sts = []
+    buf_symbols = []
     for x in bufs:
       if buf_is_kernel_arg(x) and x.realized not in rawbufs:
         rawbufs.append(x.realized)
         buf_sts.append(x.st)
-    if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs, buf_sts))
+        buf_symbols.append(x.symbols)
+    if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs, buf_sts, buf_symbols))
     # jit recreates symbol buffers so we don't store them in cache to simply cache checks
     if symbol_info is not None: rawbufs += [s[1] for s in symbol_info.values()]
     return self(rawbufs, force_wait=force_wait, symbols={k:v[0] for k,v in symbol_info.items()})
@@ -192,7 +194,7 @@ class Compiled:
 
     # we don't have an output buffer, we have to create it
     if not output.realized:
-      output.realized = self.buffer(output.st.inferred_size(output.st.symbols), output.dtype, **kwargs)
+      output.realized = self.buffer(output.st.inferred_size(output.symbols), output.dtype, **kwargs)
 
     # compilation time
     k = self.codegen(ast, output)
