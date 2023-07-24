@@ -43,7 +43,7 @@ def whitening(X):
     return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
   X = torch.tensor(transform(X).numpy())
   Λ, V = _eigens(_patches(X))
-  W = (V/torch.sqrt(Λ+1e-2)[:,None,None,None]).numpy()
+  W = Tensor((V/torch.sqrt(Λ+1e-2)[:,None,None,None]).numpy(), requires_grad=False)
 
   return W
 
@@ -65,9 +65,8 @@ class ConvGroup:
     return x + residual
 
 class SpeedyResNet:
-  def __init__(self, W=None):
-    if W:
-      self.whitening = Tensor(W, requires_grad=False)
+  def __init__(self, W):
+    self.whitening = W
     self.net = [
       nn.Conv2d(12, 64, kernel_size=1),
       nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.5),
@@ -81,11 +80,11 @@ class SpeedyResNet:
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to do the rest conv layers
-    forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net) if W else lambda x: x.sequential(self.net)
-    if not training and getenv('TTA', 1)==1: return ((forward(x)*0.5) + (forward(x[..., ::-1])*0.5)).log_softmax()
+    forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
+    if not training and getenv('TTA', 0)==1: return ((forward(x)*0.5) + (forward(x[..., ::-1])*0.5)).log_softmax()
     return forward(x).log_softmax()
 
-def Cutmix(X, Y, mask_size=3, p=0.5):
+def cutmix(X, Y, mask_size=3, p=0.5):
   if Tensor.rand(1) > 0.5:
     return X, Y
   # create a mask
