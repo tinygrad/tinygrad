@@ -242,9 +242,9 @@ class TestSymbolicNumeric(unittest.TestCase):
 
 class TestSymbolicInfer(unittest.TestCase):
   def test_infer(self):
-    va = Variable("a", 1, 10)
-    vb = Variable("b", 1, 10)
-    vc = Variable("c", 1, 10)
+    va = Variable("a", 0, 10)
+    vb = Variable("b", 0, 10)
+    vc = Variable("c", 0, 10)
     assert va.infer({va: 5}) == 5
     assert va.infer({va: 8}) == 8
     assert NumNode(2).infer({va: 8}) == 2
@@ -257,11 +257,17 @@ class TestSymbolicInfer(unittest.TestCase):
     assert (va//3).infer({va: 5}) == 1
     assert (va%2).infer({va: 8}) == 0
     assert (va%3).infer({va: 8}) == 2
-    assert (va<2).infer({va: 5}) == False
-    assert (va<8).infer({va: 5}) == True
+    self.assertFalse((va<2).infer({va: 5}))
+    self.assertTrue((va<8).infer({va: 5}))
     assert Variable.sum([va,vb,vc]).infer({va: 1, vb: 3, vc: 7}) == 11
-    assert Variable.ands([va,vb,vc]).infer({va: 1, vb: 4, vc: 9}) == True
-    assert Variable.ands([va,vb,vc]).infer({va: 1, vb: 4, vc: 0}) == False
+    self.assertTrue(Variable.ands([va,vb,vc]).infer({va: 1, vb: 4, vc: 9}))
+    self.assertFalse(Variable.ands([va,vb,vc]).infer({va: 1, vb: 4, vc: 0}))
+
+  def test_infer_not_checking_bounds(self):
+    va = Variable("a", 1, 10)
+    assert va.infer({va: -5}) == -5
+    assert va.infer({va: 5}) == 5
+    assert va.infer({va: 20}) == 20
 
   def test_sym_infer(self):
     va = Variable("a", 1, 10)
