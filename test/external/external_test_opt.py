@@ -79,7 +79,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     img = Tensor.randn(1, 3, 224, 224)
     with CLCache(223): # NOTE: this is way too high
       out = model.forward(img)
-      assert len(GlobalCounters.cache) == 0, f"ViT prerealized?"
+      assert len(GlobalCounters.cache) == 0, "ViT prerealized?"
       out.realize()
 
   def test_llama(self):
