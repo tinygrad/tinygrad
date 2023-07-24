@@ -38,9 +38,7 @@ class Context:
   def __exit__(self, *args): Context.stack = Context.stack.parents
 
 class ContextVar:
-  def __init__(self, key, default_value):
-    self.key = key
-    if key not in Context.stack: Context.stack[key] = getenv(key, default_value)
+  def __init__(self, key, default_value): self.key = key; Context.stack.setdefault(key, getenv(key, default_value))
   def __call__(self, x): Context.stack[self.key] = x
   def __bool__(self): return self.value != 0
   def __ge__(self, x): return self.value >= x
