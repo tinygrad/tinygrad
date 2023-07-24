@@ -1,6 +1,6 @@
 from typing import Tuple, Dict, List
 from tinygrad.helpers import DType
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Device, Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.state import get_state_dict
 import json
@@ -138,7 +138,6 @@ def export_model(model, input:Tensor, target:str):
     elif target == "webgpu":
       prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names)
     else:
-      from tinygrad.tensor import Device
       prg = json.dumps({"backend": Device.DEFAULT, "input_size": { "size": bufs['input'][0], "dtype": bufs['input'][1].name}, "output_size": {"size": bufs["outputs"][0], "dtype": bufs["outputs"][1].name}, "functions": functions, "statements": [{"kernel":kernel,"args":args, "global_size":global_size, "local_size": local_size} for (kernel, args, global_size, local_size) in statements], "buffers": {name:{"size":size, "dtype": dtype.name, "id": weight_names[_key] if _key in weight_names else ""} for name, (size,dtype,_key) in bufs.items()}})
 
     return prg, bufs['input'][0], bufs['outputs'][0], state
