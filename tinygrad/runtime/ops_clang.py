@@ -16,8 +16,8 @@ class ClangProgram:
         os.rename(fn+".tmp", fn)
     else:
       if DEBUG >= 5: print(prg)
-      subprocess.check_output(["as","-arch", "arm64", "-o", f"{name}.o"], input=prg.encode('utf-8'))
-      subprocess.check_output(["clang", "-lm", "-shared", f"{name}.o", "-o", fn])
+      subprocess.check_output(["as","-arch", "arm64", "-o", f"{fn}.o"], input=prg.encode('utf-8'))
+      subprocess.check_output(["clang", "-lm", "-shared", f"{fn}.o", "-o", fn])
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
 
