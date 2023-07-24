@@ -9,6 +9,8 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
 
 def is_sym_int(x: Any) -> bool: return isinstance(x, int) or isinstance(x, Node)
+def sym_infer(x: Union[Node, int], symbols: Dict[Variable, int]) -> int: return x if isinstance(x, int) else x.infer(symbols)
+def sym_vars(x: Union[Node, int]) -> List[Variable]: return [] if isinstance(x, int) else x.vars()
 
 class Node:
   b: Union[Node, int]
@@ -25,8 +27,10 @@ class Node:
   def key(self) -> str: return self.render(ctx="DEBUG")
   @functools.cached_property
   def hash(self) -> int: return hash(self.key)
-  def __repr__(self): return "<"+self.key+">"
   def __hash__(self): return self.hash
+  def __repr__(self): return "<"+self.key+">"
+  def infer(self, symbols): raise NotImplementedError
+  def __bool__(self): return not (self.max == self.min == 0)
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
@@ -135,11 +139,13 @@ class Variable(Node):
   def __init__(self, expr:Optional[str], nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
   def vars(self): return [self]
+  def infer(self, symbols): return symbols[self]
 
 class NumNode(Node):
   def __init__(self, num:int):
     self.b, self.min, self.max = num, num, num
   def __int__(self): return self.b
+  def infer(self, _): return self.b
 
 def create_node(ret:Node):
   assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {type(ret)} {ret}"
@@ -155,11 +161,13 @@ class OpNode(Node):
   def get_bounds(self) -> Tuple[int, int]: pass
 
 class LtNode(OpNode):
+  def infer(self, symbols): return sym_infer(self.a, symbols) < sym_infer(self.b, symbols)
   def __mul__(self, b: Union[Node, int]): return (self.a*b) < (self.b*b)
   def __floordiv__(self, b: int, _=False): return (self.a//b) < (self.b//b)
   def get_bounds(self) -> Tuple[int, int]: return int(self.a.max < self.b), int(self.a.min < self.b)
 
 class MulNode(OpNode):
+  def infer(self, symbols): return sym_infer(self.a, symbols) * sym_infer(self.b, symbols)
   def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul
   def __floordiv__(self, b: int, factoring_allowed=False): # NOTE: mod negative isn't handled right
     assert isinstance(self.b, int)
@@ -173,12 +181,14 @@ class MulNode(OpNode):
     return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
 
 class DivNode(OpNode):
+  def infer(self, symbols): return sym_infer(self.a, symbols) // sym_infer(self.b, symbols)
   def __floordiv__(self, b: int, _=False): return self.a//(self.b*b) # two divs is one div
   def get_bounds(self) -> Tuple[int, int]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
 
 class ModNode(OpNode):
+  def infer(self, symbols): return sym_infer(self.a, symbols) % sym_infer(self.b, symbols)
   def __floordiv__(self, b: int, factoring_allowed=True):
     if (self.b % b == 0): return (self.a//b) % (self.b//b) # put the div inside mod
     return Node.__floordiv__(self, b, factoring_allowed)
@@ -187,10 +197,12 @@ class ModNode(OpNode):
     return (0, self.b-1) if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b) else (self.a.min%self.b, self.a.max%self.b)
 
 class RedNode(Node):
+  def infer(self, symbols): raise NotImplementedError
   def __init__(self, nodes:List[Node]): self.nodes = nodes
   def vars(self): return functools.reduce(lambda l,x: l+x.vars(), self.nodes, [])
 
 class SumNode(RedNode):
+  def infer(self, symbols): return sum(sym_infer(n, symbols) for n in self.nodes)
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
   def __floordiv__(self, b: int, factoring_allowed=True):
     if b == 1: return self
@@ -228,6 +240,7 @@ class SumNode(RedNode):
     return new_nodes
 
 class AndNode(RedNode):
+  def infer(self, symbols): return all(sym_infer(n, symbols) for n in self.nodes)
   def __mul__(self, b: Union[Node, int]): Variable.ands([x*b for x in self.nodes])
   def __floordiv__(self, b: int, _=True): return Variable.ands([x//b for x in self.nodes])
 

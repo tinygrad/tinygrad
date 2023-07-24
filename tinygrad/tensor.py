@@ -55,7 +55,7 @@ class Tensor:
     if data.__class__ is LazyBuffer:
       data = cast(LazyBuffer, data) # NOTE: this is a noop, it makes mypy happy
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-      self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
+      self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data, symbols=data.symbols)
       return
 
     if isinstance(data, (int, float)):
@@ -83,7 +83,10 @@ class Tensor:
   def device(self) -> str: return self.lazydata.device
 
   @property
-  def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
+  def shape(self) -> Tuple[int, ...]: return self.lazydata.shape # NOTE: type is Tuple[Union[Node, int], ...] but mypy doesn't like it and symbolic shape footprint is small.
+
+  @property
+  def inferred_shape(self) -> Tuple[int, ...]: return self.lazydata.inferred_shape
 
   @property
   def dtype(self) -> DType: return self.lazydata.dtype
@@ -158,7 +161,9 @@ class Tensor:
 
   @staticmethod
   def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
-    return Tensor.full(tensor.shape, fill_value=fill_value, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
+    ret = Tensor.full(tensor.shape, fill_value=fill_value, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
+    ret.lazydata.symbols.update(tensor.lazydata.symbols)
+    return ret
 
   @staticmethod
   def zeros_like(tensor, **kwargs): return Tensor.full_like(tensor, 0, **kwargs)
