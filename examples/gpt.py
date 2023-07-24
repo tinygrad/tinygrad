@@ -18,17 +18,14 @@ Tensor.manual_seed(31337)
 # hyperparameters
 batch_size = 32 # how many independent sequences will we process in parallel?
 block_size = 8 # what is the maximum context length for predictions?
-max_iters = 2000
-# eval_interval = 500
+max_iters = 1000
+eval_interval = 100
 learning_rate = 1e-3
-# eval_iters = 200
+eval_iters = 50
 n_embd = 32
 n_head = 4
 n_layer = 3
-# dropout = 0.2
-
-def tempestLoop():
-  pass
+dropout = 0.2
 
 def get_input_text(url, file_path, clean):
   """ fetch and return tiny Shakespear input text """
@@ -48,6 +45,19 @@ def cross_entropy(out, Y):
   y = y.reshape(list(Y.shape)+[num_classes])
   y = Tensor(y)
   return out.mul(y).mean()
+
+def estimate_loss():
+  out = {}
+  Tensor.training = False
+  for split in ['train', 'val']:
+    losses = np.zeros(eval_iters)
+    for k in range(eval_iters):
+      X, Y = get_batch(split)
+      _, loss = model(X, Y)
+      losses[k] = loss.numpy()
+    out[split] = losses.mean()
+  Tensor.training = True
+  return out
 
 # data loading
 def get_batch(split):
@@ -77,6 +87,7 @@ class Head():
     mask = Tensor(np.triu(np.ones((T,T), dtype=np.float32) * -np.inf, k=1))
     wei = wei + mask
     wei = wei.softmax(-1)
+    wei = wei.dropout(dropout)
     # perform the weighted aggregation of the values
     v = self.value(x) # (B,T,hs)
     out = wei @ v  # (B, T, T) @ (B, T, hs) -> (B, T, hs)
@@ -92,7 +103,7 @@ class MultiHeadAttention():
 
   def __call__(self, x):
     out = self.heads[0](x).cat(*[h(x) for h in self.heads[1:]], dim=-1)
-    out = self.proj(out)
+    out = self.proj(out).dropout(dropout)
     return out
 
 
@@ -107,7 +118,7 @@ class FeedForward():
     ]
 
   def __call__(self, x):
-    return x.sequential(self.net)
+    return x.sequential(self.net).dropout(dropout)
 
 
 class Block():
@@ -215,27 +226,31 @@ if __name__ == "__main__":
   train_data = data[:n]
   val_data = data[n:]
       
-  m = GPTLanguageModel(vocab_size)
+  model = GPTLanguageModel(vocab_size)
   
-  parameters = get_parameters(m)
+  parameters = get_parameters(model)
   optimizer = optim.AdamW(parameters, lr=1e-3)
 
   Tensor.training = True
   for iter in range(max_iters):
+
+    # every once in a while evaluate the loss on train and val sets
+    if iter % eval_interval == 0 or iter == max_iters - 1:
+      losses = estimate_loss()
+      print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+
     # sample a batch of data
     xb, yb = get_batch("train")
 
     # evaluate the loss
-    _, loss = m(xb, yb)
+    _, loss = model(xb, yb)
     optimizer.zero_grad()
     loss.backward()        
     optimizer.step()
-    if (iter % 50 == 0):
-      print("epoch: {0} loss: {1}".format(iter, loss.numpy()))
   
   print("final loss: {0}".format(loss.numpy()))
 
   Tensor.training = False
   context = Tensor.zeros((1, 1), dtypes.int64)
   print("-- hark! --")
-  m.generate(context, max_new_tokens=500).numpy()[0]
+  model.generate(context, max_new_tokens=500).numpy()[0]
