@@ -68,9 +68,10 @@ def torch_load(fn:str):
     if storage[2] not in offsets: return None
     byte_offset = offsets[storage[2]]+storage_offset*storage[1].itemsize
     ret = t[byte_offset:byte_offset+prod(size)].cast(storage[1])
-    # convert bfloat16 -> float16 using LLVM
+    # convert bfloat16 -> float16 using LLVM for Llama 2
     # upstream LLaMA also does this conversion:
     # https://github.com/facebookresearch/llama/blob/6c7fe276574e78057f917549435a2554000a876d/llama/generation.py#L95
+    # TODO: should this be done in the example instead? or maybe we don't need this anymore with better bfloat16 support
     if storage[1] == dtypes.bfloat16:
       ret = ret.to("LLVM").half().to(Device.DEFAULT).realize()
 
