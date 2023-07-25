@@ -43,7 +43,7 @@ def get_run_onnx(onnx_model: ModelProto):
       elif attr == 'sparse_tensor_type': raise NotImplementedError(f"sparse_tensor_type is not implemented: {type_proto}")
       elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
       else: raise Exception(f"unknown attr: {attr}, {type_proto}")
-        
+
   def buffer_parse(inp: TensorProto) -> Tensor:
     if inp.data_type in (1,10,6,7):
       # TODO: this is shared with below
@@ -150,7 +150,7 @@ def get_run_onnx(onnx_model: ModelProto):
       elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt.get('alpha', 1.0))
       elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt.get('perm', list(range(len(inp[0].shape))[::-1])))
-      elif n.op_type == "Squeeze": 
+      elif n.op_type == "Squeeze":
         axes = opt['axes'] if 'axes' in opt else safe_numpy(inp[1])
         axes = [int(x) if x >= 0 else int(x+inp[0].ndim) for x in axes]
         ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in axes])
@@ -176,7 +176,7 @@ def get_run_onnx(onnx_model: ModelProto):
         if n.op_type == "Pow": ret = (inp[0] ** inp[1]).cast(inp[0].dtype)
       elif n.op_type == "Split":
         if 'axis' not in opt: opt['axis'] = 0
-        if 'num_outputs' in opt or len(inp) == 1: 
+        if 'num_outputs' in opt or len(inp) == 1:
           opt['split'] = [inp[0].shape[opt['axis']] // len(n.output)] * len(n.output)
           for i in range(inp[0].shape[opt['axis']] % len(n.output)):
             opt['split'][i] += 1
@@ -201,14 +201,14 @@ def get_run_onnx(onnx_model: ModelProto):
           starts, ends = safe_numpy(starts.ceil().cast(dtypes.int32)).tolist(), safe_numpy(ends.ceil().cast(dtypes.int32)).tolist()
         arg = [(0,x,1) for x in inp[0].shape]
         shrink_args = [(0,x) for x in inp[0].shape]
-        only_shrink = False # HACK BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise __getitem__ Tensor.reshape() has to allow 0 in newshape 
+        only_shrink = False # HACK BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise __getitem__ Tensor.reshape() has to allow 0 in newshape
         for i, axis in enumerate(axes):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
           starts[i], ends[i] = starts[i] + inp[0].shape[axis] if starts[i] < 0 else starts[i], ends[i] + inp[0].shape[axis] if ends[i] < 0 else ends[i]
           starts[i], ends[i] = max(0, min(starts[i], inp[0].shape[axis])), max(0, min(ends[i], inp[0].shape[axis]))
           shrink_args[axis] = (starts[i], ends[i])
-          if starts[i] == ends[i]: 
-            only_shrink = True 
+          if starts[i] == ends[i]:
+            only_shrink = True
             continue
           if starts[i] > ends[i] and steps[i] >= 0: steps[i] = -steps[i]
           arg[axis] = (starts[i], ends[i], steps[i])

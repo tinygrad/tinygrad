@@ -85,7 +85,7 @@ def Gemm(A, B, C=None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=0):
   if C is not None: ret += beta * (C if broadcast == 0 else C.reshape([-1 if i <  len(C.shape) else 1 for i in range(len(ret.shape))][::-1]))
   return ret
 
-def _batchnorm(self:Tensor, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor): # works with Tensors.ndim != 4 
+def _batchnorm(self:Tensor, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor): # works with Tensors.ndim != 4
   shape = [1, -1] + [1] * (self.ndim-2)
   x = (self - mean.reshape(shape=shape))
   if weight: x = x * weight.reshape(shape=shape)
@@ -171,8 +171,8 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     for n, pad in n_pads: # TODO NOT SURE IF FOR LOOPING LIKE THIS IS A GOOD IDEA IN TINYGRAD, there are probably better way
       if pad == (0,0): continue # BUG assert pad[0] != 0 and pad[1] != 0, might be bug when one of the pads == 0
       pad_begin, pad_end = pad
-      begin_repeat_args = [(1) if i != n else math.ceil(pad_begin+1/x.shape[i]) for i in range(x.ndim)] 
-      end_repeat_args = [(1) if i != n else math.ceil(pad_end+1/x.shape[i]) for i in range(x.ndim)] 
+      begin_repeat_args = [(1) if i != n else math.ceil(pad_begin+1/x.shape[i]) for i in range(x.ndim)]
+      end_repeat_args = [(1) if i != n else math.ceil(pad_end+1/x.shape[i]) for i in range(x.ndim)]
       begin_shrink_arg = [(0,s) if i != n else (s-1-pad_begin,s-1) for i,s in enumerate(x.shape)]
       end_shrink_arg = [(0,s) if i != n else (1,1+pad_end) for i,s in enumerate(x.shape)]
       b = x.repeat(begin_repeat_args).flip(n).shrink(tuple(begin_shrink_arg))
@@ -219,7 +219,7 @@ def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=N
 
 def MaxUnpool(xT, xI, outshape=None, kernel_shape=None, pads=None, strides=None):
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
-  outlength = prod(out_sh) 
+  outlength = prod(out_sh)
   xI = xI.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
   arange = Tensor.arange(outlength).reshape(1, outlength).expand(xI.shape)
   xT = xT.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
@@ -241,13 +241,13 @@ def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_
   if auto_pad != "NOTSET":
     if not kernel_shape: kernel_shape = W.shape[-len(strides):]
     pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
-  ret = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding) 
-  # HACK: Need smarter way of determining ret shape and output_shape 
+  ret = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding)
+  # HACK: Need smarter way of determining ret shape and output_shape
   # out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
-  if output_shape and not output_padding: 
+  if output_shape and not output_padding:
     output_padding = [os - rs for os, rs in zip(output_shape, ret.shape[-2:])]
-    ret = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding) 
-  return ret 
+    ret = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding)
+  return ret
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
 def Dropout(data, ratio=0.5, training_mode=False, seed=None):
@@ -294,7 +294,7 @@ def HardSwish(input): return input * HardSigmoid(input, 1/6, 0.5)
 def Celu(X, alpha=1.0): return X.relu() - (-alpha*(X/alpha).exp()+1).relu()
 def Selu(X, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
 def Softplus(X): return X.softplus()
-def PRelu(X:Tensor, slope:Tensor): 
+def PRelu(X:Tensor, slope:Tensor):
   slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope # OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
   return X.clip(0, float("inf")) + X.clip(float("-inf"), 0) * slope
 def LeakyRelu(X, alpha=0.01): return X.leakyrelu(alpha)
@@ -326,7 +326,7 @@ def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
 def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
 
-def _axes(axes, noop_with_empty_axes): 
+def _axes(axes, noop_with_empty_axes):
   return [int(x) for x in safe_numpy(axes)] if axes is not None and not (isinstance(axes, Tensor) and axes.shape == (0,)) else ([] if noop_with_empty_axes else None)
 
 # ReduceProd would require a new llop
@@ -430,7 +430,7 @@ def Gather(input, indices, axis=0):
     args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(input_sh)] for i in indices]
     return input.shrink(arg=tuple(args[0])).cat(*[input.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
   else:
-    # NOTE faster gather with larger indices probably, fixed number of kernels, so O(?) haha 
+    # NOTE faster gather with larger indices probably, fixed number of kernels, so O(?) haha
     return input.gather(indices, axis)
 
 def GatherElements(input, indices, axis):
@@ -448,7 +448,7 @@ def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
   b = x.cast(dtypes.int32).contiguous().cast(x.dtype)
   b = (b >= 0).where(b+n, b-n)
   if equidistant_case == "round_down":
-    return (x > b).where(b+1-n, b-n) 
+    return (x > b).where(b+1-n, b-n)
   elif equidistant_case == "round_up":
     return (x >= b).where(b+1-n, b-n)
   elif equidistant_case == "round_to_even":
@@ -500,7 +500,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       roi = roi_
   if scales:
     scales = safe_numpy(scales).tolist()
-    if axes: 
+    if axes:
       scales_ = [1]*X.ndim
       for a,s in zip(axes, scales):
         scales_[a] = s
@@ -523,7 +523,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       scale = max(scales)
       sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, "round_up")
       sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
-  output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)] 
+  output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
   output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
   # bs,c,py,px = X.shape
   scales_lol = [os/xs for xs, os in zip(X.shape, output_shape)]
@@ -550,12 +550,12 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
         corners = safe_numpy(X.shrink(shrink_args))
         x1, x2, y1, y2 = x_floor, x_floor+1, y_floor, y_floor+1
         if x == x_floor and y == y_floor: # TODO https://en.wikipedia.org/wiki/Bilinear_interpolation#Weighted_mean maybe do weighted mean?
-          ret.append(corners[0,0,0,0]) 
+          ret.append(corners[0,0,0,0])
         elif x == x_floor:
           ret.append((corners[0,0,0,0] * (y2 - y) + corners[0,0,1,0] * (y - y1)) / (y2 - y1))
         elif y == y_floor:
           ret.append((corners[0,0,0,0] * (x2 - x) + corners[0,0,0,1] * (x - x1)) / (x2 - x1))
-        else: 
+        else:
           ret.append((corners[0,0,0,0] * (x2 - x) * (y2 - y) + corners[0,0,0,1] * (x - x1) * (y2 - y) + corners[0,0,1,0] * (x2 - x) * (y - y1) + corners[0,0,1,1] * (x - x1) * (y - y1)) / ((x2 - x1) * (y2 - y1)))
     return Tensor(ret).reshape(output_shape)
   elif mode == "cubic":
