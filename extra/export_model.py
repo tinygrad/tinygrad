@@ -48,11 +48,8 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
     weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
     cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
 
-  # buffers (empty + weights)
   cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in ['input', 'outputs']]
-  # the functions
   cprog += list(functions.values())
-  # the net 
   cprog += ["void net(float* input, float* outputs) {"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
   return '\n'.join(cprog)
 
@@ -127,17 +124,17 @@ const setupNet = async (device, safetensor) => {{
   """ + f"\n\nconst loadNet = async (device) => {{ return await fetch('net.safetensors').then(x => x.arrayBuffer()).then(x => setupNet(device, new Uint8Array(x))); }}"
 
 def export_model(model, input:Tensor, target:str):
-    assert Device.DEFAULT in ["WEBGPU", "CLANG", "CUDA", "GPU", "METAL"], "only WEBGPU, CLANG, CUDA, GPU, METAL are supported"
-    run,special_names = jit_model(model, input)
-    functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
-    state = get_state_dict(model)
-    weight_names = {id(x.lazydata.realized): name for name, x in state.items()}
-    prg = ""
-    if target == "clang":
-      prg = export_model_clang(functions, statements, bufs, bufs_to_save)
-    elif target == "webgpu":
-      prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names)
-    else:
-      prg = json.dumps({"backend": Device.DEFAULT, "input_size": { "size": bufs['input'][0], "dtype": bufs['input'][1].name}, "output_size": {"size": bufs["outputs"][0], "dtype": bufs["outputs"][1].name}, "functions": functions, "statements": [{"kernel":kernel,"args":args, "global_size":global_size, "local_size": local_size} for (kernel, args, global_size, local_size) in statements], "buffers": {name:{"size":size, "dtype": dtype.name, "id": weight_names[_key] if _key in weight_names else ""} for name, (size,dtype,_key) in bufs.items()}})
+  assert Device.DEFAULT in ["WEBGPU", "CLANG", "CUDA", "GPU", "METAL"], "only WEBGPU, CLANG, CUDA, GPU, METAL are supported"
+  run,special_names = jit_model(model, input)
+  functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
+  state = get_state_dict(model)
+  weight_names = {id(x.lazydata.realized): name for name, x in state.items()}
+  prg = ""
+  if target == "clang":
+    prg = export_model_clang(functions, statements, bufs, bufs_to_save)
+  elif target == "webgpu":
+    prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names)
+  else:
+    prg = json.dumps({"backend": Device.DEFAULT, "input_size": { "size": bufs['input'][0], "dtype": bufs['input'][1].name}, "output_size": {"size": bufs["outputs"][0], "dtype": bufs["outputs"][1].name}, "functions": functions, "statements": [{"kernel":kernel,"args":args, "global_size":global_size, "local_size": local_size} for (kernel, args, global_size, local_size) in statements], "buffers": {name:{"size":size, "dtype": dtype.name, "id": weight_names[_key] if _key in weight_names else ""} for name, (size,dtype,_key) in bufs.items() if name not in ["input", "outputs"]}})
 
-    return prg, bufs['input'][0], bufs['outputs'][0], state
+  return prg, bufs['input'][0], bufs['outputs'][0], state
