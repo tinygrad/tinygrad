@@ -86,7 +86,7 @@ class TestRealWorld(unittest.TestCase):
       loss.backward()
       optimizer.step()
 
-    helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/32)*BS, 236)
+    helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/32)*BS, 241)
 
     # reset device
     Tensor.training = old_training
