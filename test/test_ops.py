@@ -1103,6 +1103,22 @@ class TestOps(unittest.TestCase):
     n = (x < 0).where(x, 1).numpy()
     assert np.all(n == 1.)
 
+  def test_gather(self):
+    nda = np.random.randn(4,5,6,9,5).astype(np.float32)
+    ten = Tensor(nda, requires_grad=True)
+    tor = torch.tensor(nda, requires_grad=True)
+    c = np.random.randint(low=-4, high=4, size=[3,4,5]).astype(np.int32)
+    a = Tensor(c, requires_grad=False)
+    b = torch.tensor(c, requires_grad=False)
+    helper_test_op([], lambda: tor[b,:,:,:,:], lambda: ten.gather(a, dim=0))
+    helper_test_op([], lambda: tor[:,b,:,:,:], lambda: ten.gather(a, dim=1))
+    helper_test_op([], lambda: tor[:,:,b,:,:], lambda: ten.gather(a, dim=2))
+    helper_test_op([], lambda: tor[:,:,:,b,:], lambda: ten.gather(a, dim=3))
+    helper_test_op([], lambda: tor[:,:,:,:,b], lambda: ten.gather(a, dim=4))
+    ta = Tensor(c, requires_grad=True)
+    tb = torch.tensor(c, requires_grad=True, dtype=torch.float32)
+    self.helper_test_exception([], lambda: tor[tb,:,:,:,:].sum().backward(), lambda: ten.gather(ta, dim=0).sum().backward(), expected=(IndexError, RuntimeError)) # torch raises IndexError, Tensor raises RuntimeError
+
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)
