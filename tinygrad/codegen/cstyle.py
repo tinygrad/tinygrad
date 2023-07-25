@@ -195,7 +195,6 @@ class CStyleCodegen(Linearizer):
 
   def codegen(self):
     self.process()
-    if not getenv("KOPT"): self.hand_coded_optimizations()
     if self.lang.global_max: self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
     self.linearize()
 
