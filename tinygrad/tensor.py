@@ -315,10 +315,9 @@ class Tensor:
 
   def gather(self, idx, dim):
     idx = (idx < 0).where(idx+self.shape[dim], idx) # Turn neg idx pos
-    new_shape = [*self.shape[:dim+1], *idx.shape, *self.shape[dim+1:]]
-    new_self = self.reshape(*self.shape[:dim+1], *[1]*idx.ndim, *self.shape[dim+1:]).expand(new_shape)
-    arange = Tensor.arange(self.shape[dim], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim, self.shape[dim], *[1]*idx.ndim, *[1]*(self.ndim-dim-1)).expand(new_shape)
-    new_idx = idx.reshape(*[1]*dim, 1, *idx.shape, *[1]*(self.ndim-dim-1)).expand(new_shape)
+    new_self = self.reshape(*self.shape[:dim+1], *[1]*idx.ndim, *self.shape[dim+1:])
+    arange = Tensor.arange(self.shape[dim], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim, self.shape[dim], *[1]*idx.ndim, *[1]*(self.ndim-dim-1))
+    new_idx = idx.reshape(*[1]*dim, 1, *idx.shape, *[1]*(self.ndim-dim-1))
     return (new_self * (arange == new_idx)).sum(dim)
 
   def cat(self, *args, dim=0):
