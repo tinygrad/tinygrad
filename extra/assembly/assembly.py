@@ -165,20 +165,14 @@ class AssemblyCodegen(Linearizer):
               pred = args.valid.render(render_ops)
               ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
           if args.valid.max == 1:
-            if buf_to_dtype[args.name] != dtypes.float:
-              ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global', args.memory_dtype))) #if args.i != -1 else 'shared')
-            else:
               # NOTE: you can't compute the index in here, because it assumes it's all available later
-              ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global'))) # if args.i != -1 else 'shared'
+              ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global', args.memory_dtype if buf_to_dtype[args.name] != dtypes.float else None))) #if args.i != -1 else 'shared')
           if args.valid.min == 0 and args.valid.max == 1:
             ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
             skipload_branch += 1
       elif uop == UOps.STORE:
         idx, treg, off = addr_w_offset(args)
-        if buf_to_dtype['data0'] != dtypes.float:
-          ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global', args.memory_dtype))) #if args.i != -1 else 'shared')
-        else:
-          ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global'))) #if args.i != -1 else 'shared'
+        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global', args.memory_dtype if buf_to_dtype['data0'] != dtypes.float else None))) #if args.i != -1 else 'shared')
 
     # define registers
     ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)) for dtype,c in cnts.items()] + ins
