@@ -47,6 +47,11 @@ class ResidualCouplingBlock:
     return x
 
 
+class LayerNorm(nn.LayerNorm):
+  def __init__(self, channels, eps=1e-5): super().__init__(channels, eps, elementwise_affine=True)
+  def forward(self, x: Tensor): return self.__call__(x.transpose(1, -1)).transpose(1, -1)
+
+
 class WN:
   def __init__(self, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=0, p_dropout=0):
     assert (kernel_size % 2 == 1)
@@ -139,6 +144,7 @@ class TextEncoder:
       kernel_size,
       p_dropout)
 
+  #TODO: remove torch
   def forward(self, x, x_mask, f0=None, noice_scale=1):
     x = x + self.f0_emb(f0).transpose(1, 2)
     x = self.enc_(x * x_mask, x_mask)
