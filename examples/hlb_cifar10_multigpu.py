@@ -92,7 +92,7 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
     if not is_train: break
     seed += 1
 
-def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.014, pct_start=0.0546875, momentum=0.7, wd=0.16, label_smoothing=0., mixup_alpha=0.025, seed=9):
+def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.04, pct_start=0.2, momentum=0.8, wd=0.13, label_smoothing=0., mixup_alpha=0.025, seed=9):
   rank, world_size = getenv("RANK"), getenv("WORLD_SIZE")
   set_seed(seed)
   Tensor.training = True
