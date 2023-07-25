@@ -414,10 +414,12 @@ def SoftmaxCrossEntropyLoss(scores, labels, weights=None, ignore_index=None, red
   y = -scores.softmax().log().transpose(0,1)
   '''
 
+# TODO get rid of _gather(), replace with logic from Tensor.gather()
 def _gather(input: Tensor, indices: Tensor):
   reshape_arg = [1]*input.ndim + [input.shape[-1]]
   return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]))*input).sum(indices.ndim)
 
+def ArrayFeatureExtractor(input, indices): return input.gather(indices, input.ndim-1)
 def Gather(input, indices, axis=0):
   if indices.numel() < 9: # TODO NOT SURE YET FOR THE EXACT NUMBER, NEED TO TEST THIS
     # NOTE faster gather with smaller indices SOMETHING SOMETHING O(?) IDK I DIDN'T GO TO SCHOOL FOR THIS but kernel number increases depending on size of indices
@@ -440,14 +442,8 @@ def GatherElements(input, indices, axis):
   input = input.permute(*permute_args)
   return _gather(input, indices).transpose(ax1=0, ax2=axis)
 
-def ArrayFeatureExtractor(input, indices):
-  ret = Gather(input, indices, input.ndim-1)
-  return ret
-
 def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
-  def _and(cond1, cond2):
-    and_cond = cond1 + cond2
-    return (and_cond == 2).where(1, 0)
+  def _and(cond1, cond2): return ((cond1 + cond2) == 2).where(1, 0)
   assert n <= 1, f"n:{n} shouldn't be larger than 1"
   b = x.cast(dtypes.int32).contiguous().cast(x.dtype)
   b = (b >= 0).where(b+n, b-n)
@@ -467,7 +463,7 @@ def Round(X:Tensor):
 
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
   def _nearest_gather(X: Tensor, indices: Tensor, output_shape):
-    return _gather(X.flatten(), indices).reshape(output_shape)
+    return _gather(X.flatten(), indices).reshape(output_shape) # replace with Tensor.gather()
   def _nearest_mode(x_resized: Tensor, nearest_mode: str, x_len):
     if nearest_mode == "round_prefer_floor": ret = _round(x_resized, 0.5, "round_down")
     elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, 0.5, "round_up")
