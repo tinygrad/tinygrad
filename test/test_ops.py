@@ -1099,24 +1099,26 @@ class TestOps(unittest.TestCase):
     assert np.all(n == 1.)
 
   def test_gather(self):
-    c = np.random.randn(4,5,6,9,5).astype(np.float32)
-    a = Tensor(c, requires_grad=True)
-    b = torch.tensor(c, requires_grad=True)
+    nda = np.random.randn(4,5,6,9,5).astype(np.float32)
+    ten = Tensor(nda, requires_grad=True)
+    tor = torch.tensor(nda, requires_grad=True)
 
-    # for cases where indices is vector (indices.ndim == 1)
-    va = Tensor([0,1,2,3,3,0], requires_grad=False)
-    vb = torch.tensor([0,1,2,3,3,0], requires_grad=False)
-    for dim in range(c.ndim):
+    # for cases where indices.ndim == 1
+    a = Tensor([0,1,2,3,3,0], requires_grad=False)
+    b = torch.tensor([0,1,2,3,3,0], requires_grad=False)
+    for dim in range(nda.ndim):
       with self.subTest(torch.index_select.__name__, dim=dim):
-        helper_test_op([], lambda: torch.index_select(input=b, index=vb, dim=dim), lambda: a.gather(va, dim=dim))
+        helper_test_op([], lambda: torch.index_select(input=tor, index=b, dim=dim), lambda: ten.gather(a, dim=dim)) # matches index_select api
 
-    # for cases where indices is matrix (indices.ndim > 1)
+    # for cases where indices.ndim > 1
     mc = np.random.randint(4, size=[3,4,5]).astype(np.int32)
     ma = Tensor(mc, requires_grad=False)
     mb = torch.tensor(mc, requires_grad=False)
-    helper_test_op([], lambda: b[mb,:,:,:,:], lambda: a.gather(ma, dim=0))
-    helper_test_op([], lambda: b[:,:,mb,:,:], lambda: a.gather(ma, dim=2))
-    helper_test_op([], lambda: b[:,:,:,:,mb], lambda: a.gather(ma, dim=4))
+    helper_test_op([], lambda: tor[mb,:,:,:,:], lambda: ten.gather(ma, dim=0))
+    helper_test_op([], lambda: tor[:,mb,:,:,:], lambda: ten.gather(ma, dim=1))
+    helper_test_op([], lambda: tor[:,:,mb,:,:], lambda: ten.gather(ma, dim=2))
+    helper_test_op([], lambda: tor[:,:,:,mb,:], lambda: ten.gather(ma, dim=3))
+    helper_test_op([], lambda: tor[:,:,:,:,mb], lambda: ten.gather(ma, dim=4))
 
 if __name__ == '__main__':
   np.random.seed(1337)
