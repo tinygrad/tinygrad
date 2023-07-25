@@ -9,7 +9,7 @@ import ast, os
 if __name__ == "__main__":
   model = EfficientNet(0)
   model.load_from_pretrained()
-  mode = "clang" if getenv("CLANG", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else "" 
+  mode = "clang" if getenv("CLANG", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else ""
   prg, inp_size, out_size, state = export_model(model, Tensor.randn(1,3,224,224), mode)
   if getenv("CLANG", "") == "":
     safe_save(state, os.path.join(os.path.dirname(__file__), "net.safetensors"))
