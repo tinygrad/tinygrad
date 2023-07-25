@@ -9,7 +9,7 @@ from collections import namedtuple
 
 from tqdm import tqdm
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import dtypes, GlobalCounters
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from extra.utils import download_file
 from tinygrad.state import torch_load, load_state_dict
@@ -614,8 +614,8 @@ if __name__ == "__main__":
 
   def get_model_output(latent, timestep):
     # put into diffuser
-    unconditional_latent = model.model.diffusion_model(latent, timestep, unconditional_context)
-    latent = model.model.diffusion_model(latent, timestep, context)
+    latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep.expand(2, *timestep.shape[1:]), unconditional_context.cat(context, dim=0))
+    unconditional_latent, latent = latents[0:1], latents[1:2]
 
     unconditional_guidance_scale = 7.5
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
@@ -647,6 +647,7 @@ if __name__ == "__main__":
 
   # this is diffusion
   for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
+    GlobalCounters.reset()
     t.set_description("%3d %3d" % (index, timestep))
     e_t = get_model_output(latent, Tensor([timestep]))
     x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t, index)
