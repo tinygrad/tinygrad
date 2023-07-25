@@ -3,6 +3,9 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
+import pytest
+
+pytestmark = pytest.mark.webgpu
 
 # NOTE: METAL fails, might be platform and optimization options dependent.
 @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["METAL", "WEBGPU"], f"no JIT on {Device.DEFAULT}")

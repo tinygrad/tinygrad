@@ -170,7 +170,6 @@ class Tensor:
   def eye(dim:int, **kwargs):
     return Tensor([1], **kwargs).pad(((0,dim),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
 
-
   # ***** rng hlops *****
 
   @staticmethod
@@ -282,7 +281,7 @@ class Tensor:
     valid_slices = list(filterfalse(lambda x: x is None, orig_slices))
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
-    new_slice = tuple((s, e)  if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
+    new_slice = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
     new_shape = tuple(e - s for s, e in new_slice)
     # Shrink
     sliced_tensor = self.shrink(new_slice)
@@ -312,6 +311,13 @@ class Tensor:
       else: # i is None
         final_shape.append(1)
     return sliced_tensor.reshape(tuple(final_shape))  # Reshape
+
+  def gather(self, idx, dim):
+    idx = (idx < 0).where(idx+self.shape[dim], idx) # Turn neg idx pos
+    new_self = self.reshape(*self.shape[:dim+1], *[1]*idx.ndim, *self.shape[dim+1:])
+    arange = Tensor.arange(self.shape[dim], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim, self.shape[dim], *[1]*idx.ndim, *[1]*(self.ndim-dim-1))
+    new_idx = idx.reshape(*[1]*dim, 1, *idx.shape, *[1]*(self.ndim-dim-1))
+    return (new_self * (arange == new_idx)).sum(dim)
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
