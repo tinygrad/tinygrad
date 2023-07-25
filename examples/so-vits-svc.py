@@ -4,23 +4,169 @@ from pathlib import Path
 from typing import List
 from extra.utils import download_file
 from tinygrad import nn
+from tinygrad.nn import Conv1d, Conv2d
 from tinygrad.helpers import dtypes
 from tinygrad.state import torch_load
 from tinygrad.tensor import Tensor
 from unidecode import unidecode
 
+# TODO: review and refactor
+from torch.nn import functional as F
+from torch.nn.utils import spectral_norm, weight_norm
+
+LRELU_SLOPE = 0.1
+
+class Synthesizer:
+  def __init__(
+    self,
+    spec_channels,
+    segment_size,
+    inter_channels,
+    hidden_channels,
+    filter_channels,
+    n_heads,
+    n_layers,
+    kernel_size,
+    p_dropout,
+    resblock,
+    resblock_kernel_sizes,
+    resblock_dilation_sizes,
+    upsample_rates,
+    upsample_initial_channel,
+    upsample_kernel_sizes,
+    gin_channels,
+    ssl_dim,
+    n_speakers,
+    sampling_rate=44100,
+    vol_embedding=False,
+    vocoder_name="nsf-hifigan",
+    use_depthwise_conv=False,
+    use_automatic_f0_prediction=True,
+    flow_share_parameter=False,
+    n_flow_layer=4,
+    **kwargs
+  ):
+
+    self.spec_channels = spec_channels
+    self.inter_channels = inter_channels
+    self.hidden_channels = hidden_channels
+    self.filter_channels = filter_channels
+    self.n_heads = n_heads
+    self.n_layers = n_layers
+    self.kernel_size = kernel_size
+    self.p_dropout = p_dropout
+    self.resblock = resblock
+    self.resblock_kernel_sizes = resblock_kernel_sizes
+    self.resblock_dilation_sizes = resblock_dilation_sizes
+    self.upsample_rates = upsample_rates
+    self.upsample_initial_channel = upsample_initial_channel
+    self.upsample_kernel_sizes = upsample_kernel_sizes
+    self.segment_size = segment_size
+    self.gin_channels = gin_channels
+    self.ssl_dim = ssl_dim
+    self.vol_embedding = vol_embedding
+    self.emb_g = nn.Embedding(n_speakers, gin_channels)
+    self.use_depthwise_conv = use_depthwise_conv
+    self.use_automatic_f0_prediction = use_automatic_f0_prediction
+    if vol_embedding:
+      self.emb_vol = nn.Linear(1, hidden_channels)
+
+    self.pre = nn.Conv1d(ssl_dim, hidden_channels, kernel_size=5, padding=2)
+
+    self.enc_p = TextEncoder(
+      inter_channels,
+      hidden_channels,
+      filter_channels=filter_channels,
+      n_heads=n_heads,
+      n_layers=n_layers,
+      kernel_size=kernel_size,
+      p_dropout=p_dropout
+    )
+    hps = {
+      "sampling_rate": sampling_rate,
+      "inter_channels": inter_channels,
+      "resblock": resblock,
+      "resblock_kernel_sizes": resblock_kernel_sizes,
+      "resblock_dilation_sizes": resblock_dilation_sizes,
+      "upsample_rates": upsample_rates,
+      "upsample_initial_channel": upsample_initial_channel,
+      "upsample_kernel_sizes": upsample_kernel_sizes,
+      "gin_channels": gin_channels,
+      "use_depthwise_conv": use_depthwise_conv
+    }
+
+    modules.set_Conv1dModel(self.use_depthwise_conv)
+
+    if vocoder_name == "nsf-hifigan":
+      from vdecoder.hifigan.models import Generator
+      self.dec = Generator(h=hps)
+    elif vocoder_name == "nsf-snake-hifigan":
+      from vdecoder.hifiganwithsnake.models import Generator
+      self.dec = Generator(h=hps)
+    else:
+      print("[?] Unkown vocoder: use default(nsf-hifigan)")
+      from vdecoder.hifigan.models import Generator
+      self.dec = Generator(h=hps)
+
+    self.enc_q = Encoder(spec_channels, inter_channels, hidden_channels, 5, 1, 16, gin_channels=gin_channels)
+    self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, n_flow_layer, gin_channels=gin_channels,
+                                      share_parameter=flow_share_parameter)
+    if self.use_automatic_f0_prediction:
+      self.f0_decoder = F0Decoder(
+        1,
+        hidden_channels,
+        filter_channels,
+        n_heads,
+        n_layers,
+        kernel_size,
+        p_dropout,
+        spk_channels=gin_channels
+      )
+    self.emb_uv = nn.Embedding(2, hidden_channels)
+    self.character_mix = False
+
+  def EnableCharacterMix(self, n_speakers_map, device):
+    self.speaker_map = torch.zeros((n_speakers_map, 1, 1, self.gin_channels)).to(device)
+    for i in range(n_speakers_map):
+      self.speaker_map[i] = self.emb_g(torch.LongTensor([[i]]).to(device))
+    self.speaker_map = self.speaker_map.unsqueeze(0).to(device)
+    self.character_mix = True
+
+  def forward(self, c, f0, uv, spec, g=None, c_lengths=None, spec_lengths=None, vol=None):
+    g = self.emb_g(g).transpose(1, 2)
+
+    # vol proj
+    vol = self.emb_vol(vol[:, :, None]).transpose(1, 2) if vol is not None and self.vol_embedding else 0
+
+    # ssl prenet
+    x_mask = torch.unsqueeze(commons.sequence_mask(c_lengths, c.size(2)), 1).to(c.dtype)
+    x = self.pre(c) * x_mask + self.emb_uv(uv.long()).transpose(1, 2) + vol
+
+    # f0 predict
+    if self.use_automatic_f0_prediction:
+      lf0 = 2595. * torch.log10(1. + f0.unsqueeze(1) / 700.) / 500
+      norm_lf0 = utils.normalize_f0(lf0, x_mask, uv)
+      pred_lf0 = self.f0_decoder(x, norm_lf0, x_mask, spk_emb=g)
+    else:
+      lf0 = 0
+      norm_lf0 = 0
+      pred_lf0 = 0
+    # encoder
+    z_ptemp, m_p, logs_p, _ = self.enc_p(x, x_mask, f0=f0_to_coarse(f0))
+    z, m_q, logs_q, spec_mask = self.enc_q(spec, spec_lengths, g=g)
+
+    # flow
+    z_p = self.flow(z, spec_mask, g=g)
+    z_slice, pitch_slice, ids_slice = commons.rand_slice_segments_with_pitch(z, f0, spec_lengths, self.segment_size)
+
+    # nsf decoder
+    o = self.dec(z_slice, g=g, f0=pitch_slice)
+
+    return o, ids_slice, spec_mask, (z, z_p, m_p, logs_p, m_q, logs_q), pred_lf0, norm_lf0, lf0
+
 
 class ResidualCouplingBlock:
-  def __init__(self,
-               channels,
-               hidden_channels,
-               kernel_size,
-               dilation_rate,
-               n_layers,
-               n_flows=4,
-               gin_channels=0,
-               share_parameter=False
-               ):
+  def __init__(self, channels, hidden_channels, kernel_size, dilation_rate, n_layers, n_flows=4, gin_channels=0, share_parameter=False):
     self.channels = channels
     self.hidden_channels = hidden_channels
     self.kernel_size = kernel_size
@@ -33,7 +179,7 @@ class ResidualCouplingBlock:
 
     self.wn = WN(hidden_channels, kernel_size, dilation_rate, n_layers, p_dropout=0, gin_channels=gin_channels) if share_parameter else None
 
-    for i in range(n_flows):
+    for _ in range(n_flows):
       self.flows.append(ResidualCouplingLayer(channels, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=gin_channels, mean_only=True, wn_sharing_parameter=self.wn))
       self.flows.append(Flip())
 
@@ -61,7 +207,7 @@ class WN:
     for i in range(n_layers):
       dilation = dilation_rate ** i
       self.in_layers.append(nn.Conv1d(hidden_channels, 2 * hidden_channels, kernel_size, dilation=dilation,
-                                      padding=int((kernel_size * dilation - dilation) / 2)))
+        padding=int((kernel_size * dilation - dilation) / 2)))
       self.res_skip_layers.append(
         nn.Conv1d(hidden_channels, 2 * hidden_channels if i < n_layers - 1 else hidden_channels, 1))
 
@@ -105,9 +251,11 @@ class ResidualCouplingLayer:
     if not reverse: return x0.cat((m + x1 * logs.exp() * x_mask), dim=1)
     return x0.cat(((x1 - m) * (-logs).exp() * x_mask), dim=1)
 
+
 class Flip:
   def forward(self, x: Tensor, *args, reverse=False, **kwargs):
     return x.flip([1]) if reverse else (x.flip([1]), Tensor.zeros(x.shape[0], dtype=x.dtype).to(device=x.device))
+
 
 class Log:
   def forward(self, x : Tensor, x_mask, reverse=False):
@@ -118,15 +266,7 @@ class Log:
 
 
 class TextEncoder:
-  def __init__(self,
-               out_channels,
-               hidden_channels,
-               kernel_size,
-               n_layers,
-               gin_channels=0,
-               filter_channels=None,
-               n_heads=None,
-               p_dropout=None):
+  def __init__(self, out_channels, hidden_channels, kernel_size, n_layers, gin_channels=0, filter_channels=None, n_heads=None, p_dropout=None):
 
     self.out_channels = out_channels
     self.hidden_channels = hidden_channels
@@ -142,9 +282,9 @@ class TextEncoder:
       n_heads,
       n_layers,
       kernel_size,
-      p_dropout)
+      p_dropout
+    )
 
-  #TODO: remove torch
   def forward(self, x, x_mask, f0=None, noice_scale=1):
     x = x + self.f0_emb(f0).transpose(1, 2)
     x = self.enc_(x * x_mask, x_mask)
@@ -253,4 +393,189 @@ class Encoder:
     return x * x_mask
 
 
+class DiscriminatorP:
+  def __init__(self, period, kernel_size=5, stride=3, use_spectral_norm=False):
+    self.period = period
+    self.use_spectral_norm = use_spectral_norm
+    norm_f = weight_norm if use_spectral_norm is False else spectral_norm
+    self.convs = nn.ModuleList([
+      norm_f(Conv2d(1, 32, (kernel_size, 1), (stride, 1), padding=(get_padding(kernel_size, 1), 0))),
+      norm_f(Conv2d(32, 128, (kernel_size, 1), (stride, 1), padding=(get_padding(kernel_size, 1), 0))),
+      norm_f(Conv2d(128, 512, (kernel_size, 1), (stride, 1), padding=(get_padding(kernel_size, 1), 0))),
+      norm_f(Conv2d(512, 1024, (kernel_size, 1), (stride, 1), padding=(get_padding(kernel_size, 1), 0))),
+      norm_f(Conv2d(1024, 1024, (kernel_size, 1), 1, padding=(get_padding(kernel_size, 1), 0))),
+    ])
+    self.conv_post = norm_f(Conv2d(1024, 1, (3, 1), 1, padding=(1, 0)))
+
+  def forward(self, x):
+    fmap = []
+
+    # 1d to 2d
+    b, c, t = x.shape
+    if t % self.period != 0:  # pad first
+      n_pad = self.period - (t % self.period)
+      x = F.pad(x, (0, n_pad), "reflect")
+      t = t + n_pad
+    x = x.view(b, c, t // self.period, self.period)
+
+    for l in self.convs:
+      x = l(x)
+      x = F.leaky_relu(x, LRELU_SLOPE)
+      fmap.append(x)
+    x = self.conv_post(x)
+    fmap.append(x)
+    x = torch.flatten(x, 1, -1)
+
+    return x, fmap
+
+
+class DiscriminatorS:
+  def __init__(self, use_spectral_norm=False):
+    norm_f = weight_norm if use_spectral_norm is False else spectral_norm
+    self.convs = nn.ModuleList([
+      norm_f(Conv1d(1, 16, 15, 1, padding=7)),
+      norm_f(Conv1d(16, 64, 41, 4, groups=4, padding=20)),
+      norm_f(Conv1d(64, 256, 41, 4, groups=16, padding=20)),
+      norm_f(Conv1d(256, 1024, 41, 4, groups=64, padding=20)),
+      norm_f(Conv1d(1024, 1024, 41, 4, groups=256, padding=20)),
+      norm_f(Conv1d(1024, 1024, 5, 1, padding=2)),
+    ])
+    self.conv_post = norm_f(Conv1d(1024, 1, 3, 1, padding=1))
+
+  def forward(self, x):
+    fmap = []
+
+    for l in self.convs:
+      x = l(x)
+      x = F.leaky_relu(x, LRELU_SLOPE)
+      fmap.append(x)
+      x = self.conv_post(x)
+      fmap.append(x)
+      x = torch.flatten(x, 1, -1)
+    return x, fmap
+
+
+class MultiPeriodDiscriminator:
+  def __init__(self, use_spectral_norm=False):
+    periods = [2, 3, 5, 7, 11]
+    discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
+    discs = discs + [DiscriminatorP(i, use_spectral_norm=use_spectral_norm) for i in periods]
+    self.discriminators = nn.ModuleList(discs)
+
+  def forward(self, y, y_hat):
+    y_d_rs = []
+    y_d_gs = []
+    fmap_rs = []
+    fmap_gs = []
+    for i, d in enumerate(self.discriminators):
+      y_d_r, fmap_r = d(y)
+      y_d_g, fmap_g = d(y_hat)
+      y_d_rs.append(y_d_r)
+      y_d_gs.append(y_d_g)
+      fmap_rs.append(fmap_r)
+      fmap_gs.append(fmap_g)
+
+    return y_d_rs, y_d_gs, fmap_rs, fmap_gs
+
+class FFT:
+  def __init__(self, hidden_channels, filter_channels, n_heads, n_layers=1, kernel_size=1, p_dropout=0.,
+               proximal_bias=False, proximal_init=True, **kwargs):
+
+    self.hidden_channels = hidden_channels
+    self.filter_channels = filter_channels
+    self.n_heads = n_heads
+    self.n_layers = n_layers
+    self.kernel_size = kernel_size
+    self.p_dropout = p_dropout
+    self.proximal_bias = proximal_bias
+    self.proximal_init = proximal_init
+
+    self.drop = nn.Dropout(p_dropout)
+    self.self_attn_layers = nn.ModuleList()
+    self.norm_layers_0 = nn.ModuleList()
+    self.ffn_layers = nn.ModuleList()
+    self.norm_layers_1 = nn.ModuleList()
+    for i in range(self.n_layers):
+      self.self_attn_layers.append(
+        MultiHeadAttention(hidden_channels, hidden_channels, n_heads, p_dropout=p_dropout, proximal_bias=proximal_bias,
+                           proximal_init=proximal_init))
+      self.norm_layers_0.append(LayerNorm(hidden_channels))
+      self.ffn_layers.append(
+        FFN(hidden_channels, hidden_channels, filter_channels, kernel_size, p_dropout=p_dropout, causal=True))
+      self.norm_layers_1.append(LayerNorm(hidden_channels))
+
+  def forward(self, x, x_mask):
+    """
+    x: decoder input
+    h: encoder output
+    """
+    self_attn_mask = subsequent_mask(x_mask.size(2)).to(device=x.device, dtype=x.dtype)
+    x = x * x_mask
+    for i in range(self.n_layers):
+      y = self.self_attn_layers[i](x, x, self_attn_mask)
+      y = self.drop(y)
+      x = self.norm_layers_0[i](x + y)
+
+      y = self.ffn_layers[i](x, x_mask)
+      y = self.drop(y)
+      x = self.norm_layers_1[i](x + y)
+    x = x * x_mask
+    return x
+
+
+class F0Decoder(nn.Module):
+  def __init__(self, out_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, spk_channels=0):
+
+    self.out_channels = out_channels
+    self.hidden_channels = hidden_channels
+    self.filter_channels = filter_channels
+    self.n_heads = n_heads
+    self.n_layers = n_layers
+    self.kernel_size = kernel_size
+    self.p_dropout = p_dropout
+    self.spk_channels = spk_channels
+    self.prenet = nn.Conv1d(hidden_channels, hidden_channels, 3, padding=1)
+    self.decoder = FFT(
+      hidden_channels,
+      filter_channels,
+      n_heads,
+      n_layers,
+      kernel_size,
+      p_dropout)
+    self.proj = nn.Conv1d(hidden_channels, out_channels, 1)
+    self.f0_prenet = nn.Conv1d(1, hidden_channels, 3, padding=1)
+    self.cond = nn.Conv1d(spk_channels, hidden_channels, 1)
+
+    def forward(self, x, norm_f0, x_mask, spk_emb=None):
+      x = torch.detach(x)
+      if (spk_emb is not None):
+        x = x + self.cond(spk_emb)
+      x += self.f0_prenet(norm_f0)
+      x = self.prenet(x) * x_mask
+      x = self.decoder(x * x_mask, x_mask)
+      x = self.proj(x) * x_mask
+      return x
+
+
 def convert_pad_shape(pad_shape): return tuple(tuple(x) for x in pad_shape)
+
+
+def get_padding(kernel_size, dilation=1): return int((kernel_size*dilation - dilation)/2)
+
+
+def fused_add_tanh_sigmoid_multiply(input_a: Tensor, input_b: Tensor, n_channels: int):
+    n_channels_int, in_act = n_channels, input_a + input_b
+    t_act, s_act = in_act[:, :n_channels_int, :].tanh(), in_act[:, n_channels_int:, :].sigmoid()
+    return t_act * s_act
+
+
+def split(tensor, split_sizes, dim=0):  # if split_sizes is an integer, convert it to a tuple of size split_sizes elements
+  if isinstance(split_sizes, int): split_sizes = (split_sizes,) * (tensor.shape[dim] // split_sizes)
+  assert sum(split_sizes) == tensor.shape[
+    dim], "Sum of split_sizes must equal the dimension size of tensor along the given dimension."
+  start, slices = 0, []
+  for size in split_sizes:
+    slice_range = [(start, start + size) if j == dim else None for j in range(len(tensor.shape))]
+    slices.append(slice_range)
+    start += size
+  return [tensor.slice(s) for s in slices]
