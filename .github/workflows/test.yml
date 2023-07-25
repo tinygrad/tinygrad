@@ -68,22 +68,7 @@ jobs:
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
-      run: PYTHONPATH="." DEBUG=1 python test/external/fuzz_shapetracker.py
-  
-  testimagenet:
-    name: ImageNet to C Compile Test
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e .
+      run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
     - name: Compile EfficientNet to C
       run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
