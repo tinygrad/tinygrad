@@ -1102,16 +1102,14 @@ class TestOps(unittest.TestCase):
     nda = np.random.randn(4,5,6,9,5).astype(np.float32)
     ten = Tensor(nda, requires_grad=True)
     tor = torch.tensor(nda, requires_grad=True)
-
-    # for cases where indices.ndim > 1
-    mc = np.random.randint(low=-4, high=4, size=[3,4,5]).astype(np.int32)
-    ma = Tensor(mc, requires_grad=False)
-    mb = torch.tensor(mc, requires_grad=False)
-    helper_test_op([], lambda: tor[mb,:,:,:,:], lambda: ten.gather(ma, dim=0))
-    helper_test_op([], lambda: tor[:,mb,:,:,:], lambda: ten.gather(ma, dim=1))
-    helper_test_op([], lambda: tor[:,:,mb,:,:], lambda: ten.gather(ma, dim=2))
-    helper_test_op([], lambda: tor[:,:,:,mb,:], lambda: ten.gather(ma, dim=3))
-    helper_test_op([], lambda: tor[:,:,:,:,mb], lambda: ten.gather(ma, dim=4))
+    c = np.random.randint(low=-4, high=4, size=[3,4,5]).astype(np.int32)
+    a = Tensor(c, requires_grad=False)
+    b = torch.tensor(c, requires_grad=False)
+    helper_test_op([], lambda: tor[b,:,:,:,:], lambda: ten.gather(a, dim=0))
+    helper_test_op([], lambda: tor[:,b,:,:,:], lambda: ten.gather(a, dim=1))
+    helper_test_op([], lambda: tor[:,:,b,:,:], lambda: ten.gather(a, dim=2))
+    helper_test_op([], lambda: tor[:,:,:,b,:], lambda: ten.gather(a, dim=3))
+    helper_test_op([], lambda: tor[:,:,:,:,b], lambda: ten.gather(a, dim=4))
 
 if __name__ == '__main__':
   np.random.seed(1337)
