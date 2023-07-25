@@ -51,5 +51,14 @@ class TestContextVars(unittest.TestCase):
       self.assertEqual(VARIABLE.value, 1)
     self.assertEqual(VARIABLE.value, 0)
 
+  def test_decorator(self):
+    @Context(VARIABLE=1, DEBUG=4)
+    def test():
+      self.assertEqual(VARIABLE.value, 1)
+
+    self.assertEqual(VARIABLE.value, 0)
+    test()
+    self.assertEqual(VARIABLE.value, 0)
+
 if __name__ == '__main__':
   unittest.main()
