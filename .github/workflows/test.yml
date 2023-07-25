@@ -70,29 +70,6 @@ jobs:
     - name: Fuzz Test shapetracker
       run: PYTHONPATH="." DEBUG=1 python test/external/fuzz_shapetracker.py
   
-  testwebgpu:
-    name: WebGPU Tests
-    runs-on: macos-13
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e '.[testing,webgpu]' --extra-index-url https://download.pytorch.org/whl/cpu
-    # - name: Set Env
-    #   run: printf "WEBGPU=1\nWGPU_BACKEND_TYPE=D3D12\n" >> $GITHUB_ENV
-    - name: Run Pytest
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -s -v -n=auto test/test_ops.py test/test_speed_v_torch.py test/test_nn.py test/test_jit.py test/test_randomness.py test/test_tensor.py test/test_assign.py test/test_conv.py test/test_nn.py test/test_custom_function.py test/test_conv_shapetracker.py
-    - name: Build WEBGPU Efficientnet
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
-    # - name: Install Puppeteer
-    #   run: npm install puppeteer
-    # - name: Run Efficientnet
-    #   run: node test/test_webgpu.js
   testimagenet:
     name: ImageNet to C Compile Test
     runs-on: ubuntu-latest
@@ -222,7 +199,7 @@ jobs:
     - name: Run webgpu pytest
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto -m 'webgpu'
     - name: Build WEBGPU Efficientnet
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.webgpu.compile_webgpu
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
 
   testdocker:
     name: Docker Test
