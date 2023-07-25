@@ -90,3 +90,7 @@ class ResidualCouplingLayer:
       logs = Tensor.zeros_like(m)
     if not reverse: return x0.cat((m + x1 * logs.exp() * x_mask), dim=1)
     return x0.cat(((x1 - m) * (-logs).exp() * x_mask), dim=1)
+
+class Flip:
+  def forward(self, x: Tensor, *args, reverse=False, **kwargs):
+    return x.flip([1]) if reverse else (x.flip([1]), Tensor.zeros(x.shape[0], dtype=x.dtype).to(device=x.device))
