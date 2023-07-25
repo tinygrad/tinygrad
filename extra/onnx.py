@@ -30,15 +30,14 @@ ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
   def type_parse(type_proto: TypeProto):
-    while True: # NEED BETTER PARSER :D
+    while True:
       attr = type_proto.WhichOneof('value')
       if attr == 'tensor_type': return tuple(x.dim_value for x in getattr(type_proto, attr).shape.dim)
-      elif attr == 'sequence_type': 
-        return []
+      elif attr == 'sequence_type':
         type_proto = getattr(type_proto, attr).elem_type
         attr = type_proto.WhichOneof('value')
-        t_shape = [x.dim_value for x in getattr(type_proto, attr).shape.dim]
-        return (1, *t_shape)
+        t_shape = [(x.dim_value,) for x in getattr(type_proto, attr).shape.dim]
+        return (1, t_shape)
       elif attr == 'map_type': raise NotImplementedError(f"map_type is not implemented: {type_proto}")
       elif attr == 'opaque_type': raise NotImplementedError(f"opaque_type is not implemented: {type_proto}")
       elif attr == 'sparse_tensor_type': raise NotImplementedError(f"sparse_tensor_type is not implemented: {type_proto}")
@@ -93,8 +92,10 @@ def get_run_onnx(onnx_model: ModelProto):
 
   # preparse the attributes
   attribute_dict = {}
+  domain = ""
   for num,n in enumerate(onnx_model.graph.node):
     attribute_dict[num] = attribute_to_dict(n.attribute)
+    if n.domain: domain = n.domain
 
   onnx_model_version = onnx_model.opset_import[0].version
 
@@ -103,10 +104,6 @@ def get_run_onnx(onnx_model: ModelProto):
     input_tensors: Dict[str,Tensor] = {}
     intermediate_tensors: Dict[str,Tensor] = {}
     output_tensor_names = [x.name for x in onnx_model.graph.output]
-
-    requires_grad = False
-    for opset in onnx_model.opset_import: 
-      if opset.domain == "ai.onnx.preview.training": requires_grad = True # TODO TEST WITH REAL ONNX MODELS CUZ I HAVE NO IDEA IF THIS WORKS IN PRACTICE
 
     # get inputs
     for inp in onnx_model.graph.input:
@@ -118,12 +115,12 @@ def get_run_onnx(onnx_model: ModelProto):
           input_tensors[inp.name] = inputs[inp.name]
         elif isinstance(inputs[inp.name], list):
           input_tensors[inp.name] = [Tensor(i, requires_grad=False) for i in inputs[inp.name]]
-        elif requires_grad:
-          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True)
+        elif domain == "ai.onnx.preview.training":
+          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True) # TODO not entirely sure how to parse which inp requires_grad, some are manually turned off in optimizers
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
-        input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else []
-        assert input_shape == shape or shape == [], f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
+        input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else (1, [i.shape for i in input_tensors[inp.name]])
+        assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
         for _,v in input_tensors.items(): v.realize() if v.__class__ is Tensor else ...
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
@@ -219,8 +216,8 @@ def get_run_onnx(onnx_model: ModelProto):
       elif n.op_type == "Shrink":
         bias = opt['bias'] if 'bias' in opt else 0
         ret = (inp[0] < -opt['lambd'])*(inp[0]+bias) + (inp[0] > opt['lambd'])*(inp[0]-bias)
-      elif n.op_type == "Gradient": # TODO NO IDEA IF THIS IS CORRECT LOL
-        assert len(opt["xs"]) == len(inp), "output and input has to match lol"
+      elif n.op_type == "Gradient":
+        assert len(opt["xs"]) == len(inp), f"len(opt['xs']):{len(opt['xs'])}, len(inp):{len(inp)} output and input has to match"
         y = opt["y"]
         intermediate_tensors[y].backward()
         ret = tuple([t.grad for t in inp])
