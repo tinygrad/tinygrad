@@ -1110,6 +1110,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor[:,:,b,:,:], lambda: ten.gather(a, dim=2))
     helper_test_op([], lambda: tor[:,:,:,b,:], lambda: ten.gather(a, dim=3))
     helper_test_op([], lambda: tor[:,:,:,:,b], lambda: ten.gather(a, dim=4))
+    ta = Tensor(c, requires_grad=True)
+    tb = torch.tensor(c, requires_grad=True, dtype=torch.float32)
+    self.helper_test_exception([], lambda: tor[tb,:,:,:,:].sum().backward(), lambda: ten.gather(ta, dim=0).sum().backward(), expected=(IndexError, RuntimeError)) # torch raises IndexError, Tensor raises RuntimeError
 
 if __name__ == '__main__':
   np.random.seed(1337)
