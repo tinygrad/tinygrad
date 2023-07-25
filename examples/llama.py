@@ -3,9 +3,8 @@
 #import typeguard.importhook
 #typeguard.importhook.install_import_hook('tinygrad')
 
-import functools
 from pathlib import Path
-import sys, argparse, math, platform
+import functools, sys, argparse, math, platform
 import numpy as np
 from tqdm import tqdm
 np.set_printoptions(linewidth=200)
@@ -51,8 +50,8 @@ class RMSNorm:
     return (x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()) * self.weight
 
 class Attention:
-  def __init__(self, dim, n_heads):
-    self.wq, self.wk, self.wv, self.wo = [Linear(dim, dim, bias=False) for _ in range(4)]
+  def __init__(self, dim, n_heads, linear=Linear):
+    self.wq, self.wk, self.wv, self.wo = [linear(dim, dim, bias=False) for _ in range(4)]
     self.n_heads = n_heads
     self.head_dim = dim // n_heads
 
@@ -92,21 +91,24 @@ class Attention:
     return self.wo(output)
 
 class FeedForward:
-  def __init__(self, dim, hidden_dim, multiple_of):
+  def __init__(self, dim, hidden_dim, multiple_of, linear=Linear, ffn_dim_multiplier=None):
     # TODO: what is this?
     hidden_dim = int(2 * hidden_dim / 3)
+    # custom dim factor multiplier
+    if ffn_dim_multiplier is not None:
+      hidden_dim = int(ffn_dim_multiplier * hidden_dim)
     hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
-    self.w1 = Linear(dim, hidden_dim, bias=False)
-    self.w2 = Linear(hidden_dim, dim, bias=False)
-    self.w3 = Linear(dim, hidden_dim, bias=False)
+    self.w1 = linear(dim, hidden_dim, bias=False)
+    self.w2 = linear(hidden_dim, dim, bias=False)
+    self.w3 = linear(dim, hidden_dim, bias=False)
 
   def __call__(self, x:Tensor) -> Tensor:
     return self.w2(self.w1(x).silu() * self.w3(x))
 
 class TransformerBlock:
-  def __init__(self, dim, multiple_of, n_heads, norm_eps):
-    self.attention = Attention(dim, n_heads)
-    self.feed_forward = FeedForward(dim, 4*dim, multiple_of)
+  def __init__(self, dim, multiple_of, n_heads, norm_eps, linear=Linear, ffn_dim_multiplier=None):
+    self.attention = Attention(dim, n_heads, linear)
+    self.feed_forward = FeedForward(dim, 4*dim, multiple_of, linear, ffn_dim_multiplier)
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
     if getenv("JIT"):
@@ -130,11 +132,11 @@ class TransformerBlock:
     return self._post(x, output)
 
 class Transformer:
-  def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, max_batch_size=32, max_seq_len=1024):
-    self.layers = [TransformerBlock(dim, multiple_of, n_heads, norm_eps) for _ in range(n_layers)]
+  def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None):
+    self.layers = [TransformerBlock(dim, multiple_of, n_heads, norm_eps, linear, ffn_dim_multiplier) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = Embedding(vocab_size, dim)
-    self.output = Linear(dim, vocab_size, bias=False)
+    self.output = linear(dim, vocab_size, bias=False)
     self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2))
 
   def __call__(self, tokens:Tensor, start_pos:int):
@@ -145,28 +147,46 @@ class Transformer:
     freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen].contiguous().realize()
     mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
     h = h.sequential([functools.partial(layer, start_pos=start_pos, freqs_cis=freqs_cis, mask=mask) for layer in self.layers])
-
-    return self.output(self.norm(h)[:, -1, :])
+    return self.output(self.norm(h))
 
 # **** files and arguments ****
 
-WEIGHTS_DIR = Path(__file__).parent.parent / "weights/LLaMA/"
-TOKENIZER_FILENAME = WEIGHTS_DIR / "tokenizer.model"
 VOCAB_SIZE = 32000
-
-args_small = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE}
-
-args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_7B_FILENAME = WEIGHTS_DIR / "7B/consolidated.00.pth"
-
-args_13B = {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_13B_FILENAMES = [WEIGHTS_DIR / "13B/consolidated.00.pth", WEIGHTS_DIR / "13B/consolidated.01.pth"]
-
-args_30B = {"dim": 6656, "multiple_of": 256, "n_heads": 52, "n_layers": 60, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_30B_FILENAMES = [WEIGHTS_DIR / "30B/consolidated.00.pth", WEIGHTS_DIR / "30B/consolidated.01.pth", WEIGHTS_DIR / "30B/consolidated.02.pth", WEIGHTS_DIR / "30B/consolidated.03.pth"]
-
-args_65B = {"dim": 8192, "multiple_of": 256, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE}
-WEIGHTS_65B_FILENAMES = [WEIGHTS_DIR / "65B/consolidated.00.pth", WEIGHTS_DIR / "65B/consolidated.01.pth", WEIGHTS_DIR / "65B/consolidated.02.pth", WEIGHTS_DIR / "65B/consolidated.03.pth", WEIGHTS_DIR / "65B/consolidated.04.pth", WEIGHTS_DIR / "65B/consolidated.05.pth", WEIGHTS_DIR / "65B/consolidated.06.pth", WEIGHTS_DIR / "65B/consolidated.07.pth"]
+MODEL_PARAMS = {
+  1: {
+    "7B": {
+      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
+      "files": 1,
+    },
+    "13B": {
+      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
+      "files": 2,
+    },
+    "30B": {
+      "args": {"dim": 6656, "multiple_of": 256, "n_heads": 52, "n_layers": 60, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
+      "files": 4,
+    },
+    "65B": {
+      "args": {"dim": 8192, "multiple_of": 256, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+      "files": 8,
+    },
+  },
+  2: {
+    "7B": {
+      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+      "files": 1,
+    },
+    "13B": {
+      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+      "files": 2,
+    },
+#     # 70B is disabled because we do not yet implement n_kv_heads argument
+#     "70B": {
+#       "args": {"dim": 8192, "multiple_of": 4096, "ffn_dim_multiplier": 1.3, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+#       "files": 8,
+#     },
+  },
+}
 
 # **** helper functions ****
 def sample(logits, temperature):
@@ -181,29 +201,78 @@ def sample(logits, temperature):
 def concat_weights(models):
   def convert(name) -> Tensor:
     disk_tensors = [model[name] for model in models]
-    if len(disk_tensors) == 1:
-      return disk_tensors[0]
-    if len(disk_tensors[0].shape) == 1:
-      return disk_tensors[0]
-    if name.startswith('tok_embeddings.') or name.endswith('.attention.wo.weight') or name.endswith('.feed_forward.w2.weight'):
-      axis = 1
-    else:
-      axis = 0
+    if len(disk_tensors) == 1 or len(disk_tensors[0].shape) == 1:
+      return disk_tensors[0].to(device=Device.DEFAULT)
+    axis = 1 if name.startswith('tok_embeddings.') or name.endswith('.attention.wo.weight') or name.endswith('.feed_forward.w2.weight') else 0
     lazy_tensors = [data.to(device=Device.DEFAULT) for data in disk_tensors]
-    first, rest = lazy_tensors[0], lazy_tensors[1:]
-    return first.cat(*rest, dim=axis)
+    return lazy_tensors[0].cat(*lazy_tensors[1:], dim=axis)
   return {name: convert(name) for name in {name: None for model in models for name in model}}
+
+class AbsmaxQuantizedLinear:
+  def __init__(self, in_features, out_features, bias=False):
+    assert bias == False
+    self.weight = Tensor.ones(out_features, in_features, dtype=dtypes.int8)
+    self.scale = Tensor.ones(out_features, dtype=dtypes.half)
+
+  def __call__(self, x):
+    return x.dot(self.weight.cast(dtype=dtypes.half).T/self.scale)
+
+  @staticmethod
+  def quantize(tensors):
+    new_tensors = {}
+    for name,v in tensors.items():
+      if 'feed_forward' in name or ('attention.w') in name or name == 'output.weight':
+        scale = 127.0 / v.abs().max(axis=1)
+        int8_weight = (v.T*scale).T.cast(dtype=dtypes.int8)
+        new_tensors[name] = int8_weight
+        new_tensors[name.replace('weight', 'scale')] = scale
+      else:
+        new_tensors[name] = v
+    return new_tensors
+
+class LLaMa:
+  @staticmethod
+  def build(model_path, tokenizer_path, model_gen=1, model_size="7B", quantize=False):
+    from sentencepiece import SentencePieceProcessor
+    sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
+    assert sp_model.vocab_size() == VOCAB_SIZE
+
+    from tinygrad.state import torch_load, load_state_dict
+    params = MODEL_PARAMS[model_gen][model_size]
+    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
+    weights = concat_weights([torch_load(filename) for filename in [f"{model_path}/{model_size}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
+    if quantize:
+      weights = AbsmaxQuantizedLinear.quantize(weights)
+    load_state_dict(model, weights, strict=False)
+
+    return LLaMa(model, sp_model)
+
+  def __init__(self, model, tokenizer):
+    self.model = model
+    self.tokenizer = tokenizer
+
+  def greedy_until(self, prompt:str, until, max_length, temperature):
+    toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)
+    start_pos = 0
+    for i in range(max_length):
+      logits = self.model(Tensor([toks[start_pos:]]), start_pos).realize()[:, -1, :]
+      tok = sample(logits, temperature)
+      start_pos = len(toks)
+      toks.append(tok)
+
+      if tok == self.tokenizer.eos_id(): break
+      output = self.tokenizer.decode(toks)
+      for s in until:
+        if output.endswith(s): return output[0:-len(s)]
+    return output
 
 # **** main code ****
 
 if __name__ == "__main__":
   Tensor.no_grad = True
   print(f"using {Device.DEFAULT} backend")
-  from sentencepiece import SentencePieceProcessor
-  sp_model = SentencePieceProcessor(model_file=str(TOKENIZER_FILENAME))
-  assert sp_model.vocab_size() == VOCAB_SIZE
 
-  parser = argparse.ArgumentParser(description='Run LLaMA 7B in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser = argparse.ArgumentParser(description='Run LLaMA in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   # test: python3 examples/llama.py --prompt="Hello." --temperature=0
   # Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
   parser.add_argument('--prompt', type=str, default=None, help="Phrase to start with. Without this, it goes into chatbot mode")
@@ -213,31 +282,12 @@ if __name__ == "__main__":
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
   parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
-  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B]")
+  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B] for Gen 2")
+  parser.add_argument('--gen', type=int, default="1", help="Generation of the model to use [1, 2]")
+  parser.add_argument('--quantize', action='store_true', help="Quantize the weights to int8 in memory")
 
   args = parser.parse_args()
   chatbot = args.prompt == None
-
-  from tinygrad.state import torch_load, load_state_dict
-  if args.size == "65B":
-    print("using 65B model")
-    model = Transformer(**args_65B)
-    weights = [torch_load(filename) for filename in WEIGHTS_65B_FILENAMES]
-    load_state_dict(model, concat_weights(weights), strict=False)
-  elif args.size == "30B":
-    print("using 30B model")
-    model = Transformer(**args_30B)
-    weights = [torch_load(filename) for filename in WEIGHTS_30B_FILENAMES]
-    load_state_dict(model, concat_weights(weights), strict=False)
-  elif args.size == "13B":
-    print("using 13B model")
-    model = Transformer(**args_13B)
-    weights = [torch_load(filename) for filename in WEIGHTS_13B_FILENAMES]
-    load_state_dict(model, concat_weights(weights), strict=False)
-  else:
-    print("using 7B model")
-    model = Transformer(**args_7B)
-    load_state_dict(model, torch_load(WEIGHTS_7B_FILENAME), strict=False)
 
   # *** prompt engineers work here ****
 
@@ -328,21 +378,28 @@ After you are done speaking, output [EOS]. You are not Chad.
 
   # *** prompt engineers stop here ****
 
+
+  LLAMA_SUFFIX = {1: "", 2: "-2"}[args.gen]
+  WEIGHTS_DIR = Path(__file__).parent.parent / f"weights/LLaMA{LLAMA_SUFFIX}/"
+  TOKENIZER_FILENAME = WEIGHTS_DIR / "tokenizer.model"
+  print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
+  llama = LLaMa.build(WEIGHTS_DIR, TOKENIZER_FILENAME, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
+
   if chatbot:
     # encode pre prompt
-    toks = [sp_model.bos_id()] + sp_model.encode(pre_prompt)
+    toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(pre_prompt)
 
     print(f"Preparing KV cache for chatbot with personality {args.personality}...")
     with Timing():
-      model(Tensor([toks]), 0).realize()  # NOTE: output logits are not used
+      llama.model(Tensor([toks]), 0).realize()  # NOTE: output logits are not used
     start_pos = len(toks)
   else:
     # non chat bot mode
-    toks = [sp_model.bos_id()] + sp_model.encode(args.prompt)
+    toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(args.prompt)
     start_pos = 0
 
   # print prompt
-  outputted = sp_model.decode(toks)
+  outputted = llama.tokenizer.decode(toks)
   sys.stdout.write(outputted)
   sys.stdout.flush()
 
@@ -357,10 +414,10 @@ After you are done speaking, output [EOS]. You are not Chad.
       user_prompt = user_delim + input(user_delim) + "\n"
       outputted += user_prompt
 
-    new_toks = [sp_model.bos_id()] + sp_model.encode(outputted)
+    new_toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
     assert toks == new_toks[:len(toks)]
     toks = new_toks
-    assert outputted == sp_model.decode(toks)
+    assert outputted == llama.tokenizer.decode(toks)
 
     last_break = len(outputted)
     for i in range(args.count):
@@ -369,7 +426,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       if args.timing: print("")
       st = GlobalCounters.time_sum_s
       with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=args.timing):
-        logits = model(Tensor([toks[start_pos:]]), start_pos).realize()
+        logits = llama.model(Tensor([toks[start_pos:]]), start_pos).realize()[:, -1, :]
       with Timing("sync in ", enabled=args.timing):
         tok = sample(logits, args.temperature)
 
@@ -380,7 +437,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       toks.append(tok)
 
       # TODO: this is a hack to deal with spaces. i think the decode is fast though, so who cares?
-      cur = sp_model.decode(toks)
+      cur = llama.tokenizer.decode(toks)
       sys.stdout.write(cur[len(outputted):])
       sys.stdout.flush()
       outputted = cur
