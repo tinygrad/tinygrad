@@ -1104,7 +1104,7 @@ class TestOps(unittest.TestCase):
     tor = torch.tensor(nda, requires_grad=True)
 
     # for cases where indices.ndim > 1
-    mc = np.random.randint(low= -4, high= 4, size=[3,4,5]).astype(np.int32)
+    mc = np.random.randint(low=-4, high=4, size=[3,4,5]).astype(np.int32)
     ma = Tensor(mc, requires_grad=False)
     mb = torch.tensor(mc, requires_grad=False)
     helper_test_op([], lambda: tor[mb,:,:,:,:], lambda: ten.gather(ma, dim=0))
