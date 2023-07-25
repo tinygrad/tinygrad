@@ -5,7 +5,6 @@ from _weakref import _remove_dead_weakref # type: ignore
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 from math import prod # noqa: F401 # pylint:disable=unused-import
-from collections import ChainMap
 
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
@@ -32,20 +31,22 @@ def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
 class Context:
-  stack: ChainMap = ChainMap()
+  stack: ClassVar[List[dict[str, Any]]] = [{}]
   def __init__(self, **kwargs): self.kwargs = kwargs
-  def __enter__(self): Context.stack = Context.stack.new_child(self.kwargs)
-  def __exit__(self, *args): Context.stack = Context.stack.parents
+  def __enter__(self): Context.stack.append({**Context.stack[-1], **self.kwargs})
+  def __exit__(self, *args): Context.stack.pop()
 
 class ContextVar:
-  def __init__(self, key, default_value): self.key = key; Context.stack.setdefault(key, getenv(key, default_value))
-  def __call__(self, x): Context.stack[self.key] = x
-  def __bool__(self): return self.value != 0
+  def __init__(self, key, default_value):
+    self.key, self.initial_value = key, getenv(key, default_value)
+    if key not in Context.stack[-1]: Context.stack[-1][key] = self.initial_value
+  def __call__(self, x): Context.stack[-1][self.key] = x
+  def __bool__(self): return bool(self.value)
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
   @property
-  def value(self): return Context.stack[self.key]
+  def value(self): return Context.stack[-1].get(self.key, self.initial_value)
 
 DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
 GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
