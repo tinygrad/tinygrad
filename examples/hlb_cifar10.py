@@ -38,7 +38,7 @@ def whitening(X):
   def _eigens(patches):
     n,c,h,w = patches.shape
     Σ = _cov(patches.reshape(n, c*h*w))
-    Λ, V = torch.linalg.eigh(Σ)
+    Λ, V = torch.linalg.eigh(Σ, UPLO='L')
     return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
 
   X = torch.tensor(X.numpy())
@@ -102,7 +102,7 @@ def cutmix(X, Y, mask_size=3, p=0.5, mix=True):
 
   if not mix: return Tensor.where(mask, Tensor.rand(*X.shape), X), Y
   
-  # TODO shuffle instead of reverse, currently is not supported in tinygrad tensor
+  # TODO shuffle instead of reverse, currently is not supported
   X_patch = X[::-1,...]
   Y_patch = Y[::-1]
   X_cutmix = Tensor.where(mask, X_patch, X)
@@ -128,6 +128,7 @@ transform_test = [
 def fetch_batches(X, Y, BS, seed, is_train=False):
   while True:
     set_seed(seed)
+    # here only shuffle by batches
     order = list(range(0, X.shape[0], BS))
     random.shuffle(order)
     for i in order:
