@@ -80,8 +80,14 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
       Y[range(BS),all_Y[batch_end-BS:batch_end]] = -1.0*num_classes
       Y = Tensor(Y.reshape(BS, num_classes))
       # divide into rank subsets
-      X = X[BS*rank//world_size:BS*(rank+1)//world_size]
-      Y = Y[BS*rank//world_size:BS*(rank+1)//world_size]
+      if is_train:
+        X = X[BS*rank//world_size:BS*(rank+1)//world_size]
+        Y = Y[BS*rank//world_size:BS*(rank+1)//world_size]
+      else:
+        world_size = min(world_size, 4)
+        rank = min(rank, 3)
+        X = X[BS*rank//world_size:BS*(rank+1)//world_size]
+        Y = Y[BS*rank//world_size:BS*(rank+1)//world_size]
       yield X, Y
     if not is_train: break
     seed += 1
@@ -109,6 +115,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
                             total_steps=STEPS, pct_start=PCT_START)
 
   state_dict = get_state_dict(model)
+  padding = Tensor.zeros(2)
 
   # JIT at every run
   @TinyJit
@@ -130,7 +137,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
           bucket_meta[k] = (v.numel(), v.shape)
           bucket.append(v.grad.flatten())
         if len(bucket) == getenv("BUCKET_SIZE", 4):
-          grads = collectives.allreduce(Tensor.cat(*bucket), cache_id=k)
+          grads = collectives.allreduce(Tensor.cat(*bucket, padding), cache_id=k)
           offset = 0
           for k in bucket_meta:
             size = bucket_meta[k][0]
@@ -139,7 +146,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
           bucket = []
           bucket_meta = {}
       if len(bucket) > 0:
-        grads = collectives.allreduce(Tensor.cat(*bucket), cache_id="last")
+        grads = collectives.allreduce(Tensor.cat(*bucket, padding), cache_id="last")
         offset = 0
         for k in bucket_meta:
           size = bucket_meta[k][0]
@@ -185,14 +192,16 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
       correct = sum(corrects)
       # collect accuracy calculations from all ranks
       if rank == 0:
-        correct += OOB.recv(1)
-      elif rank == 1:
+        for j in range(1, min(getenv("WORLD_SIZE"), 4)):
+          correct += OOB.recv(j)
+      elif rank < 5:
         OOB.send(correct, 0)
 
-      acc = correct/(len(corrects)*getenv("WORLD_SIZE"))*100.0
-      if acc > best_eval:
-        best_eval = acc
-        print(f"eval {correct}/{len(corrects)*getenv('WORLD_SIZE')} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
+      if rank == 0:
+        acc = correct/(len(corrects)*min(getenv("WORLD_SIZE"), 4))*100.0
+        if acc > best_eval:
+          best_eval = acc
+          print(f"eval {correct}/{len(corrects)*min(getenv('WORLD_SIZE'), 4)} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
     if STEPS == 0 or i==STEPS: break
     GlobalCounters.reset()
     st = time.monotonic()
@@ -204,7 +213,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     i += 1
 
 if __name__ == "__main__":
-  devices = ["gpu:0", "gpu:1"]
+  devices = ["hip:0", "hip:1", "hip:2", "hip:3", "hip:4", "hip:5"]
   world_size = len(devices)
 
   # startup our manager
