@@ -12,6 +12,7 @@ def compute_offsets(total):
 #NOTE: Darwin needs lm functions to start with a "_" 
 def get_op(op): return f"bl {'_' if system() == 'Darwin' else ''}{op}"
 type_to_reg = {dtypes.half: 'h', dtypes.float32: 's', dtypes.bool: 'x',dtypes.int8:'w', dtypes.int32: 'w', dtypes.int64: 'x', dtypes.uint8:'w', dtypes.uint32: 'w', dtypes.uint64: 'x'}
+prev_uop = None
 class ARM64Codegen(AssemblyCodegen):
   def specialize(self, asm):
     ins = [] 
@@ -39,13 +40,6 @@ class ARM64Codegen(AssemblyCodegen):
         if arg.startswith('data'):
           if int(arg[4:]) >= 8: ins.append(f"ldr x1, [x19, #{(int(arg[4:]) - 8) * 8}]")
           ins.append(f"str x{'1' if int(arg[4:]) >= 8 else int(arg[4:])}, {reg_map[out.nm]}")
-      # elif uop == UOps.CONST:
-      #   # NOTE: Are ConstOp always float?
-      #   if arg.__class__ is ConstOp:
-      #     ins.append(f"mov x0, 0x{float_to_hex(arg.value)}")
-      #     ins.append("fmov s0, w0")
-      #   else: mov_imm(arg, f"x0")
-      #   ins.append(f"str {'s' if arg.__class__ is float else 'x'}0, {reg_map[out.nm]}")
       elif uop == UOps.CAST:
         if arg == BinaryOps.CMPEQ:
           ins.append("cset w0, eq")
@@ -68,7 +62,6 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"{alu[arg]} s0, s3")
           ins.append(f"fcsel s0, s2, s1, eq")
         elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
-          #TODO Linux might handle this differently
           ins.append("stp x29, x30, [sp, #0]!")
           ins.append("mov x29, sp")
           ins.append("fcvt d0, s0")
@@ -99,7 +92,6 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
           # Manually offset in case it can't fix in imm
           mov_imm(abs(arg[0]), "x2")
-          #ins.append(f"mov x2, #{abs(arg[0])}")
           ins.append(f"{'sub' if arg[0] < 0 else 'add'} x1, x1, x2")
           ins.append(f"ldr{'sb' if need_cast and arg[2] in (dtypes.int8, dtypes.uint8) else ''} {reg_in}, [x1]")
           if need_cast: ins.append(f"{'fcvt' if arg[2] == dtypes.half else 'scvtf'} s0, {reg_in}")
@@ -114,7 +106,12 @@ class ARM64Codegen(AssemblyCodegen):
         ins.append(f"ldr x2, {reg_map[vin[0].nm]}")
         ins.append(f"str {reg_out}, [x2, x3, lsl {shifts[arg[2]] if need_cast and arg[2] in shifts else '#0'}]")
       elif uop == UOps.COND_BRANCH:
+        #TODO: this is a hack it should always be a cmp before a cond branch?
+        if prev_uop == UOps.LOAD:
+          ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
+          ins.append(f"cmp x1, #0")
         ins.append(f"b.{'lt' if arg[1] == True else 'ge'} {arg[0][1:]}")
       elif uop == UOps.LABEL:
         ins.append(f"{arg[1:]}:")
+      prev_uop=uop
     return "test", "\n".join([".arch armv8-a",".text", ".global _test",".p2align 2", "_test:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins  + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret;"])
