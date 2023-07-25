@@ -15,7 +15,6 @@ from tinygrad.helpers import getenv
 from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
-from examples.train_resnet import ComposeTransforms
 
 def set_seed(seed):
   Tensor.manual_seed(getenv('SEED', seed)) # Deterministic
@@ -41,7 +40,8 @@ def whitening(X):
     Σ = _cov(patches.reshape(n, c*h*w))
     Λ, V = torch.linalg.eigh(Σ)
     return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
-  X = torch.tensor(transform(X).numpy())
+
+  X = torch.tensor(X.numpy())
   Λ, V = _eigens(_patches(X))
   W = Tensor((V/torch.sqrt(Λ+1e-2)[:,None,None,None]).numpy(), requires_grad=False)
 
@@ -84,9 +84,8 @@ class SpeedyResNet:
     if not training and getenv('TTA', 0)==1: return ((forward(x)*0.5) + (forward(x[..., ::-1])*0.5)).log_softmax()
     return forward(x).log_softmax()
 
-def cutmix(X, Y, mask_size=3, p=0.5):
-  if Tensor.rand(1) > 0.5:
-    return X, Y
+def cutmix(X, Y, mask_size=3, p=0.5, mix=True):
+  if Tensor.rand(1) > 0.5: return X, Y
   # create a mask
   is_even = int(mask_size % 2 == 0)
   center_max = X.shape[-2]-mask_size//2-is_even
@@ -100,32 +99,31 @@ def cutmix(X, Y, mask_size=3, p=0.5):
   d_y =(d_y >= -(mask_size / 2)) * (d_y <= mask_size / 2)
   d_x =(d_x >= -(mask_size / 2)) * (d_x <= mask_size / 2)
   mask = d_y * d_x
-  # # Tensor.rand(X.shape) would trigger error
-  # X_cutout = Tensor.where(mask, X_patch, X)
 
-  # TODO shuffle instead of reverse inside tinygrad tensor, currently is not supported
+  if not mix: return Tensor.where(mask, Tensor.rand(*X.shape), X), Y
+  
+  # TODO shuffle instead of reverse, currently is not supported in tinygrad tensor
   X_patch = X[::-1,...]
+  Y_patch = Y[::-1]
   X_cutmix = Tensor.where(mask, X_patch, X)
-  Y_cutmix = Y[::-1]
   mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
-  Y_cutmix = mix_portion * Y_cutmix + (1. - mix_portion) * Y
-
+  Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
   return X_cutmix, Y_cutmix
 
-transform = ComposeTransforms([
-    lambda x: x.to(device=Device.DEFAULT).float(),
-    lambda x: x / 255.0, # scale
-    lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1), # normalize
-    lambda x: x.reshape((-1,3,32,32)),
-    lambda x: Tensor.where(Tensor.rand(x.shape[0],1,1,1) < 0.5, x[..., ::-1], x), # flip LR
-])
+transform = [
+  lambda x: x.to(device=Device.DEFAULT).float(),
+  lambda x: x / 255.0, # scale
+  lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1), # normalize
+  lambda x: x.reshape((-1,3,32,32)),
+  lambda x: Tensor.where(Tensor.rand(x.shape[0],1,1,1) < 0.5, x[..., ::-1], x), # flip LR
+]
 
-transform_test = ComposeTransforms([
-    lambda x: x.to(device=Device.DEFAULT).float(),
-    lambda x: x / 255.0,
-    lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1),
-    lambda x: x.reshape((-1,3,32,32)),
-])
+transform_test = [
+  lambda x: x.to(device=Device.DEFAULT).float(),
+  lambda x: x / 255.0,
+  lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1),
+  lambda x: x.reshape((-1,3,32,32)),
+]
 
 def fetch_batches(X, Y, BS, seed, is_train=False):
   while True:
@@ -135,19 +133,21 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     for i in order:
       # padding for matching buffer size during JIT
       batch_end = min(i+BS, Y.shape[0])
-      if not is_train:
-        x = transform_test(X[batch_end-BS:batch_end,:])
-      x = transform(X[batch_end-BS:batch_end,:])
       # NOTE -10 was used instead of 1 as labels
-      y = Tensor(-10*np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()])
-      x, y = cutmix(x, y)
+      if not is_train: 
+        # Need fancy indexing support to remove numpy
+        x, y = X[batch_end-BS:batch_end,:].sequential(transform_test), Tensor(-10*np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()])
+      else: 
+        # ideally put cutmix inside transform 
+        x, y = cutmix(X[batch_end-BS:batch_end,:].sequential(transform), Tensor(-10*np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()]))
       yield x, y
+
     if not is_train: break
     seed += 1
 
 def train_cifar(bs=512, eval_bs=500, steps=1000,
                 # training hyper-parameters (if including model sizes)
-                div_factor=1e16, final_lr_ratio=0.004560827731448039, max_lr=0.01040497290691913, pct_start=0.22817715646040532, momentum=0.8468770654506089, wd=0.17921940728200592, label_smoothing=0.2, seed=32):
+                div_factor=1e16, final_lr_ratio=0.006389020478166033, max_lr=0.024951257544924808, pct_start=0.23887852220714273, momentum=0.7340500574033951, wd=0.1350204572679035, label_smoothing=0.06653598251238921, seed=32):
   set_seed(seed)
   Tensor.training = True
 
@@ -169,7 +169,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
     X_train, Y_train, X_test, Y_test = fetch_cifar()    # they are disk tensor now
 
   # precompute whitening patches
-  W = whitening(X_train)
+  W = whitening(X_train.sequential(transform))
 
   model = SpeedyResNet(W)
   optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
