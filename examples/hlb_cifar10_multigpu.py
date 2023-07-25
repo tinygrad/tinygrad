@@ -93,7 +93,7 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
     seed += 1
 
 def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.014, pct_start=0.0546875, momentum=0.7, wd=0.16, label_smoothing=0., mixup_alpha=0.025, seed=9):
-  rank = getenv("RANK")
+  rank, world_size = getenv("RANK"), getenv("WORLD_SIZE")
   set_seed(seed)
   Tensor.training = True
 
@@ -115,7 +115,6 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
                             total_steps=STEPS, pct_start=PCT_START)
 
   state_dict = get_state_dict(model)
-  padding = Tensor.zeros(2)
 
   # JIT at every run
   @TinyJit
@@ -137,20 +136,20 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
           bucket_meta[k] = (v.numel(), v.shape)
           bucket.append(v.grad.flatten())
         if len(bucket) == getenv("BUCKET_SIZE", 4):
-          grads = collectives.allreduce(Tensor.cat(*bucket, padding), cache_id=k)
+          grads = collectives.allreduce(Tensor.cat(*bucket, Tensor.zeros(2)), cache_id=k)
           offset = 0
           for k in bucket_meta:
             size = bucket_meta[k][0]
-            state_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]))
+            state_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]) / world_size)
             offset += size
           bucket = []
           bucket_meta = {}
       if len(bucket) > 0:
-        grads = collectives.allreduce(Tensor.cat(*bucket, padding), cache_id="last")
+        grads = collectives.allreduce(Tensor.cat(*bucket, Tensor.zeros(2)), cache_id="last")
         offset = 0
         for k in bucket_meta:
           size = bucket_meta[k][0]
-          state_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]))
+          state_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]) / world_size)
           offset += size
 
       optimizer.step()
@@ -213,7 +212,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     i += 1
 
 if __name__ == "__main__":
-  devices = ["hip:0", "hip:1", "hip:2", "hip:3", "hip:4", "hip:5"]
+  devices = ["gpu:0", "gpu:1", "gpu:2", "gpu:3", "gpu:4", "gpu:5"]
   world_size = len(devices)
 
   # startup our manager
