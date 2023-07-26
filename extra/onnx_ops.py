@@ -167,8 +167,8 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
   elif mode == "reflect":
     n_pads = [(n,pad) for n,pad in enumerate(pads_)][::-1]
-    for n, pad in n_pads: # TODO NOT SURE IF FOR LOOPING LIKE THIS IS A GOOD IDEA IN TINYGRAD, there are probably better way
-      if pad == (0,0): continue # BUG assert pad[0] != 0 and pad[1] != 0, might be bug when one of the pads == 0
+    for n, pad in n_pads: # TODO theres probably a way to do this with less code
+      if pad == (0,0): continue
       pad_begin, pad_end = pad
       begin_repeat_args = [(1) if i != n else math.ceil(pad_begin+1/x.shape[i]) for i in range(x.ndim)]
       end_repeat_args = [(1) if i != n else math.ceil(pad_end+1/x.shape[i]) for i in range(x.ndim)]
@@ -180,8 +180,8 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     return x
   elif mode == "edge":
     n_pads = [(n,pad) for n,pad in enumerate(pads_)][::-1]
-    for n, pad in n_pads: # TODO NOT SURE IF FOR LOOPING LIKE THIS IS A GOOD IDEA IN TINYGRAD, there are probably better ways
-      if pad == (0,0): continue # BUG assert pad[0] != 0 and pad[1] != 0, might be bug when one of the pads == 0
+    for n, pad in n_pads: # TODO theres probably a way to do this with less code
+      if pad == (0,0): continue
       pad_st, pad_ed = pad
       st_slice_arg = [(0,s) if dim != n else (0,1) for dim,s in enumerate(x.shape)]
       ed_slice_arg = [(0,s) if dim != n else (s-1, s) for dim,s in enumerate(x.shape)]
@@ -195,7 +195,7 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value)
 
 def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
-  if dilations != 1: raise NotImplementedError(f"dilations != 1 not implemented, dilations:{dilations}")
+  if dilations != 1: raise NotImplementedError(f"dilations != 1 not supported, dilations:{dilations}")
   pixel_axes = tuple(range(len(X.shape)))[-2:]
   if ceil_mode: auto_pad = "SAME_UPPER"
   padding_included = _padding(X, pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations).avg_pool2d(kernel_shape, stride=strides)
@@ -223,7 +223,7 @@ def MaxUnpool(xT, xI, outshape=None, kernel_shape=None, pads=None, strides=None)
   arange = Tensor.arange(outlength).reshape(1, outlength).expand(xI.shape)
   xT = xT.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
   ret = ((xI == arange) * xT).sum(0).reshape([1, 1] + out_sh)
-  if outshape:
+  if outshape is not None:
     outshape = safe_numpy(outshape).tolist()
     if outshape != ret.shape:
       diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
@@ -425,7 +425,7 @@ def _gather(input: Tensor, indices: Tensor):
 
 def ArrayFeatureExtractor(input, indices): return input.gather(indices, input.ndim-1)
 def Gather(input, indices, axis=0):
-  if indices.numel() < 9: # TODO NOT SURE YET FOR THE EXACT NUMBER, NEED TO TEST THIS
+  if indices.numel() < 9: # TODO not sure the exact number, need to run performance tests
     # NOTE faster gather and lessor kernels for smaller indices SOMETHING SOMETHING O(?) IDK I DIDN'T GO TO SCHOOL FOR THIS but kernel number increases depending on size of indices
     input_sh = list(input.shape)
     ret_shape = input_sh[:axis] + list(indices.shape) + input_sh[axis+1:]
@@ -433,8 +433,7 @@ def Gather(input, indices, axis=0):
     indices = [input_sh[axis]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
     args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(input_sh)] for i in indices]
     return input.shrink(arg=tuple(args[0])).cat(*[input.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
-  else:
-    # NOTE faster gather with larger indices probably, fixed number of kernels, so O(?) haha
+  else: # NOTE faster gather with larger indices probably, fixed number of kernels, but exceeds 199 kernels for openpilot
     return input.gather(indices, axis)
 
 def GatherElements(input, indices, axis):
@@ -494,25 +493,25 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       x_out = roi[-1][0] * (X.shape[-1] - 1) + x_out * ((roi[-1][1] - roi[-1][0]) * (X.shape[-1] - 1) / (output_shape[-1] - 1))  if output_shape[-1] > 1 else Tensor([0.5 * (roi[-1][0] + roi[-1][1]) * (X.shape[-1] - 1)])
       y_out = roi[-2][0] * (X.shape[-2] - 1) + y_out * ((roi[-2][1] - roi[-2][0]) * (X.shape[-2] - 1) / (output_shape[-2] - 1))  if output_shape[-2] > 1 else Tensor([0.5 * (roi[-2][0] + roi[-2][1]) * (X.shape[-2] - 1)])
     return x_out.clip(0, X.shape[-1]-1), y_out.clip(0, X.shape[-2]-1)
-  if roi:
+  if roi is not None:
     roi = safe_numpy(roi)
     roi = [(st,ed) for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])]
     roi_ = [(1,1)] * 4
-    if axes:
+    if axes is not None:
       for a,r in zip(axes, roi):
         roi_[a] = r
       roi = roi_
-  if scales:
+  if scales is not None:
     scales = safe_numpy(scales).tolist()
-    if axes:
+    if axes is not None:
       scales_ = [1]*X.ndim
       for a,s in zip(axes, scales):
         scales_[a] = s
       scales = scales_
-  elif sizes:
+  elif sizes is not None:
     sizes = [int(i) for i in safe_numpy(sizes)]
     scales = []
-    if axes:
+    if axes is not None:
       sizes_ = [1]*X.ndim
       for a,s in zip(axes, sizes):
         sizes_[a] = s
@@ -533,7 +532,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   scales_lol = [os/xs for xs, os in zip(X.shape, output_shape)]
   x_out = Tensor.arange(output_shape[-1])
   y_out = Tensor.arange(output_shape[-2])
-  print(output_shape, "output shape")
   if mode == "nearest":
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol, roi)
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])

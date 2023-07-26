@@ -151,20 +151,20 @@ backend_test.exclude('test_spacetodepth_*')
 backend_test.exclude('test_scan*')
 backend_test.exclude('test_split_to_sequence_*')
 backend_test.exclude('test_upsample_nearest_cpu') # Deprecated since version 10 of the default ONNX operator set.
-backend_test.exclude('test_resize_downsample_scales_cubic_*')
-backend_test.exclude('test_resize_downsample_sizes_cubic_*')
-backend_test.exclude('test_resize_upsample_scales_cubic_*')
-backend_test.exclude('test_resize_upsample_sizes_cubic_*')
+backend_test.exclude('test_resize_downsample_scales_cubic_*') # unsure how to implement cubic
+backend_test.exclude('test_resize_downsample_sizes_cubic_*') # unsure how to implement cubic
+backend_test.exclude('test_resize_upsample_scales_cubic_*') # unsure how to implement cubic
+backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to implement cubic
 
 # rest of the failing tests
-backend_test.exclude('test_averagepool_2d_dilations_cpu')
-backend_test.exclude('test_convtranspose_autopad_same_cpu')
-backend_test.exclude('test_optional_has_element_empty_optional_input_cpu')
-backend_test.exclude('test_range_int32_type_negative_delta_expanded_cpu')
-backend_test.exclude('test_reshape_allowzero_reordered_cpu')
-backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu')
-backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu')
-backend_test.exclude('test_resize_tf_crop_and_resize_cpu')
+backend_test.exclude('test_averagepool_2d_dilations_cpu') # dilations != 1 not supported for avgpool
+backend_test.exclude('test_convtranspose_autopad_same_cpu') # requires another way of determining ret shape
+backend_test.exclude('test_optional_has_element_empty_optional_input_cpu') # Attempts to create Tensor from None
+backend_test.exclude('test_range_int32_type_negative_delta_expanded_cpu') # AttributeProto.GRAPH not implemented
+backend_test.exclude('test_reshape_allowzero_reordered_cpu') # reshaping to 0 shape
+backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
+backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
+backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
 backend_test.exclude('test_operator_pow_cpu') # issue #1251
 backend_test.exclude('test_identity_sequence_cpu') # type_proto has no shape or dim_value
 

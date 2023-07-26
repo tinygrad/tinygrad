@@ -116,12 +116,18 @@ def get_run_onnx(onnx_model: ModelProto):
         elif isinstance(inputs[inp.name], list):
           input_tensors[inp.name] = [Tensor(i, requires_grad=False) for i in inputs[inp.name]]
         elif domain == "ai.onnx.preview.training":
-          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True) # TODO not entirely sure how to parse which inp requires_grad, some are manually turned off in optimizers
+          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True) # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizers
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else (1, [i.shape for i in input_tensors[inp.name]])
         assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
-        for _,v in input_tensors.items(): v.realize() if v.__class__ is Tensor else ...
+        for _,v in input_tensors.items(): 
+          if isinstance(v, Tensor):
+            v.realize()
+          elif isinstance(v, list):
+            for v_ in v: v_.realize()
+          else:
+            raise Exception(f"unknown input type: {type(v)}")
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
 
