@@ -12,7 +12,7 @@ def compute_offsets(total):
     return [4096]*quotient + [remainder] if remainder else [4096]*quotient
 rtor:Dict[Register, str] = {}
 pend_regs:Set[Register] = set()
-x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (9,10,11,12,13,14,15,16,17,18,20,21)]
+x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (8,9,10,11,12,13,14,15,16,17,18,20,21)]
 s_regs = ['s' + str(i) for i in reversed(range(2,30))]
 def alloc_reg(x):
   global x_regs, s_regs
