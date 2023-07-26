@@ -12,12 +12,13 @@ def compute_offsets(total):
     return [4096]*quotient + [remainder] if remainder else [4096]*quotient
 rtor:Dict[Register, str] = {}
 pend_regs:Set[Register] = set()
-x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (16,17,18,20,21)]
-s_regs = ['s' + str(i) for i in reversed(range(2,20))]
+x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (9,10,11,12,13,14,15,16,17,18,20,21)]
+s_regs = ['s' + str(i) for i in reversed(range(2,30))]
 def alloc_reg(x):
   global x_regs, s_regs
   available_regs = s_regs if dtypes.is_float(x[1]) else x_regs
   if len(available_regs) == 0:
+    print("________")
     var_name = max(filter(lambda x: x[0] != 'x', rtor.keys()), key = lambda k: rtor[k])
     available_regs.append(rtor[var_name])
     del rtor[var_name]
@@ -49,7 +50,7 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"movk w2, #{(value >> 16) & 0xffff}, lsl #16")
           ins.append(f"sxtw {to}, w2")
         else:
-          ins.append(f"{'mov' if to[0] == 'x' else 'fmov'} {to}, {'#' + str(value) if to[0] == 'x' else '0x' + float_to_hex(arg)}")
+          ins.append(f"{'mov' if to[0] == 'x' else 'fmov'} {to}, {'#' + str(value) if to[0] == 'x' else float_to_hex(arg)}")
 
     for i, (uop, out, vin, arg) in enumerate(asm):
       if out is not None and out.nm not in rtor:
@@ -74,8 +75,7 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"cset {rtor[vin[0].nm]}, eq")
           ins.append(f"scvtf {rtor[out.nm]}, {rtor[vin[0].nm]}")
         else:
-          ins.append(f"sxtw {rtor[vin[0].nm]}, w{rtor[vin[0].nm][1:]}")
-          ins.append(f"mov {rtor[out.nm]}, {rtor[vin[0].nm]}")
+          ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
 #        ins.append(f"str {'s' if dtypes.is_float(out[1]) else 'x'}0, {reg_map[out.nm]}")
       elif uop == UOps.ALU:
         reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
@@ -117,7 +117,7 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"udiv x21, {rtor[vin[0].nm]}, x20")
           ins.append(f"msub {rtor[out.nm]}, x21, x20, {rtor[vin[0].nm]}")
         else:
-          ins.append(f"{'f' if dtypes.is_float(out[1]) == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]},{'#'+str(vin[1]) if vin[1].__class__ is int else rtor[vin[1].nm]}")
+          ins.append(f"{'f' if reg == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]},{'#'+str(vin[1]) if vin[1].__class__ is int else rtor[vin[1].nm]}")
           #ins.append(f"{'f' if reg == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {reg}0, {reg}0, {reg}1")
         #ins.append(f"str {reg}{'2' if arg == BinaryOps.MOD else '0'}, {reg_map[out.nm]}")
       elif uop == UOps.LOAD:
@@ -130,9 +130,9 @@ class ARM64Codegen(AssemblyCodegen):
           #reg_out = rtor[out.nm] 
           #reg_in = type_to_reg[arg[2] if arg[2] is not None else out[1]] + '0'
           # Manually offset in case it can't fix in imm
-          mov_imm(abs(arg[0]), "x20")
-          ins.append(f"{'sub' if arg[0] < 0 else 'add'} {rtor[vin[0].nm]}, {rtor[vin[0].nm]}, x20")
-          ins.append(f"ldr {rtor[out.nm]}, [{rtor[vin[0].nm]}]")
+          #mov_imm(abs(arg[0]), "x20")
+          ins.append(f"add x21, {rtor[vin[0].nm]}, #{arg[0]}")
+          ins.append(f"ldr {rtor[out.nm]}, [x21]")
           # ins.append(f"{'sub' if arg[0] < 0 else 'add'} x1, x1, x2")
           # ins.append(f"ldr{'sb' if arg[2] is not None and arg[2] in (dtypes.int8, dtypes.uint8) else ''} {reg_in}, [x1]")
           # if arg[2] is not None: ins.append(f"{'fcvt' if arg[2] == dtypes.half else 'scvtf'} s0, {reg_in}")
