@@ -35,7 +35,7 @@ def _simplify_sum_reshape_expand_sum(self:LazyBuffer, src: Any, prev_src: Any) -
           expansion_size = prev_src.shape[expansion_index]
           return LazyOp(BinaryOps.MUL, (src, LazyBuffer.const_like(src, expansion_size)))
   return None
-  
+
 # **** realize functions ****
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
@@ -138,7 +138,7 @@ class LazyBuffer:
     if not self.realized:
       # get real ops first
       if self.optype is BinaryOps: self.op = _ast_binaryops(self)
-      elif self.optype is ReduceOps: 
+      elif self.optype is ReduceOps:
         self.op = _ast_reduceops(self)
         if self.op.op in BinaryOps: self.op = _ast_binaryops(self)
       elif self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
@@ -185,6 +185,7 @@ class LazyBuffer:
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
+    assert self.dtype.np, "numpy dtype is required for toCPU"
     realized = self.cast(dtypes.from_np(self.dtype.np)).contiguous().realize().realized
     ret = cast(RawBuffer, realized).toCPU().reshape(self.shape)
     return ret
@@ -323,7 +324,7 @@ class _Device:
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def canonicalize(self, device:Optional[str]) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "") if device is not None else self.DEFAULT
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __getitem__(self, x:str) -> Union[Interpreted, Compiled]: 
+  def __getitem__(self, x:str) -> Union[Interpreted, Compiled]:
     x = x.split(":")[0].upper()
     return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
   def _default_device(self) -> str:
@@ -361,7 +362,7 @@ def _realize_empty(buffer: LazyBuffer) -> None:
 
 def _realize_rand(buffer: LazyBuffer) -> None:
   rng = np.random.default_rng(buffer.op.arg)
-  buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=buffer.shape, dtype=buffer.dtype.np), **buffer._device_extra_args()) # type: ignore
+  buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=buffer.shape, dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args()) # type: ignore
 
 def _realize_const(buffer: LazyBuffer) -> None:
   if hasattr(Device[buffer.device].codegen, 'supports_constant_folding'):
