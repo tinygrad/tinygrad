@@ -607,22 +607,14 @@ class Linearizer:
     # Check the global allocation limit, current the global_size will be flipped during codegen 
     # and then padded right with 1s if its length < 3 which makes this part a bit awkward to write
     global_dims = self.first_reduce-self.local_dims
-    if global_dims > 0: assert max(global_max) >= max(self.full_shape[0:global_dims]), f"device max allocation {max(self.full_shape[0:global_dims])} exceeds global maximum limit {max(global_max)}"
-    order = None
-    if global_dims == 2:  # 0 -> y, 1 -> x
-      if self.full_shape[0] > global_max[1]:
-        order=list(range(len(self.full_shape))) 
-        order[1], order[0] = order[0], order[1]
-    if global_dims == 3:  # 0 -> z, 1 -> y, 2 -> x
-      if self.full_shape[0] > global_max[0]:
-        order=list(range(len(self.full_shape))) 
-        order[2], order[0] = order[0], order[2]
-      if self.full_shape[1] > global_max[1]:
-        order=list(range(len(self.full_shape))) 
-        order[2], order[1] = order[1], order[2]
-    if order:
-      self.reshape_and_permute(None, order)
-      if DEBUG >= 3: print("permuted global dim", self.full_shape, "due to allocation exceeds global limit")
+    if global_dims > 0: 
+      assert max(global_max) >= max(self.full_shape[0:global_dims]), f"device max allocation {max(self.full_shape[0:global_dims])} exceeds global dim maximum {max(global_max)}"
+      for i in range(global_dims-1):
+        if self.full_shape[i] > global_max[i]:
+          order = list(range(len(self.full_shape)))
+          order[i], order[global_dims-1] = order[global_dims-1], order[i] 
+          self.reshape_and_permute(None, order)
+          if DEBUG >= 3: print("permuted global dim", order, "due to allocation exceeds global limit")
 
   def alias_buffer(self, i, pattern):
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
