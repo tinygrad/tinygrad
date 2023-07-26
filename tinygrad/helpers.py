@@ -13,9 +13,7 @@ CI = os.getenv("CI", "") != ""
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x):
-  if x[0].__class__ in {tuple, list}:
-    try: return tuple(x[0])
-    except IndexError: return tuple()
+  if x[0].__class__ in {tuple, list}: return tuple(x[0])
   return tuple(x)
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def all_same(items): return all(x == items[0] for x in items)
