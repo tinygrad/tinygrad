@@ -23,7 +23,7 @@ if __name__ == '__main__':
   llama_sp_model = llama.sp_model()
   llama_model = llama.load_model(args.llama_size)
   toks, start_pos, user_delim, end_delim = llama.encode_chatbot_preprompt(llama_model, llama_sp_model, args.personality)
-  outputted = llama_sp_model.decode(toks) 
+  outputted = llama_sp_model.decode(toks)
 
   # VITS SETUP START. TODO: pretty much none of this code should exist in this file
   vits_model_config = vits.MODELS[args.vits_model]
@@ -70,7 +70,7 @@ if __name__ == '__main__':
         lst = [whisper_enc._special_tokens["<|startoftranscript|>"]]
         if len(user_speech := re.sub('<\|.*?\|>', '', dec)) > 0:
           break
-  
+
     print(user_speech)
 
     # throw into llama
