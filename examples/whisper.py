@@ -247,6 +247,7 @@ if __name__ == "__main__":
   enc = get_encoding(state['dims']['n_vocab'])
 
   def decode_segment(segment, initial_tokens, sample_len=224, n_audio=1, n_group=1):
+    if segment.ndim == 2: segment = np.expand_dims(segment, axis=0)
     texts, sample_begin = [], len(initial_tokens)
     decoder = GreedyDecoder(eot=enc.eot_token)
     sequence_ranker = MaximumLikelihoodRanker(None)
@@ -261,6 +262,7 @@ if __name__ == "__main__":
       logits = logits[:, -1]
       tokens, completed = decoder.update(tokens, logits, sum_logprobs)
       if completed: break
+    # TODO: tokens.shape does not match openai's whisper
     tokens = tokens.reshape(n_audio, n_group, -1)
     sum_logprobs = sum_logprobs.reshape(n_audio, n_group)
     tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
@@ -276,12 +278,14 @@ if __name__ == "__main__":
     mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
     content_frames = mel.shape[-1] - N_FRAMES
     initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|en|>"], enc._special_tokens["<|transcribe|>"]]
-    seek = 0
+    seek, texts = 0, []
     while seek < content_frames:
+      print(seek)
       mel_segment = mel[:, seek:seek+N_FRAMES]
-      mel_segment = np.expand_dims(pad_or_trim(mel, N_FRAMES), axis=0)
+      mel_segment = pad_or_trim(mel, N_FRAMES)
       segment_size = min(N_FRAMES, content_frames - seek)
       texts = decode_segment(mel_segment, initial_tokens)
+      print(texts)
       # TODO: increment seek properly
       #if no_speech_probs[0] > no_speech_threshold and avg_logprobs[0] <= logprob_threshold:
       seek += segment_size
