@@ -152,7 +152,9 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
 
   @staticmethod
-  def arange(stop, start=0, step=1, **kwargs): return Tensor.full((ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
+  def arange(start, stop=None, step=1, **kwargs):
+    if stop is None: stop, start = start, 0
+    return Tensor.full((ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
 
   @staticmethod
   def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
@@ -167,7 +169,6 @@ class Tensor:
   @staticmethod
   def eye(dim:int, **kwargs):
     return Tensor([1], **kwargs).pad(((0,dim),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
-
 
   # ***** rng hlops *****
 
@@ -280,7 +281,7 @@ class Tensor:
     valid_slices = list(filterfalse(lambda x: x is None, orig_slices))
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
-    new_slice = tuple((s, e)  if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
+    new_slice = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
     new_shape = tuple(e - s for s, e in new_slice)
     # Shrink
     sliced_tensor = self.shrink(new_slice)
@@ -311,16 +312,24 @@ class Tensor:
         final_shape.append(1)
     return sliced_tensor.reshape(tuple(final_shape))  # Reshape
 
+  def gather(self, idx, dim):
+    idx = (idx < 0).where(idx+self.shape[dim], idx) # Turn neg idx pos
+    new_self = self.reshape(*self.shape[:dim+1], *[1]*idx.ndim, *self.shape[dim+1:])
+    arange = Tensor.arange(self.shape[dim], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim, self.shape[dim], *[1]*idx.ndim, *[1]*(self.ndim-dim-1))
+    new_idx = idx.reshape(*[1]*dim, 1, *idx.shape, *[1]*(self.ndim-dim-1))
+    return (new_self * (arange == new_idx)).sum(dim)
+
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
     assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
-    catargs = [self] + list(args)
-    assert all(len(t.shape) != 0 for t in catargs), "zero-dimensional tensor cannot be concatenated"
-    shape_cumsum = [0, *accumulate([y.shape[dim] for y in catargs])]
-    slc = [[(0, s) for s in self.shape] for _ in catargs]
-    for s,k in zip(slc, shape_cumsum):
-      s[dim] = (-k, shape_cumsum[-1]-k)
-    return reduce(Tensor.__add__, [arg.slice(s) for arg,s in zip(catargs, slc)])
+    catargs = [self, *args]
+    assert all(t.shape for t in catargs), "zero-dimensional tensor cannot be concatenated"
+    shapes = [s.shape[dim] for s in catargs]
+    shape_cumsum = [0, *accumulate(shapes)]
+    slc = [[(0, 0) for _ in self.shape] for _ in catargs]
+    for shp,k,s in zip(shapes, shape_cumsum[:-1], slc):
+      s[dim] = (k, shape_cumsum[-1] - k - shp)
+    return reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
   @staticmethod
   def stack(tensors, dim=0):
@@ -499,7 +508,7 @@ class Tensor:
   def tan(self): return self.sin() / self.cos()
 
   @staticmethod
-  def _tri(r:int, c:int, k:int=0, **kwargs) -> Tensor: return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= Tensor.arange(c-k, start=-k, **kwargs).unsqueeze(0).expand(r,c)
+  def _tri(r:int, c:int, k:int=0, **kwargs) -> Tensor: return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= Tensor.arange(-k, c-k, **kwargs).unsqueeze(0).expand(r,c)
   def triu(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k, dtype=self.dtype).where(self, Tensor.zeros_like(self))
   def tril(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, dtype=self.dtype).where(Tensor.zeros_like(self), self)
 

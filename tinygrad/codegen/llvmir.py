@@ -95,7 +95,9 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
         reduce_phis.append(newvar)
       else:
         idx = args.idx.render(render_llvm, bb[-1])
-        if args.valid.min == 0:
+        if args.valid.max == 0:
+          val = ir.Constant(dtype_to_llvm_dtype[args.memory_dtype], args.invalid_value)
+        elif args.valid.min == 0:
           aug_idx = bb[-1].select(valid, idx, int_const(0))
           val = bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [aug_idx], inbounds=True)), ir.Constant(dtype_to_llvm_dtype[args.memory_dtype], args.invalid_value))
         else:

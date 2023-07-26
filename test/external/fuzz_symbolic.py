@@ -32,6 +32,14 @@ def ge(expr, rng=None):
   if rng is None: rng = random.randint(-4,4)
   return expr >= rng, rng
 
+def le(expr, rng=None):
+  if rng is None: rng = random.randint(-4,4)
+  return expr <= rng, rng
+
+def gt(expr, rng=None):
+  if rng is None: rng = random.randint(-4,4)
+  return expr > rng, rng
+
 if __name__ == "__main__":
   ops = [add_v, div, mul, add_num, mod]
   for _ in range(1000):
@@ -41,9 +49,8 @@ if __name__ == "__main__":
     u3 = Variable("v3", 0, random.choice(upper_bounds))
     v = [u1,u2,u3]
     tape = [random.choice(ops) for _ in range(random.randint(2, 30))]
-    # 10% of the time, add a less than or greater than
-    if random.random() < 0.05: tape.append(lt)
-    elif random.random() < 0.05: tape.append(ge)
+    # 10% of the time, add one of lt, le, gt, ge
+    if random.random() < 0.1: tape.append(random.choice([lt, le, gt, ge]))
     expr = Variable.num(0)
     rngs = []
     for t in tape:

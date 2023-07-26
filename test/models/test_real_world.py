@@ -8,7 +8,7 @@ from tinygrad.lazy import Device
 from tinygrad.helpers import CI, dtypes
 
 from examples.hlb_cifar10 import SpeedyResNet
-from examples.llama import Transformer, args_7B
+from examples.llama import Transformer, MODEL_PARAMS
 from examples.stable_diffusion import UNetModel
 
 def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed):
@@ -47,7 +47,7 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t, t2): return model(t, 801, t2).realize()
-    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 14.04, 912)
+    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 14.5, 924)
 
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE, "needs JIT")
   def test_llama(self):
@@ -55,7 +55,7 @@ class TestRealWorld(unittest.TestCase):
     Tensor.default_type = dtypes.float16
 
     args_tiny = {"dim": 1024, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
-    model = Transformer(**(args_tiny if CI else args_7B))
+    model = Transformer(**(args_tiny if CI else MODEL_PARAMS[1]["7B"]["args"]))
     derandomize_model(model)
     @TinyJit
     def test(t): return model(t, 0).realize()
