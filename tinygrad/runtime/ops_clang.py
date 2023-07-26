@@ -21,22 +21,22 @@ class ClangProgram:
         os.rename(fn+'.tmp', fn)
     else:
       if DEBUG >= 5: print(prg)
-      prg = """
+      """
      .arch armv8-a
 .text
 .global _test
 .p2align 2
 _test:
-stp x29, x30, [sp, #0]!
-mov x29, sp
-ldr s0, [x1, #0]
-fcvt d0, s0
-bl _sin
-fcvt s0, d0
-str s0, [x0, #0]
-mov sp, x29
-ldp x29, x30, [sp], #0
-ret;
+Lloh0:
+        adrp    x8, _sinf@GOTPAGE
+        ldr     s0, [x1]
+        mov     x19, x0
+Lloh1:
+        ldr     x8, [x8, _sinf@GOTPAGEOFF]
+        blr     x8
+        ldp     x29, x30, [sp, #16]             ; 16-byte Folded Reload
+        str     s0, [x19]
+        ret
       """
       if getenv('ARM64'):
         subprocess.check_output(args=('as -arch arm64 -o '+fn+'.o').split(), input=prg.encode('utf-8'))

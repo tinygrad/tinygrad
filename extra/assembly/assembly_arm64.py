@@ -12,7 +12,7 @@ def compute_offsets(total):
     return [4096]*quotient + [remainder] if remainder else [4096]*quotient
 rtor:Dict[Register, str] = {}
 pend_regs:Set[Register] = set()
-x_regs = ['x' + str(i) for i in reversed(range(15))]
+x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (16,17,18,20,21)]
 s_regs = ['s' + str(i) for i in reversed(range(2,20))]
 def alloc_reg(x):
   global x_regs, s_regs
@@ -20,6 +20,7 @@ def alloc_reg(x):
   if len(available_regs) == 0:
     var_name = max(filter(lambda x: x[0] != 'x', rtor.keys()), key = lambda k: rtor[k])
     available_regs.append(rtor[var_name])
+    del rtor[var_name]
   reg = available_regs.pop()
   rtor[x.nm] = reg
   return reg 
@@ -37,7 +38,7 @@ class ARM64Codegen(AssemblyCodegen):
     ins = [] 
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.MOD: "", BinaryOps.CMPLT: "subs", BinaryOps.CMPEQ: "subs",
-           UnaryOps.SIN: get_op('sin'), UnaryOps.LOG2: get_op("log2"), UnaryOps.EXP2: get_op("exp2"), UnaryOps.SQRT: get_op("sqrt"),
+           UnaryOps.SIN: get_op('sinf'), UnaryOps.LOG2: get_op("log2f"), UnaryOps.EXP2: get_op("exp2f"), UnaryOps.SQRT: get_op("sqrtf"),
            TernaryOps.MULACC: "fmadd", TernaryOps.WHERE: "fcmp"}
     reg_map = {}
     var_size = 0
@@ -48,7 +49,7 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"movk w2, #{(value >> 16) & 0xffff}, lsl #16")
           ins.append(f"sxtw {to}, w2")
         else:
-          ins.append(f"mov {to}, {'#' + str(value) if value.__class__ is int else '0x' + float_to_hex(arg)}")
+          ins.append(f"{'mov' if to[0] == 'x' else 'fmov'} {to}, {'#' + str(value) if to[0] == 'x' else '0x' + float_to_hex(arg)}")
 
     for i, (uop, out, vin, arg) in enumerate(asm):
       if out is not None and out.nm not in rtor:
@@ -70,8 +71,8 @@ class ARM64Codegen(AssemblyCodegen):
       #     ins.append(f"str x{'1' if int(arg[4:]) >= 8 else int(arg[4:])}, {reg_map[out.nm]}")
       if uop == UOps.CAST:
         if arg == BinaryOps.CMPEQ:
-          ins.append("cset w0, eq")
-          ins.append("scvtf s0, w0")
+          ins.append(f"cset {rtor[vin[0].nm]}, eq")
+          ins.append(f"scvtf {rtor[out.nm]}, {rtor[vin[0].nm]}")
         else:
           ins.append(f"sxtw {rtor[vin[0].nm]}, w{rtor[vin[0].nm][1:]}")
           ins.append(f"mov {rtor[out.nm]}, {rtor[vin[0].nm]}")
@@ -82,34 +83,41 @@ class ARM64Codegen(AssemblyCodegen):
         #   if vin[i].__class__ is not int: ins.append(f"ldr {reg}{i}, {reg_map[vin[i].nm]}")
         #   else: mov_imm(vin[1], f"{reg}{i}")
         if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
-          ins.append("ands x0, x0, x1;")
+          ins.append(f"ands {rtor[out[0].nm]}, {rtor[vin[0].nm]}, {rtor[vin[1].nm]}")
         elif arg == BinaryOps.MUL and vin[1].__class__ is int:
-          mov_imm(vin[1], 'x15')
-          ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]}, x15")
+          mov_imm(vin[1], 'x20')
+          ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]}, x20")
         elif arg == TernaryOps.MULACC and out == vin[2]:
-          ins.append(f"{alu[arg]} s0, s0, s1, s2")
+          ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]}, {rtor[vin[1].nm]}, {rtor[vin[2].nm]}")
         elif arg == TernaryOps.WHERE:
-          ins.append(f"fmov s3, #0")
-          ins.append(f"{alu[arg]} s0, s3")
-          ins.append(f"fcsel s0, s2, s1, eq")
+          ins.append(f"fmov s0, #0")
+          ins.append(f"{alu[arg]} {rtor[vin[0].nm]}, s0")
+          ins.append(f"fcsel {rtor[out.nm]},{rtor[vin[2].nm]}, {rtor[vin[1].nm]}, eq")
         elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
+          ins.append(f"sub sp, sp, #{len(rtor)*16}")
           ins.append("stp x29, x30, [sp, #0]!")
           ins.append("mov x29, sp")
           ins.append(f"fmov s0, {rtor[vin[0].nm]}")
-          ins.append(f"fcvt d0, s0")
+          for i,k in enumerate(rtor.keys()):
+            ins.append(f"str {rtor[k]}, [sp, #{32 + (16*i)}]")
+          ins.append(f"fmov s0, {rtor[vin[0].nm]}")
           ins.append(alu[arg])
-          ins.append(f"fcvt s0, d0")
           ins.append(f"fmov {rtor[out.nm]}, s0")
           ins.append("mov sp, x29")
           ins.append("ldp x29, x30, [sp], #0")
+          for i,k in enumerate(rtor.keys()):
+            if k != out.nm:
+              ins.append(f"ldr {rtor[k]}, [sp, #{32 + (16*i)}]")
+          ins.append(f"add sp, sp, #{len(rtor)*16}")
         elif arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
 #          ins.append(f"{alu[arg]} {reg}0, {reg}0, {reg}1" if reg == 'x' else f"fcmp {reg}0, {reg}1")
-          ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]}, {'#'+str(vin[1]) if vin[1].__class__ is int else rtor[vin[1].nm]}" if reg == 'x' else f"fcmp {reg}0, {reg}1")
+          ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]}, {'#'+str(vin[1]) if vin[1].__class__ is int else rtor[vin[1].nm]}" if reg == 'x' else f"fcmp {rtor[vin[0].nm]}, {rtor[vin[1].nm]}")
         elif arg == BinaryOps.MOD:
-          ins.append("udiv x2, x0, x1")
-          ins.append("msub x2, x2, x1, x0")
+          ins.append(f"mov x20, {vin[1]}")
+          ins.append(f"udiv x21, {rtor[vin[0].nm]}, x20")
+          ins.append(f"msub {rtor[out.nm]}, x21, x20, {rtor[vin[0].nm]}")
         else:
-          ins.append(f"{'f' if reg == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]},{'#'+str(vin[1]) if vin[1].__class__ is int else rtor[vin[1].nm]}")
+          ins.append(f"{'f' if dtypes.is_float(out[1]) == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]},{'#'+str(vin[1]) if vin[1].__class__ is int else rtor[vin[1].nm]}")
           #ins.append(f"{'f' if reg == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {reg}0, {reg}0, {reg}1")
         #ins.append(f"str {reg}{'2' if arg == BinaryOps.MOD else '0'}, {reg_map[out.nm]}")
       elif uop == UOps.LOAD:
@@ -121,9 +129,10 @@ class ARM64Codegen(AssemblyCodegen):
           #reg_out = 's0' if dtypes.is_float(out[1]) else 'x0'
           #reg_out = rtor[out.nm] 
           #reg_in = type_to_reg[arg[2] if arg[2] is not None else out[1]] + '0'
-          ins.append(f"ldr {rtor[out.nm]}, [{rtor[vin[0].nm]}, #{arg[0]}]")
           # Manually offset in case it can't fix in imm
-          # mov_imm(abs(arg[0]), "x2")
+          mov_imm(abs(arg[0]), "x20")
+          ins.append(f"{'sub' if arg[0] < 0 else 'add'} {rtor[vin[0].nm]}, {rtor[vin[0].nm]}, x20")
+          ins.append(f"ldr {rtor[out.nm]}, [{rtor[vin[0].nm]}]")
           # ins.append(f"{'sub' if arg[0] < 0 else 'add'} x1, x1, x2")
           # ins.append(f"ldr{'sb' if arg[2] is not None and arg[2] in (dtypes.int8, dtypes.uint8) else ''} {reg_in}, [x1]")
           # if arg[2] is not None: ins.append(f"{'fcvt' if arg[2] == dtypes.half else 'scvtf'} s0, {reg_in}")
@@ -140,12 +149,11 @@ class ARM64Codegen(AssemblyCodegen):
       elif uop == UOps.COND_BRANCH:
         #TODO: this is a hack it shouldn't always be a cmp before a cond branch?
         if prev_uop == UOps.LOAD:
-          ins.append(f"ldr x1, {reg_map[vin[0].nm]}")
-          ins.append(f"cmp x1, #0")
+          ins.append(f"cmp {rtor[vin[0].nm]}, #0")
         ins.append(f"b.{'lt' if arg[1] == True else 'ge'} {arg[0][1:]}")
       elif uop == UOps.LABEL:
         ins.append(f"{arg[1:]}:")
       prev_uop=uop
    #[f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)] 
    #+ [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] 
-    return "test", "\n".join([".arch armv8-a",".text", ".global _test",".p2align 2", "_test:", "mov x19, sp"]+[f"sub sp, sp, #{offset}" for offset in compute_offsets(32)] + ins + [f"add sp, sp, #{offset}" for offset in compute_offsets(32)] + ["ret;"])
+    return "test", "\n".join([".arch armv8-a",".text", ".global _test",".p2align 2", "_test:", "mov x19, sp"] + ins  + ["ret;"])
