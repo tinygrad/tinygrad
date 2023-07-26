@@ -72,8 +72,11 @@ class ARM64Codegen(AssemblyCodegen):
       #     ins.append(f"str x{'1' if int(arg[4:]) >= 8 else int(arg[4:])}, {reg_map[out.nm]}")
       if uop == UOps.CAST:
         if arg == BinaryOps.CMPEQ:
-          ins.append(f"cset {rtor[vin[0].nm]}, eq")
-          ins.append(f"scvtf {rtor[out.nm]}, {rtor[vin[0].nm]}")
+          # ins.append(f"fmov s1, #1.0")
+          # ins.append(f"fmov s0, #0.0")
+          # ins.append(f"fcsel {rtor[out.nm]}, s1, s0, eq")
+          ins.append("cset w21, eq")
+          ins.append(f"scvtf {rtor[out.nm]}, w21")
         else:
           ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
 #        ins.append(f"str {'s' if dtypes.is_float(out[1]) else 'x'}0, {reg_map[out.nm]}")
