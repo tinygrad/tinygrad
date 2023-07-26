@@ -327,7 +327,7 @@ class Tensor:
     shapes = [s.shape[dim] for s in catargs]
     shape_cumsum = [0, *accumulate(shapes)]
     slc = [[(0, 0) for _ in self.shape] for _ in catargs]
-    for shp,k,s  in zip(shapes, shape_cumsum[:-1], slc):
+    for shp,k,s in zip(shapes, shape_cumsum[:-1], slc):
       s[dim] = (k, shape_cumsum[-1] - k - shp)
     return reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
