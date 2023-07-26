@@ -157,6 +157,10 @@ class TestSpeed(unittest.TestCase):
     helper_test_generic_square('cumsum_0', 256, f0, f0, onearg=True)
     helper_test_generic_square('cumsum_1', 256, f1, f1, onearg=True)
 
+  def test_cat(self):
+    helper_test_generic_square('cat_0', 256, lambda x,y : torch.cat((x,y),dim=0), lambda x,y : x.cat(y, dim=0))
+    helper_test_generic_square('cat_1', 256, lambda x,y : torch.cat((x,y),dim=1), lambda x,y : x.cat(y, dim=1))
+
   def test_array_packing(self):
     N = 2048
     def f(a, b): return a.reshape(N, N // 32, 32).permute(1,0,2).contiguous()
