@@ -153,7 +153,6 @@ def _auto_pad(X, auto_pad, strides, kernel_shape, dilations):
   elif auto_pad == "SAME_LOWER": return [pad_shape[0]-pad_shape[0]//2, pad_shape[1]-pad_shape[1]//2, pad_shape[0]//2,  pad_shape[1]//2]
   else: raise NotImplementedError(f"auto_pad={auto_pad} not implemented, yet")
 
-# pads = [up, left, down, right]
 def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.): # BUG: OUTPUT HAS WRONG SHAPE BUT CHECK DIDNT PICK UP
   constant_value = value if constant_value is None else safe_numpy(constant_value)
   seq_pads = list(pads) if isinstance(pads, tuple) else safe_numpy(pads)
@@ -396,7 +395,7 @@ def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, red
     input = input.reshape((N, C, -1))
     target = target.reshape((N, -1))
   if weight is not None:
-    mask = target.unsqueeze(-1) == Tensor.arange(C,dtype=dtypes.int64).repeat((N, 1, 1))
+    mask = target.unsqueeze(-1) == Tensor.arange(C,dtype=dtypes.int32).repeat((N, 1, 1))
     weight = (mask * weight).sum(axis=-1)
   if ignore_index is not None:
     cond = (target == ignore_index)
@@ -408,11 +407,16 @@ def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, red
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
 
 def SoftmaxCrossEntropyLoss(scores, labels, weights=None, ignore_index=None, reduction="mean"):
-  '''
   N, C, *s_dimensions = scores.shape
-  N_, *s_dimensions_ = labels.shape
-  y = -scores.softmax().log().transpose(0,1)
-  '''
+  if ignore_index is not None: labels = (labels == ignore_index).where(C+1, labels)
+  mask = labels.unsqueeze(1) == Tensor.arange(C).reshape(1, C, *[1]*len(s_dimensions))
+  y = scores.log_softmax(axis=1)
+  if weights is not None: weights = weights.gather(labels, 0)
+  loss = (mask * -y).sum(1) if weights is None else (mask * -y).sum(1) * weights
+  num_non_zero = (loss == 0).where(0, 1).sum()
+  if reduction == "mean": loss = loss.sum() / num_non_zero if weights is None else loss.sum() / weights.sum()
+  elif reduction == "sum": loss = loss.sum()
+  return loss, y
 
 # TODO get rid of _gather(), replace with logic from Tensor.gather()
 def _gather(input: Tensor, indices: Tensor):
@@ -422,7 +426,7 @@ def _gather(input: Tensor, indices: Tensor):
 def ArrayFeatureExtractor(input, indices): return input.gather(indices, input.ndim-1)
 def Gather(input, indices, axis=0):
   if indices.numel() < 9: # TODO NOT SURE YET FOR THE EXACT NUMBER, NEED TO TEST THIS
-    # NOTE faster gather with smaller indices SOMETHING SOMETHING O(?) IDK I DIDN'T GO TO SCHOOL FOR THIS but kernel number increases depending on size of indices
+    # NOTE faster gather and lessor kernels for smaller indices SOMETHING SOMETHING O(?) IDK I DIDN'T GO TO SCHOOL FOR THIS but kernel number increases depending on size of indices
     input_sh = list(input.shape)
     ret_shape = input_sh[:axis] + list(indices.shape) + input_sh[axis+1:]
     if indices.ndim > 1: indices = indices.flatten()
