@@ -1,10 +1,11 @@
 import yaml
 from typing import Tuple, Set, Dict
 from tinygrad.helpers import dtypes
-from tinygrad.codegen.assembly import AssemblyCodegen, Register
+from extra.assembly.assembly import AssemblyCodegen, Register
 from tinygrad.codegen.linearizer import UOps
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.runtime.ops_gpu import ROCM_LLVM_PATH
+from tinygrad.helpers import getenv
 
 # ugh, is this really needed?
 from extra.helpers import enable_early_exec
@@ -106,14 +107,6 @@ class RDNACodegen(AssemblyCodegen):
           pend_regs.clear()
           ins.append(f'v_mul_i32_i24 {reg_out(out)}, {reg_out(out)}, s{2+int(arg[3])}')
           ins.append(f'v_add_nc_u32 {reg_out(out)}, v{int(arg[3])}, {reg_out(out)}')
-      elif uop == UOps.CONST:
-        if arg == float('inf'): arg = "0x7f800000"
-        elif arg == float('-inf'): arg = "0xff800000"
-        if out.dtype == dtypes._float4:
-          for off in range(4):
-            ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(Register(out.nm, dtypes.float, False, off=off))}, {arg}")
-        else:
-          ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, {arg}")
       elif uop == UOps.ALU:
         if arg in [BinaryOps.CMPLT, BinaryOps.CMPEQ]:
           ins.append(f"{'s' if out.scalar else 'v'}_{alu[arg]}_{dtype_to_rdnatype[out.dtype]} {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
@@ -128,7 +121,15 @@ class RDNACodegen(AssemblyCodegen):
           else:
             ins.append(f"{'s_' if out.scalar else 'v_'}{alu_arg}_{dtype_to_rdnatype[out.dtype] if arg != UnaryOps.NOOP else 'b32'}{'_i24' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 and not out.scalar else ''} {reg_out(out)}, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
       elif uop == UOps.LOAD:
-        if out.scalar:
+        if len(vin) == 0: # CONST
+          if arg == float('inf'): arg = "0x7f800000"
+          elif arg == float('-inf'): arg = "0xff800000"
+          if out.dtype == dtypes._float4:
+            for off in range(4):
+              ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(Register(out.nm, dtypes.float, False, off=off))}, {arg}")
+          else:
+            ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, {arg}")
+        elif out.scalar:
           # swap arg order
           ins.append(f's_load_b32 {reg_out(out)}, {reg_in(vin[0])}, {reg_in(vin[1])} offset:{arg[0]}')
         else:
@@ -198,6 +199,7 @@ class RDNACodegen(AssemblyCodegen):
                 'amdhsa.target': 'amdgcn-amd-amdhsa--gfx1100', 'amdhsa.version': [1, 2]}
 
     code = boilerplate_start + "\n" + '\n'.join("%s %d" % x for x in kernel_desc.items()) + "\n" +  code_start + '\n'.join(ins) + "\n.amdgpu_metadata\n" + yaml.dump(metadata) + ".end_amdgpu_metadata"
-    obj = early_exec(([ROCM_LLVM_PATH / "llvm-mc", '--arch=amdgcn', '--mcpu=gfx1100', '--triple=amdgcn-amd-amdhsa', '--filetype=obj', '-'], code.encode("utf-8")))
-    asm = early_exec(([ROCM_LLVM_PATH / "ld.lld", "/dev/stdin", "-o", "/dev/stdout", "--pie"], obj))
+    obj = early_exec(([ROCM_LLVM_PATH / "llvm-mc" if getenv("ROCM_LLVM_PATH") else "llvm-mc", '--arch=amdgcn', '--mcpu=gfx1100', '--triple=amdgcn-amd-amdhsa', '--filetype=obj', '-'], code.encode("utf-8")))
+    asm = early_exec(([ROCM_LLVM_PATH / "ld.lld" if getenv("ROCM_LLVM_PATH") else "ld.lld", "/dev/stdin", "-o", "/dev/stdout", "--pie"], obj))
     return asm
+  
