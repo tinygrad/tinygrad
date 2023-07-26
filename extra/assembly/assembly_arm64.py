@@ -75,6 +75,7 @@ class ARM64Codegen(AssemblyCodegen):
           # ins.append(f"fmov s1, #1.0")
           # ins.append(f"fmov s0, #0.0")
           # ins.append(f"fcsel {rtor[out.nm]}, s1, s0, eq")
+          ins.append("mov x21, xzr")
           ins.append("cset w21, eq")
           ins.append(f"scvtf {rtor[out.nm]}, w21")
         else:
