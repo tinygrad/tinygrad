@@ -142,7 +142,7 @@ namespace H11ANE {
       int ANE_ForgetFirmware();
 
 
-    private:   // size is 0x88 
+    private:   // size is 0x88
       unsigned char unknown[0x88];
   };
 
