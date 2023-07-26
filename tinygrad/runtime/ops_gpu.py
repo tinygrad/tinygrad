@@ -78,7 +78,7 @@ class CLProgram:
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
     cl_bufs = [x._buf if isinstance(x, CLBuffer) else x for x in bufs]
-    e = self.clprgs[cl_bufs[0].device](CL.cl_queue[cl_bufs[0].device], [g*l for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *cl_bufs)
+    e = self.clprgs[cl_bufs[0].device].capture_call("~/code/tinygrad/mybug.py", CL.cl_queue[cl_bufs[0].device], [g*l for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *cl_bufs)
     if wait:
       e.wait()
       try:
