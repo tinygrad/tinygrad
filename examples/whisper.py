@@ -246,7 +246,7 @@ if __name__ == "__main__":
   load_state_dict(model, state['model_state_dict'])
   enc = get_encoding(state['dims']['n_vocab'])
 
-  def decode_with_fallback(segment, initial_tokens, sample_len=224, n_audio=1, n_group=1):
+  def decode_segment(segment, initial_tokens, sample_len=224, n_audio=1, n_group=1):
     texts, sample_begin = [], len(initial_tokens)
     decoder = GreedyDecoder(eot=enc.eot_token)
     sequence_ranker = MaximumLikelihoodRanker(None)
@@ -281,7 +281,7 @@ if __name__ == "__main__":
       mel_segment = mel[:, seek:seek+N_FRAMES]
       mel_segment = np.expand_dims(pad_or_trim(mel, N_FRAMES), axis=0)
       segment_size = min(N_FRAMES, content_frames - seek)
-      texts = decode_with_fallback(mel_segment, initial_tokens)
+      texts = decode_segment(mel_segment, initial_tokens)
       # TODO: increment seek properly
       #if no_speech_probs[0] > no_speech_threshold and avg_logprobs[0] <= logprob_threshold:
       seek += segment_size
