@@ -180,7 +180,7 @@ def prep_audio(audio, padding) -> Tensor:
   log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
   return log_spec
-  
+
 def listener(q):
   prep_audio(np.zeros(300), RATE)
   import pyaudio
