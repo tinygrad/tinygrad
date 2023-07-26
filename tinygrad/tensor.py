@@ -324,11 +324,15 @@ class Tensor:
     assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
     catargs = [self] + list(args)
     assert all(len(t.shape) != 0 for t in catargs), "zero-dimensional tensor cannot be concatenated"
-    shape_cumsum = [0, *accumulate([y.shape[dim] for y in catargs])]
-    slc = [[(0, s) for s in self.shape] for _ in catargs]
-    for s,k in zip(slc, shape_cumsum):
-      s[dim] = (-k, shape_cumsum[-1]-k)
-    return reduce(Tensor.__add__, [arg.slice(s) for arg,s in zip(catargs, slc)])
+    shps = [s.shape[dim] for s in catargs]
+    shape_cumsum = [0, *accumulate(shps)]
+
+    slc = [[(0, 0) for _ in (self.shape)] for _ in catargs]
+
+    for i,k in enumerate(shape_cumsum[:-1]):
+      slc[i][dim] = (k, sum(shps) - k - shps[i])
+
+    return reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
   @staticmethod
   def stack(tensors, dim=0):
