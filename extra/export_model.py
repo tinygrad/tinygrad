@@ -25,8 +25,9 @@ def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str]
   return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
 
 def jit_model(model, the_input:Tensor) -> Tuple[TinyJit,Dict[int,str]]:
+  assert hasattr(model, "forward") or callable(model), "model needs a forward function"
   @TinyJit
-  def run(x): return model.forward(x).realize()
+  def run(x): return (model.forward(x) if hasattr(model, "forward") else model(x)).realize()
 
   # twice to run the JIT
   for _ in range(2): the_output = run(the_input)
