@@ -63,7 +63,7 @@ class Node:
 
   def __floordiv__(self, b:int, factoring_allowed=True):
     assert b != 0
-    if b < 0: return (self//-b)*-1
+    if b < 0: return (self*-1//-b)
     if b == 1: return self
 
     # the numerator of div is not allowed to be negative
@@ -77,7 +77,7 @@ class Node:
     assert b > 0
     if b == 1: return NumNode(0)
     if self.min >= 0 and self.max < b: return self
-    if self.min < 0: return (self - ((self.min//b)*b)) % b
+    if self.min < 0: return create_node(ModNode(create_rednode(SumNode, [self, NumNode(-1*(self.min//b)*b)]), b))
     return create_node(ModNode(self, b))
 
   @staticmethod

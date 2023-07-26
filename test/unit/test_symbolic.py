@@ -108,7 +108,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 7) // 2, 0, 3, "(a//2)")
 
   def test_div_neg_min_max(self):
-    self.helper_test_variable(Variable("a", 0, 7) // -2, -3, 0, "((a//2)*-1)")
+    self.helper_test_variable(Variable("a", 0, 7) // -2, -4, 0, "((((a*-1)+8)//2)+-4)")
 
   def test_sum_div_min_max(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 2, 0, 5, "((a+b)//2)")
