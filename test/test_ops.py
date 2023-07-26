@@ -1042,8 +1042,8 @@ class TestOps(unittest.TestCase):
       lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
 
   def test_cat(self):
-    for dim in range(-1, 2):
-      helper_test_op([(45,65), (45,65)], lambda x,y: torch.cat((x,y), dim), lambda x,y: x.cat(y, dim=dim))
+    for dim in range(-2, 3):
+      helper_test_op([(45,65, 90), (45,65,90), (45,65,90)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
 
     with self.assertRaises(AssertionError):
       a = Tensor(3.14)
