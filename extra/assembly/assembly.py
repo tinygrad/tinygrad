@@ -2,7 +2,7 @@ from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultD
 from tinygrad.codegen.linearizer import Linearizer, UOps, Token, ConstOp
 from tinygrad.codegen.optimizer import hand_coded_optimizations
 from tinygrad.ops import ASTRunner, BinaryOps, UnaryOps
-from tinygrad.helpers import DType, dtypes, DEBUG
+from tinygrad.helpers import DType, dtypes, DEBUG, getenv
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 import functools
 import math
@@ -180,6 +180,10 @@ class AssemblyCodegen(Linearizer):
     if DEBUG >= 4:
       for tins in ins: print(tins)
     name, asm = self.specialize(ins)
+
+    if getenv("RDNA_ASM"):
+      import sys
+      sys.exit(asm)
 
     return ASTRunner(name, asm,
       global_size[::-1], local_size[::-1],
