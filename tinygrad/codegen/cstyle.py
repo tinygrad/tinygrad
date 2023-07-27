@@ -54,7 +54,7 @@ class CStyleLanguage(NamedTuple):
       elif var_dtype == dtypes.float16:
         return f"as_half({x})"
       elif var_dtype == dtypes.bfloat16:
-        raise NotImplementedError(f"No bitcast implemented for bfloat16 in OpenCL")
+        raise NotImplementedError("No bitcast implemented for bfloat16 in OpenCL")
       elif var_dtype == dtypes.int8:
         return f"as_char({x})"
       elif var_dtype == dtypes.int32:
