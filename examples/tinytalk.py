@@ -1,9 +1,7 @@
-import argparse, multiprocessing, numpy as np, torch, re, sys, simpleaudio as sa
+import argparse, multiprocessing as mp, numpy as np, torch, re, sys, simpleaudio as sa
 import whisper, llama, vits
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes
-
-# TODO: too much copy paste. tidy up
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='Talk with tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -39,12 +37,27 @@ if __name__ == '__main__':
   vits_net_g = vits.load_model(vits_text_mapper.symbols, hps, vits_model_config)
   # VITS SETUP END
 
-  while 1:
-    # whisper -> llama -> vits
+  def speak(q_speak, q_aid):
+    while 1:
+      id, text_to_synthesize = q_speak.get()
+      if args.vits_model == "mmts-tts": text_to_synthesize = vits_text_mapper.filter_oov(text_to_synthesize.lower())
+      stn_tst = vits_text_mapper.get_text(text_to_synthesize, hps.data.add_blank, hps.data.text_cleaners)
+      x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
+      sid = Tensor([args.speaker_id], dtype=dtypes.int64)
+      audio_tensor = vits_net_g.infer(x_tst, x_tst_lengths, sid, args.noise_scale, args.length_scale, args.noise_scale_w, emotion_embedding=None,max_y_length_estimate_scale=None)[0, 0].realize()
+      audio_data = (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
+      sa.play_buffer(audio_data, 1, 2, hps.data.sampling_rate).wait_done() 
+      q_aid.put(id)
 
-    # NOTE: this is pretty much copied from whisper.py. TODO: address code reuse
-    q = multiprocessing.Queue()
-    p = multiprocessing.Process(target=whisper.listener, args=(q,))
+  q_speak, q_aid = mp.Queue(), mp.Queue()
+  speak_p = mp.Process(target=speak, args=(q_speak,q_aid))
+  audio_id = 0
+
+  # chat loop
+  while 1:
+    # TODO: when https://github.com/tinygrad/tinygrad/pull/999 is merged, this will work better
+    q = mp.Queue()
+    p = mp.Process(target=whisper.listener, args=(q,))
     p.daemon = True
     p.start()
 
@@ -65,16 +78,17 @@ if __name__ == '__main__':
       idx = out[0,-1].numpy().argmax()
       lst.append(idx)
       dec = whisper_enc.decode(lst)
+      user_speech = re.sub('<\|.*?\|>', '', dec)
+      print(f"You: {user_speech}", end='\r')
       if dec.endswith("<|endoftext|>"):
         #total = total[:, 320*(len(lst)-1):]
         lst = [whisper_enc._special_tokens["<|startoftranscript|>"]]
-        if len(user_speech := re.sub('<\|.*?\|>', '', dec)) > 0:
+        if len(user_speech) > 0:
           break
 
-    print(user_speech)
+    print(f"You: {user_speech}")
 
     # throw into llama
-
     # add tokens from user in chatbot mode
     outputted += user_delim + user_speech + "\n"
 
@@ -85,6 +99,7 @@ if __name__ == '__main__':
 
     text_to_synthesize = ""
 
+    # llama loop
     while 1:
       logits = llama_model(Tensor([toks[start_pos:]]), start_pos).realize()
       tok = llama.sample(logits, 0.7) # args.temperature in llama.py
@@ -99,20 +114,13 @@ if __name__ == '__main__':
       sys.stdout.write(out)
       sys.stdout.flush()
       outputted = cur
+      if outputted.endswith(("!",".","?")):
+        text_to_synthesize = text_to_synthesize.split(": ", 1)[-1].replace(" [EOS]", "")
+        q_speak.put((audio_id, text_to_synthesize))
+        audio_id += 1
+        text_to_synthesize = ""
       if outputted.endswith(end_delim): break
 
-    text_to_synthesize = text_to_synthesize.split(": ", 1)[1].replace(" [EOS]", "")
-
-    # text-to-speech
-    if args.vits_model == "mmts-tts": text_to_synthesize = vits_text_mapper.filter_oov(text_to_synthesize.lower())
-    stn_tst = vits_text_mapper.get_text(text_to_synthesize, hps.data.add_blank, hps.data.text_cleaners)
-    x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
-    sid = Tensor([args.speaker_id], dtype=dtypes.int64)
-
-    audio_tensor = vits_net_g.infer(x_tst, x_tst_lengths, sid, args.noise_scale, args.length_scale, args.noise_scale_w, emotion_embedding=None,max_y_length_estimate_scale=None)[0, 0].realize()
-
-    # Save the audio output.
-    audio_data = (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
-
-    play = sa.play_buffer(audio_data, 1, 2, hps.data.sampling_rate)
-    play.wait_done()
+    # wait until "speak" process is complete
+    while not q_aid.empty() and q_aid.get() >= audio_id:
+      pass
