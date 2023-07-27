@@ -67,8 +67,7 @@ class CStyleLanguage(NamedTuple):
         return f"as_uint({x})"
       elif var_dtype == dtypes.uint64:
         return f"as_ulong({x})"
-      else:
-        raise NotImplementedError(f"No bitcast implemented for {var_dtype}")
+      raise NotImplementedError(f"No bitcast implemented for {var_dtype}")
     return f"*(({var_dtype.name}*)&({x}))"
   
   # returns a str expression of the const with the given type
