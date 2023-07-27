@@ -366,11 +366,11 @@ class Tensor:
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
   # (padding_left, padding_right, padding_top, padding_bottom)
-  def pad2d(self, padding:Union[List[int], Tuple[int, ...]], value:int=0):
+  def pad2d(self, padding:Union[List[int], Tuple[int, ...]], value:float=0):
     shape = [(0,s) for s in self.shape[:-(len(padding)//2)]]
     slc = shape + [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], self.shape[::-1])][::-1]
     if value == 0: return self.slice(slc)
-    return self.slice(slc) + (Tensor.ones(self.shape).slice(slc) > 0).where(0, value) #ones for binary like map
+    return self.slice(slc) + value*(Tensor.ones(self.shape).slice(slc) == 0)
 
   @property
   def T(self) -> Tensor: return self.transpose()
