@@ -121,7 +121,7 @@ def get_run_onnx(onnx_model: ModelProto):
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else (1, [i.shape for i in input_tensors[inp.name]])
         assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
-        for _,v in input_tensors.items(): 
+        for _,v in input_tensors.items():
           if isinstance(v, Tensor):
             v.realize()
           elif isinstance(v, list):

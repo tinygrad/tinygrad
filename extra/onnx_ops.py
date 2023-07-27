@@ -12,8 +12,7 @@ import math
 def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
   groups = len(inputs) // 3
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T = safe_numpy(T)
-  R = safe_numpy(R)
+  T, R = safe_numpy(T), safe_numpy(R)
   r = R / (1 + T * decay_factor)
   ret = []
   for input in grouped_inputs:
@@ -31,8 +30,7 @@ def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
 def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
   groups = len(inputs) // 3
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T = safe_numpy(T)
-  R = safe_numpy(R)
+  T, R = safe_numpy(T), safe_numpy(R)
   beta_adjusted = beta if T > 0 else 1
   ret = []
   for input in grouped_inputs:
@@ -51,8 +49,7 @@ def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
 def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
   groups = len(inputs) // 4
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T = safe_numpy(T)
-  R = safe_numpy(R)
+  T, R = safe_numpy(T), safe_numpy(R)
   ret = []
   for input in grouped_inputs:
     X, G, V, H = input
@@ -251,7 +248,7 @@ def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
 def Dropout(data, ratio=0.5, training_mode=False, seed=None):
   if isinstance(ratio, Tensor) and not ratio.shape: ratio = safe_numpy(ratio) # ratio and tensor is passed in as Tensor with shape: ()
-  if isinstance(training_mode, Tensor) and not training_mode.shape: training_mode = safe_numpy(training_mode) #TODO maybe address this in attribute_parse() in onnx.py??
+  if isinstance(training_mode, Tensor) and not training_mode.shape: training_mode = safe_numpy(training_mode)
   if not training_mode: return data, Tensor.ones(*data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
   rng = np.random.RandomState(seed)
   ratio = ratio.lazydata.realize().toCPU()[0] if isinstance(ratio, Tensor) else ratio
@@ -340,7 +337,7 @@ def ReduceLogSum(data, axes=None, keepdims=1, noop_with_empty_axes=0): return da
 def ReduceLogSumExp(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
 
 
-def GlobalAveragePool(X): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
+def GlobalAveragePool(X:Tensor): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def OptionalHasElement(x: Tensor=None): return Tensor(x is not None and x.numel() > 0, dtype=dtypes.bool)
 def OptionalGetElement(x: Tensor=None): return x if x is not None else Tensor([], dtype=dtypes.float32)
