@@ -77,7 +77,7 @@ class Node:
     assert b > 0
     if b == 1: return NumNode(0)
     if self.min >= 0 and self.max < b: return self
-    if self.min < 0: return create_node(ModNode(create_rednode(SumNode, [self, NumNode(-1*(self.min//b)*b)]), b))
+    if self.min < 0: return create_node(ModNode(self - (self.min//b)*b, b))
     return create_node(ModNode(self, b))
 
   @staticmethod
