@@ -39,7 +39,7 @@ Lloh1:
         ret
       """
       if getenv('ARM64'):
-        subprocess.check_output(args=('as -arch arm64 -o '+fn+'.o').split(), input=prg.encode('utf-8'))
+        subprocess.check_output(args=('as  -o '+fn+'.o').split(), input=prg.encode('utf-8'))
         subprocess.check_output(args=('clang -lm -O2 -Wall -shared '+fn+'.o -o'+fn).split())
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]

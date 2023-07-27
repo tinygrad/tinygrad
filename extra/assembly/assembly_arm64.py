@@ -15,7 +15,7 @@ def alloc_reg(x):
   global x_regs, s_regs
   available_regs = s_regs if dtypes.is_float(x[1]) else x_regs
   if len(available_regs) == 0:
-    var_name = max(filter(lambda x: x[0] != 'x', rtor.keys()), key = lambda k: rtor[k])
+    var_name = max(key = lambda k: rtor[k])
     available_regs.append(rtor[var_name])
     del rtor[var_name]
   reg = available_regs.pop()
@@ -47,7 +47,12 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"sxtw {to}, w15")
         else:
           #ins.append(f"{'mov' if to[0] == 'x' else 'fmov'} {to}, {'#' + str(value) if to[0] == 'x' else '0x' + float_to_hex(arg)}")
-          ins.append(f"{'mov' if to[0] == 'x' else 'fmov'} {to}, {'#' + str(value) if to[0] == 'x' else float_to_hex(arg)}")
+          if to[0] == 's': 
+            ins.append(f"mov x15, {'0x' + float_to_hex(value)}")
+            ins.append(f"scvtf {to}, x15")
+          else:
+            ins.append(f"{'mov'} {to}, {'#' + str(value) if value.__class__ is int else '0x' + float_to_hex(value)}")
+          #ins.append(f"{'mov' if to[0] == 'x' else 'fmov'} {to}, {'#' + str(value) if to[0] == 'x' else '0x' +float_to_hex(arg)}")
 
     for i, (uop, out, vin, arg) in enumerate(asm):
       if out is not None and out.nm not in rtor:
@@ -56,7 +61,7 @@ class ARM64Codegen(AssemblyCodegen):
           for v in vin:
             if v.__class__ is not int and v.nm not in rtor:
               alloc_reg(v)
-      print(rtor)
+      #print(rtor)
       if uop == UOps.CAST:
         if arg == BinaryOps.CMPEQ:
           ins.append("mov x15, xzr")
