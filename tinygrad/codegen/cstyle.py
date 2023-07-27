@@ -18,6 +18,7 @@ class CStyleLanguage(NamedTuple):
   buffer_suffix: str = ""
   smem_prefix: str = ""
   barrier: str = ""
+  is_gpu=False
   gid: List[str] = []
   lid: List[str] = []
   extra_args: List[str] = []
@@ -47,6 +48,27 @@ class CStyleLanguage(NamedTuple):
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   def render_bitcast(self, x:str, var_dtype:DType) -> str:
+    if self.is_gpu:
+      if var_dtype == dtypes.float32:
+        return f"as_float({x})"
+      elif var_dtype == dtypes.float16:
+        return f"as_half({x})"
+      elif var_dtype == dtypes.bfloat16:
+        raise NotImplementedError(f"No bitcast implemented for bfloat16 in OpenCL")
+      elif var_dtype == dtypes.int8:
+        return f"as_char({x})"
+      elif var_dtype == dtypes.int32:
+        return f"as_int({x})"
+      elif var_dtype == dtypes.int64:
+        return f"as_long({x})"
+      elif var_dtype == dtypes.uint8:
+        return f"as_uchar({x})"
+      elif var_dtype == dtypes.uint32:
+        return f"as_uint({x})"
+      elif var_dtype == dtypes.uint64:
+        return f"as_ulong({x})"
+      else:
+        raise NotImplementedError(f"No bitcast implemented for {var_dtype}")
     return f"*(({var_dtype.name}*)&({x}))"
   
   # returns a str expression of the const with the given type
@@ -174,7 +196,7 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
     elif uop == UOps.CAST and newvar is not None and newvar.dtype.sz > 1:
       kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
     elif uop == UOps.BITCAST:
-      assert newvar is not None and isinstance(args, DType)
+      assert newvar is not None and isinstance(args, DType), "bitcast must specify datatype"
       kk(f"{newvar.render(True)} = {lang.render_bitcast(vin[0].render(), args)};")
     elif uop == UOps.DEFINE_LOCAL:
       if lang.external_local_bufs:
