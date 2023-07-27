@@ -7,18 +7,14 @@ from tinygrad.codegen.linearizer import UOps, ConstOp
 from tinygrad.helpers import dtypes
 
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
-def compute_offsets(total):
-    quotient, remainder = divmod(total, 4096)
-    return [4096]*quotient + [remainder] if remainder else [4096]*quotient
 rtor:Dict[Register, str] = {}
 pend_regs:Set[Register] = set()
-x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (8,9,10,11,12,13,14,15,16,17,18,20,21)]
+x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (9,10,11,12,13,14,15,16,17,18,19,20,21)]
 s_regs = ['s' + str(i) for i in reversed(range(2,30))]
 def alloc_reg(x):
   global x_regs, s_regs
   available_regs = s_regs if dtypes.is_float(x[1]) else x_regs
   if len(available_regs) == 0:
-    print("________")
     var_name = max(filter(lambda x: x[0] != 'x', rtor.keys()), key = lambda k: rtor[k])
     available_regs.append(rtor[var_name])
     del rtor[var_name]
@@ -46,10 +42,11 @@ class ARM64Codegen(AssemblyCodegen):
     def mov_imm(value, to):
         # Manually move value into reg if vin[1] can't fit
         if value > 65535:
-          ins.append(f"mov w2, #{value & 0xffff}")
-          ins.append(f"movk w2, #{(value >> 16) & 0xffff}, lsl #16")
-          ins.append(f"sxtw {to}, w2")
+          ins.append(f"mov w15, #{value & 0xffff}")
+          ins.append(f"movk w15, #{(value >> 16) & 0xffff}, lsl #16")
+          ins.append(f"sxtw {to}, w15")
         else:
+          #ins.append(f"{'mov' if to[0] == 'x' else 'fmov'} {to}, {'#' + str(value) if to[0] == 'x' else '0x' + float_to_hex(arg)}")
           ins.append(f"{'mov' if to[0] == 'x' else 'fmov'} {to}, {'#' + str(value) if to[0] == 'x' else float_to_hex(arg)}")
 
     for i, (uop, out, vin, arg) in enumerate(asm):
@@ -60,37 +57,20 @@ class ARM64Codegen(AssemblyCodegen):
             if v.__class__ is not int and v.nm not in rtor:
               alloc_reg(v)
       print(rtor)
-      # if uop == UOps.DEFINE_REGISTER:
-      #   for i in range(arg[2]):
-      #     var_size += 16
-      #     #TODO: Find a way to use less memory lookups. Graph coloring?
-      #     reg_map[f"%{arg[1]}{i}"] = f"[sp, #{var_size}]"
-      #     #regs(f"%{arg[1]}{i}", arg[0][0], var_size)
-      # elif uop == UOps.DEFINE_GLOBAL:
-      #   if arg.startswith('data'):
-      #     if int(arg[4:]) >= 8: ins.append(f"ldr x1, [x19, #{(int(arg[4:]) - 8) * 8}]")
-      #     ins.append(f"str x{'1' if int(arg[4:]) >= 8 else int(arg[4:])}, {reg_map[out.nm]}")
       if uop == UOps.CAST:
         if arg == BinaryOps.CMPEQ:
-          # ins.append(f"fmov s1, #1.0")
-          # ins.append(f"fmov s0, #0.0")
-          # ins.append(f"fcsel {rtor[out.nm]}, s1, s0, eq")
-          ins.append("mov x21, xzr")
-          ins.append("cset w21, eq")
-          ins.append(f"scvtf {rtor[out.nm]}, w21")
+          ins.append("mov x15, xzr")
+          ins.append("cset w15, eq")
+          ins.append(f"scvtf {rtor[out.nm]}, w15")
         else:
           ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
-#        ins.append(f"str {'s' if dtypes.is_float(out[1]) else 'x'}0, {reg_map[out.nm]}")
       elif uop == UOps.ALU:
         reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
-        #for i in range(len(vin)):
-        #   if vin[i].__class__ is not int: ins.append(f"ldr {reg}{i}, {reg_map[vin[i].nm]}")
-        #   else: mov_imm(vin[1], f"{reg}{i}")
         if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
           ins.append(f"ands {rtor[out[0].nm]}, {rtor[vin[0].nm]}, {rtor[vin[1].nm]}")
         elif arg == BinaryOps.MUL and vin[1].__class__ is int:
-          mov_imm(vin[1], 'x20')
-          ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]}, x20")
+          mov_imm(vin[1], 'x15')
+          ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]}, x15")
         elif arg == TernaryOps.MULACC and out == vin[2]:
           ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]}, {rtor[vin[1].nm]}, {rtor[vin[2].nm]}")
         elif arg == TernaryOps.WHERE:
@@ -114,42 +94,23 @@ class ARM64Codegen(AssemblyCodegen):
               ins.append(f"ldr {rtor[k]}, [sp, #{32 + (16*i)}]")
           ins.append(f"add sp, sp, #{len(rtor)*16}")
         elif arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
-#          ins.append(f"{alu[arg]} {reg}0, {reg}0, {reg}1" if reg == 'x' else f"fcmp {reg}0, {reg}1")
           ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]}, {'#'+str(vin[1]) if vin[1].__class__ is int else rtor[vin[1].nm]}" if reg == 'x' else f"fcmp {rtor[vin[0].nm]}, {rtor[vin[1].nm]}")
         elif arg == BinaryOps.MOD:
-          ins.append(f"mov x20, {vin[1]}")
-          ins.append(f"udiv x21, {rtor[vin[0].nm]}, x20")
-          ins.append(f"msub {rtor[out.nm]}, x21, x20, {rtor[vin[0].nm]}")
+          ins.append(f"mov x15, {vin[1]}")
+          ins.append(f"udiv x14, {rtor[vin[0].nm]}, x15")
+          ins.append(f"msub {rtor[out.nm]}, x14, x15 {rtor[vin[0].nm]}")
         else:
           ins.append(f"{'f' if reg == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]},{'#'+str(vin[1]) if vin[1].__class__ is int else rtor[vin[1].nm]}")
-          #ins.append(f"{'f' if reg == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {reg}0, {reg}0, {reg}1")
-        #ins.append(f"str {reg}{'2' if arg == BinaryOps.MOD else '0'}, {reg_map[out.nm]}")
       elif uop == UOps.LOAD:
         if arg.__class__ in (int, float):
           mov_imm(arg, rtor[out.nm])
-          # mov_imm(arg,"x0")
-          # ins.append(f"str x0, {reg_map[out.nm]}") 
         else:
-          #reg_out = 's0' if dtypes.is_float(out[1]) else 'x0'
-          #reg_out = rtor[out.nm] 
-          #reg_in = type_to_reg[arg[2] if arg[2] is not None else out[1]] + '0'
-          # Manually offset in case it can't fix in imm
           #mov_imm(abs(arg[0]), "x20")
-          ins.append(f"add x21, {rtor[vin[0].nm]}, #{arg[0]}")
-          ins.append(f"ldr {rtor[out.nm]}, [x21]")
           # ins.append(f"{'sub' if arg[0] < 0 else 'add'} x1, x1, x2")
-          # ins.append(f"ldr{'sb' if arg[2] is not None and arg[2] in (dtypes.int8, dtypes.uint8) else ''} {reg_in}, [x1]")
-          # if arg[2] is not None: ins.append(f"{'fcvt' if arg[2] == dtypes.half else 'scvtf'} s0, {reg_in}")
-          #ins.append(f"str {reg_out}, {reg_map[out.nm]}")
+          ins.append(f"add x15, {rtor[vin[0].nm]}, #{arg[0]}")
+          ins.append(f"ldr {rtor[out.nm]}, [x15]")
       elif uop == UOps.STORE:
-        shifts = {dtypes.int64: "#3", dtypes.half: "#1", dtypes.int8:"#2", dtypes.uint8: "#2"}
-        #ins.append(f"ldr s0, {reg_map[vin[1].nm]}")
-        #reg_out = (type_to_reg[arg[2]] if arg[2] is not None else "s") + '0'
-        #if arg[2] is not None: ins.append(f"fcvt{'zs' if arg[2] != dtypes.half else '' } {reg_out}, s0")
-        #ins.append(f"mov x3, #{arg[0]}")
-        #ins.append(f"ldr x2, {reg_map[vin[0].nm]}")
         ins.append(f"str {rtor[vin[1].nm]}, [{rtor[vin[0].nm]}, #{arg[0]}]")
-        #ins.append(f"str {reg_out}, [x2, x3, lsl {shifts[arg[2]] if arg[2] is not None and arg[2] in shifts else '#0'}]")
       elif uop == UOps.COND_BRANCH:
         #TODO: this is a hack it shouldn't always be a cmp before a cond branch?
         if prev_uop == UOps.LOAD:
@@ -158,6 +119,4 @@ class ARM64Codegen(AssemblyCodegen):
       elif uop == UOps.LABEL:
         ins.append(f"{arg[1:]}:")
       prev_uop=uop
-   #[f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)] 
-   #+ [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] 
     return "test", "\n".join([".arch armv8-a",".text", ".global _test",".p2align 2", "_test:", "mov x19, sp"] + ins  + ["ret;"])
