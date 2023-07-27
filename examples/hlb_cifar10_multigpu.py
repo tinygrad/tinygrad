@@ -254,65 +254,65 @@ def run():
       "target": 90.0,
     }
     good = {
-      "max_lr": 0.025498470797116014,
-      "pct_start": 0.1992938922567368,
-      "div_factor": 1862926896844592,
-      "momentum": 0.8931837205853504,
-      "wd": 0.09106877702305435,
-      "label_smoothing": 0.14551907089629904,
-      "final_lr_ratio": 0.0010867069979536724,
-      "mixup_alpha": 0.020217493177474396,
+      "max_lr": 0.016279556912291174,
+      "pct_start": 0.20191245376826575,
+      "div_factor": 3098105635814253,
+      "momentum": 0.9210648369131892,
+      "wd": 0.12201506850368582,
+      "label_smoothing": 0.1590394650216007,
+      "final_lr_ratio": 0.0015072069793158026,
+      "mixup_alpha": 0.020980960594745347,
     }
     parameters_dict = {
       "max_lr": {
         "distribution": "normal",
         "mu": good["max_lr"],
-        "sigma": 0.009,
+        "sigma": 0.0032,
       },
       "pct_start": {
         "distribution": "normal",
         "mu": good["pct_start"],
-        "sigma": 0.03,
+        "sigma": 0.04,
       },
       "div_factor": {
         "distribution": "normal",
         "mu": good["div_factor"],
-        "sigma": 1.24e15,
+        "sigma": 6e14,
       },
       "momentum": {
         "distribution": "normal",
         "mu": good["momentum"],
-        "sigma": 0.16,
+        "sigma": 0.184,
       },
       "wd": {
         "distribution": "normal",
         "mu": good["wd"],
-        "sigma": 0.0189,
+        "sigma": 0.0244,
       },
       "label_smoothing": {
         "distribution": "normal",
         "mu": good["label_smoothing"],
-        "sigma": 0.044,
+        "sigma": 0.032,
       },
       "final_lr_ratio": {
         "distribution": "normal",
         "mu": good["final_lr_ratio"],
-        "sigma": 0.00023,
+        "sigma": 0.0003,
       },
       "mixup_alpha": {
         "distribution": "normal",
         "mu": good["mixup_alpha"],
-        "sigma": 0.003,
+        "sigma": 0.004,
       },
     }
     sweep_config = {
       "method": "bayes",
-      "name": "sweep-3",
+      "name": "sweep-4",
       "metric": metric,
       "parameters": parameters_dict,
     }
     sweep_id = wandb.sweep(sweep_config, project="tinygrad-cifar10")
-    wandb.agent(sweep_id, function=rank_0_initiate_train_single_step, count=100)
+    wandb.agent(sweep_id, function=rank_0_initiate_train_single_step, count=300)
   else:
     # wait for command from rank 0 to start a single train iteration
     from extra.dist import OOB
@@ -324,14 +324,14 @@ def run():
 
 def run2():
   train_cifar({
-    "max_lr": 0.025498470797116014,
-    "pct_start": 0.1992938922567368,
-    "div_factor": 1862926896844592,
-    "momentum": 0.8931837205853504,
-    "wd": 0.09106877702305435,
-    "label_smoothing": 0.14551907089629904,
-    "final_lr_ratio": 0.0010867069979536724,
-    "mixup_alpha": 0.020217493177474396,
+    "max_lr": 0.016279556912291174,
+    "pct_start": 0.20191245376826575,
+    "div_factor": 3098105635814253,
+    "momentum": 0.9210648369131892,
+    "wd": 0.12201506850368582,
+    "label_smoothing": 0.1590394650216007,
+    "final_lr_ratio": 0.0015072069793158026,
+    "mixup_alpha": 0.020980960594745347,
   })
 
 if __name__ == "__main__":
