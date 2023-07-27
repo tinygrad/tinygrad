@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 from extra import dist
 from multiprocessing import shared_memory
 from tinygrad.helpers import GlobalCounters
@@ -8,16 +8,19 @@ from tinygrad.runtime.lib import RawBuffer
 from tinygrad.runtime.ops_shm import RawShmBuffer
 from tinygrad.tensor import Tensor, Function
 import numpy as np
+import time
 
 # fake the function signature of ASTRunner so we can put it in the cache
-def _send_rb(args:Tuple[RawBuffer, RawShmBuffer, int], jit=False, force_wait=False):
+def _send_rb(args:Tuple[RawBuffer, RawShmBuffer, int, Any], jit=False, force_wait=False):
   # we only support copyout buffers right now
+  st = time.perf_counter()
   args[0]._copyout(np.frombuffer(args[1]._buffer(), dtype=args[0].dtype.np))
-  dist.OOB.send(None, args[2])
+  dist.OOB.send(st, args[2])
 
 def _recv_rb(args:Tuple[RawBuffer, RawShmBuffer, int], jit=False, force_wait=False):
-  dist.OOB.recv(args[2])
+  st = dist.OOB.recv(args[2])
   args[0]._copyin(args[1].toCPU())
+  print(f"recv {time.perf_counter() - st}, bandwidth {args[0].size * args[0].dtype.itemsize / (time.perf_counter() - st) / 1e9} GB/s")
 
 # send a rawbuffer from out rank to the target rank
 def send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
@@ -31,12 +34,12 @@ def send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
   # copy the buffer into shared memory
   device = f"{shm_name},{cache_id}" if cache_id is not None else shm_name
   rb = RawShmBuffer(x.size, x.dtype, device=device)
-  # we only support copyout buffers right now
   x._copyout(np.frombuffer(rb._buffer(), dtype=x.dtype.np))
   dist.OOB.send((shm_name, cache_id), target_rank)
+  # _send_rb((x, rb, target_rank, (shm_name, cache_id)))
 
   # jit support
-  if GlobalCounters.cache is not None: GlobalCounters.cache.append((_send_rb, [x, rb, target_rank]))
+  if GlobalCounters.cache is not None: GlobalCounters.cache.append((_send_rb, [x, rb, target_rank, None]))
 setattr(send_rb, "shared_memory_cache", {})
 
 # receive a rawbuffer from the target rank
