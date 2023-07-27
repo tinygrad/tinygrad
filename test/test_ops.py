@@ -280,6 +280,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x**1.2, lambda x: Tensor.pow(x,1.2), a=-10)
     helper_test_op([()], lambda x: x**0.2, lambda x: Tensor.pow(x,0.2), a=-10)
     helper_test_op([()], lambda x: x**1.2, lambda x: Tensor.pow(x,1.2), a=-10)
+    a, b = Tensor([0.0], requires_grad=True), torch.tensor([0.0], requires_grad=True)
+    helper_test_op([], lambda: b**1.1, lambda: a**1.1, )
   def test_pow_const(self):
     helper_test_op([(45,65)], lambda x: x**1.0, lambda x: x**1.0)
     helper_test_op([(45,65)], lambda x: x**-1.0, lambda x: x**-1.0)
