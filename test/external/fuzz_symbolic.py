@@ -72,8 +72,9 @@ if __name__ == "__main__":
       real_expr = render_real_expr[t.__name__](real_expr, rng)
       rngs.append(rng)
     render = expr.render()
-    sample_size = min(100, (u1.max*u2.max*u3.max))
-    samples = [ (random.randint(u1.min, u1.max), random.randint(u2.min, u2.max), random.randint(u3.min, u3.max)) for _ in range(sample_size) ]
+    sample_size = min(101, (u1.max*u2.max*u3.max))
+    if sample_size < 101: samples = list(itertools.product(range(u1.min, u1.max+1), range(u2.min, u2.max+1), range(u3.min, u3.max+1)))
+    else: samples = [ (random.randint(u1.min, u1.max), random.randint(u2.min, u2.max), random.randint(u3.min, u3.max)) for _ in range(sample_size) ]
     for count, (v1, v2, v3) in enumerate(samples):
       v = [v1,v2,v3]
       num = eval(render)
