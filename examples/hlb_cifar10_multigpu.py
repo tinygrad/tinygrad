@@ -18,6 +18,7 @@ from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
 from extra.dist import collectives
+import wandb
 
 
 def set_seed(seed):
@@ -92,15 +93,15 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
     if not is_train: break
     seed += 1
 
-def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.04, pct_start=0.2, momentum=0.8, wd=0.13, label_smoothing=0., mixup_alpha=0.025, seed=9):
+def train_cifar(config, bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.04, pct_start=0.2, momentum=0.8, wd=0.13, label_smoothing=0., mixup_alpha=0.025, seed=9):
   rank, world_size = getenv("RANK"), getenv("WORLD_SIZE")
   set_seed(seed)
   Tensor.training = True
 
   BS, EVAL_BS, STEPS = getenv("BS", bs), getenv('EVAL_BS', eval_bs), getenv("STEPS", steps)
-  MAX_LR, PCT_START, MOMENTUM, WD = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start), getenv('MOMENTUM', momentum), getenv("WD", wd)
-  DIV_FACTOR, LABEL_SMOOTHING, MIXUP_ALPHA = getenv('DIV_FACTOR', div_factor), getenv('LABEL_SMOOTHING', label_smoothing), getenv('MIXUP_ALPHA', mixup_alpha)
-  FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio))
+  MAX_LR, PCT_START, MOMENTUM, WD = getenv("MAX_LR", config["max_lr"]), getenv('PCT_START', config["pct_start"]), getenv('MOMENTUM', config["momentum"]), getenv("WD", config["wd"])
+  DIV_FACTOR, LABEL_SMOOTHING, MIXUP_ALPHA = getenv('DIV_FACTOR', config["div_factor"]), getenv('LABEL_SMOOTHING', config["label_smoothing"]), getenv('MIXUP_ALPHA', config["mixup_alpha"])
+  FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', config["final_lr_ratio"]))
   if getenv("FAKEDATA"):
     N = 2048
     X_train = np.random.default_rng().standard_normal(size=(N, 3, 32, 32), dtype=np.float32)
@@ -209,7 +210,129 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     loss_cpu = loss.numpy()
     cl = time.monotonic()
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+    # if rank == 0: wandb.log({"loss": loss_cpu, "lr": optimizer.lr.numpy()[0], "gflops": GlobalCounters.global_ops*1e-9/(cl-st), "mem_used": GlobalCounters.mem_used/1e9})
     i += 1
+  return best_eval
+
+def rank_0_initiate_train_single_step():
+  wandb.init(project="tinygrad-cifar10")
+
+  from extra.dist import OOB
+  # send command to all ranks to start a single train iteration
+  for i in range(1, getenv("WORLD_SIZE")):
+    OOB.send({
+      "max_lr": wandb.config.max_lr,
+      "pct_start": wandb.config.pct_start,
+      "div_factor": wandb.config.div_factor,
+      "momentum": wandb.config.momentum,
+      "wd": wandb.config.wd,
+      "label_smoothing": wandb.config.label_smoothing,
+      "final_lr_ratio": wandb.config.final_lr_ratio,
+      "mixup_alpha": wandb.config.mixup_alpha,
+    }, i)
+
+  acc = train_cifar({
+    "max_lr": wandb.config.max_lr,
+    "pct_start": wandb.config.pct_start,
+    "div_factor": wandb.config.div_factor,
+    "momentum": wandb.config.momentum,
+    "wd": wandb.config.wd,
+    "label_smoothing": wandb.config.label_smoothing,
+    "final_lr_ratio": wandb.config.final_lr_ratio,
+    "mixup_alpha": wandb.config.mixup_alpha,
+  })
+  wandb.log({"val_acc": acc})
+
+def run():
+  rank = getenv("RANK")
+  # setup wandb sweep
+  if rank == 0:
+    wandb.login()
+    metric = {
+      "name": "val_acc",
+      "goal": "maximize",
+      "target": 90.0,
+    }
+    good = {
+      "max_lr": 0.025498470797116014,
+      "pct_start": 0.1992938922567368,
+      "div_factor": 1862926896844592,
+      "momentum": 0.8931837205853504,
+      "wd": 0.09106877702305435,
+      "label_smoothing": 0.14551907089629904,
+      "final_lr_ratio": 0.0010867069979536724,
+      "mixup_alpha": 0.020217493177474396,
+    }
+    parameters_dict = {
+      "max_lr": {
+        "distribution": "normal",
+        "mu": good["max_lr"],
+        "sigma": 0.009,
+      },
+      "pct_start": {
+        "distribution": "normal",
+        "mu": good["pct_start"],
+        "sigma": 0.03,
+      },
+      "div_factor": {
+        "distribution": "normal",
+        "mu": good["div_factor"],
+        "sigma": 1.24e15,
+      },
+      "momentum": {
+        "distribution": "normal",
+        "mu": good["momentum"],
+        "sigma": 0.16,
+      },
+      "wd": {
+        "distribution": "normal",
+        "mu": good["wd"],
+        "sigma": 0.0189,
+      },
+      "label_smoothing": {
+        "distribution": "normal",
+        "mu": good["label_smoothing"],
+        "sigma": 0.044,
+      },
+      "final_lr_ratio": {
+        "distribution": "normal",
+        "mu": good["final_lr_ratio"],
+        "sigma": 0.00023,
+      },
+      "mixup_alpha": {
+        "distribution": "normal",
+        "mu": good["mixup_alpha"],
+        "sigma": 0.003,
+      },
+    }
+    sweep_config = {
+      "method": "bayes",
+      "name": "sweep-3",
+      "metric": metric,
+      "parameters": parameters_dict,
+    }
+    sweep_id = wandb.sweep(sweep_config, project="tinygrad-cifar10")
+    wandb.agent(sweep_id, function=rank_0_initiate_train_single_step, count=100)
+  else:
+    # wait for command from rank 0 to start a single train iteration
+    from extra.dist import OOB
+    while True:
+      config = OOB.recv(0)
+      if config is not None:
+        train_cifar(config)
+      else: break
+
+def run2():
+  train_cifar({
+    "max_lr": 0.025498470797116014,
+    "pct_start": 0.1992938922567368,
+    "div_factor": 1862926896844592,
+    "momentum": 0.8931837205853504,
+    "wd": 0.09106877702305435,
+    "label_smoothing": 0.14551907089629904,
+    "final_lr_ratio": 0.0010867069979536724,
+    "mixup_alpha": 0.020217493177474396,
+  })
 
 if __name__ == "__main__":
   devices = ["gpu:0", "gpu:1", "gpu:2", "gpu:3", "gpu:4", "gpu:5"]
@@ -220,5 +343,5 @@ if __name__ == "__main__":
 
   processes = []
   for rank, device in enumerate(devices):
-    processes.append(dist.spawn(rank, device, fn=train_cifar, args=()))
+    processes.append(dist.spawn(rank, device, fn=run2, args=()))
   for p in processes: p.join()
