@@ -51,21 +51,21 @@ class CStyleLanguage(NamedTuple):
     if self.is_gpu:
       if var_dtype == dtypes.float32:
         return f"as_float({x})"
-      elif var_dtype == dtypes.float16:
+      if var_dtype == dtypes.float16:
         return f"as_half({x})"
-      elif var_dtype == dtypes.bfloat16:
+      if var_dtype == dtypes.bfloat16:
         raise NotImplementedError("No bitcast implemented for bfloat16 in OpenCL")
-      elif var_dtype == dtypes.int8:
+      if var_dtype == dtypes.int8:
         return f"as_char({x})"
-      elif var_dtype == dtypes.int32:
+      if var_dtype == dtypes.int32:
         return f"as_int({x})"
-      elif var_dtype == dtypes.int64:
+      if var_dtype == dtypes.int64:
         return f"as_long({x})"
-      elif var_dtype == dtypes.uint8:
+      if var_dtype == dtypes.uint8:
         return f"as_uchar({x})"
-      elif var_dtype == dtypes.uint32:
+      if var_dtype == dtypes.uint32:
         return f"as_uint({x})"
-      elif var_dtype == dtypes.uint64:
+      if var_dtype == dtypes.uint64:
         return f"as_ulong({x})"
       raise NotImplementedError(f"No bitcast implemented for {var_dtype}")
     return f"*(({var_dtype.name}*)&({x}))"
