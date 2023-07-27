@@ -11,6 +11,9 @@ from tinygrad.helpers import prod, dtypes
 from tinygrad.lazy import LazyBuffer, create_lazybuffer, Device
 from tinygrad.ops import ASTRunner
 from tinygrad.shape.shapetracker import ShapeTracker
+import pytest
+
+pytestmark = pytest.mark.webgpu
 
 # we don't always have GPU support, so the type signature is the abstract CompiledBuffer instead of GPUBuffer
 def atan2_gpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
@@ -31,7 +34,7 @@ def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
 # NOTE: The derivative of atan2 doesn't need a custom op! https://www.liquisearch.com/atan2/derivative
 # In general, it is also optional to write a backward function, just your backward pass won't work without it
 
-from tinygrad.ops import ASTRunner, LazyOp, LoadOps, BinaryOps, UnaryOps
+from tinygrad.ops import LazyOp, LoadOps, BinaryOps, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.tensor import Function
 
@@ -48,7 +51,7 @@ class ATan2(Function):
 
 # *** third, we use our lovely new mlop in some tests ***
 
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 
 @unittest.skipUnless(Device.DEFAULT in ["CPU", "GPU"], "atan2 is only implemented for CPU and GPU")
 class TestCustomFunction(unittest.TestCase):
