@@ -370,7 +370,7 @@ class Tensor:
     shape = [(0,s) for s in self.shape[:-(len(padding)//2)]]
     slc = shape + [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], self.shape[::-1])][::-1]
     if value == 0: return self.slice(slc)
-    return self.slice(slc) + value*(1 - Tensor.ones(self.shape).slice(slc))
+    return self.slice(slc) + (value - Tensor.full(self.shape, value).slice(slc))
 
   @property
   def T(self) -> Tensor: return self.transpose()
