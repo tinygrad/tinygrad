@@ -18,7 +18,7 @@ class CStyleLanguage(NamedTuple):
   buffer_suffix: str = ""
   smem_prefix: str = ""
   barrier: str = ""
-  is_gpu=False
+  is_gpu: bool = False
   gid: List[str] = []
   lid: List[str] = []
   extra_args: List[str] = []
