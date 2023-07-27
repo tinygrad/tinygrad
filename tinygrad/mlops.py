@@ -90,8 +90,13 @@ class Sum(Function):
 class Max(Function):
   __slots__ = "x", "ret"
   def forward(self, x:LazyBuffer, new_shape:ShapeType) -> LazyBuffer:
-    self.x, self.ret = x, x.reduce_op(ReduceOps.MAX, new_shape)
-    return self.ret
+    tensor_sum = x.reduce_op(ReduceOps.SUM, new_shape) # sums to nan if nan is present
+    nan_mask = tensor_sum.binary_op(BinaryOps.CMPEQ, tensor_sum) # 0 if nan is present, 1 otherwise
+    expanded_nan_mask = nan_mask.expand(x.shape) # expand 0s/1s to original shape
+    expanded_tensor_sum = tensor_sum.expand(x.shape) # expand nan to original shape
+    where_result = expanded_nan_mask.ternary_op(TernaryOps.WHERE, x, expanded_tensor_sum)
+    self.x, self.ret = where_result, where_result.reduce_op(ReduceOps.MAX, new_shape)
+    return self.ret # WHERE returns -inf instead of nan...
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # 1s in locations where the max was chosen (can be two locations)
