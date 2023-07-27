@@ -1,8 +1,8 @@
 import itertools
 import random
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, CI
 from tinygrad.shape.symbolic import Variable
-random.seed(random.random())
+random.seed(42 if CI else random.random())
 
 def add_v(expr, rng=None):
   if rng is None: rng = random.randint(0,2)
