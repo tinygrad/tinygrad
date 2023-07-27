@@ -16,7 +16,7 @@ class Cast(Function):
     return x.cast(dtype)
   def backward(self, grad_output):
     return grad_output.cast(self.input_dtype)
-  
+
 class Bitcast(Function):
   __slots__ = "input_shape", "input_dtype"
   def forward(self, x, dtype):

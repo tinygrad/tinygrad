@@ -114,7 +114,7 @@ class FlopCounter:
 from tinygrad.shape.shapetracker import ShapeTracker
 shape_fxn_for_op: Dict[Op, Callable] = {
   UnaryOps.CAST: lambda self,dtype: (self.shape, dtype, self.consume_flops()),   # cast uses no flops
-  UnaryOps.BITCAST: lambda self,new_dtype: (((prod(self.shape) * self.dtype.itemsize * 8) // (new_dtype.itemsize * 8),), new_dtype, self.consume_flops()),  # bitcast may change shape
+  UnaryOps.BITCAST: lambda self,dtype: (self.shape, dtype, self.consume_flops()),  # bitcast uses no flops
   **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op not in {UnaryOps.CAST, UnaryOps.BITCAST}},
   **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
   **{op:lambda self,new_shape: (new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},

@@ -46,6 +46,9 @@ class CStyleLanguage(NamedTuple):
     if var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
+  def render_bitcast(self, x:str, var_dtype:DType) -> str:
+    return f"*(({var_dtype.name}*)&({x}))"
+  
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): val = "NAN"
@@ -170,6 +173,9 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
       kk(lang.render_store(args.name, args.memory_dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, args.local))
     elif uop == UOps.CAST and newvar is not None and newvar.dtype.sz > 1:
       kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
+    elif uop == UOps.BITCAST:
+      assert newvar is not None and isinstance(args, DType)
+      kk(f"{newvar.render(True)} = {lang.render_bitcast(vin[0].render(), args)};")
     elif uop == UOps.DEFINE_LOCAL:
       if lang.external_local_bufs:
         prekernel.append(lang.render_local(args[0], args[1]))

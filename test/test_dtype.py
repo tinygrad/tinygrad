@@ -42,6 +42,7 @@ def _test_casts_to(tensor_contents:List, source_dtypes:List[DType], target_dtype
     lambda s_dtype: _test_cast(Tensor(tensor_contents, dtype=s_dtype), target_dtype, target_contents),
     source_dtypes
   ))
+def _test_bitcast(a:Tensor, target_dtype:DType, target): _test_op(lambda: a.bitcast(target_dtype), target_dtype, target)
 
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype:DType):
   _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)+Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [2,4,6,8])
@@ -116,9 +117,26 @@ class TestInt32Dtype(unittest.TestCase):
   def test_casts_to_int32(self): _test_casts_to([1,2,3,4], source_dtypes=[dtypes.float32, dtypes.int64], target_dtype=dtypes.int32)
   def test_casts_from_int32(self): _test_casts_from([1,2,3,4], source_dtype=dtypes.int32, target_dtypes=[dtypes.float32, dtypes.int64])
 
-  def test_int32_ops(self): _test_ops(a_dtype=dtypes.int32, b_dtype=dtypes.int32, target_dtype=dtypes.int32)
-  def test_int32_upcast_float32(self): _test_ops(a_dtype=dtypes.int32, b_dtype=dtypes.float32, target_dtype=dtypes.float32)
-  def test_int32_upcast_int64(self): _test_ops(a_dtype=dtypes.int32, b_dtype=dtypes.int64, target_dtype=dtypes.int64)
+  def test_int32_to_float(self): _test_cast(Tensor([1,2,3,4], dtype=dtypes.int32), dtypes.float32, [1,2,3,4])
+  def test_int32_to_int64(self): _test_cast(Tensor([1,2,3,4], dtype=dtypes.int32), dtypes.int64, [1,2,3,4])
 
+  def test_int32_add(self): _test_add(Tensor([1,2,3,4], dtype=dtypes.int32), Tensor([1,2,3,4], dtype=dtypes.int32), dtypes.int32, [2,4,6,8])
+  def test_int32_mul(self): _test_mul(Tensor([1,2,3,4], dtype=dtypes.int32), Tensor([1,2,3,4], dtype=dtypes.int32), dtypes.int32, [1,4,9,16])
+  def test_int32_matmul(self): _test_matmul(Tensor([[1,2],[3,4]], dtype=dtypes.int32), Tensor.eye(2, dtype=dtypes.int32), dtypes.int32, [[1,2],[3,4]])
+
+  def test_int32_add_upcast_float(self): _test_add_upcast(Tensor([1,2,3,4], dtype=dtypes.int32), Tensor([1,2,3,4], dtype=dtypes.float32), dtypes.float32, [2,4,6,8])
+  def test_int32_mul_upcast_float(self): _test_mul_upcast(Tensor([1,2,3,4], dtype=dtypes.int32), Tensor([1,2,3,4], dtype=dtypes.float32), dtypes.float32, [1,4,9,16])
+  def test_int32_matmul_upcast_float(self): _test_matmul_upcast(Tensor([[1,2],[3,4]], dtype=dtypes.int32), Tensor.eye(2, dtype=dtypes.float32), dtypes.float32, [[1,2],[3,4]])
+
+  def test_int32_add_upcast_int64(self): _test_add_upcast(Tensor([1,2,3,4], dtype=dtypes.int32), Tensor([1,2,3,4], dtype=dtypes.int64), dtypes.int64, [2,4,6,8])
+  def test_int32_mul_upcast_int64(self): _test_mul_upcast(Tensor([1,2,3,4], dtype=dtypes.int32), Tensor([1,2,3,4], dtype=dtypes.int64), dtypes.int64, [1,4,9,16])
+  def test_int32_matmul_upcast_int64(self): _test_matmul_upcast(Tensor([[1,2],[3,4]], dtype=dtypes.int32), Tensor.eye(2, dtype=dtypes.int64), dtypes.int64, [[1,2],[3,4]])
+
+class TestBitCast(unittest.TestCase):
+  def test_float32_bitcast_to_int32(self): _test_bitcast(Tensor([1,2,3,4], dtype=dtypes.float32), dtypes.int32, [1065353216, 1073741824, 1077936128, 1082130432])
+  def test_shape_change_bitcast(self):
+    with self.assertRaises(ValueError):
+      _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
+  
 if __name__ == '__main__':
   unittest.main()
