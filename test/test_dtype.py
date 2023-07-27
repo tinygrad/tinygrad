@@ -126,6 +126,6 @@ class TestBitCast(unittest.TestCase):
   def test_shape_change_bitcast(self):
     with self.assertRaises(ValueError):
       _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
-  
+
 if __name__ == '__main__':
   unittest.main()
