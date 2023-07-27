@@ -262,7 +262,6 @@ if __name__ == "__main__":
       logits = logits[:, -1]
       tokens, completed = decoder.update(tokens, logits, sum_logprobs)
       if completed: break
-    # TODO: tokens.shape does not match openai's whisper
     tokens = tokens.reshape(n_audio, n_group, -1)
     sum_logprobs = sum_logprobs.reshape(n_audio, n_group)
     tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
@@ -280,16 +279,12 @@ if __name__ == "__main__":
     initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|en|>"], enc._special_tokens["<|transcribe|>"]]
     seek, texts = 0, []
     while seek < content_frames:
-      print(seek)
       mel_segment = mel[:, seek:seek+N_FRAMES]
-      mel_segment = pad_or_trim(mel, N_FRAMES)
+      mel_segment = pad_or_trim(mel_segment, N_FRAMES)
       segment_size = min(N_FRAMES, content_frames - seek)
-      texts = decode_segment(mel_segment, initial_tokens)
-      print(texts)
-      # TODO: increment seek properly
-      #if no_speech_probs[0] > no_speech_threshold and avg_logprobs[0] <= logprob_threshold:
+      texts += decode_segment(mel_segment, initial_tokens)
       seek += segment_size
-    return texts[0] if mel.ndim == 2 else texts
+    return "".join(texts)
 
   if getenv("TEST"):
     diff = difflib.Differ()
