@@ -119,8 +119,11 @@ def hand_coded_optimizations(k:Linearizer):
       if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1)
       k.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
 
+      s0 = max(axis_buf0, key=lambda x:x[1])[0]
+      s1 = max(axis_buf1, key=lambda x:x[1])[0]
+
       # TODO: select axis in smart way
-      s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
+      #s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
       global_count = k.first_reduce
 
       # upcast first
