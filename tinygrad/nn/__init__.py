@@ -1,7 +1,7 @@
 import math
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, dtypes
 
 class BatchNorm2d:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
@@ -10,10 +10,12 @@ class BatchNorm2d:
     if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
     else: self.weight, self.bias = None, None
 
-    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
+    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False, dtype=dtypes.float32), Tensor.ones(sz, requires_grad=False, dtype=dtypes.float32)
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x:Tensor):
+    x_dtype = x.dtype
+    x = x.cast(dtypes.float32).realize()
     if Tensor.training:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
@@ -21,7 +23,7 @@ class BatchNorm2d:
       batch_mean = x.mean(axis=(0,2,3))
       y = (x - batch_mean.reshape(shape=[1, -1, 1, 1]))
       batch_var = (y*y).mean(axis=(0,2,3))
-      batch_invstd = batch_var.add(self.eps).pow(-0.5)
+      batch_invstd = batch_var.add(self.eps).rsqrt()
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
@@ -33,8 +35,7 @@ class BatchNorm2d:
       # NOTE: this can be precomputed for static inference. we expand it here so it fuses
       batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
 
-    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
-
+    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd).cast(x_dtype).realize()
 # TODO: these Conv lines are terrible
 def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
   return Conv2d(in_channels, out_channels, (kernel_size,), stride, padding, dilation, groups, bias)

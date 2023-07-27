@@ -23,6 +23,7 @@ def set_seed(seed):
 num_classes = 10
 HALF = getenv('HALF', 1) == 1
 LOSS_SCALE = getenv('LOSS_SCALE', 1) 
+KEEP_FP32_COPY = getenv('KEEP_FP32_COPY') 
 
 
 def change_dtype(layers, dtype):
@@ -50,20 +51,19 @@ def copy_weights(from_model, to_model):
       to_model_state[k].grad.assign(Tensor(v.grad.cast(to_model_state[k].dtype).numpy(), requires_grad=False).realize())
 
 class ConvGroup:
-  def __init__(self, channels_in, channels_out, short, se=True):
-    self.short, self.se = short, se and not short
-    self.conv = [nn.Conv2d(channels_in if i == 0 else channels_out, channels_out, kernel_size=3, padding=1, bias=False) for i in range(1 if short else 3)]
-    self.norm = [nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.8) for _ in range(1 if short else 3)]
-    if self.se: self.se1, self.se2 = nn.Linear(channels_out, channels_out//16), nn.Linear(channels_out//16, channels_out)
+  def __init__(self, channels_in, channels_out):
+    self.conv = [nn.Conv2d(channels_in if i == 0 else channels_out, channels_out, kernel_size=3, padding=1, bias=False) for i in range(2)]
+    self.norm = [nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.8) for _ in range(2)]
+    self.act = lambda x: x.relu()
 
   def __call__(self, x):
     x = self.conv[0](x).max_pool2d(2)
-    x = self.norm[0](x).relu()
-    if self.short: return x
+    x = self.norm[0](x)
+    x = self.act(x)
     residual = x
-    mult = self.se2((self.se1(residual.mean((2,3)))).relu()).sigmoid().reshape(x.shape[0], x.shape[1], 1, 1) if self.se else 1.0
-    x = self.norm[1](self.conv[1](x)).relu()
-    x = self.norm[2](self.conv[2](x) * mult).relu()
+    x = self.conv[1](x)
+    x = self.norm[1](x)
+    x = self.act(x)
     return x + residual
 
 class SpeedyResNet:
@@ -74,9 +74,9 @@ class SpeedyResNet:
       nn.Conv2d(3, BASE_DIM, kernel_size=1),
       nn.BatchNorm2d(BASE_DIM, track_running_stats=False, eps=1e-12, momentum=0.8),
       lambda x: x.relu(),
-      ConvGroup(BASE_DIM, BASE_DIM*2, short=False),
-      ConvGroup(BASE_DIM*2, BASE_DIM*4, short=True),
-      ConvGroup(BASE_DIM*4, BASE_DIM*8, short=False),
+      ConvGroup(BASE_DIM, BASE_DIM*2),
+      ConvGroup(BASE_DIM*2, BASE_DIM*4),
+      ConvGroup(BASE_DIM*4, BASE_DIM*8),
       lambda x: x.max((2,3)),
       nn.Linear(BASE_DIM*8, num_classes, bias=False)
     ]
@@ -134,56 +134,47 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   cifar10_mean = Tensor(np.array([125.306918046875, 122.950394140625, 113.86538318359375], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
   cifar10_std = Tensor(np.array([62.993219278136884, 62.08870764001421, 66.70489964063091], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
 
-  model_fp32 = SpeedyResNet()
-  model_fp16 = change_dtype(SpeedyResNet(), dtypes.float16 if HALF else dtypes.float32)
+  main_model = SpeedyResNet()
+  calc_model = change_dtype(SpeedyResNet(), dtypes.float16 if HALF else dtypes.float32)
 
-  optimizer = optim.SGD(get_parameters(model_fp32), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  optimizer = optim.SGD(get_parameters(main_model if KEEP_FP32_COPY else calc_model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, 
                             total_steps=STEPS, pct_start=PCT_START)
   
-  @TinyJit
-  def preprocess_step(Xr, Xl, Yr, Yl, mixup_prob):
+  if KEEP_FP32_COPY: copy_weights(main_model, calc_model)
+  
+  def train_step(calc_model, main_model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
     Xr = (Xr - cifar10_mean) / cifar10_std
     Xl = (Xl - cifar10_mean) / cifar10_std
     X, Y = Xr*mixup_prob + Xl*(1-mixup_prob), Yr*mixup_prob + Yl*(1-mixup_prob)
     X = Tensor.where(Tensor.rand(X.shape[0],1,1,1, dtype=X.dtype) < 0.5, X[..., ::-1], X) # flip augmentation
-    return X.realize(), Y.realize()
-  
-  def run_forward(model, X, Y):
-    out = model(X)
+    out = calc_model(X)
     loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
     if not getenv("DISABLE_BACKWARD"):
-      loss = loss/LOSS_SCALE
-    return loss.realize()
-
-  def run_backward(model_fp16, model_fp32, loss, optimizer, lr_scheduler,):
-    optimizer.init_params(get_parameters(model_fp16))
-    optimizer.zero_grad() # Zero grad needs to be called with fp16 params
-    optimizer.init_params(get_parameters(model_fp32))
-    loss.backward()
-    copy_weights(model_fp16, model_fp32)
-    optimizer.step()
-    copy_weights(model_fp32, model_fp16) # TODO: is this needed?
-    lr_scheduler.step()
-    loss = loss * LOSS_SCALE
-
-
-  def train_step(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
-    X, Y = preprocess_step(Xr, Xl, Yr, Yl, mixup_prob)
-    copy_weights(model_fp32, model_fp16) # copy weights from master copy
-    loss = run_forward(model_fp16, X, Y)
-    if not getenv("DISABLE_BACKWARD"):
-      run_backward(model_fp16, model_fp32, loss, optimizer, lr_scheduler)
+      loss = loss*LOSS_SCALE
+      if KEEP_FP32_COPY: optimizer.init_params(get_parameters(calc_model))
+      optimizer.zero_grad() # Zero grad needs to be called with fp16 params
+      if KEEP_FP32_COPY: optimizer.init_params(get_parameters(main_model))
+      loss.backward()
+      if KEEP_FP32_COPY: copy_weights(calc_model, main_model)
+      optimizer.step(LOSS_SCALE)
+      if KEEP_FP32_COPY: copy_weights(main_model, calc_model) # TODO: is this needed?
+      lr_scheduler.step()
+      loss = loss / LOSS_SCALE
     return loss.realize()
   
-  def eval_step(model_fp32, X, Y):
-    out = model_fp32(X, training=False)
+  @TinyJit
+  def train_step_jitted(calc_model, main_model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob):
+    return train_step(calc_model, main_model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
+  
+  def eval_step(model, X, Y):
+    out = model(X, training=False)
     loss = out.mul(Y).mean()
     return out.realize(), loss.realize()
 
   @TinyJit
-  def eval_step_jitted(model_fp32, X, Y):
-    return eval_step(model_fp32, X, Y)
+  def eval_step_jitted(model, X, Y):
+    return eval_step(model, X, Y)
   
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
@@ -205,7 +196,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
       eval_func = eval_step_jitted if getenv('JIT', 1) == 1 else eval_step
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
         Xt, Yt = Tensor(Xt), Tensor(Yt) 
-        out, loss = eval_func(model_fp32, Xt, Yt)
+        out, loss = eval_func(main_model if KEEP_FP32_COPY else calc_model, Xt, Yt)
         outs = out.numpy().argmax(axis=1)
         correct = outs == Yt.numpy().argmin(axis=1)
         losses.append(loss.numpy().tolist())
@@ -216,12 +207,13 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
         print(f"eval {sum(corrects)}/{len(corrects)} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
     if STEPS == 0 or i==STEPS: break
     # TODO: JIT is broken with mixed precision training 
+    train_func = train_step_jitted if getenv('JIT', 1) == 1 else train_step
     GlobalCounters.reset()
     st = time.monotonic()
     (Xr, Yr), (Xl, Yl) = next(right_batcher), next(left_batcher)
     Xr, Xl, Yr, Yl = Tensor(Xr), Tensor(Xl), Tensor(Yr), Tensor(Yl)
     lt = time.monotonic()
-    loss = train_step(model_fp16, model_fp32, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
+    loss = train_func(calc_model, main_model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
     et = time.monotonic()
     loss_cpu = loss.numpy() 
     cl = time.monotonic()

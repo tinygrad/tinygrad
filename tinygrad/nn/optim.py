@@ -44,7 +44,7 @@ class SGD(Optimizer):
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False, dtype=t.dtype) for t in self.params] if self.momentum else []
 
   # https://pytorch.org/docs/stable/generated/torch.optim.SGD.html
-  def step(self) -> None:
+  def step(self, loss_scale=1) -> None:
     global global_steps
     for i, t in enumerate(self.params):
       assert t.grad is not None
@@ -52,13 +52,15 @@ class SGD(Optimizer):
         log_grad(i, t.grad)
         grad_sum = t.grad.sum().numpy()
         if grad_sum != grad_sum:
-          raise Exception(f'NaNs detected in bp! found NaNs in {t.shape}')
+          print(f'NaNs detected in bp! found NaNs in {t.shape}, skipping update')
+          continue
       g = t.grad.realize() + self.wd * t.detach()
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g).realize()  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
-      g = g.cast(t.dtype) if g.dtype != t.dtype else g
-      t.assign(t.detach() - g * self.lr)
+      weight_update = (g * self.lr)/loss_scale
+      weight_update = weight_update.cast(t.dtype) if weight_update.dtype != t.dtype else weight_update
+      t.assign(t.detach() - weight_update)
     self.realize(self.b)
     global_steps += 1
 
