@@ -4,7 +4,7 @@ import os, functools, platform, time, re
 from weakref import KeyedRef, ref
 from _weakref import _remove_dead_weakref # type: ignore
 import numpy as np
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
+from typing import Dict, Set, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 from math import prod # noqa: F401 # pylint:disable=unused-import
 
 ShapeType = Tuple[int, ...]
@@ -32,22 +32,27 @@ def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
 class Context(contextlib.ContextDecorator):
-  stack: ClassVar[List[dict[str, Any]]] = [{}]
+  stack: ClassVar[List[dict[str, int]]] = [{}]
+  _vars: ClassVar[Dict[str, Tuple[ContextVar, int]]] = {}
   def __init__(self, **kwargs): self.kwargs = kwargs
-  def __enter__(self): Context.stack.append({**Context.stack[-1], **self.kwargs})
-  def __exit__(self, *args): Context.stack.pop()
+  def __enter__(self):
+    Context.stack.append(self.kwargs)
+    for k, (o, _) in Context._vars.items(): o.value = self.kwargs.get(k, o.value)
+  def __exit__(self, *args):
+    Context.stack.pop()
+    for k, (o, dv) in Context._vars.items(): o.value = Context.stack[-1].get(k, dv)
 
 class ContextVar:
-  def __init__(self, key, default_value):
-    self.key, self.initial_value = key, getenv(key, default_value)
-    if key not in Context.stack[-1]: Context.stack[-1][key] = self.initial_value
-  def __call__(self, x): Context.stack[-1][self.key] = x
+  __slots__ = "value"
+  def __new__(cls, key, default_value):
+    if key in Context._vars: return Context._vars[key][0]
+    Context._vars[key] = (instance := super().__new__(cls), getenv(key, default_value))
+    instance.value = Context.stack[-1].get(key, default_value)
+    return instance
   def __bool__(self): return bool(self.value)
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
-  @property
-  def value(self): return Context.stack[-1].get(self.key, self.initial_value)
 
 DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
 GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
