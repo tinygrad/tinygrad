@@ -21,9 +21,9 @@ class BatchNorm2d:
       batch_mean = x.mean(axis=(0,2,3))
       y = (x - batch_mean.reshape(shape=[1, -1, 1, 1]))
       batch_var = (y*y).mean(axis=(0,2,3))
-      batch_invstd = batch_var.add(self.eps).rsqrt()
+      batch_invstd = batch_var.clip(self.eps, float('inf')).rsqrt()
 
-      # NOTE: wow, this is done all throughout training in most PyTorch models
+    # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
         self.running_mean.assign((1 - self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
         self.running_var.assign((1 - self.momentum) * self.running_var + self.momentum * prod(y.shape)/(prod(y.shape) - y.shape[1]) * batch_var.detach() )
