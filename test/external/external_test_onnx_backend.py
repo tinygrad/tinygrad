@@ -165,7 +165,6 @@ backend_test.exclude('test_reshape_allowzero_reordered_cpu') # reshaping to 0 sh
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
-backend_test.exclude('test_operator_pow_cpu') # issue #1251
 backend_test.exclude('test_identity_sequence_cpu') # type_proto has no shape or dim_value
 
 # disable model tests for now since they are slow

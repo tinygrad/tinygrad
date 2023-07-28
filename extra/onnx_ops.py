@@ -163,6 +163,21 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh) if dim[1]%sh != 0 else nsh) for dim, sh, nsh in zip(pads_, base_shape, new_shape)]
     return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
   elif mode == "reflect":
+    '''
+    print(x.numpy())
+    # repeat, shrink to x.shape, (padder == x).where(x, padder)
+    repeat_args = [(1) if pads_[i] == (0,0) else (2 + math.ceil(pads_[i][0]/x.shape[i]) + math.ceil(pads_[i][1]/x.shape[i])) for i in range(x.ndim)]
+    shrink_args = [(s-1 + (s - pads_[dim][0])%s, s + s*(repeat_args[dim]-1) - (s - pads_[dim][0])%s) for dim,s in enumerate(x.shape)] 
+    # padder = x.flip([n for n in range(x.ndim)]).repeat(repeat_args).shrink(tuple(shrink_args))
+    padder = x.flip([n for n in range(x.ndim)]).repeat(repeat_args).shrink(tuple(shrink_args))
+    x = x.pad(tuple(pads_))
+    # ret = (padder == x).where(x, padder)
+    print(padder.shape)
+    print(padder.numpy())
+    print(x.shape)
+    print(x.numpy())
+    exit()
+    '''
     n_pads = [(n,pad) for n,pad in enumerate(pads_)][::-1]
     for n, pad in n_pads: # TODO theres probably a way to do this with less code
       if pad == (0,0): continue
@@ -337,7 +352,7 @@ def ReduceLogSum(data, axes=None, keepdims=1, noop_with_empty_axes=0): return da
 def ReduceLogSumExp(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
 
 
-def GlobalAveragePool(X:Tensor): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
+def GlobalAveragePool(X): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def OptionalHasElement(x: Tensor=None): return Tensor(x is not None and x.numel() > 0, dtype=dtypes.bool)
 def OptionalGetElement(x: Tensor=None): return x if x is not None else Tensor([], dtype=dtypes.float32)
@@ -410,8 +425,7 @@ def SoftmaxCrossEntropyLoss(scores, labels, weights=None, ignore_index=None, red
   y = scores.log_softmax(axis=1)
   if weights is not None: weights = weights.gather(labels, 0)
   loss = (mask * -y).sum(1) if weights is None else (mask * -y).sum(1) * weights
-  num_non_zero = (loss == 0).where(0, 1).sum()
-  if reduction == "mean": loss = loss.sum() / num_non_zero if weights is None else loss.sum() / weights.sum()
+  if reduction == "mean": loss = loss.sum() / (loss == 0).where(0, 1).sum() if weights is None else loss.sum() / weights.sum()
   elif reduction == "sum": loss = loss.sum()
   return loss, y
 
@@ -434,6 +448,21 @@ def Gather(input, indices, axis=0):
     return input.gather(indices, axis)
 
 def GatherElements(input, indices, axis):
+  idx = indices
+  if axis < 0: axis += input.ndim
+  ret = input.gather(indices, dim=axis)
+  input_extra = input.shape[:axis] + input.shape[axis+1:]
+  indices_extra = idx.shape[:axis] + idx.shape[axis+1:]
+  indices_extra = [[axis+n,i] if n < axis else (axis+1+n, i) for n,i in enumerate(indices_extra)][::-1]
+  input_extra = [(n,i) if n < axis else(n+indices.ndim, i) for n,i in enumerate(input_extra)][::-1]
+  for n, ((dim_indices, indices), (dim_input, input)) in enumerate(zip(indices_extra, input_extra)):
+    if dim_input < dim_indices and n < len(indices_extra)-1: indices_extra[n+1][0] -= 1
+    arange_indices = Tensor.arange(indices).reshape(*[1]*dim_indices, indices, *[1]*(ret.ndim-dim_indices-1))
+    arange_input = Tensor.arange(input).reshape(*[1]*dim_input, input, *[1]*(ret.ndim-dim_input-1))
+    ret = ((arange_indices == arange_input) * ret).sum(dim_input)
+  return ret
+  '''
+  # hacked gather
   indices = (indices < 0).where(indices+input.shape[axis], indices)
   indices = indices.transpose(ax1=axis, ax2=0)
   permute_args = list(range(input.ndim))
@@ -441,7 +470,7 @@ def GatherElements(input, indices, axis):
   permute_args.append(permute_args.pop(0))
   input = input.permute(*permute_args)
   return _gather(input, indices).transpose(ax1=0, ax2=axis)
-
+  '''
 def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
   def _and(cond1, cond2): return ((cond1 + cond2) == 2).where(1, 0)
   assert n <= 1, f"n:{n} shouldn't be larger than 1"
