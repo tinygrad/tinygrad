@@ -60,7 +60,7 @@ class CStyleLanguage(NamedTuple):
     }
     if self.is_gpu:
       if var_dtype == dtypes.bfloat16 or var_dtype not in gpu_bitcast_mapping:
-          raise NotImplementedError(f"No bitcast implemented for {var_dtype}")
+        raise NotImplementedError(f"No bitcast implemented for {var_dtype}")
       return f"{gpu_bitcast_mapping[var_dtype]}({x})"
     return f"*(({var_dtype.name}*)&({x}))"
   
