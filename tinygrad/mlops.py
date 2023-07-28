@@ -18,13 +18,12 @@ class Cast(Function):
     return grad_output.cast(self.input_dtype)
 
 class Bitcast(Function):
-  __slots__ = "input_shape", "input_dtype"
+  __slots__ = "input_dtype"
   def forward(self, x, dtype):
-    self.input_shape = x.shape
     self.input_dtype = x.dtype
     return x.bitcast(dtype)
   def backward(self, grad_output):
-    return grad_output.bitcast(self.input_dtype).reshape(self.input_shape)
+    return grad_output.bitcast(self.input_dtype)
 
 # ************* unary ops *************
 
