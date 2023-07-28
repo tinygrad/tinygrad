@@ -16,8 +16,8 @@ def apply_opt(k, x):
       k.local_dims += 1
   k.simplify_ones()
 
-UPCASTS = [1, 2, 4, 8]
-LOCALS = [1, 2, 4, 8, 16, 32]
+UPCASTS = [1, 2, 3, 4, 5, 6, 7, 8]
+LOCALS = [1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32]
 
 # optimization
 def kernel_optimize(k, create_k, runtime):
