@@ -84,6 +84,26 @@ class SpeedyResNet:
     if not training and getenv('TTA', 0)==1: return ((forward(x)*0.5) + (forward(x[..., ::-1])*0.5)).log_softmax()
     return forward(x).log_softmax()
 
+# TODO currently this only works for RGB in format of NxCxHxW and pads the HxW
+# implemented in recursive fashion but figuring out how to switch indexing dim 
+# during the loop was a bit tricky
+def pad_reflect(X, padding) -> Tensor:
+  print(padding)
+  p = padding[3]
+  s = X.shape[3]
+  # TODO assert padding length can't be greater than s - 1 for pad reflect
+  X_lr = X[...,:,1:1+p[0]].flip(3).pad(((0,0),(0,0),(0,0),(0,s+p[0]))) + X[...,:,-1-p[1]:-1].flip(3).pad(((0,0),(0,0),(0,0),(s+p[1],0)))
+  X = X.pad(((0,0),(0,0),(0,0),p)) + X_lr
+
+  p = padding[2]
+  s = X.shape[2]
+  X_lr = X[...,1:1+p[0],:].flip(2).pad(((0,0),(0,0),(0,s+p[0]),(0,0))) + X[...,-1-p[1]:-1,:].flip(2).pad(((0,0),(0,0),(s+p[1],0),(0,0)))
+  X = X.pad(((0,0),(0,0),p,(0,0))) + X_lr
+    
+  return X
+
+# def masked_select()
+
 def cutmix(X, Y, mask_size=3, p=0.5, mix=True):
   if Tensor.rand(1) > 0.5: return X, Y
   # create a mask
