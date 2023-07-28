@@ -235,10 +235,9 @@ class Tensor:
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
   def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
-  def pad(self, arg: Tuple[Tuple[int, int], ...], value:float=None) -> Tensor:
+  def pad(self, arg: Tuple[Tuple[int, int], ...], value:float=0) -> Tensor:
     ret = mlops.Pad.apply(self, arg=arg) if any(x != (0, 0) for x in arg) else self
-    if value is None: return ret
-    return ret + (value - mlops.Pad.apply(Tensor.full(self.shape, value), arg=arg))
+    return ret if value == 0 else ret + (value - mlops.Pad.apply(Tensor.full(self.shape, value), arg=arg))
   # ***** movement hlops *****
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
@@ -368,7 +367,7 @@ class Tensor:
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
   # (padding_left, padding_right, padding_top, padding_bottom)
-  def pad2d(self, padding:Union[List[int], Tuple[int, ...]], value:float=None):
+  def pad2d(self, padding:Union[List[int], Tuple[int, ...]], value:float=0):
     assert len(padding) % 2 == 0 and len(padding)//2 <= len(self.shape), "Padding length must be even!"
     n_pad = list(zip(padding[::2][::-1], padding[1::2][::-1]))
     pad_, shr_ = [ (max(0,a), max(0,b)) for (a,b) in n_pad], [ (max(0,-a), s + max(0,a) + b) for (a,b),s in zip(n_pad, self.shape[-len(n_pad):])]
