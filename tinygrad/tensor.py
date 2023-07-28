@@ -241,7 +241,7 @@ class Tensor:
   # ***** movement hlops *****
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
-  def slice(self, arg:Sequence[Optional[Tuple[int, int]]]) -> Tensor: return self.pad2d(flatten([(a[1] - s, -a[0]) if a is not None else (0,0) for s,a in zip(self.shape, arg)])[::-1])
+  def slice(self, arg:Sequence[Optional[Tuple[int, int]]]) -> Tensor: return self.pad2d(flatten(((a[1] - s, -a[0]) if a is not None else (0,0) for s,a in zip(self.shape, arg)))[::-1])
 
   # - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
   # - A slice i:j returns the elements with indices in [i, j)
@@ -368,7 +368,7 @@ class Tensor:
     assert len(padding) % 2 == 0 and len(padding)//2 <= len(self.shape), "Padding length must be even!"
     n_pad = list(zip(padding[::2][::-1], padding[1::2][::-1]))
     pad_, shr_ = [ (max(0,a), max(0,b)) for (a,b) in n_pad], [ (max(0,-a), s + max(0,a) + b) for (a,b),s in zip(n_pad, self.shape[-len(n_pad):])]
-    return self.pad(tuple([(0,0) for _ in self.shape[:-len(n_pad)]] + pad_), value).shrink(tuple([(0,s) for s in self.shape[:-len(n_pad)]] + shr_))
+    return self.pad(tuple([(0,0) for _ in self.shape[:-len(n_pad)]] + pad_), value=value).shrink(tuple([(0,s) for s in self.shape[:-len(n_pad)]] + shr_))
 
   @property
   def T(self) -> Tensor: return self.transpose()
