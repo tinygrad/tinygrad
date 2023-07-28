@@ -53,16 +53,21 @@ def copy_weights(from_model, to_model):
 class ConvGroup:
   def __init__(self, channels_in, channels_out):
     self.conv = [nn.Conv2d(channels_in if i == 0 else channels_out, channels_out, kernel_size=3, padding=1, bias=False) for i in range(2)]
-    self.norm = [nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.8) for _ in range(2)]
+    self.norm = [nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-4, momentum=0.8) for _ in range(2)]
     self.act = lambda x: x.relu()
 
   def __call__(self, x):
+    xtype = x.dtype
     x = self.conv[0](x).max_pool2d(2)
+    x = x.cast(dtypes.float32)
     x = self.norm[0](x)
+    x = x.cast(xtype)
     x = self.act(x)
     residual = x
     x = self.conv[1](x)
+    x = x.cast(dtypes.float32)
     x = self.norm[1](x)
+    x = x.cast(xtype)
     x = self.act(x)
     return x + residual
 
@@ -72,7 +77,9 @@ class SpeedyResNet:
     BASE_DIM=getenv("BASE_DIM", 64)
     self.net = [
       nn.Conv2d(3, BASE_DIM, kernel_size=1),
-      nn.BatchNorm2d(BASE_DIM, track_running_stats=False, eps=1e-12, momentum=0.8),
+      lambda x: x.cast(dtypes.float32),
+      nn.BatchNorm2d(BASE_DIM, track_running_stats=False, eps=1e-4, momentum=0.8),
+      lambda x: x.cast(dtypes.float16 if HALF else dtypes.float32),
       lambda x: x.relu(),
       ConvGroup(BASE_DIM, BASE_DIM*2),
       ConvGroup(BASE_DIM*2, BASE_DIM*4),
@@ -92,6 +99,33 @@ class SpeedyResNet:
         if out_sum != out_sum:
           raise Exception(f'NaNs detected in fp! found NaNs in {out_sum.shape} {layer}')
     return out.log_softmax()
+  
+
+class SimpleNet:
+  def __init__(self):
+    IMG_SIZE = 32
+    activation = lambda x: x.relu()
+    self.net = [
+      lambda x: x.reshape(-1, 3*IMG_SIZE*IMG_SIZE),
+      nn.Linear(3*IMG_SIZE*IMG_SIZE, (IMG_SIZE//2)*(IMG_SIZE//2)),
+      activation,
+      nn.Linear((IMG_SIZE//2)*(IMG_SIZE//2), (IMG_SIZE//4)*(IMG_SIZE//4)),
+      activation,
+      nn.Linear((IMG_SIZE//4)*(IMG_SIZE//4), num_classes),
+    ]
+
+  def __call__(self, x, training=True):
+    if not training and getenv('TTA', 0)==1: return ((x.sequential(self.net) * 0.5) + (x[..., ::-1].sequential(self.net) * 0.5)).log_softmax()
+    out = x
+    for layer in self.net:
+      out = layer(out)
+      if getenv('LOG_GRADS'):
+        out_sum = out.sum().numpy()
+        if out_sum != out_sum:
+          raise Exception(f'NaNs detected in fp! found NaNs in {out_sum.shape} {layer}')
+    return out.log_softmax()
+
+
 
 def fetch_batches(all_X, all_Y, BS, seed, is_train=False):
   def _shuffle(all_X, all_Y):
@@ -134,8 +168,10 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
   cifar10_mean = Tensor(np.array([125.306918046875, 122.950394140625, 113.86538318359375], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
   cifar10_std = Tensor(np.array([62.993219278136884, 62.08870764001421, 66.70489964063091], dtype=np.float16 if HALF else np.float32).reshape(1,3,1,1))
 
-  main_model = SpeedyResNet()
-  calc_model = change_dtype(SpeedyResNet(), dtypes.float16 if HALF else dtypes.float32)
+  net = SimpleNet if getenv('SIMPLE') else SpeedyResNet
+
+  main_model = net()
+  calc_model = change_dtype(net(), dtypes.float16 if HALF else dtypes.float32)
 
   optimizer = optim.SGD(get_parameters(main_model if KEEP_FP32_COPY else calc_model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, 
@@ -168,6 +204,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio
     return train_step(calc_model, main_model, optimizer, lr_scheduler, Xr, Xl, Yr, Yl, mixup_prob)
   
   def eval_step(model, X, Y):
+    X = (X - cifar10_mean) / cifar10_std
     out = model(X, training=False)
     loss = out.mul(Y).mean()
     return out.realize(), loss.realize()

@@ -14,8 +14,6 @@ class BatchNorm2d:
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x:Tensor):
-    x_dtype = x.dtype
-    x = x.cast(dtypes.float32).realize()
     if Tensor.training:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
@@ -35,7 +33,7 @@ class BatchNorm2d:
       # NOTE: this can be precomputed for static inference. we expand it here so it fuses
       batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
 
-    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd).cast(x_dtype).realize()
+    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
 # TODO: these Conv lines are terrible
 def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
   return Conv2d(in_channels, out_channels, (kernel_size,), stride, padding, dilation, groups, bias)
