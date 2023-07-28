@@ -8,7 +8,7 @@ from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst, buf_is_kernel_arg
-from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
+from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View, unit_stride_axes
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode
 VariableOrNum = Union[Variable, NumNode, Node]
 
@@ -174,12 +174,12 @@ class Linearizer:
     self.earlybufs = dedup(self.reduceop.buffers) if self.reduceop else []
 
     # create new shapetrackers inside this kernel, we will permute them
-    self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]
-    for st in self.sts: st.simplify()
+    self.sts: List[ShapeTracker] = [ShapeTracker(x.st.views) for x in self.bufs]
+    for st in self.sts: st = ShapeTracker(ShapeTracker.simplify(st.views))
 
     # make the output buffer shape correct in here
-    self.sts[0].reshape(self.info.shape)
-    self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
+    self.sts[0] = ShapeTracker(ShapeTracker.reshape(self.sts[0].views, self.info.shape))
+    self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
@@ -202,11 +202,11 @@ class Linearizer:
     if DEBUG >= 5: self.printbufs("early")
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
-  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]
+  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in unit_stride_axes(self.sts[i].views) if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]
 
   def upcasted_axis(self, i):
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
-                    self.sts[i].real_strides()[self.shape_len-self.upcasted:],
+                    ShapeTracker.real_strides(self.sts[i].views)[self.shape_len-self.upcasted:],
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
 
   # TODO: is there a better way to write this?
@@ -218,7 +218,7 @@ class Linearizer:
 
   def get_upcast_dim(self, i) -> List[int]:
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
-    return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
+    return [x for x in unit_stride_axes(self.sts[i].views) if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
     if isinstance(self.bufs[i].realized, RawConst): const = self.bufs[i].realized._buf
@@ -235,13 +235,13 @@ class Linearizer:
     ret = []
     for _idx in _idxs:
       if amt > 1:
-        idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
+        idx, valid = ShapeTracker.expr_idxs(tuple(self.sts[i].views), (_idx[:upcast_dim[0]] + (Variable.num(0),) + _idx[upcast_dim[0]+1:]))
         localtype = dtypes._float4 if amt == 4 else dtypes._float2
         if idx.render() != ((idx//amt)*amt).render():
-          idx, valid = self.sts[i].expr_idxs(_idx)
+          idx, valid = ShapeTracker.expr_idxs(tuple(self.sts[i].views), tuple(_idx))
           localtype = dtypes.float32
       else:
-        idx, valid = self.sts[i].expr_idxs(_idx)
+        idx, valid = ShapeTracker.expr_idxs(tuple(self.sts[i].views), tuple(_idx))
         localtype = dtypes.float32
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
@@ -267,7 +267,7 @@ class Linearizer:
       store_offset_new = {}
       for k,out_tokens in grouped_store_offset.items():
         amt = len(out_tokens)
-        idx, valid = self.sts[i].expr_idxs(k)
+        idx, valid = ShapeTracker.expr_idxs(tuple(self.sts[i].views), tuple(k))
         assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
         assert valid.min == 1, "stores are always valid"
         if all_same([x.name for x in out_tokens]) and tuple(range(amt)) == tuple(x.offset for x in out_tokens):
@@ -277,7 +277,7 @@ class Linearizer:
       store_offset = store_offset_new
 
     for idx, var in store_offset.items():
-      idx, valid = self.sts[i].expr_idxs(idx)
+      idx, valid = ShapeTracker.expr_idxs(tuple(self.sts[i].views), tuple(idx))
       if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
       self.uop(UOps.STORE, None, [var], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid))
 
@@ -293,7 +293,7 @@ class Linearizer:
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
-      self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      self.sts.append(ShapeTracker.from_shape(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
 
@@ -349,7 +349,7 @@ class Linearizer:
       # compute local aliases
       locals_to_store = []
       for i in self.local_alias:
-        strides = self.sts[i].real_strides()
+        strides = ShapeTracker.real_strides(self.sts[i])
         extra_locals = [lidx for lidx,st in zip(local_idxs[self.exclude_local_upcast:], strides[len(global_idxs)+self.exclude_local_upcast:self.first_reduce]) if st == 0]
         this_upcast_idxs: List[Node] = []
         for j,v in enumerate(full_upcast_idxs):
@@ -540,9 +540,11 @@ class Linearizer:
 
   # apply reshape and permute to all shapetrackers
   def reshape_and_permute(self, new_shape_fxn, axis):
-    for st in self.sts:
-      if new_shape_fxn is not None: st.reshape(tuple(new_shape_fxn(st.shape)))
-      if axis is not None: st.permute(tuple(axis))
+    for i in range(len(self.sts)):
+      if new_shape_fxn is not None: 
+        self.sts[i] = ShapeTracker(ShapeTracker.reshape(self.sts[i].views, tuple(new_shape_fxn(self.sts[i].shape))))
+      if axis is not None: 
+        self.sts[i] = ShapeTracker(self.sts[i].views[:-1] + (ShapeTracker.permute(self.sts[i].views[-1], tuple(axis)),))
 
   # drops the final dimension
   def upcast(self):
@@ -573,8 +575,8 @@ class Linearizer:
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
 
   def simplify_merge_adjacent(self):
-    if self.shape_len == 0: return
-    shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
+    if self.shape_len == 0: return 
+    shapes, strides = [x.shape for x in self.sts], [ShapeTracker.real_strides(x.views) for x in self.sts]
 
     # merge dimensions if we can, multi get_shape_strides
     # TODO: does this always preserve the reduce dimension, NO
@@ -592,7 +594,7 @@ class Linearizer:
         else: rets[j].append((shapes[j][i], strides[j][i]))
 
     # do the reshapes
-    for i,x in enumerate(rets): self.sts[i].reshape(tuple([y[0] for y in x]))
+    for i,x in enumerate(rets): self.sts[i] = ShapeTracker(ShapeTracker.reshape(self.sts[i].views, tuple([y[0] for y in x])))
 
   # ******************** GPU simplifiers ********************
 
@@ -609,7 +611,7 @@ class Linearizer:
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
 
     bst = 1
-    real_strides = self.sts[i].real_strides()
+    real_strides = ShapeTracker.real_strides(self.sts[i])
     shp, stride = [(s if p != 0 else 1) for s,p in zip(self.sts[i].shape, pattern)], [0]*len(pattern)
     for priority in range(1, max(pattern)+1):  # priority. 0 is non local and ignored
       for j,p in enumerate(pattern):
@@ -617,7 +619,7 @@ class Linearizer:
           stride[j] = bst
           bst *= shp[j]
 
-    self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
+    self.sts.append(ShapeTracker((View(tuple(shp), tuple(stride)),)))
     self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]

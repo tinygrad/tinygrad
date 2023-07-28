@@ -4,6 +4,7 @@ from tinygrad.helpers import DEBUG, prod, getenv, ImageDType
 from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.lazy import LazyBuffer
+from tinygrad.shape.shapetracker import ShapeTracker, unit_stride_axes  
 
 def apply_opt(k, x):
   for axis, amt, typ in x:
@@ -87,7 +88,7 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], runtime):
 
 def required_optimizations(k:Linearizer, early_only=False):
   for buf_index,buf in enumerate(k.bufs):
-    unit_stride_axes_mul_4 = [i for i in k.sts[buf_index].unit_stride_axes(ignore_valid=True) if k.sts[buf_index].shape[i]%4 == 0]
+    unit_stride_axes_mul_4 = [i for i in unit_stride_axes(k.sts[buf_index].views, ignore_valid=True) if k.sts[buf_index].shape[i]%4 == 0]
     if (not early_only or buf in k.earlybufs) and k.bufs[buf_index].dtype.__class__ is ImageDType:
       assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {k.bufs[buf_index]}"
       if all(x < (k.shape_len-k.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in k.upcast_in_mid_reduce_axes:
@@ -111,8 +112,8 @@ def hand_coded_optimizations(k:Linearizer):
       isinstance(k.reduceop.src[0].src[0], LazyBuffer) and isinstance(k.reduceop.src[0].src[1], LazyBuffer) and hasattr(k, 'lang') and len(k.lang.lid):
     buf0 = k.bufs.index(k.reduceop.src[0].src[0])
     buf1 = k.bufs.index(k.reduceop.src[0].src[1])
-    buf0_strides = k.sts[buf0].real_strides()
-    buf1_strides = k.sts[buf1].real_strides()
+    buf0_strides = ShapeTracker.real_strides(k.sts[buf0])
+    buf1_strides = ShapeTracker.real_strides(k.sts[buf1])
     axis_buf0 = [(i,k.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and k.full_shape[i]%8 == 0]
     axis_buf1 = [(i,k.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and k.full_shape[i]%8 == 0]
     if len(axis_buf0) and len(axis_buf1) and k.full_shape[k.first_reduce]%8 == 0 and (k.shape_len-k.first_reduce) == 1:
@@ -172,7 +173,7 @@ def hand_coded_optimizations(k:Linearizer):
 
     # are we upcasting in mid reduce? (only for images)
     if k.bufs[0].dtype.name.startswith('image') and not k.float4_axis(0) and k.group_for_reduce and k.first_reduce <= 2 and prod(k.sts[0].shape) > 1:
-      axes = k.sts[0].unit_stride_axes()
+      axes = unit_stride_axes(k.sts[0].views)
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
       if k.sts[0].shape[axes[0]]%4 == 0:
         k.shift_to(axes[0], 4, insert_before=k.first_reduce + len(k.group_for_reduce))   # insert at the end of the grouped axis
