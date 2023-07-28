@@ -365,7 +365,7 @@ class Tensor:
 
   # (padding_left, padding_right, padding_top, padding_bottom)
   def pad2d(self, padding:Union[List[int], Tuple[int, ...]], value:float=0):
-    assert len(padding) % 2 == 0 and len(padding)//2 <= len(self.shape), "Padding length must be even!"
+    assert len(padding) % 2 == 0 and len(padding)//2 <= len(self.shape) # Match Pytorch Behaviour
     n_pad = list(zip(padding[::2][::-1], padding[1::2][::-1]))
     pad_, shr_ = [ (max(0,a), max(0,b)) for (a,b) in n_pad], [ (max(0,-a), s + max(0,a) + b) for (a,b),s in zip(n_pad, self.shape[-len(n_pad):])]
     return self.pad(tuple([(0,0) for _ in self.shape[:-len(n_pad)]] + pad_), value=value).shrink(tuple([(0,s) for s in self.shape[:-len(n_pad)]] + shr_))
