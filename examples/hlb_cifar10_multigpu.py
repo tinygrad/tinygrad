@@ -307,7 +307,7 @@ def run():
     }
     sweep_config = {
       "method": "bayes",
-      "name": "sweep-4",
+      "name": "sweep-5",
       "metric": metric,
       "parameters": parameters_dict,
     }
@@ -343,5 +343,5 @@ if __name__ == "__main__":
 
   processes = []
   for rank, device in enumerate(devices):
-    processes.append(dist.spawn(rank, device, fn=run2, args=()))
+    processes.append(dist.spawn(rank, device, fn=run, args=()))
   for p in processes: p.join()
