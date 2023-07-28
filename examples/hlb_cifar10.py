@@ -53,7 +53,7 @@ def copy_weights(from_model, to_model):
 class ConvGroup:
   def __init__(self, channels_in, channels_out):
     self.conv = [nn.Conv2d(channels_in if i == 0 else channels_out, channels_out, kernel_size=3, padding=1, bias=False) for i in range(2)]
-    self.norm = [nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.8) for _ in range(2)]
+    self.norm = [nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-7, momentum=0.8) for _ in range(2)]
     self.act = lambda x: x.relu()
 
   def __call__(self, x):
@@ -78,7 +78,7 @@ class SpeedyResNet:
     self.net = [
       nn.Conv2d(3, BASE_DIM, kernel_size=1),
       lambda x: x.cast(dtypes.float32),
-      nn.BatchNorm2d(BASE_DIM, track_running_stats=False, eps=1e-12, momentum=0.8),
+      nn.BatchNorm2d(BASE_DIM, track_running_stats=False, eps=1e-7, momentum=0.8),
       lambda x: x.cast(dtypes.float16 if HALF else dtypes.float32),
       lambda x: x.relu(),
       ConvGroup(BASE_DIM, BASE_DIM*2),
