@@ -91,13 +91,16 @@ class SpeedyResNet:
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
   def __call__(self, x, training=True):
     if not training and getenv('TTA', 0)==1: return ((x.sequential(self.net) * 0.5) + (x[..., ::-1].sequential(self.net) * 0.5)).log_softmax()
-    out = x
+    inp = x
     for layer in self.net:
-      out = layer(out)
+      out = layer(inp)
       if getenv('LOG_GRADS'):
-        out_sum = out.sum().numpy()
-        if out_sum != out_sum:
-          raise Exception(f'NaNs detected in fp! found NaNs in {out_sum.shape} {layer}')
+        out_mean = out.mean().numpy()
+        if not np.isfinite(out_mean):
+          np.save('/tmp/bad_fp_inp', inp.numpy())
+          np.save('/tmp/bad_fp_out', out.numpy())
+          raise Exception(f'NaNs/inf detected in fp! of {layer}')
+      inp = out
     return out.log_softmax()
   
 

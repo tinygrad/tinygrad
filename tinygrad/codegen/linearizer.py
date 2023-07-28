@@ -142,7 +142,7 @@ class Linearizer:
   supported_vector_sizes_alu: Dict[DType, List[int]] = {dtypes.float: []}
   uses_float32_calculations = True
 
-  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
+  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, is_in_search=False):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
 
@@ -154,6 +154,7 @@ class Linearizer:
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
     self.key = (ast.map_buffers({x:(self.arg_bufs[x.realized] if x.realized in self.arg_bufs else x) for x in self.bufs}).key, tuple([x.key for x in self.bufs]))
+    self.is_in_search = is_in_search
 
   def get_buffer_name(self, i):
     if self.bufs[i].__class__ == LocalBuffer: return self.bufs[i].name

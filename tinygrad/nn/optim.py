@@ -1,5 +1,6 @@
 # sorted in order of increasing complexity
 from typing import List
+import numpy as np
 from tinygrad.helpers import dedup, getenv, dtypes
 from tinygrad.tensor import Tensor
 
@@ -50,8 +51,8 @@ class SGD(Optimizer):
       assert t.grad is not None
       if getenv('LOG_GRADS'):
         log_grad(i, t.grad)
-        grad_sum = t.grad.sum().numpy()
-        if grad_sum != grad_sum:
+        grad_sum = t.grad.mean().numpy()
+        if not np.isfinite(grad_sum):
           print(f'NaNs detected in bp! found NaNs in {t.shape}, skipping update')
           continue
       g = t.grad.realize() + self.wd * t.detach()

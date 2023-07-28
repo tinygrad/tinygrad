@@ -16,8 +16,8 @@ def apply_opt(k, x):
       k.local_dims += 1
   k.simplify_ones()
 
-UPCASTS = [1,2,3,4,5,6,7,8]
-LOCALS = [1,2,3,4,5,6,7,8,16,24,32]
+UPCASTS = [1, 2, 4, 8]
+LOCALS = [1, 2, 4, 8, 16, 32]
 
 # optimization
 def kernel_optimize(k, create_k, runtime):
@@ -46,6 +46,7 @@ def kernel_optimize(k, create_k, runtime):
   if len(opts) == 0: return
   search_space = prod([len(x.choices) for x in opts])
   optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, 200))
+  if DEBUG >= 1: print("optimizer start", k.colored_shape(), "in search space", search_space)
   recommendation = optimizer.minimize(opt)
   apply_opt(k, recommendation.value)
   if DEBUG >= 1: print("optimizer hit", k.colored_shape(), "in search space", search_space)

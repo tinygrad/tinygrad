@@ -213,4 +213,4 @@ class CStyleCodegen(Linearizer):
 
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
       global_size, local_size,
-      op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=display_name)
+      op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=display_name, is_in_search=self.is_in_search)
