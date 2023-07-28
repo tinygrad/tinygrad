@@ -184,6 +184,37 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor.randn(2,2,2).ndim == 3
     assert Tensor.randn(1,1,1,1,1,1).ndim == 6
 
+  def test_argfix(self):
+    self.assertEqual(Tensor.zeros().shape, ())
+    self.assertEqual(Tensor.ones().shape, ())
+
+    self.assertEqual(Tensor.zeros([]).shape, ())
+    self.assertEqual(Tensor.ones([]).shape, ())
+
+    self.assertEqual(Tensor.zeros(tuple()).shape, ())
+    self.assertEqual(Tensor.ones(tuple()).shape, ())
+
+    self.assertEqual(Tensor.zeros(1).shape, (1,))
+    self.assertEqual(Tensor.ones(1).shape, (1,))
+
+    self.assertEqual(Tensor.zeros(1,1).shape, (1,1))
+    self.assertEqual(Tensor.ones(1,1).shape, (1,1))
+
+    self.assertEqual(Tensor.zeros(1,1,1,1,1,1,1,1).shape, (1,1,1,1,1,1,1,1))
+    self.assertEqual(Tensor.ones(1,1,1,1,1,1,1,1).shape, (1,1,1,1,1,1,1,1))
+
+    self.assertEqual(Tensor.zeros(420,10,40,32).shape, (420,10,40,32))
+    self.assertEqual(Tensor.ones(420,10,40,32).shape, (420,10,40,32))
+
+    self.assertEqual(Tensor.zeros([1]).shape, (1,))
+    self.assertEqual(Tensor.ones([1]).shape, (1,))
+
+    self.assertEqual(Tensor.zeros([1]).shape, (1,))
+    self.assertEqual(Tensor.ones([1]).shape, (1,))
+
+    self.assertEqual(Tensor.zeros([10,20,40]).shape, (10,20,40))
+    self.assertEqual(Tensor.ones([10,20,40]).shape, (10,20,40))
+
   def test_numel(self):
     assert Tensor.randn(10, 10).numel() == 100
     assert Tensor.randn(1,2,5).numel() == 10
