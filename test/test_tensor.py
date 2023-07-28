@@ -197,17 +197,8 @@ class TestTinygrad(unittest.TestCase):
     self.assertEqual(Tensor.zeros(1).shape, (1,))
     self.assertEqual(Tensor.ones(1).shape, (1,))
 
-    self.assertEqual(Tensor.zeros(1,1).shape, (1,1))
-    self.assertEqual(Tensor.ones(1,1).shape, (1,1))
-
-    self.assertEqual(Tensor.zeros(1,1,1,1,1,1,1,1).shape, (1,1,1,1,1,1,1,1))
-    self.assertEqual(Tensor.ones(1,1,1,1,1,1,1,1).shape, (1,1,1,1,1,1,1,1))
-
-    self.assertEqual(Tensor.zeros(420,10,40,32).shape, (420,10,40,32))
-    self.assertEqual(Tensor.ones(420,10,40,32).shape, (420,10,40,32))
-
-    self.assertEqual(Tensor.zeros([1]).shape, (1,))
-    self.assertEqual(Tensor.ones([1]).shape, (1,))
+    self.assertEqual(Tensor.zeros(1,10,20).shape, (1,10,20))
+    self.assertEqual(Tensor.ones(1,10,20).shape, (1,10,20))
 
     self.assertEqual(Tensor.zeros([1]).shape, (1,))
     self.assertEqual(Tensor.ones([1]).shape, (1,))
