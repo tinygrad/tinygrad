@@ -13,14 +13,14 @@ import time
 # fake the function signature of ASTRunner so we can put it in the cache
 def _send_rb(args:Tuple[RawBuffer, RawShmBuffer, int, Any], jit=False, force_wait=False):
   # we only support copyout buffers right now
-  st = time.perf_counter()
+  # st = time.perf_counter()
   args[0]._copyout(np.frombuffer(args[1]._buffer(), dtype=args[0].dtype.np))
-  dist.OOB.send(st, args[2])
+  dist.OOB.send(None, args[2])
 
 def _recv_rb(args:Tuple[RawBuffer, RawShmBuffer, int], jit=False, force_wait=False):
-  st = dist.OOB.recv(args[2])
+  dist.OOB.recv(args[2])
   args[0]._copyin(args[1].toCPU())
-  print(f"recv {time.perf_counter() - st}, bandwidth {args[0].size * args[0].dtype.itemsize / (time.perf_counter() - st) / 1e9} GB/s")
+  # print(f"recv {time.perf_counter() - st}, bandwidth {args[0].size * args[0].dtype.itemsize / (time.perf_counter() - st) / 1e9} GB/s")
 
 # send a rawbuffer from out rank to the target rank
 def send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
