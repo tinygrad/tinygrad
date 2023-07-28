@@ -27,7 +27,7 @@ def kernel_optimize(k, create_k, runtime):
       k.process()
       apply_opt(k, x)
       prg = k.codegen().build(runtime)
-      tm = min([prg.exec(k.bufs, force_wait=True) for _ in range(3)])*1000
+      tm = min([prg.exec(k.bufs, force_wait=True, cache=False) for _ in range(3)])*1000
       return tm
     except Exception:
       if DEBUG >= 3:

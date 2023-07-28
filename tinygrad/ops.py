@@ -125,18 +125,17 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 # **************** for Compiled Buffers ****************
 
 class ASTRunner:
-  def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None, is_in_search=False):
+  def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
     if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args): print(prg)
-    self.is_in_search = is_in_search
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
   def build(self, runtime):
     self.clprg = runtime(self.name, self.prg, **self.runtime_args)
     return self
 
-  def exec(self, bufs, force_wait=False) -> Optional[float]:
+  def exec(self, bufs, force_wait=False, cache=True) -> Optional[float]:
     rawbufs = dedup([x.realized for x in bufs if buf_is_kernel_arg(x)])
-    if GlobalCounters.cache is not None and not self.is_in_search: GlobalCounters.cache.append((self, rawbufs))
+    if GlobalCounters.cache is not None and cache: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs, force_wait=force_wait)
 
   def __call__(self, rawbufs:List[RawBuffer], jit=False, force_wait=False) -> Optional[float]:
@@ -184,7 +183,7 @@ class Compiled:
       if k.key not in self.method_cache:
         if getenv("KOPT"):
           from tinygrad.codegen.optimizer import kernel_optimize
-          kernel_optimize(k, lambda: self.codegen(ast, output, is_in_search=True), self.runtime)
+          kernel_optimize(k, lambda: self.codegen(ast, output), self.runtime)
         self.method_cache[k.key] = k.codegen().build(self.runtime)
       elif DEBUG >= 5: print(f"method cache hit : {k.key}")
       prg = self.method_cache[k.key]
