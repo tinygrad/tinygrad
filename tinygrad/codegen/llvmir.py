@@ -41,7 +41,7 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
   buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
 
   # create llvm function
-  dtype_to_llvm_dtype = {dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32), dtypes.uint32: ir.IntType(32)}
+  dtype_to_llvm_dtype = {dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32), dtypes.uint32: ir.IntType(32), dtypes.uint64: ir.IntType(64)}
   func_dtypes = [dtype_to_llvm_dtype[dtype] for dtype in buf_to_dtype.values()]
   func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in func_dtypes]), name='exec')
 

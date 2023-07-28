@@ -48,26 +48,20 @@ class CStyleLanguage(NamedTuple):
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   def render_bitcast(self, x:str, var_dtype:DType) -> str:
+    gpu_bitcast_mapping = {
+      dtypes.float32: "as_float",
+      dtypes.float16: "as_half",
+      dtypes.int8: "as_char",
+      dtypes.int32: "as_int",
+      dtypes.int64: "as_long",
+      dtypes.uint8: "as_uchar",
+      dtypes.uint32: "as_uint",
+      dtypes.uint64: "as_ulong"
+    }
     if self.is_gpu:
-      if var_dtype == dtypes.float32:
-        return f"as_float({x})"
-      if var_dtype == dtypes.float16:
-        return f"as_half({x})"
-      if var_dtype == dtypes.bfloat16:
-        raise NotImplementedError("No bitcast implemented for bfloat16 in OpenCL")
-      if var_dtype == dtypes.int8:
-        return f"as_char({x})"
-      if var_dtype == dtypes.int32:
-        return f"as_int({x})"
-      if var_dtype == dtypes.int64:
-        return f"as_long({x})"
-      if var_dtype == dtypes.uint8:
-        return f"as_uchar({x})"
-      if var_dtype == dtypes.uint32:
-        return f"as_uint({x})"
-      if var_dtype == dtypes.uint64:
-        return f"as_ulong({x})"
-      raise NotImplementedError(f"No bitcast implemented for {var_dtype}")
+      if var_dtype == dtypes.bfloat16 or var_dtype not in gpu_bitcast_mapping:
+          raise NotImplementedError(f"No bitcast implemented for {var_dtype}")
+      return f"{gpu_bitcast_mapping[var_dtype]}({x})"
     return f"*(({var_dtype.name}*)&({x}))"
   
   # returns a str expression of the const with the given type
