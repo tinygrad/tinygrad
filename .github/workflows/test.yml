@@ -205,7 +205,7 @@ jobs:
         backend: [llvm, clang, gpu, cuda]
 
     name: Tests on (${{ matrix.backend }})
-    runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || matrix.backend=='clang'&&'windows-latest'|| 'ubuntu-latest' }}
+    runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || matrix.backend=='clang'&&'ubuntu-latest'|| 'ubuntu-latest' }}
     timeout-minutes: 20
 
     steps:
@@ -263,6 +263,8 @@ jobs:
           sudo ninja install
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Check Device.DEFAULT
+        run: python -c "from tinygrad.lazy import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda'
         run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}'
