@@ -4,7 +4,8 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup
 from tinygrad.shape.shapetracker import MovementOps
-from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg
+from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg, Allocator
+from tinygrad.runtime.cache_collector import CacheCollector
 if TYPE_CHECKING:
   from tinygrad.lazy import LazyBuffer
 
@@ -135,7 +136,7 @@ class ASTRunner:
 
   def exec(self, bufs, force_wait=False) -> Optional[float]:
     rawbufs = dedup([x.realized for x in bufs if buf_is_kernel_arg(x)])
-    if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
+    CacheCollector.add(self, rawbufs)
     return self(rawbufs, force_wait=force_wait)
 
   def __call__(self, rawbufs:List[RawBuffer], jit=False, force_wait=False) -> Optional[float]:
@@ -152,9 +153,12 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], codegen, runtime, synchronize=lambda: None):
-    self.buffer, self.codegen, self.runtime, self.synchronize = buffer, codegen, runtime, synchronize
+  def __init__(self, allocator: Allocator, codegen, runtime, synchronize=lambda: None):
+    self.allocator, self.codegen, self.runtime, self.synchronize = allocator, codegen, runtime, synchronize
     self.method_cache: Dict[str, ASTRunner] = {}
+
+  @property
+  def buffer(self): return self.allocator.buftype
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):
     # all movementops do nothing in a Compiled buffer!
@@ -173,7 +177,7 @@ class Compiled:
 
     # we don't have an output buffer, we have to create it
     if not output.realized:
-      output.realized = self.buffer(prod(output.shape), output.dtype, **kwargs)
+      output.realized = self.allocator(prod(output.shape), output.dtype, **kwargs)
 
     # compilation time
     k = self.codegen(ast, output)

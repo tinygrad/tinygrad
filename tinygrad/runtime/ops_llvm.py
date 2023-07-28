@@ -4,7 +4,7 @@ from tinygrad.ops import Compiled
 from tinygrad.helpers import getenv, DEBUG
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.llvmir import LLVMIRCodegen
-from tinygrad.runtime.lib import RawMallocBuffer
+from tinygrad.runtime.lib import RawMallocBuffer, Allocator
 
 import llvmlite.binding as llvm  # type: ignore
 
@@ -62,4 +62,5 @@ class LLVMProgram:
     cfunc(*[x._buf for x in bufs])
     if wait: return time.monotonic()-st
 
-LLVMBuffer = Compiled(RawMallocBuffer, LLVMIRCodegen, LLVMProgram)
+LLVMAlloc = Allocator(RawMallocBuffer)
+LLVMBuffer = Compiled(LLVMAlloc, LLVMIRCodegen, LLVMProgram)

@@ -1,9 +1,9 @@
 import numpy as np
 import ctypes
 import extra.hip_wrapper as hip
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, DeviceInfo
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferCopyInOut
+from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
@@ -12,6 +12,12 @@ if DEBUG >= 5:
   early_exec = enable_early_exec()
 
 # The default HIP stream is used for everything.
+
+class _HIP:
+  def __init__(self):
+    device_properties = hip.hipGetDeviceProperties(0)
+    self.dev_info = DeviceInfo(memory_size=device_properties.totalGlobalMem)
+HIP = _HIP()
 
 class RawHIPBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype): super().__init__(size, dtype, hip.hipMalloc(size * dtype.itemsize))
@@ -73,4 +79,5 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 
-HIPBuffer = Compiled(RawHIPBuffer, HIPCodegen, HIPProgram, hip.hipDeviceSynchronize)
+HIPAlloc = LRUAllocator(RawHIPBuffer, HIP.dev_info)
+HIPBuffer = Compiled(HIPAlloc, HIPCodegen, HIPProgram, hip.hipDeviceSynchronize)

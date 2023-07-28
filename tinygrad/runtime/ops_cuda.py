@@ -2,9 +2,9 @@ import subprocess, time, re, hashlib, tempfile, os
 from typing import Optional
 import numpy as np
 from pycuda.compiler import compile as cuda_compile # type: ignore
-from tinygrad.helpers import DEBUG, getenv, fromimport, colored
+from tinygrad.helpers import DEBUG, getenv, fromimport, colored, DeviceInfo
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer
+from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, Allocator, LRUAllocator
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
 def pretty_ptx(s):
@@ -43,6 +43,7 @@ if getenv("CUDACPU", 0) == 1:
   import pycuda.driver # type: ignore
   pycuda.driver.Context = context
   RawCUDABuffer = RawMallocBuffer
+  CUDAAlloc = Allocator(RawCUDABuffer)
 else:
   import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
   import pycuda.driver as cuda # type: ignore
@@ -50,6 +51,11 @@ else:
     def __init__(self, size, dtype): super().__init__(size, dtype, cuda.mem_alloc(size * dtype.itemsize)) # type: ignore
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore
     def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) # type: ignore
+  class _CUDA:
+    def __init__(self):
+      self.dev_info = DeviceInfo(memory_size=pycuda.driver.Context.get_device().total_memory() if hasattr(pycuda.driver.Context.get_device(), 'total_memory') else 0)
+  CUDA = _CUDA()
+  CUDAAlloc = LRUAllocator(RawCUDABuffer, CUDA.dev_info)
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
@@ -94,4 +100,4 @@ class CUDACodegen(CStyleCodegen):
     """)
   supports_float4_alu = False
 
-CUDABuffer = Compiled(RawCUDABuffer, fromimport("tinygrad.codegen.assembly_ptx", "PTXCodegen") if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)
+CUDABuffer = Compiled(CUDAAlloc, fromimport("tinygrad.codegen.assembly_ptx", "PTXCodegen") if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)

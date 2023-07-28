@@ -2,9 +2,9 @@
 import os, subprocess, pathlib
 import Metal, Cocoa, libdispatch # type: ignore
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType
+from tinygrad.helpers import prod, getenv, DEBUG, DType, DeviceInfo
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferMapped
+from tinygrad.runtime.lib import RawBufferMapped, LRUAllocator
 
 METAL_XCODE = getenv("METAL_XCODE")
 
@@ -13,12 +13,14 @@ class _METAL:
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.dispatch_group = libdispatch.dispatch_group_create() 
     self.mtl_queue = self.device.newCommandQueue()
+    self.dev_info = DeviceInfo(memory_size=self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
   def command_buffer(self):
     command_buffer = self.mtl_queue.commandBuffer()
     libdispatch.dispatch_group_enter(self.dispatch_group)
     def leave(_): libdispatch.dispatch_group_leave(self.dispatch_group)
     command_buffer.addCompletedHandler_(leave)
     return command_buffer
+  # TODO: is there a better way to do this?
   def synchronize(self):
     libdispatch.dispatch_group_wait(self.dispatch_group, libdispatch.DISPATCH_TIME_FOREVER)
 METAL = _METAL()
@@ -81,4 +83,5 @@ class MetalCodegen(CStyleCodegen):
     gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
     extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
 
-MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram, METAL.synchronize)
+MetalAlloc = LRUAllocator(RawMetalBuffer, METAL.dev_info)
+MetalBuffer = Compiled(MetalAlloc, MetalCodegen, MetalProgram, METAL.synchronize)

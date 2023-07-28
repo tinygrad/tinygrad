@@ -3,9 +3,9 @@ import pathlib
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
-from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
+from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, DeviceInfo
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferCopyInOut
+from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
@@ -24,6 +24,7 @@ class _CL:
     self.cl_ctxs: List[cl.Context] = [cl.Context(devices=[x]) for x in platforms[getenv('CL_PLATFORM', 0)] if x.name not in getenv('CL_EXCLUDE', "").split(",")] if device is None else [cl.Context(devices=[platforms[getenv('CL_PLATFORM', 0)][device]])]
     if DEBUG >= 1: print(f"using devices: {[ctx.devices[0].hashable_model_and_version_identifier for ctx in self.cl_ctxs]}")
     self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(ctx, device=ctx.devices[0], properties=cl.command_queue_properties.PROFILING_ENABLE) for ctx in self.cl_ctxs]
+    self.dev_infos = [DeviceInfo(memory_size=ctx.devices[0].max_mem_alloc_size) for ctx in self.cl_ctxs]
   def synchronize(self):
     for evt in self.events_in_flight: evt.wait()
     self.events_in_flight.clear()
@@ -48,7 +49,7 @@ class CLBuffer(RawBufferCopyInOut):
     CL.events_in_flight.append(cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False))
   def _copyout(self, x:np.ndarray):
     CL.synchronize()
-    assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
+    assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
     cl.enqueue_copy(CL.cl_queue[self._buf.device], x, self._buf, is_blocking=True)
 
 class CLProgram:
@@ -94,4 +95,5 @@ class CLCodegen(CStyleCodegen):
     barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
     gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True)
 
-GPUBuffer = Compiled(CLBuffer, fromimport("tinygrad.codegen.assembly_rdna", "RDNACodegen") if getenv("RDNA") else CLCodegen, CLProgram, CL.synchronize)
+CLAlloc = LRUAllocator(CLBuffer, CL.dev_infos[0])
+GPUBuffer = Compiled(CLAlloc, fromimport("tinygrad.codegen.assembly_rdna", "RDNACodegen") if getenv("RDNA") else CLCodegen, CLProgram, CL.synchronize)

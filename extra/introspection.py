@@ -3,7 +3,8 @@ import gc
 from tinygrad.helpers import prod
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.runtime.ops_gpu import CLBuffer
+from tinygrad.runtime.ops_gpu import CLBuffer, CLAlloc
+from tinygrad.runtime.lib import is_buffer_wrapped
 from tinygrad.ops import GlobalCounters
 
 def print_objects():
@@ -11,9 +12,9 @@ def print_objects():
   tensors = [x for x in gc.get_objects() if isinstance(x, Tensor)]
   tensor_ram_used = sum([prod(x.shape)*4 for x in tensors])
   lazybuffers = [x for x in gc.get_objects() if isinstance(x, LazyBuffer)]
-  gpubuffers = [x for x in gc.get_objects() if isinstance(x, CLBuffer)]
-  realized_buffers = [x.realized for x in lazybuffers if x.realized]
-  gpubuffers_orphaned = [x for x in gpubuffers if x not in realized_buffers]
+  gpubuffers = [x for x in gc.get_objects() if isinstance(x, CLBuffer) and not is_buffer_wrapped(x)]
+  realized_buffers = [x.realized if not is_buffer_wrapped(x.realized) else x.realized._wrapped_buffer for x in lazybuffers if x.realized]
+  gpubuffers_orphaned = [x for x in gpubuffers if x not in realized_buffers and x not in CLAlloc.aging_order]
 
   print(f"{len(tensors)} tensors allocated in {tensor_ram_used/1e9:.2f} GB, GPU using {GlobalCounters.mem_used/1e9:.2f} GB")
   print(f"{len(lazybuffers)} lazybuffers {len(realized_buffers)} realized, {len(gpubuffers)} GPU buffers")

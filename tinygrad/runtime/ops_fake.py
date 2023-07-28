@@ -2,7 +2,7 @@
 import numpy as np
 from tinygrad.helpers import dtypes, prod
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBuffer
+from tinygrad.runtime.lib import RawBuffer, Allocator
 
 class RawFakeBuffer(RawBuffer):
   @classmethod
@@ -14,4 +14,5 @@ class FakeProgram:
   def __call__(self, global_size, local_size, *args, wait=False): pass
 
 # NOTE: you have to set a codegen to use this
-FakeBuffer = Compiled(RawFakeBuffer, None, FakeProgram)
+FakeAlloc = Allocator(RawFakeBuffer)
+FakeBuffer = Compiled(FakeAlloc, None, FakeProgram)

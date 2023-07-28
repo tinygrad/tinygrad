@@ -1,6 +1,6 @@
 import os, time, ctypes, hashlib, subprocess, platform, tempfile
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawMallocBuffer
+from tinygrad.runtime.lib import RawMallocBuffer, Allocator
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
 args = {
@@ -29,4 +29,5 @@ class ClangCodegen(CStyleCodegen):
   lang = CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict")
   supports_float4: bool = False
 
-ClangBuffer = Compiled(RawMallocBuffer, ClangCodegen, ClangProgram)
+ClangAlloc = Allocator(RawMallocBuffer)
+ClangBuffer = Compiled(ClangAlloc, ClangCodegen, ClangProgram)

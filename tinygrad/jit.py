@@ -1,10 +1,11 @@
 from typing import Callable, List, Tuple, Any, Dict, cast, Union
 import functools, itertools
 from tinygrad.helpers import DEBUG, DType
+from tinygrad.runtime.cache_collector import CacheCollector
 
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
-from tinygrad.ops import GlobalCounters, RawBuffer
+from tinygrad.ops import RawBuffer
 
 JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU"]
 
@@ -32,10 +33,9 @@ class TinyJit:
       for prg, args in self.jit_cache: prg(args, jit=True)
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 1:
-      GlobalCounters.cache = []
+      CacheCollector.start()
       self.ret = self.fxn(*args, **kwargs)
-      self.jit_cache = GlobalCounters.cache
-      GlobalCounters.cache = None
+      self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 

@@ -18,6 +18,7 @@ import numpy as np
 
 import tinygrad.graph as graph
 from tinygrad.ops import GlobalCounters
+from tinygrad.runtime.cache_collector import CacheCollector
 
 import pyopencl as cl
 from tinygrad.runtime.ops_gpu import CL
@@ -40,7 +41,7 @@ from tinygrad.jit import TinyJit
 def model_exec(run_onnx, using_graph, **inputs):
   ret = next(iter(run_onnx(inputs).values())).cast(dtypes.float32)
   GlobalCounters.reset()
-  GlobalCounters.cache = []  # don't cache pre-realize
+  CacheCollector.start()
   if using_graph: graph.GRAPH = True
   print("realizing")
   return ret.realize()
