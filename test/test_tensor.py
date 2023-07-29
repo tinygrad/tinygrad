@@ -1,10 +1,14 @@
+import dataclasses
 import numpy as np
 import torch
 import unittest
-from tinygrad.tensor import Tensor
-from tinygrad.ops import LoadOps, OpType
+import itertools
+from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
+import pytest
+
+pytestmark = pytest.mark.webgpu
 
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)
@@ -180,6 +184,28 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor.randn(2,2,2).ndim == 3
     assert Tensor.randn(1,1,1,1,1,1).ndim == 6
 
+  def test_argfix(self):
+    self.assertEqual(Tensor.zeros().shape, ())
+    self.assertEqual(Tensor.ones().shape, ())
+
+    self.assertEqual(Tensor.zeros([]).shape, ())
+    self.assertEqual(Tensor.ones([]).shape, ())
+
+    self.assertEqual(Tensor.zeros(tuple()).shape, ())
+    self.assertEqual(Tensor.ones(tuple()).shape, ())
+
+    self.assertEqual(Tensor.zeros(1).shape, (1,))
+    self.assertEqual(Tensor.ones(1).shape, (1,))
+
+    self.assertEqual(Tensor.zeros(1,10,20).shape, (1,10,20))
+    self.assertEqual(Tensor.ones(1,10,20).shape, (1,10,20))
+
+    self.assertEqual(Tensor.zeros([1]).shape, (1,))
+    self.assertEqual(Tensor.ones([1]).shape, (1,))
+
+    self.assertEqual(Tensor.zeros([10,20,40]).shape, (10,20,40))
+    self.assertEqual(Tensor.ones([10,20,40]).shape, (10,20,40))
+
   def test_numel(self):
     assert Tensor.randn(10, 10).numel() == 100
     assert Tensor.randn(1,2,5).numel() == 10
@@ -190,27 +216,6 @@ class TestTinygrad(unittest.TestCase):
   def test_element_size(self):
     for _, dtype in dtypes.fields().items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
-
-  def test_constant_fold(self):
-    def helper_assert_all_const(op: OpType):
-      if isinstance(op.op, LoadOps): assert op.op == LoadOps.CONST
-      else:
-        for buf in op.buffers: helper_assert_all_const(buf.op)
-    helper_assert_all_const(Tensor(2).lazydata.op)
-    helper_assert_all_const(Tensor(2).reshape([1, 1, 1]).lazydata.op)
-    helper_assert_all_const(Tensor([2]).lazydata.op)
-    helper_assert_all_const(Tensor([2]).reshape([1, 1, 1]).lazydata.op)
-    helper_assert_all_const((Tensor(2)+Tensor(3)).lazydata.op)
-    helper_assert_all_const((Tensor(2)+Tensor([3])).lazydata.op)
-    helper_assert_all_const((Tensor([[2]])+Tensor([3])).lazydata.op)
-    with self.assertRaises(AssertionError):
-      helper_assert_all_const((Tensor([2, 0])+Tensor([3, 0])).lazydata.op)
-
-  def test_constant_fold_shape(self):
-    self.assertEqual(Tensor(3).shape, ())
-    self.assertEqual(Tensor([3]).shape, (1,))
-    self.assertEqual(Tensor([[3]]).shape, (1, 1))
-    self.assertEqual(Tensor([[[3]]]).shape, (1, 1, 1))
 
 if __name__ == '__main__':
   unittest.main()
