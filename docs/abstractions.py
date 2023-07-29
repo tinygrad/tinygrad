@@ -120,8 +120,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import LazyOp, BinaryOps, LoadOps
 
 # the 2+3 from before
-# added some 0s, otherwise Tensor([2]) will be folded into a constant without using LoadOps.FROM
-result = Tensor([2, 0]) + Tensor([3, 0])
+result = Tensor([2]) + Tensor([3])
 print(type(result.lazydata), result.lazydata)  # let's look at the lazydata of result
 
 # you'll see it has a LazyOp
@@ -266,7 +265,9 @@ class Linearizer:
   uops: List[UOp]
 
 from tinygrad.tensor import Tensor
-result = Tensor(2) + Tensor(3)
+from tinygrad.helpers import prod
+result = Tensor(2).realize() + Tensor(3).realize()
+result.lazydata.realized = Device[Device.DEFAULT].buffer(prod(result.shape), result.dtype)
 
 # use the real Linearizer to linearize 2+3
 from tinygrad.codegen.linearizer import Linearizer

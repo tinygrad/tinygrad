@@ -74,29 +74,29 @@ class Thneed:
         if o['arg_type'] == "image2d_t":
           if 'buffer_id' in o and o['height'] == 1 and not bufs_loaded[o['buffer_id']]:
             # hack: use a image1d since we can back that with a buffer
-            buf = cl.Image(CL.cl_ctx, mf.READ_WRITE, tfmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
+            buf = cl.Image(CL.cl_ctxs[0], mf.READ_WRITE, tfmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
           else:
             # buffer isn't supported in image2d, copy buffer into image
             if 'buffer_id' in o and bufs_loaded[o['buffer_id']]:
               arr = np.zeros(bufs[o['buffer_id']].size // 2, dtype=np.float16)
               cl.enqueue_copy(CL.cl_queue[0], arr, bufs[o['buffer_id']])
-              buf = cl.Image(CL.cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, tfmt,
+              buf = cl.Image(CL.cl_ctxs[0], mf.READ_WRITE | mf.COPY_HOST_PTR, tfmt,
                 shape=(o['width'], o['height']), pitches=(o['row_pitch'],), hostbuf=arr)
             elif o['needs_load']:
-              buf = cl.Image(CL.cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, tfmt,
+              buf = cl.Image(CL.cl_ctxs[0], mf.READ_WRITE | mf.COPY_HOST_PTR, tfmt,
                 shape=(o['width'], o['height']), pitches=(o['row_pitch'],), hostbuf=o['data'])
             else:
-              buf = cl.Image(CL.cl_ctx, mf.READ_WRITE, tfmt, shape=(o['width'], o['height']))
+              buf = cl.Image(CL.cl_ctxs[0], mf.READ_WRITE, tfmt, shape=(o['width'], o['height']))
         if o['arg_type'] == "image1d_t":
           assert not o['needs_load']
           assert not bufs_loaded[o['buffer_id']]
-          buf = cl.Image(CL.cl_ctx, mf.READ_WRITE, tfmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
+          buf = cl.Image(CL.cl_ctxs[0], mf.READ_WRITE, tfmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
       else:
         if 'data' in o:
-          buf = cl.Buffer(CL.cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=o['data'])
+          buf = cl.Buffer(CL.cl_ctxs[0], mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=o['data'])
         else:
           # zero out buffers
-          buf = cl.Buffer(CL.cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=b'\x00'*o['size'])
+          buf = cl.Buffer(CL.cl_ctxs[0], mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=b'\x00'*o['size'])
 
       bufs[o['id']] = buf
       bufs_loaded[o['id']] = 'data' in o
@@ -161,7 +161,7 @@ class Thneed:
     for prg, args in self.cl_cache:
       # get binaries for saving
       if prg.name not in saved_binaries:
-        binary = prg.clprogram.get_info(cl.program_info.BINARIES)
+        binary = prg.clprograms[0].get_info(cl.program_info.BINARIES)
         assert len(binary) == 1
         jdat['binaries'].append({"name":prg.name, "length":len(binary[0])})
         binaries.append(binary[0])
@@ -201,7 +201,7 @@ class Thneed:
               row_pitch = (a.shape[0]*4*(2 if FLOAT16 else 4) + 63)//64 * 64
               size = row_pitch * a.shape[1]
               # this is *2 if float16 and *4 if float32
-              buf = cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, size=size * (2 if FLOAT16 else 1))
+              buf = cl.Buffer(CL.cl_ctxs[0], cl.mem_flags.READ_WRITE, size=size * (2 if FLOAT16 else 1))
 
               # zero out the buffer
               cl.enqueue_copy(CL.cl_queue[0], buf, b'\x00'*buf.size, is_blocking=True)
@@ -271,7 +271,7 @@ class Thneed:
     events = []
     st = time.monotonic()
     for prg, args in self.cl_cache:
-      events.append(prg.clprg(CL.cl_queue[0], *args))
+      events.append(prg.clprgs[0](CL.cl_queue[0], *args))
     mt = time.monotonic()
     CL.synchronize()
     et = time.monotonic() - st

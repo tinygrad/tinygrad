@@ -9,13 +9,10 @@ from math import prod # noqa: F401 # pylint:disable=unused-import
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
+CI = os.getenv("CI", "") != ""
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
-def argfix(*x):
-  if x[0].__class__ in {tuple, list}:
-    try: return tuple(x[0])
-    except IndexError: return tuple()
-  return tuple(x)
+def argfix(*x): return tuple(x[0]) if x and x[0].__class__ in (tuple, list) else x
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def all_same(items): return all(x == items[0] for x in items)
 def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
@@ -100,6 +97,9 @@ class dtypes:
   uint8: Final[DType] = DType(0, 1, "unsigned char", np.uint8)
   uint32: Final[DType] = DType(1, 4, "unsigned int", np.uint32)
   uint64: Final[DType] = DType(2, 8, "unsigned long", np.uint64)
+
+  # NOTE: bfloat16 isn't supported in numpy
+  bfloat16: Final[DType] = DType(0, 2, "__bf16", None)
 
   # NOTE: these are internal dtypes, should probably check for that
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
