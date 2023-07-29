@@ -81,7 +81,7 @@ class Upsample:
   def __init__(self, scale_factor):
     self.scale_factor=scale_factor
     self.torch_ups = torch.nn.Upsample(scale_factor=scale_factor)
-  def __forward__(self, x):
+  def forward(self, x):
     return self.torch_ups(torch.from_numpy(x.numpy())).numpy()
 
 # TODO: most of the hifigan in standard vits is reused here
