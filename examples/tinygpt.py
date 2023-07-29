@@ -245,8 +245,11 @@ if __name__ == "__main__":
   val_data = data[n:]
       
   model = GPTLanguageModel(vocab_size)
-  
   parameters = get_parameters(model)
+  # print the number of parameters in the model
+  print(sum(p.numel() for p in parameters)/1e6, 'M parameters')
+
+  # create a tinygrad AdamW optimizer
   optimizer = optim.AdamW(parameters, lr=learning_rate)
 
   Tensor.training = True
