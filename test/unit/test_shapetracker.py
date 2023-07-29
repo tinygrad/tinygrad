@@ -156,7 +156,7 @@ class TestIndexExpressions(unittest.TestCase):
   def test_reshape_expand(self):
     self.st.reshape((10, 1, 10))
     self.st.expand((10, 10, 10))
-    self.expr = lambda idx : idx//100*10 + idx%10
+    self.expr = lambda idx: idx//100*10 + idx%10
 
 class TestSimplifyingShapeTracker(unittest.TestCase):
   def setUp(self):
