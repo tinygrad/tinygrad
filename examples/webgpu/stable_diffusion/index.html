@@ -1,0 +1,196 @@
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+#result {  font-size: 48px; }
+#time {  font-size: 16px;  color: grey; }
+#mybox {  padding: 20px; }
+#resultbox {  padding: 50px; }
+.bigggg {  font-size: 18px;  margin-top: 10px; }
+.bigg {  font-size: 18px; }
+#url {  font-size: 18px;  width: 70%; }
+a {  text-decoration: none; }
+h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: normal; }
+#video {  height:0px;  width:0px;  border: 1px dotted black;  object-fit: cover;}
+
+* {  text-align: center;  font-family: monospace; }
+</style>
+<title>tinygrad has WebGPU</title>
+<script src="./net.js"></script>
+</head>
+<body>
+<h1>WebGPU <a href="https://github.com/geohot/tinygrad">tinygrad</a> StableDiffusion!</h1>
+<div id="mybox">
+<input type="text" id="prompt" placeholder="write your prompt here" value="a horse sized cat eating a bagel" hidden>
+<input class="bigg" type="button" onclick="runNet()" value="Run">
+</div>
+<br/>
+<canvas id="canvas" width="512" height="512"> </canvas>
+<div id="resultbox">
+<div id="result">result will go here</div>
+<div id="time"></div>
+</div>
+<script>
+	var NumpyLoader = (function () {
+    function asciiDecode(buf) {
+        return String.fromCharCode.apply(null, new Uint8Array(buf));
+    }
+
+    function readUint16LE(buffer) {
+        var view = new DataView(buffer);
+        var val = view.getUint8(0);
+        val |= view.getUint8(1) << 8;
+        return val;
+    }
+
+    function fromArrayBuffer(buf) {
+      // Check the magic number
+      var magic = asciiDecode(buf.slice(0,6));
+      if (magic.slice(1,6) != 'NUMPY') {
+          throw new Error('unknown file type');
+      }
+
+      var version = new Uint8Array(buf.slice(6,8)),
+          headerLength = readUint16LE(buf.slice(8,10)),
+          headerStr = asciiDecode(buf.slice(10, 10+headerLength));
+          offsetBytes = 10 + headerLength;
+          //rest = buf.slice(10+headerLength);  XXX -- This makes a copy!!! https://www.khronos.org/registry/typedarray/specs/latest/#5
+
+      // Hacky conversion of dict literal string to JS Object
+      eval("var info = " + headerStr.toLowerCase().replace('(','[').replace('),',']'));
+    
+      // Intepret the bytes according to the specified dtype
+      var data;
+      if (info.descr === "|u1") {
+          data = new Uint8Array(buf, offsetBytes);
+      } else if (info.descr === "|i1") {
+          data = new Int8Array(buf, offsetBytes);
+      } else if (info.descr === "<u2") {
+          data = new Uint16Array(buf, offsetBytes);
+      } else if (info.descr === "<i2") {
+          data = new Int16Array(buf, offsetBytes);
+      } else if (info.descr === "<u4") {
+          data = new Uint32Array(buf, offsetBytes);
+      } else if (info.descr === "<i4") {
+          data = new Int32Array(buf, offsetBytes);
+      } else if (info.descr === "<f4") {
+          data = new Float32Array(buf, offsetBytes);
+      } else if (info.descr === "<f8") {
+          data = new Float64Array(buf, offsetBytes);
+      } else {
+          throw new Error('unknown numeric dtype')
+      }
+
+      return {
+          shape: info.shape,
+          fortran_order: info.fortran_order,
+          data: data
+      };
+    }
+
+    function open(file, callback) {
+        var reader = new FileReader();
+        reader.onload = function() {
+            // the file contents have been read as an array buffer
+            var buf = reader.result;
+            var ndarray = fromArrayBuffer(buf);
+            callback(ndarray);
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function ajax(url, callback) {
+        var xhr = new XMLHttpRequest();
+        xhr.onload = function(e) {
+            var buf = xhr.response; // not responseText
+            var ndarray = fromArrayBuffer(buf);
+            callback(ndarray);
+        };
+        xhr.open("GET", url, true);
+        xhr.responseType = "arraybuffer";
+        xhr.send(null);
+    }
+
+    return {
+        open: open,
+        ajax: ajax
+    };
+	})();
+
+	const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
+	const resultText = document.getElementById('result');
+	let labels, net;
+
+	const error = (err) => {
+		resultText.innerHTML = `Error: ${err}`;
+		throw new Error(err);
+	}
+
+	const getDevice = async () => {
+		if (!navigator.gpu) error("WebGPU not supported.");
+		const adapter = await navigator.gpu.requestAdapter();
+		const requiredLimits = {};
+		requiredLimits.maxStorageBufferBindingSize = 268435456;
+		
+		return await adapter.requestDevice({
+    	requiredLimits,
+  		}	);
+	};
+
+	const timer = async (func, label = "") => {
+		document.getElementById('time').innerHTML = "";
+		const start = performance.now();
+		const out = await func();
+		const delta = (performance.now() - start).toFixed(1)
+		console.log(`${delta} ms ${label}`);
+		document.getElementById('time').innerHTML = `${delta} ms ${label}`;
+		return out;
+	}	
+
+	function checkStatus(response) {
+		if (!response.ok) {
+			throw new Error(`HTTP ${response.status} - ${response.statusText}`);
+		}
+		return response;
+	}
+
+	const getSavetensorBuffer = async () => new Uint8Array(await (await fetch("./net.safetensors")).arrayBuffer());
+
+	const loadLet = async () => {
+		resultText.innerHTML = "loading..."
+		const safetensor = await getSavetensorBuffer();
+		const device = await getDevice();
+		net = await timer(() => setupNet(device, safetensor), "(compilation)");
+		resultText.innerHTML = "ready"
+	}
+
+	const runNet = () => {
+		if (!net) error("Net not loaded yet.");
+
+		NumpyLoader.ajax("./latent_tensor.npy", async (input) => {
+			console.log(input.data);
+			const out = await timer(() => net(input.data));
+			
+			let pixels = []
+			let pixelCounter = 0
+
+			for (let j = 0; j < 512; j++) {
+				for (let k = 0; k < 512; k++) {
+					pixels.push(out[pixelCounter])
+					pixels.push(out[pixelCounter+1])
+					pixels.push(out[pixelCounter+2])
+					pixels.push(255)
+					pixelCounter += 3
+				}
+			}
+			
+			ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), 512, 512), 0, 0);
+			console.log(out);
+			console.log("Success");
+		});
+	};
+
+	loadLet();
+</script>
+</body>
+</html>

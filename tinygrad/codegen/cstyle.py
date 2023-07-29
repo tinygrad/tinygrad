@@ -194,10 +194,11 @@ class CStyleCodegen(Linearizer):
 
   def codegen(self):
     self.process()
-    #self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
+    self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
     self.linearize()
 
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.lang)
+    print(f'global size={global_size}')
 
     # painfully name the function something unique
     if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]

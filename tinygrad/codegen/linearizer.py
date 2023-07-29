@@ -596,6 +596,28 @@ class Linearizer:
 
   # ******************** GPU simplifiers ********************
 
+  # TODO: needs general solution, these hacks are for webgpu, more specifically for stable_diffusion
+  # The 65535 refers to the maxComputeWorkgroupsPerDimension, so the max global size is [65535, 65535, 65535]
+  # There is also a limit for maxComputeWorkgroupSize[X,Y,Z], which is 256,256,64
+  def limit_global_size(self, x):
+    new_shape = list(x)
+    dim_len = len(new_shape)
+
+    for i in range(dim_len):
+      next_idx = (i + 1) % dim_len
+
+      while new_shape[i] > 65535:
+        new_shape[i] = new_shape[i] // 2
+
+        if (new_shape[next_idx] <= 128):
+          new_shape[next_idx] = new_shape[next_idx] * 2
+        else:
+          next_idx = (next_idx + 1) % dim_len
+          new_shape[next_idx] = new_shape[next_idx] * 2
+
+    return tuple(new_shape)
+
+
   def limit_global_dims(self, limit):
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
@@ -604,6 +626,9 @@ class Linearizer:
       num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
       if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
+
+    self.reshape_and_permute(lambda x: self.limit_global_size(x), None)
+    print(f'full shape={self.full_shape}')
 
   def alias_buffer(self, i, pattern):
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
