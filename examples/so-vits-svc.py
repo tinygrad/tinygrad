@@ -91,7 +91,7 @@ class Generator:
     self.num_kernels, self.num_upsamples = len(resblock_kernel_sizes), len(upsample_rates)
     self.conv_pre = nn.Conv1d(inter_channels, upsample_initial_channel, 7, 1, padding=3)
     self.f0_upsamp = Upsample(scale_factor=np.prod(upsample_rates))
-    # TODO: add harmonic noised sinus frequency 
+    # TODO: add harmonic noised sinus frequency
     resblock = ResBlock1 if resblock == '1' else ResBlock2
     self.ups = [nn.ConvTranspose1d(upsample_initial_channel//(2**i), upsample_initial_channel//(2**(i+1)), k, u, padding=(k-u)//2) for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes))]
     self.resblocks = []
