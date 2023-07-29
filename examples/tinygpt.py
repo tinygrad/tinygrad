@@ -178,6 +178,7 @@ class GPTLanguageModel():
     return logits, loss
 
   def generate(self, idx, max_new_tokens):
+    out = '' # full generated output string
     # idx is (B, T) array of indices in the current context
     for _ in range(max_new_tokens):
       # crop idx to the last block_size tokens
@@ -190,15 +191,16 @@ class GPTLanguageModel():
       probs = logits.softmax(-1) # (B, C)
       # sample from the distribution
       idx_next = [np.random.choice(len(p), size=1, p=p) for p in probs.numpy()]
-      #idx_next = multinomial(torch.tensor(probs.numpy()), num_samples=1).numpy() # (B, 1)
-      print(decode(idx_next[0]), flush=True, end='')
-      idx_next = Tensor(idx_next)
+      token = decode(idx_next[0])
+      # print and flush for running stream of next token
+      print(token, flush=True, end='')
+      out = out + token
       # append sampled index to the running sequence
-      idx = Tensor.cat(idx, idx_next, dim=1) # (B, T+1)
-      # limit idx to block_size to reduce context length for efficiency
-      # comment this out to use full concatenated idx context in each iteration **slow**
+      idx = Tensor.cat(idx, Tensor(idx_next), dim=1) # (B, T+1)
+      # limit idx to block_size to reduce context length for efficiency but worse output
+      # comment this line out to use full concatenated idx context for more accuracy ** very slow **
       idx = idx[:,-block_size:]
-    return idx
+    return out
 
 
 if __name__ == "__main__":
@@ -269,7 +271,7 @@ if __name__ == "__main__":
   print("-- hark! --")
   # generate output tokens
   context = Tensor.zeros((1, 1), dtypes.int64)
-  out = decode(model.generate(context, max_new_tokens=2000).numpy()[0])
+  out = model.generate(context, max_new_tokens=1000)
   print("\n-- exeunt. --")
   if (args.output is not None):
     with open(args.output, 'w') as f:
