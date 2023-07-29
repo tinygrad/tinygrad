@@ -31,8 +31,8 @@ extra/datasets/kits/
 extra/datasets/COCO/
 extra/datasets/audio*
 venv
-examples/webgpu/net.js
-examples/webgpu/net.safetensors
+examples/webgpu/*/net.js
+examples/webgpu/*/*.safetensors
 node_modules
 package.json
 package-lock.json

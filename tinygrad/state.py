@@ -18,6 +18,11 @@ def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
 def safe_save(tensors:Dict[str, Tensor], fn:str):
   metadata, offset = {}, 0
   for k,v in tensors.items():
+    # TODO: Load whole model
+    # Only handling post_quant_conv and decoder for now, so no need to load the whole model
+    if not (k.startswith('first_stage_model.post_quant_conv') or k.startswith('first_stage_model.decoder')):
+      continue
+    
     metadata[k] = {'dtype': inverse_safe_dtypes[v.dtype], 'shape': list(v.shape), 'data_offsets':[offset, offset+v.nbytes()]}
     offset += v.nbytes()
   j = json.dumps(metadata, separators=(',', ':'))

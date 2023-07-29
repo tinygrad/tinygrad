@@ -3,6 +3,7 @@
 import os
 import tempfile
 from pathlib import Path
+import numpy as np
 import gzip, argparse, math, re
 from functools import lru_cache
 from collections import namedtuple
@@ -55,9 +56,19 @@ class ResnetBlock:
     self.nin_shortcut = Conv2d(in_channels, out_channels, 1) if in_channels != out_channels else lambda x: x
 
   def __call__(self, x):
-    h = self.conv1(self.norm1(x).swish())
-    h = self.conv2(self.norm2(h).swish())
-    return self.nin_shortcut(x) + h
+    '''
+      TODO: Needs general solution
+      Breaking up the computations into smaller sub-steps and realizing early
+      seems to circumvent the 8 storage buffer per compute stage limit in WebGPU
+    '''
+    a = self.norm1(x).realize()
+    a = a.swish().realize()
+    b = self.conv1(a)
+    b = self.norm2(b).realize()
+    b = b.swish().realize()
+    b = self.conv2(b).realize()
+    c = self.nin_shortcut(x)
+    return c + b
 
 class Mid:
   def __init__(self, block_in):
@@ -87,20 +98,27 @@ class Decoder:
     self.conv_out = Conv2d(128, 3, 3, padding=1)
 
   def __call__(self, x):
-    x = self.conv_in(x)
-    x = self.mid(x)
-
+    x = self.conv_in(x).realize()
+    x = self.mid(x).realize()
+    
     for l in self.up[::-1]:
       print("decode", x.shape)
-      for b in l['block']: x = b(x)
+      for b in l['block']: 
+        # TODO: It produces bad result without this weight.numpy() call. Why?
+        if hasattr(b.nin_shortcut, 'weight'):
+          b.nin_shortcut.weight.numpy()
+        x = b(x)
       if 'upsample' in l:
         # https://pytorch.org/docs/stable/generated/torch.nn.functional.interpolate.html ?
         bs,c,py,px = x.shape
         x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
         x = l['upsample']['conv'](x)
       x.realize()
+  
+    t = self.norm_out(x).realize()
+    t = t.swish().realize()
 
-    return self.conv_out(self.norm_out(x).swish())
+    return self.conv_out(t)
 
 class Encoder:
   def __init__(self):
@@ -138,11 +156,11 @@ class AutoencoderKL:
     self.post_quant_conv = Conv2d(4, 4, 1)
 
   def __call__(self, x):
-    latent = self.encoder(x)
-    latent = self.quant_conv(latent)
+    latent = self.encoder(x).realize()
+    latent = self.quant_conv(latent).realize()
     latent = latent[:, 0:4]  # only the means
     print("latent", latent.shape)
-    latent = self.post_quant_conv(latent)
+    latent = self.post_quant_conv(latent).realize()
     return self.decoder(latent)
 
 # not to be confused with ResnetBlock
@@ -558,13 +576,27 @@ class ClipTokenizer:
     if len(bpe_tokens) > 75:
       bpe_tokens = bpe_tokens[:75]
     return [49406] + bpe_tokens + [49407] * (77 - len(bpe_tokens) - 1)
-
+  
 class StableDiffusion:
   def __init__(self):
     self.alphas_cumprod = Tensor.empty(1000)
     self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel())
     self.first_stage_model = AutoencoderKL()
     self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = CLIPTextTransformer()))
+
+  def forward(self, latent_tensor):
+    #TODO: Support the other parts of the model, currently it decodes an input latent_tensor
+    # saved after a diffusor step
+
+    # upsample latent space to image with autoencoder
+    x = self.first_stage_model.post_quant_conv(1/0.18215 * latent_tensor)
+    x = self.first_stage_model.decoder(x)
+
+    # make image correct size and scale
+    x = (x + 1.0) / 2.0
+    x = (x.reshape(3,512,512).permute(1,2,0).clip(0,1)*255)
+
+    return x
 
   # TODO: make __call__ run the model
 
@@ -658,6 +690,9 @@ if __name__ == "__main__":
     #x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t_prime, index)
     latent = x_prev
     latent.realize()
+
+  # Uncomment it to save the latent tensor to be used in the browser
+  # numpy.save("./latent_tensor", latent.numpy())
 
   # upsample latent space to image with autoencoder
   x = model.first_stage_model.post_quant_conv(1/0.18215 * latent)
