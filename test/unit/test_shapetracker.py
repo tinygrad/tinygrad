@@ -126,17 +126,17 @@ class TestIndexExpressions(unittest.TestCase):
     self.numel = prod(self.st.shape)
 
   def tearDown(self):
-    for idx in ['idx', None, (0, 99), (7, 203), (2, 5), (0, 0), (0, self.numel-1), (self.numel, self.numel), (0, self.numel), (0, self.numel+1), (self.numel+100, self.numel+100)]:
-        if isinstance(idx, tuple):
-          idx = Variable("idx", idx[0], idx[1])
+    assert self.expr(self.default_idx()) == self.st.expr_node()[0]
+    for idx in [None, (0, 99), (7, 203), (2, 5), (0, 0), (0, self.numel-1), (self.numel, self.numel), (0, self.numel), (0, self.numel+1), (self.numel+100, self.numel+100)]:
+        if idx is not None:
+          idx = test_idx = Variable("idx", idx[0], idx[1])
         else:
-          idx = self.default_idx(self.st.shape)
-        
-        assert self.expr(idx) == self.st.expr_node(idx)[0]
-        self.check_bounds(self.expr(idx))
+          test_idx = self.default_idx()
+        self.check_bounds(self.expr(test_idx))
+        assert self.expr(test_idx) == self.st.expr_node(idx)[0]
 
-  def default_idx(self, shape):
-    return Variable("idx", 0, prod(shape)-1)
+  def default_idx(self):
+    return Variable("idx", 0, prod(self.st.shape)-1)
 
   def check_bounds(self, expr):
     assert expr.min >= self.st.real_offset()
