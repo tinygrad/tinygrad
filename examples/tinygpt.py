@@ -168,7 +168,7 @@ class GPTLanguageModel():
     for block in self.blocks: x = block(x) # (B,T,C)
     x = self.ln_f(x) # (B,T,C)
     logits = self.lm_head(x) # (B,T,vocab_size)
-    
+
     if targets is None:
       loss = None
     else:
@@ -214,10 +214,10 @@ if __name__ == "__main__":
   """
 
   parser = argparse.ArgumentParser(description="""Tiny Shakespeare GPT""")
-  parser.add_argument('--input', default=os.path.join(os.path.sep, 'tmp', 'input.txt'), 
+  parser.add_argument('--input', default=os.path.join(os.path.sep, 'tmp', 'input.txt'),
                       help="Where to save the input text, defaults to '/tmp/input.txt'",
                       metavar="PATH")
-  parser.add_argument('--output', default=None, 
+  parser.add_argument('--output', default=None,
                       help='Save the output text, defaults to NO OUTPUT.',
                       metavar="PATH")
   parser.add_argument('--clean', action="store_true",
@@ -243,7 +243,7 @@ if __name__ == "__main__":
   n = int(0.9*data.shape[0])
   train_data = data[:n]
   val_data = data[n:]
-      
+
   model = GPTLanguageModel(vocab_size)
   parameters = get_parameters(model)
   # print the number of parameters in the model
@@ -269,7 +269,7 @@ if __name__ == "__main__":
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-  
+
   Tensor.training = False
   print("-- hark! --")
   # generate output tokens
