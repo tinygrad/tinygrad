@@ -22,7 +22,7 @@ class ARM64Codegen(AssemblyCodegen):
     prev_uop = None
     ins = [] 
     x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (9,10,11,12,13,14,15,16,17,18,19,20)]
-    s_regs = ['s' + str(i) for i in reversed(range(2,30))]
+    s_regs = ['s' + str(i) for i in reversed(range(3,30))]
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.MOD: "", BinaryOps.CMPLT: "subs", BinaryOps.CMPEQ: "subs",
            UnaryOps.SIN: get_op('sinf'), UnaryOps.LOG2: get_op("log2f"), UnaryOps.EXP2: get_op("exp2f"), UnaryOps.SQRT: get_op("sqrtf"),
@@ -35,7 +35,7 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"sxtw {to}, w15")
         elif to[0] == 's': 
             #NOTE: value comes as int when it should be float
-            #value = float(value) if value.__class__ is int else value
+            value = float(value) if value.__class__ is int else value
             ins.append(f"movz x15, {'0x' + float_to_hex(value)[:4]}, lsl #16")
             ins.append(f"movk x15, {'0x' + float_to_hex(value)[4:]}")
             ins.append(f"scvtf {to}, w15")
@@ -48,8 +48,8 @@ class ARM64Codegen(AssemblyCodegen):
       for var in ([v for v in [out] + vin if v is not None and v.__class__ is not int]):
         live_range[var.nm] = [i,i] if var.nm not in live_range else [live_range[var.nm][0], i]
 
-    temp_floats = ['s0', 's1', 's0']
-    temp_ints = ['x13', 'x12', 'x13']
+    temp_floats = ['s0', 's1', 's2']
+    temp_ints = ['x13', 'x12', 'x11']
     def load_var(vin):
       prev_reg = None
       for i, v in enumerate([v for v in vin if v.__class__ is not int and v.nm in mem_vars]):
@@ -70,11 +70,11 @@ class ARM64Codegen(AssemblyCodegen):
         #NOTE: Very simple spill, everything that don't fit in regs goes to mem
         if len(available_regs) == 0:
           var_size += 16
-          reg ='s1' if dtypes.is_float(out[1]) else 'x12'
+          reg = 's1' if dtypes.is_float(out[1]) else 'x12'
           available_regs.append(reg)
           mem_vars[v.nm] = f"[sp, #{var_size}]"
         rtor[v.nm] = available_regs.pop()
-
+    save_vars = 0
     for i, (uop, out, vin, arg) in enumerate(asm):
       for var, reg in list(rtor.items()):
         available_regs = s_regs if reg[0] == 's' else x_regs
@@ -83,13 +83,13 @@ class ARM64Codegen(AssemblyCodegen):
       # Assign a registers to the variables using live ranges.
       allocate_regs(vin)
       allocate_regs([out])
-     
       if uop == UOps.DEFINE_GLOBAL:
         if arg.startswith('data'):
           # args 8 onward goes into the stack, so we move them into regs 
           if int(arg[4:]) >= 8:
             ins.append(f"ldr x15, [x19, #{(int(arg[4:]) - 8) * 8}]")
             ins.append(f"mov {rtor[out.nm]}, x15")
+            store_var(out)
       elif uop == UOps.CAST:
         if arg == BinaryOps.CMPEQ:
           ins.append("mov x15, xzr")
@@ -111,10 +111,9 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"fcsel {rtor[out.nm]},{rtor[vin[2].nm]}, {rtor[vin[1].nm]}, eq")
         elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
           save_regs = [k for k in rtor.keys() if k != out.nm and k not in mem_vars]
-          ins.append(f"sub sp, sp, #{len(save_regs)*16}")
+          ins.append(f"sub sp, sp, #{(len(save_regs))*16}")
           for i,k in enumerate(save_regs,1):
-            ins.append(f"mov x15, #{(16*i)}")
-            ins.append(f"str {rtor[k]}, [sp, x15]")
+            ins.append(f"str {rtor[k]}, [sp, #{16*i}]")
           ins.append("stp x29, x30, [sp, #0]!")
           ins.append("mov x29, sp")
           ins.append(f"fmov s0, {rtor[vin[0].nm]}")
@@ -123,8 +122,7 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append("mov sp, x29")
           ins.append("ldp x29, x30, [sp], #0")
           for i,k in enumerate(save_regs,1):
-            ins.append(f"mov x15, #{(16*i)}")
-            ins.append(f"ldr {rtor[k]}, [sp, x15]")
+            ins.append(f"ldr {rtor[k]}, [sp, #{16*i}]")
           ins.append(f"add sp, sp, #{len(save_regs)*16}")
         elif arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
           ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]}, {'x15' if vin[1].__class__ is int else rtor[vin[1].nm]}" if reg == 'x' else f"fcmp {rtor[vin[0].nm]}, {rtor[vin[1].nm]}")
@@ -139,6 +137,7 @@ class ARM64Codegen(AssemblyCodegen):
           mov_imm(arg, rtor[out.nm])
         else:
           load_var(vin) 
+          #NOTE: if need casting load var in s/h0 or x/w12 temp regs
           reg_in = type_to_reg[arg[2]] + ('0' if dtypes.is_float(arg[2]) else '12') if arg[2] is not None else rtor[out.nm]
           mov_imm(arg[0], "x15")
           ins.append(f"add x15, {rtor[vin[0].nm]}, x15")
@@ -148,6 +147,7 @@ class ARM64Codegen(AssemblyCodegen):
       elif uop == UOps.STORE:
         load_var(vin) 
         shifts = {dtypes.int64: "#3", dtypes.half: "#1", dtypes.int8:"#2", dtypes.uint8: "#2"}
+        #NOTE: if need casting load var in s/h0 or x/w12 temp regs
         reg_out = (type_to_reg[arg[2]] + ('0' if dtypes.is_float(arg[2]) else '12') if arg[2] is not None else rtor[vin[1].nm])
         if arg[2] is not None: ins.append(f"fcvt{'zs' if arg[2] != dtypes.half else '' } {reg_out}, {rtor[vin[1].nm]}")
         ins.append(f"mov x15, #{arg[0]}")
