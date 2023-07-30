@@ -9,15 +9,18 @@ args = {
   'Darwin': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'dylib', 'exp':''}
 }[platform.system()]
 
+def _compile_to_lib(prg:str):
+  # TODO: is there a way to not write this to disk?
+  dst = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
+  if not os.path.exists(dst):
+    subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+dst+'.tmp').split(), input=prg.encode('utf-8'))
+    os.rename(dst+'.tmp', dst)
+  return ctypes.CDLL(dst)
+
 class ClangProgram:
   def __init__(self, name:str, prg:str):
     prg = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n' + prg
-    # TODO: is there a way to not write this to disk?
-    fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
-    if not os.path.exists(fn):
-      subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+fn+'.tmp').split(), input=prg.encode('utf-8'))
-      os.rename(fn+'.tmp', fn)
-    self.lib = ctypes.CDLL(fn)
+    self.lib = _compile_to_lib(prg)
     self.fxn = self.lib[name]
 
   def __call__(self, global_size, local_size, *args, wait=False):
