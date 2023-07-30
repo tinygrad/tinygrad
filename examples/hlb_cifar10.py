@@ -88,10 +88,9 @@ class SpeedyResNet:
 # implemented in recursive fashion but figuring out how to switch indexing dim 
 # during the loop was a bit tricky
 def pad_reflect(X, padding) -> Tensor:
-  print(padding)
   p = padding[3]
   s = X.shape[3]
-  # TODO assert padding length can't be greater than s - 1 for pad reflect
+
   X_lr = X[...,:,1:1+p[0]].flip(3).pad(((0,0),(0,0),(0,0),(0,s+p[0]))) + X[...,:,-1-p[1]:-1].flip(3).pad(((0,0),(0,0),(0,0),(s+p[1],0)))
   X = X.pad(((0,0),(0,0),(0,0),p)) + X_lr
 
@@ -102,10 +101,8 @@ def pad_reflect(X, padding) -> Tensor:
     
   return X
 
-# def masked_select()
-
-def cutmix(X, Y, mask_size=3, p=0.5, mix=True):
-  if Tensor.rand(1) > 0.5: return X, Y
+# return a mask in the format of BS x C x H x W where H x W are in bool 
+def make_square_mask(X, mask_size):
   # create a mask
   is_even = int(mask_size % 2 == 0)
   center_max = X.shape[-2]-mask_size//2-is_even
@@ -119,6 +116,20 @@ def cutmix(X, Y, mask_size=3, p=0.5, mix=True):
   d_y =(d_y >= -(mask_size / 2)) * (d_y <= mask_size / 2)
   d_x =(d_x >= -(mask_size / 2)) * (d_x <= mask_size / 2)
   mask = d_y * d_x
+
+  return mask
+
+def random_crop(X, crop_size=32):
+  mask = make_square_mask(X, crop_size)
+  mask = mask.repeat((1,3,1,1))
+  X_cropped = Tensor(X.flatten().numpy()[mask.flatten().numpy().astype(bool)])
+  
+  return X_cropped.reshape((-1, 3, crop_size, crop_size))
+
+def cutmix(X, Y, mask_size=5, p=0.5, mix=True):
+  if Tensor.rand(1) > 0.5: return X, Y
+
+  mask = make_square_mask(X, mask_size)
 
   if not mix: return Tensor.where(mask, Tensor.rand(*X.shape), X), Y
   
@@ -135,7 +146,10 @@ transform = [
   lambda x: x / 255.0, # scale
   lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1), # normalize
   lambda x: x.reshape((-1,3,32,32)),
+  lambda x: pad_reflect(x, ((0,0),(0,0),(2,2),(2,2))),
+  lambda x: random_crop(x),
   lambda x: Tensor.where(Tensor.rand(x.shape[0],1,1,1) < 0.5, x[..., ::-1], x), # flip LR
+  # ideally cutmix can also be placed here but it also takes y
 ]
 
 transform_test = [
@@ -190,7 +204,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
     X_train, Y_train, X_test, Y_test = fetch_cifar()    # they are disk tensor now
 
   # precompute whitening patches
-  W = whitening(X_train.sequential(transform))
+  W = whitening(X_train.sequential(transform_test))
 
   model = SpeedyResNet(W)
   optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
