@@ -17,6 +17,12 @@ def _compile_to_lib(prg:str):
     os.rename(dst+'.tmp', dst)
   return ctypes.CDLL(dst)
 
+if platform.system() == 'Linux':
+  # Reproducer taken from https://github.com/llvm/llvm-project/issues/56204
+  lib = _compile_to_lib('float __attribute__((noinline)) n(float v) { return -v; } int check() { return (__fp16)n(-1.f); }')
+  if lib['check']() != 1:
+    raise RuntimeError('Test lib incorrectly handles half precision floating point. CLANG backend won\'t produce valid results')
+
 class ClangProgram:
   def __init__(self, name:str, prg:str):
     prg = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n' + prg
