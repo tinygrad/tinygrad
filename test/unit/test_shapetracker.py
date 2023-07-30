@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction
+from tinygrad.shape.symbolic import Variable
 
 def shapetracker_getitem(st, val):
   locals = {"idx": val, "valid": 1}
@@ -118,6 +119,44 @@ class TestRealSimplifies(unittest.TestCase):
     self.st = ShapeTracker((8, 1, 6, 10, 28, 3, 2, 1), views=[
       View((8, 3, 3, 11, 2, 28), (924, 308, 0, 28, 0, 1), 0, None),
       View((8, 1, 6, 10, 28, 3, 2, 1), (5544, 0, 0, 56, 1, 1848, 672, 0), 0, None)])
+
+class TestIndexExpressions(unittest.TestCase):
+  def setUp(self):
+    self.st = ShapeTracker((10, 10))
+    self.numel = prod(self.st.shape)
+
+  def tearDown(self):
+    assert self.expr(self.default_idx()) == self.st.expr_node()[0]
+    for idx in [None, (0, 99), (7, 203), (2, 5), (0, 0), (0, self.numel-1), (self.numel, self.numel), (0, self.numel), (0, self.numel+1), (self.numel+100, self.numel+100)]:
+        if idx is not None:
+          idx = test_idx = Variable("idx", idx[0], idx[1])
+        else:
+          test_idx = self.default_idx()
+        self.check_bounds(self.expr(test_idx))
+        assert self.expr(test_idx) == self.st.expr_node(idx)[0]
+
+  def default_idx(self):
+    return Variable("idx", 0, prod(self.st.shape)-1)
+
+  def check_bounds(self, expr):
+    assert expr.min >= self.st.real_offset()
+    assert expr.max <= self.st.real_offset() + self.numel - 1
+
+  def test_noop(self): 
+    self.expr = lambda idx: idx%100
+
+  def test_permute(self):
+    self.st.permute((1, 0))
+    self.expr = lambda idx: idx%10*10 + idx//10%10
+
+  def test_reshape(self):
+    self.st.reshape((10, 1, 10))
+    self.expr = lambda idx: idx%10 + idx//10%10*10
+
+  def test_reshape_expand(self):
+    self.st.reshape((10, 1, 10))
+    self.st.expand((10, 10, 10))
+    self.expr = lambda idx: idx//100*10 + idx%10
 
 class TestSimplifyingShapeTracker(unittest.TestCase):
   def setUp(self):
