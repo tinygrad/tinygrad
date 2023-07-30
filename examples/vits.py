@@ -521,7 +521,7 @@ def load_model(symbols, hps, model) -> Synthesizer:
   net_g = Synthesizer(len(symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
   _ = load_checkpoint(weights_path, net_g, None)
   return net_g
-def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None):
+def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None, skip_list=[]):
   assert os.path.isfile(checkpoint_path)
   start_time = time.time()
   checkpoint_dict = torch_load(checkpoint_path)
@@ -530,6 +530,7 @@ def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None):
   saved_state_dict = checkpoint_dict['model']
   weight_g, weight_v, parent = None, None, None
   for key, v in saved_state_dict.items():
+    if any(layer in key for layer in skip_list): continue
     try:
       obj, skip = model, False
       for k in key.split('.'):

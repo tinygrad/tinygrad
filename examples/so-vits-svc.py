@@ -1,8 +1,11 @@
 from tinygrad import nn
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, getenv
-from vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present
+from tinygrad.state import torch_load
+from vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present, get_hparams_from_file, load_checkpoint
+
 import numpy as np
+
 import logging
 import sys
 from pathlib import Path
@@ -37,10 +40,10 @@ class Synthesizer:
     if vol_embedding:
       self.emb_vol = nn.Linear(1, hidden_channels)
     self.pre = nn.Conv1d(ssl_dim, hidden_channels, kernel_size=5, padding=2)
-    self.enc_p = TextEncoder(inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout)
+    self.enc_p = TextEncoder(inter_channels, hidden_channels, kernel_size, n_layers, filter_channels=filter_channels, n_heads=n_heads, p_dropout=p_dropout)
     self.dec = Generator(sampling_rate, inter_channels, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gin_channels)
     self.enc_q = PosteriorEncoder(spec_channels, inter_channels, hidden_channels, 5, 1, 16, gin_channels=gin_channels)
-    self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, n_flows=n_flow_layer, gin_channels=gin_channels) # TODO: This is already defined in super Synthesizer. Maybe adjust super constructor? Only diff is n_flows param
+    self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, n_flow_layer, gin_channels=gin_channels)
     self.emb_uv = nn.Embedding(vocab_size=2, embed_size=hidden_channels)
     self.character_mix = False
   def EnableCharacterMix(self, n_speakers_map, device):
@@ -76,10 +79,10 @@ class TextEncoder:
     self.out_channels, self.hidden_channels, self.kernel_size, self.n_layers, self.gin_channels = out_channels, hidden_channels, kernel_size, n_layers, gin_channels
     self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
     self.f0_emb = nn.Embedding(256, hidden_channels)  # n_vocab = 256
-    self.encoder = Encoder(hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout)
+    self.enc_ = Encoder(hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout)
   def forward(self, x, x_mask, f0=None, noise_scale=1):
     x = x + self.f0_emb(f0).transpose(1, 2)
-    x = self.encoder.forward(x * x_mask, x_mask)
+    x = self.enc_.forward(x * x_mask, x_mask)
     stats = self.proj(x) * x_mask
     m, logs = split(stats, self.out_channels, dim=1)
     z = (m + randn_like(m) * logs.exp() * noise_scale) * x_mask
@@ -145,19 +148,19 @@ class Generator:
     resblock = ResBlock1 if resblock == '1' else ResBlock2
     self.ups, self.noise_convs = [], []
     for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
-      c_curr = upsample_initial_channel//(2**(i+1))
-      self.ups.append(nn.ConvTranspose1d(upsample_initial_channel//(2**i), c_curr, k, u, padding=(k-u)//2))
+      c_cur = upsample_initial_channel//(2**(i+1))
+      self.ups.append(nn.ConvTranspose1d(upsample_initial_channel//(2**i), c_cur, k, u, padding=(k-u)//2))
       if i + 1 < len(upsample_rates):  # TODO: make oneliner after debugging
-        stride_f0 = np.prod(upsample_rates[i + 1:])
-        self.noise_convs.append(nn.Conv1d(1, c_curr, stride_f0 * 2, stride_f0, (stride_f0+1) // 2))
+        stride_f0 = int(np.prod(upsample_rates[i + 1:]))
+        self.noise_convs.append(nn.Conv1d(1, c_cur, kernel_size=stride_f0 * 2, stride=stride_f0, padding=(stride_f0+1) // 2))
       else:
-        self.noise_convs.append(nn.Conv1d(1, c_curr, kernel_size=1))
+        self.noise_convs.append(nn.Conv1d(1, c_cur, kernel_size=1))
     self.resblocks = []
     for i in range(len(self.ups)):
       ch = upsample_initial_channel // (2 ** (i + 1))
       for _, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes)):
         self.resblocks.append(resblock(ch, k, d))
-    self.conv_post = nn.Conv1d(ch, 1, 7, 1, padding=3, bias=False)
+    self.conv_post = nn.Conv1d(ch, 1, 7, 1, padding=3)
     if gin_channels != 0: self.cond = nn.Conv1d(gin_channels, upsample_initial_channel, 1)
     self.upp = np.prod(upsample_rates)
   def forward(self, x, f0, g=None):
@@ -213,6 +216,14 @@ class F0Decoder():
     self.cond = nn.Conv1d(spk_channels, hidden_channels, 1)
 """
 
+# TODO: this is just for Synthesizer for now
+def load_model(hps, model) -> Synthesizer:
+  weights_path = model[1]
+  download_if_not_present(weights_path, model[3])
+  net_g = Synthesizer(hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, **hps.model)
+  _ = load_checkpoint(weights_path, net_g, None, skip_list=["f0_decoder"])
+  return net_g
+
 SO_VITS_SVC_PATH = Path(__file__).parent.parent / "weights/So-VITS-SVC"
 VITS_MODELS = { # config_path, weights_path, config_url, weights_url
   "saul_goodman" : (SO_VITS_SVC_PATH / "config_saul_gman.json", SO_VITS_SVC_PATH / "pretrained_saul_gman.pth", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/G_80000.pth")
@@ -223,9 +234,11 @@ if __name__=="__main__":
 
   test_model = "saul_goodman"
   model_config = VITS_MODELS[test_model]
-  
+
   config_path = model_config[0]
   download_if_not_present(config_path, model_config[2])
-  
-  model_path = model_config[1]
-  download_if_not_present(model_path, model_config[3])
+  hps = get_hparams_from_file(config_path)
+
+  Tensor.no_grad = True
+  net_g = load_model(hps, model_config)
+  logging.debug(f"Loaded model with hps: {hps}")
