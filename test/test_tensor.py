@@ -1,9 +1,7 @@
-import dataclasses
 import numpy as np
 import torch
 import unittest
-import itertools
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 import pytest
