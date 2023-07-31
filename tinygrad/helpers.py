@@ -1,5 +1,4 @@
 from __future__ import annotations
-import contextlib
 import os, functools, platform, time, re
 from weakref import KeyedRef, ref
 from _weakref import _remove_dead_weakref # type: ignore
@@ -31,7 +30,7 @@ def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
-class Context(contextlib.ContextDecorator):
+class Context:
   stack: ClassVar[List[dict[str, int]]] = [{}]
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
