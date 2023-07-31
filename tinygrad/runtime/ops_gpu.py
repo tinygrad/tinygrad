@@ -47,9 +47,11 @@ class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
     assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
     CL.events_in_flight.append(cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False))
   def _copyout(self, x:np.ndarray):
+    buf = cl.Buffer(CL.cl_ctxs[self._buf.device], cl.mem_flags.WRITE_ONLY | cl.mem_flags.USE_HOST_PTR, 0, hostbuf=memoryview(x))
+    mapped = cl.enqueue_map_buffer(CL.cl_queue[self._buf.device], buf, cl.map_flags.WRITE, 0, x.size, dtype=x.dtype)
     CL.synchronize()
     assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
-    cl.enqueue_copy(CL.cl_queue[self._buf.device], x, self._buf, is_blocking=True)
+    with mapped[0].base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped[0], self._buf, is_blocking=True, wait_for=[mapped[1]])
   def _transfer(self, x):
     if "gfx" in CL.cl_ctxs[x._buf.device].devices[0].name: # TODO: only on amd
       e = cl.enqueue_copy_buffer_p2p_amd(CL.cl_platform, CL.cl_queue[x._buf.device], x._buf, self._buf, x.size * x.dtype.itemsize)
