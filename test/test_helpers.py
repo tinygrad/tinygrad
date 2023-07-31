@@ -1,9 +1,6 @@
 import unittest
 from tinygrad.helpers import Context, ContextVar
 
-# TODO unsure about the name and placement of this new file.
-# avoided naming it test_helpers.py since there already is already extras/test_helpers.py
-
 VARIABLE = ContextVar("VARIABLE", 0)
 
 class TestContextVars(unittest.TestCase):
