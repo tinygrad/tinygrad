@@ -492,7 +492,7 @@ def Round(X:Tensor):
 
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
   def _nearest_gather(X: Tensor, indices: Tensor, output_shape):
-    return _gather(X.flatten(), indices).reshape(output_shape) # replace with Tensor.gather()
+    return _gather(X.flatten(), indices).reshape(output_shape) # replace with Tensor.gather() because this might be wrong
   def _nearest_mode(x_resized: Tensor, nearest_mode: str, x_len):
     if nearest_mode == "round_prefer_floor": ret = _round(x_resized, 0.5, "round_down")
     elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, 0.5, "round_up")
