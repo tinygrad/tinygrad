@@ -35,9 +35,15 @@ class TestContextVars(unittest.TestCase):
     C = ContextVar("C", 0)
     self.assertEqual(C.value, 13)
 
-  def test_assignment_by_call_syntax(self):
-    VARIABLE.value = 6
-    self.assertEqual(VARIABLE.value, 6)
+  def test_assignment_across_modules(self):
+    B = ContextVar("B", 1)
+    # local assignment
+    B.value = 2
+    self.assertEqual(B.value, 2)
+    # Assignment in another module.
+    exec('from tinygrad.helpers import ContextVar;B = ContextVar("B", 0);B.value = 3;', {})
+    # Assignment in another module should affect this one as well.
+    self.assertEqual(B.value, 3)
 
   def test_context_assignment(self):
     with Context(VARIABLE=1):
