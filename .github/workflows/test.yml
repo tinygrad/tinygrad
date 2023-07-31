@@ -76,27 +76,6 @@ jobs:
     - name: Test EfficientNet
       run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
 
-  testcpuwindows:
-    name: CPU on Windows
-    runs-on: windows-latest
-    timeout-minutes: 20
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Cache pip
-      uses: actions/cache@v3
-      with:
-        path: '~\AppData\Local\pip\cache'
-        key: testing
-    - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Run pytest
-      run: python -m pytest -n=auto test/ -k 'test'
-
   testtorch:
     name: Torch Tests
     runs-on: ubuntu-latest

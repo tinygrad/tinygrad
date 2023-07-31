@@ -10,7 +10,7 @@ function cleanup(err) {
     res.kill();
     if(err != null) {
         console.error(err);
-        process.exit(1);
+        process.exit(1);        
     }
 }
 
@@ -24,7 +24,7 @@ async function waitForText(selector, text) {
             ready = true;
             break
         }
-        await timeout(2000);
+        await timeout(2000);           
         n += 1
     }
     return ready;

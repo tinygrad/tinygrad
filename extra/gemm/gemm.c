@@ -135,7 +135,7 @@ int main() {
   for (int i = 0; i < 4000; i++) {
     memset(C, 0, N*N*sizeof(float));
 
-#if NTHREADS != 1
+#if NTHREADS != 1 
     nready = 0;
     ndone = 0;
     pthread_mutex_lock(&lock);
@@ -147,7 +147,7 @@ int main() {
 #endif
 
     uint64_t start = nanos();
-#if NTHREADS == 1
+#if NTHREADS == 1 
     matmul(0, N);
 #else
     // unlocking mutex starts threads
@@ -156,7 +156,7 @@ int main() {
 #endif
     uint64_t end = nanos();
 
-#if NTHREADS != 1
+#if NTHREADS != 1 
     for (int j = 0; j < NTHREADS; j++) {
       pthread_join(threads[j], NULL);
     }
