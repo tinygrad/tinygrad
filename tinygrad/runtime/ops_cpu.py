@@ -16,6 +16,7 @@ base_fxn_for_op: Dict[Op, Callable] = {
   MovementOps.RESHAPE: lambda x, arg: x.reshape(arg), MovementOps.SHRINK: lambda x, arg: x[tuple(slice(p[0], p[1], None) for p in arg)],
 }
 
+def promote_types(x, y): return ret if (ret := np.promote_types(x.dtype, y.dtype)) != np.float64 else np.float32
 def match_types(x, y):
   up = x.dtype if dtypes.from_np(x.dtype).priority > dtypes.from_np(y.dtype).priority else y.dtype
   return x.astype(up, copy=False), y.astype(up, copy=False)
@@ -44,8 +45,6 @@ numpy_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
 class RawNumpyBuffer(RawBuffer):
   def __init__(self, size:int, dtype:DType, buf:Optional[np.ndarray]=None): super().__init__(size, dtype, buf if buf is not None else np.empty([size], dtype.np))
   @classmethod
-  def fromCPU(cls, x): 
-    if x.dtype == np.float64: x = x.astype(np.float32)
-    return cls(x.size, dtypes.from_np(x.dtype), x)
+  def fromCPU(cls, x): return cls(x.size, dtypes.from_np(x.dtype), x)
   def toCPU(self): return self._buf
 CPUBuffer = Interpreted(RawNumpyBuffer, numpy_fxn_for_op, from_underlying=RawNumpyBuffer.fromCPU)
