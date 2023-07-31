@@ -70,8 +70,7 @@ class TransformerEncoder_1:
       dropout = 0
       mean = 0.0
       std = std = math.sqrt((4 * (1.0 - dropout)) / (cfg.conv_pos * self.embedding_dim))
-      # TODO: here comes Tensor.normal
-      layer.weight, layer.bias = (std * Tensor.randn(*layer.weight.shape) + mean), (Tensor.zeros(*layer.bias.shape))
+      layer.weight, layer.bias = (Tensor.normal(*layer.weight.shape)), (Tensor.zeros(*layer.bias.shape))
       # TODO: layer.weights = weight_norm(layer.weight, layer.bias, dim=2)
       return Sequential([layer, SamePad(cfg.conv_pos), GELU()])
     self.dropout, self.embedding_dim = cfg.dropout, cfg.encoder_embed_dim
@@ -213,7 +212,7 @@ class ConvFeatureExtractionModel():
     def block(n_in, n_out, k, stride, is_layer_norm=False, is_group_norm=False, conv_bias=False):
       def make_conv():
         conv = nn.Conv1d(n_in, n_out, k, stride=stride, bias=conv_bias)
-        conv.weight = Tensor.kaiming_uniform(*conv.weight.shape)  # TODO: Tensor.kaiming_normal
+        conv.weight = Tensor.kaiming_normal(*conv.weight.shape)
         return conv
       class SequentialMasked(Sequential):  # https://github.com/auspicious3000/contentvec/blob/main/contentvec/models/wav2vec/wav2vec2_1.py#L56
         def __init__(self, list): super().__init__(list)
