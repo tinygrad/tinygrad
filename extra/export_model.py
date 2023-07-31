@@ -138,25 +138,25 @@ def export_model(model, input:Tensor, target:str):
   else:
     prg = json.dumps({
       "backend": Device.DEFAULT, 
-      "input": { 
-        "size": bufs['input'][0], 
+      "input": {
+        "size": bufs['input'][0],
         "dtype": bufs['input'][1].name
-      }, 
+      },
       "output": {
-        "size": bufs["outputs"][0], 
+        "size": bufs["outputs"][0],
         "dtype": bufs["outputs"][1].name
-      }, 
-      "functions": functions, 
+      },
+      "functions": functions,
       "statements": [{
         "kernel": kernel,
-        "args": args, 
-        "global_size": global_size, 
+        "args": args,
+        "global_size": global_size,
         "local_size": local_size
-      } for (kernel, args, global_size, local_size) in statements], 
-      "buffers": { 
+      } for (kernel, args, global_size, local_size) in statements],
+      "buffers": {
         name: {
-          "size": size, 
-          "dtype": dtype.name, 
+          "size": size,
+          "dtype": dtype.name,
           "id": weight_names[_key] if _key in weight_names else ""
         } for name, (size,dtype,_key) in bufs.items() if name not in ["input", "outputs"]
       }
