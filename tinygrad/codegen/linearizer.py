@@ -595,7 +595,7 @@ class Linearizer:
     for i,x in enumerate(rets): self.sts[i].reshape(tuple([y[0] for y in x]))
 
   # ******************** GPU simplifiers ********************
-  def _limit_size(self, x: Tuple[int], max_size: List[int]) -> Tuple[int, ...]:
+  def _limit_size(self, x: Tuple[int], max_size: List) -> Tuple[int, ...]:
     new_shape,dims = list(x), len(x)
     for i in range(dims):
       next_idx = (i + 1) % dims
