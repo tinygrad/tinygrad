@@ -51,7 +51,7 @@ class TestContextVars(unittest.TestCase):
     self.assertEqual(VARIABLE.value, 0)
 
   def test_unknown_param_to_context(self):
-    with self.assertRaises(Exception) as context:
+    with self.assertRaises(KeyError) as context:
       with Context(SOMETHING_ELSE=1):
         pass
 
@@ -87,6 +87,8 @@ with Context(VARIABLE=1):
   def test_nested_context(self):
     with Context(VARIABLE=1):
       with Context(VARIABLE=2):
+        with Context(VARIABLE=3):
+          self.assertEqual(VARIABLE.value, 3)
         self.assertEqual(VARIABLE.value, 2)
       self.assertEqual(VARIABLE.value, 1)
     self.assertEqual(VARIABLE.value, 0)
