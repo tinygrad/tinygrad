@@ -49,33 +49,32 @@ class ARM64Codegen(AssemblyCodegen):
         live_range[var.nm] = [i,i] if var.nm not in live_range else [live_range[var.nm][0], i]
 
     temp_floats = ['s0', 's1', 's2']
-    temp_ints = ['x13', 'x12', 'x11']
-    def load_var(vin):
-      for i, v in enumerate([v for v in vin if v.__class__ is not int and v.nm in mem_vars]):
-        rtor[v.nm] = temp_floats[i] if dtypes.is_float(v[1]) else temp_ints[i] 
-        ins.append(f"ldr {rtor[v.nm]}, {mem_vars[v.nm]}")
-
+    temp_ints = ['x11', 'x12', 'x13']
+    
     mem_vars = {} 
     def allocate_regs(vars): 
       nonlocal var_size
-      for i,v in enumerate([v for v in vars if v is not None and v.__class__ is not int and v.nm not in rtor]):
+      for v in [v for v in vars if v is not None and v.__class__ is not int and v.nm not in rtor]:
         available_regs = s_regs if dtypes.is_float(v[1]) else x_regs
         #NOTE: Very simple spill, everything that don't fit in regs goes to mem
         if len(available_regs) == 0:
           var_size += 16
-          reg = 's1' if dtypes.is_float(out[1]) else 'x12'
-          available_regs.append(reg)
+          available_regs.append('s0' if dtypes.is_float(out[1]) else 'x11')
           mem_vars[v.nm] = f"[sp, #{var_size}]"
         rtor[v.nm] = available_regs.pop()
-    save_vars = 0
+
     for i, (uop, out, vin, arg) in enumerate(asm):
       for var, reg in list(rtor.items()):
         available_regs = s_regs if reg[0] == 's' else x_regs
         if var[1] != 'B' and var not in mem_vars and i > live_range[var][1]:
           available_regs.append(rtor.pop(var))
       # Assign a registers to the variables using live ranges.
-      allocate_regs(vin)
-      allocate_regs([out])
+      allocate_regs([out] + vin)
+
+      for i, v in enumerate([v for v in vin if v.__class__ is not int and v.nm in mem_vars]):
+        rtor[v.nm] = temp_floats[i] if dtypes.is_float(v[1]) else temp_ints[i] 
+        ins.append(f"ldr {rtor[v.nm]}, {mem_vars[v.nm]}")
+
       if uop == UOps.DEFINE_GLOBAL:
         if arg.startswith('data'):
           # args 8 onward goes into the stack, so we move them into regs 
@@ -88,10 +87,8 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append("cset w15, eq")
           ins.append(f"scvtf {rtor[out.nm]}, w15")
         else:
-          load_var(vin) 
           ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
       elif uop == UOps.ALU:
-        load_var(vin) 
         reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
         if len(vin)==2 and vin[1].__class__ is int: mov_imm(vin[1], 'x15')
         if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
@@ -126,7 +123,6 @@ class ARM64Codegen(AssemblyCodegen):
         if arg.__class__ in (int, float):
           mov_imm(arg, rtor[out.nm])
         else:
-          load_var(vin) 
           #NOTE: if need casting load var in s/h0 or x/w12 temp regs
           reg_in = type_to_reg[arg[2]] + ('0' if dtypes.is_float(arg[2]) else '12') if arg[2] is not None else rtor[out.nm]
           mov_imm(arg[0], "x15")
@@ -134,7 +130,6 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"ldr{'sb' if arg[2] is not None and arg[2] in (dtypes.int8, dtypes.uint8) else ''} {reg_in}, [x15]")
           if arg[2] is not None: ins.append(f"{'fcvt' if arg[2] == dtypes.half else 'scvtf'} {rtor[out.nm]}, {reg_in}")
       elif uop == UOps.STORE:
-        load_var(vin) 
         shifts = {dtypes.int64: "#3", dtypes.half: "#1", dtypes.int8:"#2", dtypes.uint8: "#2"}
         #NOTE: if need casting load var in s/h0 or x/w12 temp regs
         reg_out = (type_to_reg[arg[2]] + ('0' if dtypes.is_float(arg[2]) else '12') if arg[2] is not None else rtor[vin[1].nm])
@@ -144,7 +139,6 @@ class ARM64Codegen(AssemblyCodegen):
       elif uop == UOps.COND_BRANCH:
         #TODO: this is a hack it shouldn't always be a cmp before a cond branch?
         if prev_uop == UOps.LOAD:
-          load_var(vin) 
           ins.append(f"cmp {rtor[vin[0].nm]}, #0")
         ins.append(f"b.{'lt' if arg[1] == True else 'ge'} {arg[0][1:]}")
       elif uop == UOps.LABEL:
