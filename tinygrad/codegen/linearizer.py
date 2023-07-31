@@ -608,7 +608,7 @@ class Linearizer:
           new_shape[next_idx] = new_shape[next_idx] * 2
     return tuple(new_shape)
 
-  def limit_global_dims(self, limit: int, global_max: List[int] = [], local_max: List[int] = []):
+  def limit_global_dims(self, limit: int, global_max: List[int] = None, local_max: List[int] = None):
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
     # NOTE: this might make multiview shapetrackers
