@@ -93,7 +93,7 @@ def fetch_batches(all_X, all_Y, BS, seed, is_train=False, flip_chance=0.5):
     if not is_train: break
     seed += 1
 
-def train_cifar(config, bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.04, pct_start=0.2, momentum=0.8, wd=0.13, label_smoothing=0., mixup_alpha=0.025, seed=9):
+def train_cifar(config, bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_lr_ratio=0.001, max_lr=0.04, pct_start=0.2, momentum=0.8, wd=0.13, label_smoothing=0., mixup_alpha=0.025, seed=6):
   rank, world_size = getenv("RANK"), getenv("WORLD_SIZE")
   set_seed(seed)
   Tensor.training = True
@@ -324,18 +324,19 @@ def run():
 
 def run2():
   train_cifar({
-    "max_lr": 0.016279556912291174,
-    "pct_start": 0.20191245376826575,
-    "div_factor": 3098105635814253,
-    "momentum": 0.9210648369131892,
-    "wd": 0.12201506850368582,
-    "label_smoothing": 0.1590394650216007,
-    "final_lr_ratio": 0.0015072069793158026,
-    "mixup_alpha": 0.020980960594745347,
+    "max_lr": 0.01,
+    "pct_start": 0.0546875,
+    "div_factor": 1e16,
+    "momentum": 0.8,
+    "wd": 0.15,
+    "label_smoothing": 0,
+    "final_lr_ratio": 0.001,
+    "mixup_alpha": 0.025,
   })
 
 if __name__ == "__main__":
   devices = ["gpu:0", "gpu:1", "gpu:2", "gpu:3", "gpu:4", "gpu:5"]
+  # devices = ["hip:0", "hip:1", "hip:2", "hip:3", "hip:4", "hip:5"]
   world_size = len(devices)
 
   # startup our manager
@@ -343,5 +344,5 @@ if __name__ == "__main__":
 
   processes = []
   for rank, device in enumerate(devices):
-    processes.append(dist.spawn(rank, device, fn=run, args=()))
+    processes.append(dist.spawn(rank, device, fn=run2, args=()))
   for p in processes: p.join()
