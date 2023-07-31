@@ -238,12 +238,12 @@ class ShapeTracker:
   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
     # reshape into symbolic shape, update the variable value
     if all(isinstance(s, int) for s in self.shape) and len(new_vars:=list(s for s in new_shape if isinstance(s, Variable))) > 0:
-      assert len(new_vars) == 1  # only allow adding one variable
+      assert len(new_vars) == 1, "only one variable is supported in a shape"
       new_var, new_val = new_vars[0], prod(self.shape) // prod(s for s in new_shape if isinstance(s, int))
       if new_var.val is None:
-        assert new_var.min <= new_val <= new_var.max
+        assert new_var.min <= new_val <= new_var.max, f"variable value {new_val} out of range [{new_var.min}, {new_var.max}]"
         new_var.val = new_val
-      else: assert new_var.val == new_val
+      else: assert new_var.val == new_val, f"value conflicts, was {new_var.val}, set to {new_val}"
 
     if self.views[-1].shape == new_shape: return self
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
