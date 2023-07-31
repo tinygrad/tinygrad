@@ -33,21 +33,20 @@ def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
-  _vars: ClassVar[Dict[str, Tuple[ContextVar, int]]] = {}
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
+    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
     Context.stack.append(self.kwargs)
-    for k, (o, _) in Context._vars.items(): o.value = self.kwargs.get(k, o.value)
   def __exit__(self, *args):
-    Context.stack.pop()
-    for k, (o, dv) in Context._vars.items(): o.value = Context.stack[-1].get(k, dv)
+    for k in Context.stack.pop(): ContextVar._cache[k].value = Context.stack[-1].get(k, Context.stack[0][k])
 
 class ContextVar:
+  _cache: ClassVar[Dict[str, ContextVar]] = {}
   __slots__ = "value"
   def __new__(cls, key, default_value):
-    if key in Context._vars: return Context._vars[key][0]
-    Context._vars[key] = (instance := super().__new__(cls), getenv(key, default_value))
-    instance.value = Context.stack[-1].get(key, default_value)
+    if key in ContextVar._cache: return ContextVar._cache[key]
+    instance = ContextVar._cache[key] = super().__new__(cls)
+    instance.value = Context.stack[0][key] = getenv(key, default_value)
     return instance
   def __bool__(self): return bool(self.value)
   def __ge__(self, x): return self.value >= x
