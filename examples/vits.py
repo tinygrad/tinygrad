@@ -514,13 +514,6 @@ class HParams:
   def __contains__(self, key): return key in self.__dict__
   def __repr__(self): return self.__dict__.__repr__()
 
-# MODEL LOADING
-def load_model(symbols, hps, model) -> Synthesizer:
-  weights_path = model[1]
-  download_if_not_present(weights_path, model[3])
-  net_g = Synthesizer(len(symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
-  _ = load_checkpoint(weights_path, net_g, None)
-  return net_g
 def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None):
   assert os.path.isfile(checkpoint_path)
   start_time = time.time()
@@ -658,6 +651,80 @@ MODELS = { # config_path, weights_path, config_url, weights_url
   "voistock": (VITS_PATH / "config_voistock.json", VITS_PATH / "pretrained_voistock.pth", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/15/config.json", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/15/model.pth"),
 }
 Y_LENGTH_ESTIMATE_SCALARS = {"ljs": 2.8, "vctk": 1.74, "mmts-tts": 1.9, "uma_trilingual": 2.3, "cjks": 3.3, "voistock": 3.1}
+
+class VITSModel:
+  def __init__(self, model_to_use="vctk", speaker_id=6, emotion_path=None):
+    self.model_to_use, self.speaker_id = model_to_use, speaker_id
+    model_config = MODELS[model_to_use]
+    # Load the hyperparameters from the config file.
+    config_path = model_config[0]
+    download_if_not_present(config_path, model_config[2])
+    self.hps = get_hparams_from_file(config_path)
+    # If model has multiple speakers, validate speaker id and retrieve name if available.
+    self.model_has_multiple_spakers = self.hps.data.n_speakers > 0
+    if self.model_has_multiple_spakers:
+      logging.info(f"Model has {self.hps.data.n_speakers} speakers")
+      if speaker_id >= self.hps.data.n_speakers: raise ValueError(f"Speaker ID {speaker_id} is invalid for this model.")
+      speaker_name = "?"
+      if self.hps.__contains__("speakers"):  # maps speaker ids to names
+        speakers = self.hps.speakers
+        if isinstance(speakers, List): speakers = {speaker: i for i, speaker in enumerate(speakers)}
+        speaker_name = next((key for key, value in speakers.items() if value == speaker_id), None)
+      logging.info(f"You selected speaker {speaker_id} (name: {speaker_name})")
+      # Load emotions if any. TODO: find an english model with emotions, this is untested atm.
+      self.emotion_embedding = None
+      if emotion_path is not None:
+        if emotion_path.endswith(".npy"):
+          self.emotion_embedding = Tensor(np.load(emotion_path), dtype=dtypes.int64).unsqueeze(0)
+        else:
+          raise ValueError("Emotion path must be a .npy file.")
+      # Load symbols, instantiate TextMapper and clean the text.
+      if self.hps.__contains__("symbols"):
+        symbols = self.hps.symbols
+      elif model_to_use == "mmts-tts":
+        symbols = [x.replace("\n", "") for x in open(download_if_not_present(VITS_PATH / "vocab_mmts-tts.txt", "https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/vocab.txt"), encoding="utf-8").readlines()]
+      else:
+        symbols = ['_'] + list(';:,.!?¡¿—…"«»“” ') + list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz') + list("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ")
+      self.text_mapper = TextMapper(apply_cleaners=True, symbols=symbols)
+      weights_path = model_config[1]
+      download_if_not_present(weights_path, model_config[3])
+      self.net_g = Synthesizer(len(symbols), self.hps.data.filter_length // 2 + 1,
+                               self.hps.train.segment_size // self.hps.data.hop_length,
+                               n_speakers=self.hps.data.n_speakers, **self.hps.model)
+      _ = load_checkpoint(weights_path, self.net_g, None)
+      logging.debug(f"Loaded model with hps: {self.hps}")
+
+  def tts(self, text_to_synthesize, estimate_max_y_length=False, noise_scale=0.667, noise_scale_w=0.8,
+          length_scale=1.0):
+    # Convert the input text to a tensor.
+    if self.model_to_use == "mmts-tts": text_to_synthesize = self.text_mapper.filter_oov(text_to_synthesize.lower())
+    stn_tst = self.text_mapper.get_text(text_to_synthesize, self.hps.data.add_blank, self.hps.data.text_cleaners)
+    logging.debug(
+      f"Converted input text to tensor \"{text_to_synthesize}\" -> Tensor({stn_tst.shape}): {stn_tst.numpy()}")
+    x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
+    sid = Tensor([self.speaker_id], dtype=dtypes.int64) if self.model_has_multiple_spakers else None
+    # Perform inference.
+    start_time = time.time()
+    audio_tensor = self.net_g.infer(x_tst, x_tst_lengths, sid, noise_scale, length_scale, noise_scale_w,
+                                    emotion_embedding=self.emotion_embedding,
+                                    max_y_length_estimate_scale=Y_LENGTH_ESTIMATE_SCALARS[
+                                      self.model_to_use] if estimate_max_y_length else None)[0, 0].realize()
+    logging.info(f"Inference took {(time.time() - start_time):.2f}s")
+    return (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
+
+  def write_audio_data_to_file(self, audio_data, base_name="test", out_path=None,
+                               out_dir=str(Path(__file__).parent.parent / "temp"), num_channels=1, sample_width=2):
+    out_path = Path(out_path or Path(
+      out_dir) / f"{self.model_to_use}{f'_sid_{self.speaker_id}' if self.model_has_multiple_spakers else ''}_{base_name}.wav")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(out_path), 'wb') as wav_file:
+      wav_file.setnchannels(num_channels)
+      wav_file.setsampwidth(sample_width)
+      wav_file.setframerate(self.hps.data.sampling_rate)
+      wav_file.setnframes(len(audio_data))
+      wav_file.writeframes(audio_data.tobytes())
+    logging.info(f"Saved audio output to {out_path}")
+
 if __name__ == '__main__':
   logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
   parser = argparse.ArgumentParser()
@@ -677,67 +744,13 @@ if __name__ == '__main__':
   parser.add_argument("--estimate_max_y_length", type=str, default=False, help="If true, overestimate the output length and then trim it to the correct length, to prevent premature realization, much more performant for larger inputs, for smaller inputs not so much. Default is False.")
   args = parser.parse_args()
 
-  model_config = MODELS[args.model_to_use]
-
-  # Load the hyperparameters from the config file.
-  config_path = model_config[0]
-  download_if_not_present(config_path, model_config[2])
-  hps = get_hparams_from_file(config_path)
-
-  # If model has multiple speakers, validate speaker id and retrieve name if available.
-  model_has_multiple_spakers = hps.data.n_speakers > 0
-  if model_has_multiple_spakers:
-    logging.info(f"Model has {hps.data.n_speakers} speakers")
-    if args.speaker_id >= hps.data.n_speakers: raise ValueError(f"Speaker ID {args.speaker_id} is invalid for this model.")
-    speaker_name = "?"
-    if hps.__contains__("speakers"): # maps speaker ids to names
-      speakers = hps.speakers
-      if isinstance(speakers, List): speakers = {speaker: i for i, speaker in enumerate(speakers)}
-      speaker_name = next((key for key, value in speakers.items() if value == args.speaker_id), None)
-    logging.info(f"You selected speaker {args.speaker_id} (name: {speaker_name})")
-
-  # Load emotions if any. TODO: find an english model with emotions, this is untested atm.
-  emotion_embedding = None
-  if args.emotion_path is not None:
-    if args.emotion_path.endswith(".npy"): emotion_embedding = Tensor(np.load(args.emotion_path), dtype=dtypes.int64).unsqueeze(0)
-    else: raise ValueError("Emotion path must be a .npy file.")
-
-  # Load symbols, instantiate TextMapper and clean the text.
-  if hps.__contains__("symbols"): symbols = hps.symbols
-  elif args.model_to_use == "mmts-tts": symbols = [x.replace("\n", "") for x in open(download_if_not_present(VITS_PATH / "vocab_mmts-tts.txt", "https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/vocab.txt"), encoding="utf-8").readlines()]
-  else: symbols = ['_'] + list(';:,.!?¡¿—…"«»“” ') + list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz') + list("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ")
-  text_mapper = TextMapper(apply_cleaners=True, symbols=symbols)
-
   # Load the model.
   Tensor.no_grad = True
   if args.seed is not None:
     Tensor.manual_seed(args.seed)
     np.random.seed(args.seed)
-  net_g = load_model(text_mapper.symbols, hps, model_config)
-  logging.debug(f"Loaded model with hps: {hps}")
 
-  # Convert the input text to a tensor.
-  text_to_synthesize = args.text_to_synthesize
-  if args.model_to_use == "mmts-tts": text_to_synthesize = text_mapper.filter_oov(text_to_synthesize.lower())
-  stn_tst = text_mapper.get_text(text_to_synthesize, hps.data.add_blank, hps.data.text_cleaners)
-  logging.debug(f"Converted input text to tensor \"{text_to_synthesize}\" -> Tensor({stn_tst.shape}): {stn_tst.numpy()}")
-  x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
-  sid = Tensor([args.speaker_id], dtype=dtypes.int64) if model_has_multiple_spakers else None
+  vits_model = VITSModel(args.model_to_use, args.speaker_id, args.emotion_path)
+  audio_data = vits_model.tts(args.text_to_synthesize, args.estimate_max_y_length, args.noise_scale, args.noise_scale_w, args.length_scale)
+  vits_model.write_audio_data_to_file(audio_data, args.base_name, args.out_path, args.out_dir, args.num_channels, args.sample_width)
 
-  # Perform inference.
-  start_time = time.time()
-  audio_tensor = net_g.infer(x_tst, x_tst_lengths, sid, args.noise_scale, args.length_scale, args.noise_scale_w, emotion_embedding=emotion_embedding,
-                             max_y_length_estimate_scale=Y_LENGTH_ESTIMATE_SCALARS[args.model_to_use] if args.estimate_max_y_length else None)[0, 0].realize()
-  logging.info(f"Inference took {(time.time() - start_time):.2f}s")
-
-  # Save the audio output.
-  audio_data = (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
-  out_path = Path(args.out_path or Path(args.out_dir)/f"{args.model_to_use}{f'_sid_{args.speaker_id}' if model_has_multiple_spakers else ''}_{args.base_name}.wav")
-  out_path.parent.mkdir(parents=True, exist_ok=True)
-  with wave.open(str(out_path), 'wb') as wav_file:
-    wav_file.setnchannels(args.num_channels)
-    wav_file.setsampwidth(args.sample_width)
-    wav_file.setframerate(hps.data.sampling_rate)
-    wav_file.setnframes(len(audio_data))
-    wav_file.writeframes(audio_data.tobytes())
-  logging.info(f"Saved audio output to {out_path}")

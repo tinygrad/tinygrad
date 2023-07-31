@@ -266,32 +266,12 @@ class LLaMa:
         if output.endswith(s): return output[0:-len(s)]
     return output
 
+
 # **** main code ****
 
-if __name__ == "__main__":
-  Tensor.no_grad = True
-  print(f"using {Device.DEFAULT} backend")
-
-  parser = argparse.ArgumentParser(description='Run LLaMA in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  # test: python3 examples/llama.py --prompt="Hello." --temperature=0
-  # Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
-  parser.add_argument('--prompt', type=str, default=None, help="Phrase to start with. Without this, it goes into chatbot mode")
-  parser.add_argument('--count', type=int, default=1000, help="Max number of tokens to generate")
-  parser.add_argument('--personality', type=str, default="Stacy", help="Personality, can be Stacy, George, Gary, or Lexie")
-
-  parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
-  parser.add_argument('--timing', action='store_true', help="Print timing per token")
-  parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
-  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B] for Gen 2")
-  parser.add_argument('--gen', type=int, default="1", help="Generation of the model to use [1, 2]")
-  parser.add_argument('--quantize', action='store_true', help="Quantize the weights to int8 in memory")
-
-  args = parser.parse_args()
-  chatbot = args.prompt == None
-
-  # *** prompt engineers work here ****
-
-  if args.personality.lower() == "stacy":
+def load_personality(personality = "george"):
+  global pre_prompt, user_delim, end_delim
+  if personality.lower() == "stacy":
     pre_prompt = f"""Consider that the following is conversation between an AI assistant named Stacy and User
 You are Stacy!
 You have been a rapper your whole life who struggled with bipolar disorder. You called yourself lil stacy.
@@ -310,9 +290,10 @@ After you are done speaking, output [EOS]. You are not the User.
     user_delim = "\nUser: "
     resp_delim = "Stacy: "
     end_delim = " [EOS]\n"
-    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
-  elif args.personality.lower() == "george":
-    print("WARNING: AI George Hotz is terrible and is completely disowned by the real George Hotz. Stacy is much smarter.")
+    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k, v in examples.items())
+  elif personality.lower() == "george":
+    print(
+      "WARNING: AI George Hotz is terrible and is completely disowned by the real George Hotz. Stacy is much smarter.")
     pre_prompt = f"""Consider that the following is conversation between an AI assistant named George and User
 You are an AI version of George Hotz. You act as much as you can like George.
 You are one of the greatest computer experts in the world.
@@ -334,8 +315,8 @@ After you are done speaking, output [EOS]. You are not the User.
     user_delim = "\nUser: "
     resp_delim = "George: "
     end_delim = " [EOS]\n"
-    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
-  elif args.personality.lower() == "gary":
+    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k, v in examples.items())
+  elif personality.lower() == "gary":
     pre_prompt = f"""Consider that the following is conversation between an AI assistant named Gary and User
 You are Gary!
 You have sold used cars your entire life. You are defensive about this fact, because your family belittles you.
@@ -353,8 +334,8 @@ After you are done speaking, output [EOS]. You are not the User.
     user_delim = "\nUser: "
     resp_delim = "Gary: "
     end_delim = " [EOS]\n"
-    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
-  elif args.personality.lower() == "lexie":
+    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k, v in examples.items())
+  elif personality.lower() == "lexie":
     pre_prompt = f"""Consider that the following is conversation between an attractive young girl named Lexie and a handsome man named Chad
 You are Lexie!
 You grew up in Ohio, but moved out to LA after college to try to become an actress.
@@ -374,79 +355,103 @@ After you are done speaking, output [EOS]. You are not Chad.
     user_delim = "\nChad: "
     resp_delim = "Lexie: "
     end_delim = " [EOS]\n"
-    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
+    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k, v in examples.items())
+  return pre_prompt, user_delim, end_delim
 
-  # *** prompt engineers stop here ****
+class LLAMAModel:
+  def __init__(self, personality="george", gen=1, size="7B",  quantize=False, profile=False, timing=False):
+    self.personality = personality
+    self.pre_prompt, self.user_delim, self.end_delim = load_personality(personality)
+    LLAMA_SUFFIX = {1: "", 2: "-2"}[gen]
+    WEIGHTS_DIR = Path(__file__).parent.parent / f"weights/LLaMA{LLAMA_SUFFIX}/"
+    TOKENIZER_FILENAME = WEIGHTS_DIR / "tokenizer.model"
+    print(f"using LLaMA{LLAMA_SUFFIX}-{size} model")
+    self.llama = LLaMa.build(WEIGHTS_DIR, TOKENIZER_FILENAME, model_gen=gen, model_size=size, quantize=quantize)
+    if profile:
+      import cProfile
+      self.profiler = cProfile.Profile()
+    else:
+      self.profiler = None
+    self.timing = timing
 
-
-  LLAMA_SUFFIX = {1: "", 2: "-2"}[args.gen]
-  WEIGHTS_DIR = Path(__file__).parent.parent / f"weights/LLaMA{LLAMA_SUFFIX}/"
-  TOKENIZER_FILENAME = WEIGHTS_DIR / "tokenizer.model"
-  print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
-  llama = LLaMa.build(WEIGHTS_DIR, TOKENIZER_FILENAME, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
-
-  if chatbot:
+  def start_chatbot(self, count=1000, temperature=0.7):
     # encode pre prompt
-    toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(pre_prompt)
-
-    print(f"Preparing KV cache for chatbot with personality {args.personality}...")
-    with Timing():
-      llama.model(Tensor([toks]), 0).realize()  # NOTE: output logits are not used
+    outputted, toks = self.prepare_personality_kv_cache()
+    print_text(outputted)
     start_pos = len(toks)
-  else:
-    # non chat bot mode
-    toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(args.prompt)
-    start_pos = 0
-
-  # print prompt
-  outputted = llama.tokenizer.decode(toks)
-  sys.stdout.write(outputted)
-  sys.stdout.flush()
-
-  if args.profile:
-    import cProfile, pstats
-    profiler = cProfile.Profile()
-
-  # chatbot loop
-  while 1:
-    # add tokens from user in chatbot mode
-    if chatbot:
-      user_prompt = user_delim + input(user_delim) + "\n"
+    while 1: # chatbot loop
+      user_prompt = self.user_delim + input(self.user_delim) + "\n"
       outputted += user_prompt
+      start_pos, outputted = self.complete(outputted, count, temperature, start_pos, end_condition=lambda x: x.endswith(self.end_delim))
 
+  def prepare_personality_kv_cache(self):
+    toks = [self.llama.tokenizer.bos_id()] + self.llama.tokenizer.encode(self.pre_prompt)
+    outputted = self.llama.tokenizer.decode(toks)
+    print(f"Preparing KV cache for chatbot with personality {self.personality}...")
+    with Timing():
+      self.llama.model(Tensor([toks]), 0).realize()  # NOTE: output logits are not used
+    return outputted, toks
+
+  def complete(self, prompt, count=1000, temperature=0.7, start_pos=0, end_condition=lambda x: False, text_gen_callback=lambda x: print_text(x)):
+    llama = self.llama
+    # non chat bot mode
+    toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(prompt)
+    outputted = self.llama.tokenizer.decode(toks)
+    # print_text(outputted)
     new_toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
     assert toks == new_toks[:len(toks)]
     toks = new_toks
     assert outputted == llama.tokenizer.decode(toks)
-
-    last_break = len(outputted)
-    for i in range(args.count):
-      if args.profile and i == 2: profiler.enable()
-
-      if args.timing: print("")
+    for i in range(count):
+      if self.profiler and i == 2: self.profiler.enable()
+      if self.timing: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=args.timing):
+      with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s - st) * 1e3:.2f} ms on GPU") if DEBUG else None, enabled=self.timing):
         logits = llama.model(Tensor([toks[start_pos:]]), start_pos).realize()[:, -1, :]
-      with Timing("sync in ", enabled=args.timing):
-        tok = sample(logits, args.temperature)
-
-      # use the kv cache
-      start_pos = len(toks)
-
-      # add the new token
-      toks.append(tok)
-
+      with Timing("sync in ", enabled=self.timing):
+        tok = sample(logits, temperature)
+      start_pos = len(toks) # use the kv cache
+      toks.append(tok)      # add the new token
       # TODO: this is a hack to deal with spaces. i think the decode is fast though, so who cares?
       cur = llama.tokenizer.decode(toks)
-      sys.stdout.write(cur[len(outputted):])
-      sys.stdout.flush()
+      new_output = cur[len(outputted):]
+      text_gen_callback(new_output)
       outputted = cur
+      if end_condition(outputted): break
+    if self.profiler:
+      import pstats
+      self.profiler.disable()
+      stats = pstats.Stats(self.profiler)
+      stats.dump_stats('out.prof')
+      stats.sort_stats("time")
+      stats.print_stats(0.2)
+    return start_pos, outputted
 
-      # stop after you have your answer
-      if chatbot and outputted.endswith(end_delim): break
-    if not chatbot: break
+def print_text(text):
+  sys.stdout.write(text)
+  sys.stdout.flush()
 
-  if args.profile:
-    profiler.disable()
-    stats = pstats.Stats(profiler)
-    stats.dump_stats('out.prof')
+if __name__ == "__main__":
+  Tensor.no_grad = True
+  print(f"using {Device.DEFAULT} backend")
+
+  parser = argparse.ArgumentParser(description='Run LLaMA in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  # test: python3 examples/llama.py --prompt="Hello." --temperature=0
+  # Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
+  parser.add_argument('--prompt', type=str, default=None, help="Phrase to start with. Without this, it goes into chatbot mode")
+  parser.add_argument('--count', type=int, default=1000, help="Max number of tokens to generate")
+  parser.add_argument('--personality', type=str, default="Stacy", help="Personality, can be Stacy, George, Gary, or Lexie")
+  parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
+  parser.add_argument('--timing', action='store_true', help="Print timing per token")
+  parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
+  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B] for Gen 2")
+  parser.add_argument('--gen', type=int, default="1", help="Generation of the model to use [1, 2]")
+  parser.add_argument('--quantize', action='store_true', help="Quantize the weights to int8 in memory")
+
+  args = parser.parse_args()
+
+  model = LLAMAModel(personality=args.personality, gen=args.gen, size=args.size, quantize=args.quantize, profile=args.profile, timing=args.timing)
+  if args.prompt is None:
+    model.start_chatbot(args.count)
+  else:
+    model.complete(args.prompt, args.count, args.temperature)

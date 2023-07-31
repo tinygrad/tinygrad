@@ -5,7 +5,7 @@ import pathlib
 import base64
 import multiprocessing
 import numpy as np
-from typing import Optional
+from typing import Optional, Callable
 from extra.utils import download_file
 from tinygrad.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv
@@ -191,56 +191,67 @@ def listener(q):
     q.put(waveform)
   print("done listening")
 
-if __name__ == "__main__":
-  if getenv("SMALL"):
-    fn = BASE / "whisper-small.en.pt"
-    download_file("https://openaipublic.azureedge.net/main/whisper/models/f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872/small.en.pt", fn)
-  else:
-    fn = BASE / "whisper-tiny.en.pt"
-    download_file("https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt", fn)
-  state = torch_load(fn)
-  model = Whisper(state['dims'])
-  load_state_dict(model, state['model_state_dict'])
-  enc = get_encoding(state['dims']['n_vocab'])
+class WhisperModel:
+  def __init__(self, small=False):
+    if small:
+      fn = BASE / "whisper-small.en.pt"
+      download_file("https://openaipublic.azureedge.net/main/whisper/models/f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872/small.en.pt", fn)
+    else:
+      fn = BASE / "whisper-tiny.en.pt"
+      download_file("https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt", fn)
+    state = torch_load(fn)
+    self.model = Whisper(state['dims'])
+    load_state_dict(self.model, state['model_state_dict'])
+    self.enc = get_encoding(state['dims']['n_vocab'])
 
-  if len(sys.argv) > 1:
-    # offline
-    waveform, sample_rate = torchaudio.load(sys.argv[1], normalize=True)
+  def stt(self, file):
+    model = self.model
+    waveform, sample_rate = torchaudio.load(file, normalize=True)
     log_spec = prep_audio(waveform, sample_rate)
-    lst = [enc._special_tokens["<|startoftranscript|>"]]
+    lst = [self.enc._special_tokens["<|startoftranscript|>"]]
     dat = model.encoder(Tensor(log_spec)).realize()
     for i in range(50):
       out = model.decoder(Tensor([lst]), dat)
       out.realize()
       idx = out[0,-1].numpy().argmax()
       lst.append(idx)
-      print(enc.decode(lst))
-  else:
-    # online
+      print(self.enc.decode(lst))
 
+  def start_listening(self, on_transcript: Callable[[str], None] = lambda x: None):
+    model = self.model
     q = multiprocessing.Queue()
     p = multiprocessing.Process(target=listener, args=(q,))
     p.daemon = True
     p.start()
-
-    lst = [enc._special_tokens["<|startoftranscript|>"]]
+    lst = [self.enc._special_tokens["<|startoftranscript|>"]]
     total = None
     did_read = False
     for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
       while not q.empty() or total is None:
         waveform = q.get()
-        if total is None: total = waveform
-        else: total = np.concatenate([total, waveform], axis=1)
+        if total is None:
+          total = waveform
+        else:
+          total = np.concatenate([total, waveform], axis=1)
         did_read = True
       if did_read:
         last_total = total.shape[1]
         log_spec = prep_audio(torch.Tensor(total), RATE)
         encoded_audio = model.encoder(Tensor(log_spec)).realize()
       out = model.decoder(Tensor([lst]), encoded_audio).realize()
-      idx = out[0,-1].numpy().argmax()
+      idx = out[0, -1].numpy().argmax()
       lst.append(idx)
-      dec = enc.decode(lst)
-      print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
+      dec = self.enc.decode(lst)
+      print(dec)  # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
       if dec.endswith("<|endoftext|>"):
-        #total = total[:, 320*(len(lst)-1):]
-        lst = [enc._special_tokens["<|startoftranscript|>"]]
+        on_transcript(dec)
+        # total = total[:, 320*(len(lst)-1):]
+        lst = [self.enc._special_tokens["<|startoftranscript|>"]]
+
+if __name__ == "__main__":
+  model = WhisperModel(small=getenv("SMALL"))
+  if len(sys.argv) > 1:
+    model.stt(sys.argv[1])  # offline
+  else:
+    model.start_listening() # online
+
