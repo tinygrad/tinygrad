@@ -1,4 +1,4 @@
-import os, time, ctypes, hashlib, subprocess, platform, tempfile
+import os, time, ctypes, hashlib, subprocess, platform, tempfile, portalocker
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
@@ -12,10 +12,11 @@ args = {
 def _compile_to_lib(prg:str):
   # TODO: is there a way to not write this to disk?
   dst = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
-  if not os.path.exists(dst):
-    subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -march=native -x c '+args['cflags']+' - -o '+dst+'.tmp').split(), input=prg.encode('utf-8'))
-    os.rename(dst+'.tmp', dst)
-  return ctypes.CDLL(dst)
+  with portalocker.Lock(dst+'.lock', flags=portalocker.LockFlags.EXCLUSIVE) as lock:
+    if not os.path.exists(dst):
+      subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -march=native -x c '+args['cflags']+' - -o '+dst+'.tmp').split(), input=prg.encode('utf-8'))
+      os.rename(dst+'.tmp', dst)
+    return ctypes.CDLL(dst)
 
 if platform.system() == 'Linux':
   # Reproducer taken from https://github.com/llvm/llvm-project/issues/56204

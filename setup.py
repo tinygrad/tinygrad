@@ -19,7 +19,7 @@ setup(name='tinygrad',
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
       ],
-      install_requires=['numpy', 'requests', 'pillow', 'tqdm', 'networkx', 'pyopencl', 'PyYAML'],
+      install_requires=['numpy', 'requests', 'pillow', 'tqdm', 'networkx', 'pyopencl', 'PyYAML', 'portalocker'],
       python_requires='>=3.8',
       extras_require={
         'llvm': ["llvmlite"],
