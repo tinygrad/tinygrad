@@ -201,7 +201,7 @@ class Tensor:
   @staticmethod
   def kaiming_normal(*shape, a:float = 0.01, **kwargs) -> Tensor:
     std = sqrt(2.0 / (1 + a ** 2)) / sqrt(prod(shape[1:]))
-    return Tensor.normal(*shape, mean=0, std=std, **kwargs)
+    return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
   # ***** toposort and backward pass *****
   def deepwalk(self):
