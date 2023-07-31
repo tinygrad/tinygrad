@@ -56,7 +56,7 @@ class ARM64Codegen(AssemblyCodegen):
         if len(available_regs) == 0:
           var_size += 16
           available_regs.append('s0' if dtypes.is_float(out[1]) else 'x11')
-          mem_vars[v.nm] = f"[sp, #{var_size}]"
+          mem_vars[v.nm] = var_size
         rtor[v.nm] = available_regs.pop()
 
     for i, (uop, out, vin, arg) in enumerate(asm):
@@ -72,7 +72,8 @@ class ARM64Codegen(AssemblyCodegen):
       # Assing temp regs to vin to loading them into the same temp reg
       for i, v in enumerate([v for v in vin if v.__class__ is not int and v.nm in mem_vars]):
         rtor[v.nm] = temp_floats[i] if dtypes.is_float(v[1]) else temp_ints[i] 
-        ins.append(f"ldr {rtor[v.nm]}, {mem_vars[v.nm]}")
+        ins.append(f"mov x15, {mem_vars[v.nm]}")
+        ins.append(f"ldr {rtor[v.nm]}, [sp, x15]")
 
       if uop == UOps.DEFINE_GLOBAL:
         if arg.startswith('data'):
@@ -143,5 +144,7 @@ class ARM64Codegen(AssemblyCodegen):
       elif uop == UOps.LABEL:
         ins.append(f"{arg[1:]}:")
       prev_uop=uop
-      if out is not None and out.nm in mem_vars: ins.append(f"str {rtor[out.nm]}, {mem_vars[out.nm]}")
+      if out is not None and out.nm in mem_vars:
+        ins.append(f"mov x15, {mem_vars[out.nm]}")
+        ins.append(f"str {rtor[out.nm]}, [sp, x15]")
     return "test", "\n".join([".arch armv8-a",".text", ".global _test",".p2align 2", "_test:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins  + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret;"])

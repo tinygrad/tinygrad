@@ -21,26 +21,9 @@ class ClangProgram:
         os.rename(fn+'.tmp', fn)
     else:
       if DEBUG >= 5: print(prg)
-      """
-     .arch armv8-a
-.text
-.global _test
-.p2align 2
-_test:
-Lloh0:
-        adrp    x8, _sinf@GOTPAGE
-        ldr     s0, [x1]
-        mov     x19, x0
-Lloh1:
-        ldr     x8, [x8, _sinf@GOTPAGEOFF]
-        blr     x8
-        ldp     x29, x30, [sp, #16]             ; 16-byte Folded Reload
-        str     s0, [x19]
-        ret
-      """
       if getenv('ARM64'):
         subprocess.check_output(args=('as  -o '+fn+'.o').split(), input=prg.encode('utf-8'))
-        subprocess.check_output(args=('clang -lm -O2 -Wall -shared '+fn+'.o -o'+fn).split())
+        subprocess.check_output(args=('clang -lm -shared '+fn+'.o -o'+fn).split())
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
 
