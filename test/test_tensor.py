@@ -140,7 +140,7 @@ class TestTinygrad(unittest.TestCase):
     self.assertFalse(gradcheck(tiny_func, tiny_x, eps = 1e-5))
 
   def test_random_fns_are_deterministic_with_seed(self):
-    for random_fn in [Tensor.randn, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform]:
+    for random_fn in [Tensor.randn, Tensor.normal, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform, Tensor.kaiming_normal]:
       with self.subTest(msg=f"Tensor.{random_fn.__name__}"):
         Tensor.manual_seed(1337)
         a = random_fn(10,10).realize()
@@ -183,6 +183,28 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor.randn(1).ndim == 1
     assert Tensor.randn(2,2,2).ndim == 3
     assert Tensor.randn(1,1,1,1,1,1).ndim == 6
+
+  def test_argfix(self):
+    self.assertEqual(Tensor.zeros().shape, ())
+    self.assertEqual(Tensor.ones().shape, ())
+
+    self.assertEqual(Tensor.zeros([]).shape, ())
+    self.assertEqual(Tensor.ones([]).shape, ())
+
+    self.assertEqual(Tensor.zeros(tuple()).shape, ())
+    self.assertEqual(Tensor.ones(tuple()).shape, ())
+
+    self.assertEqual(Tensor.zeros(1).shape, (1,))
+    self.assertEqual(Tensor.ones(1).shape, (1,))
+
+    self.assertEqual(Tensor.zeros(1,10,20).shape, (1,10,20))
+    self.assertEqual(Tensor.ones(1,10,20).shape, (1,10,20))
+
+    self.assertEqual(Tensor.zeros([1]).shape, (1,))
+    self.assertEqual(Tensor.ones([1]).shape, (1,))
+
+    self.assertEqual(Tensor.zeros([10,20,40]).shape, (10,20,40))
+    self.assertEqual(Tensor.ones([10,20,40]).shape, (10,20,40))
 
   def test_numel(self):
     assert Tensor.randn(10, 10).numel() == 100
