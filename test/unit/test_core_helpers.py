@@ -30,7 +30,7 @@ class TestContextVars(unittest.TestCase):
 
   def test_value_accross_modules(self):
     # Mocking module import by invoking the code but not in our globals().
-    exec('from tinygrad.helpers import ContextVar;C = ContextVar("C", 13)', {})
+    exec('from tinygrad.helpers import ContextVar;C = ContextVar("C", 13)', {}) # pylint:disable=exec-used
     # It should not matter that the first creation was in another module.
     C = ContextVar("C", 0)
     self.assertEqual(C.value, 13)
@@ -41,7 +41,7 @@ class TestContextVars(unittest.TestCase):
     B.value = 2
     self.assertEqual(B.value, 2)
     # Assignment in another module.
-    exec('from tinygrad.helpers import ContextVar;B = ContextVar("B", 0);B.value = 3;', {})
+    exec('from tinygrad.helpers import ContextVar;B = ContextVar("B", 0);B.value = 3;', {}) # pylint:disable=exec-used
     # Assignment in another module should affect this one as well.
     self.assertEqual(B.value, 3)
 
@@ -51,7 +51,7 @@ class TestContextVars(unittest.TestCase):
     self.assertEqual(VARIABLE.value, 0)
 
   def test_unknown_param_to_context(self):
-    with self.assertRaises(KeyError) as context:
+    with self.assertRaises(KeyError):
       with Context(SOMETHING_ELSE=1):
         pass
 
@@ -79,7 +79,7 @@ class TestContextVars(unittest.TestCase):
 from tinygrad.helpers import Context, ContextVar
 with Context(VARIABLE=1):
   _NEW3 = ContextVar("_NEW3", 0)"""
-    exec(code, {})
+    exec(code, {})  # pylint:disable=exec-used
     # While _NEW3 was created in an outside scope it should still work the same as above.
     _NEW3 = ContextVar("_NEW3", 1)
     self.assertEqual(_NEW3.value, 0)
