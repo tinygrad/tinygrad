@@ -51,16 +51,9 @@ class ARM64Codegen(AssemblyCodegen):
     temp_floats = ['s0', 's1', 's2']
     temp_ints = ['x13', 'x12', 'x11']
     def load_var(vin):
-      prev_reg = None
       for i, v in enumerate([v for v in vin if v.__class__ is not int and v.nm in mem_vars]):
-        if rtor[v.nm] == prev_reg:
-          rtor[v.nm] = 's0' if dtypes.is_float(v[1]) else 'x13'
+        rtor[v.nm] = temp_floats[i] if dtypes.is_float(v[1]) else temp_ints[i] 
         ins.append(f"ldr {rtor[v.nm]}, {mem_vars[v.nm]}")
-        prev_reg = rtor[v.nm]
-
-    def store_var(out):
-      if out.nm in mem_vars:
-          ins.append(f"str {rtor[out.nm]}, {mem_vars[out.nm]}")
 
     mem_vars = {} 
     def allocate_regs(vars): 
@@ -89,7 +82,6 @@ class ARM64Codegen(AssemblyCodegen):
           if int(arg[4:]) >= 8:
             ins.append(f"ldr x15, [x19, #{(int(arg[4:]) - 8) * 8}]")
             ins.append(f"mov {rtor[out.nm]}, x15")
-            store_var(out)
       elif uop == UOps.CAST:
         if arg == BinaryOps.CMPEQ:
           ins.append("mov x15, xzr")
@@ -98,7 +90,6 @@ class ARM64Codegen(AssemblyCodegen):
         else:
           load_var(vin) 
           ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
-        store_var(out)
       elif uop == UOps.ALU:
         load_var(vin) 
         reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
@@ -131,7 +122,6 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"msub {rtor[out.nm]}, x14, x15, {rtor[vin[0].nm]}")
         else:
           ins.append(f"{'f' if reg == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
-        store_var(out)
       elif uop == UOps.LOAD:
         if arg.__class__ in (int, float):
           mov_imm(arg, rtor[out.nm])
@@ -143,7 +133,6 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"add x15, {rtor[vin[0].nm]}, x15")
           ins.append(f"ldr{'sb' if arg[2] is not None and arg[2] in (dtypes.int8, dtypes.uint8) else ''} {reg_in}, [x15]")
           if arg[2] is not None: ins.append(f"{'fcvt' if arg[2] == dtypes.half else 'scvtf'} {rtor[out.nm]}, {reg_in}")
-        store_var(out)
       elif uop == UOps.STORE:
         load_var(vin) 
         shifts = {dtypes.int64: "#3", dtypes.half: "#1", dtypes.int8:"#2", dtypes.uint8: "#2"}
@@ -161,4 +150,5 @@ class ARM64Codegen(AssemblyCodegen):
       elif uop == UOps.LABEL:
         ins.append(f"{arg[1:]}:")
       prev_uop=uop
+      if out is not None and out.nm in mem_vars: ins.append(f"str {rtor[out.nm]}, {mem_vars[out.nm]}")
     return "test", "\n".join([".arch armv8-a",".text", ".global _test",".p2align 2", "_test:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins  + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret;"])
