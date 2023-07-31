@@ -5,26 +5,11 @@ Most of these are self-explanatory, and are usually used to set an option at run
 
 Example: `GPU=1 DEBUG=4 python3 -m pytest`
 
-However you can also decorate a function to set a value only inside that function.
-
-```python
-# in tensor.py (probably only useful if you are a tinygrad developer)
-@Context(DEBUG=4)
-def numpy(self) -> ...
-```
-
-Or use contextmanager to temporarily set a value inside some scope:
-
-```python
-with Context(DEBUG=0):
-  a = Tensor.ones(10, 10)
-  a *= 2
-```
-
-## Global Variables
-The columns of this list are are: Variable, Possible Value(s) and Description.
+The columns are: Variable, Possible Value(s) and Description.
 
 - A `#` means that the variable can take any integer value.
+
+## Global Variables
 
 These control the behavior of core tinygrad even when used as a library.
 
