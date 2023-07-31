@@ -11,7 +11,7 @@ METAL_XCODE = getenv("METAL_XCODE")
 class _METAL:
   def __init__(self):
     self.device = Metal.MTLCreateSystemDefaultDevice()
-    self.dispatch_group = libdispatch.dispatch_group_create()
+    self.dispatch_group = libdispatch.dispatch_group_create() 
     self.mtl_queue = self.device.newCommandQueue()
   def command_buffer(self):
     command_buffer = self.mtl_queue.commandBuffer()

@@ -9,7 +9,7 @@ if __name__ == "__main__":
   model.load_from_pretrained()
   run, special_names = jit_model(model, Tensor.randn(1,3,224,224))
   functions, statements, bufs, _bufs_to_save = compile_net(run, special_names)
-
+  
   state = get_state_dict(model)
   weights = {id(x.lazydata.realized): name for name, x in state.items()}
   safe_save(state, path.join(path.dirname(__file__), "net.safetensors"))
@@ -28,7 +28,7 @@ if __name__ == "__main__":
 const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {{
   return safetensorBuffer.subarray(...tensorMetadata.data_offsets);
 }}
-
+  
 const createEmptyBuf = (device, size) => {{
     return device.createBuffer({{size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }});
 }};
@@ -50,7 +50,7 @@ const addComputePass = (device, commandEncoder, pipeline, bufs, workgroup) => {{
 }};
 
 {kernel_code}
-
+      
 const setupNet = async (device, safetensor) => {{
     const metadata = getTensorMetadata(safetensor);
 
