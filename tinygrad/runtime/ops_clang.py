@@ -12,7 +12,7 @@ args = {
 def _compile_to_lib(prg:str):
   # TODO: is there a way to not write this to disk?
   dst = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
-  with portalocker.Lock(dst+'.lock', flags=portalocker.LockFlags.EXCLUSIVE) as lock:
+  with portalocker.Lock(dst+'.lock', flags=portalocker.LockFlags.EXCLUSIVE):
     if not os.path.exists(dst):
       subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -march=native -x c '+args['cflags']+' - -o '+dst+'.tmp').split(), input=prg.encode('utf-8'))
       os.rename(dst+'.tmp', dst)
