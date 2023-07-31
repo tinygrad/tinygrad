@@ -137,7 +137,7 @@ def export_model(model, input:Tensor, target:str):
     prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names)
   else:
     prg = json.dumps({
-      "backend": Device.DEFAULT, 
+      "backend": Device.DEFAULT,
       "input": {
         "size": bufs['input'][0],
         "dtype": bufs['input'][1].name
