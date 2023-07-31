@@ -491,7 +491,10 @@ def Round(X:Tensor):
   return _round(X, 0.5, "round_to_even")
 
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
-  def _nearest_gather(X: Tensor, indices: Tensor, output_shape): return X.flatten().gather(indices, dim=0).reshape(output_shape) # TODO get rid of flatten()?
+  def _nearest_gather(X: Tensor, indices: Tensor, output_shape): 
+    print(X.shape)
+    exit()
+    return X.flatten().gather(indices, dim=0).reshape(output_shape) # TODO get rid of flatten()?
   def _nearest_mode(x_resized: Tensor, nearest_mode: str, x_len):
     if nearest_mode == "round_prefer_floor": ret = _round(x_resized, 0.5, "round_down")
     elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, 0.5, "round_up")
@@ -552,16 +555,18 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, "round_up")
       sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
   output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
-  assert output_shape[1] == 1, "TODO: DOES NOT YET SUPPORT MULTIPLE CHANNELS"
   output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
-  # bs,c,py,px = X.shape
   scales_lol = [os/xs for xs, os in zip(X.shape, output_shape)]
   x_out = Tensor.arange(output_shape[-1])
   y_out = Tensor.arange(output_shape[-2])
+  assert output_shape[1] == 1, "TODO: DOES NOT YET SUPPORT MULTIPLE CHANNELS"
   if mode == "nearest":
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol, roi)
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
     y_out = _nearest_mode(y_out, nearest_mode, X.shape[-1])
+    # for multiple channels:
+    # X[:, :, x_out, y_out] x_out.ndim == 1 and y_out.ndim == 1
+    # TODO NEED TO SUPPORT COMBINED INDEXING ASAP
     y_out = [int(i) for i in safe_numpy(y_out)]
     stack_args = [x_out + y * X.shape[-1] for y in y_out]
     indices_out = Tensor.stack(stack_args).flatten()
