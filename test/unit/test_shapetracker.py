@@ -571,5 +571,24 @@ class TestGetContraction(unittest.TestCase):
     r = get_contraction((1,2,3,4), (1,2,6,2))
     self.assertEqual(r, None)
 
+  def test_contraction_ones(self):
+    r = get_contraction((1,), (1,1,1))
+    self.assertEqual(r, [[0], [], []])
+
+    r = get_contraction((1,1), (1,1,1))
+    self.assertEqual(r, [[0], [1], []])
+
+    r = get_contraction((1,1,1,1), (1,))
+    self.assertEqual(r, [[0,1,2,3]])
+
+    r = get_contraction((1,1,1,1), (1,1))
+    self.assertEqual(r, [[0], [1,2,3]])
+
+    r = get_contraction((1,1,1,1), (1,1,1))
+    self.assertEqual(r, [[0], [1], [2,3]])
+
+    r = get_contraction((1,1,1,1), (1,1,1,1))
+    self.assertEqual(r, [[0], [1], [2], [3]])
+
 if __name__ == '__main__':
   unittest.main()
