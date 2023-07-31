@@ -42,6 +42,7 @@ class Context:
 class ContextVar:
   _cache: ClassVar[Dict[str, ContextVar]] = {}
   __slots__ = "value"
+  value: int
   def __new__(cls, key, default_value):
     if key in ContextVar._cache: return ContextVar._cache[key]
     instance = ContextVar._cache[key] = super().__new__(cls)
