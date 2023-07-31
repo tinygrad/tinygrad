@@ -138,11 +138,11 @@ def export_model(model, input:Tensor, target:str):
   else:
     prg = json.dumps({
       "backend": Device.DEFAULT, 
-      "input_size": { 
+      "input": { 
         "size": bufs['input'][0], 
         "dtype": bufs['input'][1].name
       }, 
-      "output_size": {
+      "output": {
         "size": bufs["outputs"][0], 
         "dtype": bufs["outputs"][1].name
       }, 
