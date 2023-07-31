@@ -9,7 +9,7 @@ We need some imports to get started:
 
 ```python
 import numpy as np
-from tinygrad.helpers import Timing
+import time
 ```
 
 ## Tensors
@@ -221,22 +221,23 @@ We will be using the same batch size of 64 and will be evaluating for 1000 of th
 # set training flag to false
 Tensor.training = False
 
-with Timing("Time: "):
-  avg_acc = 0
-  for step in range(1000):
-    # random sample a batch
-    samp = np.random.randint(0, X_test.shape[0], size=(64))
-    batch = Tensor(X_test[samp], requires_grad=False)
-    # get the corresponding labels
-    labels = Y_test[samp]
+st = time.perf_counter()
+avg_acc = 0
+for step in range(1000):
+  # random sample a batch
+  samp = np.random.randint(0, X_test.shape[0], size=(64))
+  batch = Tensor(X_test[samp], requires_grad=False)
+  # get the corresponding labels
+  labels = Y_test[samp]
 
-    # forward pass
-    out = net(batch)
+  # forward pass
+  out = net(batch)
 
-    # calculate accuracy
-    pred = np.argmax(out.numpy(), axis=-1)
-    avg_acc += (pred == labels).mean()
-  print(f"Test Accuracy: {avg_acc / 1000}")
+  # calculate accuracy
+  pred = np.argmax(out.numpy(), axis=-1)
+  avg_acc += (pred == labels).mean()
+print(f"Test Accuracy: {avg_acc / 1000}")
+print(f"Time: {time.perf_counter() - st}")
 ```
 
 ## And that's it
@@ -265,22 +266,23 @@ from tinygrad.jit import TinyJit
 def jit(x):
   return net(x).realize()
 
-with Timing("Time: "):
-  avg_acc = 0
-  for step in range(1000):
-    # random sample a batch
-    samp = np.random.randint(0, X_test.shape[0], size=(64))
-    batch = Tensor(X_test[samp], requires_grad=False)
-    # get the corresponding labels
-    labels = Y_test[samp]
+st = time.perf_counter()
+avg_acc = 0
+for step in range(1000):
+  # random sample a batch
+  samp = np.random.randint(0, X_test.shape[0], size=(64))
+  batch = Tensor(X_test[samp], requires_grad=False)
+  # get the corresponding labels
+  labels = Y_test[samp]
 
-    # forward pass with jit
-    out = jit(batch)
+  # forward pass with jit
+  out = jit(batch)
 
-    # calculate accuracy
-    pred = np.argmax(out.numpy(), axis=-1)
-    avg_acc += (pred == labels).mean()
-  print(f"Test Accuracy: {avg_acc / 1000}")
+  # calculate accuracy
+  pred = np.argmax(out.numpy(), axis=-1)
+  avg_acc += (pred == labels).mean()
+print(f"Test Accuracy: {avg_acc / 1000}")
+print(f"Time: {time.perf_counter() - st}")
 ```
 
 You will find that the evaluation time is much faster than before and that your accelerator utilization is much higher.
