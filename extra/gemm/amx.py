@@ -56,7 +56,7 @@ bufs = [c,a,b]
 module = ir.Module(name=__file__)
 func = ir.Function(module, ir.FunctionType(ir.IntType(64), [ir.FloatType().as_pointer()]*3), name='exec')
 
-# load all 
+# load all
 entry = ir.IRBuilder(func.append_basic_block(name="entry"))
 zm, xm, ym = [entry.ptrtoint(func.args[i], ir.IntType(64)) for i in range(3)]
 

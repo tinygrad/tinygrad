@@ -36,7 +36,7 @@ int main(int argc, char* argv[]) {
   CFTypeRef ivalues[2];
   ivalues[0] = CFStringCreateWithCString(kCFAllocatorDefault, argv[1], kCFStringEncodingUTF8);
   ivalues[1] = CFSTR("./");
-  
+
   CFDictionaryRef iDictionary = CFDictionaryCreate(kCFAllocatorDefault, ikeys, ivalues, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   CFArrayRef array = CFArrayCreate(kCFAllocatorDefault, (const void**)&iDictionary, 1, &kCFTypeArrayCallBacks);
 
@@ -68,7 +68,6 @@ int main(int argc, char* argv[]) {
   printf("hello\n");
   int ret = ANECCompile(optionsDictionary, flagsDictionary, 0);
   printf("compile: %d\n", ret);
-
 
   return ret;
 }

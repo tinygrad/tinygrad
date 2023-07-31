@@ -14,8 +14,10 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tu
   assert len(shape) == len(strides)
   ret = [(shape[0], strides[0])] if len(shape) > 0 else []
   for i in range(1, len(shape)):
-    if (strides[i] != 0 and ret[-1][1] == shape[i]*strides[i]) or ret[-1][0] == 1 or (strides[i] == 0 and ret[-1][1] == 0):
+    if ret[-1][1] == shape[i]*strides[i] or ret[-1][0] == 1:
       ret[-1] = (ret[-1][0] * shape[i], strides[i])
+    elif shape[i] == 1:
+      continue
     else:
       ret.append((shape[i], strides[i]))
   return tuple(ret)
@@ -56,7 +58,7 @@ class View(ViewInternal):
 
   # generate an expression if you have a single idx variable
   def expr_node(self, idx=None) -> Node:
-    if idx is None: idx = Variable('idx', 0, prod(self.shape))
+    if idx is None: idx = Variable('idx', 0, prod(self.shape)-1)
     ret: List[Node] = [Variable.num(self.offset)] if self.offset else []
     acc = 1
     for d,s in reversed(self.shape_strides):
@@ -282,11 +284,11 @@ def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Opt
     if new_shape[i] == 1 and old_shape[old_shape_i] != 1:
       if i < len(new_shape) - 1: i += 1
     else:
-      if new_shape[i] % old_shape[old_shape_i] != 0 or prod([old_shape[x] for x in axis_groups[i]]) * old_shape[old_shape_i] > new_shape[i]:
-        return None
       axis_groups[i].append(old_shape_i)
+      axis_group_size = prod([old_shape[x] for x in axis_groups[i]])
       # Move to next axes group if total size of all dimensions match.
-      if prod([old_shape[x] for x in axis_groups[i]]) == new_shape[i]:
+      if axis_group_size == new_shape[i]:
         if i < len(new_shape) - 1: i += 1
+      elif axis_group_size > new_shape[i]: return None
       old_shape_i += 1
   return axis_groups

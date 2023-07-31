@@ -76,6 +76,27 @@ jobs:
     - name: Test EfficientNet
       run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
 
+  testcpuwindows:
+    name: CPU on Windows
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: '~\AppData\Local\pip\cache'
+        key: testing
+    - name: Install Dependencies
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Run pytest
+      run: python -m pytest -n=auto test/ -k 'test'
+
   testtorch:
     name: Torch Tests
     runs-on: ubuntu-latest
@@ -205,7 +226,7 @@ jobs:
         backend: [llvm, clang, gpu, cuda]
 
     name: Tests on (${{ matrix.backend }})
-    runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || matrix.backend=='clang'&&'windows-latest'|| 'ubuntu-latest' }}
+    runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
     timeout-minutes: 20
 
     steps:
@@ -218,7 +239,7 @@ jobs:
       - name: Cache pip
         uses: actions/cache@v3
         with:
-          path: ${{ matrix.backend=='clang'&&'~\AppData\Local\pip\cache'||'~/.cache/pip' }}
+          path: '~/.cache/pip'
           key: ${{ matrix.backend }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n'}}" >> $GITHUB_ENV
@@ -228,7 +249,7 @@ jobs:
           wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
           echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt update && \
-          sudo apt install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl 
+          sudo apt install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
       - name: Install packages (cuda)
         if: matrix.backend == 'cuda'
         run: |
@@ -263,6 +284,8 @@ jobs:
           sudo ninja install
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Check Device.DEFAULT
+        run: python -c "from tinygrad.lazy import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda'
         run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}'

@@ -33,7 +33,7 @@ class TestBatchnorm(unittest.TestCase):
         return self.c2(self.c(x)).relu()
     lm = LilModel()
     model_step(lm)
-  
+
   def test_two_conv_bn(self):
     class LilModel:
       def __init__(self):

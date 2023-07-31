@@ -79,7 +79,7 @@ rbreak ^ZinAneInstruction*
 weeee ZinIrRegBitPrintOutDebug_7u_
 print (void)debugregs(0, 0x0000000100211030+8, 3)
 
-== min.plist == 
+== min.plist ==
 
 Types: GOC, Conv, Broadcast, ScaledElementWise, Reshape, InputView, Neuron, Concat
 
@@ -323,7 +323,7 @@ zin_ane_compiler v4.2.1
   ANECCompile(__CFDictionary *param_1, __CFDictionary *param_2, unsigned long param_3)
 
 param_1:
-{   
+{
     InputNetworks =     (
                 {
             NetworkPlistName = "net.plist";

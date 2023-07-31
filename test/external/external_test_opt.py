@@ -294,7 +294,7 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
-  def test_permute_was_pushed_though_contract_reshape(self):
+  def test_permute_was_pushed_through_contract_reshape(self):
     a = Tensor.randn(4, 4, 4, 4, 4)
     with CLCache():
       c = a.sum(-1)
@@ -304,7 +304,7 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(a.numpy().sum(-1).reshape(16,16).transpose(1,0), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
-  def test_permute_was_pushed_though_contractw1s_reshape(self):
+  def test_permute_was_pushed_through_contractw1s_reshape(self):
     a = Tensor.randn(4, 4, 4, 4, 4)
     with CLCache():
       c = a.sum(-1)
@@ -366,7 +366,7 @@ class TestOpt(unittest.TestCase):
       a = Tensor.ones(n, m).sum(axis).reshape(n, 1).expand(n, m).sum(axis)
       a.realize()
       cache_len = len(GlobalCounters.cache)
-    np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5) 
+    np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
     return cache_len
 
   def test_expand_reduce_is_folded_on_same_axis(self):
@@ -377,9 +377,9 @@ class TestOpt(unittest.TestCase):
           a = Tensor.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
           a.realize()
           cache_len = len(GlobalCounters.cache)
-        np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5) 
+        np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
         return cache_len
-  
+
   def test_expand_reduce_is_not_folded_on_different_axes(self):
     axis1, axis2 = 0, 1
     for n in [4, 8, 16]:
@@ -388,7 +388,7 @@ class TestOpt(unittest.TestCase):
         a = Tensor.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
         a.realize()
         cache_len = len(GlobalCounters.cache)
-      np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5) 
+      np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
       return cache_len
 
 if __name__ == '__main__':
