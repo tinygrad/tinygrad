@@ -595,7 +595,7 @@ class Linearizer:
     for i,x in enumerate(rets): self.sts[i].reshape(tuple([y[0] for y in x]))
 
   # ******************** GPU simplifiers ********************
-  def _limit_size(self, x: Tuple[int], max_size: List[int]) -> Tuple[int]:
+  def _limit_size(self, x: Tuple[int], max_size: List[int]) -> Tuple[int, ...]:
     new_shape,dims = list(x), len(x)
     for i in range(dims):
       next_idx = (i + 1) % dims
@@ -608,7 +608,7 @@ class Linearizer:
           new_shape[next_idx] = new_shape[next_idx] * 2
     return tuple(new_shape)
 
-  def limit_global_dims(self, limit: int, global_max: List[int] = None, local_max: List[int] = None):
+  def limit_global_dims(self, limit: int, global_max: List[int], local_max: List[int]):
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
     # NOTE: this might make multiview shapetrackers
@@ -623,7 +623,7 @@ class Linearizer:
       if global_max:
         tmp = global_max[:global_dims] + (local_max[:self.local_dims] if local_max else [])
         if max(global_max) < max(self.full_shape[:global_dims]): self.reshape_and_permute(lambda x: self._limit_size(x, tmp + [math.inf] * (len(self.full_shape)-len(tmp))), None)
-        assert max(global_max) >= max(self.full_shape[0:global_dims]), f"device max allocation {max(self.full_shape[0:global_dims])} exceeds global dim maximum {max(global_max)}"
+        assert max(global_max) >= max(self.full_shape[:global_dims]), f"device max allocation {max(self.full_shape[:global_dims])} exceeds global dim maximum {max(global_max)}"
       for i in range(global_dims-1):
         if self.full_shape[i] > global_max[i]:
           order = list(range(len(self.full_shape)))
