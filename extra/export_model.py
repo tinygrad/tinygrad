@@ -69,7 +69,7 @@ const getTensorMetadata = (safetensorBuffer) => {{
 const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {{
   return safetensorBuffer.subarray(...tensorMetadata.data_offsets);
 }}
-  
+
 const createEmptyBuf = (device, size) => {{
     return device.createBuffer({{size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }});
 }};
@@ -91,7 +91,7 @@ const addComputePass = (device, commandEncoder, pipeline, bufs, workgroup) => {{
 }};
 
 {kernel_code}
-      
+
 const setupNet = async (device, safetensor) => {{
     const metadata = getTensorMetadata(safetensor);
 
