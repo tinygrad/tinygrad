@@ -44,6 +44,11 @@ class TestContextVars(unittest.TestCase):
       self.assertEqual(VARIABLE.value, 1)
     self.assertEqual(VARIABLE.value, 0)
 
+  def test_unknown_param_to_context(self):
+    with self.assertRaises(Exception) as context:
+      with Context(SOMETHING_ELSE=1):
+        pass
+
   def test_inside_context_assignment(self):
     with Context(VARIABLE=4):
       # What you can and cannot do inside a context.
