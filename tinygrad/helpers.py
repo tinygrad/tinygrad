@@ -1,6 +1,5 @@
 from __future__ import annotations
-import contextlib
-import os, functools, platform, time, re
+import os, functools, platform, time, re, contextlib
 from weakref import KeyedRef, ref
 from _weakref import _remove_dead_weakref # type: ignore
 import numpy as np
