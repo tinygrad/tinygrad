@@ -7,26 +7,25 @@ from tinygrad.codegen.linearizer import UOps, ConstOp
 from tinygrad.helpers import dtypes
 
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
-pend_regs:Set[Register] = set()
 def compute_offsets(total):
   quotient, remainder = divmod(total, 4096)
   return [4096]*quotient + [remainder] if remainder else [4096]*quotient
-
 #NOTE: Darwin needs lm functions to start with a "_" 
 def get_op(op): return f"bl {'_' if system() == 'Darwin' else ''}{op}"
-type_to_reg = {dtypes.half: 'h', dtypes.float32: 's', dtypes.bool: 'x',dtypes.int8:'w', dtypes.int32: 'w', dtypes.int64: 'x', dtypes.uint8:'w', dtypes.uint32: 'w', dtypes.uint64: 'x'}
+
 class ARM64Codegen(AssemblyCodegen):
   def specialize(self, asm):
-    rtor:Dict[Register, str] = {}
     var_size = 0
     prev_uop = None
     ins = [] 
-    x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (9,10,11,12,13,14,15,16,17,18,19,20)]
+    x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (11,12,13,14,15,16,17,18,19,20)]
     s_regs = ['s' + str(i) for i in reversed(range(3,30))]
+    type_to_reg = {dtypes.half: 'h', dtypes.float32: 's', dtypes.bool: 'x',dtypes.int8:'w', dtypes.int32: 'w', dtypes.int64: 'x', dtypes.uint8:'w', dtypes.uint32: 'w', dtypes.uint64: 'x'}
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.MOD: "", BinaryOps.CMPLT: "subs", BinaryOps.CMPEQ: "subs",
            UnaryOps.SIN: get_op('sinf'), UnaryOps.LOG2: get_op("log2f"), UnaryOps.EXP2: get_op("exp2f"), UnaryOps.SQRT: get_op("sqrtf"),
            TernaryOps.MULACC: "madd", TernaryOps.WHERE: "fcmp"}
+
     def mov_imm(value, to):
         # Manually move value into reg if vin[1] can't fit
         if value > 65535:
@@ -39,7 +38,7 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"{'f' if to[0] == 's' else ''}mov {to}, {'w' if to[0] == 's' else 'x'}15")
 
     # Get variables intervals
-    live_range = {}
+    live_range:Dict[str, str] = {}
     for i, (uop, out, vin, arg) in enumerate(asm):
       for var in ([v for v in [out] + vin if v is not None and v.__class__ is not int]):
         live_range[var.nm] = [i,i] if var.nm not in live_range else [live_range[var.nm][0], i]
@@ -47,7 +46,8 @@ class ARM64Codegen(AssemblyCodegen):
     temp_floats = ['s0', 's1', 's2']
     temp_ints = ['x11', 'x12', 'x13']
     
-    mem_vars = {} 
+    mem_vars:Dict[str, str] = {} 
+    rtor:Dict[str, str] = {}
     def allocate_regs(vars): 
       nonlocal var_size
       for v in [v for v in vars if v is not None and v.__class__ is not int and v.nm not in rtor]:
@@ -65,16 +65,18 @@ class ARM64Codegen(AssemblyCodegen):
         available_regs = s_regs if reg[0] == 's' else x_regs
         if var[1] != 'B' and var not in mem_vars and i > live_range[var][1]:
           available_regs.append(rtor.pop(var))
+
       # Assign a registers to the variables using live ranges.
       allocate_regs([out] + vin)
 
+      # Assing temp regs to vin to loading them into the same temp reg
       for i, v in enumerate([v for v in vin if v.__class__ is not int and v.nm in mem_vars]):
         rtor[v.nm] = temp_floats[i] if dtypes.is_float(v[1]) else temp_ints[i] 
         ins.append(f"ldr {rtor[v.nm]}, {mem_vars[v.nm]}")
 
       if uop == UOps.DEFINE_GLOBAL:
         if arg.startswith('data'):
-          # args 8 onward goes into the stack, so we move them into regs 
+          # data 8 to n into the stack 
           if int(arg[4:]) >= 8:
             ins.append(f"ldr x15, [x19, #{(int(arg[4:]) - 8) * 8}]")
             ins.append(f"mov {rtor[out.nm]}, x15")
@@ -86,10 +88,9 @@ class ARM64Codegen(AssemblyCodegen):
         else:
           ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
       elif uop == UOps.ALU:
-        reg = 's' if dtypes.is_float(vin[0][1]) else 'x'
         if len(vin)==2 and vin[1].__class__ is int: mov_imm(vin[1], 'x15')
         if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
-          ins.append(f"ands {rtor[out.nm]}, {rtor[vin[0].nm]}, {'x15' if vin[1].__class__ is int else rtor[vin[1].nm]}")
+          ins.append(f"ands {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
         elif arg == TernaryOps.WHERE:
           ins.append(f"fmov s0, #0")
           ins.append(f"{alu[arg]} {rtor[vin[0].nm]}, s0")
@@ -97,6 +98,7 @@ class ARM64Codegen(AssemblyCodegen):
         elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
           save_regs = [k for k in rtor.keys() if k != out.nm and k not in mem_vars]
           ins.append(f"sub sp, sp, #{(len(save_regs))*16}")
+          # Save the registers before they are cleared by func call  
           for i,k in enumerate(save_regs,1):
             ins.append(f"str {rtor[k]}, [sp, #{16*i}]")
           ins.append("stp x29, x30, [sp, #0]!")
@@ -110,12 +112,12 @@ class ARM64Codegen(AssemblyCodegen):
             ins.append(f"ldr {rtor[k]}, [sp, #{16*i}]")
           ins.append(f"add sp, sp, #{len(save_regs)*16}")
         elif arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
-          ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[0].nm]}, {'x15' if vin[1].__class__ is int else rtor[vin[1].nm]}" if reg == 'x' else f"fcmp {rtor[vin[0].nm]}, {rtor[vin[1].nm]}")
+          ins.append(f"{alu[arg]} {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}" if not dtypes.is_float(vin[0][1]) else f"fcmp {rtor[vin[0].nm]}, {rtor[vin[1].nm]}")
         elif arg == BinaryOps.MOD:
           ins.append(f"udiv x14, {rtor[vin[0].nm]}, x15")
           ins.append(f"msub {rtor[out.nm]}, x14, x15, {rtor[vin[0].nm]}")
         else:
-          ins.append(f"{'f' if reg == 's' else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
+          ins.append(f"{'f' if dtypes.is_float(vin[0][1]) else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
       elif uop == UOps.LOAD:
         if arg.__class__ in (int, float):
           mov_imm(arg, rtor[out.nm])
