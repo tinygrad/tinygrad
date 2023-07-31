@@ -1,4 +1,16 @@
-# 2 space indentation
+# Top-most EditorConfig file
+root = true
+
+# Unix-style newlines with a newline ending every file, utf-8 charset
+[*]
+end_of_line = lf
+trim_trailing_whitespace = true
+charset = utf-8
+
 [*.py]
 indent_style = space
-indent_size = 2
+
+# ignore binary files
+[{*.hwx,*.mlmodel,*.weights,*.golden}]
+end_of_line = unset
+trim_trailing_whitespace = unset

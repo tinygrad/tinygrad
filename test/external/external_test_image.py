@@ -23,7 +23,7 @@ class TestImage(unittest.TestCase):
     t1 = t1.sum()
     t1.realize()
     assert t1.numpy() == 16*4*4*4, f"got {t1.numpy()}"
-  
+
   def test_add_image(self):
     t1 = Tensor.ones(16, 16, 1).reshape(16, 4, 4) + 3
     t2 = Tensor.ones(16, 16, 1).reshape(16, 4, 4) + 4
@@ -38,7 +38,7 @@ class TestImage(unittest.TestCase):
     tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=1)
     tiny_dat = Tensor.ones(bs, 12, 64, 128)
     tiny_conv(tiny_dat).realize()
-  
+
   def test_op_conv(self):
     bs, in_chans, out_chans = 1,12,32
     tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=1)
