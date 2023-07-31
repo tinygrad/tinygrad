@@ -182,7 +182,9 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
 
 def train_cifar(bs=512, eval_bs=500, steps=1000,
                 # training hyper-parameters (if including model sizes)
-                div_factor=1e16, final_lr_ratio=0.006389020478166033, max_lr=0.024951257544924808, pct_start=0.23887852220714273, momentum=0.7340500574033951, wd=0.1350204572679035, label_smoothing=0.06653598251238921, seed=32):
+                div_factor=1e16, final_lr_ratio=0.004560827731448039, 
+                max_lr=0.0138319916999336, pct_start=0.03254630825011651, momentum=0.8632474768028381, wd=0.07324837942480592, label_smoothing=0.24287006281063067, 
+                seed=32):
   set_seed(seed)
   Tensor.training = True
 
@@ -190,10 +192,12 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   # For SGD
   MOMENTUM, WD = getenv('MOMENTUM', momentum), getenv("WD", wd)
   # For LR Scheduler
-  MAX_LR, PCT_START, DIV_FACTOR = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start), getenv('DIV_FACTOR', div_factor)
-  FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio))
+  MAX_LR, PCT_START = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start)
   # Others
   LABEL_SMOOTHING = getenv('LABEL_SMOOTHING', label_smoothing)
+
+  DIV_FACTOR = getenv('DIV_FACTOR', div_factor)
+  FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio))
 
   if getenv("FAKEDATA"):
     N = 2048
