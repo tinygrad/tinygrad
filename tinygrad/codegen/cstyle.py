@@ -21,6 +21,7 @@ class CStyleLanguage(NamedTuple):
   gid: List[str] = []
   lid: List[str] = []
   global_max: List[int] = []
+  local_max: List[int] = []
   extra_args: List[str] = []
   float4: Optional[str] = None
   half_prekernel: Optional[str] = None
@@ -195,7 +196,7 @@ class CStyleCodegen(Linearizer):
 
   def codegen(self):
     self.process()
-    if self.lang.global_max: self.limit_global_dims(len(self.lang.gid), self.lang.global_max)  # NOTE: this is optional now
+    if self.lang.global_max: self.limit_global_dims(len(self.lang.gid), self.lang.global_max, self.lang.local_max)  # NOTE: this is optional now
     self.linearize()
 
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.lang)
