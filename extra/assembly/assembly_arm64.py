@@ -33,14 +33,10 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"movz w15, #{value & 0xffff}")
           ins.append(f"movk w15, #{(value >> 16) & 0xffff}, lsl #16")
           ins.append(f"sxtw {to}, w15")
-        elif to[0] == 's': 
-            #NOTE: value comes as int when it should be float
-            value = float(value) if value.__class__ is int else value
-            ins.append(f"movz x15, {'0x' + float_to_hex(value)[:4]}, lsl #16")
-            ins.append(f"movk x15, {'0x' + float_to_hex(value)[4:]}")
-            ins.append(f"scvtf {to}, w15")
-        else:
-            ins.append(f"mov {to}, #{value}")
+        else: 
+          #NOTE: value comes as int when it should be float
+          ins.append(f"mov x15, #{('0x' + float_to_hex(value)) if to[0] == 's' else value}")
+          ins.append(f"{'f' if to[0] == 's' else ''}mov {to}, {'w' if to[0] == 's' else 'x'}15")
 
     # Get variables intervals
     live_range = {}
@@ -64,6 +60,7 @@ class ARM64Codegen(AssemblyCodegen):
         rtor[v.nm] = available_regs.pop()
 
     for i, (uop, out, vin, arg) in enumerate(asm):
+      # Clear regs out of interval
       for var, reg in list(rtor.items()):
         available_regs = s_regs if reg[0] == 's' else x_regs
         if var[1] != 'B' and var not in mem_vars and i > live_range[var][1]:
