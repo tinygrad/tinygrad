@@ -58,7 +58,7 @@ jobs:
           path: /tmp/.buildx-cache
           key: arm64
       - name: Build arm64 image
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v4
         with:
           context: .
           file: test/extra/arm64_dockerfile
@@ -67,11 +67,8 @@ jobs:
           load: true
           push: false
           tags: tinygrad-arm64
-          cache-from: type=local,src=/tmp/.buildx-cache
-          # Note the mode=max here
-          # More: https://github.com/moby/buildkit#--export-cache-options
-          # And: https://github.com/docker/buildx#--cache-tonametypetypekeyvalue
-          cache-to: type=local,mode=max,dest=/tmp/.buildx-cache-new
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Test Ops
         run: docker run -e ARM64=1 -e CLANG=1 -e FORWARD_ONLY=1 tinygrad-arm64 /usr/bin/env python3 -m pytest -n=auto -s test/test_ops.py
 
