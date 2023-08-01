@@ -3,7 +3,7 @@ FROM ubuntu:20.04
 WORKDIR /app
 
 RUN apt-get update && \
-       apt-get install -y python3.8 python3-pip  && \
+       apt-get install -y --no-install-recommends git python3.8 python3-pip  && \
        rm -rf /var/lib/apt/lists/*
 
 RUN git clone https://github.com/tinygrad/tinygrad.git
