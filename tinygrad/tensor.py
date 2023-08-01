@@ -358,12 +358,12 @@ class Tensor:
   def gather(self: Tensor, idx: Tensor, dim: int):
     if dim < 0: dim += self.ndim
     ret = self._gather(idx, dim=dim)
-    idx_extra = [(dim+n,i) if n < dim else (dim+1+n,i) for n,i in enumerate(idx.shape[:dim] + idx.shape[dim+1:])][::-1]
-    self_extra = [(n,i) if n < dim else (n+idx.ndim,i) for n,i in enumerate(self.shape[:dim] + self.shape[dim+1:])][::-1]
+    idx_extra = [[dim+n,i] if n < dim else [dim+1+n, i] for n,i in enumerate(idx.shape[:dim] + idx.shape[dim+1:])][::-1]
+    self_extra = [[n,i] if n < dim else [n+idx.ndim, i] for n,i in enumerate(self.shape[:dim] + self.shape[dim+1:])][::-1]
     for n, ((dim_idx, idx_), (dim_self, self_)) in enumerate(zip(idx_extra, self_extra)):
       if dim_self < dim_idx and n < len(idx_extra)-1:
         for i in range(1, len(idx_extra)-n):
-          idx_extra[n+i] = (idx_extra[n+1][0]-1, idx_extra[n+1][1])
+          idx_extra[n+i][0] -= 1
       arange_idx = Tensor.arange(idx_, dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim_idx, idx_, *[1]*(ret.ndim-dim_idx-1))
       arange_self = Tensor.arange(self_, dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim_self, self_, *[1]*(ret.ndim-dim_self-1))
       ret = ((arange_idx == arange_self) * ret).sum(dim_self)
