@@ -50,7 +50,7 @@ jobs:
         uses: docker/setup-qemu-action@2
         with:
           platforms: all
-      name: Build Docker Image
+      - name: Build Docker Image
         run: |
           docker buildx create --use
           docker buildx build --platform linux/arm64 -t tinygrad -f test/extra/arm64_dockerfile .
