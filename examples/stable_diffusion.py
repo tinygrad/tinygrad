@@ -584,12 +584,73 @@ class StableDiffusion:
     self.first_stage_model = AutoencoderKL()
     self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = CLIPTextTransformer()))
 
-  def forward(self, latent_tensor):
-    #TODO: Support the other parts of the model, currently it decodes an input latent_tensor
-    # saved after a diffusor step
+  def forward(self, prompt_tensor):
+    '''context = self.cond_stage_model.transformer.text_model(prompt_tensor).realize()
+
+    unconditional_prompt = Tensor([
+      [49406, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 
+       49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 
+       49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 
+       49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 
+       49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 
+       49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 
+       49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407]
+    ])
+
+    unconditional_context = self.cond_stage_model.transformer.text_model(unconditional_prompt).realize()
+
+    return context'''
+
+    '''def get_model_output(latent, timestep):
+      # put into diffuser
+      latent_exp = latent.expand(2, *latent.shape[1:]).realize()
+      timestep_exp = timestep.expand(2, *timestep.shape[1:]).realize()
+      uncond_cat = unconditional_context.cat(context, dim=0).realize()
+
+      latents = self.model.diffusion_model(latent_exp, timestep_exp, uncond_cat)
+      unconditional_latent, latent = latents[0:1], latents[1:2]
+
+      unconditional_guidance_scale = 7.5
+      scaled_latent =  (unconditional_guidance_scale * (latent - unconditional_latent)).realize()
+      e_t = (unconditional_latent + scaled_latent).realize()
+      return e_t
+    
+    timesteps = list(range(1, 1000, 1000//5))
+    print(f"running for {timesteps} timesteps")
+    alphas = [model.alphas_cumprod.numpy()[t] for t in timesteps]
+    alphas_prev = [1.0] + alphas[:-1]
+
+    def get_x_prev_and_pred_x0(x, e_t, index):
+      temperature = 1
+      a_t, a_prev = alphas[index], alphas_prev[index]
+      sigma_t = 0
+      sqrt_one_minus_at = math.sqrt(1-a_t)
+      #print(a_t, a_prev, sigma_t, sqrt_one_minus_at)
+
+      pred_x0 = (x - sqrt_one_minus_at * e_t) / math.sqrt(a_t)
+
+      # direction pointing to x_t
+      dir_xt = math.sqrt(1. - a_prev - sigma_t**2) * e_t
+      noise = sigma_t * Tensor.randn(*x.shape) * temperature
+
+      x_prev = math.sqrt(a_prev) * pred_x0 + dir_xt #+ noise
+      return x_prev, pred_x0
+
+    # start with random noise
+    latent = Tensor.randn(1,4,64,64)
+
+    # this is diffusion
+    for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
+      # GlobalCounters.reset()
+      t.set_description("%3d %3d" % (index, timestep))
+      e_t = get_model_output(latent, Tensor([timestep]))
+      x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t, index)
+      latent = x_prev
+      latent.realize()
+    '''
 
     # upsample latent space to image with autoencoder
-    x = self.first_stage_model.post_quant_conv(1/0.18215 * latent_tensor)
+    x = self.first_stage_model.post_quant_conv(1/0.18215 * prompt_tensor)
     x = self.first_stage_model.decoder(x)
 
     # make image correct size and scale

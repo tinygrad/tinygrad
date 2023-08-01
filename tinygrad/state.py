@@ -9,20 +9,18 @@ from tinygrad.lazy import Device
 safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
-def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
+def safe_load_metadata(fn:Union[Tensor,str]):
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
   json_len = t[0:1].cast(dtypes.int64).numpy()[0]
-  metadata = json.loads(t[8:8+json_len].numpy().tobytes())
+  return (t, json_len, json.loads(t[8:8+json_len].numpy().tobytes()))
+
+def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
+  t, json_len, metadata = safe_load_metadata(fn)
   return {k:t[8+json_len+v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']])[:prod(v['shape'])].reshape(v['shape']) for k,v in metadata.items() if k != "__metadata__"}
 
 def safe_save(tensors:Dict[str, Tensor], fn:str):
   metadata, offset = {}, 0
   for k,v in tensors.items():
-    # TODO: Load whole model
-    # Only handling post_quant_conv and decoder for now, so no need to load the whole model
-    if not (k.startswith('first_stage_model.post_quant_conv') or k.startswith('first_stage_model.decoder')):
-      continue
-    
     metadata[k] = {'dtype': inverse_safe_dtypes[v.dtype], 'shape': list(v.shape), 'data_offsets':[offset, offset+v.nbytes()]}
     offset += v.nbytes()
   j = json.dumps(metadata, separators=(',', ':'))

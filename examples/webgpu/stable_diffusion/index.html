@@ -154,13 +154,11 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
 		return response;
 	}
 
-	const getSavetensorBuffer = async () => new Uint8Array(await (await fetch("./net.safetensors")).arrayBuffer());
-
 	const loadLet = async () => {
 		resultText.innerHTML = "loading..."
-		const safetensor = await getSavetensorBuffer();
+		const safetensorParts = await getSafetensorParts();
 		const device = await getDevice();
-		net = await timer(() => setupNet(device, safetensor), "(compilation)");
+		net = await timer(() => setupNet(device, safetensorParts), "(compilation)");
 		resultText.innerHTML = "ready"
 	}
 
