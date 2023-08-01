@@ -60,14 +60,14 @@ jobs:
       - name: Build Docker Image
         run: |
           docker buildx build \
-          --cache-from=type=local,src=/tmp/.buildx-cache \
-          --cache-to=type=local,dest=/tmp/.buildx-cache \
+          --cache-from=type=local,src=~/.cache/buildx-cache \
+          --cache-to=type=local,dest=~/.cache/buildx-cache \
           --platform linux/arm64 \
           --load \
           -t tinygrad-arm64 \
           -f test/extra/arm64_dockerfile .
       - name: Test Ops
-        run: docker run -e ARM64=1 -e CLANG=1 -e FORWARD_ONLY=1 tinygrad-arm64 python3 -m pytest -n=auto test/test_ops.py
+        run: docker run -e ARM64=1 -e CLANG=1 -e FORWARD_ONLY=1 tinygrad-arm64 /usr/bin/env python3 -m pytest -n=auto -s test/test_ops.py
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
