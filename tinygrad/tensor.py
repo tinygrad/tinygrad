@@ -289,7 +289,7 @@ class Tensor:
       orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
     else:
       orig_slices += [slice(None)] * (len(self.shape) - num_slices)
-    tensor_found = [[i,v] for i, v in enumerate(orig_slices) if isinstance(v, Tensor)]
+    tensor_found = [(i,v) for i, v in enumerate(orig_slices) if isinstance(v, Tensor)]
     orig_slices = [slice(None, None, None) if isinstance(v, Tensor) else v for v in orig_slices]
     valid_slices = list(filterfalse(lambda x: x is None, orig_slices))
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
@@ -331,12 +331,13 @@ class Tensor:
     ret = sliced_tensor.reshape(tuple(final_shape))  # Reshape
     # Fancy/tensor indexing
     if tensor_found:
-      for i,s in enumerate(sub): tensor_found[i][0] += s
-      dim, idx = [i[0] for i in tensor_found], [(i[1] < 0).where(i[1]+ret.shape[i[0]], i[1]) for i in tensor_found]
+      for i,s in enumerate(sub): tensor_found[i] = (tensor_found[i][0]+s, tensor_found[i][1])
+      dim = [i[0] for i in tensor_found]
+      idx = [(i[1] < 0).where(i[1]+ret.shape[i[0]], i[1]) for i in tensor_found]
       dim_cond = dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1
       for n,d in enumerate(dim):
         if n == 0:
-          new_ret = ret._gather(idx[n], d)
+          new_ret = ret._gather(idx=idx[n], dim=d)
         else:
           new_idx = idx[n].reshape(*[1]*dim[0], *idx[n].shape, *[1]*(ret.ndim-dim[0]-n))
           arange = Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(idx[n].ndim+d-n), ret.shape[d], *[1]*(ret.ndim-d-1))
@@ -357,16 +358,14 @@ class Tensor:
   def gather(self: Tensor, idx: Tensor, dim: int):
     if dim < 0: dim += self.ndim
     ret = self._gather(idx, dim=dim)
-    self_extra = self.shape[:dim] + self.shape[dim+1:]
-    idx_extra = idx.shape[:dim] + idx.shape[dim+1:]
-    idx_extra = [[dim+n,i] if n < dim else (dim+1+n, i) for n,i in enumerate(idx_extra)][::-1]
-    self_extra = [(n,i) if n < dim else(n+idx.ndim, i) for n,i in enumerate(self_extra)][::-1]
-    for n, ((dim_idx, idx), (dim_self, self)) in enumerate(zip(idx_extra, self_extra)):
+    idx_extra = [(dim+n,i) if n < dim else (dim+1+n,i) for n,i in enumerate(idx.shape[:dim] + idx.shape[dim+1:])][::-1]
+    self_extra = [(n,i) if n < dim else (n+idx.ndim,i) for n,i in enumerate(self.shape[:dim] + self.shape[dim+1:])][::-1]
+    for n, ((dim_idx, idx_), (dim_self, self_)) in enumerate(zip(idx_extra, self_extra)):
       if dim_self < dim_idx and n < len(idx_extra)-1:
         for i in range(1, len(idx_extra)-n):
-          idx_extra[n+i][0] -= 1
-      arange_idx = Tensor.arange(idx, dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim_idx, idx, *[1]*(ret.ndim-dim_idx-1))
-      arange_self = Tensor.arange(self, dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim_self, self, *[1]*(ret.ndim-dim_self-1))
+          idx_extra[n+i] = (idx_extra[n+1][0]-1, idx_extra[n+1][1])
+      arange_idx = Tensor.arange(idx_, dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim_idx, idx_, *[1]*(ret.ndim-dim_idx-1))
+      arange_self = Tensor.arange(self_, dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim_self, self_, *[1]*(ret.ndim-dim_self-1))
       ret = ((arange_idx == arange_self) * ret).sum(dim_self)
     return ret
 
