@@ -22,7 +22,7 @@ class ClangProgram:
     else:
       if DEBUG >= 5: print(prg)
       if getenv('ARM64'):
-        subprocess.check_output(args=('as  -o '+fn+'.o').split(), input=prg.encode('utf-8'))
+        subprocess.check_output(args=('as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
         subprocess.check_output(args=('clang -lm -shared '+fn+'.o -o'+fn).split())
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
