@@ -56,16 +56,17 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.cache/buildx-cache
-          key: testing
+          key: buildx-cache
       - name: Build Docker Image
         run: |
           docker buildx build \
           --cache-from=type=local,src=/tmp/.buildx-cache \
           --cache-to=type=local,dest=/tmp/.buildx-cache \
           --platform linux/arm64 \
-          -t tinygrad:tinygrad -f test/extra/arm64_dockerfile .
+          -t tinygrad/tinygrad:tg \
+          -f test/extra/arm64_dockerfile .
       - name: Test Ops
-        run: docker run -e ARM64=1 -e CLANG=1 -e FORWARD_ONLY=1 tinygrad:tinygrad python -m pytest -n=auto test/test_ops.py
+        run: docker run -e ARM64=1 -e CLANG=1 -e FORWARD_ONLY=1 tinygrad/tinygrad:tg python -m pytest -n=auto test/test_ops.py
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
