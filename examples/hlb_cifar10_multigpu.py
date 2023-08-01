@@ -137,7 +137,7 @@ def train_cifar(config, bs=512, eval_bs=500, steps=1000, div_factor=1e16, final_
           bucket_meta[k] = (v.numel(), v.shape)
           bucket.append(v.grad.flatten())
         if len(bucket) == getenv("BUCKET_SIZE", 4):
-          grads = collectives.allreduce(Tensor.cat(*bucket, Tensor.zeros(2)), cache_id=k)
+          grads = collectives.allreduce(Tensor.cat(*bucket), cache_id=k)
           offset = 0
           for k in bucket_meta:
             size = bucket_meta[k][0]
@@ -336,6 +336,7 @@ def run2():
 
 if __name__ == "__main__":
   devices = ["gpu:0", "gpu:1", "gpu:2", "gpu:3", "gpu:4", "gpu:5"]
+  # devices = ["gpu:2", "gpu:4"]
   # devices = ["hip:0", "hip:1", "hip:2", "hip:3", "hip:4", "hip:5"]
   world_size = len(devices)
 
