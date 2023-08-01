@@ -330,7 +330,7 @@ class Tensor:
         final_shape.append(1)
     ret = sliced_tensor.reshape(tuple(final_shape))  # Reshape
     # Fancy/tensor indexing
-    if tensor_found: 
+    if tensor_found:
       for i,s in enumerate(sub): tensor_found[i][0] += s
       dim, idx = [i[0] for i in tensor_found], [(i[1] < 0).where(i[1]+ret.shape[i[0]], i[1]) for i in tensor_found]
       dim_cond = dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1
@@ -341,7 +341,7 @@ class Tensor:
           new_idx = idx[n].reshape(*[1]*dim[0], *idx[n].shape, *[1]*(ret.ndim-dim[0]-n))
           arange = Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(idx[n].ndim+d-n), ret.shape[d], *[1]*(ret.ndim-d-1))
           new_ret = ((new_idx == arange) * new_ret).sum(idx[n].ndim+d-n)
-      if dim_cond: 
+      if dim_cond:
         order = list(range(idx[0].ndim + ret.ndim - len(dim)))
         order = order[dim[0]:dim[0]+idx[0].ndim] + order[:dim[0]] + order[dim[0]+idx[0].ndim:]
         ret = new_ret.permute(order=order)
@@ -362,7 +362,7 @@ class Tensor:
     idx_extra = [[dim+n,i] if n < dim else (dim+1+n, i) for n,i in enumerate(idx_extra)][::-1]
     self_extra = [(n,i) if n < dim else(n+idx.ndim, i) for n,i in enumerate(self_extra)][::-1]
     for n, ((dim_idx, idx), (dim_self, self)) in enumerate(zip(idx_extra, self_extra)):
-      if dim_self < dim_idx and n < len(idx_extra)-1: 
+      if dim_self < dim_idx and n < len(idx_extra)-1:
         for i in range(1, len(idx_extra)-n):
           idx_extra[n+i][0] -= 1
       arange_idx = Tensor.arange(idx, dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim_idx, idx, *[1]*(ret.ndim-dim_idx-1))

@@ -1114,7 +1114,7 @@ class TestOps(unittest.TestCase):
     x = Tensor.full((3, 3), float("inf"))
     n = (x < 0).where(x, 1).numpy()
     assert np.all(n == 1.)
-  
+
   def test_slice_fancy_indexing(self):
     # indices cannot have gradient
     a = torch.randint(low=-1, high=1, size=(10,1,1,1,1,1), requires_grad=False)
