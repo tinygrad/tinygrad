@@ -44,6 +44,8 @@ jobs:
     name: ARM64 Test
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
       - name: Setup qemu
         uses: docker/setup-qemu-action@v2
         with:
@@ -63,7 +65,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Test Ops
-        run: docker run -e ARM64=1 -e CLANG=1 -e tinygrad-arm64 /usr/bin/env python3 -m pytest -n=auto test/test_ops.py
+        run: docker run -e ARM64=1 -e CLANG=1 -e tinygrad-arm64 /usr/bin/env python3 -m pytest -n=auto -s test/ -m 'not exclude_clang' --ignore=test/models/test_real_world.py
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
