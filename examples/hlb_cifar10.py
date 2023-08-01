@@ -51,6 +51,7 @@ class ConvGroup:
   def __init__(self, channels_in, channels_out, short, se=True):
     self.short, self.se = short, se and not short
     self.conv = [nn.Conv2d(channels_in if i == 0 else channels_out, channels_out, kernel_size=3, padding=1, bias=False) for i in range(1 if short else 3)]
+    # eps needs to be 1e-5 to support fp16 but currently it will drop val acc on fp32
     self.norm = [nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.5) for _ in range(1 if short else 3)]
     if self.se: self.se1, self.se2 = nn.Linear(channels_out, channels_out//16), nn.Linear(channels_out//16, channels_out)
 
@@ -69,6 +70,7 @@ class SpeedyResNet:
     self.whitening = W
     self.net = [
       nn.Conv2d(12, 64, kernel_size=1),
+      # eps needs to be 1e-5 to support fp16 but currently it will drop val acc on fp32
       nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.5),
       lambda x: x.relu(),
       ConvGroup(64, 128, short=False),
@@ -85,7 +87,7 @@ class SpeedyResNet:
     return forward(x).log_softmax()
 
 # TODO currently this only works for RGB in format of NxCxHxW and pads the HxW
-# implemented in recursive fashion but figuring out how to switch indexing dim 
+# implemented in recursive fashion but figuring out how to switch indexing dim
 # during the loop was a bit tricky
 def pad_reflect(X, padding) -> Tensor:
   p = padding[3]
@@ -98,7 +100,7 @@ def pad_reflect(X, padding) -> Tensor:
   s = X.shape[2]
   X_lr = X[...,1:1+p[0],:].flip(2).pad(((0,0),(0,0),(0,s+p[0]),(0,0))) + X[...,-1-p[1]:-1,:].flip(2).pad(((0,0),(0,0),(s+p[1],0),(0,0)))
   X = X.pad(((0,0),(0,0),p,(0,0))) + X_lr
-    
+
   return X
 
 # return a mask in the format of BS x C x H x W where H x W are in bool 
@@ -123,7 +125,7 @@ def random_crop(X, crop_size=32):
   mask = make_square_mask(X, crop_size)
   mask = mask.repeat((1,3,1,1))
   X_cropped = Tensor(X.flatten().numpy()[mask.flatten().numpy().astype(bool)])
-  
+
   return X_cropped.reshape((-1, 3, crop_size, crop_size))
 
 def cutmix(X, Y, mask_size=5, p=0.5, mix=True):
@@ -132,7 +134,7 @@ def cutmix(X, Y, mask_size=5, p=0.5, mix=True):
   mask = make_square_mask(X, mask_size)
 
   if not mix: return Tensor.where(mask, Tensor.rand(*X.shape), X), Y
-  
+
   # TODO shuffle instead of reverse, currently is not supported
   X_patch = X[::-1,...]
   Y_patch = Y[::-1]
@@ -169,7 +171,7 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
       # padding for matching buffer size during JIT
       batch_end = min(i+BS, Y.shape[0])
       # NOTE -10 was used instead of 1 as labels
-      if not is_train: 
+      if not is_train:
         # Need fancy indexing support to remove numpy
         x, y = X[batch_end-BS:batch_end,:].sequential(transform_test), Tensor(-10*np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()])
       else: 
@@ -181,9 +183,9 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     seed += 1
 
 def train_cifar(bs=512, eval_bs=500, steps=1000,
-                # training hyper-parameters (if including model sizes)
-                div_factor=1e16, final_lr_ratio=0.004560827731448039, 
-                max_lr=0.0138319916999336, pct_start=0.03254630825011651, momentum=0.8632474768028381, wd=0.07324837942480592, label_smoothing=0.24287006281063067, 
+                momentum=0.8632474768028381, wd=0.07324837942480592, 
+                max_lr=0.0138319916999336, pct_start=0.03254630825011651, div_factor=1e16, final_lr_ratio=0.004560827731448039, 
+                label_smoothing=0.24287006281063067, 
                 seed=32):
   set_seed(seed)
   Tensor.training = True
@@ -192,12 +194,12 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   # For SGD
   MOMENTUM, WD = getenv('MOMENTUM', momentum), getenv("WD", wd)
   # For LR Scheduler
-  MAX_LR, PCT_START = getenv("MAX_LR", max_lr), getenv('PCT_START', pct_start)
-  # Others
-  LABEL_SMOOTHING = getenv('LABEL_SMOOTHING', label_smoothing)
-
+  MAX_LR = getenv("MAX_LR", max_lr)
+  PCT_START = getenv('PCT_START', pct_start)
   DIV_FACTOR = getenv('DIV_FACTOR', div_factor)
   FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio))
+  # Others
+  LABEL_SMOOTHING = getenv('LABEL_SMOOTHING', label_smoothing)
 
   if getenv("FAKEDATA"):
     N = 2048
