@@ -34,7 +34,7 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"movk w15, #{(value >> 16) & 0xffff}, lsl #16")
           ins.append(f"sxtw {to}, w15")
         else: 
-          #NOTE: value comes as int when it should be float
+          #NOTE: value == 0 but reg is 's' 
           ins.append(f"mov x15, #{('0x' + float_to_hex(value)) if to[0] == 's' else value}")
           ins.append(f"{'f' if to[0] == 's' else ''}mov {to}, {'w' if to[0] == 's' else 'x'}15")
 
