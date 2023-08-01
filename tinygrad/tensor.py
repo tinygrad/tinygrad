@@ -373,9 +373,8 @@ class Tensor:
     if dim < 0: dim = len(self.shape) + dim + 1
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
-  # (padding_left, padding_right, padding_top, padding_bottom)
+  # (padding_left, padding_right, padding_top, padding_bottom) Supports N Dimension, Length needs to be even
   def pad2d(self, padding:Union[List[int], Tuple[int, ...]], value:float=0):
-    assert len(padding) % 2 == 0 and len(padding)//2 <= len(self.shape) # Match Pytorch Behaviour
     arg = [(0,s) for s in self.shape[:-(len(padding)//2)]] + [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], self.shape[::-1])][::-1]
     padding = tuple([(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg)])
     return self.pad(padding, value=value).shrink(tuple([(p[0] + pad_[0], p[1] + pad_[0]) for p,pad_ in zip(arg, padding)]))
