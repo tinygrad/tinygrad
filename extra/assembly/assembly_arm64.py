@@ -11,7 +11,7 @@ def compute_offsets(total):
   quotient, remainder = divmod(total, 4096)
   return [4096]*quotient + [remainder] if remainder else [4096]*quotient
 #NOTE: Darwin needs lm functions to start with a "_" 
-def get_op(op): return f"bl {'_' if system() == 'Darwin' else ''}{op}"
+def get_name(name): return ('_' if system() == 'Darwin' else '') + name
 
 class ARM64Codegen(AssemblyCodegen):
   def hand_coded_optimizations(self): pass
@@ -24,7 +24,7 @@ class ARM64Codegen(AssemblyCodegen):
     type_to_reg = {dtypes.half: 'h', dtypes.float32: 's', dtypes.bool: 'x',dtypes.int8:'w', dtypes.int32: 'w', dtypes.int64: 'x', dtypes.uint8:'w', dtypes.uint32: 'w', dtypes.uint64: 'x'}
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
            BinaryOps.MOD: "", BinaryOps.CMPLT: "subs", BinaryOps.CMPEQ: "subs",
-           UnaryOps.SIN: get_op('sinf'), UnaryOps.LOG2: get_op("log2f"), UnaryOps.EXP2: get_op("exp2f"), UnaryOps.SQRT: get_op("sqrtf"),
+           UnaryOps.SIN:'bl ' + get_name('sinf'), UnaryOps.LOG2: 'bl ' + get_name("log2f"), UnaryOps.EXP2: 'bl ' + get_name("exp2f"), UnaryOps.SQRT: 'bl ' + get_name("sqrtf"),
            TernaryOps.MULACC: "madd", TernaryOps.WHERE: "fcmp"}
 
     def mov_imm(value, to):
@@ -148,4 +148,4 @@ class ARM64Codegen(AssemblyCodegen):
       if out is not None and out.nm in mem_vars:
         ins.append(f"mov x15, {mem_vars[out.nm]}")
         ins.append(f"str {rtor[out.nm]}, [sp, x15]")
-    return "test", "\n".join([".arch armv8-a",".text", ".global test",".p2align 2", "test:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins  + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret;"+"\n"])
+    return "test", "\n".join([".arch armv8-a",".text", f".global {get_name('test')}",".p2align 2", f"{get_name('test')}:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins  + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret;"+"\n"])
