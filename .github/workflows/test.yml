@@ -52,16 +52,16 @@ jobs:
           platforms: arm64
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-      - name: Cache pip
+      - name: cache docker layers
         uses: actions/cache@v3
         with:
-          path: ~/.cache/pip
-          key: ~/.cache/pip
+          path: /tmp/.buildx-cache
+          key: arm64
       - name: Build Docker Image
         run: |
           docker buildx build \
-          --cache-from=type=local,src=~/.cache/pip \
-          --cache-to=type=local,dest=~/.cache/pip \
+          --cache-from: type=local,src=/tmp/.buildx-cache \
+          --cache-to: type=local,dest=/tmp/.buildx-cache-new \
           --platform linux/arm64 \
           --load \
           -t tinygrad-arm64 \
