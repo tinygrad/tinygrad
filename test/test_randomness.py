@@ -67,6 +67,10 @@ class TestRandomness(unittest.TestCase):
     self.assertTrue(normal_test(Tensor.randn))
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
 
+  def test_normal(self):
+    self.assertTrue(normal_test(Tensor.normal))
+    self.assertTrue(equal_distribution(Tensor.normal, lambda x: torch.nn.init.normal_(torch.empty(x), mean=0, std=1), lambda x: np.random.normal(loc=0, scale=1, size=x)))
+
   def test_uniform(self):
     self.assertFalse(normal_test(Tensor.uniform))
     self.assertTrue(equal_distribution(Tensor.uniform, lambda x: torch.nn.init.uniform_(torch.empty(x), a=-1, b=1), lambda x: np.random.uniform(low=-1, high=1, size=x)))
@@ -85,6 +89,13 @@ class TestRandomness(unittest.TestCase):
     np.random.seed(1337)
     for shape in [(128, 64, 3, 3), (20, 24)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), shape=shape))
+
+  def test_kaiming_normal(self):
+    Tensor.manual_seed(1337)
+    torch.manual_seed(1337)
+    np.random.seed(1337)
+    for shape in [(128, 64, 3, 3), (20, 24)]:
+      self.assertTrue(equal_distribution(Tensor.kaiming_normal, lambda x: torch.nn.init.kaiming_normal_(torch.empty(x)), shape=shape))
 
   def test_conv2d_init(self):
     params = (128, 256, (3,3))

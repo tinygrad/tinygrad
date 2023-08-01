@@ -179,6 +179,9 @@ class Tensor:
     return src[0].mul(2*pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(Tensor.default_type if dtype is None else dtype)
 
   @staticmethod
+  def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
+
+  @staticmethod
   def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor: return ((high-low) * Tensor.rand(*shape, **kwargs)) + low
 
   @staticmethod
@@ -193,6 +196,12 @@ class Tensor:
   def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
     bound = sqrt(3.0) * sqrt(2.0 / (1 + a ** 2)) / sqrt(prod(shape[1:]))
     return Tensor.uniform(*shape, low=-bound, high=bound, **kwargs)
+
+  # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_normal_
+  @staticmethod
+  def kaiming_normal(*shape, a:float = 0.01, **kwargs) -> Tensor:
+    std = sqrt(2.0 / (1 + a ** 2)) / sqrt(prod(shape[1:]))
+    return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
   # ***** toposort and backward pass *****
   def deepwalk(self):
@@ -234,8 +243,10 @@ class Tensor:
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))]))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
-  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Pad.apply(self, arg=arg) if any(x != (0,0) for x in arg) else self
   def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
+  def pad(self, arg: Tuple[Tuple[int, int], ...], value:float=0) -> Tensor:
+    ret = mlops.Pad.apply(self, arg=arg) if any(x != (0, 0) for x in arg) else self
+    return ret if 0 == value else ret + (value - mlops.Pad.apply(Tensor.full(self.shape, value), arg=arg))
 
   # ***** movement hlops *****
 
@@ -322,13 +333,14 @@ class Tensor:
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
     assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
-    catargs = [self] + list(args)
-    assert all(len(t.shape) != 0 for t in catargs), "zero-dimensional tensor cannot be concatenated"
-    shape_cumsum = [0, *accumulate([y.shape[dim] for y in catargs])]
-    slc = [[(0, s) for s in self.shape] for _ in catargs]
-    for s,k in zip(slc, shape_cumsum):
-      s[dim] = (-k, shape_cumsum[-1]-k)
-    return reduce(Tensor.__add__, [arg.slice(s) for arg,s in zip(catargs, slc)])
+    catargs = [self, *args]
+    assert all(t.shape for t in catargs), "zero-dimensional tensor cannot be concatenated"
+    shapes = [s.shape[dim] for s in catargs]
+    shape_cumsum = [0, *accumulate(shapes)]
+    slc = [[(0, 0) for _ in self.shape] for _ in catargs]
+    for shp,k,s in zip(shapes, shape_cumsum[:-1], slc):
+      s[dim] = (k, shape_cumsum[-1] - k - shp)
+    return reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
   @staticmethod
   def stack(tensors, dim=0):
@@ -512,12 +524,9 @@ class Tensor:
   def tril(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, dtype=self.dtype).where(Tensor.zeros_like(self), self)
 
   # ***** math functions (unary) *****
-  def ceil(self: Tensor) -> Tensor:
-    b = self.cast(dtypes.int32).contiguous().cast(self.dtype)
-    return (self > b).where(b+1, b)
-  def floor(self: Tensor) -> Tensor:
-    b = self.cast(dtypes.int32).contiguous().cast(self.dtype)
-    return (self < b).where(b-1, b)
+  def trunc(self: Tensor) -> Tensor: return self.cast(dtypes.int32).contiguous().cast(self.dtype)
+  def ceil(self: Tensor) -> Tensor: return (self > (b := self.trunc())).where(b+1, b)
+  def floor(self: Tensor) -> Tensor: return (self < (b := self.trunc())).where(b-1, b)
 
   def __neg__(self): return 0.0-self
   def square(self): return self*self
@@ -579,7 +588,12 @@ class Tensor:
     sign = (x * pi).cos() if isinstance(x, Tensor) else cos(x * pi) if not reverse else (self * pi).cos()
     # we only need to correct the sign if the base is negative
     base_sign = ((self.sign() if not reverse else x.sign() if isinstance(x, Tensor) else copysign(1, x)) - 1) / -2
-    return ar.mul(sign * base_sign + (1 - base_sign))
+    # we need 0 to be positive so we need to correct base_sign when the base is 0
+    base_sign = base_sign - (1.5 * (1 - (self.sign().abs() if not reverse else x.sign().abs() if isinstance(x, Tensor) else abs(int(bool(x))))))
+    # inject nan if the base is negative and the power is not an integer
+    to_nan = (((x - x.trunc()) * 1e10).abs().clip(0, 1) if isinstance(x, Tensor) else int(bool(x - int(x))) if not reverse else ((self - self.trunc()) * 1e10).abs().clip(0, 1)) * base_sign
+    inject_nan = ((((-to_nan) * 2) + 1)).log().add(1) if isinstance(to_nan, Tensor) else 1 if not to_nan else float("nan")
+    return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan)
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)
