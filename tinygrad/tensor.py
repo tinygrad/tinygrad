@@ -376,8 +376,8 @@ class Tensor:
   # (padding_left, padding_right, padding_top, padding_bottom) Supports N Dimension, Length needs to be even
   def pad2d(self, padding:Union[List[int], Tuple[int, ...]], value:float=0):
     arg = [(0,s) for s in self.shape[:-(len(padding)//2)]] + [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], self.shape[::-1])][::-1]
-    padding = tuple([(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg)])
-    return self.pad(padding, value=value).shrink(tuple([(p[0] + pad_[0], p[1] + pad_[0]) for p,pad_ in zip(arg, padding)]))
+    pad_ = tuple([(max(0, -p[0]), max(0, p[1]-s)) for p,s in zip(arg, self.shape)])
+    return self.pad(pad_, value=value).shrink(tuple([(p[0] + pad_[i][0], p[1] + pad_[i][0]) for i,p in enumerate(arg)]))
 
   @property
   def T(self) -> Tensor: return self.transpose()
