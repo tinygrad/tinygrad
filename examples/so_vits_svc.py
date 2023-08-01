@@ -58,7 +58,7 @@ class ContentVec:
   def forward_padding_mask(self, features, padding_mask):
     # replaces original forward_padding_mask for batch inference
     lengths_org = tilde(padding_mask.cast(dtypes.bool)).cast(dtypes.int64).sum(1)  # ensure its bool for tilde
-    lengths = (lengths_org - 400).cast(dtypes.float32).div(320).floor().cast(dtypes.int64) + 1
+    lengths = (lengths_org - 400).float().div(320).floor().cast(dtypes.int64) + 1  # intermediate float to divide
     padding_mask = lengths_to_padding_mask(lengths)
     return padding_mask
 
@@ -333,18 +333,18 @@ class TransposeLast:
 class Fp32LayerNorm(nn.LayerNorm):
   def __init__(self, *args, **kwargs): super().__init__(*args, **kwargs)
   def __call__(self, input: Tensor):
-    self.weight = self.weight.cast(dtypes.float32) if self.weight is not None else None
-    self.bias = self.bias.cast(dtypes.float32) if self.bias is not None else None
-    output = super().__call__(input.cast(dtypes.float32))
+    self.weight = self.weight.float() if self.weight is not None else None
+    self.bias = self.bias.float() if self.bias is not None else None
+    output = super().__call__(input.float())
     return output.cast(input.dtype)
 
 class Fp32GroupNorm(nn.GroupNorm):
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
   def __call__(self, input: Tensor):
-    self.weight = self.weight.cast(dtypes.float32) if self.weight is not None else None
-    self.bias = self.bias.cast(dtypes.float32) if self.bias is not None else None
-    output = super().__call__(input.cast(dtypes.float32))
+    self.weight = self.weight.float() if self.weight is not None else None
+    self.bias = self.bias.float() if self.bias is not None else None
+    output = super().__call__(input.float())
     return output.cast(input.dtype)
 
 class CondLayerNorm:  # https://github.com/auspicious3000/contentvec/blob/main/contentvec/modules/cond_layer_norm.py#L10
@@ -457,7 +457,7 @@ class SineGen():
     self.sine_amp, self.noise_std, self.harmonic_num, self.sampling_rate, self.voiced_threshold, self.flag_for_pulse = sine_amp, noise_std, harmonic_num, samp_rate, voice_threshold, flag_for_pulse
     self.dim = self.harmonic_num + 1
   def _f02uv(self, f0):
-    return (f0 > self.voiced_threshold).cast(dtypes.float32)  #generate uv signal
+    return (f0 > self.voiced_threshold).float()  #generate uv signal
   def _f02sine(self, f0_values):
     def padDiff(x : Tensor): return (x.pad2d((0,0,-1,1)) - x).pad2d((0,0,0,-1))
     def mod(x: Tensor, n: int) -> Tensor: return x - n * x.div(n).floor()  # TODO: this is what the % operator does in pytorch.
