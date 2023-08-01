@@ -348,13 +348,13 @@ class Tensor:
       else: ret = new_ret
     return ret
 
-  def _gather(self, idx, dim):
+  def _gather(self: Tensor, idx: Tensor, dim: int):
     new_self = self.reshape(*self.shape[:dim+1], *[1]*idx.ndim, *self.shape[dim+1:])
     arange = Tensor.arange(self.shape[dim], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim, self.shape[dim], *[1]*idx.ndim, *[1]*(self.ndim-dim-1))
     new_idx = idx.reshape(*[1]*dim, 1, *idx.shape, *[1]*(self.ndim-dim-1))
     return (new_self * (arange == new_idx)).sum(dim)
 
-  def gather(self, idx, dim):
+  def gather(self: Tensor, idx: Tensor, dim: int):
     if dim < 0: dim += self.ndim
     ret = self._gather(idx, dim=dim)
     self_extra = self.shape[:dim] + self.shape[dim+1:]
