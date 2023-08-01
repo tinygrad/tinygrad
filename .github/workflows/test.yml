@@ -63,7 +63,7 @@ jobs:
           context: .
           file: test/extra/arm64_dockerfile
           # Set the desired build target here
-          platform: linux/arm64
+          platforms: linux/arm64
           load: true
           push: false
           tags: tinygrad-arm64
