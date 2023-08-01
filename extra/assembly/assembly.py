@@ -38,12 +38,16 @@ class AssemblyCodegen(Linearizer):
   # s registers are the addresses and non local indexes
   def codegen(self):
     self.process()
-    if not getenv("CLANG"): self.hand_coded_optimizations()
-    self.limit_global_dims(3)  # all GPU asms have 3 (for now)
+    self.hand_coded_optimizations()
+    if not getenv("CLANG"): 
+      self.limit_global_dims(3)  # all GPU asms have 3 (for now)
     self.linearize()
 
     cnts:DefaultDict[Tuple[DType, bool], int] = defaultdict(int)
     tor: Dict[Any, Register] = {}
+    buf_to_dtype = {args[0]:args[1] for uop,_,_,args in self.uops if uop == UOps.DEFINE_GLOBAL}
+    buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
+    
     def newreg(tok, dtype=dtypes.float32, scalar=False):
       nonlocal cnts, tor
       if isinstance(tok, Token): dtype = tok.dtype  # this
@@ -82,7 +86,7 @@ class AssemblyCodegen(Linearizer):
       AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: render_alu(BinaryOps.MUL, a, b.render(ops,ctx), dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
     def addr_w_offset(args):
-      idx = args.idx*args.memory_dtype.itemsize
+      idx = args.idx*buf_to_dtype[args.name].itemsize
       off = 0  # TODO: should this be None?
       if isinstance(idx, SumNode):
         nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
@@ -95,15 +99,15 @@ class AssemblyCodegen(Linearizer):
           new_reg = newreg((reg.nm, 'vec'), dtype=reg.dtype)
           ins.append(AssemblyInstruction(UOps.ALU, new_reg, [reg], UnaryOps.NOOP))
           reg = new_reg
-        return tor[f"buf{args.i}"], reg, off
-      reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[args[0]], dtype=dtypes.uint64)
+        return tor[f"buf{buf_index[args.name]}"], reg, off
+      reg = render_alu(BinaryOps.ADD, render_cast(reg, dtypes.uint64), tor[f"buf{buf_index[args.name]}"], dtype=dtypes.uint64)
       return reg, None, off
 
     buf_to_dtype = {args[0]:args[1] for uop,_,_,args in self.uops if uop == UOps.DEFINE_GLOBAL}
     buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
 
     ins = []
-    ins += [AssemblyInstruction(UOps.DEFINE_GLOBAL, newreg(args[0], dtype=dtypes.uint64, scalar=True), [], args[0]) for uop,_,_,args in self.uops if uop == UOps.DEFINE_GLOBAL]
+    ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64, scalar=True), [], f"buf{i}") for i in range(len(self.bufs))]
     global_size, local_size = [], []
     skipload_branch = 0
     for uop,newvar,vin,args in self.uops:
@@ -166,13 +170,13 @@ class AssemblyCodegen(Linearizer):
               ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
           if args.valid.max == 1:
               # NOTE: you can't compute the index in here, because it assumes it's all available later
-              ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global', args.memory_dtype if buf_to_dtype[args.name] != dtypes.float else None))) #if args.i != -1 else 'shared')
+              ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if buf_index[args.name] != -1 else 'shared', args.memory_dtype if buf_to_dtype[args.name] != dtypes.float else None))) #if args.i != -1 else 'shared')
           if args.valid.min == 0 and args.valid.max == 1:
             ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
             skipload_branch += 1
       elif uop == UOps.STORE:
         idx, treg, off = addr_w_offset(args)
-        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global', args.memory_dtype if buf_to_dtype['data0'] != dtypes.float else None))) #if args.i != -1 else 'shared')
+        ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if buf_index[args.name] != -1 else 'shared', args.memory_dtype if buf_to_dtype['data0'] != dtypes.float else None))) #if args.i != -1 else 'shared')
 
     # define registers
     ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)) for dtype,c in cnts.items()] + ins

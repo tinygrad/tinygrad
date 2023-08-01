@@ -14,6 +14,7 @@ def compute_offsets(total):
 def get_op(op): return f"bl {'_' if system() == 'Darwin' else ''}{op}"
 
 class ARM64Codegen(AssemblyCodegen):
+  def hand_coded_optimizations(self): pass
   def specialize(self, asm):
     var_size = 0
     prev_uop = None
@@ -28,7 +29,7 @@ class ARM64Codegen(AssemblyCodegen):
 
     def mov_imm(value, to):
         # Manually move value into reg if vin[1] can't fit
-        if value > 65535:
+        if abs(value) > abs(65535) and abs(value) != float('inf'):
           ins.append(f"movz w15, #{value & 0xffff}")
           ins.append(f"movk w15, #{(value >> 16) & 0xffff}, lsl #16")
           ins.append(f"sxtw {to}, w15")
@@ -75,11 +76,11 @@ class ARM64Codegen(AssemblyCodegen):
         ins.append(f"mov x15, {mem_vars[v.nm]}")
         ins.append(f"ldr {rtor[v.nm]}, [sp, x15]")
 
-      if uop == UOps.DEFINE_GLOBAL:
-        if arg.startswith('data'):
+      if uop == UOps.SPECIAL:
+        if arg.startswith('buf'):
           # data 8 to n into the stack 
-          if int(arg[4:]) >= 8:
-            ins.append(f"ldr x15, [x19, #{(int(arg[4:]) - 8) * 8}]")
+          if int(arg[3:]) >= 8:
+            ins.append(f"ldr x15, [x19, #{(int(arg[3:]) - 8) * 8}]")
             ins.append(f"mov {rtor[out.nm]}, x15")
       elif uop == UOps.CAST:
         if arg == BinaryOps.CMPEQ:
