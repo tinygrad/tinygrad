@@ -1114,22 +1114,39 @@ class TestOps(unittest.TestCase):
     x = Tensor.full((3, 3), float("inf"))
     n = (x < 0).where(x, 1).numpy()
     assert np.all(n == 1.)
+  
+  def test_slice_fancy_indexing(self):
+    # indices cannot have gradient
+    a = torch.randint(low=-1, high=1, size=(10,1,1,1,1,1), requires_grad=False)
+    b = torch.randint(high=1, size=(1,16,1,1,1,1), requires_grad=False)
+    c = torch.randint(low=-5, high=5, size=(10,1,14,1,1,1), requires_grad=False)
+    d = torch.randint(high=4, size=(10,1,1,14,1,1), requires_grad=False)
+    e = torch.randint(high=1, size=(10,1,1,1,13,1), requires_grad=False)
+    i = Tensor(a.numpy(), requires_grad=False)
+    j = Tensor(b.numpy(), requires_grad=False)
+    k = Tensor(c.numpy(), requires_grad=False)
+    o = Tensor(d.numpy(), requires_grad=False)
+    p = Tensor(e.numpy(), requires_grad=False)
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,e], lambda x: x[:,j,k,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,:], lambda x: x[:,j,k,o,:])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,...], lambda x: x[i,j,...])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,...,e], lambda x: x[i,...,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[...,c,:,e], lambda x: x[...,k,:,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,:,10:11,d,0:2], lambda x: x[1,:,10:11,o,0:2])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,4,c,d,2], lambda x: x[1,4,k,o,2])
 
   def test_gather(self):
-    nda = np.random.randn(4,5,6,9,5).astype(np.float32)
-    ten = Tensor(nda, requires_grad=True)
-    tor = torch.tensor(nda, requires_grad=True)
-    c = np.random.randint(low=-4, high=4, size=[3,4,5]).astype(np.int32)
+    # indices cannot have gradient
+    c = np.random.randint(3, size=[3,4,5,1,4]).astype(np.int32)
     a = Tensor(c, requires_grad=False)
-    b = torch.tensor(c, requires_grad=False)
-    helper_test_op([], lambda: tor[b,:,:,:,:], lambda: ten.gather(a, dim=0))
-    helper_test_op([], lambda: tor[:,b,:,:,:], lambda: ten.gather(a, dim=1))
-    helper_test_op([], lambda: tor[:,:,b,:,:], lambda: ten.gather(a, dim=2))
-    helper_test_op([], lambda: tor[:,:,:,b,:], lambda: ten.gather(a, dim=3))
-    helper_test_op([], lambda: tor[:,:,:,:,b], lambda: ten.gather(a, dim=4))
-    ta = Tensor(c, requires_grad=True)
-    tb = torch.tensor(c, requires_grad=True, dtype=torch.float32)
-    self.helper_test_exception([], lambda: tor[tb,:,:,:,:].sum().backward(), lambda: ten.gather(ta, dim=0).sum().backward(), expected=(IndexError, RuntimeError)) # torch raises IndexError, Tensor raises RuntimeError
+    b = torch.tensor(c, dtype=torch.int64, requires_grad=False)
+    helper_test_op([(4,5,6,9,5)], lambda x: x.gather(index=b, dim=0), lambda x: x.gather(idx=a, dim=0))
+    helper_test_op([(4,5,6,9,5)], lambda x: x.gather(index=b, dim=1), lambda x: x.gather(idx=a, dim=1))
+    helper_test_op([(4,5,6,9,5)], lambda x: x.gather(index=b, dim=2), lambda x: x.gather(idx=a, dim=2))
+    helper_test_op([(4,5,6,9,5)], lambda x: x.gather(index=b, dim=3), lambda x: x.gather(idx=a, dim=3))
+    helper_test_op([(4,5,6,9,5)], lambda x: x.gather(index=b, dim=4), lambda x: x.gather(idx=a, dim=4))
 
 if __name__ == '__main__':
   np.random.seed(1337)
