@@ -67,7 +67,7 @@ jobs:
           -t tinygrad-arm64 \
           -f test/extra/arm64_dockerfile .
       - name: Test Ops
-        run: docker run -e ARM64=1 -e CLANG=1 -e FORWARD_ONLY=1 tinygrad-arm64 python -m pytest -n=auto test/test_ops.py
+        run: docker run -e ARM64=1 -e CLANG=1 -e FORWARD_ONLY=1 tinygrad-arm64 python3 -m pytest -n=auto test/test_ops.py
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
