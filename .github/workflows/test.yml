@@ -55,13 +55,13 @@ jobs:
       - name: Cache pip
         uses: actions/cache@v3
         with:
-          path: ~/.cache/buildx-cache
-          key: buildx-cache
+          path: ~/.cache/pip
+          key: ~/.cache/pip
       - name: Build Docker Image
         run: |
           docker buildx build \
-          --cache-from=type=local,src=~/.cache/buildx-cache \
-          --cache-to=type=local,dest=~/.cache/buildx-cache \
+          --cache-from=type=local,src=~/.cache/pip \
+          --cache-to=type=local,dest=~/.cache/pip \
           --platform linux/arm64 \
           --load \
           -t tinygrad-arm64 \
