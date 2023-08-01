@@ -28,7 +28,7 @@ class ARM64Codegen(AssemblyCodegen):
            TernaryOps.MULACC: "madd", TernaryOps.WHERE: "fcmp"}
 
     def mov_imm(value, to):
-        # Manually move value into reg if vin[1] can't fit
+        # Manually move value into reg if value can't fit
         if abs(value) > abs(65535) and abs(value) != float('inf'):
           ins.append(f"movz w15, #{value & 0xffff}")
           ins.append(f"movk w15, #{(value >> 16) & 0xffff}, lsl #16")
