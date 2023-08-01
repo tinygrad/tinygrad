@@ -30,8 +30,8 @@ class Svc():
 
 # original code for contentvec: https://github.com/auspicious3000/contentvec/
 class ContentVec:
-  # TODO: self.label_embs_concat and self.final_proj dims are hardcoded 
-  # and depend on fairseq.data.dictionary Dictionary in the checkpoint. 
+  # TODO: self.label_embs_concat and self.final_proj dims are hardcoded
+  # and depend on fairseq.data.dictionary Dictionary in the checkpoint.
   # This param can't yet be loaded since there is no pickle for it. See with DEBUG=2.
   def __init__(self, cfg: HParams):
     self.feature_grad_mult, self.untie_final_proj = cfg.feature_grad_mult, cfg.untie_final_proj
@@ -76,12 +76,12 @@ class ContentVec:
 
   @classmethod
   def load_model(cls, checkpoint_path:str, checkpoint_url:str):
-      download_if_not_present(checkpoint_path, checkpoint_url)
-      cfg = load_config_from_checkpoint(checkpoint_path)
-      enc = cls(cfg.model)
-      _ = load_checkpoint_enc(checkpoint_path, enc, None)
-      logging.debug(f"{cls.__name__}: Loaded model with cfg={cfg}")
-      return enc
+    download_if_not_present(checkpoint_path, checkpoint_url)
+    cfg = load_config_from_checkpoint(checkpoint_path)
+    enc = cls(cfg.model)
+    _ = load_checkpoint_enc(checkpoint_path, enc, None)
+    logging.debug(f"{cls.__name__}: Loaded model with cfg={cfg}")
+    return enc
 
 class TransformerEncoder:
   def __init__(self, cfg: HParams):
@@ -92,7 +92,7 @@ class TransformerEncoder:
       # for training: layer.weights need to be weight_normed
       return layer
     self.dropout, self.embedding_dim, self.layer_norm_first, self.layerdrop, self.num_layers, self.num_layers_1 = cfg.dropout, cfg.encoder_embed_dim, cfg.layer_norm_first, cfg.encoder_layerdrop, cfg.encoder_layers, cfg.encoder_layers_1
-    self.pos_conv = Sequential([make_conv(), SamePad(cfg.conv_pos), GELU()]) 
+    self.pos_conv = Sequential([make_conv(), SamePad(cfg.conv_pos), GELU()])
     self.layers = [
       TransformerSentenceEncoderLayer(embedding_dim=self.embedding_dim,
                                       ffn_embedding_dim=cfg.encoder_ffn_embed_dim,
@@ -287,7 +287,7 @@ class ConvFeatureExtractionModel():
         x = conv(x)
     return x
 
-def tilde(x: Tensor) -> Tensor: 
+def tilde(x: Tensor) -> Tensor:
   if x.dtype == dtypes.bool: return (1 - x).cast(dtypes.bool)
   return (x + 1) * -1  # this seems to be what the ~ operator does in pytorch for non bool
 def lengths_to_padding_mask(lens: Tensor) -> Tensor:
@@ -349,7 +349,7 @@ class Fp32GroupNorm(nn.GroupNorm):
 
 class CondLayerNorm:  # https://github.com/auspicious3000/contentvec/blob/main/contentvec/modules/cond_layer_norm.py#L10
   # this one is a bit weird since it has slightly different constructor args than nn.LayerNorm
-  def __init__(self, dim_last, eps=1e-5, dim_spk=256, elementwise_affine=True): 
+  def __init__(self, dim_last, eps=1e-5, dim_spk=256, elementwise_affine=True):
     self.dim_last, self.eps, self.dim_spk, self.elementwise_affine = dim_last, eps, dim_spk, elementwise_affine
     if self.elementwise_affine:
       self.weight_ln = nn.Linear(self.dim_spk, self.dim_last, bias=False)
@@ -419,13 +419,13 @@ class Synthesizer:
     return o,f0
   @classmethod
   def load_model(cls, config_path:str, config_url:str, weights_path:str, weights_url:str):
-      download_if_not_present(config_path, config_url)
-      hps = get_hparams_from_file(config_path)
-      download_if_not_present(weights_path, weights_url)
-      net_g = cls(hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, **hps.model)
-      _ = load_checkpoint(weights_path, net_g, None, skip_list=["f0_decoder"])
-      logging.debug(f"{cls.__name__}:Loaded model with hps: {hps}")
-      return net_g
+    download_if_not_present(config_path, config_url)
+    hps = get_hparams_from_file(config_path)
+    download_if_not_present(weights_path, weights_url)
+    net_g = cls(hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, **hps.model)
+    _ = load_checkpoint(weights_path, net_g, None, skip_list=["f0_decoder"])
+    logging.debug(f"{cls.__name__}:Loaded model with hps: {hps}")
+    return net_g
 
 def randn_like(x): return Tensor.randn(*x.shape, dtype=x.dtype).to(device=x.device)
 
@@ -643,7 +643,7 @@ if __name__=="__main__":
 
   Tensor.no_grad = True
   Tensor.training = False
-  
+
   # 1. ContentVec
   contentvec = ContentVec.load_model(encoder_location[0], encoder_location[1])
 
