@@ -9,6 +9,7 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
 
 def is_sym_int(x: Any) -> bool: return isinstance(x, int) or isinstance(x, Node)
+def sym_vars(x: Union[Node, int], left_only=False) -> List[Variable]: return [] if isinstance(x, int) else x.vars(left_only)
 
 class Node:
   b: Union[Node, int]
@@ -20,7 +21,7 @@ class Node:
     ret = ops[type(self)](self, ops, ctx)
     if strip_parens and ret[0] == '(' and ret[-1] == ')': ret = ret[1:-1]
     return ret
-  def vars(self): return []
+  def vars(self, left_only=False): return []
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
   @functools.cached_property
@@ -135,7 +136,7 @@ class Variable(Node):
   def __init__(self, expr:Optional[str], nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
     self.val: Optional[int] = None
-  def vars(self): return [self]
+  def vars(self, left_only=False): return [self]
 
 class NumNode(Node):
   def __init__(self, num:int):
@@ -151,7 +152,7 @@ class OpNode(Node):
   def __init__(self, a:Node, b:Union[Node, int]):
     self.a, self.b = a, b
     self.min, self.max = self.get_bounds()
-  def vars(self): return self.a.vars()
+  def vars(self, left_only=False): return self.a.vars(left_only) + (self.b.vars(left_only) if not left_only and isinstance(self.b, Node) else [])
   @abstractmethod
   def get_bounds(self) -> Tuple[int, int]: pass
 
@@ -189,7 +190,7 @@ class ModNode(OpNode):
 
 class RedNode(Node):
   def __init__(self, nodes:List[Node]): self.nodes = nodes
-  def vars(self): return functools.reduce(lambda l,x: l+x.vars(), self.nodes, [])
+  def vars(self, left_only=False): return functools.reduce(lambda l,x: l+x.vars(left_only), self.nodes, [])
 
 class SumNode(RedNode):
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
