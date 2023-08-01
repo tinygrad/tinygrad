@@ -94,7 +94,7 @@ class ARM64Codegen(AssemblyCodegen):
         if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
           ins.append(f"ands {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
         elif arg == TernaryOps.WHERE:
-          ins.append(f"fmov s0, #0")
+          ins.append(f"fmov s0, #0.0")
           ins.append(f"{alu[arg]} {rtor[vin[0].nm]}, s0")
           ins.append(f"fcsel {rtor[out.nm]},{rtor[vin[2].nm]}, {rtor[vin[1].nm]}, eq")
         elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
@@ -148,4 +148,4 @@ class ARM64Codegen(AssemblyCodegen):
       if out is not None and out.nm in mem_vars:
         ins.append(f"mov x15, {mem_vars[out.nm]}")
         ins.append(f"str {rtor[out.nm]}, [sp, x15]")
-    return "test", "\n".join([".arch armv8-a",".text", ".global _test",".p2align 2", "_test:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins  + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret;"])
+    return "test", "\n".join([".arch armv8-a",".text", ".global _test",".p2align 2", "_test:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins  + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret;"+"\n"])
