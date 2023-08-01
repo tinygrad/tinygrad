@@ -47,13 +47,15 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
       - name: Setup qemu
-        uses: docker/setup-qemu-action@v1
+        uses: docker/setup-qemu-action@2
         with:
           platforms: all
-      - name: Install dependencies
-        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      name: Build Docker Image
+        run: |
+          docker buildx create --use
+          docker buildx build --platform linux/arm64 -t tinygrad -f test/extra/arm64_dockerfile .
       - name: Test Ops
-        run: ARM64=1 CLANG=1 python -m pytest -n=auto test/test_ops.py
+        run: docker run -e ARM64=1 -e CLANG=1 -e FORWARD_ONLY=1 tinygrad python -m pytest -n=auto test/test_ops.py
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
