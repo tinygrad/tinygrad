@@ -451,7 +451,9 @@ class CLIPTextTransformer:
 # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
 @lru_cache()
 def default_bpe():
-  return Path(__file__).parent.parent / "weights/bpe_simple_vocab_16e6.txt.gz"
+  fn = Path(__file__).parent.parent / "weights/bpe_simple_vocab_16e6.txt.gz"
+  download_file("https://github.com/openai/CLIP/raw/main/clip/bpe_simple_vocab_16e6.txt.gz", fn)
+  return fn
 
 def get_pairs(word):
   """Return set of symbol pairs in a word.

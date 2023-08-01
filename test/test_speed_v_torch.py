@@ -18,7 +18,7 @@ from tinygrad.helpers import colored, getenv, DEBUG, CI
 from tinygrad.jit import TinyJit
 import pytest
 
-pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exclude_clang, pytest.mark.webgpu]
+pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 
@@ -130,7 +130,7 @@ class TestBigSpeed(unittest.TestCase):
   def test_large_conv_3x3(self): helper_test_conv(bs=4, in_chans=128, out_chans=128, kernel_size=3, img_size_y=130, img_size_x=130)
   def test_large_conv_5x5(self): helper_test_conv(bs=4, in_chans=128, out_chans=128, kernel_size=5, img_size_y=130, img_size_x=130)
 
-@unittest.skipIf((getenv("BIG") == 1 or Device.DEFAULT == "WEBGPU"), "only big tests")
+@unittest.skipIf((getenv("BIG") == 1), "only big tests")
 class TestSpeed(unittest.TestCase):
   def test_sub(self):
     def f(a, b): return a-b
@@ -156,6 +156,10 @@ class TestSpeed(unittest.TestCase):
     def f1(a, b): return a.cumsum(axis=1)
     helper_test_generic_square('cumsum_0', 256, f0, f0, onearg=True)
     helper_test_generic_square('cumsum_1', 256, f1, f1, onearg=True)
+
+  def test_cat(self):
+    helper_test_generic_square('cat_0', 256, lambda x,y: torch.cat((x,y),dim=0), lambda x,y: x.cat(y,dim=0))
+    helper_test_generic_square('cat_1', 256, lambda x,y: torch.cat((x,y),dim=1), lambda x,y: x.cat(y,dim=1))
 
   def test_array_packing(self):
     N = 2048

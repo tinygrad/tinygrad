@@ -595,15 +595,41 @@ class Linearizer:
     for i,x in enumerate(rets): self.sts[i].reshape(tuple([y[0] for y in x]))
 
   # ******************** GPU simplifiers ********************
+  def _limit_size(self, x: Tuple[int], max_size: List) -> Tuple[int, ...]:
+    new_shape,dims = list(x), len(x)
+    for i in range(dims):
+      next_idx = (i + 1) % dims
+      while new_shape[i] > max_size[i]:
+        new_shape[i] = new_shape[i] // 2
+        if (new_shape[next_idx] <= max_size[next_idx]):
+          new_shape[next_idx] = new_shape[next_idx] * 2
+        else:
+          next_idx = (next_idx + 1) % dims
+          new_shape[next_idx] = new_shape[next_idx] * 2
+    return tuple(new_shape)
 
-  def limit_global_dims(self, limit):
+  def limit_global_dims(self, limit: int, global_max: List[int], local_max: List[int]):
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
     # NOTE: this might make multiview shapetrackers
-    if limit and (self.first_reduce-self.local_dims) > limit:
+    if (self.first_reduce-self.local_dims) > limit:
       num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
       if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
+    # Check the global allocation limit, current the global_size will be flipped during codegen 
+    # and then padded right with 1s if its length < 3 which makes this part a bit awkward to write
+    global_dims = self.first_reduce-self.local_dims
+    if global_dims > 0:
+      if global_max:
+        tmp = global_max[:global_dims] + (local_max[:self.local_dims] if local_max else [])
+        if max(global_max) < max(self.full_shape[:global_dims]): self.reshape_and_permute(lambda x: self._limit_size(x, tmp + [math.inf] * (len(self.full_shape)-len(tmp))), None)
+        assert max(global_max) >= max(self.full_shape[:global_dims]), f"device max allocation {max(self.full_shape[:global_dims])} exceeds global dim maximum {max(global_max)}"
+      for i in range(global_dims-1):
+        if self.full_shape[i] > global_max[i]:
+          order = list(range(len(self.full_shape)))
+          order[i], order[global_dims-1] = order[global_dims-1], order[i] 
+          self.reshape_and_permute(None, order)
+          if DEBUG >= 3: print("permuted global dim", order, "due to allocation exceeds global limit")
 
   def alias_buffer(self, i, pattern):
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"

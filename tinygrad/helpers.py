@@ -12,11 +12,7 @@ OSX = platform.system() == "Darwin"
 CI = os.getenv("CI", "") != ""
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
-def argfix(*x):
-  if x[0].__class__ in {tuple, list}:
-    try: return tuple(x[0])
-    except IndexError: return tuple()
-  return tuple(x)
+def argfix(*x): return tuple(x[0]) if x and x[0].__class__ in (tuple, list) else x
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def all_same(items): return all(x == items[0] for x in items)
 def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
@@ -31,22 +27,27 @@ def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
 class Context:
-  def __init__(self, **kwargs): self.pvars = kwargs
-  def __enter__(self): ContextVar.ctx_stack.append({ **self.pvars, **{ key: ContextVar.ctx_stack[-1][key] for key in ContextVar.ctx_stack[-1].keys() if key not in self.pvars } })
-  def __exit__(self, *args): ContextVar.ctx_stack.pop()
+  stack: ClassVar[List[dict[str, int]]] = [{}]
+  def __init__(self, **kwargs): self.kwargs = kwargs
+  def __enter__(self):
+    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
+    Context.stack.append(self.kwargs)
+  def __exit__(self, *args):
+    for k in Context.stack.pop(): ContextVar._cache[k].value = Context.stack[-1].get(k, Context.stack[0][k])
 
 class ContextVar:
-  ctx_stack: ClassVar[List[dict[str, Any]]] = [{}]
-  def __init__(self, key, default_value):
-    self.key, self.initial_value = key, getenv(key, default_value)
-    if key not in ContextVar.ctx_stack[-1]: ContextVar.ctx_stack[-1][key] = self.initial_value
-  def __call__(self, x): ContextVar.ctx_stack[-1][self.key] = x
-  def __bool__(self): return self.value != 0
+  _cache: ClassVar[Dict[str, ContextVar]] = {}
+  __slots__ = "value"
+  value: int
+  def __new__(cls, key, default_value):
+    if key in ContextVar._cache: return ContextVar._cache[key]
+    instance = ContextVar._cache[key] = super().__new__(cls)
+    instance.value = Context.stack[0][key] = getenv(key, default_value)
+    return instance
+  def __bool__(self): return bool(self.value)
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
-  @property
-  def value(self): return ContextVar.ctx_stack[-1][self.key] if self.key in ContextVar.ctx_stack[-1] else self.initial_value
 
 DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
 GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
