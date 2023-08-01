@@ -64,6 +64,7 @@ jobs:
           file: test/extra/arm64_dockerfile
           # Set the desired build target here
           platform: linux/arm64
+          load: true
           push: false
           tags: tinygrad-arm64
           cache-from: type=local,src=/tmp/.buildx-cache
