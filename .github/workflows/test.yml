@@ -63,7 +63,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Test Ops
-        run: docker run -e ARM64=1 -e CLANG=1 -e tinygrad-arm64 /usr/bin/env python3 -m pytest -n=auto -s test/ -m 'not exclude_clang' --ignore=test/models/test_real_world.py
+        run: docker run -e ARM64=1 -e CLANG=1 -e tinygrad-arm64 /usr/bin/env python3 -m pytest -n=auto test/
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
