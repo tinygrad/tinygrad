@@ -134,6 +134,7 @@ class Variable(Node):
 
   def __init__(self, expr:Optional[str], nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
+    self.val: Optional[int] = None
   def vars(self): return [self]
 
 class NumNode(Node):
