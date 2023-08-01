@@ -51,7 +51,7 @@ class CLBuffer(RawBufferCopyInOut):
     buf = cl.Buffer(CL.cl_ctxs[self._buf.device], cl.mem_flags.WRITE_ONLY | cl.mem_flags.USE_HOST_PTR, 0, hostbuf=memoryview(x))
     mapped = cl.enqueue_map_buffer(CL.cl_queue[self._buf.device], buf, cl.map_flags.WRITE, 0, self.size, dtype=self.dtype.np)
     CL.synchronize()
-    with mapped[0].base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped[0], self._buf, is_blocking=True, wait_for=[mapped[1]] + CL.events_in_flight)
+    with mapped[0].base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped[0], self._buf, is_blocking=True, wait_for=[mapped[1]])
 
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
