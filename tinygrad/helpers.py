@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re
+import os, functools, platform, time, re, contextlib
 from weakref import KeyedRef, ref
 from _weakref import _remove_dead_weakref # type: ignore
 import numpy as np
@@ -26,7 +26,7 @@ def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
-class Context:
+class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
@@ -52,7 +52,7 @@ class ContextVar:
 DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
 GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 
-class Timing(object):
+class Timing(contextlib.ContextDecorator):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
   def __enter__(self): self.st = time.perf_counter_ns()
   def __exit__(self, exc_type, exc_val, exc_tb):
