@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, Node
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, sym_vars
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -239,6 +239,36 @@ class TestSymbolicNumeric(unittest.TestCase):
   def test_times_2_plus_3_mod_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)%4)
   def test_times_2_plus_3_div_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)//4)
   def test_times_2_plus_3_div_4_mod_4(self): self.helper_test_numeric(lambda x: ((x*2 + 3)//4)%4)
+
+class TestSymbolicVars(unittest.TestCase):
+  def test_simple(self):
+    z = NumNode(0)
+    a = Variable("a", 0, 10)
+    b = Variable("b", 0, 10)
+    c = Variable("c", 0, 10)
+    assert z.vars() == z.vars() == []
+    assert a.vars() == a.vars() == [a]
+    m = MulNode(a, 3)
+    assert m.vars() == [a]
+    s = SumNode([a, b, c])
+    assert s.vars() == [a, b, c]
+
+  def test_compound(self):
+    a = Variable("a", 0, 10)
+    b = Variable("b", 0, 10)
+    c = Variable("c", 0, 10)
+    # TODO: update this after we support symbolic * symbolic
+    assert (a + b * c).vars() == [a, b]
+    assert (a % 3 + b // 5).vars() == [a, b]
+    assert (a + b + c - a).vars() == [b, c]
+
+  def test_sym_vars(self):
+    a = Variable("a", 0, 10)
+    b = Variable("b", 0, 10)
+    assert sym_vars(1) == []
+    assert sym_vars(a) == [a]
+    assert sym_vars(a+b) == [a, b]
+    assert sym_vars(a*3) == [a]
 
 if __name__ == '__main__':
   unittest.main()

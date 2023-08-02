@@ -12,7 +12,6 @@ dist
 /env
 a.out
 boxes.jpg
-weights/*
 pandecode.dump
 vertex.bin
 recognize*
