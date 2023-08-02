@@ -1,4 +1,5 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
+import argparse
 import sys, math, string, difflib, base64, functools, itertools, multiprocessing
 import subprocess as sp
 from pathlib import Path
@@ -7,7 +8,7 @@ import librosa
 import numpy as np
 from tinygrad import nn
 from tinygrad.state import torch_load, load_state_dict
-from tinygrad.helpers import getenv, dtypes
+from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
 from extra.utils import download_file
 from extra.datasets.librispeech import ci, BASEDIR
@@ -126,6 +127,20 @@ LANGUAGES = {
   "as": "assamese", "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa", "ba": "bashkir", "jw": "javanese", "su": "sundanese",
 }
 
+MODELS = {
+    "tiny.en": "https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt",
+    "tiny": "https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt",
+    "base.en": "https://openaipublic.azureedge.net/main/whisper/models/25a8566e1d0c1e2231d1c762132cd20e0f96a85d16145c3a00adf5d1ac670ead/base.en.pt",
+    "base": "https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e/base.pt",
+    "small.en": "https://openaipublic.azureedge.net/main/whisper/models/f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872/small.en.pt",
+    "small": "https://openaipublic.azureedge.net/main/whisper/models/9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt",
+    "medium.en": "https://openaipublic.azureedge.net/main/whisper/models/d7440d1dc186f76616474e0ff0b3b6b879abc9d1a4926b7adfa41db2d497ab4f/medium.en.pt",
+    "medium": "https://openaipublic.azureedge.net/main/whisper/models/345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1/medium.pt",
+    "large-v1": "https://openaipublic.azureedge.net/main/whisper/models/e4b87e7e0bf463eb8e6956e646f1e277e901512310def2c24bf0e11bd3c28e9a/large-v1.pt",
+    "large-v2": "https://openaipublic.azureedge.net/main/whisper/models/81f7c96c852ee8fc832187b0132e569d6c3065a3252ed18e56effd0b6a73e524/large-v2.pt",
+    "large": "https://openaipublic.azureedge.net/main/whisper/models/81f7c96c852ee8fc832187b0132e569d6c3065a3252ed18e56effd0b6a73e524/large-v2.pt",
+}
+
 BASE = Path(__file__).parent.parent / "weights"
 
 def get_encoding(n_vocab_in):
@@ -182,16 +197,15 @@ def prep_audio(audio, padding) -> Tensor:
   return log_spec
 
 def listener(q):
-  prep_audio(np.zeros(300), RATE)
-  import pyaudio
-  p = pyaudio.PyAudio()
-  stream = p.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
-  print("listening")
-  for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-    data = stream.read(CHUNK)
-    waveform = ((np.frombuffer(data, np.int16) / 32768).astype(np.float32) * 3).reshape(1, -1)
-    q.put(waveform)
-  print("done listening")
+    prep_audio(np.zeros(300), RATE)
+    import sounddevice as sd
+    print("listening")
+    def callback(indata, frames, time, status):
+        waveform = ((indata).astype(np.float32)).reshape(1, -1)
+        q.put(waveform)
+    with sd.InputStream(callback=callback, channels=1, samplerate=RATE, blocksize=CHUNK):
+        sd.sleep(RECORD_SECONDS * 1000)
+    print("done listening")
 
 def pad_or_trim(array, length=N_SAMPLES, axis=-1):
   if array.shape[axis] > length:
@@ -235,12 +249,18 @@ class MaximumLikelihoodRanker:
     return [np.argmax(scores(p, l) for p, l in zip(sum_logprobs, lengths))]
 
 if __name__ == "__main__":
-  if getenv("SMALL"):
-    fn = BASE / "whisper-small.pt"
-    download_file("https://openaipublic.azureedge.net/main/whisper/models/9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt", fn)
-  else:
-    fn = BASE / "whisper-tiny.pt"
-    download_file("https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt", fn)
+  parser = argparse.ArgumentParser(description='Run Whisper in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser.add_argument('--model', type=str, default="tiny", help='model to use')
+  parser.add_argument('--test', action='store_true', help='run tests')
+  parser.add_argument('--file', type=str, default=None, help='file to transcribe')
+  args = parser.parse_args()
+  #check if model exists
+  if args.model not in MODELS:
+    print("Model not found. Please choose from the following:")
+    print(list(MODELS.keys()))
+    sys.exit(1)
+  fn = BASE / f"whisper-{args.model}.pt"
+  download_file(MODELS[args.model], fn)
   state = torch_load(fn)
   model = Whisper(state['dims'])
   load_state_dict(model, state['model_state_dict'])
@@ -286,7 +306,7 @@ if __name__ == "__main__":
       seek += segment_size
     return "".join(texts)
 
-  if getenv("TEST"):
+  if args.test:
     diff = difflib.Differ()
     for c in ci:
       fn = BASEDIR / c["files"][0]["fname"]
@@ -295,8 +315,8 @@ if __name__ == "__main__":
       transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
       sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
       print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
-  elif len(sys.argv) > 1:
-    print(transcribe_wav(sys.argv[1]))
+  elif args.file:
+    print(transcribe_wav(args.file))
   else:
     q = multiprocessing.Queue()
     p = multiprocessing.Process(target=listener, args=(q,))
