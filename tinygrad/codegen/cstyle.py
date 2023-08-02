@@ -196,7 +196,10 @@ class CStyleCodegen(Linearizer):
   kernel_cnt: Final[DefaultDict[str, int]] = collections.defaultdict(int)
   kernel_name_cache: Final[Dict[str, Tuple[str, str]]] = {}
 
-  def codegen(self):
+  def codegen(self, force_fp32_calc=False):
+    if force_fp32_calc:
+      use_fp32 = self.uses_float32_calculations
+      self.uses_float32_calculations = True
     self.process()
     if not getenv("KOPT"): self.hand_coded_optimizations()
     #self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
@@ -210,6 +213,8 @@ class CStyleCodegen(Linearizer):
       CStyleCodegen.kernel_cnt[self.function_name] += 1
       suffix = f"{'n'+str(CStyleCodegen.kernel_cnt[self.function_name]-1)}" if CStyleCodegen.kernel_cnt[self.function_name] > 1 else ""
       CStyleCodegen.kernel_name_cache[prg] = function_name, display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
+
+    if force_fp32_calc: self.uses_float32_calculations = use_fp32
 
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
       global_size, local_size,

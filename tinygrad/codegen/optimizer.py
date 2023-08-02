@@ -21,12 +21,12 @@ LOCALS = [1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32]
 
 # optimization
 def kernel_optimize(k, create_k, runtime):
-  def opt(x):
+  def opt(x, force_fp32):
     try:
       k = create_k()
       k.process()
       apply_opt(k, x)
-      prg = k.codegen().build(runtime)
+      prg = k.codegen(force_fp32).build(runtime)
       tm = min([prg.exec(k.bufs, force_wait=True, cache=False) for _ in range(3)])*1000
       return tm
     except Exception:
@@ -44,9 +44,14 @@ def kernel_optimize(k, create_k, runtime):
   for i in range(k.shape_len-k.first_reduce):
     opts.append(ng.p.TransitionChoice([(i,s,"R") for s in UPCASTS if k.full_shape[k.first_reduce+i]%s == 0]))
   if len(opts) == 0: return
-  search_space = prod([len(x.choices) for x in opts])
-  optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, 200))
+  search_space = prod([len(x.choices) for x in opts] + [2])
+  force_fp32 = ng.p.Choice([True, False])
+  opt_params = ng.p.Tuple(*opts)
+  instrumentation = ng.p.Instrumentation(opt_params, force_fp32)
+
+  optimizer = ng.optimizers.NGOpt(parametrization=instrumentation, budget=min(search_space, 200))
   if DEBUG >= 1: print("optimizer start", k.colored_shape(), "in search space", search_space)
   recommendation = optimizer.minimize(opt)
-  apply_opt(k, recommendation.value)
-  if DEBUG >= 1: print("optimizer hit", k.colored_shape(), "in search space", search_space)
+  apply_opt(k, recommendation.value[0][0])
+  if k.uses_float32_calculations: k.uses_float32_calculations = recommendation.value[0][1]
+  if DEBUG >= 1: print("optimizer hit", k.colored_shape(), "with fp32=",recommendation.value[0][1], "in search space", search_space)
