@@ -168,8 +168,15 @@ class MulNode(OpNode):
     if b % self.b == 0 and self.b > 0: return self.a//(b//self.b)
     return Node.__floordiv__(self, b, factoring_allowed)
   def __mod__(self, b: int):
-    a = (self.a * (self.b%b))
-    return Node.__mod__(a, b)
+    multiplier = self.b % b
+    the_gcd = gcd(multiplier, b)
+    if the_gcd != 1:
+      # (x * (f * gcd)) % (g * gcd) = (x*f % g) * gcd
+      new_self = self.a * (multiplier // the_gcd)
+      new_b = (b // the_gcd)
+      return (new_self % new_b) * the_gcd
+    new_self = self.a * multiplier
+    return Node.__mod__(new_self, b)
   def get_bounds(self) -> Tuple[int, int]:
     return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
 
@@ -218,7 +225,7 @@ class SumNode(RedNode):
     new_nodes: List[Node] = []
     for x in self.nodes:
       if x.__class__ is NumNode: new_nodes.append(Variable.num(x.b%b))
-      elif isinstance(x, MulNode): new_nodes.append(x.a * (x.b%b))
+      elif isinstance(x, MulNode): new_nodes.append(x % b)
       else: new_nodes.append(x)
     return Node.__mod__(Node.sum(new_nodes), b)
 

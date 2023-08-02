@@ -126,9 +126,16 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_no_factor(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
 
+  def test_mul_mod_gcd(self):
+    self.helper_test_variable(Variable("a", 0, 9)*50  % 100, 0, 50, "((a%2)*50)")
+    self.helper_test_variable(Variable("a", 0, 9)*-75 % 100, 0, 75, "((a%4)*25)")
+    self.helper_test_variable(Variable("a", 0, 9)*75  % 100, 0, 75, "(((a*3)%4)*25)")
+    self.helper_test_variable(Variable("a", 0, 9)*-25 % 100, 0, 75, "(((a*3)%4)*25)")
+    self.helper_test_variable(Variable("a", 0, 9)*33  % 100, 0, 99, "((a*33)%100)")
+    self.helper_test_variable(Variable("a", 0, 9)*-33 % 100, 0, 99, "((a*67)%100)")
+
   def test_mod_factor(self):
-    # NOTE: even though the mod max is 50, it can't know this without knowing about the mul
-    self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 99, "((b*50)%100)")
+    self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 50, "((b%2)*50)")
 
   def test_sum_div_const(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*4, Variable.num(3)]) // 4, 0, 7, "a")
