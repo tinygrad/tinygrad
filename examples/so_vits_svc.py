@@ -22,11 +22,7 @@ F0_MIN = 50.0
 F0_MEL_MIN = 1127 * np.log(1 + F0_MIN / 700)
 F0_MEL_MAX = 1127 * np.log(1 + F0_MAX / 700)
 
-# TODO: add speech encoder ContentVec256L9 (most weights trained on 4.0 architecture require this)
-# TODO: add Synthesizer
-# TODO: add Volume Extractor
-class Svc():
-  def __init__(self, net_g_config): pass
+
 
 # original code for contentvec: https://github.com/auspicious3000/contentvec/
 class ContentVec:
@@ -35,9 +31,9 @@ class ContentVec:
   # This param can't yet be loaded since there is no pickle for it. See with DEBUG=2.
   def __init__(self, cfg: HParams):
     self.feature_grad_mult, self.untie_final_proj = cfg.feature_grad_mult, cfg.untie_final_proj
+    feature_enc_layers = eval(cfg.conv_feature_layers)
     self.embed = feature_enc_layers[-1][0]
     final_dim = cfg.final_dim if cfg.final_dim > 0 else cfg.encoder_embed_dim
-    feature_enc_layers = eval(cfg.conv_feature_layers)
     self.feature_extractor = ConvFeatureExtractionModel(conv_layers=feature_enc_layers, dropout=0.0, mode=cfg.extractor_mode, conv_bias=cfg.conv_bias)
     self.post_extract_proj = nn.Linear(self.embed, cfg.encoder_embed_dim) if self.embed != cfg.encoder_embed_dim else None
     self.encoder = TransformerEncoder(cfg)
@@ -62,7 +58,7 @@ class ContentVec:
     padding_mask = lengths_to_padding_mask(lengths)
     return padding_mask
 
-  def extract_features(self, source: Tensor, spk_emb: Tensor, padding_mask=None, mask=False, ret_conv=False, output_layer=None, tap=False):
+  def extract_features(self, source: Tensor, spk_emb: Tensor, padding_mask=None, ret_conv=False, output_layer=None, tap=False):
     features = self.forward_features(source, padding_mask)
     if padding_mask is not None:
       padding_mask = self.forward_padding_mask(features, padding_mask)
@@ -82,6 +78,27 @@ class ContentVec:
     _ = load_checkpoint_enc(checkpoint_path, enc, None)
     logging.debug(f"{cls.__name__}: Loaded model with cfg={cfg}")
     return enc
+
+class ContentVec256L9:
+  def __init__(self, model:ContentVec):
+    self.hidden_dim = 256
+    self.model = model
+
+  def encoder(self, wav: Tensor):
+    feats = wav
+    if len(feats.shape) == 2:  # double channels
+      feats = feats.mean(-1)
+    assert len(feats.shape) == 1, feats.dim()
+    feats = feats.reshape(1, -1)
+    padding_mask = Tensor.zeros_like(feats).cast(dtypes.bool)
+    logits = self.model.extract_features(feats.to(wav.device), padding_mask=padding_mask.to(wav.device), output_layer=9)
+    feats = self.model.final_proj(logits[0])
+    return feats.transpose(1, 2)
+
+  @classmethod
+  def load_model(cls, checkpoint_path:str, checkpoint_url:str):
+    contentvec = ContentVec.load_model(checkpoint_path, checkpoint_url)
+    return cls(contentvec)
 
 class TransformerEncoder:
   def __init__(self, cfg: HParams):
@@ -253,11 +270,10 @@ class ConvFeatureExtractionModel():
       assert (is_layer_norm and is_group_norm) == False, "layer norm and group norm are exclusive"
       if is_layer_norm:
         return Sequential([make_conv(), Dropout(p=dropout), Sequential([TransposeLast(), Fp32LayerNorm(dim, elementwise_affine=True), TransposeLast()]), GELU()])
-      if is_group_norm:
-        if mode == "default":
-          return Sequential([make_conv(), Dropout(p=dropout), Fp32GroupNorm(dim, dim, affine=True), GELU()])
-        elif mode == "group_norm_masked":
-          return SequentialMasked([make_conv(), Dropout(p=dropout), GroupNormMasked(dim, dim, affine=True), GELU()])
+      elif is_group_norm and mode == "default":
+        return Sequential([make_conv(), Dropout(p=dropout), Fp32GroupNorm(dim, dim, affine=True), GELU()])
+      elif is_group_norm and mode == "group_norm_masked":
+        return SequentialMasked([make_conv(), Dropout(p=dropout), GroupNormMasked(dim, dim, affine=True), GELU()])
       else:
         return Sequential([make_conv(), Dropout(p=dropout), GELU()])
     in_d = 1
@@ -267,11 +283,11 @@ class ConvFeatureExtractionModel():
       (dim, k, stride) = cl
       if i == 0:
         self.cl = cl
-      self.conv_layers.append(block(in_d, dim, k, stride, is_layer_norm=(mode == "layer_norm"), is_group_norm=(mode == "default" or mode == "group_norm_masked") and i == 0, conv_bias=conv_bias))
+      self.conv_layers.append(block(in_d, dim, k, stride, is_layer_norm=(mode == "layer_norm"), is_group_norm=((mode == "default" or mode == "group_norm_masked") and i == 0), conv_bias=conv_bias))
       in_d = dim
-  def forward(self, x, padding_mask):  # TODO: refactor this later
-    # BxT -> BxCxT
-    x = x.unsqueeze(1)
+
+  def forward(self, x:Tensor, padding_mask:Tensor):  # TODO: refactor this later
+    x = x.unsqueeze(1)  # BxT -> BxCxT
     for i, conv in enumerate(self.conv_layers) :
       if i == 0:
         if self.mode == "group_norm_masked":
@@ -287,6 +303,7 @@ class ConvFeatureExtractionModel():
         x = conv(x)
     return x
 
+# helpers:
 def tilde(x: Tensor) -> Tensor:
   if x.dtype == dtypes.bool: return (1 - x).cast(dtypes.bool)
   return (x + 1) * -1  # this seems to be what the ~ operator does in pytorch for non bool
@@ -367,8 +384,11 @@ class GroupNormMasked:
   def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
     self.num_groups, self.num_channels, self.eps, self.affine = num_groups, num_channels, eps, affine
     self.weight, self.bias = (Tensor.ones(num_channels)), (Tensor.zeros(num_channels))  if self.affine else (None, None)
+    raise NotImplementedError("not needed for for this case")
   def __call__(self, x, mask):
-    raise NotImplementedError
+    pass
+
+
 
 # TODO: depthwise conv (optional) #self.use_depthwise_conv = use_depthwise_conv
 # TODO: f0 decoder (optional for infer) #self.use_automatic_f0_prediction = use_automatic_f0_prediction
@@ -645,7 +665,7 @@ if __name__=="__main__":
   Tensor.training = False
 
   # 1. ContentVec
-  contentvec = ContentVec.load_model(encoder_location[0], encoder_location[1])
+  contentvec256L9 = ContentVec256L9.load_model(encoder_location[0], encoder_location[1])
 
   # 2. Synthesizer
   net_g = Synthesizer.load_model(config_path=vits_location[0], config_url=vits_location[2], weights_path=vits_location[1], weights_url=vits_location[3])
