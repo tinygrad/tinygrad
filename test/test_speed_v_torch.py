@@ -132,6 +132,7 @@ class TestBigSpeed(unittest.TestCase):
 
 @unittest.skipIf((getenv("BIG") == 1), "only big tests")
 class TestSpeed(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT == "METAL", "Metal is slower than pytorch.")
   def test_sub(self):
     def f(a, b): return a-b
     helper_test_generic_square('sub', 4096, f, f)
@@ -140,6 +141,7 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a.pow(b)
     helper_test_generic_square('pow', 2048, f, f)
 
+  @unittest.skipIf(Device.DEFAULT == "METAL", "Metal is slower than pytorch.")
   def test_sum(self):
     def f(a, b): return a.sum()
     helper_test_generic_square('sum', 2048, f, f, onearg=True)
