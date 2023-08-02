@@ -30,7 +30,57 @@ class TestSymbolic(unittest.TestCase):
     st = t1.lazydata.st
     assert st.shape == (i+j+k, 4)
     assert st.real_strides() == (4, 1)
+    i = Variable("i", 1, 5)
+    j = Variable("j", 1, 5)
+    k = Variable("k", 1, 5)
     t1 = Tensor.rand(3, 4).reshape(3, i).cat(Tensor.rand(3, 4).reshape(3, j), dim=1).cat(Tensor.rand(3, 4).reshape(3, k), dim=1)
     st = t1.lazydata.st
     assert st.shape == (3, i+j+k)
     assert st.real_strides() == (i+j+k, 1)
+
+class TestSymbolicReshape(unittest.TestCase):
+  def test_reshape_into_symbols_simple(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10)
+      assert Tensor.rand(i, 4).reshape(vi, 4).shape == (vi, 4)
+      assert vi.val == i
+      vi = Variable("i", 1, 10)
+      assert Tensor.rand(i, 6).reshape(vi, 2, 3).shape == (vi, 2, 3)
+      assert vi.val == i
+
+  def test_reshape_symbols_reshape_ints(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10)
+      assert Tensor.rand(i, 4).reshape(vi, 4).reshape(i, 4).shape == (i, 4)
+      assert Tensor.rand(i, 4).reshape(vi, 4).reshape(i*4,).shape == (i*4,)
+      assert Tensor.rand(i, 6).reshape(vi, 6).reshape(i*2, 3).shape == (i*2, 3)
+      with self.assertRaises(AssertionError):
+        Tensor.rand(i, 6).reshape(vi, 6).reshape(1, 77).shape
+
+  def test_reshape_reuse_var_same_value_ok(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10)
+      a = Tensor.rand(i, 4).reshape(vi, 4)
+      b = Tensor.rand(i, 3).reshape(vi, 3)
+      assert vi.val == i
+
+  def test_reshape_reuse_var_different_value_fail(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10)
+      a = Tensor.rand(i, 4).reshape(vi, 2)
+      with self.assertRaises(AssertionError):
+        b = Tensor.rand(i, 3).reshape(vi, 3)
+
+  def test_reshape_into_symbols_bad_shape(self):
+    vi = Variable("i", 1, 10)
+    vj = Variable("j", 1, 10)
+    with self.assertRaises(AssertionError):
+      t = Tensor.rand(3, 4).reshape(vi, vj)
+    with self.assertRaises(AssertionError):
+      t = Tensor.rand(4, 4).reshape(vi, vi)
+    with self.assertRaises(AssertionError):
+      t = Tensor.rand(4, 6).reshape(vi, 6).reshape(vi, 4)
+    with self.assertRaises(AssertionError):
+      t = Tensor.rand(100, 4).reshape(Variable("too_small", 1, 10), 4)
+    with self.assertRaises(AssertionError):
+      t = Tensor.rand(3, 4).reshape(Variable("too_big", 100, 200), 4)

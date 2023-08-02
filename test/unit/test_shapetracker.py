@@ -188,7 +188,6 @@ class TestIndexExpressions2d(unittest.TestCase):
       st.expand((base_shape[0], base_shape[1], base_shape[1]))
       self.node_exprs.append(lambda idx, base_shape=base_shape, offset=offset: idx//(base_shape[1]*base_shape[1])%base_shape[0]*base_shape[1] + idx%base_shape[1] + offset)
       self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: idxs[0]*base_shape[1] + idxs[2] + offset)
-
   def test_permute_reshape_1(self): # This tests multiple views
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
       st.permute((1, 0))
