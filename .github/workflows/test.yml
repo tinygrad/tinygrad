@@ -182,6 +182,8 @@ jobs:
       run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
     - name: Run JIT test
       run: DEBUG=2 METAL=1 python -m pytest test/test_jit.py
+    - name: Run remaining tests
+      run: DEBUG=2 METAL=1 python -m pytest test/*.py
     # TODO: why not testing the whole test/?
     - name: Run webgpu pytest
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto -m 'webgpu'
