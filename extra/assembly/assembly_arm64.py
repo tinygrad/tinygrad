@@ -10,7 +10,8 @@ def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 def compute_offsets(total):
   quotient, remainder = divmod(total, 4096)
   return [4096]*quotient + [remainder] if remainder else [4096]*quotient
-#NOTE: Darwin needs lm functions to start with a "_" 
+
+#NOTE: Darwin needs names to start with a "_" 
 def get_name(name): return ('_' if system() == 'Darwin' else '') + name
 
 class ARM64Codegen(AssemblyCodegen):
@@ -34,7 +35,7 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"movk w15, #{(value >> 16) & 0xffff}, lsl #16")
           ins.append(f"sxtw {to}, w15")
         else: 
-          #NOTE: value == 0 but reg is 's' 
+          #NOTE: Some load instructions value == 0 but reg is 's' 
           ins.append(f"mov x15, #{('0x' + float_to_hex(value)) if to[0] == 's' else value}")
           ins.append(f"{'f' if to[0] == 's' else ''}mov {to}, {'w' if to[0] == 's' else 'x'}15")
 
@@ -44,8 +45,7 @@ class ARM64Codegen(AssemblyCodegen):
       for var in ([v for v in [out] + vin if v is not None and v.__class__ is not int]):
         live_range[var.nm] = [i,i] if var.nm not in live_range else [live_range[var.nm][0], i]
 
-    temp_floats = ['s0', 's1', 's2']
-    temp_ints = ['x11', 'x12', 'x13']
+    
     
     mem_vars:Dict[str, str] = {} 
     rtor:Dict[str, str] = {}
@@ -55,10 +55,14 @@ class ARM64Codegen(AssemblyCodegen):
         available_regs = s_regs if dtypes.is_float(v[1]) else x_regs
         #NOTE: Very simple spill, everything that don't fit in regs goes to mem
         if len(available_regs) == 0:
+          # ARM needs the stack 16-byte aligned
           var_size += 16
           available_regs.append('s0' if dtypes.is_float(out[1]) else 'x11')
           mem_vars[v.nm] = var_size
         rtor[v.nm] = available_regs.pop()
+
+    temp_floats = ['s0', 's1', 's2']
+    temp_ints = ['x11', 'x12', 'x13']
 
     for i, (uop, out, vin, arg) in enumerate(asm):
       # Clear regs out of interval
@@ -70,9 +74,10 @@ class ARM64Codegen(AssemblyCodegen):
       # Assign a registers to the variables using live ranges.
       allocate_regs([out] + vin)
 
-      # Assing temp regs to vin to loading them into the same temp reg
+      # Assign temp regs to vin and load them before direct use 
       for i, v in enumerate([v for v in vin if v.__class__ is not int and v.nm in mem_vars]):
         rtor[v.nm] = temp_floats[i] if dtypes.is_float(v[1]) else temp_ints[i] 
+        # ARM64 addressing constraints https://devblogs.microsoft.com/oldnewthing/20220728-00/?p=106912
         ins.append(f"mov x15, {mem_vars[v.nm]}")
         ins.append(f"ldr {rtor[v.nm]}, [sp, x15]")
 
@@ -145,6 +150,7 @@ class ARM64Codegen(AssemblyCodegen):
       elif uop == UOps.LABEL:
         ins.append(f"{arg[1:]}:")
       prev_uop=uop
+      # store regs into memory if neede 
       if out is not None and out.nm in mem_vars:
         ins.append(f"mov x15, {mem_vars[out.nm]}")
         ins.append(f"str {rtor[out.nm]}, [sp, x15]")
