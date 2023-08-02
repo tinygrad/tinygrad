@@ -155,7 +155,7 @@ class OpNode(Node):
     if isinstance(self, MulNode): assert isinstance(b, int), f"MulNode.b must be int, getting {type(b)}"
     self.a, self.b = a, b
     self.min, self.max = self.get_bounds()
-  def vars(self): return self.a.vars() + (self.b.vars() if isinstance(self.b, Node) else [])
+  def vars(self): return self.a.vars()
   @abstractmethod
   def get_bounds(self) -> Tuple[int, int]: pass
 
