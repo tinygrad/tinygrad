@@ -1,9 +1,51 @@
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
+from tinygrad.state import get_parameters
+from tinygrad.nn import optim
+from tinygrad.helpers import getenv, dtypes
+from tqdm import tqdm
+import numpy as np
 
 def train_resnet():
   # TODO: Resnet50-v1.5
-  pass
+  from models.resnet import ResNet50
+  from extra.datasets.imagenet import iterate, get_val_files
+  from extra.lr_scheduler import CosineAnnealingLR
+  from extra.training import sparse_categorical_crossentropy
+
+  input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
+  input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
+  def input_fixup(x):
+    x = x.permute([0,3,1,2]).cast(dtypes.float32) / 255.0
+    x -= input_mean
+    x /= input_std
+    return x
+
+  num_classes = 1000
+  model = ResNet50(num_classes)
+  parameters = get_parameters(model)
+
+  BS = 32
+  lr = BS*1e-3
+  epochs = 50
+  optimizer = optim.SGD(parameters, lr, momentum=.875, weight_decay=1/2**15)
+  scheduler = CosineAnnealingLR(optimizer, epochs)
+  print(f"training with batch size {BS} for {epochs} epochs")
+
+  Tensor.training = True
+  for epoch in range(epochs):
+    for X, Y in (t := tqdm(iterate(bs=BS, val=True), total=len(get_val_files()))):
+      X = Tensor(X, requires_grad=False)
+      X = input_fixup(X)
+      optimizer.zero_grad()
+      out = model.forward(X)
+      loss = sparse_categorical_crossentropy(out, Y)
+      loss.backward()
+      optimizer.step()
+      scheduler.step()
+
+      cat = np.argmax(out.cpu().numpy(), axis=-1)
+      accuracy = (cat == Y).mean()
+      t.set_description(f"loss: {loss.numpy().item():.3f} | acc: {accuracy:.2f}")
 
 def train_retinanet():
   # TODO: Retinanet
