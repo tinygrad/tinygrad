@@ -4,6 +4,8 @@ from tinygrad.nn import optim
 from tinygrad.helpers import getenv, dtypes
 from tqdm import tqdm
 import numpy as np
+import math
+import random
 
 def train_resnet():
   # TODO: Resnet50-v1.5
@@ -12,13 +14,10 @@ def train_resnet():
   from extra.lr_scheduler import CosineAnnealingLR
   from extra.training import sparse_categorical_crossentropy
 
-  input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
-  input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
-  def input_fixup(x):
-    x = x.permute([0,3,1,2]).cast(dtypes.float32) / 255.0
-    x -= input_mean
-    x /= input_std
-    return x
+  seed = getenv('SEED', 42)
+  Tensor.manual_seed(seed)
+  np.random.seed(seed)
+  random.seed(seed)
 
   num_classes = 1000
   model = ResNet50(num_classes)
@@ -32,10 +31,10 @@ def train_resnet():
   print(f"training with batch size {BS} for {epochs} epochs")
 
   Tensor.training = True
+  steps_in_epoch = math.floor(len(get_val_files()) / BS)
   for epoch in range(epochs):
-    for X, Y in (t := tqdm(iterate(bs=BS, val=True), total=len(get_val_files()))):
+    for X, Y in (t := tqdm(iterate(bs=BS, val=True), total=steps_in_epoch)):
       X = Tensor(X, requires_grad=False)
-      X = input_fixup(X)
       optimizer.zero_grad()
       out = model.forward(X)
       loss = sparse_categorical_crossentropy(out, Y)
