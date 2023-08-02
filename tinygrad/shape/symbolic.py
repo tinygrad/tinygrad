@@ -39,7 +39,7 @@ class Node:
   def __gt__(self, b:Union[Node,int]): return (-self) < (-b)
   def __ge__(self, b:Union[Node,int]): return (-self) < (-b+1)
   def __lt__(self, b:Union[Node,int]):
-    if self == b: return False
+    if self == b: return NumNode(0)
     lhs = self
     if isinstance(lhs, SumNode):
       muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
@@ -159,7 +159,9 @@ class OpNode(Node):
 class LtNode(OpNode):
   def __mul__(self, b: Union[Node, int]): return (self.a*b) < (self.b*b)
   def __floordiv__(self, b: int, _=False): return (self.a//b) < (self.b//b)
-  def get_bounds(self) -> Tuple[int, int]: return int(self.a.max < self.b), int(self.a.min < self.b)
+  def get_bounds(self) -> Tuple[int, int]:
+    if isinstance(self.b, int): return int(self.a.max < self.b), int(self.a.min < self.b)
+    return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min > self.b.max else (0, 1)
 
 class MulNode(OpNode):
   def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul
