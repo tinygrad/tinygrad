@@ -213,19 +213,46 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   W = whitening(X_train.sequential(transform_test))
 
   model = SpeedyResNet(W)
-  print(*get_state_dict(model), sep='\n')
-  optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
-  lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
+
+  params_list = list(get_state_dict(model).values())
+  print("All params")
+  print(*params_list, sep='\n')
+
+  params_dict = get_state_dict(model)
+  params_non_bias = []
+  params_bias = []
+  for params in params_dict:
+    print(params_dict[params].requires_grad)
+    if params_dict[params].requires_grad is not False:
+      if 'bias' in params:
+        params_bias.append(params_dict[params])
+      else:
+        params_non_bias.append(params_dict[params])
+
+  print("params bias")
+  print(*params_bias, sep='\n')
+  print("params non-bias")
+  print(*params_non_bias, sep='\n')
+
+  # optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  opt_bias     = optim.SGD(params_bias, lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  opt_non_bias = optim.SGD(params_non_bias, lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  # lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
+  lr_sched_bias     = OneCycleLR(opt_bias, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
+  lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
   # JIT at every run
   @TinyJit
   def train_step_jitted(model, optimizer, lr_scheduler, X, Y):
     out = model(X)
     loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
     if not getenv("DISABLE_BACKWARD"):
-      optimizer.zero_grad()
+      optimizer[0].zero_grad()
+      optimizer[1].zero_grad()
       loss.backward()
-      optimizer.step()
-      lr_scheduler.step()
+      optimizer[0].step()
+      optimizer[1].step()
+      lr_scheduler[0].step()
+      lr_scheduler[1].step()
     return loss.realize()
 
   @TinyJit
@@ -265,11 +292,12 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
     if STEPS == 0 or i==STEPS: break
     GlobalCounters.reset()
     st = time.monotonic()
-    loss = train_step_jitted(model, optimizer, lr_scheduler, X, Y)
+    # loss = train_step_jitted(model, optimizer, lr_scheduler, X, Y)
+    loss = train_step_jitted(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
     et = time.monotonic()
     loss_cpu = loss.numpy()
     cl = time.monotonic()
-    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
 
 if __name__ == "__main__":
