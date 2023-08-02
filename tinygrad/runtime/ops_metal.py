@@ -6,15 +6,21 @@ from tinygrad.codegen.linearizer import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferMapped
+from tinygrad.runtime.lib import RawBufferMapped, LRUAllocator
 
 METAL_XCODE = getenv("METAL_XCODE")
+
+class MetalAllocator(LRUAllocator):
+  def _do_alloc(self, size, dtype, device, **kwargs): return METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
+  def _do_free(self, buf): buf.release()
+  def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 
 class _METAL:
   def __init__(self):
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueue()
+    self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
   # TODO: is there a better way to do this?
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
@@ -22,11 +28,7 @@ class _METAL:
 METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):
-  def __init__(self, size:int, dtype:DType):
-    super().__init__(size, dtype, METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared))
-  def __del__(self):
-    self._buf.release()
-    super().__del__()
+  def __init__(self, size:int, dtype:DType): super().__init__(size, dtype, allocator=METAL.allocator)
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
