@@ -2,7 +2,7 @@ from __future__ import annotations
 from abc import abstractmethod
 import functools
 from math import gcd
-from tinygrad.helpers import partition, prod
+from tinygrad.helpers import partition
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
 
 # NOTE: Python has different behavior for negative mod and floor div than c
@@ -57,9 +57,7 @@ class Node:
   def __mul__(self, b:Union[Node, int]):
     if b == 0: return NumNode(0)
     if b == 1: return self
-    if isinstance(b, int): return create_node(MulNode(self, b))
-    if isinstance(self, ProdNode): return create_rednode(ProdNode, ([*self.nodes, b]))
-    return create_rednode(ProdNode, ([self, b]))
+    return create_node(MulNode(self, b))
   def __rmul__(self, b:int): return self*b
 
   # *** complex ops ***
@@ -152,7 +150,6 @@ def create_node(ret:Node):
 
 class OpNode(Node):
   def __init__(self, a:Node, b:Union[Node, int]):
-    if isinstance(self, MulNode): assert isinstance(b, int), f"MulNode.b must be int, getting {type(b)}"
     self.a, self.b = a, b
     self.min, self.max = self.get_bounds()
   def vars(self): return self.a.vars()
@@ -165,9 +162,7 @@ class LtNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]: return int(self.a.max < self.b), int(self.a.min < self.b)
 
 class MulNode(OpNode):
-  def __mul__(self, b: Union[Node, int]):
-    assert isinstance(self.b, int)
-    return self.a*(self.b*b) if isinstance(b, int) else create_rednode(ProdNode, ([self.a, Node.num(self.b), b]))
+  def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul
   def __floordiv__(self, b: int, factoring_allowed=False): # NOTE: mod negative isn't handled right
     assert isinstance(self.b, int)
     if self.b % b == 0: return self.a*(self.b//b)
@@ -234,9 +229,6 @@ class SumNode(RedNode):
     for x in self.nodes: new_nodes += (x.flat_components if isinstance(x, SumNode) else [x])
     return new_nodes
 
-class ProdNode(RedNode):
-  pass
-
 class AndNode(RedNode):
   def __mul__(self, b: Union[Node, int]): Variable.ands([x*b for x in self.nodes])
   def __floordiv__(self, b: int, _=True): return Variable.ands([x//b for x in self.nodes])
@@ -244,9 +236,6 @@ class AndNode(RedNode):
 def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   ret = typ(nodes)
   if typ == SumNode: ret.min, ret.max = (sum([x.min for x in nodes]), sum([x.max for x in nodes]))
-  elif typ == ProdNode:
-    assert all(x.min >= 0 for x in nodes), "negative x.min not supported"
-    ret.min, ret.max = (prod([x.min for x in nodes]), prod([x.max for x in nodes]))
   elif typ == AndNode: ret.min, ret.max = (min([x.min for x in nodes]), max([x.max for x in nodes]))
   return create_node(ret)
 
@@ -258,6 +247,5 @@ render_python: Dict[Type, Callable] = {
   ModNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}%{self.b})",
   LtNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}<{self.b})",
   SumNode: lambda self,ops,ctx: f"({'+'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
-  ProdNode: lambda self,ops,ctx: f"({'*'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
   AndNode: lambda self,ops,ctx: f"({' and '.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
 }
