@@ -57,39 +57,40 @@ class Token(NamedTuple):
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
 def get_grouped_float4_idxs(acc: List[Token]) -> Optional[List[int]]:
-    idx_to_token_group = {}
-    for idx, token in enumerate(acc):
-        if token.dtype != 'float4' or token.offset > 3:
-            continue
-        if token.name not in idx_to_token_group:
-            idx_to_token_group[token.name] = []
-        idx_to_token_group[token.name].append(idx)
-    idx_to_token_group = {k: v for k, v in idx_to_token_group.items() if len(v) == 4}
-    if idx_to_token_group:
-        return [idx for group in idx_to_token_group.values() for idx in group]
-    return None
+  idx_to_token_group = {}
+  for idx, token in enumerate(acc):
+    if token.dtype != 'float4' or token.offset > 3:
+      continue
+    if token.name not in idx_to_token_group:
+      idx_to_token_group[token.name] = []
+    idx_to_token_group[token.name].append(idx)
+  idx_to_token_group = {k: v for k, v in idx_to_token_group.items() if len(v) == 4}
+  if idx_to_token_group:
+    return [idx for group in idx_to_token_group.values() for idx in group]
+  return None
 
 def to_float4(x: List[Token]) -> Optional[Token]:
-    if len(x) != 4 or any(token.dtype != 'float4' for token in x):
-        return None
-    return x[0]
+  if len(x) != 4 or any(token.dtype != 'float4' for token in x):
+    return None
+  return x[0]
 
 def get_grouped_maybe_float4(*values: List[Token], grouping_allowed=True):
-    assert all(len(value) == len(values[0]) for value in values), f"all values are not the same length {values}"
-    idxs = get_grouped_float4_idxs(values[-1]) if grouping_allowed else None
-    if idxs is not None:
-        new_idxs = []
-        new_values = []
-        for i in range(0, len(idxs), 4):
-            group_values = [[v[idx] for v in values] for idx in idxs[i:i+4]]
-            new_values_group = [to_float4(value) for value in group_values]
-            if None in new_values_group:
-                break
-            new_idxs.append(idxs[i:i+4])
-            new_values.append(new_values_group)
-        if len(new_values) == len(idxs) // 4:
-            return zip(new_idxs, new_values)
-    return zip([[i] for i in range(len(values[0]))], zip(*values))
+  assert all(len(value) == len(values[0]) for value in values), f"all values are not the same length {values}"
+  idxs = get_grouped_float4_idxs(values[-1]) if grouping_allowed else None
+  if idxs is not None:
+    new_idxs = []
+    new_values = []
+    for i in range(0, len(idxs), 4):
+      group_values = [[v[idx] for v in values] for idx in idxs[i:i+4]]
+      new_values_group = [to_float4(value) for value in group_values]
+      if None in new_values_group:
+        break
+      new_idxs.append(idxs[i:i+4])
+      new_values.append(new_values_group)
+    if len(new_values) == len(idxs) // 4:
+      return zip(new_idxs, new_values)
+  return zip([[i] for i in range(len(values[0]))], zip(*values))
+
 
 # TODO: generic visitor pattern?
 def expand_node(idx:Node) -> List[Node]:
