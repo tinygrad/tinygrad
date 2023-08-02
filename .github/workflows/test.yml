@@ -296,4 +296,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Test Ops
-        run: docker run -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 /usr/bin/env python3 -m pytest -n=auto -s test/ -m 'not exclude_clang'
+        run: docker run -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 /usr/bin/env python3 -m pytest -n=auto test/ -m 'not exclude_clang' -s
