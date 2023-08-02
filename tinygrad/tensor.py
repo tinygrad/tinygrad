@@ -322,7 +322,7 @@ class Tensor:
       if isinstance(i, (int, slice)):
         dim_shape = next(it_shape)
         if isinstance(i, slice): final_shape.append(dim_shape)
-        elif tensor_found: # i is int
+        elif tensor_found:
           for n_ in range(len(tensor_found)):
             if tensor_found[n_][0] > n: sub[n_] -= 1
       else: # i is None
@@ -332,10 +332,10 @@ class Tensor:
     if tensor_found:
       for i,s in enumerate(sub): tensor_found[i] = (tensor_found[i][0]+s, tensor_found[i][1])
       dim = [i[0] for i in tensor_found]
-      idx = [(i[1] < 0).where(i[1]+ret.shape[i[0]], i[1]) for i in tensor_found]
       dim_cond = dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1
+      idx = [(i[1] < 0).where(i[1]+ret.shape[i[0]], i[1]) for i in tensor_found]
       new_ret = ret._gather(idx=idx[0], dim=dim[0])
-      for n,d in zip(range(1, len(dim[1:])+1), dim[1:]):
+      for n,d in enumerate(dim[1:], 1):
         new_idx = idx[n].reshape(*[1]*dim[0], *idx[n].shape, *[1]*(ret.ndim-dim[0]-n))
         arange = Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(idx[n].ndim+d-n), ret.shape[d], *[1]*(ret.ndim-d-1))
         new_ret = ((new_idx == arange) * new_ret).sum(idx[n].ndim+d-n)
