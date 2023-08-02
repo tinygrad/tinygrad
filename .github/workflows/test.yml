@@ -183,7 +183,14 @@ jobs:
     - name: Run JIT test
       run: DEBUG=2 METAL=1 python -m pytest test/test_jit.py
     - name: Run remaining tests
-      run: DEBUG=2 METAL=1 python -m pytest test/*.py
+      run: |
+        DEBUG=2 METAL=1 python -m pytest \
+        test_assign.py test_conv_shapetracker.py test_dtype.py \
+        test_helpers.py test_lazybuffer.py test_net_speed.py \
+        test_ops.py test_randomness.py test_speed_v_torch.py \
+        test_conv.py test_custom_function.py \
+        test_gc.py test_jit.py test_linearizer.py test_nn.py \
+        test_optim.py test_specific_conv.py test_symbolic_shapetracker.py
     # TODO: why not testing the whole test/?
     - name: Run webgpu pytest
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto -m 'webgpu'

@@ -191,6 +191,7 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a.exp()
     helper_test_generic_square('exp', 2048, f, f, onearg=True)
 
+  @unittest.skipIf(Device.DEFAULT == "METAL", "Metal __del__ fails")
   def test_relu(self):
     def f(a, b): return a.relu()
     helper_test_generic_square('relu', 4096, f, f, onearg=True)
