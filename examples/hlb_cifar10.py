@@ -103,7 +103,7 @@ def pad_reflect(X, padding) -> Tensor:
 
   return X
 
-# return a mask in the format of BS x C x H x W where H x W are in bool 
+# return a mask in the format of BS x C x H x W where H x W are in bool
 def make_square_mask(X, mask_size):
   # create a mask
   is_even = int(mask_size % 2 == 0)
@@ -174,8 +174,8 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
       if not is_train:
         # Need fancy indexing support to remove numpy
         x, y = X[batch_end-BS:batch_end,:].sequential(transform_test), Tensor(-10*np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()])
-      else: 
-        # ideally put cutmix inside transform 
+      else:
+        # ideally put cutmix inside transform
         x, y = cutmix(X[batch_end-BS:batch_end,:].sequential(transform), Tensor(-10*np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()]))
       yield x, y
 
@@ -183,9 +183,9 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     seed += 1
 
 def train_cifar(bs=512, eval_bs=500, steps=1000,
-                momentum=0.8632474768028381, wd=0.07324837942480592, 
-                max_lr=0.0138319916999336, pct_start=0.03254630825011651, div_factor=1e16, final_lr_ratio=0.004560827731448039, 
-                label_smoothing=0.24287006281063067, 
+                momentum=0.8632474768028381, wd=0.07324837942480592,
+                max_lr=0.0138319916999336, pct_start=0.03254630825011651, div_factor=1e16, final_lr_ratio=0.004560827731448039,
+                label_smoothing=0.24287006281063067,
                 seed=32):
   set_seed(seed)
   Tensor.training = True
