@@ -95,7 +95,7 @@ def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movement
 
 lazycache: LightWeakValueDictionary = LightWeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType):
-  #print("create_lazybuffer", device, shape, optype, op, dtype)
+  #print("create_lazybuffer", device, st, optype, op, dtype)
 
   # fromcpu aren't cached
   if not LAZYCACHE or (optype is LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}): return LazyBuffer(device, st, optype, op, dtype)
@@ -191,7 +191,9 @@ class LazyBuffer:
     ret = cast(RawBuffer, realized).toCPU().reshape(self.shape)
     return ret
 
-  def cast(self:LazyBuffer, arg:Tuple[DType, bool]) -> LazyBuffer: return elementwise_op(UnaryOps.CAST, self, arg=arg) if self.dtype != arg[0] else self
+  def cast(self:LazyBuffer, arg:Tuple[DType, bool]) -> LazyBuffer:
+    assert not arg[1] or self.dtype.itemsize == arg[0].itemsize, "can't bitcast mismatched dtype itemsizes"
+    return elementwise_op(UnaryOps.CAST, self, arg=arg) if self.dtype != arg[0] else self
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
   def ternary_op(self:LazyBuffer, op:TernaryOps, y: LazyBuffer, z:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y, z)

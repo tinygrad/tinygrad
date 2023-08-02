@@ -126,7 +126,7 @@ class TestBitCast(unittest.TestCase):
   def test_uint64_bitcast_to_int64(self): _test_bitcast(Tensor([18446744073709551615, 18446744073709551614, 18446744073709551613, 18446744073709551612], dtype=dtypes.uint64), dtypes.int64, [-1, -2, -3, -4])
 
   def test_shape_change_bitcast(self):
-    with self.assertRaises(ValueError):
+    with self.assertRaises(AssertionError):
       _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
 
 class TestInt32Dtype(unittest.TestCase):
