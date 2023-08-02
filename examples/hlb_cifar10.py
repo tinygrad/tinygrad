@@ -7,7 +7,7 @@ import random
 import numpy as np
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from tinygrad import nn
-from tinygrad.state import get_parameters
+from tinygrad.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
@@ -213,6 +213,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   W = whitening(X_train.sequential(transform_test))
 
   model = SpeedyResNet(W)
+  print(*get_state_dict(model), sep='\n')
   optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
   # JIT at every run
