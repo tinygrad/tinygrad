@@ -16,7 +16,35 @@ from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
 
-# TODO add dict for hyperparameters
+# TODO adjust dict for hyperparameters
+default_conv_kwargs = {'kernel_size': 3, 'padding': 'same', 'bias': False}
+
+batchsize = 1024
+bias_scaler = 56
+# To replicate the ~95.78%-accuracy-in-113-seconds runs, you can change the base_depth from 64->128, train_epochs from 12.1->85, ['ema'] epochs 10->75, cutmix_size 3->9, and cutmix_epochs 6->75
+hyp = {
+    'opt': {
+        'bias_lr':        1.64 * bias_scaler/512, # TODO: Is there maybe a better way to express the bias and batchnorm scaling? :'))))
+        'non_bias_lr':    1.64 / 512,
+        'bias_decay':     1.08 * 6.45e-4 * batchsize/bias_scaler,
+        'non_bias_decay': 1.08 * 6.45e-4 * batchsize,
+        'scaling_factor': 1./9,
+        'percent_start': .23,
+        'loss_scale_scaler': 1./128, # * Regularizer inside the loss summing (range: ~1/512 - 16+). FP8 should help with this somewhat too, whenever it comes out. :)
+    },
+    'net': {
+        'whitening': {
+            'kernel_size': 2,
+            'num_examples': 50000,
+        },
+        'batch_norm_momentum': .5, # * Don't forget momentum is 1 - momentum here (due to a quirk in the original paper... >:( )
+        'conv_norm_pow': 2.6,
+        'cutmix_size': 3,
+        'cutmix_epochs': 6,
+        'pad_amount': 2,
+        'base_depth': 64 ## This should be a factor of 8 in some way to stay tensor core friendly
+    }
+}
 
 def set_seed(seed):
   Tensor.manual_seed(getenv('SEED', seed)) # Deterministic
