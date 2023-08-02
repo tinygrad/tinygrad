@@ -7,7 +7,7 @@ import random
 import numpy as np
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from tinygrad import nn
-from tinygrad.state import get_state_dict, get_parameters
+from tinygrad.state import get_state_dict
 from tinygrad.nn import optim
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
@@ -15,6 +15,8 @@ from tinygrad.helpers import getenv
 from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
+
+# TODO add dict for hyperparameters
 
 def set_seed(seed):
   Tensor.manual_seed(getenv('SEED', seed)) # Deterministic
@@ -214,38 +216,29 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
 
   model = SpeedyResNet(W)
 
-  params_list = list(get_state_dict(model).values())
-  print("All params")
-  print(*params_list, sep='\n')
-
+  # parse the training params into bias and non-bias
   params_dict = get_state_dict(model)
   params_non_bias = []
   params_bias = []
   for params in params_dict:
-    print(params_dict[params].requires_grad)
     if params_dict[params].requires_grad is not False:
       if 'bias' in params:
         params_bias.append(params_dict[params])
       else:
         params_non_bias.append(params_dict[params])
 
-  print("params bias")
-  print(*params_bias, sep='\n')
-  print("params non-bias")
-  print(*params_non_bias, sep='\n')
-
-  # optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   opt_bias     = optim.SGD(params_bias, lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   opt_non_bias = optim.SGD(params_non_bias, lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
-  # lr_scheduler = OneCycleLR(optimizer, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
+
   lr_sched_bias     = OneCycleLR(opt_bias, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
-  # JIT at every run
+
   @TinyJit
   def train_step_jitted(model, optimizer, lr_scheduler, X, Y):
     out = model(X)
     loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
     if not getenv("DISABLE_BACKWARD"):
+      # 0 for bias and 1 for non-bias
       optimizer[0].zero_grad()
       optimizer[1].zero_grad()
       loss.backward()
