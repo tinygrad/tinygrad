@@ -170,7 +170,7 @@ class ShapeTracker:
         ret[idxs.index(this_dim.a)] = this_dim.b
       elif isinstance(this_dim, Variable):
         ret[idxs.index(this_dim)] = 1
-    idx_vars, valid_vars = idx.vars(left_only=True), valid.vars(left_only=True)
+    idx_vars, valid_vars = idx.vars(), valid.vars()
     for i,tidx in enumerate(idxs):
       if tidx in valid_vars and not ignore_valid: ret[i] = None
       elif tidx not in idx_vars: ret[i] = 0

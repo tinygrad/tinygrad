@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, sym_vars
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, ProdNode, sym_vars
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -246,19 +246,21 @@ class TestSymbolicVars(unittest.TestCase):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
-    assert z.vars() == z.vars(left_only=True) == []
-    assert a.vars() == a.vars(left_only=True) == [a]
-    m = MulNode(a, b)
-    assert m.vars() == [a, b]
-    assert m.vars(left_only=True) == [a]
+    assert z.vars() == z.vars() == []
+    assert a.vars() == a.vars() == [a]
+    m = MulNode(a, 3)
+    assert m.vars() == [a]
     s = SumNode([a, b, c])
-    assert s.vars() == [a, b, c] == s.vars(left_only=True) == [a, b, c]
+    assert s.vars() == [a, b, c]
+    s = ProdNode([a, b, c])
+    assert s.vars() == [a, b, c]
 
   def test_compound(self):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
     assert (a + b * c).vars() == [a, b, c]
+    assert (a * b * c).vars() == [a, b, c]
     assert (a % 3 + b // 5).vars() == [a, b]
     assert (a + b + c - a).vars() == [b, c]
 
@@ -268,8 +270,7 @@ class TestSymbolicVars(unittest.TestCase):
     assert sym_vars(1) == []
     assert sym_vars(a) == [a]
     assert sym_vars(a+b) == [a, b]
-    assert sym_vars(MulNode(a, b)) == [a, b]
-    assert sym_vars(MulNode(a, b), left_only=True) == [a]
+    assert sym_vars(a*3) == [a]
 
 if __name__ == '__main__':
   unittest.main()
