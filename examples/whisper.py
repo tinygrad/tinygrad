@@ -102,15 +102,20 @@ class Whisper:
   def __init__(self, dims):
     self.encoder = AudioEncoder(**dims)
     self.decoder = TextDecoder(**dims)
+    self.dims = dims
 
+  @property
+  def is_multilingual(self):
+      return self.dims["n_vocab"] == 51865
+    
   def __call__(self, mel:Tensor, tokens:Tensor):
     return self.decoder(tokens, self.encoder(mel))
 
-RATE = 16000
-CHUNK = 1600
-RECORD_SECONDS = 10
+_RATE = 16000
+_CHUNK = 1600
+_RECORD_SECONDS = 10
 
-def prep_audio(waveform=None, sr=RATE) -> Tensor:
+def prep_audio(waveform=None, sr=_RATE) -> Tensor:
   N_FFT = 400
   HOP_LENGTH = 160
   N_MELS = 80
@@ -123,7 +128,7 @@ def prep_audio(waveform=None, sr=RATE) -> Tensor:
   #print(waveform.shape, log_spec.shape)
   return log_spec
 
-LANGUAGES = {
+_LANGUAGES = {
   "en": "english", "zh": "chinese", "de": "german", "es": "spanish", "ru": "russian", "ko": "korean", "fr": "french", "ja": "japanese", "pt": "portuguese", "tr": "turkish",
   "pl": "polish", "ca": "catalan", "nl": "dutch", "ar": "arabic", "sv": "swedish", "it": "italian", "id": "indonesian", "hi": "hindi", "fi": "finnish", "vi": "vietnamese",
   "he": "hebrew", "uk": "ukrainian", "el": "greek", "ms": "malay", "cs": "czech", "ro": "romanian", "da": "danish", "hu": "hungarian", "ta": "tamil", "no": "norwegian",
@@ -136,15 +141,33 @@ LANGUAGES = {
   "as": "assamese", "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa", "ba": "bashkir", "jw": "javanese", "su": "sundanese",
 }
 
-BASE = pathlib.Path(__file__).parent.parent / "weights"
-def get_encoding(n_vocab_in):
-  download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/gpt2.tiktoken", BASE / "gpt2.tiktoken")
-  ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(BASE / "gpt2.tiktoken") if line)}
+_BASE = pathlib.Path(__file__).parent.parent / "weights"
+
+_MODELS = {
+    "tiny.en": "https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt",
+    "tiny": "https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt",
+    "base.en": "https://openaipublic.azureedge.net/main/whisper/models/25a8566e1d0c1e2231d1c762132cd20e0f96a85d16145c3a00adf5d1ac670ead/base.en.pt",
+    "base": "https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e/base.pt",
+    "small.en": "https://openaipublic.azureedge.net/main/whisper/models/f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872/small.en.pt",
+    "small": "https://openaipublic.azureedge.net/main/whisper/models/9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt",
+    "medium.en": "https://openaipublic.azureedge.net/main/whisper/models/d7440d1dc186f76616474e0ff0b3b6b879abc9d1a4926b7adfa41db2d497ab4f/medium.en.pt",
+    "medium": "https://openaipublic.azureedge.net/main/whisper/models/345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1/medium.pt",
+    "large.en": "https://openaipublic.azureedge.net/main/whisper/models/e4b87e7e0bf463eb8e6956e646f1e277e901512310def2c24bf0e11bd3c28e9a/large.pt",
+    "large": "https://openaipublic.azureedge.net/main/whisper/models/e4b87e7e0bf463eb8e6956e646f1e277e901512310def2c24bf0e11bd3c28e9a/large.pt",
+}
+
+def get_encoding(multilingual: bool, n_vocab_in):
+  if multilingual:
+    download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/multilingual.tiktoken", _BASE / "multilingual.tiktoken")
+    ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(_BASE / "multilingual.tiktoken") if line)}
+  else:
+    download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/gpt2.tiktoken", _BASE / "gpt2.tiktoken")
+    ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(_BASE / "gpt2.tiktoken") if line)}
   n_vocab = len(ranks)
   specials = [
     "<|endoftext|>",
     "<|startoftranscript|>",
-    *[f"<|{lang}|>" for lang in LANGUAGES.keys()],
+    *[f"<|{lang}|>" for lang in _LANGUAGES.keys()],
     "<|translate|>",
     "<|transcribe|>",
     "<|startoflm|>",
@@ -173,25 +196,27 @@ def listener(q):
   prep_audio()
   import pyaudio
   p = pyaudio.PyAudio()
-  stream = p.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
+  stream = p.open(format=pyaudio.paInt16, channels=1, rate=_RATE, input=True, frames_per_buffer=_CHUNK)
   print("listening")
-  for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-    data = stream.read(CHUNK)
+  for _ in range(0, int(_RATE / _CHUNK * _RECORD_SECONDS)):
+    data = stream.read(_CHUNK)
     waveform = ((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3).reshape(1, -1)
     q.put(waveform)
   print("done listening")
 
 if __name__ == "__main__":
-  if getenv("SMALL"):
-    fn = BASE / "whisper-small.en.pt"
-    download_file("https://openaipublic.azureedge.net/main/whisper/models/f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872/small.en.pt", fn)
+  sizes = ["TINY", "BASE", "SMALL", "MEDIUM", "LARGE"]
+  envs = [x for x in sizes if getenv(x)]
+  if len(envs) == 0:
+    fn = _BASE / "whisper-base.en.pt"
+    download_file(_MODELS["base.en"], fn)
   else:
-    fn = BASE / "whisper-tiny.en.pt"
-    download_file("https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt", fn)
+    fn = _BASE / f"whisper-{envs[0].lower()}.en.pt"
+    download_file(_MODELS[f"{envs[0].lower()}.en"], fn)
   state = torch_load(fn)
   model = Whisper(state['dims'])
   load_state_dict(model, state['model_state_dict'])
-  enc = get_encoding(state['dims']['n_vocab'])
+  enc = get_encoding(model.is_multilingual, state['dims']['n_vocab'])
 
   if len(sys.argv) > 1:
     # offline
@@ -207,7 +232,6 @@ if __name__ == "__main__":
       print(enc.decode(lst))
   else:
     # online
-
     q = multiprocessing.Queue()
     p = multiprocessing.Process(target=listener, args=(q,))
     p.daemon = True
@@ -216,7 +240,7 @@ if __name__ == "__main__":
     lst = [enc._special_tokens["<|startoftranscript|>"]]
     total = None
     did_read = False
-    for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+    for i in range(0, int(_RATE / _CHUNK * _RECORD_SECONDS)):
       while not q.empty() or total is None:
         waveform = q.get()
         if total is None: total = waveform
@@ -224,7 +248,7 @@ if __name__ == "__main__":
         did_read = True
       if did_read:
         last_total = total.shape[1]
-        log_spec = prep_audio(waveform=Tensor(total).numpy(), sr=RATE)
+        log_spec = prep_audio(waveform=Tensor(total).numpy(), sr=_RATE)
         encoded_audio = model.encoder(Tensor(log_spec)).realize()
       out = model.decoder(Tensor([lst]), encoded_audio).realize()
       idx = out[0,-1].numpy().argmax()
