@@ -6,9 +6,6 @@ import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
 from tinygrad.lazy import Device
-import pytest
-
-pytestmark = pytest.mark.webgpu
 
 if CI:
   import warnings
@@ -611,6 +608,12 @@ class TestOps(unittest.TestCase):
 
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)))
+    helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (-1,2,-3,4)), lambda x: x.pad2d(padding=(-1,2,-3,4)))
+    helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4), value=5), lambda x: x.pad2d(padding=(1,2,3,4),value=5))
+    helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (-1,2,-3,4), value=5), lambda x: x.pad2d(padding=(-1,2,-3,4),value=5))
+  def test_pad(self):
+    helper_test_op([(3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)),lambda x: x.pad(((3,4),(1,2))))
+    helper_test_op([(3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4), value=5), lambda x: x.pad(((3,4), (1,2)), value=5))
 
   def test_transpose(self):
     helper_test_op([(3,3,3)], lambda x: x.transpose(1,2), lambda x: x.transpose(1,2))
@@ -803,7 +806,7 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv_transpose3d(x,w).relu(),
       lambda x,w: Tensor.conv_transpose2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
-  @unittest.skipIf((IMAGE>0 or (Device.DEFAULT == "WEBGPU" and getenv("CI","") != "")), "no conv1d on images")
+  @unittest.skipIf((IMAGE>0), "no conv1d on images")
   def test_conv1d(self):
     for bs in [1,8]:
       for cin in [1,3]:
