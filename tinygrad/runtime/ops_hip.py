@@ -1,10 +1,12 @@
 import numpy as np
 import ctypes
-from tinygrad.helpers import DEBUG, getenv
+from typing import List, Tuple
+from tinygrad.helpers import DEBUG, getenv, DType
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
-HIP_CPU=getenv("HIP_CPU")
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
+
+HIP_CPU=getenv("HIP_CPU")
 if HIP_CPU: 
   import extra.hip_cpu_wrapper as hip
 else:
@@ -70,17 +72,30 @@ class HIPProgram:
       hip.hipEventSynchronize(end)
       return hip.hipEventElapsedTime(start, end)*1e-3
 
-from typing import List, Tuple
-from tinygrad.helpers import DType
-def render_kernel(self, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str,List[int],List[int]]:
-    return self.super().render_kernel(kernel, bufs, global_size, local_size, prekernel)
+
 class HIPLanguage(CStyleLanguage):
     def render_kernel(self, kernel: List[str], bufs: List[Tuple[str, DType]], global_size: List[int], local_size: List[int], prekernel: List[str]) -> Tuple[str, List[int], List[int]]:
       prg, gs, ls = super().render_kernel(kernel, bufs, global_size, local_size, prekernel)
-      return prg + (hip.genKernelWrapper(bufs) if HIP_CPU else ""), gs, ls
+      return prg + (f"""
+extern "C" void launch_kernel_KERNEL_NAME_PLACEHOLDER(
+  std::uint32_t grid_dim_x,
+  std::uint32_t grid_dim_y,
+  std::uint32_t grid_dim_z,
+  std::uint32_t block_dim_x,
+  std::uint32_t block_dim_y,
+  std::uint32_t block_dim_z,
+  std::uint32_t shared_mem_bytes,
+  hipStream_t stream,
+  {",".join([f"{buf[1].name}* {buf[0]}" for buf in bufs])}
+  ) {{ 
+    hipLaunchKernelGGL(KERNEL_NAME_PLACEHOLDER, dim3(grid_dim_x, grid_dim_y, grid_dim_z), dim3(block_dim_x, block_dim_y, block_dim_z), shared_mem_bytes, stream, {", ".join([buf[0] for buf in bufs])});
+    hipStreamSynchronize(stream);
+}}\n""" if HIP_CPU else ""), gs, ls
 class HIPCodegen(CStyleCodegen):
   lang = HIPLanguage(
-    kernel_prefix = ("#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" if not HIP_CPU else "") + """
+    kernel_prefix = (
+      "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" if not HIP_CPU else "#include <math.h>\ntypedef unsigned char uchar;\ninline float max(float x, float y) { return fmax(x, y); }") + 
+"""
 __device__ float4 max(float4 x, float4 y) { return float4(max(x.x, y.x), max(x.y, y.y), max(x.z, y.z), max(x.w, y.w)); }
 __device__ float4 pow(float x, float4 y) { return float4(pow(x, y.x), pow(x, y.y), pow(x, y.z), pow(x, y.w)); }
 __device__ float4 pow(float4 x, float4 y) { return float4(pow(x.x, y.x), pow(x.y, y.y), pow(x.z, y.z), pow(x.w, y.w)); }
@@ -88,12 +103,9 @@ __device__ float4 log2(float4 x) { return float4(log2(x.x), log2(x.y), log2(x.z)
 __device__ float4 exp2(float4 x) { return float4(exp2(x.x), exp2(x.y), exp2(x.z), exp2(x.w)); }
 __device__ float4 sin(float4 x) { return float4(sin(x.x), sin(x.y), sin(x.z), sin(x.w)); }
 extern "C" __global__
-    """,
-    smem_prefix = "__shared__ ", 
-    barrier = "__syncthreads();", 
-    float4 = "make_float4", 
-    uses_vload=True,
-    half_prekernel = "#include <hip/hip_fp16.h>\nusing half4 = HIP_vector_type<half, 4>;" + """
+    """, smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4", uses_vload=True,
+    half_prekernel = ("#include <hip/hip_fp16.h>\nusing half4 = HIP_vector_type<half, 4>;\n" if not HIP_CPU else "using half_float::half; MAKE_VECTOR_TYPE(half, half);\n") + 
+"""
 __device__ float vload_half(size_t offset, const half *p) { return (float)*(p + offset); }
 __device__ float2 vload_half2(size_t offset, const half *p) { return make_float2((float)*(p + offset*2), (float)*(p + offset*2 + 1)); }
 __device__ float4 vload_half4(size_t offset, const half *p) { return make_float4((float)*(p + offset*4), (float)*(p + offset*4 + 1), (float)*(p + offset*4 + 2), (float)*(p + offset*4 + 3)); }
@@ -103,8 +115,6 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset
     """,
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
-
   )
-  
 
 HIPBuffer = Compiled(RawHIPBuffer, HIPCodegen, HIPProgram, hip.hipDeviceSynchronize)

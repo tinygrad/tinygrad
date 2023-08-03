@@ -6,90 +6,20 @@ import os
 
 prg = r"""
 #include <hip/hip_runtime.h>
-
 extern "C" {
-
-hipError_t my_hipMalloc(void** ptr, std::size_t size) {
-  return hipMalloc(ptr, size);
-}
-
-hipError_t my_hipFree(void* ptr)
-{
-    return hip::detail::deallocate(ptr);
-}
-
-hipError_t my_hipMemcpy(
-  void* dst,
-  const void* src,
-  std::size_t size,
-  hipMemcpyKind kind = hipMemcpyDefault) {
-  auto r = hipMemcpy(dst, src, size, kind);
-  return r;
-}
-
-hipError_t my_hipMemcpyAsync(
-  void* dst,
-  const void* src,
-  std::size_t size,
-  hipMemcpyKind kind,
-  hipStream_t stream) {
-  return hipMemcpyAsync(dst, src, size, kind, stream);
-}
-
-hipError_t my_hipDeviceSynchronize() {
-  return hipDeviceSynchronize();
-}
-
-hipError_t my_hipEventCreate(hipEvent_t* event)
-{
-    return hipEventCreate(event);
-}
-
-hipError_t my_hipEventDestroy(hipEvent_t event)
-{
-    return hipEventDestroy(event);
-}
-
-hipError_t my_hipEventElapsedTime(float* ms, hipEvent_t start, hipEvent_t stop)
-{
-    return hipEventElapsedTime(ms, start, stop);
-}
-
-hipError_t my_hipEventRecord(hipEvent_t event, hipStream_t stream = nullptr)
-{
-    return hipEventRecord(event, stream);
-}
-
-hipError_t my_hipEventSynchronize(hipEvent_t event)
-{
-   return hipEventSynchronize(event);
-}
-
-hipError_t my_hipStreamSynchronize(hipStream_t 	stream) {
-  return hipStreamSynchronize(stream);
-}
-
+hipError_t my_hipMalloc(void** ptr, std::size_t size) { return hipMalloc(ptr, size); }
+hipError_t my_hipFree(void* ptr) { return hip::detail::deallocate(ptr); }
+hipError_t my_hipMemcpy(void* dst, const void* src, std::size_t size, hipMemcpyKind kind = hipMemcpyDefault) { return hipMemcpy(dst, src, size, kind); }
+hipError_t my_hipMemcpyAsync(void* dst, const void* src, std::size_t size, hipMemcpyKind kind, hipStream_t stream) { return hipMemcpyAsync(dst, src, size, kind, stream); }
+hipError_t my_hipDeviceSynchronize() { return hipDeviceSynchronize(); }
+hipError_t my_hipEventCreate(hipEvent_t* event) { return hipEventCreate(event); }
+hipError_t my_hipEventDestroy(hipEvent_t event) { return hipEventDestroy(event); }
+hipError_t my_hipEventElapsedTime(float* ms, hipEvent_t start, hipEvent_t stop) { return hipEventElapsedTime(ms, start, stop); }
+hipError_t my_hipEventRecord(hipEvent_t event, hipStream_t stream = nullptr) { return hipEventRecord(event, stream); }
+hipError_t my_hipEventSynchronize(hipEvent_t event) { return hipEventSynchronize(event); }
+hipError_t my_hipStreamSynchronize(hipStream_t 	stream) { return hipStreamSynchronize(stream); }
 }
 """
-from typing import List, Tuple
-from tinygrad.helpers import DType
-def genKernelWrapper(bufs: List[Tuple[str,DType]]) -> str:
-  return f"""
-extern "C" void launch_kernel_KERNEL_NAME_PLACEHOLDER(
-  std::uint32_t grid_dim_x,
-  std::uint32_t grid_dim_y,
-  std::uint32_t grid_dim_z,
-  std::uint32_t block_dim_x,
-  std::uint32_t block_dim_y,
-  std::uint32_t block_dim_z,
-  std::uint32_t shared_mem_bytes,
-  hipStream_t stream,
-  {",".join([f"{buf[1].name}* {buf[0]}" for buf in bufs])}
-  ) {{ 
-    hipLaunchKernelGGL(KERNEL_NAME_PLACEHOLDER, dim3(grid_dim_x, grid_dim_y, grid_dim_z), dim3(block_dim_x, block_dim_y, block_dim_z), shared_mem_bytes, stream, {", ".join([buf[0] for buf in bufs])});
-    hipStreamSynchronize(stream);
-}}\n"""
-
 fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.so"
 if not os.path.exists(fn):
   subprocess.check_output(args=('clang -g -std=c++20 --stdlib=libstdc++ -shared -O2 -Wall -Werror -x c++ -ltbb -ltbbmalloc -fPIC --rtlib=compiler-rt - -o '+fn+'.tmp').split(), input=prg.encode('utf-8'))
