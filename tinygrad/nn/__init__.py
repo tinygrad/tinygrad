@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Union, Tuple
+from typing import Any, Optional, Union, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 
@@ -122,3 +122,10 @@ class Embedding:
   def __call__(self, idx:Tensor) -> Tensor:
     vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(1, 1, self.vocab_size).expand(*idx.shape, self.vocab_size)
     return (vocab_counter == idx.unsqueeze(2).expand(*idx.shape, self.vocab_size)) @ self.weight
+
+class CrossEntropyLoss:
+  def __init__(self, reduction: str='mean', label_smoothing: float=0.0) -> None:
+    self.reducton, self.label_smoothing = reduction, label_smoothing
+  
+  def __call__(self, input: Tensor, target: Tensor) -> Tensor:
+    pass
