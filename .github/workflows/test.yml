@@ -295,7 +295,7 @@ jobs:
           load: true
           push: false
           tags: tinygrad-arm64
-          output: /tmp/buildx-docs
+          outputs: /tmp/buildx-docs
           cache-from: type=gha
           cache-to: type=gha,mode=max
       # - name: Test Ops
