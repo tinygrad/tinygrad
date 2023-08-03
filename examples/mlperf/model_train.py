@@ -1,4 +1,5 @@
 from tinygrad.tensor import Tensor
+from tinygrad.jit import TinyJit
 from tinygrad.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import getenv, dtypes
@@ -6,6 +7,8 @@ from tqdm import tqdm
 import numpy as np
 import math
 import random
+import wandb
+import time
 
 def train_resnet():
   # TODO: Resnet50-v1.5
@@ -19,32 +22,46 @@ def train_resnet():
   np.random.seed(seed)
   random.seed(seed)
 
+  wandb.init()
+
   num_classes = 1000
   model = ResNet50(num_classes)
   parameters = get_parameters(model)
 
-  BS = 32
+  BS = 16
   lr = BS*1e-3
   epochs = 50
   optimizer = optim.SGD(parameters, lr, momentum=.875, weight_decay=1/2**15)
   scheduler = CosineAnnealingLR(optimizer, epochs)
   print(f"training with batch size {BS} for {epochs} epochs")
 
+  @TinyJit
+  def train_step(X, Y):
+    optimizer.zero_grad()
+    out = model.forward(X)
+    loss = sparse_categorical_crossentropy(out, Y)
+    loss.backward()
+    optimizer.step()
+    scheduler.step()
+    return loss.realize(), out
+
   Tensor.training = True
   steps_in_epoch = math.floor(len(get_val_files()) / BS)
   for epoch in range(epochs):
     for X, Y in (t := tqdm(iterate(bs=BS, val=True), total=steps_in_epoch)):
       X = Tensor(X, requires_grad=False)
-      optimizer.zero_grad()
-      out = model.forward(X)
-      loss = sparse_categorical_crossentropy(out, Y)
-      loss.backward()
-      optimizer.step()
-      scheduler.step()
+      st = time.time()
+      loss, out = train_step(X, Y)
+      et = time.time()
 
       cat = np.argmax(out.cpu().numpy(), axis=-1)
       accuracy = (cat == Y).mean()
       t.set_description(f"loss: {loss.numpy().item():.3f} | acc: {accuracy:.2f}")
+
+      wandb.log({"loss": loss.numpy().item(), 
+                 "acc": accuracy,
+                 "forward_time": et - st,}
+      )
 
 def train_retinanet():
   # TODO: Retinanet
