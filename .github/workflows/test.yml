@@ -12,33 +12,33 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-      - name: Set up Python 3.8
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.8
-      - name: Cache pip
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: linting
-      - name: Install dependencies
-        run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Repo line count
-        run: python3 sz.py
-      - name: Lint with pylint
-        run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
-      - name: Lint with flake8
-        run: flake8 --statistics -j4
-      - name: Lint tinygrad with pylint
-        run: pylint tinygrad/
-      - name: Run mypy
-        run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
-      - name: Install SLOCCount
-        run: sudo apt-get install sloccount
-      - name: Check <5000 lines
-        run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: linting
+    - name: Install dependencies
+      run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Repo line count
+      run: python3 sz.py
+    - name: Lint with pylint
+      run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
+    - name: Lint with flake8
+      run: flake8 --statistics -j4
+    - name: Lint tinygrad with pylint
+      run: pylint tinygrad/
+    - name: Run mypy
+      run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
+    - name: Install SLOCCount
+      run: sudo apt-get install sloccount
+    - name: Check <5000 lines
+      run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
@@ -46,35 +46,35 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-      - name: Set up Python 3.8
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.8
-      - name: Cache pip
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: testing
-      - name: Install Dependencies
-        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Test Docs
-        run: python docs/abstractions.py
-      - name: Test Quickstart
-        run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
-      - name: Run Pytest
-        run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)"
-      - name: Fuzz Test symbolic
-        run: python test/external/fuzz_symbolic.py
-      - name: Fuzz Test shapetracker
-        run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
-      - name: Compile EfficientNet to C
-        run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
-      - name: Compile C to native
-        run: clang -O2 recognize.c -lm -o recognize
-      - name: Test EfficientNet
-        run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: testing
+    - name: Install Dependencies
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Test Docs
+      run: python docs/abstractions.py
+    - name: Test Quickstart
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
+    - name: Run Pytest
+      run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)"
+    - name: Fuzz Test symbolic
+      run: python test/external/fuzz_symbolic.py
+    - name: Fuzz Test shapetracker
+      run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
+    - name: Compile EfficientNet to C
+      run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
+    - name: Compile C to native
+      run: clang -O2 recognize.c -lm -o recognize
+    - name: Test EfficientNet
+      run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
 
   testtorch:
     name: Torch Tests
@@ -82,23 +82,23 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-      - name: Set up Python 3.8
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.8
-      - name: Cache pip
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: testing
-      - name: Install Dependencies
-        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Run Pytest
-        run: TORCH=1 python -m pytest -n=auto test/
-      - name: Run ONNX
-        run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: testing
+    - name: Install Dependencies
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Run Pytest
+      run: TORCH=1 python -m pytest -n=auto test/
+    - name: Run ONNX
+      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
 
   testopencl:
     strategy:
@@ -160,33 +160,33 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.11
-      - name: Cache pip
-        uses: actions/cache@v3
-        with:
-          path: ~/Library/Caches/pip
-          key: metalwebgpu
-      - name: Install Dependencies
-        run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Test LLaMA compile speed
-        run: PYTHONPATH="." METAL=1 python3 test/external/external_test_speed_llama.py
-      #- name: Run dtype test
-      #  run: DEBUG=4 METAL=1 python -m pytest test/test_dtype.py
-      # dtype test has issues on test_half_to_int8
-      - name: Run metal ops test
-        run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
-      - name: Run JIT test
-        run: DEBUG=2 METAL=1 python -m pytest test/test_jit.py
-      # TODO: why not testing the whole test/?
-      - name: Run webgpu pytest
-        run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto -m 'webgpu'
-      - name: Build WEBGPU Efficientnet
-        run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/Library/Caches/pip
+        key: metalwebgpu
+    - name: Install Dependencies
+      run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Test LLaMA compile speed
+      run: PYTHONPATH="." METAL=1 python3 test/external/external_test_speed_llama.py
+    #- name: Run dtype test
+    #  run: DEBUG=4 METAL=1 python -m pytest test/test_dtype.py
+    # dtype test has issues on test_half_to_int8
+    - name: Run metal ops test
+      run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
+    - name: Run JIT test
+      run: DEBUG=2 METAL=1 python -m pytest test/test_jit.py
+    # TODO: why not testing the whole test/?
+    - name: Run webgpu pytest
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto -m 'webgpu'
+    - name: Build WEBGPU Efficientnet
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
 
   testdocker:
     name: Docker Test
@@ -194,12 +194,12 @@ jobs:
     if: ${{ false }}
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-      - name: Build Docker
-        run: docker build -t tinygrad -f test/Dockerfile .
-      - name: Test Docker
-        run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Build Docker
+      run: docker build -t tinygrad -f test/Dockerfile .
+    - name: Test Docker
+      run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
 
   tests:
     strategy:
@@ -220,7 +220,7 @@ jobs:
       - name: Cache pip
         uses: actions/cache@v3
         with:
-          path: "~/.cache/pip"
+          path: '~/.cache/pip'
           key: ${{ matrix.backend }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n'}}" >> $GITHUB_ENV
