@@ -287,35 +287,17 @@ jobs:
           platforms: arm64
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-      - name: Cache Docker layers
-        uses: actions/cache@v3
-        id: cache-build
-        env:
-          cache-name: cache-arm64-build
+      - name: Build arm64 image
+        uses: docker/build-push-action@v4
         with:
-          path: ${{ github.workspace }}/cache
-          key: docker
-          restore-keys: |
-            docker
-      # - name: Build arm64 image
-      #   uses: docker/build-push-action@v4
-      #   with:
-      #     file: test/extra/arm64_dockerfile
-      #     platforms: linux/arm64
-      #     load: true
-      #     push: false
-      #     tags: tinygrad-arm64
-      #     cache-from: type=gha,src=/tmp/.buildx-cache
-      #     cache-to: type=gha,dest=/tmp/.buildx-cache-new,mode=max
-      - name: Build Docker Image
-        run: |
-          docker buildx build \
-          --cache-from "type=gha,src=$GITHUB_WORKSPACE/cache" \
-          --cache-to "type=gha,dest=$GITHUB_WORKSPACE/cache" \
-          --platform linux/arm64 \
-          --load \
-          -t tinygrad-arm64 \
-          -f test/extra/arm64_dockerfile .
+          file: test/extra/arm64_dockerfile
+          platforms: linux/arm64
+          load: true
+          push: false
+          tags: tinygrad-arm64
+          output: /tmp/buildx-docs
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       # - name: Test Ops
       #   run: docker run -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 python3 -m pytest -n=auto test/test_ops.py
       # - name: Test Dtypes
