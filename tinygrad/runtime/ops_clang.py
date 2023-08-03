@@ -12,11 +12,10 @@ args = {
 CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n'
 class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False):
-    prg = CLANG_PROGRAM_HEADER + prg
     # TODO: is there a way to not write this to disk?
     fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
     if not binary:
-      prg = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n' + prg
+      prg = CLANG_PROGRAM_HEADER + prg
       # TODO: is there a way to not write this to disk?
       if not os.path.exists(fn):
         subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+fn+'.tmp').split(), input=prg.encode('utf-8'))
@@ -25,7 +24,7 @@ class ClangProgram:
       if DEBUG >= 5: print(prg)
       if getenv('ARM64'):
         subprocess.check_output(args=('as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
-        subprocess.check_output(args=('clang -lm -shared '+fn+'.o -o'+fn).split())
+        subprocess.check_output(args=('clang -lm -shared -fPIC '+fn+'.o -o'+fn).split())
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
 
