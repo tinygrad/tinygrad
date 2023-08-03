@@ -19,17 +19,19 @@ from tinygrad.jit import TinyJit
 # TODO adjust dict for hyperparameters
 default_conv_kwargs = {'kernel_size': 3, 'padding': 'same', 'bias': False}
 
-batchsize = 1024
+batchsize = 512
 bias_scaler = 56
-# To replicate the ~95.78%-accuracy-in-113-seconds runs, you can change the base_depth from 64->128, train_epochs from 12.1->85, ['ema'] epochs 10->75, cutmix_size 3->9, and cutmix_epochs 6->75
+
 hyp = {
     'opt': {
         'bias_lr':        1.64 * bias_scaler/512, # TODO: Is there maybe a better way to express the bias and batchnorm scaling? :'))))
         'non_bias_lr':    1.64 / 512,
         'bias_decay':     1.08 * 6.45e-4 * batchsize/bias_scaler,
         'non_bias_decay': 1.08 * 6.45e-4 * batchsize,
+        'percent_start':  0.23,
+        'div_factor':     1e16,
+        'final_lr_ratio': 0.07,
         'scaling_factor': 1./9,
-        'percent_start': .23,
         'loss_scale_scaler': 1./128, # * Regularizer inside the loss summing (range: ~1/512 - 16+). FP8 should help with this somewhat too, whenever it comes out. :)
     },
     'net': {
@@ -214,7 +216,7 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
 
 def train_cifar(bs=512, eval_bs=500, steps=1000,
                 momentum=0.8632474768028381, wd=0.07324837942480592,
-                max_lr=0.0138319916999336, pct_start=0.03254630825011651, div_factor=1e16, final_lr_ratio=0.004560827731448039,
+                max_lr=0.0138319916999336,
                 label_smoothing=0.24287006281063067,
                 seed=32):
   set_seed(seed)
@@ -225,9 +227,6 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   MOMENTUM, WD = getenv('MOMENTUM', momentum), getenv("WD", wd)
   # For LR Scheduler
   MAX_LR = getenv("MAX_LR", max_lr)
-  PCT_START = getenv('PCT_START', pct_start)
-  DIV_FACTOR = getenv('DIV_FACTOR', div_factor)
-  FINAL_DIV_FACTOR = 1./(DIV_FACTOR*getenv('FINAL_LR_RATIO', final_lr_ratio))
   # Others
   LABEL_SMOOTHING = getenv('LABEL_SMOOTHING', label_smoothing)
 
@@ -258,8 +257,12 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   opt_bias     = optim.SGD(params_bias, lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   opt_non_bias = optim.SGD(params_non_bias, lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
 
-  lr_sched_bias     = OneCycleLR(opt_bias, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
-  lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=MAX_LR, div_factor=DIV_FACTOR, final_div_factor=FINAL_DIV_FACTOR, total_steps=STEPS, pct_start=PCT_START)
+  # NOTE taken from the hlb_CIFAR repository, might need to be tuned
+  initial_div_factor = hyp['opt']['div_factor'] 
+  final_lr_ratio = hyp['opt']['final_lr_ratio'] 
+  pct_start = hyp['opt']['percent_start'] 
+  lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=MAX_LR ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
+  lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=MAX_LR ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
 
   @TinyJit
   def train_step_jitted(model, optimizer, lr_scheduler, X, Y):
