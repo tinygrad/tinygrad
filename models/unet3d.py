@@ -30,7 +30,7 @@ class UNet3D:
     self.input_block = DownsampleBlock(in_channels, filters[0], stride=1)
     self.downsample = [DownsampleBlock(i, o) for i, o in zip(inp, out)]
     self.bottleneck = DownsampleBlock(filters[-1], filters[-1])
-    self.upsample = [UpsampleBlock(filters[-1], filters[-1])] + [UpsampleBlock(i, o) for i, o in zip(out[::-1], inp[::-1])] 
+    self.upsample = [UpsampleBlock(filters[-1], filters[-1])] + [UpsampleBlock(i, o) for i, o in zip(out[::-1], inp[::-1])]
     self.output = {"conv": nn.Conv2d(filters[0], n_class, kernel_size=(1, 1, 1))}
 
   def __call__(self, x):
@@ -44,7 +44,7 @@ class UNet3D:
       x = upsample(x, skip)
     x = self.output["conv"](x)
     return x
-    
+
   def load_from_pretrained(self):
     fn = Path(__file__).parent.parent / "weights" / "unet-3d.ckpt"
     download_file("https://zenodo.org/record/5597155/files/3dunet_kits19_pytorch.ptc?download=1", fn)

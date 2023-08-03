@@ -79,7 +79,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     img = Tensor.randn(1, 3, 224, 224)
     with CLCache(223): # NOTE: this is way too high
       out = model.forward(img)
-      assert len(GlobalCounters.cache) == 0, f"ViT prerealized?"
+      assert len(GlobalCounters.cache) == 0, "ViT prerealized?"
       out.realize()
 
   def test_llama(self):
@@ -294,7 +294,7 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
-  def test_permute_was_pushed_though_contract_reshape(self):
+  def test_permute_was_pushed_through_contract_reshape(self):
     a = Tensor.randn(4, 4, 4, 4, 4)
     with CLCache():
       c = a.sum(-1)
@@ -304,7 +304,7 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(a.numpy().sum(-1).reshape(16,16).transpose(1,0), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
-  def test_permute_was_pushed_though_contractw1s_reshape(self):
+  def test_permute_was_pushed_through_contractw1s_reshape(self):
     a = Tensor.randn(4, 4, 4, 4, 4)
     with CLCache():
       c = a.sum(-1)

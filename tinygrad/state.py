@@ -4,6 +4,7 @@ from typing import Dict, Union, List
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters
 from tinygrad.shape.shapetracker import strides_for_shape
+from tinygrad.lazy import Device
 
 safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
@@ -67,6 +68,12 @@ def torch_load(fn:str):
     if storage[2] not in offsets: return None
     byte_offset = offsets[storage[2]]+storage_offset*storage[1].itemsize
     ret = t[byte_offset:byte_offset+prod(size)].cast(storage[1])
+    # convert bfloat16 -> float16 using LLVM for Llama 2
+    # upstream LLaMA also does this conversion:
+    # https://github.com/facebookresearch/llama/blob/6c7fe276574e78057f917549435a2554000a876d/llama/generation.py#L95
+    # TODO: should this be done in the example instead? or maybe we don't need this anymore with better bfloat16 support
+    if storage[1] == dtypes.bfloat16:
+      ret = ret.to("LLVM").half().to(Device.DEFAULT)
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
     shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
@@ -80,7 +87,7 @@ def torch_load(fn:str):
 
     return ret.reshape(size)
 
-  intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "IntStorage": dtypes.int32, "LongStorage": dtypes.int64, "_rebuild_tensor_v2": _rebuild_tensor_v2}
+  intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16, "IntStorage": dtypes.int32, "LongStorage": dtypes.int64, "_rebuild_tensor_v2": _rebuild_tensor_v2}
   whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed
   class Dummy: pass
   class TorchPickle(pickle.Unpickler):

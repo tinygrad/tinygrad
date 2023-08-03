@@ -2,22 +2,22 @@ import unittest
 import numpy as np
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, CI
 
 def multidevice_test(fxn):
   exclude_devices = getenv("EXCLUDE_DEVICES", "").split(",")
   def ret(self):
     for device in Device._buffers:
       if device in ["DISK", "FAKE"]: continue
-      print(device)
+      if not CI: print(device)
       if device in exclude_devices:
-        print(f"WARNING: {device} test is excluded")
+        if not CI: print(f"WARNING: {device} test is excluded")
         continue
       with self.subTest(device=device):
         try:
           Device[device]
         except Exception:
-          print(f"WARNING: {device} test isn't running")
+          if not CI: print(f"WARNING: {device} test isn't running")
           continue
         fxn(self, device)
   return ret
