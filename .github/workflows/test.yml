@@ -289,13 +289,6 @@ jobs:
         uses: docker/setup-buildx-action@v2
         with:
           buildkitd-flags: --debug
-      - name: "Cache Docker layers - base"
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache-base
-          key: ${{ runner.os }}-buildx-base-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-base-
       - name: Build arm64 image
         uses: docker/build-push-action@v4
         with:
