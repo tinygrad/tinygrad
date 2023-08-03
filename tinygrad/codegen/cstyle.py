@@ -3,7 +3,7 @@ import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, MemOp, ConstOp
 from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, colored, getenv, prod, DType
-from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
+from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, sym_render
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -64,12 +64,12 @@ class CStyleLanguage(NamedTuple):
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx.render(render_cl, strip_parens=True)})"
     if output_dtype.sz > 1:
       return f"({output_dtype.name})(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})))"
-    return f"*({buf_name}+{idx.render(render_cl, strip_parens=True)})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx.render(render_cl)}]"
+    return f"*({buf_name}+{idx.render(render_cl, strip_parens=True)})" if self.uses_ptr_arithmetic else f"{buf_name}[{sym_render(idx, render_cl)}]"
 
   def render_local(self, name:str, size:int):
     return self.smem_prefix + f"float {name}[{size}];"
 
-  def render_for(self, expr: str, _min:int, _max:int) -> str:
+  def render_for(self, expr: str, _min:int, _max:Union[int,str]) -> str:
     return f"for (int {expr} = {_min}; {expr} <= {_max}; ++{expr}) {{"
 
   def render_conditional(self, cond: str, x:str, y:str) -> str:
@@ -128,7 +128,7 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
           kk(add_gl_dimension(lang.size_prefix, args, i, var, local_size, lang.lid))
         else:
           if getenv("NOUNROLL"): kk("#pragma unroll(1)")   # prevent loop unrolling
-          kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, var.min, var.max))
+          kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, var.min, sym_render(var.max)))
       depth += 1
     elif uop == UOps.BARRIER:
       kk(lang.barrier)

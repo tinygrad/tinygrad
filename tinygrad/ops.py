@@ -171,9 +171,9 @@ class Compiled:
           output.realized = None
           break
 
-    # we don't have an output buffer, we have to create it
+    # we don't have an output buffer, we have to create it, and create max size if it has symbolic shape
     if not output.realized:
-      output.realized = self.buffer(prod(output.shape), output.dtype, **kwargs)
+      output.realized = self.buffer(prod(s if isinstance(s, int) else s.max for s in output.shape), output.dtype, **kwargs)
 
     # compilation time
     k = self.codegen(ast, output)
@@ -194,5 +194,6 @@ class Compiled:
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
+    if getenv("TEST_COMPILE_ONLY"): return output.realized
     prg.exec(k.bufs)
     return output.realized

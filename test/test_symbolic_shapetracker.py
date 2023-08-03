@@ -99,3 +99,6 @@ class TestSymbolicExpand(unittest.TestCase):
     a = Tensor.rand(3, 4).reshape(3, vi)
     a = a + 1
     assert a.shape == (3, vi)
+
+if __name__ == '__main__':
+  unittest.main()

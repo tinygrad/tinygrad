@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, sym_vars
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, sym_vars, sym_render, sym_rename
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -275,6 +275,25 @@ class TestSymbolicMinMax(unittest.TestCase):
     a = Variable("a", 1, 8)
     assert max(1, a) == max(a, 1) == a
     assert min(1, a) == min(a, 1) == 1
+
+class TestSymRender(unittest.TestCase):
+  def test_sym_render(self):
+    a = Variable("a", 1, 8)
+    assert sym_render(a) == "a"
+    assert sym_render(1) == "1"
+    assert sym_render(a+1) == "(1+a)"
+
+class TestSymRename(unittest.TestCase):
+  def test_sym_rename(self):
+    a = Variable("a", 1, 8)
+    b = Variable.num(3)
+    c = a + b
+    assert sym_rename(a) == "s0"
+    assert sym_rename(b) == "s1"
+    assert sym_rename(c) == "s2"
+    assert sym_rename(a) == "s0"
+    assert sym_rename(b) == "s1"
+    assert sym_rename(c) == "s2"
 
 if __name__ == '__main__':
   unittest.main()
