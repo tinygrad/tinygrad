@@ -99,5 +99,13 @@ with Context(VARIABLE=1):
     test()
     self.assertEqual(VARIABLE.value, 0)
 
+  def test_assignment_before_context(self):
+    B = ContextVar("B", 1)
+    B.value = 2 # this reflects to all ContextVar("B") but is used in Context.__exit__
+    with Context(B=3):
+      ...
+    assert B.value == 2, f"Expected B to be 2, but was {B.value}"
+
+
 if __name__ == '__main__':
   unittest.main()

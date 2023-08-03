@@ -30,7 +30,8 @@ class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
-    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
+    Context.stack[-1] = {k:o.value for k,o in ContextVar._cache.items()} # store current state
+    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v # Update to new temporary state
     Context.stack.append(self.kwargs)
   def __exit__(self, *args):
     for k in Context.stack.pop(): ContextVar._cache[k].value = Context.stack[-1].get(k, Context.stack[0][k])
