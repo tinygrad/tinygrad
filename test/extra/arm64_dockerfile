@@ -4,11 +4,11 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends clang g++ ocl-icd-opencl-dev python python3.8 python3-pip python3-dev  && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install torch pytest pytest-xdist onnx onnx2torch opencv-python tabulate safetensors types-PyYAML cloudpickle numpy requests pillow tqdm networkx pyopencl PyYAML --extra-index-url https://download.pytorch.org/whl/cpu
+# RUN pip3 install torch pytest pytest-xdist onnx onnx2torch opencv-python tabulate safetensors types-PyYAML cloudpickle numpy requests pillow tqdm networkx pyopencl PyYAML --extra-index-url https://download.pytorch.org/whl/cpu
 
 WORKDIR /app
 
 ADD . /app
 
-RUN pip3 install -e '.[testing]'
+# RUN pip3 install -e '.[testing]'
 

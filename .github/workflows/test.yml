@@ -294,9 +294,9 @@ jobs:
           cache-name: cache-arm64-build
         with:
           path: ${{ github.workspace }}/cache
-          key: ${{ runner.os }}-docker-${{ hashfiles('cache/**') }}
+          key: docker
           restore-keys: |
-            ${{ runner.os }}-docker-
+            docker
       # - name: Build arm64 image
       #   uses: docker/build-push-action@v4
       #   with:
