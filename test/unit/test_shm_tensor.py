@@ -20,7 +20,7 @@ class TestRawShmBuffer(unittest.TestCase):
     assert np.allclose(t.numpy(), t2.numpy())
     s.unlink()
 
-  # @unittest.skipIf(CI, "CI doesn't like big shared memory")
+  @unittest.skipIf(CI, "CI doesn't like big shared memory")
   def test_e2e_big(self):
     t = Tensor.randn(2048, 2048, 8).realize()
 
