@@ -1,18 +1,25 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
 import sys
-import pathlib
+from pathlib import Path
 import base64
 import multiprocessing
 import numpy as np
-from typing import Optional
+from typing import List, Optional
 from extra.utils import download_file
 from tinygrad.state import torch_load, load_state_dict
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, dtypes
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
 import itertools
 import librosa
+import tiktoken
+import pyaudio
+from dataclasses import dataclass
+
+def available_models() -> List[str]:
+  """Returns the names of available models"""
+  return list(_MODELS.keys())
 
 # TODO: you have written this fifteen times
 class MultiHeadAttention:
@@ -32,7 +39,7 @@ class MultiHeadAttention:
     return self.out(wv)
 
   def qkv_attention(self, q, k, v, mask=None):
-    n_batch, n_ctx, n_state = q.shape
+    _, n_ctx, n_state = q.shape
     scale = (n_state // self.n_head) ** -0.25
     q = q.reshape(*q.shape[:2], self.n_head, -1).permute(0, 2, 1, 3) * scale
     k = k.reshape(*k.shape[:2], self.n_head, -1).permute(0, 2, 3, 1) * scale
@@ -59,8 +66,36 @@ class ResidualAttentionBlock:
     x = x + self.mlp_ln(x).sequential(self.mlp)
     return x
 
+class GreedyDecoder:
+  def __init__(self, eot): self.eot = eot
+
+  def update(self, tokens, logits, sum_logprobs):
+    tokens = tokens.numpy()
+    next_tokens = logits.numpy().argmax(-1)
+    logprobs = logits.log_softmax(-1).numpy()
+    current_logprobs = logprobs[np.arange(0, logprobs.shape[0]), next_tokens]
+    sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)
+    next_tokens[tokens[:, -1] == self.eot] = self.eot
+    tokens = np.concatenate([tokens, next_tokens[:, None]], axis=-1)
+    completed = (tokens[:, -1] == self.eot).all()
+    return Tensor(tokens), completed
+  
+class MaximumLikelihoodRanker:
+  def __init__(self, length_penalty): self.length_penalty = length_penalty
+
+  def rank(self, tokens, sum_logprobs):
+    def scores(logprobs, lengths):
+      result = []
+      for logprob, length in zip(logprobs, lengths):
+        if self.length_penalty is None: penalty = length
+        else: penalty = ((5 + length) / 6) ** self.length_penalty
+        result.append(logprob / penalty)
+      return result
+    lengths = [[len(t) for t in s] for s in tokens]
+    return [np.argmax(scores(p, l) for p, l in zip(sum_logprobs, lengths))]
+
 class AudioEncoder:
-  def __init__(self, n_mels, n_audio_ctx, n_audio_state, n_audio_head, n_audio_layer, **_):
+  def __init__(self, n_mels, n_audio_ctx, n_audio_state, n_audio_head, n_audio_layer):
     self.conv1 = nn.Conv1d(n_mels, n_audio_state, kernel_size=3, padding=1)
     self.conv2 = nn.Conv1d(n_audio_state, n_audio_state, kernel_size=3, stride=2, padding=1)
     self.blocks = [ResidualAttentionBlock(n_audio_state, n_audio_head) for _ in range(n_audio_layer)]
@@ -77,7 +112,7 @@ class AudioEncoder:
     return x
 
 class TextDecoder:
-  def __init__(self, n_vocab, n_text_ctx, n_text_state, n_text_head, n_text_layer, **_):
+  def __init__(self, n_vocab, n_text_ctx, n_text_state, n_text_head, n_text_layer):
     self.token_embedding = nn.Embedding(n_vocab, n_text_state)
     self.positional_embedding = Tensor.empty(n_text_ctx, n_text_state)
     self.blocks = [ResidualAttentionBlock(n_text_state, n_text_head, cross_attention=True) for _ in range(n_text_layer)]
@@ -98,22 +133,112 @@ class TextDecoder:
     x = self.ln(x)
     return x @ self.token_embedding.weight.T
 
+@dataclass
+class ModelDimensions:
+  n_mels: int
+  n_audio_ctx: int
+  n_audio_state: int
+  n_audio_head: int
+  n_audio_layer: int
+  n_vocab: int
+  n_text_ctx: int
+  n_text_state: int
+  n_text_head: int
+  n_text_layer: int
+
 class Whisper:
-  def __init__(self, dims):
-    self.encoder = AudioEncoder(**dims)
-    self.decoder = TextDecoder(**dims)
+  def __init__(self, dims: ModelDimensions):
     self.dims = dims
+    self.encoder = AudioEncoder(
+            self.dims.n_mels,
+            self.dims.n_audio_ctx,
+            self.dims.n_audio_state,
+            self.dims.n_audio_head,
+            self.dims.n_audio_layer,
+            )
+    self.decoder = TextDecoder(
+            self.dims.n_vocab,
+            self.dims.n_text_ctx,
+            self.dims.n_text_state,
+            self.dims.n_text_head,
+            self.dims.n_text_layer,
+            )
 
   @property
   def is_multilingual(self):
-      return self.dims["n_vocab"] == 51865
-    
+    return self.dims.n_vocab == 51865
+  
   def __call__(self, mel:Tensor, tokens:Tensor):
     return self.decoder(tokens, self.encoder(mel))
+  
+  def get_encoding(self):
+    if self.is_multilingual:
+      download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/multilingual.tiktoken", _BASE / "multilingual.tiktoken")
+      ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(_BASE / "multilingual.tiktoken") if line)}
+    else:
+      download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/gpt2.tiktoken", _BASE / "gpt2.tiktoken")
+      ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(_BASE / "gpt2.tiktoken") if line)}
+    n_vocab = len(ranks)
+    specials = [
+      "<|endoftext|>",
+      "<|startoftranscript|>",
+      *[f"<|{lang}|>" for lang in _LANGUAGES.keys()],
+      "<|translate|>",
+      "<|transcribe|>",
+      "<|startoflm|>",
+      "<|startofprev|>",
+      "<|nospeech|>",
+      "<|notimestamps|>",
+      *[f"<|{i * 0.02:.2f}|>" for i in range(1501)],
+    ]
+    special_tokens = dict(zip(specials, itertools.count(n_vocab)))
+    n_vocab += len(specials)
+    assert n_vocab == self.dims.n_vocab
+    return tiktoken.Encoding(
+      name="bob",
+      explicit_n_vocab=n_vocab,
+      pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
+      mergeable_ranks=ranks,
+      special_tokens=special_tokens)
+  
+  def load_state_dict(self, state_dict):
+    load_state_dict(self, state_dict)
+
+  def decode_segment(self, segment, initial_tokens, sample_len=224, n_audio=1, n_group=1):
+    if segment.ndim == 2: segment = np.expand_dims(segment, axis=0)
+    texts, sample_begin = [], len(initial_tokens)
+    decoder = GreedyDecoder(eot=enc.eot_token)
+    sequence_ranker = MaximumLikelihoodRanker(None)
+    audio_features = model.encoder(Tensor(segment)).realize()
+    tokens = Tensor([initial_tokens], dtype=dtypes.int64).repeat((segment.shape[0], 1))
+    sum_logprobs = Tensor.zeros(audio_features.shape[0])
+    no_speech_probs = [np.nan] * tokens.shape[0]
+    for i in range(sample_len):
+      logits = self.decoder(tokens, audio_features)
+      probs_at_sot = logits[:, initial_tokens.index(enc._special_tokens["<|startoftranscript|>"])].softmax(axis=-1)
+      no_speech_probs = probs_at_sot[:, enc._special_tokens["<|nospeech|>"]].numpy().tolist()
+      logits = logits[:, -1]
+      tokens, completed = decoder.update(tokens, logits, sum_logprobs)
+      if completed: break
+    tokens = tokens.reshape(n_audio, n_group, -1)
+    sum_logprobs = sum_logprobs.reshape(n_audio, n_group)
+    tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
+    tokens = [[t[sample_begin:(t == enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
+    selected = sequence_ranker.rank(tokens, sum_logprobs)
+    tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
+    texts.extend([enc.decode(t[1:]).strip() for t in tokens])
+    sum_logprobs = [lp[i] for i, lp in zip(selected, sum_logprobs)]
+    avg_logprobs = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
+    return texts
+    
 
 _RATE = 16000
 _CHUNK = 1600
 _RECORD_SECONDS = 10
+_HOP_LENGTH = 160
+_CHUNK_LENGTH = 30
+N_SAMPLES = _CHUNK_LENGTH * _RATE
+N_FRAMES = N_SAMPLES // _HOP_LENGTH
 
 def prep_audio(waveform=None, sr=_RATE) -> Tensor:
   N_FFT = 400
@@ -141,7 +266,7 @@ _LANGUAGES = {
   "as": "assamese", "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa", "ba": "bashkir", "jw": "javanese", "su": "sundanese",
 }
 
-_BASE = pathlib.Path(__file__).parent.parent / "weights"
+_BASE = Path(__file__).parent.parent / "weights"
 
 _MODELS = {
     "tiny.en": "https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt",
@@ -156,37 +281,6 @@ _MODELS = {
     "large": "https://openaipublic.azureedge.net/main/whisper/models/e4b87e7e0bf463eb8e6956e646f1e277e901512310def2c24bf0e11bd3c28e9a/large.pt",
 }
 
-def get_encoding(multilingual: bool, n_vocab_in):
-  if multilingual:
-    download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/multilingual.tiktoken", _BASE / "multilingual.tiktoken")
-    ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(_BASE / "multilingual.tiktoken") if line)}
-  else:
-    download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/gpt2.tiktoken", _BASE / "gpt2.tiktoken")
-    ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(_BASE / "gpt2.tiktoken") if line)}
-  n_vocab = len(ranks)
-  specials = [
-    "<|endoftext|>",
-    "<|startoftranscript|>",
-    *[f"<|{lang}|>" for lang in _LANGUAGES.keys()],
-    "<|translate|>",
-    "<|transcribe|>",
-    "<|startoflm|>",
-    "<|startofprev|>",
-    "<|nospeech|>",
-    "<|notimestamps|>",
-    *[f"<|{i * 0.02:.2f}|>" for i in range(1501)],
-  ]
-  special_tokens = dict(zip(specials, itertools.count(n_vocab)))
-  n_vocab += len(specials)
-  assert n_vocab == n_vocab_in
-  import tiktoken
-  return tiktoken.Encoding(
-    name="bob",
-    explicit_n_vocab=n_vocab,
-    pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
-    mergeable_ranks=ranks,
-    special_tokens=special_tokens)
-
 def img(x):
   import matplotlib.pyplot as plt
   plt.imshow(x.numpy())
@@ -194,7 +288,6 @@ def img(x):
 
 def listener(q):
   prep_audio()
-  import pyaudio
   p = pyaudio.PyAudio()
   stream = p.open(format=pyaudio.paInt16, channels=1, rate=_RATE, input=True, frames_per_buffer=_CHUNK)
   print("listening")
@@ -204,32 +297,40 @@ def listener(q):
     q.put(waveform)
   print("done listening")
 
+def load_model(name: str = None):
+  if not name:
+    sizes = ["TINY", "BASE", "SMALL", "MEDIUM", "LARGE"]
+    envs = [x for x in sizes if getenv(x)]
+    if len(envs) == 0:
+      name = "base.en"
+    else:
+      name = f"{envs[0].lower()}.en"
+  if name not in available_models():
+    raise ValueError(f"unknown model {name}")
+  fn = _BASE / f"whisper-{name}.pt"
+  download_file(_MODELS[name], fn)
+  checkpoint = torch_load(fn)
+  dims = ModelDimensions(**checkpoint["dims"])
+  model = Whisper(dims)
+  model.load_state_dict(checkpoint['model_state_dict'])
+  model.encoding = model.get_encoding()
+  return model
+
 if __name__ == "__main__":
-  sizes = ["TINY", "BASE", "SMALL", "MEDIUM", "LARGE"]
-  envs = [x for x in sizes if getenv(x)]
-  if len(envs) == 0:
-    fn = _BASE / "whisper-base.en.pt"
-    download_file(_MODELS["base.en"], fn)
-  else:
-    fn = _BASE / f"whisper-{envs[0].lower()}.en.pt"
-    download_file(_MODELS[f"{envs[0].lower()}.en"], fn)
-  state = torch_load(fn)
-  model = Whisper(state['dims'])
-  load_state_dict(model, state['model_state_dict'])
-  enc = get_encoding(model.is_multilingual, state['dims']['n_vocab'])
+  model = load_model()
 
   if len(sys.argv) > 1:
     # offline
     waveform, sample_rate = librosa.load(sys.argv[1], normalize=True)
     log_spec = prep_audio(waveform, sample_rate)
-    lst = [enc._special_tokens["<|startoftranscript|>"]]
+    lst = [model.encoding._special_tokens["<|startoftranscript|>"]]
     dat = model.encoder(Tensor(log_spec)).realize()
     for i in range(50):
       out = model.decoder(Tensor([lst]), dat)
       out.realize()
       idx = out[0,-1].numpy().argmax()
       lst.append(idx)
-      print(enc.decode(lst))
+      print(model.encoding.decode(lst))
   else:
     # online
     q = multiprocessing.Queue()
@@ -237,7 +338,7 @@ if __name__ == "__main__":
     p.daemon = True
     p.start()
 
-    lst = [enc._special_tokens["<|startoftranscript|>"]]
+    lst = [model.encoding._special_tokens["<|startoftranscript|>"]]
     total = None
     did_read = False
     for i in range(0, int(_RATE / _CHUNK * _RECORD_SECONDS)):
@@ -253,8 +354,8 @@ if __name__ == "__main__":
       out = model.decoder(Tensor([lst]), encoded_audio).realize()
       idx = out[0,-1].numpy().argmax()
       lst.append(idx)
-      dec = enc.decode(lst)
+      dec = model.encoding.decode(lst)
       print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
       if dec.endswith("<|endoftext|>"):
         #total = total[:, 320*(len(lst)-1):]
-        lst = [enc._special_tokens["<|startoftranscript|>"]]
+        lst = [model.encoding._special_tokens["<|startoftranscript|>"]]
