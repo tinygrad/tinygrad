@@ -335,7 +335,7 @@ class Tensor:
       dim_cond = dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1
       dim = [i[0] if n==0 else i[0]+i[1].ndim-n for n,i in enumerate(tensor_found)]
       idx = [(i[1] < 0).where(i[1]+ret.shape[i[0]], i[1]) for i in tensor_found]
-      new_ret = ret._gather_killme(idx, dim)
+      new_ret = ret._gather(idx, dim)
       if dim_cond:
         order = list(range(idx[0].ndim + ret.ndim - len(dim)))
         order = order[dim[0]:dim[0]+idx[0].ndim] + order[:dim[0]] + order[dim[0]+idx[0].ndim:]
@@ -348,10 +348,8 @@ class Tensor:
     arange = Tensor.arange(self.shape[dim[0]], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim[0], self.shape[dim[0]], *[1]*idx[0].ndim, *[1]*(self.ndim-dim[0]-1))
     new_ret = (self.reshape(*self.shape[:dim[0]+1], *[1]*idx[0].ndim, *self.shape[dim[0]+1:]) * (arange == new_idx)).sum(dim[0])
     for i,d in zip(idx[1:],dim[1:]):
-      idx_arg = [*[1]*dim[0], *i.shape, *[1]*(new_ret.ndim-dim[0]-i.ndim)]
-      arange_arg = [*[1]*(d), new_ret.shape[d], *[1]*(new_ret.ndim-d-1)]
-      new_idx = i.reshape(idx_arg)
-      arange = Tensor.arange(new_ret.shape[d], dtype=dtypes.int32, requires_grad=False).reshape(arange_arg)
+      new_idx = i.reshape(*[1]*dim[0], *i.shape, *[1]*(new_ret.ndim-dim[0]-i.ndim))
+      arange = Tensor.arange(new_ret.shape[d], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(d), new_ret.shape[d], *[1]*(new_ret.ndim-d-1))
       new_ret = ((new_idx == arange) * new_ret).sum(d)
     return new_ret
 
