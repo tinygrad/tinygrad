@@ -1109,20 +1109,12 @@ class TestOps(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU does not support nan/inf")
   def test_max_nan(self):
-    n = Tensor([1, float("nan")]).max().numpy()
+    n = Tensor([1, float("nan")]).max(check_nan=True).numpy()
     assert math.isnan(n.item()), f"{n.item()} is not nan"
-    n = Tensor([float("nan"), 1]).max().numpy()
+    n = Tensor([float("nan"), 1]).max(check_nan=True).numpy()
     assert math.isnan(n.item()), f"{n.item()} is not nan"
-
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU does not support nan/inf")
-  def test_max_float4_nan(self):
-    n = Tensor(np.array([[1.0, 2.0, np.nan, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)).max().numpy()
-    assert math.isnan(n.item()), f"tinygrad max: {n.item()} is not nan"
-
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU does not support nan/inf")
-  def test_max_float4_nan(self):
-    n = Tensor(np.array([[1.0, 2.0, np.nan, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)).max(ignore_nan=False).numpy()
-    assert math.isnan(n.item()), f"tinygrad max: {n.item()} is not nan"
+    n = Tensor(np.array([[1.0, 2.0, np.nan, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)).max(check_nan=True).numpy()
+    assert math.isnan(n.item()), f"tinygrad max: {n.item()} is not nan" # test float4
 
   def test_inf_where(self):
     x = Tensor.full((3, 3), float("inf"))
