@@ -112,7 +112,7 @@ def _reshape_mask(view: View, new_shape:Tuple[int, ...]) -> Tuple[Optional[Tuple
       mask = (next_mask[0]*old_dim+mask[0], (next_mask[1]-1)*old_dim+mask[1])
       old_dim *= next(r_shape, 1) # we merge this dimension with the next and try again
     else: # old_dim > new_dim
-      if mask[0]//new_dim != (mask[1]-1)//new_dim: # cannot split if the reshape cuts across the mask
+      if (mask[0]%new_dim!=0 or mask[1]%new_dim!=0) and mask[0]//new_dim!=(mask[1]-1)//new_dim: # cannot split if the reshape cuts across the mask
         return view.mask, True
       new_mask.append((mask[0]%new_dim//stride, (((mask[1]-1)%new_dim+1)-1)//stride+1))
       stride *= new_dim
@@ -128,10 +128,10 @@ def _reshape(view: View, new_shape:Tuple[int, ...]) -> Tuple[View, bool]:
   for d, s in reversed(view.shape_strides):
     acc, next_stride = 1, s
     while acc < d:
-      next_dim = next(reverse_shape)
-      acc *= next_dim
+      new_dim = next(reverse_shape)
+      acc *= new_dim
       strides.append(next_stride)
-      next_stride *= next_dim
+      next_stride *= new_dim
     if acc != d: break
   else:
     while len(strides) < len(new_shape): strides.append(0)
