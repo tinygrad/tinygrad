@@ -45,8 +45,6 @@ class ARM64Codegen(AssemblyCodegen):
       for var in ([v for v in [out] + vin if v is not None and v.__class__ is not int]):
         live_range[var.nm] = [i,i] if var.nm not in live_range else [live_range[var.nm][0], i]
 
-    
-    
     mem_vars:Dict[str, str] = {} 
     rtor:Dict[str, str] = {}
     def allocate_regs(vars): 
@@ -133,7 +131,7 @@ class ARM64Codegen(AssemblyCodegen):
           reg_in = type_to_reg[arg[2]] + ('0' if dtypes.is_float(arg[2]) else '12') if arg[2] is not None else rtor[out.nm]
           mov_imm(arg[0], "x15")
           ins.append(f"add x15, {rtor[vin[0].nm]}, x15")
-          ins.append(f"ldr{'sb' if arg[2] is not None and arg[2] in (dtypes.int8, dtypes.uint8) else ''} {reg_in}, [x15]")
+          ins.append(f"ldr{'' if arg[2] is not None and arg[2] in (dtypes.int8, dtypes.uint8) else ''} {reg_in}, [x15]")
           if arg[2] is not None: ins.append(f"{'fcvt' if arg[2] == dtypes.half else 'scvtf'} {rtor[out.nm]}, {reg_in}")
       elif uop == UOps.STORE:
         shifts = {dtypes.int64: "#3", dtypes.half: "#1", dtypes.int8:"#2", dtypes.uint8: "#2"}
