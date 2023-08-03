@@ -32,7 +32,7 @@ class HIPProgram:
       raise e
     if DEBUG >= 5:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
-      print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
+      print('\n'.join([x for x in asm.decode().split("\n") if 's_code_end' not in x]))
 
     module = hip.hipModuleLoadData(prg)
     self.prg = hip.hipModuleGetFunction(module, name)

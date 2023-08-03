@@ -428,7 +428,7 @@ if __name__ == '__main__':
 
   #v8 and v3 have same 80 class names for Object Detection
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
-  class_labels = class_labels.decode('utf-8').split('\n')
+  class_labels = class_labels.decode().split('\n')
 
   draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)
 

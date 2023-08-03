@@ -49,7 +49,7 @@ def get_run_onnx(onnx_model: ModelProto):
     # TODO: this is not complete, see onnx/onnx_ml_pb2.pyi for a complete list
     if a.type == AttributeProto.FLOAT: return float(a.f)
     elif a.type == AttributeProto.INT: return int(a.i)
-    elif a.type == AttributeProto.STRING: return a.s.decode("utf-8")
+    elif a.type == AttributeProto.STRING: return a.s.decode()
     elif a.type == AttributeProto.TENSOR: return buffer_parse(a.t) # TENSOR
     elif a.type == AttributeProto.FLOATS: return tuple(float(x) for x in a.floats)
     elif a.type == AttributeProto.INTS: return tuple(int(x) for x in a.ints)

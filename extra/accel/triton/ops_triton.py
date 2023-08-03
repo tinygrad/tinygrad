@@ -87,7 +87,7 @@ class TritonASTKernel(ASTKernel):
     self.kernel.append(f"  tl.store(data0 + {idx.render()}, {code})")
 
     # Torch inductor seems to write out files too!
-    hash = hashlib.md5(self.key.encode('utf-8')).hexdigest()
+    hash = hashlib.md5(self.key.encode()).hexdigest()
     fn = f"/tmp/{hash}.py"
     kernel = '\n'.join(self.kernel)
     if DEBUG >= 4: print(kernel)

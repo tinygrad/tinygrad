@@ -176,7 +176,7 @@ class ANE:
       ptr += pm+8
     ddat += b"\x00" * 0x100
     ret = collections.OrderedDict()
-    for ln in libane.ANE_RegDebug(0, create_string_buffer(ddat), mems).decode('utf-8').strip().split("\n"):
+    for ln in libane.ANE_RegDebug(0, create_string_buffer(ddat), mems).decode().strip().split("\n"):
       lnn = ln.split(" = ")
       if len(lnn) == 2:
         ret[lnn[0]] = int(lnn[1])

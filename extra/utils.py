@@ -18,7 +18,7 @@ def fetch(url):
     with open(url, "rb") as f:
       return f.read()
   import hashlib
-  fp = temp(hashlib.md5(url.encode('utf-8')).hexdigest())
+  fp = temp(hashlib.md5(url.encode()).hexdigest())
   download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
   with open(fp, "rb") as f:
     return f.read()
@@ -28,7 +28,7 @@ def fetch_as_file(url):
     with open(url, "rb") as f:
       return f.read()
   import hashlib
-  fp = temp(hashlib.md5(url.encode('utf-8')).hexdigest())
+  fp = temp(hashlib.md5(url.encode()).hexdigest())
   download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
   return fp
 

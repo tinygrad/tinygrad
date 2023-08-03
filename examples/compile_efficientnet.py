@@ -19,11 +19,11 @@ if __name__ == "__main__":
   else:
     cprog = [prg]
     # image library!
-    cprog += ["#define STB_IMAGE_IMPLEMENTATION", fetch("https://raw.githubusercontent.com/nothings/stb/master/stb_image.h").decode('utf-8').replace("half", "_half")]
+    cprog += ["#define STB_IMAGE_IMPLEMENTATION", fetch("https://raw.githubusercontent.com/nothings/stb/master/stb_image.h").decode().replace("half", "_half")]
 
     # imagenet labels, move to datasets?
     lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt")
-    lbls = ast.literal_eval(lbls.decode('utf-8'))
+    lbls = ast.literal_eval(lbls.decode())
     lbls = ['"'+lbls[i]+'"' for i in range(1000)]
     cprog.append(f"char *lbls[] = {{{','.join(lbls)}}};")
     cprog.append(f"float input[{inp_size}];")

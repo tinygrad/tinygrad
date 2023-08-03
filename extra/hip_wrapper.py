@@ -410,11 +410,11 @@ class hipDeviceProperties(ctypes.Structure):
 
   @property
   def name(self):
-    return self._name.decode('utf-8')
+    return self._name.decode()
 
   @property
   def gcnArchName(self):
-    return self._gcnArchName.decode('utf-8')
+    return self._gcnArchName.decode()
 
 
 _libhip.hipGetDeviceProperties.restype = int
@@ -447,7 +447,7 @@ _libhip.hipModuleGetFunction.argtypes = [ctypes.POINTER(ctypes.c_void_p),  # Ker
 
 
 def hipModuleGetFunction(module, func_name):
-  e_func_name = func_name.encode('utf-8')
+  e_func_name = func_name.encode()
   kernel = ctypes.c_void_p()
   status = _libhip.hipModuleGetFunction(ctypes.byref(kernel), module, e_func_name)
   hipCheckStatus(status)
@@ -517,15 +517,15 @@ _libhiprtc.hiprtcCreateProgram.argtypes = [ctypes.POINTER(ctypes.c_void_p),  # h
 
 
 def hiprtcCreateProgram(source, name, header_names, header_sources):
-  e_source = source.encode('utf-8')
-  e_name = name.encode('utf-8')
+  e_source = source.encode()
+  e_name = name.encode()
   e_header_names = list()
   e_header_sources = list()
   for header_name in header_names:
-    e_header_name = header_name.encode('utf-8')
+    e_header_name = header_name.encode()
     e_header_names.append(e_header_name)
   for header_source in header_sources:
-    e_header_source = header_source.encode('utf-8')
+    e_header_source = header_source.encode()
     e_header_sources.append(e_header_source)
 
   prog = ctypes.c_void_p()
@@ -557,7 +557,7 @@ _libhiprtc.hiprtcCompileProgram.argtypes = [ctypes.c_void_p,                 # h
 def hiprtcCompileProgram(prog, options):
   e_options = list()
   for option in options:
-    e_options.append(option.encode('utf-8'))
+    e_options.append(option.encode())
   c_options = (ctypes.c_char_p * len(e_options))()
   c_options[:] = e_options
   status = _libhiprtc.hiprtcCompileProgram(prog, len(c_options), c_options)
@@ -592,7 +592,7 @@ def hiprtcGetCode(prog):
   status = _libhiprtc.hiprtcGetCodeSize(prog, ctypes.byref(code_size))
   hipCheckStatus(status)
   code = "0" * code_size.value
-  e_code = code.encode('utf-8')
+  e_code = code.encode()
   status = _libhiprtc.hiprtcGetCode(prog, e_code)
   hipCheckStatus(status)
   return e_code

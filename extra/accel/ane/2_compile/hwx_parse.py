@@ -23,9 +23,9 @@ for c in a.headers[0].commands:
     hexdump(c[2])
     pass
   if c[0].cmd == 6:
-    print("name:", c[2].decode('utf-8'))
+    print("name:", c[2].decode())
   if c[0].cmd == 8:
-    print(c[2].decode('utf-8'))
+    print(c[2].decode())
   if c[0].cmd == 25:
     for section in c[2]:
       print(section.segname.strip(b'\0'), section.sectname.strip(b'\0'), hex(section.addr), hex(section.size), "@", hex(c[1].fileoff))

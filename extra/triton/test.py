@@ -18,7 +18,7 @@ compiled = compile(program_jit, signature={0: '*fp32', 1: '*fp32', 2: '*fp32'})
 print(compiled.asm['ast'])
 print(compiled.asm['ttir'])
 #print(compiled.asm['ttgir'])
-print(eval(compiled.asm['llir']).decode('utf-8'))
+print(eval(compiled.asm['llir']).decode())
 #print(compiled.asm['ptx'])
 
 print("running")

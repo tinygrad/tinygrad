@@ -495,7 +495,7 @@ def bytes_to_unicode():
 class ClipTokenizer:
   def __init__(self, bpe_path: str = default_bpe()):
     self.byte_encoder = bytes_to_unicode()
-    merges = gzip.open(bpe_path).read().decode("utf-8").split('\n')
+    merges = gzip.open(bpe_path).read().decode().split('\n')
     merges = merges[1:49152-256-2+1]
     merges = [tuple(merge.split()) for merge in merges]
     vocab = list(bytes_to_unicode().values())
@@ -552,7 +552,7 @@ class ClipTokenizer:
     bpe_tokens = []
     text = whitespace_clean(text.strip()).lower()
     for token in re.findall(self.pat, text):
-      token = ''.join(self.byte_encoder[b] for b in token.encode('utf-8'))
+      token = ''.join(self.byte_encoder[b] for b in token.encode())
       bpe_tokens.extend(self.encoder[bpe_token] for bpe_token in self.bpe(token).split(' '))
     # Truncation, keeping two slots for start and end tokens.
     if len(bpe_tokens) > 75:

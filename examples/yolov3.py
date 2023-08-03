@@ -12,7 +12,7 @@ from extra.utils import fetch
 
 def show_labels(prediction, confidence=0.5, num_classes=80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
-  coco_labels = coco_labels.decode('utf-8').split('\n')
+  coco_labels = coco_labels.decode().split('\n')
   prediction = prediction.detach().cpu().numpy()
   conf_mask = (prediction[:,:,4] > confidence)
   prediction *= np.expand_dims(conf_mask, 2)
@@ -39,7 +39,7 @@ def add_boxes(img, prediction):
   if isinstance(prediction, int): # no predictions
     return img
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
-  coco_labels = coco_labels.decode('utf-8').split('\n')
+  coco_labels = coco_labels.decode().split('\n')
   height, width = img.shape[0:2]
   scale_factor = 608 / width
   prediction[:,[1,3]] -= (608 - scale_factor * width) / 2
@@ -149,7 +149,7 @@ def infer(model, img):
 
 def parse_cfg(cfg):
   # Return a list of blocks
-  lines = cfg.decode("utf-8").split('\n')
+  lines = cfg.decode().split('\n')
   lines = [x for x in lines if len(x) > 0]
   lines = [x for x in lines if x[0] != '#']
   lines = [x.rstrip().lstrip() for x in lines]

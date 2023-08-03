@@ -48,7 +48,7 @@ class LLVMProgram:
     self.mod = llvm.parse_assembly(prg)
     self.mod.verify()
     LLVM().optimizer.run(self.mod)
-    self.mod.name = hashlib.sha1(prg.encode('utf-8')).hexdigest()
+    self.mod.name = hashlib.sha1(prg.encode()).hexdigest()
     if DEBUG >= 5: print(LLVM.target_machine.emit_assembly(self.mod))
     LLVM.engine.add_module(self.mod)
     LLVM.engine.finalize_object()

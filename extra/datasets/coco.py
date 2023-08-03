@@ -128,7 +128,7 @@ def convert_prediction_to_coco_mask(file_name, prediction):
       for mask in masks
     ]
     for rle in rles:
-      rle["counts"] = rle["counts"].decode("utf-8")
+      rle["counts"] = rle["counts"].decode()
 
     mapped_labels = [contiguous_category_id_to_json_id[int(i)] for i in labels]
 

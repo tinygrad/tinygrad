@@ -63,10 +63,10 @@ class CLProgram:
         fromimport('disassemblers.adreno', 'disasm')(self.binary())
       elif CL.cl_ctxs[0].devices[0].name.startswith('gfx'):
         asm = early_exec(([ROCM_LLVM_PATH / "llvm-objdump", '-d', '-'], self.binary()))
-        print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
+        print('\n'.join([x for x in asm.decode().split("\n") if 's_code_end' not in x]))
       else:
         # print the PTX for NVIDIA. TODO: probably broken for everything else
-        print(self.binary().decode('utf-8'))
+        print(self.binary().decode())
     if self.argdtypes is not None: _ = [clprg.set_scalar_arg_dtypes(self.argdtypes) for clprg in self.clprgs]
 
   def binary(self): return self.clprograms[0].get_info(cl.program_info.BINARIES)[0]

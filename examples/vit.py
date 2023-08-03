@@ -25,7 +25,7 @@ m.load_from_pretrained()
 
 # category labels
 lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt")
-lbls = ast.literal_eval(lbls.decode('utf-8'))
+lbls = ast.literal_eval(lbls.decode())
 
 #url = "https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg"
 url = "https://repository-images.githubusercontent.com/296744635/39ba6700-082d-11eb-98b8-cb29fb7369c0"

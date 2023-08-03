@@ -62,7 +62,7 @@ if __name__ == "__main__":
 
   # category labels
   lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt")
-  lbls = ast.literal_eval(lbls.decode('utf-8'))
+  lbls = ast.literal_eval(lbls.decode())
 
   # load image and preprocess
   url = sys.argv[1] if len(sys.argv) >= 2 else "https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/showcase/stable_diffusion_by_tinygrad.jpg"

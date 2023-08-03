@@ -54,20 +54,20 @@ else:
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
     if not binary:
-      try: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8')
+      try: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode()
       except cuda.CompileError as e:
         if DEBUG >= 3: print("FAILED TO BUILD", prg)
         raise e
     if DEBUG >= 5: print(pretty_ptx(prg))
     if DEBUG >= 6:
       try:
-        fn = os.path.join(tempfile.gettempdir(), f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}")
-        with open(fn + ".ptx", "wb") as f: f.write(prg.encode('utf-8'))
+        fn = os.path.join(tempfile.gettempdir(), f"tinycuda_{hashlib.md5(prg.encode()).hexdigest()}")
+        with open(fn + ".ptx", "wb") as f: f.write(prg.encode())
         subprocess.run(["ptxas", f"-arch={arch()}", "-o", fn, fn+".ptx"], check=True)
-        print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
+        print(subprocess.check_output(['nvdisasm', fn]).decode())
       except Exception as e: print("failed to generate SASS", str(e))
     # TODO: name is wrong, so we get it from the ptx using hacks
-    self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
+    self.prg = cuda.module_from_buffer(prg.encode()).get_function(prg.split(".visible .entry ")[1].split("(")[0])
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait:
