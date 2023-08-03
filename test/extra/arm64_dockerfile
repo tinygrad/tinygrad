@@ -5,7 +5,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # This is done before the copy to cache this layer of dependencies
-#RUN pip3 install torch pytest pytest-xdist onnx onnx2torch opencv-python tabulate safetensors types-PyYAML cloudpickle numpy requests pillow tqdm networkx pyopencl PyYAML --extra-index-url https://download.pytorch.org/whl/cpu
+RUN pip3 install torch pytest pytest-xdist onnx onnx2torch opencv-python tabulate safetensors types-PyYAML cloudpickle numpy requests pillow tqdm networkx pyopencl PyYAML --extra-index-url https://download.pytorch.org/whl/cpu
 
 WORKDIR /app
 
