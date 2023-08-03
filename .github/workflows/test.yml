@@ -299,9 +299,8 @@ jobs:
           cache-to: type=gha,mode=max,scope=armx
       # - name: Test Ops
       #   run: docker run -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 python3 -m pytest -n=auto test/test_ops.py
-      # - name: Test Dtypes
-      #run: docker run -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 python3 -m pytest -n=auto test/test_dtype.py
-      # run: docker run -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
+      - name: Test Dtypes
+        run: docker run -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 python3 -m pytest -n=auto test/test_dtype.py
       # - name: Move cache
       #   run: |
       #     rm -rf /tmp/.buildx-cache
