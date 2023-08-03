@@ -222,8 +222,7 @@ class TestSymbolicNumeric(unittest.TestCase):
       self.assertEqual(v.min, v.max)
       self.assertEqual(v.min, f(i))
     for kmin in range(MIN, MAX):
-      for kmax in range(MIN, MAX):
-        if kmin > kmax: continue
+      for kmax in range(kmin+1, MAX):
         v = f(Variable("tmp", kmin, kmax))
         values = [f(rv) for rv in range(kmin, kmax+1)]
         # the min and max may not be exact
