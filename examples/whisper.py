@@ -14,6 +14,34 @@ from extra.utils import download_file
 from extra.datasets.librispeech import ci, BASEDIR
 from examples.mlperf.metrics import word_error_rate
 
+def mel_frequencies(fmin, fmax, n_mels):
+    #use approximation, not exact, should be good enough, need to check
+    hz_to_mel = lambda freq: 2595 * np.log10(1 + freq / 700)
+    mel_to_hz = lambda mels: 700 * (10 ** (mels / 2595) - 1)
+    min_mel = hz_to_mel(fmin)
+    max_mel = hz_to_mel(fmax)
+    mels = np.linspace(min_mel, max_mel, n_mels)
+    hz: np.ndarray = mel_to_hz(mels)
+    return hz
+
+def mel(sr, n_fft, n_mels):
+    n_mels = int(n_mels)
+    weights = np.zeros((n_mels, int(1 + n_fft // 2)), dtype=np.float32)
+    fftfreqs = np.fft.rfftfreq(n=n_fft, d=1.0 / sr)
+    mel_f = mel_frequencies(0, float(sr)/2, n_mels + 2)
+    fdiff = np.diff(mel_f)
+    ramps = np.subtract.outer(mel_f, fftfreqs)
+
+    for i in range(n_mels):
+        lower = -ramps[i] / fdiff[i]
+        upper = ramps[i + 2] / fdiff[i + 1]
+        weights[i] = np.maximum(0, np.minimum(lower, upper))
+
+    if not np.all((mel_f[:-2] == 0) | (weights.max(axis=1) > 0)):
+        print('Empty filters in mel frequency basis. Some channels will produce empty responses.')
+
+    return weights
+
 # audio hyperparameters
 RATE = 16000
 CHUNK = 1600
@@ -182,7 +210,7 @@ def load_wav(file):
   return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
 
 @functools.lru_cache(None)
-def get_filters(sample_rate, n_fft, n_mels): return librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels)
+def get_filters(sample_rate, n_fft, n_mels): return mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels)
 @functools.lru_cache(None)
 def get_window(n_fft): return (1 - np.cos(2 * math.pi * np.arange(n_fft) / n_fft)) / 2
 
