@@ -57,9 +57,9 @@ class Token(NamedTuple):
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
 def get_grouped_float4_idxs(acc: List[Token]) -> Optional[List[int]]:
-  idx_to_token_group = {}
+  idx_to_token_group: Dict[str, List[int]] = {}
   for idx, token in enumerate(acc):
-    if token.dtype != 'float4' or token.offset > 3:
+    if token.dtype != 'float4' or token.offset is None or token.offset > 3:
       continue
     if token.name not in idx_to_token_group:
       idx_to_token_group[token.name] = []
