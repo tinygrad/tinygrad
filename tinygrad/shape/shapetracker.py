@@ -227,9 +227,9 @@ class ShapeTracker:
     self.__unsafe_resize(arg)
     return self
 
-  def expand(self, new_shape: Tuple[int, ...]) -> ShapeTracker:
+  def expand(self, new_shape: Tuple[Union[Node,int], ...]) -> ShapeTracker:
     assert len(new_shape) == len(self.views[-1].shape)
-    assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
+    assert all(is_sym_int(x) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)]) if self.views[-1].mask else None
     self.views[-1] = View(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
