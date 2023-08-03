@@ -254,19 +254,21 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
       else:
         params_non_bias.append(params_dict[params])
 
-  opt_bias     = optim.SGD(params_bias, lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  opt_bias     = optim.SGD(params_bias,     lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
   opt_non_bias = optim.SGD(params_non_bias, lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
 
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
-  initial_div_factor = hyp['opt']['div_factor'] 
-  final_lr_ratio = hyp['opt']['final_lr_ratio'] 
-  pct_start = hyp['opt']['percent_start'] 
+  initial_div_factor = hyp['opt']['div_factor']
+  final_lr_ratio = hyp['opt']['final_lr_ratio']
+  pct_start = hyp['opt']['percent_start']
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=MAX_LR ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=MAX_LR ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
 
   @TinyJit
   def train_step_jitted(model, optimizer, lr_scheduler, X, Y):
     out = model(X)
+    print(out)
+    print(Y)
     loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
     if not getenv("DISABLE_BACKWARD"):
       # 0 for bias and 1 for non-bias
@@ -316,7 +318,6 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
     if STEPS == 0 or i==STEPS: break
     GlobalCounters.reset()
     st = time.monotonic()
-    # loss = train_step_jitted(model, optimizer, lr_scheduler, X, Y)
     loss = train_step_jitted(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
     et = time.monotonic()
     loss_cpu = loss.numpy()
