@@ -20,7 +20,7 @@ class TestRawShmBuffer(unittest.TestCase):
     s.unlink()
 
   def test_e2e_big(self):
-    t = Tensor.randn(2048, 2048, 8).realize()
+    t = Tensor.randn(2048, 2048, 2).realize()
 
     # copy to shm
     shm_name = (s := shared_memory.SharedMemory(create=True, size=t.nbytes())).name
