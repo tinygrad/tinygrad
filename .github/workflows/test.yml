@@ -301,12 +301,11 @@ jobs:
         with:
           file: test/extra/arm64_dockerfile
           platforms: linux/arm64
-          context: ./app
-          target: base
           load: true
           push: false
           tags: tinygrad-arm64
+          # TODO: cache with output name.
           cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: Test Ops
-        run: docker run -t -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 /usr/bin/env python3 -m pytest -n=auto test/test_ops.py
+          cache-to: type=gha
+      - name: Test dtypes
+        run: docker run -t -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 /usr/bin/env python3 -m pytest -n=auto test/test_dtype.py
