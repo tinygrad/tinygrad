@@ -2,10 +2,12 @@
 
 import sys
 from pathlib import Path
+from dataclasses import dataclass
+from typing import List, Optional
 import base64
 import multiprocessing
+import subprocess as sp
 import numpy as np
-from typing import List, Optional
 from extra.utils import download_file
 from tinygrad.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, dtypes
@@ -15,7 +17,6 @@ import itertools
 import librosa
 import tiktoken
 import pyaudio
-from dataclasses import dataclass
 
 def available_models() -> List[str]:
   """Returns the names of available models"""
@@ -54,15 +55,15 @@ class ResidualAttentionBlock:
     self.attn = MultiHeadAttention(n_state, n_head)
     self.attn_ln = nn.LayerNorm(n_state)
 
-    self.cross_attn = MultiHeadAttention(n_state, n_head) if cross_attention else None
-    self.cross_attn_ln = nn.LayerNorm(n_state) if cross_attention else None
+    self.cross_attn = MultiHeadAttention(n_state, n_head) if cross_attention else lambda *args: None
+    self.cross_attn_ln = nn.LayerNorm(n_state) if cross_attention else lambda *args: None
 
     self.mlp = [nn.Linear(n_state, n_state*4), Tensor.gelu, nn.Linear(n_state*4, n_state)]
     self.mlp_ln = nn.LayerNorm(n_state)
 
   def __call__(self, x, xa=None, mask=None):
     x = x + self.attn(self.attn_ln(x), mask=mask)
-    if self.cross_attn: x = x + self.cross_attn(self.cross_attn_ln(x), xa)
+    x = x + self.cross_attn(self.cross_attn_ln(x), xa) # does nothing if cross_attention is False
     x = x + self.mlp_ln(x).sequential(self.mlp)
     return x
 
@@ -79,7 +80,11 @@ class GreedyDecoder:
     tokens = np.concatenate([tokens, next_tokens[:, None]], axis=-1)
     completed = (tokens[:, -1] == self.eot).all()
     return Tensor(tokens), completed
-  
+
+  def finalize(self, tokens, sum_logprobs):
+    tokens = np.pad(tokens.numpy(), [(0, 0), (0, 0), (0, 1)], constant_values=self.eot)
+    return tokens, sum_logprobs.numpy().tolist()
+
 class MaximumLikelihoodRanker:
   def __init__(self, length_penalty): self.length_penalty = length_penalty
 
@@ -167,10 +172,10 @@ class Whisper:
   @property
   def is_multilingual(self):
     return self.dims.n_vocab == 51865
-  
+
   def __call__(self, mel:Tensor, tokens:Tensor):
     return self.decoder(tokens, self.encoder(mel))
-  
+
   def get_encoding(self):
     if self.is_multilingual:
       download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/multilingual.tiktoken", _BASE / "multilingual.tiktoken")
@@ -200,37 +205,36 @@ class Whisper:
       pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
       mergeable_ranks=ranks,
       special_tokens=special_tokens)
-  
+
   def load_state_dict(self, state_dict):
     load_state_dict(self, state_dict)
 
   def decode_segment(self, segment, initial_tokens, sample_len=224, n_audio=1, n_group=1):
     if segment.ndim == 2: segment = np.expand_dims(segment, axis=0)
     texts, sample_begin = [], len(initial_tokens)
-    decoder = GreedyDecoder(eot=enc.eot_token)
+    decoder = GreedyDecoder(eot=self.encoding.eot_token)
     sequence_ranker = MaximumLikelihoodRanker(None)
-    audio_features = model.encoder(Tensor(segment)).realize()
+    audio_features = self.encoder(Tensor(segment)).realize()
     tokens = Tensor([initial_tokens], dtype=dtypes.int64).repeat((segment.shape[0], 1))
     sum_logprobs = Tensor.zeros(audio_features.shape[0])
-    no_speech_probs = [np.nan] * tokens.shape[0]
-    for i in range(sample_len):
+    _ = [np.nan] * tokens.shape[0]
+    for _ in range(sample_len):
       logits = self.decoder(tokens, audio_features)
-      probs_at_sot = logits[:, initial_tokens.index(enc._special_tokens["<|startoftranscript|>"])].softmax(axis=-1)
-      no_speech_probs = probs_at_sot[:, enc._special_tokens["<|nospeech|>"]].numpy().tolist()
+      probs_at_sot = logits[:, initial_tokens.index(self.encoding._special_tokens["<|startoftranscript|>"])].softmax(axis=-1)
+      _ = probs_at_sot[:, self.encoding._special_tokens["<|nospeech|>"]].numpy().tolist()
       logits = logits[:, -1]
       tokens, completed = decoder.update(tokens, logits, sum_logprobs)
       if completed: break
     tokens = tokens.reshape(n_audio, n_group, -1)
     sum_logprobs = sum_logprobs.reshape(n_audio, n_group)
     tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
-    tokens = [[t[sample_begin:(t == enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
+    tokens = [[t[sample_begin:(t == self.encoding.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
     selected = sequence_ranker.rank(tokens, sum_logprobs)
     tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
-    texts.extend([enc.decode(t[1:]).strip() for t in tokens])
+    texts.extend([self.encoding.decode(t[1:]).strip() for t in tokens])
     sum_logprobs = [lp[i] for i, lp in zip(selected, sum_logprobs)]
-    avg_logprobs = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
+    _ = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
     return texts
-    
 
 _RATE = 16000
 _CHUNK = 1600
@@ -240,10 +244,26 @@ _CHUNK_LENGTH = 30
 N_SAMPLES = _CHUNK_LENGTH * _RATE
 N_FRAMES = N_SAMPLES // _HOP_LENGTH
 
-def prep_audio(waveform=None, sr=_RATE) -> Tensor:
+def pad_or_trim(array, length=N_SAMPLES, axis=-1):
+  if array.shape[axis] > length:
+    array = array.take(indices=range(length), axis=axis)
+  if array.shape[axis] < length:
+    pad_widths = [(0, 0)] * array.ndim
+    pad_widths[axis] = (0, length - array.shape[axis])
+    array = np.pad(array, pad_widths)
+  return array
+
+def load_wav(file):
+  cmd = ["ffmpeg", "-nostdin", "-threads", "0", "-i", file, "-f", "s16le", "-ac", "1", "-acodec", "pcm_s16le", "-ar", str(_RATE), "-"]
+  try: out = sp.run(cmd, capture_output=True, check=True).stdout
+  except sp.CalledProcessError as e: raise RuntimeError(f"Failed to load audio {e.stderr.decode()}") from e
+  return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
+
+def prep_audio(waveform=None, sr=_RATE, padding=0) -> Tensor:
   N_FFT = 400
   HOP_LENGTH = 160
   N_MELS = 80
+  if padding > 0: waveform = np.pad(waveform, (0, padding))
   if waveform is None: waveform = np.zeros(N_FFT, dtype=np.float32)
   stft = librosa.stft(waveform, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.float32)
   magnitudes = stft[..., :-1] ** 2
@@ -281,11 +301,6 @@ _MODELS = {
     "large": "https://openaipublic.azureedge.net/main/whisper/models/e4b87e7e0bf463eb8e6956e646f1e277e901512310def2c24bf0e11bd3c28e9a/large.pt",
 }
 
-def img(x):
-  import matplotlib.pyplot as plt
-  plt.imshow(x.numpy())
-  plt.show()
-
 def listener(q):
   prep_audio()
   p = pyaudio.PyAudio()
@@ -322,7 +337,7 @@ if __name__ == "__main__":
   if len(sys.argv) > 1:
     # offline
     waveform, sample_rate = librosa.load(sys.argv[1], normalize=True)
-    log_spec = prep_audio(waveform, sample_rate)
+    log_spec = prep_audio(waveform, sr=sample_rate)
     lst = [model.encoding._special_tokens["<|startoftranscript|>"]]
     dat = model.encoder(Tensor(log_spec)).realize()
     for i in range(50):
@@ -349,7 +364,7 @@ if __name__ == "__main__":
         did_read = True
       if did_read:
         last_total = total.shape[1]
-        log_spec = prep_audio(waveform=Tensor(total).numpy(), sr=_RATE)
+        log_spec = prep_audio(waveform=Tensor(total).numpy())
         encoded_audio = model.encoder(Tensor(log_spec)).realize()
       out = model.decoder(Tensor([lst]), encoded_audio).realize()
       idx = out[0,-1].numpy().argmax()
