@@ -2,7 +2,7 @@ from tinygrad import nn
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, getenv
 from tinygrad.state import torch_load
-from vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present, get_hparams_from_file, load_checkpoint, weight_norm, HParams
+from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present, get_hparams_from_file, load_checkpoint, weight_norm, HParams, convert_pad_shape
 import numpy as np
 import math
 import os
@@ -11,6 +11,10 @@ import sys
 from pathlib import Path
 from typing import Optional
 import time
+import io
+import soundfile
+
+import torchaudio
 
 # original code: https://github.com/svc-develop-team/so-vits-svc
 
@@ -22,13 +26,12 @@ F0_MIN = 50.0
 F0_MEL_MIN = 1127 * np.log(1 + F0_MIN / 700)
 F0_MEL_MAX = 1127 * np.log(1 + F0_MAX / 700)
 
-
-
 # original code for contentvec: https://github.com/auspicious3000/contentvec/
 class ContentVec:
   # TODO: self.label_embs_concat and self.final_proj dims are hardcoded
   # and depend on fairseq.data.dictionary Dictionary in the checkpoint.
   # This param can't yet be loaded since there is no pickle for it. See with DEBUG=2.
+  # This means that the model only works with the given weights
   def __init__(self, cfg: HParams):
     self.feature_grad_mult, self.untie_final_proj = cfg.feature_grad_mult, cfg.untie_final_proj
     feature_enc_layers = eval(cfg.conv_feature_layers)
@@ -46,7 +49,7 @@ class ContentVec:
     if self.feature_grad_mult > 0:
       features = self.feature_extractor(source, padding_mask)
       if self.feature_grad_mult != 1.0:
-        features = GradMultiply.forward(features, self.feature_grad_mult)  # TODO: this isn't required for inference
+        features = features  # GradMultiply.forward(features, self.feature_grad_mult)  # TODO: this isn't required for inference
     else:
       features = self.feature_extractor(source, padding_mask)
     return features
@@ -58,7 +61,7 @@ class ContentVec:
     padding_mask = lengths_to_padding_mask(lengths)
     return padding_mask
 
-  def extract_features(self, source: Tensor, spk_emb: Tensor, padding_mask=None, ret_conv=False, output_layer=None, tap=False):
+  def extract_features(self, source: Tensor, spk_emb:Tensor=None, padding_mask=None, ret_conv=False, output_layer=None, tap=False):
     features = self.forward_features(source, padding_mask)
     if padding_mask is not None:
       padding_mask = self.forward_padding_mask(features, padding_mask)
@@ -93,7 +96,7 @@ class ContentVec256L9:
     padding_mask = Tensor.zeros_like(feats).cast(dtypes.bool)
     logits = self.model.extract_features(feats.to(wav.device), padding_mask=padding_mask.to(wav.device), output_layer=9)
     feats = self.model.final_proj(logits[0])
-    return feats.transpose(1, 2)
+    return feats.transpose(1,2)
 
   @classmethod
   def load_model(cls, checkpoint_path:str, checkpoint_url:str):
@@ -118,7 +121,8 @@ class TransformerEncoder:
                                       attention_dropout=0.0,  # training: attention_dropout=cfg.attention_dropout,
                                       activation_dropout=0.0,  # training: activation_dropout=cfg.activation_dropout,
                                       activation_fn=cfg.activation_fn,
-                                      layer_norm_first=self.layer_norm_first)
+                                      layer_norm_first=self.layer_norm_first,
+                                      cond_layer_norm=False)
       for _ in range(cfg.encoder_layers)
       ]
     for _ in range(cfg.encoder_layers_1):  # this one uses CondLayerNorm
@@ -146,7 +150,12 @@ class TransformerEncoder:
   def extract_features(self, x: Tensor, spk_emb: Tensor, padding_mask=None, tgt_layer=None, tap=False):
     if tgt_layer is not None:  # and not self.training
       assert tgt_layer >= 0 and tgt_layer < len(self.layers)
-    if padding_mask is not None: x = Tensor.where(tilde(padding_mask.cast(dtypes.bool)), x, 0)  # in torch x = x[padding_mask] := 0  -> all True indices set to 0. exactly the opposite of what where() does.
+    if padding_mask is not None:
+      # x[padding_mask] = 0
+      assert padding_mask.shape == x.shape[:len(padding_mask.shape)]  # first few dims of x must match padding_mask
+      tmp_mask = padding_mask.unsqueeze(-1).repeat((1, 1, x.shape[-1]))
+      tmp_mask = tilde(tmp_mask.cast(dtypes.bool))
+      x = Tensor.where(tmp_mask, x, 0)
     x_conv = self.pos_conv(x.transpose(1, 2))
     x_conv = x_conv.transpose(1, 2)
     x = x + x_conv
@@ -156,13 +165,14 @@ class TransformerEncoder:
     layer_results = []
     r = None
     for i, layer in enumerate(self.layers):
-      # dropout_probability = np.random.random()
       if i < self.num_layers:  # if (not self.training or (dropout_probability > self.layerdrop)) and (i < self.num_layers):
+        assert layer.cond_layer_norm == False
         x = layer(x, self_attn_padding_mask=padding_mask, need_weights=False)
         if tgt_layer is not None or tap:
           layer_results.append(x.transpose(0, 1))
       if i>= self.num_layers:
-        x = layer(x, spk_emb, self_attn_padding_mask=padding_mask, need_weights=False)
+        assert layer.cond_layer_norm == True
+        x = layer(x, emb=spk_emb, self_attn_padding_mask=padding_mask, need_weights=False)
       if i == tgt_layer:
         r = x
         break
@@ -182,64 +192,70 @@ class TransformerSentenceEncoderLayer:
         raise RuntimeError(f"activation function={activation} is not forseen")
     self.embedding_dim, self.dropout, self.activation_dropout, self.layer_norm_first, self.num_attention_heads = embedding_dim, dropout, activation_dropout, layer_norm_first, num_attention_heads
     self.activation_fn = get_activation_fn(activation_fn)
+    self.cond_layer_norm = cond_layer_norm
     self.self_attn = MultiHeadAttention(self.embedding_dim, self.num_attention_heads)
     self.self_attn_layer_norm = nn.LayerNorm(self.embedding_dim) if not cond_layer_norm else CondLayerNorm(self.embedding_dim)
     self.fc1 = nn.Linear(self.embedding_dim, ffn_embedding_dim)
     self.fc2 = nn.Linear(ffn_embedding_dim, self.embedding_dim)
     self.final_layer_norm = nn.LayerNorm(self.embedding_dim) if not cond_layer_norm else CondLayerNorm(self.embedding_dim)
 
-  def __call__(self, x:Tensor, self_attn_mask:Tensor=None, self_attn_padding_mask:Tensor=None):  # TODO: refactor this later
+  def __call__(self, x:Tensor, self_attn_mask:Tensor=None, self_attn_padding_mask:Tensor=None, emb:Tensor=None, need_weights=False):  # TODO: refactor this later
     # TODO: might need to do the following to self_attn_padding_mask:
     #self_attn_padding_mask = self_attn_padding_mask.view(x.shape[0], 1, 1, self_attn_padding_mask.shape[1]).expand(-1, self.num_attention_heads, -1, -1).reshape(x.shape[0] * self.num_attention_heads, 1, self_attn_padding_mask.shape[1]) if self_attn_padding_mask is not None else None
+    assert self_attn_mask == None
+    assert emb == None
+    assert self_attn_padding_mask is not None
     residual = x
     if self.layer_norm_first:
-      if self_attn_mask is None and self_attn_padding_mask is not None: self_attn_mask = self_attn_padding_mask
-      elif self_attn_padding_mask is None and self_attn_mask is not None: self_attn_padding_mask = self_attn_mask
-      mask = self_attn_mask.cast(dtypes.bool) + self_attn_padding_mask.cast(dtypes.bool) if (self_attn_mask is not None) else None  # logical or them here
-      x = self.self_attn_layer_norm(x)
-      x = self.self_attn(x=x, mask=mask)  # self attention. TODO: need_weights=False for not cond_layer_norm
+      #if self_attn_mask is None and self_attn_padding_mask is not None: self_attn_mask = self_attn_padding_mask
+      #elif self_attn_padding_mask is None and self_attn_mask is not None: self_attn_padding_mask = self_attn_mask
+      #mask = self_attn_mask.cast(dtypes.bool) + self_attn_padding_mask.cast(dtypes.bool) if (self_attn_mask is not None) else None  # logical or them here
+      x = self.self_attn_layer_norm(x) if not self.cond_layer_norm else self.self_attn_layer_norm(x, emb)
+      x = self.self_attn(x=x, mask=self_attn_padding_mask)
       x = x.dropout(self.dropout)
       x = residual + x
-      x = self.final_layer_norm(x)
+      x = self.final_layer_norm(x) if not self.cond_layer_norm else self.final_layer_norm(x, emb)
       x = self.activation_fn(self.fc1(x))
       x = x.dropout(self.activation_dropout)
       x = self.fc2(x)
-      layer_result = x
       x = x.dropout(self.dropout)
       x = residual + x
     else:
-      x = self.self_attn(x=x, mask=self_attn_padding_mask)  # self attention. TODO: need_weights=False for not cond_layer_norm
+      x = self.self_attn(x=x, mask=self_attn_padding_mask)
       x = x.dropout(self.dropout)
       x = residual + x
-      x = self.self_attn_layer_norm(x)
+      x = self.self_attn_layer_norm(x) if not self.cond_layer_norm else self.self_attn_layer_norm(x, emb)
       residual = x
       x = self.activation_fn(self.fc1(x))
       x = x.dropout(self.activation_dropout)
       x = self.fc2(x)
-      layer_result = x
       x = x.dropout(self.dropout)
       x = residual + x
-      x = self.final_layer_norm(x)
+      x = self.final_layer_norm(x) if not self.cond_layer_norm else self.final_layer_norm(x, emb)
     return x
 
-# from examples/whisper.py. Renamed attributes for weight loading and allow bias on k_proj.
+# from examples/whisper.py. Renamed attributes for weight loading and allow bias on k_proj, also transpose
 class MultiHeadAttention:
   def __init__(self, n_state, n_head):
     self.n_head = n_head
+    self.n_state = n_state
     self.q_proj = nn.Linear(n_state, n_state)
     self.k_proj = nn.Linear(n_state, n_state)
     self.v_proj = nn.Linear(n_state, n_state)
     self.out_proj = nn.Linear(n_state, n_state)
 
   def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None):
+    x = x.transpose(0,1)  # TxBxC -> BxTxC
     q = self.q_proj(x)
     k = self.k_proj(xa or x)
     v = self.v_proj(xa or x)
     wv, qk = self.qkv_attention(q, k, v, mask)
     # NOTE: we aren't returning qk
-    return self.out_proj(wv)
+    ret =  self.out_proj(wv).transpose(0,1)  # BxTxC -> TxBxC
+    return ret
 
   def qkv_attention(self, q, k, v, mask=None):
+    mask=None
     n_batch, n_ctx, n_state = q.shape
     scale = (n_state // self.n_head) ** -0.25
     q = q.reshape(*q.shape[:2], self.n_head, -1).permute(0, 2, 1, 3) * scale
@@ -286,7 +302,7 @@ class ConvFeatureExtractionModel():
       self.conv_layers.append(block(in_d, dim, k, stride, is_layer_norm=(mode == "layer_norm"), is_group_norm=((mode == "default" or mode == "group_norm_masked") and i == 0), conv_bias=conv_bias))
       in_d = dim
 
-  def forward(self, x:Tensor, padding_mask:Tensor):  # TODO: refactor this later
+  def __call__(self, x:Tensor, padding_mask:Tensor):  # TODO: refactor this later
     x = x.unsqueeze(1)  # BxT -> BxCxT
     for i, conv in enumerate(self.conv_layers) :
       if i == 0:
@@ -314,7 +330,7 @@ def lengths_to_padding_mask(lens: Tensor) -> Tensor:
   return mask.cast(dtypes.bool)
 
 class GradMultiply:
-  def forward(ctx, x, scale):
+  def forward(ctx, x, scale=1):
     ctx.scale = scale
     res = x.to(x.device)  # clone
     return res
@@ -388,8 +404,6 @@ class GroupNormMasked:
   def __call__(self, x, mask):
     pass
 
-
-
 # TODO: depthwise conv (optional) #self.use_depthwise_conv = use_depthwise_conv
 # TODO: f0 decoder (optional for infer) #self.use_automatic_f0_prediction = use_automatic_f0_prediction
 # TODO: flow_share_parameter
@@ -427,7 +441,7 @@ class Synthesizer:
       g = g.sum(dim=1) # [N, 1, B, 1, H]
       g = g.transpose(0, -1).transpose(0, -2).squeeze(0) # [B, H, N]
     else:
-      if g.dim() == 1:
+      if len(g.shape) == 1:
         g = g.unsqueeze(0)
       g = self.emb_g(g).transpose(1, 2)
     x_mask = sequence_mask(c_lengths, c.shape[2]).unsqueeze(1).cast(c.dtype)
@@ -445,7 +459,7 @@ class Synthesizer:
     net_g = cls(hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, **hps.model)
     _ = load_checkpoint(weights_path, net_g, None, skip_list=["f0_decoder"])
     logging.debug(f"{cls.__name__}:Loaded model with hps: {hps}")
-    return net_g
+    return net_g, hps
 
 def randn_like(x): return Tensor.randn(*x.shape, dtype=x.dtype).to(device=x.device)
 
@@ -470,7 +484,7 @@ class Upsample:
     self.scale_factor=scale_factor
     self.torch_ups = torch.nn.Upsample(scale_factor=scale_factor)
   def forward(self, x):
-    return Tensor(self.torch_ups(torch.from_numpy(x.numpy())).numpy()).to(x.device)
+    return Tensor(self.torch_ups(torch.from_numpy(x.realize().numpy())).numpy()).to(x.device)
 
 class SineGen():
   def __init__(self, samp_rate, harmonic_num=0, sine_amp=0.1, noise_std=0.003, voice_threshold=0, flag_for_pulse=False):
@@ -483,15 +497,31 @@ class SineGen():
     def mod(x: Tensor, n: int) -> Tensor: return x - n * x.div(n).floor()  # TODO: this is what the % operator does in pytorch.
     rad_values = mod((f0_values / self.sampling_rate) , 1)  # convert to F0 in rad
     rand_ini = Tensor.rand(f0_values.shape[0], f0_values.shape[2], device=f0_values.device)  # initial phase noise
-    rand_ini[:, 0] = 0
-    rad_values[:, 0, :] = rad_values[:, 0, :] + rand_ini
+
+    #rand_ini[:, 0] = 0
+    m = Tensor.ones(f0_values.shape[0]).unsqueeze(1).pad2d((0,f0_values.shape[2]-1,0,0)).cast(dtypes.bool)
+    m = tilde(m)
+    rand_ini = Tensor.where(m, rand_ini, 0)
+
+    #rad_values[:, 0, :] = rad_values[:, 0, :] + rand_ini
+    tmp = rad_values[:, 0, :] + rand_ini
+    m = Tensor.ones(tmp.shape).pad2d((0,0,0,rad_values.shape[1]-1,0)).cast(dtypes.bool)
+    m = tilde(m)
+    tmp = tmp.unsqueeze(1).pad2d((0,0,0,rad_values.shape[1]-1,0))
+    rad_values = Tensor.where(m, rad_values, tmp)
+
     # TODO: optional flag_for_pulse. Not required for now.
     tmp_over_one = mod(rad_values.cumsum(1), 1)
     tmp_over_one_idx = padDiff(tmp_over_one) < 0
     cumsum_shift = Tensor.zeros_like(rad_values)
-    cumsum_shift[:, 1:, :] = tmp_over_one_idx * -1.0
+
+    #cumsum_shift[:, 1:, :] = tmp_over_one_idx * -1.0
+    tmp_over_one_idx = (tmp_over_one_idx * -1.0).pad2d((0,0,1,0))
+    cumsum_shift = tmp_over_one_idx
+
     sines = ((rad_values + cumsum_shift).cumsum(1) * 2 * np.pi).sin()
     return sines
+
   def forward(self, f0, upp=None):
     fn = f0.mul(Tensor([[range(1, self.harmonic_num + 2)]], dtype=dtypes.float32).to(f0.device))
     sine_waves = self._f02sine(fn) * self.sine_amp  #generate sine waveforms
@@ -569,28 +599,66 @@ def f0_to_coarse(f0 : Tensor):
   f0_coarse = f0_coarse + ((f0_coarse >= F0_BIN) * (F0_BIN - 1))
   return f0_coarse
 
-"""
-TODO: optional F0 decoder
-class FFT():
-  def __init__(self, hidden_channels, filter_channels, n_heads, n_layers=1, kernel_size=1, p_dropout=0., proximal_bias=False, proximal_init=True, **kwargs):
-    self.hidden_channels, self.filter_channels, self.n_heads, self.n_layers, self.kernel_size, self.p_dropout, self.proximal_bias, self.proximal_init = hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, proximal_bias, proximal_init
-    #self.drop = nn.Dropout()
-    #self.self_attn_layers = nn.
-    self.attn_layers, self.norm_layers_0, self.ffn_layers, self.norm_layers_1 = []
-    for _ in range(self.n_layers):
-      self.attn_layers.append(
-          MultiHeadAttention(hidden_channels, hidden_channels, n_heads, p_dropout=p_dropout, proximal_bias=proximal_bias, proximal_init=proximal_init)
-        )
+# TODO: VolumeExtractor not fully implemented, but no model yet encountered actually needs it
+class VolumeExtractor:
+  def __init__(self, hop_size=512):
+    self.hop_size = hop_size
+  def extract(self, audio:Tensor):
+    assert isinstance(audio, Tensor)
+    logging.warn("VolumeExtractor is not fully implemented!")
+    n_frames = int(audio.shape[-1] // self.hop_size)
+    audio2 = audio ** 2
+    audio2 = audio2.pad2d((int(self.hop_size // 2), int(self.hop_size + 1) // 2))  # TODO: pad(audio2, (int(self.hop_size // 2), int((self.hop_size + 1) // 2)), mode = 'reflect')
+    # TODO: torch.nn.functional.unfold(audio2[:,None,None,:],(1,self.hop_size),stride=self.hop_size)[:,:,:n_frames].mean(dim=1)[0]
+    volume = torch.sqrt(volume)
+    return volume
 
-class F0Decoder():
-  def __init__(self, out_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, spk_channels=0):
-    self.out_channels, self.hidden_channels, self.filter_channels, self.n_heads, self.n_layers, self.kernel_size, self.p_dropout, self.spk_channels = out_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, spk_channels
-    self.prenet = nn.Conv1d(hidden_channels, hidden_channels, 3, padding=1)
-    self.decoder = None
-    self.proj = nn.Conv1d(hidden_channels, out_channels, 1)
-    self.f0_prenet = nn.Conv1d(1, hidden_channels, 3, padding=1)
-    self.cond = nn.Conv1d(spk_channels, hidden_channels, 1)
-"""
+def get_unit_f0(encoder:ContentVec256L9, wav, tran, cluster_infer_ratio, speaker, hop_length, target_sample, f0_filter=False, cr_threshold=0.005, unit_interpolate_mode="left"):
+  f0_predictor = PMF0Predictor(hop_length, sampling_rate=target_sample)
+  f0, uv = f0_predictor.compute_f0_uv(wav)
+  if f0_filter and sum(f0) == 0: raise RuntimeError("No voice detected")
+  f0 = Tensor(f0.astype(np.float32)).float()
+  uv = Tensor(uv.astype(np.float32)).float()
+  f0 = f0 * 2 ** (tran / 12)
+  f0 = f0.unsqueeze(0)
+  uv = uv.unsqueeze(0)
+  resamp_16k = torchaudio.transforms.Resample(target_sample, 16000)
+  wav16k = resamp_16k(torch.from_numpy(wav[None,:]))[0].numpy()
+  wav16k = Tensor(wav16k)
+  c = encoder.encoder(wav16k)
+  c = repeat_expand_2d(c.squeeze(0), f0.shape[1], unit_interpolate_mode)
+  c = c.unsqueeze(0)
+  return c, f0, uv
+
+def repeat_expand_2d(content, target_len, mode="left"): # content : [h, t]
+  if mode == "left": return repeat_expand_2d_left(content, target_len)
+  raise NotImplementedError(f"unit_interpolation_mode={mode} not supported.")
+
+# TODO this is __very__ slow. Any way to make it faster?
+def repeat_expand_2d_left(content, target_len): # content : [h, t]
+  target = Tensor.zeros([content.shape[0], target_len], dtype=dtypes.float32).to(content.device)
+  src_len = content.shape[-1]
+  target = Tensor.zeros([content.shape[0], target_len], dtype=dtypes.float32).to(content.device)
+  temp = np.arange(src_len+1) * target_len / src_len
+  current_pos = 0
+  dim = content.shape[0]
+  pad_val = target_len - 1
+  for i in range(target_len):
+    mask = tilde(Tensor.ones(dim, 1).pad2d((i,pad_val-i,0,0)).cast(dtypes.bool))
+    if i < temp[current_pos+1]:
+
+      # target[:, i] = content[:, current_pos]
+      fill = content[:, current_pos].reshape(dim,1).pad2d((i,pad_val-i,0,0))
+      target = Tensor.where(mask, target, fill)
+
+    else:
+      current_pos += 1
+
+      # target[:, i] = content[:, current_pos]
+      fill = content[:, current_pos].reshape(dim,1).pad2d((i,pad_val-i,0,0))
+      target = Tensor.where(mask, target, fill)
+
+  return target
 
 def load_contentvec(model) -> ContentVec:
   weights_path = model[0]
@@ -639,25 +707,49 @@ def load_checkpoint_enc(checkpoint_path, model: ContentVec, optimizer=None, skip
         setattr(obj, "weight_v", weight_v.numpy())
         obj, v = getattr(parent, "weight"), weight_norm(weight_v, weight_g, 0)
         weight_g, weight_v, parent, skip = None, None, None, False
-      if not skip and obj.shape == v.shape: obj.assign(v.to(obj.device))
+      if not skip and obj.shape == v.shape:
+        #if v.dtype == dtypes.float16: v = Tensor(v.realize().numpy().astype(np.float32))
+        #if v.dtype == dtypes.float64: logging.WARNING("dtype.float64 used")
+        obj.assign(v.to(obj.device))
       elif not skip: logging.error(f"MISMATCH SHAPE IN {key}, {obj.shape} {v.shape}")
     except Exception as e: raise e
   logging.info(f"Loaded checkpoint '{checkpoint_path}' in {time.time() - start_time:.4f}s")
   return model, optimizer
 
+def pad_array(arr, target_length):
+  current_length = arr.shape[0]
+  if current_length >= target_length:
+    return arr
+  pad_width = target_length - current_length
+  pad_left = pad_width // 2
+  pad_right = pad_width - pad_left
+  padded_arr = np.pad(arr, (pad_left, pad_right), 'constant', constant_values=(0, 0))
+  return padded_arr
+
+def split_list_by_n(list_collection, n, pre=0):
+  for i in range(0, len(list_collection), n):
+    yield list_collection[i-pre if i-pre>=0 else i: i + n]
+
 SO_VITS_SVC_PATH = Path(__file__).parent.parent / "weights/So-VITS-SVC"
 VITS_MODELS = { # config_path, weights_path, config_url, weights_url
-  "saul_goodman" : (SO_VITS_SVC_PATH / "config_saul_gman.json", SO_VITS_SVC_PATH / "pretrained_saul_gman.pth", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/G_80000.pth")
+  "saul_goodman" : (SO_VITS_SVC_PATH / "config_saul_gman.json", SO_VITS_SVC_PATH / "pretrained_saul_gman.pth", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/G_80000.pth"),
+  "drake" : (SO_VITS_SVC_PATH / "config_drake.json", SO_VITS_SVC_PATH / "pretrained_drake.pth", "missing", "missing")
 }
 ENCODER_MODELS = { # weights_path, weights_url
   "contentvec": (SO_VITS_SVC_PATH / "contentvec_checkpoint.pt", "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/hubert_base.pt")
 }
 
+AUDIO_PATH = Path(__file__).parent.parent / "recording.wav"
+RESULT_PATH = Path(__file__).parent.parent / "output.wav"
+
+from examples.sovits_helpers import slicer
+from examples.sovits_helpers.f0_predictor import PMF0Predictor
+
 if __name__=="__main__":
   logging.basicConfig(stream=sys.stdout, level=(logging.INFO if DEBUG < 1 else logging.DEBUG))
 
   encoder_model = "contentvec"
-  vits_model = "saul_goodman"
+  vits_model = "drake"
   encoder_location = ENCODER_MODELS[encoder_model]
   vits_location = VITS_MODELS[vits_model]
 
@@ -666,6 +758,109 @@ if __name__=="__main__":
 
   # 1. ContentVec
   contentvec256L9 = ContentVec256L9.load_model(encoder_location[0], encoder_location[1])
-
   # 2. Synthesizer
-  net_g = Synthesizer.load_model(config_path=vits_location[0], config_url=vits_location[2], weights_path=vits_location[1], weights_url=vits_location[3])
+  net_g, hps = Synthesizer.load_model(config_path=vits_location[0], config_url=vits_location[2], weights_path=vits_location[1], weights_url=vits_location[3])
+
+  target_sample = hps.data.sampling_rate
+  spk2id = hps.spk
+  unit_interpolate_mode = hps.data.unit_interpolate_mode if hasattr(hps.data, "unit_interpolate_mode") and hps.data.unit_interpolate_mode is not None else 'left'
+  vol_embedding = hps.model.vol_embedding if hasattr(hps.data, "vol_embedding") and hps.model.vol_embedding is not None else False
+  speech_encoder = hps.model.speech_encoder if hasattr(hps.data, "speech_encoder") and hps.model.speech_encoder is not None else 'vec256l9'
+  feature_retrieval = False
+  hop_length = hps.data.hop_length
+  target_sample = hps.data.sampling_rate
+
+  assert unit_interpolate_mode == "left"
+
+  # args
+  slice_db = -40
+  clip_seconds = 0.
+  lg_num = 0.  # linear gradient
+  pad_seconds = 0.5
+  shallow_diffuison = False
+  only_diffusion = False
+  speaker = "drake01"
+  spk_mix = False
+  tran = 0.
+  cluster_infer_ratio = 0.
+  cr_threshold = 0.05
+  noise_scale = 0.4
+
+  # 3. VolumeExtractor
+  #extractor = VolumeExtractor()
+
+  ### Loading audio and slicing ###
+  assert os.path.isfile(AUDIO_PATH)
+  assert Path(AUDIO_PATH).suffix == ".wav"
+  chunks = slicer.cut(AUDIO_PATH, db_thresh=slice_db)
+  audio_data, audio_sr = slicer.chunks2audio(AUDIO_PATH, chunks)
+
+  per_size = int(clip_seconds * audio_sr)
+  lg_size = int(lg_num * audio_sr)
+
+  ### Infer per slice ###
+  global_frame = 0
+  audio = []
+  for (slice_tag, data) in audio_data:
+    logging.info(f"====segment start, {round(len(data) / audio_sr, 3)}s====")
+    length = int(np.ceil(len(data) / audio_sr * target_sample))
+    if slice_tag:
+      print("empty segment")
+      _audio = np.zeros(length)
+      audio.extend(list(pad_array(_audio, length)))
+      global_frame += length // hop_length
+      continue
+    if per_size != 0:
+      datas = split_list_by_n(data, per_size, lg_size)
+    else:
+      datas = [data]
+    for k, dat in enumerate(datas):
+      per_length = int(np.ceil(len(dat) / audio_sr * target_sample)) if clip_seconds!=0 else length
+      if clip_seconds != 0: raise NotImplementedError("Lets see if thats not too much")
+      pad_len = int(audio_sr * pad_seconds)
+      dat = np.concatenate([np.zeros([pad_len]), dat, np.zeros([pad_len])])
+      raw_path = io.BytesIO()
+      soundfile.write(raw_path, dat, audio_sr, format="wav")
+      raw_path.seek(0)
+
+      ### Infer START ###
+      torchaudio.set_audio_backend("soundfile")
+      wav, sr = torchaudio.load(raw_path)
+      audio_resample_transform = torchaudio.transforms.Resample(sr, target_sample)  # :(
+      wav = audio_resample_transform(wav).numpy()[0]
+      if spk_mix: raise NotImplementedError("spk_mix not forseen")
+      else:
+        speaker_id = spk2id[speaker]
+        if not speaker_id and type(speaker) is int:
+          if len(spk2id.__dict__) >= speaker: speaker_id = speaker
+        if speaker_id is None: raise RuntimeError(f"speaker={speaker} not in the speaker list")
+        sid = Tensor([int(speaker_id)], dtype=dtypes.int64).unsqueeze(0)  # TODO: self.device
+        c, f0, uv = get_unit_f0(encoder=contentvec256L9,
+                                wav=wav,
+                                tran=tran,
+                                cluster_infer_ratio=cluster_infer_ratio,
+                                speaker=speaker,
+                                hop_length=hop_length,
+                                target_sample=target_sample,
+                                cr_threshold=cr_threshold,
+                                unit_interpolate_mode=unit_interpolate_mode)
+        n_frames = f0.shape[1]
+        start = time.time()
+        out_audio, f0 = net_g.infer(c.realize(), f0=f0.realize(), uv=uv.realize(), g=sid.realize(), noise_scale=noise_scale, vol=None)
+        print(f"out_audio.device={out_audio.device}")
+        out_audio = out_audio[0,0].float().realize()
+        use_time = time.time() - start
+        logging.info("vits used time:{}".format(use_time))
+      ### Infer END ###
+
+      out_sr, out_frame = out_audio.shape[-1], n_frames
+      global_frame += out_frame
+      _audio = out_audio.numpy()
+      pad_len = int(target_sample * pad_seconds)
+      _audio = _audio[pad_len:-pad_len]
+      _audio = pad_array(_audio, per_length)
+
+      audio.extend(list(_audio))
+
+  audio = np.array(audio)
+  soundfile.write(RESULT_PATH, audio, target_sample, format="flac")
