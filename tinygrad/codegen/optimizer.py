@@ -7,19 +7,17 @@ from tinygrad.lazy import LazyBuffer
 
 def apply_opt(k, x):
   if DEBUG >= 2: print(f"Shape: {k.full_shape}; Applying opt: {list(y for y in x if y[1] != 1)}")
-  first_reduce = k.first_reduce  # if a reduce dimension is upcasted to 1, then first_reduce will be the next reduce dimension
   for axis, amt, typ in x:
     if axis is None or amt == 1: continue
     if typ == "R":
       typ = "U"
-      axis += first_reduce
+      axis += k.local_dims
     assert k.full_shape[axis] % amt == 0, "no longer valid shift"
     if typ == "U":
       k.shift_to(axis, amt)
       k.upcast()
     elif typ == "L":
       k.shift_to(axis, amt, insert_before=k.first_reduce)
-      first_reduce += 1
       k.local_dims += 1
     print(k.full_shape)
   k.simplify_ones()
@@ -53,12 +51,12 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], runt
     # TODO: the order of the locals might improve things too
     opts.append(ng.p.TransitionChoice([(i,s,"U") for s in UPCASTS + extra_upcasts if k.full_shape[i]%s == 0]))
     opts.append(ng.p.TransitionChoice([(i,s,"L") for s in LOCALS + extra_locals if k.full_shape[i]%s == 0]))
-  for i in range(k.shape_len-k.first_reduce):
-    opts.append(ng.p.TransitionChoice([(i,s,"R") for s in UPCASTS + extra_upcasts if k.full_shape[k.first_reduce+i]%s == 0]))
+  for i in range(k.first_reduce, k.shape_len):
+    opts.append(ng.p.TransitionChoice([(i,s,"R") for s in UPCASTS + extra_upcasts if k.full_shape[i]%s == 0]))
   if len(opts) == 0: return "BASELINE"
   search_space = prod([len(x.choices) for x in opts])
   st = time.perf_counter()
-  optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, 10))
+  optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, 200))
   if suggestion is not None:
     optimizer.suggest(suggestion)
   recommendation = optimizer.minimize(opt)
@@ -111,9 +109,8 @@ def hand_coded_optimizations(k:Linearizer):
 
   keys = [(typ, axis) for axis in range(k.first_reduce) for typ in 'UL']
   if k.reduceop is not None:
-    keys += [('R', axis) for axis in range(k.shape_len-k.first_reduce)]
+    keys += [('R', axis) for axis in range(k.first_reduce, k.shape_len)]
   suggestion = dict.fromkeys(keys, 1)
-  og_first_reduce = k.first_reduce  # k.first_reduce may not point to the actual original first after some operations
 
   # if there's images in the earlybufs, we have to make an axis the 4 loading one
   required_optimizations(k, suggestion, early_only=True)
@@ -239,16 +236,16 @@ def hand_coded_optimizations(k:Linearizer):
   # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
   if k.first_reduce < (k.shape_len-k.upcasted) and (len(list(k.shape_offsets(k.full_buf_index))) <= 4 or not any(r for _,_,r in k.upcasted_axis(k.full_buf_index))):
     if (s:=k.full_unupcasted_shape[-1]) <= 32:
-      suggestion['R', k.axis_idxs[len(k.full_unupcasted_shape) - 1] - og_first_reduce] = s
+      suggestion['R', k.axis_idxs[len(k.full_unupcasted_shape) - 1]] = s
       k.upcast()
       # if it's small, upcast a second reduce dimension too
       if k.first_reduce < (k.shape_len-k.upcasted) and s <= 3 and (t := k.full_unupcasted_shape[-1]) <= 3:
-        suggestion['R', k.axis_idxs[len(k.full_unupcasted_shape) - 1] - og_first_reduce] = t
+        suggestion['R', k.axis_idxs[len(k.full_unupcasted_shape) - 1]] = t
         k.upcast()
     else:
       for splits in [4]:
         if k.full_unupcasted_shape[-1]%splits == 0:
-          suggestion['R', k.axis_idxs[len(k.full_unupcasted_shape) - 1] - og_first_reduce] = splits
+          suggestion['R', k.axis_idxs[len(k.full_unupcasted_shape) - 1]] = splits
           k.shift_to(len(k.full_unupcasted_shape)-1, splits, insert_before=len(k.full_unupcasted_shape))
           k.upcast()
           break
