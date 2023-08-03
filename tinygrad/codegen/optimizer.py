@@ -42,7 +42,6 @@ def apply_opt(k, x):
     elif typ == "L":
       k.shift_to(axis, amt, insert_before=k.first_reduce)
       k.local_dims += 1
-    print(k.full_shape)
   k.simplify_ones()
 
 UPCASTS = [1,2,3,4,5,6,7,8]

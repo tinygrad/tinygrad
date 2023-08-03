@@ -167,6 +167,7 @@ class Compiled:
     if output.realized:
       if output.realized.__class__ is RawConst: output.realized = None  # can't assign to RawConst
       for a in ast.buffers:
+        # TODO: KOPT does not yet saving and restoring buffers
         if a.realized == output.realized and not a.st.contiguous or getenv('KOPT', 0):
           output.realized = None
           break
