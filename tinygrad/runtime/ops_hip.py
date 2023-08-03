@@ -1,10 +1,14 @@
 import numpy as np
 import ctypes
-import extra.hip_wrapper as hip
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, getenv
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
+HIP_CPU=getenv("HIP_CPU")
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
+if HIP_CPU: 
+  import extra.hip_cpu_wrapper as hip
+else:
+  import extra.hip_wrapper as hip
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
 if DEBUG >= 5:
@@ -16,43 +20,67 @@ if DEBUG >= 5:
 class RawHIPBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype): super().__init__(size, dtype, hip.hipMalloc(size * dtype.itemsize))
   def __del__(self): hip.hipFree(self._buf)
-  def _copyin(self, x:np.ndarray): hip.hipMemcpyAsync_htod(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, 0)
-  def _copyout(self, x:np.ndarray): hip.hipMemcpy_dtoh(x.ctypes.data, self._buf, self.size * self.dtype.itemsize)
+  def _copyin(self, x:np.ndarray): hip.hipMemcpy(self._buf, x.ctypes.data_as(ctypes.c_void_p), self.size * self.dtype.itemsize, hip.hipMemcpyHostToDevice)
+  def _copyout(self, x:np.ndarray): hip.hipMemcpy(x.ctypes.data_as(ctypes.c_void_p), self._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToHost)
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
     try:
       if not binary:
-        prog = hip.hiprtcCreateProgram(prg, name, [], [])
-        device_properties = hip.hipGetDeviceProperties(hip.hipGetDevice())
-        hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
-        prg = hip.hiprtcGetCode(prog)
+        if HIP_CPU:
+          prg = "#include <hip/hip_runtime.h>\n" +  prg
+        else:
+          prog = hip.hiprtcCreateProgram(prg, name, [], [])
+          device_properties = hip.hipGetDeviceProperties(hip.hipGetDevice())
+          hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
+          prg = hip.hiprtcGetCode(prog)
     except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
     if DEBUG >= 5:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
-
-    module = hip.hipModuleLoadData(prg)
-    self.prg = hip.hipModuleGetFunction(module, name)
+    if HIP_CPU:
+      import tempfile, hashlib, os, subprocess
+      fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.so"
+      if not os.path.exists(fn):
+        subprocess.check_output(args=('clang -g -std=c++20 --stdlib=libstdc++ -shared -O2 -Wall -Werror -x c++ -ltbb -ltbbmalloc -fPIC --rtlib=compiler-rt - -o '+fn+'.tmp').split(), input=prg.encode('utf-8'))
+        os.rename(fn+'.tmp', fn)
+      self.lib = ctypes.CDLL(fn)
+      self.prg = self.lib[f"launch_kernel_{name}"]
+    else:
+      module = hip.hipModuleLoadData(prg)
+      self.prg = hip.hipModuleGetFunction(module, name)
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait:
       start, end = hip.hipEventCreate(), hip.hipEventCreate()
       hip.hipEventRecord(start)
-    class PackageStruct(ctypes.Structure):
-      _fields_ = [(f'field{idx}', ctypes.c_void_p) for idx in range(len(args))]
-    struct = PackageStruct(*[data._buf for data in args])
-    hip.hipModuleLaunchKernel(self.prg, global_size[0], global_size[1], global_size[2], local_size[0], local_size[1], local_size[2], 0, 0, struct)
+    if HIP_CPU:
+      local_size = (local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)
+      global_size = global_size + [1] * (3 - len(global_size))
+      self.prg(global_size[0], global_size[1], global_size[2], local_size[0], local_size[1], local_size[2], 0, ctypes.c_void_p(0), *[data._buf for data in args])
+    else:
+      class PackageStruct(ctypes.Structure):
+        _fields_ = [(f'field{idx}', ctypes.c_void_p) for idx in range(len(args))]
+      struct = PackageStruct(*[data._buf for data in args])
+      hip.hipModuleLaunchKernel(self.prg, global_size[0], global_size[1], global_size[2], local_size[0], local_size[1], local_size[2], 0, 0, struct)
     if wait:
       hip.hipEventRecord(end)
       hip.hipEventSynchronize(end)
       return hip.hipEventElapsedTime(start, end)*1e-3
 
+from typing import List, Tuple
+from tinygrad.helpers import DType
+def render_kernel(self, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str,List[int],List[int]]:
+    return self.super().render_kernel(kernel, bufs, global_size, local_size, prekernel)
+class HIPLanguage(CStyleLanguage):
+    def render_kernel(self, kernel: List[str], bufs: List[Tuple[str, DType]], global_size: List[int], local_size: List[int], prekernel: List[str]) -> Tuple[str, List[int], List[int]]:
+      prg, gs, ls = super().render_kernel(kernel, bufs, global_size, local_size, prekernel)
+      return prg + (hip.genKernelWrapper(bufs) if HIP_CPU else ""), gs, ls
 class HIPCodegen(CStyleCodegen):
-  lang = CStyleLanguage(
-    kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
+  lang = HIPLanguage(
+    kernel_prefix = ("#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" if not HIP_CPU else "") + """
 __device__ float4 max(float4 x, float4 y) { return float4(max(x.x, y.x), max(x.y, y.y), max(x.z, y.z), max(x.w, y.w)); }
 __device__ float4 pow(float x, float4 y) { return float4(pow(x, y.x), pow(x, y.y), pow(x, y.z), pow(x, y.w)); }
 __device__ float4 pow(float4 x, float4 y) { return float4(pow(x.x, y.x), pow(x.y, y.y), pow(x.z, y.z), pow(x.w, y.w)); }
@@ -61,7 +89,10 @@ __device__ float4 exp2(float4 x) { return float4(exp2(x.x), exp2(x.y), exp2(x.z)
 __device__ float4 sin(float4 x) { return float4(sin(x.x), sin(x.y), sin(x.z), sin(x.w)); }
 extern "C" __global__
     """,
-    smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4", uses_vload=True,
+    smem_prefix = "__shared__ ", 
+    barrier = "__syncthreads();", 
+    float4 = "make_float4", 
+    uses_vload=True,
     half_prekernel = "#include <hip/hip_fp16.h>\nusing half4 = HIP_vector_type<half, 4>;" + """
 __device__ float vload_half(size_t offset, const half *p) { return (float)*(p + offset); }
 __device__ float2 vload_half2(size_t offset, const half *p) { return make_float2((float)*(p + offset*2), (float)*(p + offset*2 + 1)); }
@@ -71,6 +102,9 @@ __device__ void vstore_half2(float2 data, size_t offset, half *p) { *(p + offset
 __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset*4) = (half)data.x; *(p + offset*4 + 1) = (half)data.y; *(p + offset*4 + 2) = (half)data.z; *(p + offset*4 + 3) = (half)data.w; }
     """,
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
-    lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
+    lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
+
+  )
+  
 
 HIPBuffer = Compiled(RawHIPBuffer, HIPCodegen, HIPProgram, hip.hipDeviceSynchronize)
