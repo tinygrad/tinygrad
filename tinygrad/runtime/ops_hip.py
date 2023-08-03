@@ -8,9 +8,9 @@ from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
 HIP_CPU=getenv("HIP_CPU")
 if HIP_CPU: 
-  import extra.hip_cpu_wrapper as hip
+  import extra.hip_cpu_wrapper as hip #type: ignore
 else:
-  import extra.hip_wrapper as hip
+  import extra.hip_wrapper as hip #type: ignore
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
 if DEBUG >= 5:

@@ -26,6 +26,12 @@ if not os.path.exists(fn):
   os.rename(fn+'.tmp', fn)
 _libhip = ctypes.CDLL(fn)
 
+hipMemcpyHostToHost = 0
+hipMemcpyHostToDevice = 1
+hipMemcpyDeviceToHost = 2
+hipMemcpyDeviceToDevice = 3
+hipMemcpyDefault = 4
+
 def hipCheckStatus(status):
   if status != 0:
     raise RuntimeError('HIP error %s' % status)
@@ -35,57 +41,36 @@ def hipDeviceSynchronize():
   hipCheckStatus(status)
 
 _libhip['my_hipMalloc'].restype = int
-_libhip['my_hipMalloc'].argtypes = [ctypes.POINTER(ctypes.c_void_p),
-                              ctypes.c_size_t]
-
-
+_libhip['my_hipMalloc'].argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
 def hipMalloc(count):
   ptr = ctypes.c_void_p()
   c_count = ctypes.c_size_t(count)
-
   status = _libhip['my_hipMalloc'](ctypes.byref(ptr), c_count)
   hipCheckStatus(status)
   return ptr
 
 _libhip['my_hipFree'].restype = int
 _libhip['my_hipFree'].argtypes = [ctypes.c_void_p]
-
-
 def hipFree(ptr):
   status = _libhip['my_hipFree'](ptr)
   hipCheckStatus(status)
   return ptr
 
-hipMemcpyHostToHost = 0
-hipMemcpyHostToDevice = 1
-hipMemcpyDeviceToHost = 2
-hipMemcpyDeviceToDevice = 3
-hipMemcpyDefault = 4
-
-
 _libhip['my_hipMemcpy'].restype = int
-_libhip['my_hipMemcpy'].argtypes = [ctypes.c_void_p, ctypes.c_void_p,
-                                   ctypes.c_size_t, ctypes.c_int]
-
+_libhip['my_hipMemcpy'].argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
 def hipMemcpy(dst, src, count, direction):
-  #print('dst', type(dst), 'src', type(src), src)
   status = _libhip['my_hipMemcpy'](dst, src, ctypes.c_size_t(count), direction)
   hipCheckStatus(status)
 
-
 _libhip['my_hipMemcpyAsync'].restype = int
-_libhip['my_hipMemcpyAsync'].argtypes = [ctypes.c_void_p, ctypes.c_void_p,
-                                   ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p]
-
+_libhip['my_hipMemcpyAsync'].argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p]
 def hipMemcpyAsync_htod(dst, src, count, stream):
   status = _libhip['my_hipMemcpyAsync'](dst, src, ctypes.c_size_t(count), hipMemcpyHostToDevice, stream)
   hipCheckStatus(status)
 
-
 def hipMemcpyAsync_dtoh(dst, src, count, stream):
   status = _libhip['my_hipMemcpyAsync'](dst, src, ctypes.c_size_t(count), hipMemcpyDeviceToHost, stream)
   hipCheckStatus(status)
-
 
 def hipMemcpyAsync(dst, src, count, direction, stream):
   status = _libhip['my_hipMemcpyAsync'](dst, src, ctypes.c_size_t(count), direction, stream)
@@ -97,37 +82,26 @@ def hipEventCreate():
   hipCheckStatus(status)
   return ptr
 
-
 _libhip['my_hipEventRecord'].restype = int
 _libhip['my_hipEventRecord'].argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-
-
 def hipEventRecord(event, stream=None):
   status = _libhip['my_hipEventRecord'](event, stream)
   hipCheckStatus(status)
 
-
 _libhip['my_hipEventDestroy'].restype = int
 _libhip['my_hipEventDestroy'].argtypes = [ctypes.c_void_p]
-
-
 def hipEventDestroy(event):
   status = _libhip['my_hipEventDestroy'](event)
   hipCheckStatus(status)
 
 _libhip['my_hipEventSynchronize'].restype = int
 _libhip['my_hipEventSynchronize'].argtypes = [ctypes.c_void_p]
-
-
 def hipEventSynchronize(event):
   status = _libhip['my_hipEventSynchronize'](event)
   hipCheckStatus(status)
 
-
 _libhip['my_hipEventElapsedTime'].restype = int
-_libhip['my_hipEventElapsedTime'].argtypes = [ctypes.POINTER(
-    ctypes.c_float), ctypes.c_void_p, ctypes.c_void_p]
-
+_libhip['my_hipEventElapsedTime'].argtypes = [ctypes.POINTER(ctypes.c_float), ctypes.c_void_p, ctypes.c_void_p]
 
 def hipEventElapsedTime(start, stop):
   t = ctypes.c_float()
@@ -137,29 +111,15 @@ def hipEventElapsedTime(start, stop):
 
 _libhip['my_hipStreamSynchronize'].restype = int
 _libhip['my_hipStreamSynchronize'].argtypes = [ctypes.c_void_p]
-
 def hipStreamSynchronize(stream):
   status = _libhip['my_hipStreamSynchronize'](stream)
   hipCheckStatus(status)
 
-# Define some unused dummy functions to satisfy mypy
-def hiprtcCreateProgram(source, name, header_names, header_sources):
-  return ""
-
-def hipGetDeviceProperties(deviceId: int):
-  return ""
-
-def hiprtcCompileProgram(prog, options):
-  pass
-
-def hiprtcGetCode(prog):
-  return ""
-
-def hipModuleLoadData(data):
-  return ""
-
-def hipModuleGetFunction(module, func_name):
-  return ""
-
-def hipModuleLaunchKernel(kernel, bx, by, bz, tx, ty, tz, shared, stream, struct):
-  pass
+def hipGetDevice(): pass
+def hiprtcCreateProgram(source, name, header_names, header_sources): pass
+def hipGetDeviceProperties(deviceId: int): pass
+def hiprtcCompileProgram(prog, options): pass
+def hiprtcGetCode(prog): pass
+def hipModuleLoadData(data): pass
+def hipModuleGetFunction(module, func_name): pass
+def hipModuleLaunchKernel(kernel, bx, by, bz, tx, ty, tz, shared, stream, struct): pass

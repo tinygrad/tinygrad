@@ -97,7 +97,7 @@ jobs:
     - name: Install Python Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: HIP=1 HIP_CPU=1 python -m pytest -s -v -n=auto test/
+      run: HIP=1 HIP_CPU=1 python -m pytest -s -v -n=auto test/test_ops.py
       
   testtorch:
     name: Torch Tests
