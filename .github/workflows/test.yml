@@ -39,6 +39,8 @@ jobs:
       run: sudo apt install sloccount
     - name: Check <5000 lines
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
+    - name: Check shared memory info
+      run: sudo lsipc
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
