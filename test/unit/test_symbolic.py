@@ -270,6 +270,12 @@ class TestSymbolicVars(unittest.TestCase):
     assert sym_vars(a+b) == [a, b]
     assert sym_vars(a*3) == [a]
 
+class TestSymbolicMinMax(unittest.TestCase):
+  def test_min_max_known(self):
+    a = Variable("a", 1, 8)
+    assert max(1, a) == max(a, 1) == a
+    assert min(1, a) == min(a, 1) == 1
+
 if __name__ == '__main__':
   unittest.main()
 
