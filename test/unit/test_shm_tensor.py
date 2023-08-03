@@ -1,5 +1,6 @@
 import unittest
 import multiprocessing.shared_memory as shared_memory
+from tinygrad.helpers import CI
 from tinygrad.runtime.ops_shm import RawShmBuffer
 from tinygrad.tensor import Tensor, Device
 import numpy as np
@@ -19,8 +20,9 @@ class TestRawShmBuffer(unittest.TestCase):
     assert np.allclose(t.numpy(), t2.numpy())
     s.unlink()
 
+  @unittest.skipIf(CI, "CI doesn't like big mmaps")
   def test_e2e_big(self):
-    t = Tensor.randn(2048, 2048).realize()
+    t = Tensor.randn(2048, 2048, 8).realize()
 
     # copy to shm
     shm_name = (s := shared_memory.SharedMemory(create=True, size=t.nbytes())).name
