@@ -295,9 +295,8 @@ jobs:
           load: true
           push: false
           tags: tinygrad-arm64
-          outputs: /tmp/buildx-docs
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: ~/.cache/buildx,type=gha
+          cache-to: ~/.cache/buildx,mode=max
       # - name: Test Ops
       #   run: docker run -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 python3 -m pytest -n=auto test/test_ops.py
       # - name: Test Dtypes
