@@ -103,7 +103,7 @@ __device__ float4 log2(float4 x) { return float4(log2(x.x), log2(x.y), log2(x.z)
 __device__ float4 exp2(float4 x) { return float4(exp2(x.x), exp2(x.y), exp2(x.z), exp2(x.w)); }
 __device__ float4 sin(float4 x) { return float4(sin(x.x), sin(x.y), sin(x.z), sin(x.w)); }
 extern "C" __global__
-    """, smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4", uses_vload=True,
+    """, smem_prefix = "__shared__ ", barrier = "__syncthreads();" if not HIP_CPU else "", float4 = "make_float4", uses_vload=True,
     half_prekernel = ("#include <hip/hip_fp16.h>\nusing half4 = HIP_vector_type<half, 4>;\n" if not HIP_CPU else "using half_float::half; MAKE_VECTOR_TYPE(half, half);\n") + 
 """
 __device__ float vload_half(size_t offset, const half *p) { return (float)*(p + offset); }
@@ -114,7 +114,6 @@ __device__ void vstore_half2(float2 data, size_t offset, half *p) { *(p + offset
 __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset*4) = (half)data.x; *(p + offset*4 + 1) = (half)data.y; *(p + offset*4 + 2) = (half)data.z; *(p + offset*4 + 3) = (half)data.w; }
     """,
     gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
-    lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
-  )
+    lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 
 HIPBuffer = Compiled(RawHIPBuffer, HIPCodegen, HIPProgram, hip.hipDeviceSynchronize)
