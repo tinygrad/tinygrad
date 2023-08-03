@@ -301,7 +301,8 @@ jobs:
         with:
           file: test/extra/arm64_dockerfile
           platforms: linux/arm64
-          targe: base
+          context: ./app
+          target: base
           load: true
           push: false
           tags: tinygrad-arm64
