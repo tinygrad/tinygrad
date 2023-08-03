@@ -116,7 +116,8 @@ def cut(audio_path, db_thresh=-30, min_len=5000):
     slicer = Slicer(
         sr=sr,
         threshold=db_thresh,
-        min_length=min_len
+        min_length=min_len,
+        max_sil_kept=300  # TODO
     )
     chunks = slicer.slice(audio)
     return chunks
