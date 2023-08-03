@@ -85,7 +85,7 @@ class TestSymbolicReshape(unittest.TestCase):
     with self.assertRaises(AssertionError):
       t = Tensor.rand(3, 4).reshape(Variable("too_big", 100, 200), 4)
 
-class TestSymbolicReshape(unittest.TestCase):
+class TestSymbolicExpand(unittest.TestCase):
   def test_expand_into_symbols(self):
     vi = Variable("i", 1, 10)
     a = Tensor([[1], [2], [3]]).expand((3, vi))
@@ -93,3 +93,9 @@ class TestSymbolicReshape(unittest.TestCase):
     vj = Variable("j", 1, 10)
     a = a.reshape(3, vi, 1).expand((3, vi, vj))
     assert a.shape == (3, vi, vj)
+
+  def test_plus_expands_constant(self):
+    vi = Variable("i", 1, 10)
+    a = Tensor.rand(3, 4).reshape(3, vi)
+    a = a + 1
+    assert a.shape == (3, vi)

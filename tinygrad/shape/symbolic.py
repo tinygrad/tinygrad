@@ -28,6 +28,7 @@ class Node:
   def hash(self) -> int: return hash(self.key)
   def __repr__(self): return "<"+self.key+">"
   def __hash__(self): return self.hash
+  def __bool__(self): return not (self.max == self.min == 0)
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
@@ -119,7 +120,7 @@ class Node:
   def ands(nodes:List[Node]) -> Node:
     if not nodes: return NumNode(1)
     if len(nodes) == 1: return nodes[0]
-    if any(x.min == x.max == 0 for x in nodes): return NumNode(0)
+    if any(not x for x in nodes): return NumNode(0)
 
     # filter 1s
     nodes = [x for x in nodes if x.min != x.max]
