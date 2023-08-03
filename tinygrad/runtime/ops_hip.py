@@ -74,9 +74,9 @@ class HIPProgram:
 
 
 class HIPLanguage(CStyleLanguage):
-    def render_kernel(self, kernel: List[str], bufs: List[Tuple[str, DType]], global_size: List[int], local_size: List[int], prekernel: List[str]) -> Tuple[str, List[int], List[int]]:
-      prg, gs, ls = super().render_kernel(kernel, bufs, global_size, local_size, prekernel)
-      return prg + (f"""
+  def render_kernel(self, kernel: List[str], bufs: List[Tuple[str, DType]], global_size: List[int], local_size: List[int], prekernel: List[str]) -> Tuple[str, List[int], List[int]]:
+    prg, gs, ls = super().render_kernel(kernel, bufs, global_size, local_size, prekernel)
+    return prg + (f"""
 extern "C" void launch_kernel_KERNEL_NAME_PLACEHOLDER(
   std::uint32_t grid_dim_x,
   std::uint32_t grid_dim_y,
