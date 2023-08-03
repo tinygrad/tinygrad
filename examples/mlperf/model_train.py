@@ -15,7 +15,15 @@ def train_resnet():
   from models.resnet import ResNet50
   from extra.datasets.imagenet import iterate, get_val_files
   from extra.lr_scheduler import CosineAnnealingLR
-  from extra.training import sparse_categorical_crossentropy
+
+  def cross_entropy(out, Y, label_smoothing=0):
+    num_classes = out.shape[-1]
+    YY = Y.flatten().astype(np.int32)
+    y = np.zeros((YY.shape[0], num_classes), np.float32)
+    y[range(y.shape[0]),YY] = -1.0*num_classes
+    y = y.reshape(list(Y.shape)+[num_classes])
+    y = Tensor(y)
+    return (1 - label_smoothing) * out.mul(y).mean() + (-1 * label_smoothing * out.mean())
 
   seed = getenv('SEED', 42)
   Tensor.manual_seed(seed)
@@ -29,7 +37,7 @@ def train_resnet():
   parameters = get_parameters(model)
 
   BS = 16
-  lr = BS*1e-3
+  lr = 0.256 * (BS / 256)  # Linearly scale from BS=256, lr=0.256
   epochs = 50
   optimizer = optim.SGD(parameters, lr, momentum=.875, weight_decay=1/2**15)
   scheduler = CosineAnnealingLR(optimizer, epochs)
@@ -39,7 +47,7 @@ def train_resnet():
   def train_step(X, Y):
     optimizer.zero_grad()
     out = model.forward(X)
-    loss = sparse_categorical_crossentropy(out, Y)
+    loss = cross_entropy(out, Y, label_smoothing=0.1)
     loss.backward()
     optimizer.step()
     scheduler.step()

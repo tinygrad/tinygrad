@@ -38,7 +38,7 @@ import torchvision.transforms.functional as F
 from torchvision.transforms import RandomResizedCrop
 def preprocess(img, val):
   if not val:
-    rrc = RandomResizedCrop(224)
+    rrc = RandomResizedCrop(224, scale=(0.08, 1.0), ratio=(3/4, 4/3))
     img = rrc(img)
     img = rand_flip(np.array(img))
   else:
