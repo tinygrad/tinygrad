@@ -188,7 +188,7 @@ class Linearizer:
 
     # parameters
     self.group_for_reduce: List[int] = []
-    self.axis_idxs: Optional[List[Optional[int]]] = None  # mapping from axes to axes before upcasts etc
+    self.axis_idxs: Optional[List[Optional[int]]] = None  # mapping from axes to canonical/original shape (before upcasts etc)
     self.upcasted: int = 0
     self.local_dims: int = 0
     self.local_alias: Dict[int, LocalBuffer] = {}

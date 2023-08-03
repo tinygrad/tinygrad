@@ -5,6 +5,29 @@ from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.lazy import LazyBuffer
 
+# ******************** optimizer simplifiers ********************
+# these take in axes in the current view, and store suggestions with axes indexed in the canonical/original shape.
+
+def shift_upcast(k, axis, amount, suggestion):
+  suggestion['U', k.axis_idxs[axis]] = amount
+  k.shift_to(axis, amount=amount)
+  k.upcast()
+
+def shift_local(k, axis, amount, suggestion):
+  suggestion['L', k.axis_idxs[axis]] = amount
+  k.shift_to(axis, amount=amount, insert_before=k.first_reduce-k.local_dims)
+  k.local_dims += 1
+
+# upcast amount off of the last reduce dimension
+def shift_reduce(k, suggestion, axis=None, amount=None):
+  if axis is None: axis = len(k.full_unupcasted_shape) - 1
+  if amount is None: amount = k.full_unupcasted_shape[-1]
+  suggestion['R', k.axis_idxs[axis]] = amount
+  if amount != k.full_shape[axis]: k.shift_to(axis, amount=amount, insert_before=len(k.full_unupcasted_shape))
+  k.upcast()
+
+# ******************** searching optimizer ********************
+
 def apply_opt(k, x):
   if DEBUG >= 2: print(f"Shape: {k.full_shape}; Applying opt: {list(y for y in x if y[1] != 1)}")
   for axis, amt, typ in x:
@@ -100,9 +123,7 @@ def required_optimizations(k:Linearizer, suggestion, early_only=False):
     if (not early_only or buf in k.earlybufs) and k.bufs[buf_index].dtype.__class__ is ImageDType:
       assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {k.bufs[buf_index]}"
       if all(x < (k.shape_len-k.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in k.upcast_in_mid_reduce_axes:
-        suggestion['U', k.axis_idxs[unit_stride_axes_mul_4[0]]] = 4
-        k.shift_to(unit_stride_axes_mul_4[0], 4)
-        k.upcast()
+        shift_upcast(k, unit_stride_axes_mul_4[0], 4, suggestion)
 
 def hand_coded_optimizations(k:Linearizer):
   k.process()
@@ -225,9 +246,7 @@ def hand_coded_optimizations(k:Linearizer):
     if len(xb_choices):
       xb_choices = sorted(xb_choices)
       if DEBUG >= 4: print(f"float4 merging axis : {xb_choices}")
-      suggestion['U', k.axis_idxs[xb_choices[0][2]]] = xb_choices[0][3]
-      k.shift_to(xb_choices[0][2], amount=xb_choices[0][3])
-      k.upcast()
+      shift_upcast(k, xb_choices[0][2], xb_choices[0][3], suggestion)
       k.simplify_ones()
       upcasted_axis.add(xb_choices[0][2])
     else:
@@ -236,27 +255,21 @@ def hand_coded_optimizations(k:Linearizer):
   # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
   if k.first_reduce < (k.shape_len-k.upcasted) and (len(list(k.shape_offsets(k.full_buf_index))) <= 4 or not any(r for _,_,r in k.upcasted_axis(k.full_buf_index))):
     if (s:=k.full_unupcasted_shape[-1]) <= 32:
-      suggestion['R', k.axis_idxs[len(k.full_unupcasted_shape) - 1]] = s
-      k.upcast()
+      shift_reduce(k, suggestion)
       # if it's small, upcast a second reduce dimension too
       if k.first_reduce < (k.shape_len-k.upcasted) and s <= 3 and (t := k.full_unupcasted_shape[-1]) <= 3:
-        suggestion['R', k.axis_idxs[len(k.full_unupcasted_shape) - 1]] = t
-        k.upcast()
+        shift_reduce(k, suggestion)
     else:
       for splits in [4]:
         if k.full_unupcasted_shape[-1]%splits == 0:
-          suggestion['R', k.axis_idxs[len(k.full_unupcasted_shape) - 1]] = splits
-          k.shift_to(len(k.full_unupcasted_shape)-1, splits, insert_before=len(k.full_unupcasted_shape))
-          k.upcast()
+          shift_reduce(k, suggestion, amount=splits)
           break
 
   # if nothing at all is upcasted and it's easy to, do an upcast
   # TODO: this is breaking the tests
   for splits in [4]:
     if k.upcasted == 0 and len(k.full_unupcasted_shape) > 0 and k.full_unupcasted_shape[-1] % splits == 0:
-      suggestion['U', k.axis_idxs[len(k.full_unupcasted_shape) - 1]] = splits
-      k.shift_to(len(k.full_unupcasted_shape)-1, splits)
-      k.upcast()
+      shift_upcast(k, len(k.full_unupcasted_shape)-1, splits, suggestion)
 
   # **** local groups ****
 
@@ -267,9 +280,7 @@ def hand_coded_optimizations(k:Linearizer):
       last_try = k.local_dims == 0 and axis == 0
       if any(k.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(k.sts))) or last_try:
         for sz in [x for x in (([32] if last_try else []) + [16,8,4,3]) if k.full_shape[axis] % x == 0 and local_size*x <= 128]:
-          suggestion['L', k.axis_idxs[axis]] = sz
-          k.shift_to(axis, sz, insert_before=k.first_reduce-k.local_dims)
-          k.local_dims += 1
+          shift_local(k, axis, sz, suggestion)
           break
       if k.local_dims >= 3: break
   k.simplify_ones()
