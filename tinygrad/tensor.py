@@ -343,22 +343,24 @@ class Tensor:
       else: ret = new_ret
     return ret
 
-  def _gather_killme(self, idx: Tuple[Tensor, ...], dim: Tuple[int, ...]):
+  def _gather(self, idx: Tuple[Tensor, ...], dim: Tuple[int, ...]):
     new_idx = idx[0].reshape(*[1]*dim[0], 1, *idx[0].shape, *[1]*(self.ndim-dim[0]-1))
     arange = Tensor.arange(self.shape[dim[0]], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim[0], self.shape[dim[0]], *[1]*idx[0].ndim, *[1]*(self.ndim-dim[0]-1))
     new_ret = (self.reshape(*self.shape[:dim[0]+1], *[1]*idx[0].ndim, *self.shape[dim[0]+1:]) * (arange == new_idx)).sum(dim[0])
     for i,d in zip(idx[1:],dim[1:]):
-      new_idx = i.reshape(*[1]*dim[0], *i.shape, *[1]*(new_ret.ndim-dim[0]-i.ndim))
-      arange = Tensor.arange(new_ret.shape[d], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(d), new_ret.shape[d], *[1]*(new_ret.ndim-d-1))
+      idx_arg = [*[1]*dim[0], *i.shape, *[1]*(new_ret.ndim-dim[0]-i.ndim)]
+      arange_arg = [*[1]*(d), new_ret.shape[d], *[1]*(new_ret.ndim-d-1)]
+      new_idx = i.reshape(idx_arg)
+      arange = Tensor.arange(new_ret.shape[d], dtype=dtypes.int32, requires_grad=False).reshape(arange_arg)
       new_ret = ((new_idx == arange) * new_ret).sum(d)
     return new_ret
 
-  def gather_lol(self: Tensor, idx: Tensor, dim: int):
+  def gather(self: Tensor, idx: Tensor, dim: int):
     if dim < 0: dim += self.ndim
     self_dims = list(range(self.ndim))
-    dim_ = [dim] + self_dims[:dim] + [idx.ndim+i-n-2 for n,i in enumerate(self_dims[dim+1:])]
+    dim_ = [dim] + [i-n for n,i in enumerate(self_dims[:dim])] + [idx.ndim+i-n-dim-1 for n,i in enumerate(self_dims[dim+1:])]
     idx_ = [idx] + [Tensor.arange(idx.shape[i], dtype=dtypes.int32, requires_grad=False) for i in self_dims[:dim]] + [Tensor.arange(idx.shape[i], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(n+1), idx.shape[i]) for n,i in enumerate(self_dims[dim+1:])]
-    return self._gather_killme(idx=idx_, dim=dim_)
+    return self._gather(idx=idx_, dim=dim_)
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
