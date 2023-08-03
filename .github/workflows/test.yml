@@ -287,6 +287,13 @@ jobs:
           platforms: arm64
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
+      - name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildx-cache
+          key: arm64
+          restore-keys: |
+            arm64
       - name: Build arm64 image
         uses: docker/build-push-action@v4
         with:
@@ -295,7 +302,13 @@ jobs:
           load: true
           push: false
           tags: tinygrad-arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,src=src=/tmp/.buildx-cache
+          cache-to: type=gha,dest=src=/tmp/.buildx-cache-new,mode=max
       - name: Test Ops
-        run: docker run -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 python3 -m pytest -n=auto test/ -k 'not test_conv_transpose2d' -m 'not exclude_clang'
+        run: docker run -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 python3 -m pytest -n=auto test/test_ops.py
+      - name: Test Dtypes
+        run: docker run -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 python3 -m pytest -n=auto test/test_dtype.py
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
