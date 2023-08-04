@@ -8,6 +8,7 @@ import math
 import os
 import logging
 import sys
+from typing import Tuple
 from pathlib import Path
 from typing import Optional
 import time
@@ -17,6 +18,7 @@ import soundfile
 # TODO: this is tragic. remove this
 import torch
 import torchaudio
+
 
 # original code: https://github.com/svc-develop-team/so-vits-svc
 
@@ -425,7 +427,7 @@ class Synthesizer:
       self.speaker_map[i] = self.emb_g(Tensor([[i]], dtype=dtypes.int64).to(device))
     self.speaker_map = self.speaker_map.unsqueeze(0).to(device)
     self.character_mix = True
-  def infer(self, c, f0, uv, g=None, noise_scale=0.35, seed=52468, vol=None):
+  def infer(self, c:Tensor, f0:Tensor, uv:Tensor, g:Tensor=None, noise_scale=0.35, seed=52468, vol=None) -> Tuple[Tensor, Tensor]:
     Tensor.manual_seed(getenv('SEED', seed))
     c_lengths = (Tensor.ones([c.shape[0]]) * c.shape[-1]).to(c.device)
     if self.character_mix and g.shape[0] > 1:  # [N, S]  *  [S, B, 1, H]
@@ -474,7 +476,6 @@ class Upsample:
   def __init__(self, scale_factor):
     self.scale = int(scale_factor)
   def forward(self, x:Tensor):
-    print(x.shape)
     repeats = tuple([1] * len(x.shape) + [self.scale])
     new_shape = (*x.shape[:-1], x.shape[-1] * self.scale)
     return x.unsqueeze(-1).repeat(repeats).reshape(new_shape)
@@ -608,7 +609,7 @@ class VolumeExtractor:
     return volume
 """
 
-def get_unit_f0(encoder:ContentVec256L9, wav, tran, cluster_infer_ratio, speaker, hop_length, target_sample, f0_filter=False, cr_threshold=0.005, unit_interpolate_mode="left"):
+def get_unit_f0(wav, tran, cluster_infer_ratio, speaker, hop_length, target_sample, f0_filter=False, cr_threshold=0.005, unit_interpolate_mode="left") -> Tuple[Tensor,Tensor,Tensor]:
   f0_predictor = PMF0Predictor(hop_length, sampling_rate=target_sample)
   f0, uv = f0_predictor.compute_f0_uv(wav)
   if f0_filter and sum(f0) == 0: raise RuntimeError("No voice detected")
@@ -620,10 +621,7 @@ def get_unit_f0(encoder:ContentVec256L9, wav, tran, cluster_infer_ratio, speaker
   resamp_16k = torchaudio.transforms.Resample(target_sample, 16000)
   wav16k = resamp_16k(torch.from_numpy(wav[None,:]))[0].numpy()
   wav16k = Tensor(wav16k)
-  c = encoder.encoder(wav16k)
-  c = repeat_expand_2d(c.squeeze(0), f0.shape[1], unit_interpolate_mode)
-  c = c.unsqueeze(0)
-  return c, f0, uv
+  return wav16k, f0, uv
 
 def repeat_expand_2d(content, target_len, mode="left"): # content : [h, t]
   if mode == "left": return repeat_expand_2d_left(content, target_len)
@@ -631,6 +629,7 @@ def repeat_expand_2d(content, target_len, mode="left"): # content : [h, t]
 
 # TODO this is __very__ slow. Any way to make it faster?
 def repeat_expand_2d_left(content, target_len): # content : [h, t]
+  #print(content.shape)
   target = Tensor.zeros([content.shape[0], target_len], dtype=dtypes.float32).to(content.device)
   src_len = content.shape[-1]
   target = Tensor.zeros([content.shape[0], target_len], dtype=dtypes.float32).to(content.device)
@@ -638,6 +637,8 @@ def repeat_expand_2d_left(content, target_len): # content : [h, t]
   current_pos = 0
   dim = content.shape[0]
   pad_val = target_len - 1
+  #print(f"target_len={target_len}")
+  #print(temp)
   for i in range(target_len):
     mask = tilde(Tensor.ones(dim, 1).pad2d((i,pad_val-i,0,0)).cast(dtypes.bool))
     if i < temp[current_pos+1]:
@@ -797,7 +798,7 @@ if __name__=="__main__":
   global_frame = 0
   audio = []
   for (slice_tag, data) in audio_data:
-    logging.info(f"====segment start, {round(len(data) / audio_sr, 3)}s====")
+    print(f"\n====segment start, {round(len(data) / audio_sr, 3)}s====")
     length = int(np.ceil(len(data) / audio_sr * target_sample))
     if slice_tag:
       print("empty segment")
@@ -819,6 +820,7 @@ if __name__=="__main__":
       raw_path.seek(0)
 
       ### Infer START ###
+      infer_start = time.time()
       torchaudio.set_audio_backend("soundfile")
       wav, sr = torchaudio.load(raw_path)
       audio_resample_transform = torchaudio.transforms.Resample(sr, target_sample)  # :(
@@ -830,8 +832,8 @@ if __name__=="__main__":
           if len(spk2id.__dict__) >= speaker: speaker_id = speaker
         if speaker_id is None: raise RuntimeError(f"speaker={speaker} not in the speaker list")
         sid = Tensor([int(speaker_id)], dtype=dtypes.int64).unsqueeze(0)  # TODO: self.device
-        c, f0, uv = get_unit_f0(encoder=contentvec256L9,
-                                wav=wav,
+
+        wav16k, f0, uv = get_unit_f0(wav=wav,
                                 tran=tran,
                                 cluster_infer_ratio=cluster_infer_ratio,
                                 speaker=speaker,
@@ -839,13 +841,22 @@ if __name__=="__main__":
                                 target_sample=target_sample,
                                 cr_threshold=cr_threshold,
                                 unit_interpolate_mode=unit_interpolate_mode)
+
         n_frames = f0.shape[1]
+
         start = time.time()
-        out_audio, f0 = net_g.infer(c.realize(), f0=f0.realize(), uv=uv.realize(), g=sid.realize(), noise_scale=noise_scale, vol=None)
-        print(f"out_audio.device={out_audio.device}")
+        c = contentvec256L9.encoder(wav16k)
+        c = repeat_expand_2d(c.squeeze(0), f0.shape[1], unit_interpolate_mode)
+        c = c.unsqueeze(0).realize()
+        enc_time = time.time() - start
+
+        start = time.time()
+        out_audio, f0 = net_g.infer(c, f0=f0, uv=uv, g=sid, noise_scale=noise_scale, vol=None)
         out_audio = out_audio[0,0].float().realize()
-        use_time = time.time() - start
-        logging.info("vits used time:{}".format(use_time))
+        vits_time = time.time() - start
+
+        infer_time = time.time() - infer_start
+        logging.info("total infer time:{:.2f}s, speech_enc time:{:.2f}s, vits time:{:.2f}s".format(infer_time, enc_time, vits_time))
       ### Infer END ###
 
       out_sr, out_frame = out_audio.shape[-1], n_frames
