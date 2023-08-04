@@ -343,7 +343,7 @@ class Tensor:
       else: ret = new_ret
     return ret
 
-  def _gather(self, idx: Tuple[Tensor, ...], dim: Tuple[int, ...]):
+  def _gather(self, idx, dim):
     new_idx = idx[0].reshape(*[1]*dim[0], 1, *idx[0].shape, *[1]*(self.ndim-dim[0]-1))
     arange = Tensor.arange(self.shape[dim[0]], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim[0], self.shape[dim[0]], *[1]*idx[0].ndim, *[1]*(self.ndim-dim[0]-1))
     new_ret = (self.reshape(*self.shape[:dim[0]+1], *[1]*idx[0].ndim, *self.shape[dim[0]+1:]) * (arange == new_idx)).sum(dim[0])
