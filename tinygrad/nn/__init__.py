@@ -124,8 +124,12 @@ class Embedding:
     return (vocab_counter == idx.unsqueeze(2).expand(*idx.shape, self.vocab_size)) @ self.weight
 
 class CrossEntropyLoss:
-  def __init__(self, reduction: str='mean', label_smoothing: float=0.0) -> None:
-    self.reducton, self.label_smoothing = reduction, label_smoothing
+  def __init__(self, reduction:str='mean', label_smoothing:float=0.0) -> None:
+    self.reduction, self.label_smoothing = reduction, label_smoothing
   
-  def __call__(self, input: Tensor, target: Tensor) -> Tensor:
-    pass
+  def __call__(self, x:Tensor, y:Tensor) -> Tensor:
+    y = (1 - self.label_smoothing)*y + self.label_smoothing / y.shape[1]
+    if self.reduction=='none': return -x.log_softmax(axis=1).mul(y).sum(axis=1)
+    if self.reduction=='mean': return -x.log_softmax(axis=1).mul(y).sum(axis=1).mean()
+    if self.reduction=='sum' : return -x.log_softmax(axis=1).mul(y).sum(axis=1).sum()
+
