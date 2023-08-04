@@ -333,9 +333,9 @@ class Tensor:
       for i,s in enumerate(sub): tensor_found[i] = (tensor_found[i][0]+s, tensor_found[i][1])
       dim = [i[0] for i in tensor_found]
       dim_cond = dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1
-      dim = [i[0] if n==0 else i[0]+i[1].ndim-n for n,i in enumerate(tensor_found)]
+      sum_dim = [i[0] if n==0 else i[0]+i[1].ndim-n for n,i in enumerate(tensor_found)]
       idx = [(i[1] < 0).where(i[1]+ret.shape[i[0]], i[1]) for i in tensor_found]
-      new_ret = ret._gather(idx, dim)
+      new_ret = ret._gather(idx, sum_dim)
       if dim_cond:
         order = list(range(idx[0].ndim + ret.ndim - len(dim)))
         order = order[dim[0]:dim[0]+idx[0].ndim] + order[:dim[0]] + order[dim[0]+idx[0].ndim:]
@@ -355,10 +355,10 @@ class Tensor:
 
   def gather(self: Tensor, idx: Tensor, dim: int):
     if dim < 0: dim += self.ndim
-    self_dims = list(range(self.ndim))
-    dim_ = [dim] + [i-n for n,i in enumerate(self_dims[:dim])] + [idx.ndim+i-n-dim-1 for n,i in enumerate(self_dims[dim+1:])]
-    idx_ = [idx] + [Tensor.arange(idx.shape[i], dtype=dtypes.int32, requires_grad=False) for i in self_dims[:dim]] + [Tensor.arange(idx.shape[i], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(n+1), idx.shape[i]) for n,i in enumerate(self_dims[dim+1:])]
-    return self._gather(idx=idx_, dim=dim_)
+    self_idx = list(range(self.ndim))
+    sum_dim = [dim] + [i-n if n < dim else idx.ndim+i-n-1 for n,i in enumerate(self_idx[:dim] + self_idx[dim+1:])]
+    idx_arange = [idx] + [Tensor.arange(idx.shape[i], dtype=dtypes.int32, requires_grad=False) for i in self_idx[:dim]] + [Tensor.arange(idx.shape[i], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(n+1), idx.shape[i]) for n,i in enumerate(self_idx[dim+1:])]
+    return self._gather(idx_arange, sum_dim)
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
