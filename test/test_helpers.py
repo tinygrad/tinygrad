@@ -99,13 +99,12 @@ with Context(VARIABLE=1):
     test()
     self.assertEqual(VARIABLE.value, 0)
 
-  def test_assignment_before_context(self):
-    B = ContextVar("B", 1)
-    B.value = 2 # this reflects to all ContextVar("B") but is used in Context.__exit__
-    with Context(B=3):
+  def test_context_exit_reverts_updated_values(self):
+    D = ContextVar("D", 1)
+    D.value = 2
+    with Context(D=3):
       ...
-    assert B.value == 2, f"Expected B to be 2, but was {B.value}"
-
+    assert D.value == 2, f"Expected D to be 2, but was {D.value}. Indicates that Context.__exit__ did not restore to the correct value."
 
 if __name__ == '__main__':
   unittest.main()
