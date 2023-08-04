@@ -121,8 +121,11 @@ def get_run_onnx(onnx_model: ModelProto):
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else (1, [i.shape for i in input_tensors[inp.name]])
         assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
+        print(input_tensors)
         for _,v in input_tensors.items():
           if isinstance(v, Tensor):
+            print(v)
+            print(v.numpy())
             v.realize()
           elif isinstance(v, list):
             for v_ in v: v_.realize()
@@ -178,7 +181,12 @@ def get_run_onnx(onnx_model: ModelProto):
         if 'broadcast' in opt: inp[1] = inp[1].reshape([-1 if i == opt['broadcast'] else 1 for i in range(len(inp[0].shape))])
         if n.op_type == "Add": ret = inp[0] + inp[1]
         if n.op_type == "Sub": ret = inp[0] - inp[1]
-        if n.op_type == "Mul": ret = (inp[0] * inp[1]).cast(inp[0].dtype)
+        if n.op_type == "Mul": 
+          print(inp[0])
+          print(inp[1])
+          print(inp[0].numpy())
+          print(inp[1].numpy())
+          ret = (inp[0] * inp[1]).cast(inp[0].dtype)
         if n.op_type == "Pow": ret = (inp[0] ** inp[1]).cast(inp[0].dtype)
       elif n.op_type == "Split":
         if 'axis' not in opt: opt['axis'] = 0
@@ -205,6 +213,7 @@ def get_run_onnx(onnx_model: ModelProto):
           axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3]).tolist()
           steps = safe_numpy(inp[4]) if len(inp) > 4 else [1]*inp[0].ndim
           starts, ends = safe_numpy(starts.ceil().cast(dtypes.int32)).tolist(), safe_numpy(ends.ceil().cast(dtypes.int32)).tolist()
+        print(starts, ends, axes, steps, "FUCK")
         arg = [(0,x,1) for x in inp[0].shape]
         shrink_args = [(0,x) for x in inp[0].shape]
         only_shrink = False # HACK BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise __getitem__ Tensor.reshape() has to allow 0 in newshape
@@ -218,6 +227,7 @@ def get_run_onnx(onnx_model: ModelProto):
             continue
           if starts[i] > ends[i] and steps[i] >= 0: steps[i] = -steps[i]
           arg[axis] = (starts[i], ends[i], steps[i])
+          print(only_shrink, "only shrink")
         ret = inp[0].shrink(tuple(shrink_args)) if only_shrink else inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
       elif n.op_type == "Shrink":
         bias = opt['bias'] if 'bias' in opt else 0
