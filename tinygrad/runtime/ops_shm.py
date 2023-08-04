@@ -7,7 +7,6 @@ from tinygrad.runtime.lib import RawBufferMapped
 from tinygrad.ops import Interpreted, Op, UnaryOps, MovementOps
 
 SHM_CACHE: Dict[str, mmap.mmap] = {}
-
 class RawShmBuffer(RawBufferMapped):
   def __init__(self, size, dtype:DType, device:str):
     device, self.cache_id = device.split(",")[0], None if "," not in device else device.split(",")[1]
