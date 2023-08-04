@@ -129,5 +129,6 @@ class CrossEntropyLoss:
   
   def __call__(self, x:Tensor, y:Tensor) -> Tensor:
     y = (1 - self.label_smoothing)*y + self.label_smoothing / y.shape[1]
-    return -x.log_softmax(axis=1).mul(y).sum(axis=1) if self.reduction=='none' else -x.log_softmax(axis=1).mul(y).sum(axis=1).mean() if self.reduction=='mean' else -x.log_softmax(axis=1).mul(y).sum(axis=1).sum() if self.reduction=='sum' else None 
-
+    if self.reduction=='none': return -x.log_softmax(axis=1).mul(y).sum(axis=1) 
+    if self.reduction=='sum': return -x.log_softmax(axis=1).mul(y).sum(axis=1).sum() 
+    return -x.log_softmax(axis=1).mul(y).sum(axis=1).mean() 
