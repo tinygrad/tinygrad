@@ -127,7 +127,7 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
         elif args[1] == "local" and lang.lid:
           kk(add_gl_dimension(lang.size_prefix, args, i, var, local_size, lang.lid))
         else:
-          if getenv("NOUNROLL"): kk("#pragma unroll(1)")   # prevent loop unrolling
+          if getenv("NOUNROLL") and not isinstance(var, NumNode): kk("#pragma unroll(1)")   # prevent loop unrolling
           kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, var.min, var.max))
       depth += 1
     elif uop == UOps.BARRIER:
