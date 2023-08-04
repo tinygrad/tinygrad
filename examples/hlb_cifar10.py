@@ -115,8 +115,14 @@ class SpeedyResNet:
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to do the rest conv layers
     forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
-    if not training and getenv('TTA', 0)==1: return ((forward(x)*0.5) + (forward(x[..., ::-1])*0.5)).log_softmax()
-    return forward(x).log_softmax()
+    if not training and getenv('TTA', 0)==1: return forward(x)*0.5 + forward(x[..., ::-1])*0.5
+    return forward(x)
+
+def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
+  y = (1 - label_smoothing)*y + label_smoothing / y.shape[1]
+  if reduction=='none': return -x.log_softmax(axis=1).mul(y).sum(axis=1)
+  if reduction=='sum': return -x.log_softmax(axis=1).mul(y).sum(axis=1).sum()
+  return -x.log_softmax(axis=1).mul(y).sum(axis=1).mean()
 
 # TODO currently this only works for RGB in format of NxCxHxW and pads the HxW
 # implemented in recursive fashion but figuring out how to switch indexing dim
@@ -200,15 +206,16 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     order = list(range(0, X.shape[0], BS))
     random.shuffle(order)
     for i in order:
-      # padding for matching buffer size during JIT
+      # padding to match buffer size during JIT
       batch_end = min(i+BS, Y.shape[0])
-      # NOTE -10 was used instead of 1 as labels
+      x = X[batch_end-BS:batch_end,:]
+      # Need fancy indexing support to remove numpy
+      y = Tensor(np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()])
       if not is_train:
-        # Need fancy indexing support to remove numpy
-        x, y = X[batch_end-BS:batch_end,:].sequential(transform_test), Tensor(-10*np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()])
+        x = x.sequential(transform_test)
       else:
         # ideally put cutmix inside transform
-        x, y = cutmix(X[batch_end-BS:batch_end,:].sequential(transform), Tensor(-10*np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()]))
+        x, y = cutmix(x.sequential(transform), y)
       yield x, y
 
     if not is_train: break
@@ -267,9 +274,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   @TinyJit
   def train_step_jitted(model, optimizer, lr_scheduler, X, Y):
     out = model(X)
-    print(out)
-    print(Y)
-    loss = (1 - LABEL_SMOOTHING) * out.mul(Y).mean() + (-1 * LABEL_SMOOTHING * out.mean())
+    loss = cross_entropy(out, Y, label_smoothing=LABEL_SMOOTHING)
     if not getenv("DISABLE_BACKWARD"):
       # 0 for bias and 1 for non-bias
       optimizer[0].zero_grad()
@@ -284,7 +289,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   @TinyJit
   def eval_step_jitted(model, X, Y):
     out = model(X, training=False)
-    loss = out.mul(Y).mean()
+    loss = cross_entropy(out, Y, reduction='mean') 
     return out.realize(), loss.realize()
 
   # 97 steps in 2 seconds = 20ms / step  Tensor.training = True
@@ -307,8 +312,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
       losses = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
         out, loss = eval_step_jitted(model, Xt, Yt)
-        outs = out.numpy().argmax(axis=1)
-        correct = outs == Yt.numpy().argmin(axis=1)
+        correct = out.numpy().argmax(axis=1) == Yt.numpy().argmax(axis=1)
         losses.append(loss.numpy().tolist())
         corrects.extend(correct.tolist())
       acc = sum(corrects)/len(corrects)*100.0
