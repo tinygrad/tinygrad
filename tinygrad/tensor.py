@@ -679,6 +679,12 @@ class Tensor:
     mask = (Tensor.rand(*self.shape, requires_grad=False) >= p).cast(dtypes.bool)
     return self * mask * (1/(1.0 - p))
 
+  def cross_entropy(self, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
+    y = (1 - label_smoothing)*y + label_smoothing / y.shape[1]
+    if reduction=='none': return -self.log_softmax(axis=1).mul(y).sum(axis=1)
+    if reduction=='sum': return -self.log_softmax(axis=1).mul(y).sum(axis=1).sum()
+    return -self.log_softmax(axis=1).mul(y).sum(axis=1).mean()
+
   # ***** cast ops *****
 
   def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self

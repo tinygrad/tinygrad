@@ -5,7 +5,7 @@ from extra.utils import WINDOWS
 from tinygrad.helpers import getenv
 from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor, Device
-from tinygrad.nn import BatchNorm2d, Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm, CrossEntropyLoss
+from tinygrad.nn import BatchNorm2d, Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm
 import torch
 import pytest
 
@@ -289,15 +289,10 @@ class TestNN(unittest.TestCase):
     x = Tensor.randn(3,5)
     y = Tensor.randn(3,5).softmax(axis=1)
 
-    loss_fun1 = CrossEntropyLoss(reduction='none')
-    loss_fun2 = CrossEntropyLoss(reduction='mean')
-    loss_fun3 = CrossEntropyLoss(reduction='sum')
-    loss_fun4 = CrossEntropyLoss(reduction='mean', label_smoothing=0.5)
-
-    loss1 = loss_fun1(x,y)
-    loss2 = loss_fun2(x,y)
-    loss3 = loss_fun3(x,y)
-    loss4 = loss_fun4(x,y)
+    loss1 = x.cross_entropy(y, reduction='none')
+    loss2 = x.cross_entropy(y, reduction='mean')
+    loss3 = x.cross_entropy(y, reduction='sum')
+    loss4 = x.cross_entropy(y, reduction='mean', label_smoothing=0.5)
 
     with torch.no_grad():
       torch_loss_fun1 = torch.nn.CrossEntropyLoss(reduction='none')
