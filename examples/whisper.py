@@ -4,7 +4,6 @@ import sys, math, string, difflib, base64, functools, itertools, multiprocessing
 import subprocess as sp
 from pathlib import Path
 from typing import Optional
-import librosa
 import numpy as np
 from tinygrad import nn
 from tinygrad.state import torch_load, load_state_dict
@@ -21,7 +20,7 @@ def mel_frequencies(fmin, fmax, n_mels):
     min_mel = hz_to_mel(fmin)
     max_mel = hz_to_mel(fmax)
     mels = np.linspace(min_mel, max_mel, n_mels)
-    hz: np.ndarray = mel_to_hz(mels)
+    hz = mel_to_hz(mels)
     return hz
 
 def mel(sr, n_fft, n_mels):
@@ -41,6 +40,110 @@ def mel(sr, n_fft, n_mels):
         print('Empty filters in mel frequency basis. Some channels will produce empty responses.')
 
     return weights
+
+def frame(x, frame_length, hop_length):
+    out_strides = x.strides + tuple([x.strides[-1]])
+    out_strides = x.strides + tuple([x.strides[-1]])
+
+    # Reduce the shape on the framing axis
+    x_shape_trimmed = list(x.shape)
+    x_shape_trimmed[-1] -= frame_length - 1
+
+    out_shape = tuple(x_shape_trimmed) + tuple([frame_length])
+    xw = np.lib.stride_tricks.as_strided(
+        x, strides=out_strides, shape=out_shape
+    )
+
+    xw = np.moveaxis(xw, -1, -2)
+
+    # Downsample along the target axis
+    slices = [slice(None)] * xw.ndim
+    slices[-1] = slice(0, None, hop_length)
+    return xw[tuple(slices)]
+
+def tinystft(y, n_fft, hop_length, window):
+    import warnings
+    warnings.simplefilter("ignore", np.ComplexWarning)
+    n = window.shape[-1]
+    lpad = int((n_fft - n) // 2)
+    lengths = [(0, 0)] * y.ndim
+    lengths[-1] = (lpad, int(n_fft - n - lpad))
+    fft_window = np.pad(window, lengths, mode="constant")
+    def expand_to(x, ndim, axes):
+        shape = [1] * ndim
+        for i, axi in enumerate([axes]):
+            shape[axi] = x.shape[i]
+        return x.reshape(shape)
+    fft_window = expand_to(fft_window, ndim=1 + y.ndim, axes=-2)
+
+    assert n_fft <= y.shape[-1], f"n_fft={n_fft} is too large for input signal of length={y.shape[-1]}"
+
+    padding = [(0, 0) for _ in range(y.ndim)]
+
+    start_k = int(np.ceil(n_fft // 2 / hop_length))
+
+    tail_k = (y.shape[-1] + n_fft // 2 - n_fft) // hop_length + 1
+
+    if tail_k <= start_k:
+        start = 0
+        extra = 0
+        padding[-1] = (n_fft // 2, n_fft // 2)
+        y = np.pad(y, padding, mode="constant")
+    else:
+        start = start_k * hop_length - n_fft // 2
+        padding[-1] = (n_fft // 2, 0)
+
+        y_pre = np.pad(
+            y[..., : (start_k - 1) * hop_length - n_fft // 2 + n_fft + 1],
+            padding,
+            mode="constant",
+        )
+        y_frames_pre = frame(y_pre, frame_length=n_fft, hop_length=hop_length)
+        y_frames_pre = y_frames_pre[..., :start_k]
+
+        extra = y_frames_pre.shape[-1]
+
+        if tail_k * hop_length - n_fft // 2 + n_fft <= y.shape[-1] + n_fft // 2:
+            padding[-1] = (0, n_fft // 2)
+            y_post = np.pad(
+                y[..., (tail_k) * hop_length - n_fft // 2 :], padding, mode="constant"
+            )
+            y_frames_post = frame(
+                y_post, frame_length=n_fft, hop_length=hop_length
+            )
+            extra += y_frames_post.shape[-1]
+        else:
+            post_shape = list(y_frames_pre.shape)
+            post_shape[-1] = 0
+            y_frames_post = np.empty_like(y_frames_pre, shape=post_shape, dtype=np.float32)
+
+    y_frames = frame(y[..., start:], frame_length=n_fft, hop_length=hop_length)
+
+    shape = list(y_frames.shape)
+    shape[-2] = 1 + n_fft // 2
+    shape[-1] += extra
+    stft_matrix = np.zeros(shape, order="F", dtype=np.float32)
+
+    if extra > 0:
+        off_start = y_frames_pre.shape[-1]
+        stft_matrix[..., :off_start] = np.fft.rfft(fft_window * y_frames_pre, axis=-2)
+
+        off_end = y_frames_post.shape[-1]
+        if off_end > 0:
+            stft_matrix[..., -off_end:] = np.fft.rfft(fft_window * y_frames_post, axis=-2)
+    else:
+        off_start = 0
+    MAX_MEM_BLOCK = 2**8 * 2**10
+    n_columns = int(
+        MAX_MEM_BLOCK // (np.prod(y_frames.shape[:-1]) * y_frames.itemsize)
+    )
+    n_columns = max(n_columns, 1)
+    for bl_s in range(0, y_frames.shape[-1], n_columns):
+        bl_t = min(bl_s + n_columns, y_frames.shape[-1])
+        stft_matrix[..., bl_s + off_start : bl_t + off_start] = np.fft.rfft(
+            fft_window * y_frames[..., bl_s:bl_t], axis=-2
+        )
+    return stft_matrix
 
 # audio hyperparameters
 RATE = 16000
@@ -216,7 +319,7 @@ def get_window(n_fft): return (1 - np.cos(2 * math.pi * np.arange(n_fft) / n_fft
 
 def prep_audio(audio, padding) -> Tensor:
   if padding > 0: audio = np.pad(audio, (0, padding))
-  stft = librosa.stft(audio, n_fft=N_FFT, hop_length=HOP_LENGTH, window=get_window(N_FFT))
+  stft = tinystft(audio, n_fft=N_FFT, hop_length=HOP_LENGTH, window=get_window(N_FFT))
   magnitudes = np.abs(stft[..., :-1]) ** 2
   mel_spec = get_filters(RATE, N_FFT, N_MELS) @ magnitudes
   log_spec = np.log10(np.clip(mel_spec, a_min=1e-10, a_max=None))
