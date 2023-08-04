@@ -332,15 +332,13 @@ class Tensor:
     if tensor_found:
       for i,s in enumerate(sub): tensor_found[i] = (tensor_found[i][0]+s, tensor_found[i][1])
       dim = [i[0] for i in tensor_found]
-      dim_cond = dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1
       sum_dim = [i[0] if n==0 else i[0]+i[1].ndim-n for n,i in enumerate(tensor_found)]
       idx = [(i[1] < 0).where(i[1]+ret.shape[i[0]], i[1]) for i in tensor_found]
-      new_ret = ret._gather(idx, sum_dim)
-      if dim_cond:
-        order = list(range(idx[0].ndim + ret.ndim - len(dim)))
+      ret = ret._gather(idx, sum_dim)
+      if dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1:
+        order = list(range(ret.ndim))
         order = order[dim[0]:dim[0]+idx[0].ndim] + order[:dim[0]] + order[dim[0]+idx[0].ndim:]
-        ret = new_ret.permute(order=order)
-      else: ret = new_ret
+        ret = ret.permute(order=order)
     return ret
 
   def _gather(self, idx, dim):
