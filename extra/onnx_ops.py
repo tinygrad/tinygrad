@@ -139,7 +139,7 @@ def _padding(X, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., stri
   if pads is None: return X
   np_pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
   zero_padded = X.pad(tuple(np_pads))
-  constant_padder = Tensor(np.pad(np.zeros(X.shape, dtype=np.float32), np_pads, constant_values=constant_value), dtype=X.dtype) # Should we avoid using np?
+  constant_padder = Tensor.zeros_like(X).pad(tuple(np_pads), value=constant_value)
   return zero_padded + constant_padder
 
 def _auto_pad(X, auto_pad, strides, kernel_shape, dilations):
