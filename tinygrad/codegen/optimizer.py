@@ -30,9 +30,9 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], runt
       k.process()
       apply_opt(k, x)
       prg = k.codegen().build(runtime)
-      first_tm = prg.exec(k.bufs, force_wait=True)
+      first_tm = prg.exec(k.bufs, force_wait=True, optimizing=True)
       if baseline*5 < first_tm*1000: return first_tm*1000  # very slow
-      tm = min([first_tm]+[prg.exec(k.bufs, force_wait=True) for _ in range(2)])*1000
+      tm = min([first_tm]+[prg.exec(k.bufs, force_wait=True, optimizing=True) for _ in range(2)])*1000
       return tm
     except Exception:
       if DEBUG >= 3:
@@ -76,7 +76,7 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], runtime):
       k = create_k()
       hand_coded_optimizations(k)
       prg = k.codegen().build(runtime)
-      return min([prg.exec(k.bufs, force_wait=True) for _ in range(5)])*1000
+      return min([prg.exec(k.bufs, force_wait=True, optimizing=True) for _ in range(5)])*1000
     choice = kernel_optimize_search(k, create_k, runtime, get_baseline())
     if global_db is not None:
       global_db[skey] = choice

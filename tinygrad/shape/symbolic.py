@@ -28,6 +28,7 @@ class Node:
   def hash(self) -> int: return hash(self.key)
   def __repr__(self): return "<"+self.key+">"
   def __hash__(self): return self.hash
+  def __bool__(self): return not (self.max == self.min == 0)
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
@@ -39,7 +40,7 @@ class Node:
   def __gt__(self, b:Union[Node,int]): return (-self) < (-b)
   def __ge__(self, b:Union[Node,int]): return (-self) < (-b+1)
   def __lt__(self, b:Union[Node,int]):
-    if self == b: return False
+    if self == b: return NumNode(0)
     lhs = self
     if isinstance(lhs, SumNode):
       muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
@@ -119,7 +120,7 @@ class Node:
   def ands(nodes:List[Node]) -> Node:
     if not nodes: return NumNode(1)
     if len(nodes) == 1: return nodes[0]
-    if any(x.min == x.max == 0 for x in nodes): return NumNode(0)
+    if any(not x for x in nodes): return NumNode(0)
 
     # filter 1s
     nodes = [x for x in nodes if x.min != x.max]
@@ -159,7 +160,9 @@ class OpNode(Node):
 class LtNode(OpNode):
   def __mul__(self, b: Union[Node, int]): return (self.a*b) < (self.b*b)
   def __floordiv__(self, b: int, _=False): return (self.a//b) < (self.b//b)
-  def get_bounds(self) -> Tuple[int, int]: return int(self.a.max < self.b), int(self.a.min < self.b)
+  def get_bounds(self) -> Tuple[int, int]:
+    if isinstance(self.b, int): return int(self.a.max < self.b), int(self.a.min < self.b)
+    return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min > self.b.max else (0, 1)
 
 class MulNode(OpNode):
   def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul
