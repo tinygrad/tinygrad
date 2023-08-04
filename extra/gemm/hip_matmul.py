@@ -58,6 +58,7 @@ extern "C" __global__ void test(float* c, __half* a, __half* b) {{
     }}
     for (int y = 0; y < {KY}; y++) {{
       for (int x = 0; x < {KX}; x++) {{
+        __syncthreads();
         c_frag[y][x] = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(a_frag[x], b_frag[y], c_frag[y][x]);
       }}
     }}

@@ -18,7 +18,7 @@ from tinygrad.helpers import colored, getenv, DEBUG, CI
 from tinygrad.jit import TinyJit
 import pytest
 
-pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exclude_clang, pytest.mark.webgpu]
+pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 
@@ -130,7 +130,7 @@ class TestBigSpeed(unittest.TestCase):
   def test_large_conv_3x3(self): helper_test_conv(bs=4, in_chans=128, out_chans=128, kernel_size=3, img_size_y=130, img_size_x=130)
   def test_large_conv_5x5(self): helper_test_conv(bs=4, in_chans=128, out_chans=128, kernel_size=5, img_size_y=130, img_size_x=130)
 
-@unittest.skipIf((getenv("BIG") == 1 or Device.DEFAULT == "WEBGPU"), "only big tests")
+@unittest.skipIf((getenv("BIG") == 1), "only big tests")
 class TestSpeed(unittest.TestCase):
   def test_sub(self):
     def f(a, b): return a-b

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re
+import os, functools, platform, time, re, contextlib
 from weakref import KeyedRef, ref
 from _weakref import _remove_dead_weakref # type: ignore
 import numpy as np
@@ -26,28 +26,34 @@ def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
-class Context:
-  def __init__(self, **kwargs): self.pvars = kwargs
-  def __enter__(self): ContextVar.ctx_stack.append({ **self.pvars, **{ key: ContextVar.ctx_stack[-1][key] for key in ContextVar.ctx_stack[-1].keys() if key not in self.pvars } })
-  def __exit__(self, *args): ContextVar.ctx_stack.pop()
+class Context(contextlib.ContextDecorator):
+  stack: ClassVar[List[dict[str, int]]] = [{}]
+  def __init__(self, **kwargs): self.kwargs = kwargs
+  def __enter__(self):
+    Context.stack[-1] = {k:o.value for k,o in ContextVar._cache.items()} # Store current state.
+    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v # Update to new temporary state.
+    Context.stack.append(self.kwargs) # Store the temporary state so we know what to undo later.
+  def __exit__(self, *args):
+    for k in Context.stack.pop(): ContextVar._cache[k].value = Context.stack[-1].get(k, ContextVar._cache[k].value)
 
 class ContextVar:
-  ctx_stack: ClassVar[List[dict[str, Any]]] = [{}]
-  def __init__(self, key, default_value):
-    self.key, self.initial_value = key, getenv(key, default_value)
-    if key not in ContextVar.ctx_stack[-1]: ContextVar.ctx_stack[-1][key] = self.initial_value
-  def __call__(self, x): ContextVar.ctx_stack[-1][self.key] = x
-  def __bool__(self): return self.value != 0
+  _cache: ClassVar[Dict[str, ContextVar]] = {}
+  __slots__ = "value"
+  value: int
+  def __new__(cls, key, default_value):
+    if key in ContextVar._cache: return ContextVar._cache[key]
+    instance = ContextVar._cache[key] = super().__new__(cls)
+    instance.value = getenv(key, default_value)
+    return instance
+  def __bool__(self): return bool(self.value)
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
-  @property
-  def value(self): return ContextVar.ctx_stack[-1][self.key] if self.key in ContextVar.ctx_stack[-1] else self.initial_value
 
 DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
 GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 
-class Timing(object):
+class Timing(contextlib.ContextDecorator):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
   def __enter__(self): self.st = time.perf_counter_ns()
   def __exit__(self, exc_type, exc_val, exc_tb):

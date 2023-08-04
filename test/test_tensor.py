@@ -2,13 +2,9 @@ import dataclasses
 import numpy as np
 import torch
 import unittest
-import itertools
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
-import pytest
-
-pytestmark = pytest.mark.webgpu
 
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)
@@ -140,7 +136,7 @@ class TestTinygrad(unittest.TestCase):
     self.assertFalse(gradcheck(tiny_func, tiny_x, eps = 1e-5))
 
   def test_random_fns_are_deterministic_with_seed(self):
-    for random_fn in [Tensor.randn, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform]:
+    for random_fn in [Tensor.randn, Tensor.normal, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform, Tensor.kaiming_normal]:
       with self.subTest(msg=f"Tensor.{random_fn.__name__}"):
         Tensor.manual_seed(1337)
         a = random_fn(10,10).realize()
