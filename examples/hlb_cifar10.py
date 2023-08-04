@@ -24,13 +24,16 @@ bias_scaler = 56
 
 hyp = {
     'opt': {
-        'bias_lr':        1.64 * bias_scaler/512, # TODO: Is there maybe a better way to express the bias and batchnorm scaling? :'))))
-        'non_bias_lr':    1.64 / 512,
-        'bias_decay':     1.08 * 6.45e-4 * batchsize/bias_scaler,
-        'non_bias_decay': 1.08 * 6.45e-4 * batchsize,
-        'percent_start':  0.23,
-        'div_factor':     1e16,
-        'final_lr_ratio': 0.07,
+        #'bias_lr':        1.64 * bias_scaler/512, # TODO: Is there maybe a better way to express the bias and batchnorm scaling? :'))))
+        #'non_bias_lr':    1.64 / 512,
+        #'bias_decay':     1.08 * 6.45e-4 * batchsize/bias_scaler,
+        #'non_bias_decay': 1.08 * 6.45e-4 * batchsize,
+        'bias_lr':        0.0138319916999336 * bias_scaler,
+        'non_bias_lr':    0.0138319916999336,
+        'bias_decay':     0.07324837942480592 / bias_scaler,
+        'non_bias_decay': 0.07324837942480592,
+        'momentum':       0.8632474768028381,
+        'percent_start':  0.25,
         'scaling_factor': 1./9,
         'loss_scale_scaler': 1./128, # * Regularizer inside the loss summing (range: ~1/512 - 16+). FP8 should help with this somewhat too, whenever it comes out. :)
     },
@@ -221,21 +224,11 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     if not is_train: break
     seed += 1
 
-def train_cifar(bs=512, eval_bs=500, steps=1000,
-                momentum=0.8632474768028381, wd=0.07324837942480592,
-                max_lr=0.0138319916999336,
-                label_smoothing=0.24287006281063067,
-                seed=32):
+def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
   set_seed(seed)
   Tensor.training = True
 
   BS, EVAL_BS, STEPS = getenv("BS", bs), getenv('EVAL_BS', eval_bs), getenv("STEPS", steps)
-  # For SGD
-  MOMENTUM, WD = getenv('MOMENTUM', momentum), getenv("WD", wd)
-  # For LR Scheduler
-  MAX_LR = getenv("MAX_LR", max_lr)
-  # Others
-  LABEL_SMOOTHING = getenv('LABEL_SMOOTHING', label_smoothing)
 
   if getenv("FAKEDATA"):
     N = 2048
@@ -261,20 +254,20 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
       else:
         params_non_bias.append(params_dict[params])
 
-  opt_bias     = optim.SGD(params_bias,     lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
-  opt_non_bias = optim.SGD(params_non_bias, lr=0.01, momentum=MOMENTUM, nesterov=True, weight_decay=WD)
+  opt_bias     = optim.SGD(params_bias,     lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['bias_decay'])
+  opt_non_bias = optim.SGD(params_non_bias, lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['non_bias_decay'])
 
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
-  initial_div_factor = hyp['opt']['div_factor']
-  final_lr_ratio = hyp['opt']['final_lr_ratio']
+  initial_div_factor = 1e16
+  final_lr_ratio = 0.07 
   pct_start = hyp['opt']['percent_start']
-  lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=MAX_LR ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
-  lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=MAX_LR ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
+  lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']     ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
+  lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'] ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
 
   @TinyJit
   def train_step_jitted(model, optimizer, lr_scheduler, X, Y):
     out = model(X)
-    loss = cross_entropy(out, Y, label_smoothing=LABEL_SMOOTHING)
+    loss = cross_entropy(out, Y, label_smoothing=0.2)
     if not getenv("DISABLE_BACKWARD"):
       # 0 for bias and 1 for non-bias
       optimizer[0].zero_grad()
