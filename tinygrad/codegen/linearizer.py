@@ -574,7 +574,7 @@ class Linearizer:
     all_ones = [s==1 for s in self.full_shape]
     self.local_dims -= sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce])
     self.upcasted -= sum(all_ones[self.shape_len-self.upcasted:])
-    if hasattr(self, axis_idxs): self.axis_idxs = [x for b, x in zip(all_ones, self.axis_idxs) if not b]
+    if hasattr(self, "axis_idxs"): self.axis_idxs = [x for b, x in zip(all_ones, self.axis_idxs) if not b]
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
 
   def simplify_merge_adjacent(self):
