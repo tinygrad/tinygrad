@@ -289,7 +289,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000,
   @TinyJit
   def eval_step_jitted(model, X, Y):
     out = model(X, training=False)
-    loss = cross_entropy(out, Y, reduction='mean') 
+    loss = cross_entropy(out, Y, reduction='mean')
     return out.realize(), loss.realize()
 
   # 97 steps in 2 seconds = 20ms / step  Tensor.training = True
