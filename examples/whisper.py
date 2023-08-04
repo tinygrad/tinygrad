@@ -194,15 +194,15 @@ def prep_audio(audio, padding) -> Tensor:
   return log_spec
 
 def listener(q):
-    prep_audio(np.zeros(300), RATE)
-    import sounddevice as sd
-    print("listening")
-    def callback(indata, frames, time, status):
-        waveform = ((indata).astype(np.float32)).reshape(1, -1)
-        q.put(waveform)
-    with sd.InputStream(callback=callback, channels=1, samplerate=RATE, blocksize=CHUNK):
-        sd.sleep(RECORD_SECONDS * 1000)
-    print("done listening")
+  prep_audio(np.zeros(300), RATE)
+  import sounddevice as sd
+  print("listening")
+  def callback(indata, frames, time, status):
+    waveform = ((indata).astype(np.float32)).reshape(1, -1)
+    q.put(waveform)
+  with sd.InputStream(callback=callback, channels=1, samplerate=RATE, blocksize=CHUNK):
+    sd.sleep(RECORD_SECONDS * 1000)
+  print("done listening")
 
 def pad_or_trim(array, length=N_SAMPLES, axis=-1):
   if array.shape[axis] > length:
