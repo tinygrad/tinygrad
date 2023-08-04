@@ -75,7 +75,9 @@ def get_run_onnx(onnx_model: ModelProto):
     tensors[inp.name].realize()
 
   # preparse the attributes
-  attribute_dict = {num: attribute_to_dict(n.attribute) for num, n in enumerate(onnx_model.graph.node)}
+  attribute_dict = {}
+  for num,n in enumerate(onnx_model.graph.node):
+    attribute_dict[num] = attribute_to_dict(n.attribute)
 
   onnx_model_version = onnx_model.opset_import[0].version
 
