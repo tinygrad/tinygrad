@@ -1122,11 +1122,7 @@ class TestOps(unittest.TestCase):
     c = torch.randint(low=-5, high=5, size=(10,1,14,1,1,1), requires_grad=False)
     d = torch.randint(high=4, size=(10,1,1,14,1,1), requires_grad=False)
     e = torch.randint(high=1, size=(10,1,1,1,13,1), requires_grad=False)
-    i = Tensor(a.numpy(), requires_grad=False)
-    j = Tensor(b.numpy(), requires_grad=False)
-    k = Tensor(c.numpy(), requires_grad=False)
-    o = Tensor(d.numpy(), requires_grad=False)
-    p = Tensor(e.numpy(), requires_grad=False)
+    i, j, k, o, p = [Tensor(tor.numpy(), requires_grad=False) for tor in [a,b,c,d,e]]
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,e], lambda x: x[:,j,k,o,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,:], lambda x: x[:,j,k,o,:])
@@ -1136,6 +1132,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,:,10:11,d,0:2], lambda x: x[1,:,10:11,o,0:2])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,4,c,d,2], lambda x: x[1,4,k,o,2])
+    helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)], lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor(1)])
+    helper_test_op([(2,3)], lambda x: x[torch.tensor([1]), torch.tensor([[0,0,0],[0,0,0]])], lambda x: x[Tensor([1]), Tensor([[0,0,0],[0,0,0]])])
 
   def test_gather(self):
     # indices cannot have gradient

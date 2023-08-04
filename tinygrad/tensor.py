@@ -332,8 +332,10 @@ class Tensor:
     if tensor_found:
       for i,s in enumerate(sub): tensor_found[i] = (tensor_found[i][0]+s, tensor_found[i][1])
       dim = [i[0] for i in tensor_found]
-      sum_dim = [i[0] if n==0 else i[0]+i[1].ndim-n for n,i in enumerate(tensor_found)]
       idx = [(i[1] < 0).where(i[1]+ret.shape[i[0]], i[1]) for i in tensor_found]
+      max_sh = max([i.ndim for i in idx])
+      idx = [i if i.ndim == max_sh else i.reshape(*[1]*(max_sh-i.ndim), *i.shape) for i in idx]
+      sum_dim = [d if n==0 else d+i.ndim-n for n,(d,i) in enumerate(zip(dim,idx))]
       ret = ret._gather(idx, sum_dim)
       if dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1:
         order = list(range(ret.ndim))
