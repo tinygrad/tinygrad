@@ -256,7 +256,7 @@ def hand_coded_optimizations(k:Linearizer):
     if (s:=k.full_unupcasted_shape[-1]) <= 32:
       shift_reduce(k, suggestion)
       # if it's small, upcast a second reduce dimension too
-      if k.first_reduce < (k.shape_len-k.upcasted) and s <= 3 and (t := k.full_unupcasted_shape[-1]) <= 3:
+      if k.first_reduce < (k.shape_len-k.upcasted) and s <= 3 and (k.full_unupcasted_shape[-1]) <= 3:
         shift_reduce(k, suggestion)
     else:
       for splits in [4]:
