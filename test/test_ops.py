@@ -372,29 +372,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (65)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
     helper_test_op([(32,45,65), (65)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
     helper_test_op([(65), (32,65,45)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
-    with self.assertRaises(AssertionError):
-      a = Tensor.ones(2)
-      b = Tensor.ones(1, 2)
-      a.matmul(b)
-    with self.assertRaises(AssertionError):
-      a = Tensor.ones(2, 4)
-      b = Tensor.ones(1)
-      a.matmul(b)
-    with self.assertRaises(AssertionError):
-      a = Tensor.ones(4)
-      b = Tensor.ones(1)
-      a.matmul(b)
+    self.helper_test_exception([(4), (1,2)], lambda x, y: x.matmul(y), Tensor.dot, expected=(RuntimeError, AssertionError))
+    self.helper_test_exception([(2,1), (4)], lambda x, y: x.matmul(y), Tensor.dot, expected=(RuntimeError, AssertionError))
+    self.helper_test_exception([(1), (4)], lambda x, y: x.matmul(y), Tensor.dot, expected=(RuntimeError, AssertionError))
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
     helper_test_op([(32,45,65), (32,65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
-    with self.assertRaises(AssertionError):
-      a = Tensor.ones(2,4)
-      b = Tensor.ones(1,3)
-      a.matmul(b)
-    with self.assertRaises(AssertionError):
-      a = Tensor.ones(2,1)
-      b = Tensor.ones(4,3)
-      a.matmul(b)
+    self.helper_test_exception([(2, 4), (1, 3)], lambda x, y: x.matmul(y), Tensor.dot, expected=(RuntimeError, AssertionError))
+    self.helper_test_exception([(2, 1), (4, 3)], lambda x, y: x.matmul(y), Tensor.dot, expected=(RuntimeError, AssertionError))
     with self.assertRaises(AssertionError):
       a = Tensor(3.14)
       a.matmul(a)
