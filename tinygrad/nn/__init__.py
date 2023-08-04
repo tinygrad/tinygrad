@@ -1,5 +1,5 @@
 import math
-from typing import Any, Optional, Union, Tuple
+from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 
@@ -131,5 +131,5 @@ class CrossEntropyLoss:
     y = (1 - self.label_smoothing)*y + self.label_smoothing / y.shape[1]
     if self.reduction=='none': return -x.log_softmax(axis=1).mul(y).sum(axis=1)
     if self.reduction=='mean': return -x.log_softmax(axis=1).mul(y).sum(axis=1).mean()
-    if self.reduction=='sum' : return -x.log_softmax(axis=1).mul(y).sum(axis=1).sum()
+    if self.reduction=='sum': return -x.log_softmax(axis=1).mul(y).sum(axis=1).sum()
 
