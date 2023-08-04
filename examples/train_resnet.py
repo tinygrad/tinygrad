@@ -43,3 +43,4 @@ if __name__ == "__main__":
     evaluate(model, X_test, Y_test, num_classes=classes, transform=transform)
     lr /= 1.2
     print(f'reducing lr to {lr:.7f}')
+#modify this file to train resnet on miniImageNet
