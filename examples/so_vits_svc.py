@@ -14,6 +14,8 @@ import time
 import io
 import soundfile
 
+# TODO: this is tragic. remove this
+import torch
 import torchaudio
 
 # original code: https://github.com/svc-develop-team/so-vits-svc
@@ -404,17 +406,8 @@ class GroupNormMasked:
   def __call__(self, x, mask):
     pass
 
-# TODO: depthwise conv (optional) #self.use_depthwise_conv = use_depthwise_conv
-# TODO: f0 decoder (optional for infer) #self.use_automatic_f0_prediction = use_automatic_f0_prediction
-# TODO: flow_share_parameter
 class Synthesizer:
-  def __init__(self, spec_channels, segment_size, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gin_channels, ssl_dim, n_speakers, sampling_rate=44100,
-               vol_embedding=False,
-               #use_depthwise_conv=False,
-               #use_automatic_f0_prediction=True,
-               #flow_share_parameter=False,
-               n_flow_layer=4,
-               **kwargs):
+  def __init__(self, spec_channels, segment_size, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gin_channels, ssl_dim, n_speakers, sampling_rate=44100, vol_embedding=False, n_flow_layer=4, **kwargs):
     self.spec_channels, self.inter_channels, self.hidden_channels, self.filter_channels, self.n_heads, self.n_layers, self.kernel_size, self.p_dropout, self.resblock, self.resblock_kernel_sizes, self.resblock_dilation_sizes, self.upsample_rates, self.upsample_initial_channel, self.upsample_kernel_sizes, self.segment_size, self.n_speakers, self.gin_channels, self.vol_embedding = spec_channels, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, segment_size, n_speakers, gin_channels, vol_embedding
     self.emb_g = nn.Embedding(n_speakers, gin_channels)
     if vol_embedding:
@@ -477,14 +470,14 @@ class TextEncoder:
     z = (m + randn_like(m) * logs.exp() * noise_scale) * x_mask
     return z, m, logs, x_mask
 
-# TODO: this is tragic. remove this
-import torch
 class Upsample:
   def __init__(self, scale_factor):
-    self.scale_factor=scale_factor
-    self.torch_ups = torch.nn.Upsample(scale_factor=scale_factor)
-  def forward(self, x):
-    return Tensor(self.torch_ups(torch.from_numpy(x.realize().numpy())).numpy()).to(x.device)
+    self.scale = int(scale_factor)
+  def forward(self, x:Tensor):
+    print(x.shape)
+    repeats = tuple([1] * len(x.shape) + [self.scale])
+    new_shape = (*x.shape[:-1], x.shape[-1] * self.scale)
+    return x.unsqueeze(-1).repeat(repeats).reshape(new_shape)
 
 class SineGen():
   def __init__(self, samp_rate, harmonic_num=0, sine_amp=0.1, noise_std=0.003, voice_threshold=0, flag_for_pulse=False):
@@ -599,6 +592,7 @@ def f0_to_coarse(f0 : Tensor):
   f0_coarse = f0_coarse + ((f0_coarse >= F0_BIN) * (F0_BIN - 1))
   return f0_coarse
 
+"""
 # TODO: VolumeExtractor not fully implemented, but no model yet encountered actually needs it
 class VolumeExtractor:
   def __init__(self, hop_size=512):
@@ -612,6 +606,7 @@ class VolumeExtractor:
     # TODO: torch.nn.functional.unfold(audio2[:,None,None,:],(1,self.hop_size),stride=self.hop_size)[:,:,:n_frames].mean(dim=1)[0]
     volume = torch.sqrt(volume)
     return volume
+"""
 
 def get_unit_f0(encoder:ContentVec256L9, wav, tran, cluster_infer_ratio, speaker, hop_length, target_sample, f0_filter=False, cr_threshold=0.005, unit_interpolate_mode="left"):
   f0_predictor = PMF0Predictor(hop_length, sampling_rate=target_sample)
