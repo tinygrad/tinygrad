@@ -284,12 +284,12 @@ class TestNN(unittest.TestCase):
       torch_x = torch.tensor(x.cpu().numpy().astype(np.int32))
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
-  
+
   def test_cross_entropy_loss(self):
     x = Tensor.randn(3,5)
     y = Tensor.randn(3,5).softmax(axis=1)
 
-    loss_fun1 = CrossEntropyLoss(reduction='none')                  
+    loss_fun1 = CrossEntropyLoss(reduction='none')                 
     loss_fun2 = CrossEntropyLoss(reduction='mean')
     loss_fun3 = CrossEntropyLoss(reduction='sum')
     loss_fun4 = CrossEntropyLoss(reduction='mean', label_smoothing=0.5)
@@ -304,9 +304,9 @@ class TestNN(unittest.TestCase):
       torch_loss_fun2 = torch.nn.CrossEntropyLoss(reduction='mean')
       torch_loss_fun3 = torch.nn.CrossEntropyLoss(reduction='sum')
       torch_loss_fun4 = torch.nn.CrossEntropyLoss(reduction='mean', label_smoothing=0.5)
-    
-    torch_x = torch.tensor(x.numpy().astype(np.float32)) 
-    torch_y = torch.tensor(y.numpy().astype(np.float32)) 
+
+    torch_x = torch.tensor(x.numpy().astype(np.float32))
+    torch_y = torch.tensor(y.numpy().astype(np.float32))
 
     torch_loss1 = torch_loss_fun1(torch_x, torch_y)
     torch_loss2 = torch_loss_fun2(torch_x, torch_y)
