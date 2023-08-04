@@ -102,6 +102,7 @@ def _reshape_mask(view: View, new_shape:Tuple[int, ...]) -> Tuple[Optional[Tuple
   r_masks, r_shape, r_new_shape = reversed(cast(Tuple[Tuple[int, int],...], view.mask)), reversed(view.shape), reversed(new_shape)
   stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
   while len(new_mask) < len(new_shape):
+    if mask[1]-mask[0] < 1: return ((0,0),)*len(new_shape), False
     if old_dim == new_dim: # easy, can just copy the mask
       new_mask.append((mask[0]//stride, (mask[1]-1)//stride+1))
       stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
@@ -117,6 +118,8 @@ def _reshape_mask(view: View, new_shape:Tuple[int, ...]) -> Tuple[Optional[Tuple
       new_mask.append((mask[0]%new_dim//stride, (((mask[1]-1)%new_dim+1)-1)//stride+1))
       stride *= new_dim
       new_dim *= next(r_new_shape, 1)
+  for mask in (mask, *r_masks): # if the old shape has leading 1s, need to make sure their mask is (0,1)
+    if mask != (0,1): return ((0,0),)*len(new_shape), False
   return tuple(reversed(new_mask)), False
 
 @functools.lru_cache(maxsize=None)

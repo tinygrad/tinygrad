@@ -461,6 +461,24 @@ class TestMaskedShapeTracker(unittest.TestCase):
     assert len(self.st.views) == 1
     self.st.assert_same()
 
+  def test_zero_mask_1(self):
+    self.st = CheckingShapeTracker((1, 3, 2))
+    self.st.pad(((0,0), (0,3), (0,0)))
+    self.st.shrink(((0,1), (3,6), (0,2)))
+    self.st.reshape((3,2))
+    self.st.assert_same()
+    self.st.reshape((1, 3, 1, 2, 1))
+    self.st.assert_same()
+  
+  def test_zero_mask_2(self):
+    self.st = CheckingShapeTracker((1, 3, 2))
+    self.st.pad(((0,2), (0,3), (0,0)))
+    self.st.shrink(((2,3), (3,6), (0,2)))
+    self.st.reshape((3,2))
+    self.st.assert_same()
+    self.st.reshape((1, 3, 1, 2, 1))
+    self.st.assert_same()
+
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((7,4))
