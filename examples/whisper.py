@@ -281,8 +281,12 @@ if __name__ == "__main__":
   parser.add_argument('--model', type=str, default="tiny", help='model to use')
   parser.add_argument('--test', action='store_true', help='run tests')
   parser.add_argument('--file', type=str, default=None, help='file to transcribe')
+  parser.add_argument('--lang', type=str, default="en", help='language to transcribe')
+  parser.add_argument('--translate', action='store_true', help='translate to english')
   args = parser.parse_args()
-  #check if model exists
+  assert args.lang in LANGUAGES, f"Language {args.lang} not found. Please choose from the following:\n{list(LANGUAGES.keys())}"
+  lang = "<|" + args.lang + "|>"
+  task = "<|translate|>" if args.translate else "<|transcribe|>"
   if args.model not in MODELS:
     print("Model not found. Please choose from the following:")
     print(list(MODELS.keys()))
@@ -324,7 +328,7 @@ if __name__ == "__main__":
   def transcribe_wav(fn, logprob_threshold=-1.0, no_speech_threshold=0.6):
     mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
     content_frames = mel.shape[-1] - N_FRAMES
-    initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|en|>"], enc._special_tokens["<|transcribe|>"]]
+    initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens[lang], enc._special_tokens[task]]
     seek, texts = 0, []
     while seek < content_frames:
       mel_segment = mel[:, seek:seek+N_FRAMES]
@@ -351,7 +355,7 @@ if __name__ == "__main__":
     p.daemon = True
     p.start()
 
-    lst = [enc._special_tokens["<|startoftranscript|>"]]
+    lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens[lang], enc._special_tokens[task]]
     total = None
     did_read = False
     for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
