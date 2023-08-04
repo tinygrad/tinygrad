@@ -289,7 +289,7 @@ class TestNN(unittest.TestCase):
     x = Tensor.randn(3,5)
     y = Tensor.randn(3,5).softmax(axis=1)
 
-    loss_fun1 = CrossEntropyLoss(reduction='none')                 
+    loss_fun1 = CrossEntropyLoss(reduction='none')
     loss_fun2 = CrossEntropyLoss(reduction='mean')
     loss_fun3 = CrossEntropyLoss(reduction='sum')
     loss_fun4 = CrossEntropyLoss(reduction='mean', label_smoothing=0.5)
