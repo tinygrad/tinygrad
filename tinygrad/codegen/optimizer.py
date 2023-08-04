@@ -6,7 +6,7 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.lazy import LazyBuffer
 
 def apply_opt(k, x):
-  if DEBUG >= 2: print(f"Shape: {k.full_shape}; Applying opt: {list(y for y in x if y[1] != 1)}")
+  if DEBUG >= 3: print(f"Shape: {k.full_shape}; Applying opt: {list(y for y in x if y[1] != 1)}")
   for axis, amt, typ in x:
     if axis is None or amt == 1: continue
     if typ == "R":
