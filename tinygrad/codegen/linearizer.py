@@ -188,7 +188,6 @@ class Linearizer:
 
     # parameters
     self.group_for_reduce: List[int] = []
-    self.axis_idxs: Optional[List[Optional[int]]] = None  # mapping from axes to canonical/original shape (before upcasts etc)
     self.upcasted: int = 0
     self.local_dims: int = 0
     self.local_alias: Dict[int, LocalBuffer] = {}
@@ -198,7 +197,9 @@ class Linearizer:
     # group simplifies
     self.simplify_ones()
     self.simplify_merge_adjacent()
-    self.axis_idxs: List[int] = list(range(len(self.full_shape)))  # simplify_merge_adjacent does not update axis_idxs; just calculate it afterwards.
+
+    # simplify_merge_adjacent does not support updating axis_idxs; define it here
+    self.axis_idxs: List[Optional[int]] = list(range(len(self.full_shape)))  # mapping from axes to canonical/original shape (before upcasts etc)
 
     # print early
     if DEBUG >= 5: self.printbufs("early")
@@ -573,8 +574,7 @@ class Linearizer:
     all_ones = [s==1 for s in self.full_shape]
     self.local_dims -= sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce])
     self.upcasted -= sum(all_ones[self.shape_len-self.upcasted:])
-    if self.axis_idxs is not None:
-      self.axis_idxs = [x for b, x in zip(all_ones, self.axis_idxs) if not b]
+    if hasattr(self, axis_idxs): self.axis_idxs = [x for b, x in zip(all_ones, self.axis_idxs) if not b]
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
 
   def simplify_merge_adjacent(self):

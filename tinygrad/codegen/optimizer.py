@@ -5,29 +5,6 @@ from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.lazy import LazyBuffer
 
-# ******************** optimizer simplifiers ********************
-# these take in axes in the current view, and store suggestions with axes indexed in the canonical/original shape.
-
-def shift_upcast(k, axis, amount, suggestion):
-  suggestion['U', k.axis_idxs[axis]] = amount
-  k.shift_to(axis, amount=amount)
-  k.upcast()
-
-def shift_local(k, axis, amount, suggestion):
-  suggestion['L', k.axis_idxs[axis]] = amount
-  k.shift_to(axis, amount=amount, insert_before=k.first_reduce-k.local_dims)
-  k.local_dims += 1
-
-# upcast amount off of the last reduce dimension
-def shift_reduce(k, suggestion, axis=None, amount=None):
-  if axis is None: axis = len(k.full_unupcasted_shape) - 1
-  if amount is None: amount = k.full_unupcasted_shape[-1]
-  suggestion['R', k.axis_idxs[axis]] = amount
-  if amount != k.full_shape[axis]: k.shift_to(axis, amount=amount, insert_before=len(k.full_unupcasted_shape))
-  k.upcast()
-
-# ******************** searching optimizer ********************
-
 def apply_opt(k, x):
   if DEBUG >= 2: print(f"Shape: {k.full_shape}; Applying opt: {list(y for y in x if y[1] != 1)}")
   for axis, amt, typ in x:
@@ -116,6 +93,27 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], runtime):
   if choice == "BASELINE": hand_coded_optimizations(k)
   else: apply_opt(k, choice)
 
+# ******************** optimizer simplifiers ********************
+# these take in axes in the current view, and store suggestions with axes indexed in the canonical/original shape.
+
+def shift_upcast(k, axis, amount, suggestion):
+  suggestion['U', k.axis_idxs[axis]] = amount
+  k.shift_to(axis, amount=amount)
+  k.upcast()
+
+def shift_local(k, axis, amount, suggestion):
+  suggestion['L', k.axis_idxs[axis]] = amount
+  k.shift_to(axis, amount=amount, insert_before=k.first_reduce-k.local_dims)
+  k.local_dims += 1
+
+# upcast amount off of the last reduce dimension
+def shift_reduce(k, suggestion, axis=None, amount=None):
+  if axis is None: axis = len(k.full_unupcasted_shape) - 1
+  if amount is None: amount = k.full_unupcasted_shape[-1]
+  suggestion['R', k.axis_idxs[axis]] = amount
+  if amount != k.full_shape[axis]: k.shift_to(axis, amount=amount, insert_before=len(k.full_unupcasted_shape))
+  k.upcast()
+
 def required_optimizations(k:Linearizer, suggestion, early_only=False):
   for buf_index,buf in enumerate(k.bufs):
     unit_stride_axes_mul_4 = [i for i in k.sts[buf_index].unit_stride_axes(ignore_valid=True) if k.sts[buf_index].shape[i]%4 == 0]
@@ -201,7 +199,6 @@ def hand_coded_optimizations(k:Linearizer):
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(k.sts[0].shape[:k.first_reduce]) <= 32 else [16]):
         if all(st.shape[k.first_reduce] % sz == 0 or st.shape[k.first_reduce] == 1 for st in k.sts):
-          # suggestion['T', k.axis_idxs[k.first_reduce]] = sz
           k.shift_to(k.first_reduce, sz, top=True, insert_before=k.first_reduce + len(k.group_for_reduce))
           k.group_for_reduce.append(sz)
           break
@@ -211,7 +208,6 @@ def hand_coded_optimizations(k:Linearizer):
       axes = k.sts[0].unit_stride_axes()
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
       if k.sts[0].shape[axes[0]]%4 == 0:
-        # suggestion['G', k.axis_idxs[axes[0]]] = 4
         k.shift_to(axes[0], 4, insert_before=k.first_reduce + len(k.group_for_reduce))   # insert at the end of the grouped axis
         k.group_for_reduce.append(4)
 
@@ -229,7 +225,7 @@ def hand_coded_optimizations(k:Linearizer):
       k.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
       k.simplify_ones()
 
-  # no more opt if we are grouping
+  # no more opt, and no suggestions (todo), if we are grouping
   if k.group_for_reduce: return
 
   # **** below this line need to be optional and benchmarked ****
