@@ -122,4 +122,3 @@ class Embedding:
   def __call__(self, idx:Tensor) -> Tensor:
     vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(1, 1, self.vocab_size).expand(*idx.shape, self.vocab_size)
     return (vocab_counter == idx.unsqueeze(2).expand(*idx.shape, self.vocab_size)) @ self.weight
-
