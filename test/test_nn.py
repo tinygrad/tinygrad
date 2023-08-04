@@ -5,7 +5,7 @@ from extra.utils import WINDOWS
 from tinygrad.helpers import getenv
 from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor, Device
-from tinygrad.nn import BatchNorm2d, Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm
+from tinygrad.nn import BatchNorm2d, Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm, CrossEntropyLoss
 import torch
 import pytest
 
@@ -284,7 +284,39 @@ class TestNN(unittest.TestCase):
       torch_x = torch.tensor(x.cpu().numpy().astype(np.int32))
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
+  
+  def test_cross_entropy_loss(self):
+    x = Tensor.randn(3,5)
+    y = Tensor.randn(3,5).softmax(axis=1)
 
+    loss_fun1 = CrossEntropyLoss(reduction='none')                  
+    loss_fun2 = CrossEntropyLoss(reduction='mean')
+    loss_fun3 = CrossEntropyLoss(reduction='sum')
+    loss_fun4 = CrossEntropyLoss(reduction='mean', label_smoothing=0.5)
+
+    loss1 = loss_fun1(x,y)
+    loss2 = loss_fun2(x,y)
+    loss3 = loss_fun3(x,y)
+    loss4 = loss_fun4(x,y)
+
+    with torch.no_grad():
+      torch_loss_fun1 = torch.nn.CrossEntropyLoss(reduction='none')
+      torch_loss_fun2 = torch.nn.CrossEntropyLoss(reduction='mean')
+      torch_loss_fun3 = torch.nn.CrossEntropyLoss(reduction='sum')
+      torch_loss_fun4 = torch.nn.CrossEntropyLoss(reduction='mean', label_smoothing=0.5)
+    
+    torch_x = torch.tensor(x.numpy().astype(np.float32)) 
+    torch_y = torch.tensor(y.numpy().astype(np.float32)) 
+
+    torch_loss1 = torch_loss_fun1(torch_x, torch_y)
+    torch_loss2 = torch_loss_fun2(torch_x, torch_y)
+    torch_loss3 = torch_loss_fun3(torch_x, torch_y)
+    torch_loss4 = torch_loss_fun4(torch_x, torch_y)
+
+    np.testing.assert_allclose(loss1.numpy(), torch_loss1.detach().numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(loss2.numpy(), torch_loss2.detach().numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(loss3.numpy(), torch_loss3.detach().numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(loss4.numpy(), torch_loss4.detach().numpy(), atol=5e-4, rtol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()
