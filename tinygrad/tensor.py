@@ -354,6 +354,7 @@ class Tensor:
     return new_ret
 
   def gather(self: Tensor, idx: Tensor, dim: int):
+    assert idx.ndim == self.ndim, f"self.ndim must equal idx.ndim"
     if dim < 0: dim += self.ndim
     self_idx = list(range(self.ndim))
     sum_dim = [dim] + [i-n if n < dim else idx.ndim+i-n-1 for n,i in enumerate(self_idx[:dim] + self_idx[dim+1:])]
