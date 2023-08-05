@@ -1,4 +1,4 @@
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict, Iterator, Union, Sequence
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict, Iterator, Union, Sequence, Final
 import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
@@ -281,6 +281,7 @@ class Linearizer:
       if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
       self.uop(UOps.STORE, None, [var], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid))
 
+  kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
     # uops
     self.uops: List[UOp] = []
@@ -453,6 +454,11 @@ class Linearizer:
       # end the global loop
       self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
+    # name the function something unique
+    Linearizer.kernel_cnt[self.function_name] += 1
+    suffix = f"{'n'+str(Linearizer.kernel_cnt[self.function_name]-1)}" if Linearizer.kernel_cnt[self.function_name] > 1 else ""
+    self.function_name, self.display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
+
   _OT = TypeVar("_OT")
   def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None) -> _OT:
     self.uops.append(UOp(uop, cast(Optional[Token], out), vin, arg))
@@ -616,7 +622,7 @@ class Linearizer:
       num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
       if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
-    # Check the global allocation limit, current the global_size will be flipped during codegen 
+    # Check the global allocation limit, current the global_size will be flipped during codegen
     # and then padded right with 1s if its length < 3 which makes this part a bit awkward to write
     global_dims = self.first_reduce-self.local_dims
     if global_dims > 0:
@@ -627,7 +633,7 @@ class Linearizer:
       for i in range(global_dims-1):
         if self.full_shape[i] > global_max[i]:
           order = list(range(len(self.full_shape)))
-          order[i], order[global_dims-1] = order[global_dims-1], order[i] 
+          order[i], order[global_dims-1] = order[global_dims-1], order[i]
           self.reshape_and_permute(None, order)
           if DEBUG >= 3: print("permuted global dim", order, "due to allocation exceeds global limit")
 
