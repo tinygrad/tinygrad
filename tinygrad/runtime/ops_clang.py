@@ -67,18 +67,18 @@ class ClangProgram:
     #self.fxn(*[x._buf for x in args])
     try:
       regs = [UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2] 
-      addr = self.end + 8 
+      addr = self.end + 4 
       for i, x in enumerate(args):
         self.mu.mem_write(addr, args[i]._buffer().tobytes())
         self.mu.reg_write(regs[i], addr)
-        addr += 8 
+        addr += args[i].size * args[i].dtype.itemsize 
 
       self.mu.emu_start(self.start, self.end)
       x0 = self.mu.reg_read(UC_ARM64_REG_X0)
-      val = self.mu.mem_read(x0, 4)
+      val = self.mu.mem_read(x0, args[0].size * args[0].dtype.itemsize)
       print(">>> X0 = 0x%x" %x0)
       print(">>> mem = 0x%s" %val)
-      print(struct.unpack('f', val)[0])
+      print(struct.unpack('f'*args[0].size, val))
       args[0]._buf = val 
     except UcError as e:
       print("ERROR: %s" % e)
