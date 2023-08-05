@@ -208,7 +208,6 @@ class CStyleCodegen(Linearizer):
       CStyleCodegen.kernel_cnt[self.function_name] += 1
       suffix = f"{'n'+str(CStyleCodegen.kernel_cnt[self.function_name]-1)}" if CStyleCodegen.kernel_cnt[self.function_name] > 1 else ""
       CStyleCodegen.kernel_name_cache[prg] = function_name, display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
+    prg = prg.replace("KERNEL_NAME_PLACEHOLDER", function_name)
 
-    return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
-      global_size, local_size,
-      op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=display_name)
+    return ASTRunner(function_name, prg, global_size, local_size, op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=display_name)
