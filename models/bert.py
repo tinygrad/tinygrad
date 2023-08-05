@@ -102,7 +102,7 @@ class BertOutput:
     hidden_states = self.LayerNorm(hidden_states + input_tensor)
     return hidden_states
 
-# approixmation of the error function
+# approximation of the error function
 def erf(x):
   t = (1 + 0.3275911 * x.abs()).reciprocal()
   return x.sign() * (1 - ((((1.061405429 * t + -1.453152027) * t + 1.421413741) * t + -0.284496736) * t + 0.254829592) * t * (-(x.square())).exp())
