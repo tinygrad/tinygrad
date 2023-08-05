@@ -109,7 +109,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dty
   return ret
 
 class LazyBuffer:
-  __slots__ = 'st', 'device', 'shape', 'optype', 'dtype', 'op', 'realized', 'output_buffer', 'children', 'node_id', '__weakref__'
+  __slots__ = 'st', 'device', 'shape', 'optype', 'dtype', 'op', 'realized', 'output_buffer', 'children', 'node_id', '__weakref__', "_device_extra_args"
   __deletable__ = ('op',)
   def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, src:Optional[RawBuffer]=None):
     self.st: ShapeTracker = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
@@ -128,13 +128,13 @@ class LazyBuffer:
       from tinygrad.graph import log_op
       log_op(self, self.op, phantom=True)
 
+    self._device_extra_args = {"device": device.split(":", 1)[1]} if ":" in self.device else {}
+
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
   @property
   def key(self):
     if self.realized: return (self.dtype, self.realized.key, self.st.key)
     return (self.dtype, self.op.op, self.st.key)
-
-  def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
 
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
@@ -156,7 +156,7 @@ class LazyBuffer:
           else:
             self.op = LazyOp(UnaryOps.CAST, (self.op,), dtypes.float32)
           self.dtype = dtypes.float32
-        self.realized = Device[self.device].exec_ast(self.op, output=self, **self._device_extra_args())
+        self.realized = Device[self.device].exec_ast(self.op, output=self, **self._device_extra_args)
 
       assert self.realized and isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
       # HACK: allow hot casting of images
@@ -356,23 +356,23 @@ def _realize_from(buffer: LazyBuffer) -> None:
   rawbuf = buffer.op.src[0].realize()
   # TODO: make this generic
   if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
-    buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
+    buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args)
     rawbuf.realized.readinto(cast(RawBufferMapped, buffer.realized)._buffer())
   else:
-    buffer.realized = Device[buffer.device].buffer.fromCPU(rawbuf.toCPU(), **buffer._device_extra_args())
+    buffer.realized = Device[buffer.device].buffer.fromCPU(rawbuf.toCPU(), **buffer._device_extra_args)
 
 def _realize_empty(buffer: LazyBuffer) -> None:
-  buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
+  buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args)
 
 def _realize_rand(buffer: LazyBuffer) -> None:
   rng = np.random.default_rng(buffer.op.arg)
-  buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=buffer.shape, dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args()) # type: ignore
+  buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=buffer.shape, dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args) # type: ignore
 
 def _realize_const(buffer: LazyBuffer) -> None:
   if hasattr(Device[buffer.device].codegen, 'supports_constant_folding'):
     buffer.realized = RawConst(1, buffer.dtype, float(buffer.op.arg))
   else:
-    buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args())
+    buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args)
 
 LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
   LoadOps.CONTIGUOUS: _realize_contiguous,
