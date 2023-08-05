@@ -27,7 +27,7 @@ def is_contiguous(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> bool: retur
 
 @functools.lru_cache(maxsize=None)
 def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
-  return tuple(stride if shp != 1 else 0 for stride, shp in zip(strides, shape))
+  return tuple([stride if shp != 1 else 0 for stride, shp in zip(strides, shape)])
 
 class ViewInternal(NamedTuple):
   shape:Tuple[int, ...]

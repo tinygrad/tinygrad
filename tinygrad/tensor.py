@@ -293,19 +293,19 @@ class Tensor:
     valid_slices = list(filterfalse(lambda x: x is None, orig_slices))
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
-    new_slice = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
-    new_shape = tuple(e - s for s, e in new_slice)
+    new_slice = tuple([(s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides)])
+    new_shape = tuple([e - s for s, e in new_slice])
     # Shrink
     sliced_tensor = self.shrink(new_slice)
     # Flip
-    if (flip_axes := tuple(i for i, s in enumerate(strides) if s < 0)):
+    if (flip_axes := tuple([i for i, s in enumerate(strides) if s < 0])):
       sliced_tensor = sliced_tensor.flip(axis=flip_axes)
     if any(s > 1 or s < 0 for s in strides):
       # normalize if negative strides
-      strides = tuple(abs(s) for s in strides)
+      strides = tuple([abs(s) for s in strides])
       def num_zeros(step, dim_sz): return 0 if step == 1 or (y := dim_sz % step) == 0 else (step - y)
       # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
-      paddings = tuple((0, num_zeros(s, dim_sz)) for s, dim_sz in zip(strides, sliced_tensor.shape))
+      paddings = tuple([(0, num_zeros(s, dim_sz)) for s, dim_sz in zip(strides, sliced_tensor.shape)])
       padded_tensor = sliced_tensor.pad(paddings)
       # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
       new_shape = reduce(operator.add, [[sh // s, s] for sh, s in zip(padded_tensor.shape, strides)], [])  # type: ignore
@@ -388,7 +388,7 @@ class Tensor:
     order = list(range(len(self.shape)))
     order[ax1], order[ax2] = order[ax2], order[ax1]
     return self.permute(order)
-  def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
+  def flatten(self, start_dim=0): return self.reshape(shape=self.shape[0:start_dim] + (-1,))
 
   # ***** reduce ops *****
 
