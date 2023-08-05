@@ -2,7 +2,7 @@ from __future__ import annotations
 from time import perf_counter
 from functools import partial
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg
@@ -42,8 +42,7 @@ class LazyOp:
 
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   def __eq__(self, __value: object) -> bool:
-    if __value.__class__ is not LazyOp: return False
-    __value = cast(LazyOp, __value)
+    if not isinstance(__value, LazyOp): return False
     return self.op is __value.op and self.src == __value.src and self.arg == __value.arg
   def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
   @property
@@ -90,12 +89,12 @@ class Interpreted:
     self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, context=None, **kwargs):
-    if TernaryOps.MULACC in self.fxn_for_op and ast.op is ReduceOps.SUM and ast.src[0].__class__ is LazyOp and ast.src[0].op is BinaryOps.MUL:
-      ast = LazyOp(TernaryOps.MULACC, cast(LazyOp, ast.src[0]).src, ast.arg)
+    if TernaryOps.MULACC in self.fxn_for_op and ast.op is ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op is BinaryOps.MUL:
+      ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
     created_context = context is None
     if context is None: context = dict()
     if not created_context and ast in context: return context[ast]
-    srcs = [self.exec_ast(cast(LazyOp, x), context=context, **kwargs) if x.__class__ is LazyOp else self.from_lazybuffer(x) for x in ast.src]
+    srcs = [self.exec_ast(x, context=context, **kwargs) if isinstance(x, LazyOp) else self.from_lazybuffer(x) for x in ast.src]
     if DEBUG >= 3: st = perf_counter()
     ret = self.from_underlying(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
     if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(perf_counter()-st)*1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape) if hasattr(ret._buf, 'shape') else str(len(ret._buf)):30s} in({len(srcs)}):", list(set(x._buf.shape if hasattr(x._buf, 'shape') else len(x._buf) for x in srcs)), ast.arg if ast.arg is not None else "")

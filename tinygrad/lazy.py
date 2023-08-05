@@ -149,7 +149,7 @@ class LazyBuffer:
         for x in self.op.buffers: x.realize()
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
-        if self.dtype.__class__ is ImageDType and self.optype is not MovementOps and (prod(self.shape) != prod(cast(ImageDType, self.dtype).shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
+        if isinstance(self.dtype, ImageDType) and self.optype != MovementOps and (prod(self.shape) != prod(self.dtype.shape) or not any([self.shape[x]%4 == 0 for x in self.st.unit_stride_axes()])):
           if self.op.op is MovementOps.RESHAPE:
             # put CAST before the final RESHAPE
             self.op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, self.op.src, dtypes.float32),), self.op.arg)
@@ -190,7 +190,8 @@ class LazyBuffer:
   def toCPU(self):
     assert self.dtype.np, "numpy dtype is required for toCPU"
     realized = self.cast(dtypes.from_np(self.dtype.np)).contiguous().realize().realized
-    ret = cast(RawBuffer, realized).toCPU().reshape(self.shape)
+    assert isinstance(realized, RawBuffer)
+    ret = realized.toCPU().reshape(self.shape)
     return ret
 
   def cast(self:LazyBuffer, arg:DType) -> LazyBuffer: return elementwise_op(UnaryOps.CAST, self, arg=arg) if self.dtype != arg else self
@@ -202,7 +203,7 @@ class LazyBuffer:
     return create_lazybuffer(self.device, ShapeTracker(self.shape), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype)
 
   def shuffle_and_prune_movement_ops(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> LazyBuffer:
-    if SHUFFLE_MOVEMENT_OPS and self.optype is BinaryOps and not self.realized and (op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op is MovementOps.RESHAPE and self.op.op in UnaryOps)) and len(self.children) == 0:
+    if SHUFFLE_MOVEMENT_OPS and self.optype is BinaryOps and not self.realized and (op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op is MovementOps.RESHAPE and self.op.op in UnaryOps)) and not self.children:
       return self.op.replace_with_movement_ops([(op, arg)])
     ret = create_lazybuffer(self.device, st, MovementOps, LazyOp(op, (self,), arg), self.dtype)
     if REMOVE_MOVEMENT_NOPS and not self.realized and not ret.realized and ret.st.contiguous:
@@ -288,7 +289,8 @@ def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
     while not bx.realized and bx.optype is MovementOps and bx.op.op is not MovementOps.EXPAND and (SHUFFLE_PAD_OPS or bx.op.op is not MovementOps.PAD) and len(bx.children) <= 1:
       assert isinstance(bx.op.op, MovementOps)
       mops.append((bx.op.op, bx.op.arg))
-      bx = cast(LazyBuffer, bx.op.src[0])
+      assert isinstance(bx.op.src[0], LazyBuffer)
+      bx = bx.op.src[0]
     # NOTE: can't push pads past anything where f(0, 0) != 0 or f(0) != 0
     unsafe_pad_ops = {BinaryOps.DIV, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
     if not bx.realized and bx.optype is BinaryOps and len(bx.children) <= 1 and len(mops) and (all(x[0] is not MovementOps.PAD for x in mops) or all(x.op not in unsafe_pad_ops for x in bx.op.get_lazyops())):
@@ -310,7 +312,8 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, 
     for x in srcs:
       if not x.realized and x.op.op is LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1:
         x.op.src[0].children.discard(x)
-        new_srcs.append(cast(LazyBuffer, x.op.src[0]))
+        assert isinstance(x.op.src[0], LazyBuffer)
+        new_srcs.append(x.op.src[0])
       else:
         new_srcs.append(x)
     return elementwise_op(op, *new_srcs, arg=arg).contiguous()
@@ -341,7 +344,7 @@ Device = _Device()
 
 def _realize_contiguous(buffer: LazyBuffer) -> None:
   realized = buffer.op.src[0].realize().realized
-  if buffer.op.src[0].st.contiguous and realized.__class__ is not RawConst and cast(RawBuffer, realized).size == prod(buffer.shape):
+  if buffer.op.src[0].st.contiguous and realized.__class__ is not RawConst and realized is not None and realized.size == prod(buffer.shape):
     # no need to run an AST, this is already contiguous
     buffer.realized = realized
   else:
