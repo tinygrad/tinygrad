@@ -25,7 +25,7 @@ class Function:
   @classmethod
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
     ctx = fxn(x[0].device, *x)
-    ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
+    ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad, canonical=True)
     if ctx.requires_grad and not Tensor.no_grad: ret._ctx = ctx    # used by autograd engine
     return ret
 
@@ -40,9 +40,9 @@ class Tensor:
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
-  def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+  def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None, canonical:bool=False):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
-    device = Device.canonicalize(device)
+    if not canonical: device = Device.DEFAULT if device is None else Device.canonicalize(device)
     # tensors have gradients, buffers do not
     self.grad: Optional[Tensor] = None
 
@@ -96,10 +96,10 @@ class Tensor:
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK
     if self.device.startswith("DISK"):
-      if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
+      if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype, canonical=True)
       self.lazydata.realize().realized._copyin(x.numpy())  # type: ignore
       return self
-    if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
+    if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype, canonical=True)
     assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
@@ -107,7 +107,7 @@ class Tensor:
     self.lazydata = x.lazydata
     return self
 
-  def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
+  def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False, canonical=True)
   def numpy(self) -> np.ndarray: return self.lazydata.toCPU()
 
   # TODO: if things are realized this won't work
@@ -218,7 +218,7 @@ class Tensor:
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
     # this is "implicit gradient creation"
-    self.grad = Tensor(1, device=self.device, requires_grad=False)
+    self.grad = Tensor(1, device=self.device, requires_grad=False, canonical=True)
 
     for t0 in reversed(self.deepwalk()):
       if not t0.requires_grad:
@@ -226,7 +226,7 @@ class Tensor:
         continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
-      grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
+      grads = [Tensor(g, device=self.device, requires_grad=False, canonical=True) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):
         if g is not None and t.requires_grad:
@@ -557,7 +557,7 @@ class Tensor:
   def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
     dtype = self.dtype if self.dtype is not dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
     x: Tensor = self
-    y: Tensor = Tensor(other, device=self.device, requires_grad=False, dtype=dtype) if not isinstance(other, Tensor) else other
+    y: Tensor = Tensor(other, device=self.device, requires_grad=False, dtype=dtype, canonical=True) if not isinstance(other, Tensor) else other
     if reverse: x, y = y, x
     if x.shape == y.shape: return fxn.apply(x, y)
 
@@ -606,8 +606,8 @@ class Tensor:
     # TODO: ensure self is non-differentiable, could mess with ceil/float though
     dtype = self.dtype if self.dtype is not dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
     x: Tensor = self
-    y: Tensor = Tensor(input_, device=self.device, requires_grad=False, dtype=dtype) if not isinstance(input_, Tensor) else input_
-    z: Tensor = Tensor(other, device=self.device, requires_grad=False, dtype=dtype) if not isinstance(other, Tensor) else other
+    y: Tensor = Tensor(input_, device=self.device, requires_grad=False, dtype=dtype, canonical=True) if not isinstance(input_, Tensor) else input_
+    z: Tensor = Tensor(other, device=self.device, requires_grad=False, dtype=dtype, canonical=True) if not isinstance(other, Tensor) else other
     if x.shape == y.shape and y.shape == z.shape: return mlops.Where.apply(x, y, z)
 
     # TODO refactor this code along with the binary version above
