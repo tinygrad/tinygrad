@@ -1,4 +1,5 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
+# to use in another file load model 
 import argparse
 import sys, math, string, difflib, base64, functools, itertools, multiprocessing
 import subprocess as sp
@@ -11,12 +12,10 @@ from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
 from extra.utils import download_file
 from extra.datasets.librispeech import ci, BASEDIR, get_window, mel, tinystft
-from examples.mlperf.metrics import word_error_rate
 
 # audio hyperparameters
 RATE = 16000
 CHUNK = 1600
-RECORD_SECONDS = 10
 MAX_ITERS = 100
 N_FFT = 400
 HOP_LENGTH = 160
@@ -106,10 +105,10 @@ class TextDecoder:
     return x @ self.token_embedding.weight.T
 
 class Whisper:
-  def __init__(self, dims):
+  def __init__(self, dims, tok):
     self.encoder = AudioEncoder(**dims)
     self.decoder = TextDecoder(**dims)
-
+    self.tokenizer = tok
   def __call__(self, mel:Tensor, tokens:Tensor):
     return self.decoder(tokens, self.encoder(mel))
 
@@ -126,7 +125,7 @@ LANGUAGES = {
   "as": "assamese", "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa", "ba": "bashkir", "jw": "javanese", "su": "sundanese",
 }
 
-MODELS = {
+WHISPER_MODELS = {
     "tiny.en": "https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt",
     "tiny": "https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt",
     "base.en": "https://openaipublic.azureedge.net/main/whisper/models/25a8566e1d0c1e2231d1c762132cd20e0f96a85d16145c3a00adf5d1ac670ead/base.en.pt",
@@ -142,9 +141,15 @@ MODELS = {
 
 BASE = Path(__file__).parent.parent / "weights"
 
-def get_encoding(n_vocab_in):
-  download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/multilingual.tiktoken", BASE / "multilingual.tiktoken")
-  ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(BASE / "multilingual.tiktoken") if line)}
+def get_encoding(n_vocab_in, is_multilingual=True):
+  if is_multilingual:
+    print("loading multilingual model")
+    download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/multilingual.tiktoken", BASE / "multilingual.tiktoken")
+    ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(BASE / "multilingual.tiktoken") if line)}
+  else:
+    print("loading english model")
+    download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/gpt2.tiktoken", BASE / "gpt2.tiktoken")
+    ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(BASE / "gpt2.tiktoken") if line)}
   n_vocab = len(ranks)
   specials = [
     "<|endoftext|>",
@@ -193,7 +198,7 @@ def prep_audio(audio, padding) -> Tensor:
   log_spec = (log_spec + 4.0) / 4.0
   return log_spec
 
-def listener(q):
+def listener(q, record_seconds):
   prep_audio(np.zeros(300), RATE)
   import sounddevice as sd
   print("listening")
@@ -201,7 +206,7 @@ def listener(q):
     waveform = ((indata).astype(np.float32)).reshape(1, -1)
     q.put(waveform)
   with sd.InputStream(callback=callback, channels=1, samplerate=RATE, blocksize=CHUNK):
-    sd.sleep(RECORD_SECONDS * 1000)
+    sd.sleep(record_seconds * 1000)
   print("done listening")
 
 def pad_or_trim(array, length=N_SAMPLES, axis=-1):
@@ -245,6 +250,56 @@ class MaximumLikelihoodRanker:
     lengths = [[len(t) for t in s] for s in tokens]
     return [np.argmax(scores(p, l) for p, l in zip(sum_logprobs, lengths))]
 
+def load_whisper_model(model_name, weights_folder=Path(__file__).parent.parent / "weights"):
+  assert model_name in WHISPER_MODELS, "Model not found. Please choose from the following: {}".format(list(WHISPER_MODELS.keys()))
+  fn = BASE / f"whisper-{model_name}.pt"
+  download_file(WHISPER_MODELS[model_name], fn)
+  state = torch_load(fn)
+  tok = get_encoding(state['dims']['n_vocab'], not (model_name.endswith(".en")))
+  model = Whisper(state['dims'], tok)
+  load_state_dict(model, state['model_state_dict'])
+  return model
+
+def decode_segment(segment, initial_tokens, model, sample_len=224, n_audio=1, n_group=1):
+  if segment.ndim == 2: segment = np.expand_dims(segment, axis=0)
+  texts, sample_begin = [], len(initial_tokens)
+  decoder = GreedyDecoder(eot=model.tokenizer.eot_token)
+  sequence_ranker = MaximumLikelihoodRanker(None)
+  audio_features = model.encoder(Tensor(segment)).realize()
+  tokens = Tensor([initial_tokens], dtype=dtypes.int64).repeat((segment.shape[0], 1))
+  sum_logprobs = Tensor.zeros(audio_features.shape[0])
+  [np.nan] * tokens.shape[0]
+  for i in range(sample_len):
+    logits = model.decoder(tokens, audio_features)
+    probs_at_sot = logits[:, initial_tokens.index(model.tokenizer._special_tokens["<|startoftranscript|>"])].softmax(axis=-1)
+    probs_at_sot[:, model.tokenizer._special_tokens["<|nospeech|>"]].numpy().tolist()
+    logits = logits[:, -1]
+    tokens, completed = decoder.update(tokens, logits, sum_logprobs)
+    if completed: break
+  tokens = tokens.reshape(n_audio, n_group, -1)
+  sum_logprobs = sum_logprobs.reshape(n_audio, n_group)
+  tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
+  tokens = [[t[sample_begin:(t == model.tokenizer.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
+  selected = sequence_ranker.rank(tokens, sum_logprobs)
+  tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
+  texts.extend([model.tokenizer.decode(t[1:]).strip() for t in tokens])
+  sum_logprobs = [lp[i] for i, lp in zip(selected, sum_logprobs)]
+  [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
+  return texts
+
+def transcribe_wav(fn, model, task_prompt, logprob_threshold=-1.0, no_speech_threshold=0.6):
+  mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
+  content_frames = mel.shape[-1] - N_FRAMES
+  initial_tokens = [model.tokenizer._special_tokens[i] for i in task_prompt]
+  seek, texts = 0, []
+  while seek < content_frames:
+    mel_segment = mel[:, seek:seek+N_FRAMES]
+    mel_segment = pad_or_trim(mel_segment, N_FRAMES)
+    segment_size = min(N_FRAMES, content_frames - seek)
+    texts += decode_segment(mel_segment, initial_tokens, model)
+    seek += segment_size
+  return "".join(texts)
+
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Run Whisper in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--model', type=str, default="tiny", help='model to use')
@@ -252,82 +307,27 @@ if __name__ == "__main__":
   parser.add_argument('--file', type=str, default=None, help='file to transcribe')
   parser.add_argument('--lang', type=str, default="en", help='language to transcribe')
   parser.add_argument('--translate', action='store_true', help='translate to english')
+  parser.add_argument('--recordlength', type=int, default=5, help='record for n seconds')
   args = parser.parse_args()
   assert args.lang in LANGUAGES, f"Language {args.lang} not found. Please choose from the following:\n{list(LANGUAGES.keys())}"
+  if args.model.endswith(".en") and args.lang != "en":
+    print("WARNING: using english-only model with non-english language")
   lang = "<|" + args.lang + "|>"
   task = "<|translate|>" if args.translate else "<|transcribe|>"
-  if args.model not in MODELS:
-    print("Model not found. Please choose from the following:")
-    print(list(MODELS.keys()))
-    sys.exit(1)
-  fn = BASE / f"whisper-{args.model}.pt"
-  download_file(MODELS[args.model], fn)
-  state = torch_load(fn)
-  model = Whisper(state['dims'])
-  load_state_dict(model, state['model_state_dict'])
-  enc = get_encoding(state['dims']['n_vocab'])
+  prompt = ["<|startoftranscript|>", f"<|{args.lang}|>", f"<|{'translate' if args.translate else 'transcribe'}|>"]
+  model= load_whisper_model(args.model)
 
-  def decode_segment(segment, initial_tokens, sample_len=224, n_audio=1, n_group=1):
-    if segment.ndim == 2: segment = np.expand_dims(segment, axis=0)
-    texts, sample_begin = [], len(initial_tokens)
-    decoder = GreedyDecoder(eot=enc.eot_token)
-    sequence_ranker = MaximumLikelihoodRanker(None)
-    audio_features = model.encoder(Tensor(segment)).realize()
-    tokens = Tensor([initial_tokens], dtype=dtypes.int64).repeat((segment.shape[0], 1))
-    sum_logprobs = Tensor.zeros(audio_features.shape[0])
-    [np.nan] * tokens.shape[0]
-    for i in range(sample_len):
-      logits = model.decoder(tokens, audio_features)
-      probs_at_sot = logits[:, initial_tokens.index(enc._special_tokens["<|startoftranscript|>"])].softmax(axis=-1)
-      probs_at_sot[:, enc._special_tokens["<|nospeech|>"]].numpy().tolist()
-      logits = logits[:, -1]
-      tokens, completed = decoder.update(tokens, logits, sum_logprobs)
-      if completed: break
-    tokens = tokens.reshape(n_audio, n_group, -1)
-    sum_logprobs = sum_logprobs.reshape(n_audio, n_group)
-    tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
-    tokens = [[t[sample_begin:(t == enc.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
-    selected = sequence_ranker.rank(tokens, sum_logprobs)
-    tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
-    texts.extend([enc.decode(t[1:]).strip() for t in tokens])
-    sum_logprobs = [lp[i] for i, lp in zip(selected, sum_logprobs)]
-    [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
-    return texts
-
-  def transcribe_wav(fn, logprob_threshold=-1.0, no_speech_threshold=0.6):
-    mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
-    content_frames = mel.shape[-1] - N_FRAMES
-    initial_tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens[lang], enc._special_tokens[task]]
-    seek, texts = 0, []
-    while seek < content_frames:
-      mel_segment = mel[:, seek:seek+N_FRAMES]
-      mel_segment = pad_or_trim(mel_segment, N_FRAMES)
-      segment_size = min(N_FRAMES, content_frames - seek)
-      texts += decode_segment(mel_segment, initial_tokens)
-      seek += segment_size
-    return "".join(texts)
-
-  if args.test:
-    diff = difflib.Differ()
-    for c in ci:
-      fn = BASEDIR / c["files"][0]["fname"]
-      print("-" * 128, f"{fn.stem}\n", sep="\n")
-      predicted = "".join(transcribe_wav(fn)).translate(str.maketrans("", "", string.punctuation)).lower()
-      transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
-      sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
-      print(f"\nword error rate: {word_error_rate([predicted], [transcript])[0]:.4f}")
-  elif args.file:
+  if args.file:
     print(transcribe_wav(args.file))
   else:
     q = multiprocessing.Queue()
-    p = multiprocessing.Process(target=listener, args=(q,))
+    p = multiprocessing.Process(target=listener, args=(q, args.recordlength))
     p.daemon = True
     p.start()
-
-    lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens[lang], enc._special_tokens[task]]
+    lst = prompt.copy()
     total = None
     did_read = False
-    for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+    for i in range(0, int(RATE / CHUNK * args.recordlength)):
       while not q.empty() or total is None:
         waveform = q.get()
         if total is None: total = waveform
@@ -340,8 +340,8 @@ if __name__ == "__main__":
       out = model.decoder(Tensor([lst]), encoded_audio).realize()
       idx = out[0,-1].numpy().argmax()
       lst.append(idx)
-      dec = enc.decode(lst)
+      dec = model.tokenizer.decode(lst)
       print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
       if dec.endswith("<|endoftext|>"):
         #total = total[:, 320*(len(lst)-1):]
-        lst = [enc._special_tokens["<|startoftranscript|>"]]
+        lst = [model.tokenizer._special_tokens["<|startoftranscript|>"]]

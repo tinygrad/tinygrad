@@ -10,7 +10,7 @@ The dataset has to be downloaded manually from https://www.openslr.org/12/ and p
 For mlperf validation the dev-clean dataset is used.
 
 Then all the flacs have to be converted to wav using something like:
-```fish
+```sh
 for file in $(find * | grep flac); do ffmpeg -i $file -ar 16k "$(dirname $file)/$(basename $file .flac).wav"; done
 ```
 
