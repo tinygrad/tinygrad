@@ -152,8 +152,8 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], codegen, runtime, synchronize=lambda: None):
-    self.buffer, self.codegen, self.runtime, self.synchronize = buffer, codegen, runtime, synchronize
+  def __init__(self, buffer: Type[RawBuffer], opts, renderer, runtime, synchronize=lambda: None):
+    self.buffer, self.opts, self.renderer, self.runtime, self.synchronize = buffer, opts, renderer, runtime, synchronize
     self.method_cache: Dict[str, ASTRunner] = {}
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):
@@ -176,14 +176,23 @@ class Compiled:
       output.realized = self.buffer(prod(output.shape), output.dtype, **kwargs)
 
     # compilation time
-    k = self.codegen(ast, output)
+    from tinygrad.codegen.linearizer import Linearizer
+    from tinygrad.codegen.optimizer import hand_coded_optimizations
+    k = Linearizer(ast, output, self.opts)
+    hand_coded_optimizations(k)
+    k.linearize()
+    src, global_size, local_size = self.renderer(k.function_name, k.uops)
+    prg = ASTRunner(k.function_name, src, global_size, local_size,
+                    op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
+                    display_name=k.display_name).build(self.runtime)
 
     # this is the default now
+    """
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
       from tinygrad.codegen.optimizer import kernel_optimize, hand_coded_optimizations
       if k.key not in self.method_cache:
         if getenv("KOPT"):
-          kernel_optimize(k, lambda: self.codegen(ast, output), self.runtime)
+          kernel_optimize(k, lambda: Linearizer(ast, output, self.opts), self.runtime)
         elif not getenv("NOOPT"):
           hand_coded_optimizations(k)
         self.method_cache[k.key] = k.codegen().build(self.runtime)
@@ -191,6 +200,7 @@ class Compiled:
       prg = self.method_cache[k.key]
     else:
       prg = k.codegen().build(self.runtime)
+    """
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 

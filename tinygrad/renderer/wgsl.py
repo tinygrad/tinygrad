@@ -1,6 +1,6 @@
-from tinygrad.codegen.cstyle import render_cl
+from tinygrad.renderer.cstyle import render_cl
 from tinygrad.helpers import dtypes, DType
-from tinygrad.codegen.cstyle import CStyleLanguage
+from tinygrad.renderer.cstyle import CStyleLanguage
 from typing import List, Union
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 import math
