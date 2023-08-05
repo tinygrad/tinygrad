@@ -279,12 +279,13 @@ for uop in linearizer.uops: print(uop)
 
 # output:
 """
+UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.float)
 UOps.LOOP           :                           []                               ([], 'global')
 UOps.LOOP           :                           []                               ([], 'local')
-UOps.LOAD           : <val1_0>                  []                               MemOp(i=1, idx=<0>, valid=<1>)
-UOps.LOAD           : <val2_0>                  []                               MemOp(i=2, idx=<0>, valid=<1>)
-UOps.ALU            : <alu0>                    [<val1_0>, <val2_0>]             BinaryOps.ADD
-UOps.STORE          :                           [<alu0>]                         MemOp(i=0, idx=<0>, valid=<1>)
+UOps.LOAD           : <acc1_0>                  []                               ConstOp(value=2.0, valid=<1>, invalid_value=0.0)
+UOps.LOAD           : <acc2_0>                  []                               ConstOp(value=3.0, valid=<1>, invalid_value=0.0)
+UOps.ALU            : <alu0>                    [<acc1_0>, <acc2_0>]             BinaryOps.ADD
+UOps.STORE          :                           [<alu0>]                         MemOp(name='data0', idx=<0>, local=False, memory_dtype=dtypes.float, valid=<1>, invalid_value=0.0)
 UOps.ENDLOOP        :                           []                               ([], 'global+local')
 """
 

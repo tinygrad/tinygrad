@@ -26,6 +26,7 @@ class Sin(Function):
     return x.unary_op(UnaryOps.SIN)
   def backward(self, grad: LazyBuffer) -> LazyBuffer:
     return self.x.const_like(math.pi / 2).binary_op(BinaryOps.SUB, self.x).unary_op(UnaryOps.SIN).binary_op(BinaryOps.MUL, grad)
+
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
   __slots__ = "ret"
