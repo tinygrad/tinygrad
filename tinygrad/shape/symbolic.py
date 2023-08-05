@@ -44,7 +44,7 @@ class Node:
     lhs = self
     if isinstance(lhs, SumNode):
       muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
-      if len(muls):
+      if muls:
         # NOTE: gcd in python 3.8 takes exactly 2 args
         mul_gcd = muls[0].b
         for x in muls[1:]: mul_gcd = gcd(mul_gcd, x.b)

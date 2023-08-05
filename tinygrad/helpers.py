@@ -89,6 +89,7 @@ class dtypes:
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint32, dtypes.uint64)
   @staticmethod
+  @functools.lru_cache(maxsize=None)
   def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT

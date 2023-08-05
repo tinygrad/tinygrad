@@ -179,7 +179,7 @@ class Linearizer:
 
     # make the output buffer shape correct in here
     self.sts[0].reshape(self.info.shape)
-    self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
+    self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
@@ -291,7 +291,7 @@ class Linearizer:
       self.uop(UOps.DEFINE_GLOBAL, None, [], (name, buf.dtype))
 
     # add a local buffer for multistage reduce
-    if len(self.group_for_reduce):
+    if self.group_for_reduce:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
@@ -363,7 +363,7 @@ class Linearizer:
           elif (elc:=[el for el in extra_locals if v.min == el.min and (v.max+1)%(el.max+1) == 0]):
             tacc = Variable.num(0)
             rem = v.max+1
-            while len(elc) and rem%(elc[0].max+1) == 0:
+            while elc and rem%(elc[0].max+1) == 0:
               if DEBUG >= 4: print(f"upcasting partial stride {rem} {elc[0]} left: {elc[1:]}")
               rem = rem//(elc[0].max+1)
               tacc += (elc[0] * rem)

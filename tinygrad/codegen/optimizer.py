@@ -47,7 +47,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], runt
     opts.append(ng.p.TransitionChoice([(i,s,"L") for s in LOCALS if k.full_shape[i]%s == 0]))
   for i in range(k.shape_len-k.first_reduce):
     opts.append(ng.p.TransitionChoice([(i,s,"R") for s in UPCASTS if k.full_shape[k.first_reduce+i]%s == 0]))
-  if len(opts) == 0: return "BASELINE"
+  if not opts: return "BASELINE"
   search_space = prod(len(x.choices) for x in opts)
   st = time.perf_counter()
   optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, 200))
@@ -115,7 +115,7 @@ def hand_coded_optimizations(k:Linearizer):
     buf1_strides = k.sts[buf1].real_strides()
     axis_buf0 = [(i,k.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and k.full_shape[i]%8 == 0]
     axis_buf1 = [(i,k.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and k.full_shape[i]%8 == 0]
-    if len(axis_buf0) and len(axis_buf1) and k.full_shape[k.first_reduce]%8 == 0 and (k.shape_len-k.first_reduce) == 1:
+    if axis_buf0 and axis_buf1 and k.full_shape[k.first_reduce]%8 == 0 and (k.shape_len-k.first_reduce) == 1:
       if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1)
       k.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
 
@@ -205,7 +205,7 @@ def hand_coded_optimizations(k:Linearizer):
       # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis not in upcasted_axis and k.full_shape[axis]%upcast_amount == 0 and any(k.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in k.upcasted_axis(buf_index)) for buf_index in range(len(k.sts))):
         xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in k.sts), sum(st.views[-1].strides[axis] for st in k.sts), axis, upcast_amount))
-    if len(xb_choices):
+    if xb_choices:
       xb_choices = sorted(xb_choices)
       if DEBUG >= 4: print(f"float4 merging axis : {xb_choices}")
       k.shift_to(xb_choices[0][2], amount=xb_choices[0][3])

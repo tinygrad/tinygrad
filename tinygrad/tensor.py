@@ -3,9 +3,9 @@ from __future__ import annotations
 import time
 from functools import partialmethod, reduce
 from itertools import accumulate, filterfalse
-import operator
+from operator import add
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
 from math import ceil, pi, prod, sqrt, log, cos, copysign, isinf
 from tinygrad.lazy import Device, LazyBuffer
@@ -52,8 +52,7 @@ class Tensor:
 
     # internal variables used for autograd graph construction
     self._ctx: Optional[Function] = None
-    if data.__class__ is LazyBuffer:
-      data = cast(LazyBuffer, data) # NOTE: this is a noop, it makes mypy happy
+    if isinstance(data, LazyBuffer):
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
@@ -283,7 +282,7 @@ class Tensor:
       raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     orig_slices = list(val)
     ellipses_found = [i for i, v in enumerate(val) if v is Ellipsis]
-    if len(ellipses_found) > 0:
+    if ellipses_found:
       if len(ellipses_found) != 1:
         raise IndexError("an index can only have a single ellipsis ('...')")
       ellipsis_idx = ellipses_found[0]
@@ -293,14 +292,14 @@ class Tensor:
     valid_slices = list(filterfalse(lambda x: x is None, orig_slices))
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
-    new_slice = tuple([(s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides)])
+    new_slice = tuple([(s, e) if st else (e+1, s+1) for s, e, st in zip(start, stop, strides)])
     new_shape = tuple([e - s for s, e in new_slice])
     # Shrink
     sliced_tensor = self.shrink(new_slice)
     # Flip
     if (flip_axes := tuple([i for i, s in enumerate(strides) if s < 0])):
       sliced_tensor = sliced_tensor.flip(axis=flip_axes)
-    if any(s > 1 or s < 0 for s in strides):
+    if any(s != 1 for s in strides):
       # normalize if negative strides
       strides = tuple([abs(s) for s in strides])
       def num_zeros(step, dim_sz): return 0 if step == 1 or (y := dim_sz % step) == 0 else (step - y)
@@ -308,11 +307,11 @@ class Tensor:
       paddings = tuple([(0, num_zeros(s, dim_sz)) for s, dim_sz in zip(strides, sliced_tensor.shape)])
       padded_tensor = sliced_tensor.pad(paddings)
       # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
-      new_shape = reduce(operator.add, [[sh // s, s] for sh, s in zip(padded_tensor.shape, strides)], [])  # type: ignore
+      new_shape = reduce(add, [[sh // s, s] for sh, s in zip(padded_tensor.shape, strides)], [])  # type: ignore
       reshaped_tensor = padded_tensor.reshape(new_shape)
       # Shrink: do [:, 0]
       new_shape = new_shape[::2]
-      final_slice = reduce(operator.add, (((0, sh), (0, 1)) for sh in new_shape), ())
+      final_slice = reduce(add, (((0, sh), (0, 1)) for sh in new_shape), ())
       sliced_tensor = reshaped_tensor.shrink(final_slice)
     final_shape = []
     it_shape = iter(new_shape)
@@ -354,7 +353,7 @@ class Tensor:
     base_shape = self.shape
     if len(repeats) > self.ndim:
       base_shape = (1,) * (len(repeats) - self.ndim) + base_shape
-    new_shape = [x for i in range(len(base_shape)) for x in [1, base_shape[i]]]
+    new_shape = [x for b in base_shape for x in [1, b]]
     expand_shape = [x for r,s in zip(repeats, base_shape) for x in [r,s]]
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
     return self.reshape(new_shape).expand(expand_shape).reshape(final_shape)
@@ -395,8 +394,8 @@ class Tensor:
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False):
     axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if axis.__class__ is int else list(axis)) # type: ignore
     axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
-    shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis_]
-    ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else self.shape[i] for i in range(len(self.shape))]))
+    shape = [s for i,s in enumerate(self.shape) if i not in axis_]
+    ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else s for i,s in enumerate(self.shape)]))
     return ret if keepdim else ret.reshape(shape=shape)
 
   def sum(self, axis=None, keepdim=False): return self._reduce(mlops.Sum, axis, keepdim)
@@ -449,7 +448,7 @@ class Tensor:
     o_ = [(i+(s-k))//s for i,s,k in zip(i_, s_, k_)]
     xup = self.slice(slc_prefix + [(0,o*s) for o,s in zip(o_, s_)])
     xup = xup.reshape(*prefix, *([1]*len(_insert_dims)), *flatten(((o, s) for o,s in zip(o_, s_))))
-    if len(_insert_dims):
+    if _insert_dims:
       xup = xup.expand(*prefix, *_insert_dims, *flatten(((o, s) for o,s in zip(o_, s_))))
       prefix += _insert_dims
       slc_prefix += [(0,x) for x in _insert_dims]
@@ -556,17 +555,16 @@ class Tensor:
   # ***** broadcasted binary mlops *****
 
   def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
-    dtype = self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
+    dtype = self.dtype if self.dtype is not dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
     x: Tensor = self
-    y: Tensor = Tensor(cast(float, other), device=self.device, requires_grad=False, dtype=dtype) if other.__class__ is not Tensor else cast(Tensor, other)
+    y: Tensor = Tensor(other, device=self.device, requires_grad=False, dtype=dtype) if not isinstance(other, Tensor) else other
     if reverse: x, y = y, x
     if x.shape == y.shape: return fxn.apply(x, y)
 
     len_x_shape, len_y_shape = len(x.shape), len(y.shape)
-    max_shape = max(len_x_shape, len_y_shape)
 
-    if len_x_shape != max_shape: x = x.reshape((1,) * (max_shape - len_x_shape) + x.shape)
-    if len_y_shape != max_shape: y = y.reshape((1,) * (max_shape - len_y_shape) + y.shape)
+    if len_y_shape < len_x_shape: y = y.reshape((1,) * (len_x_shape - len_y_shape) + y.shape)
+    else: x = x.reshape((1,) * (len_y_shape - len_x_shape) + x.shape)
 
     shape_ret = tuple([max(x, y) for x, y in zip(x.shape, y.shape)])
     if x.shape != shape_ret: x = x.expand(shape_ret)
@@ -608,8 +606,8 @@ class Tensor:
     # TODO: ensure self is non-differentiable, could mess with ceil/float though
     dtype = self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
     x: Tensor = self
-    y: Tensor = Tensor(cast(float, input_), device=self.device, requires_grad=False, dtype=dtype) if input_.__class__ is not Tensor else cast(Tensor, input_)
-    z: Tensor = Tensor(cast(float, other), device=self.device, requires_grad=False, dtype=dtype) if other.__class__ is not Tensor else cast(Tensor, other)
+    y: Tensor = Tensor(input_, device=self.device, requires_grad=False, dtype=dtype) if not isinstance(input_, Tensor) else input_
+    z: Tensor = Tensor(other, device=self.device, requires_grad=False, dtype=dtype) if not isinstance(other, Tensor) else other
     if x.shape == y.shape and y.shape == z.shape: return mlops.Where.apply(x, y, z)
 
     # TODO refactor this code along with the binary version above
