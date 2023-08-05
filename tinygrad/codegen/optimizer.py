@@ -1,5 +1,6 @@
 from typing import Callable
-import itertools, time
+from time import perf_counter
+from itertools import product
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType
 from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.linearizer import Linearizer
@@ -49,10 +50,10 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], runt
     opts.append(ng.p.TransitionChoice([(i,s,"R") for s in UPCASTS if k.full_shape[k.first_reduce+i]%s == 0]))
   if not opts: return "BASELINE"
   search_space = prod(len(x.choices) for x in opts)
-  st = time.perf_counter()
+  st = perf_counter()
   optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, 200))
   recommendation = optimizer.minimize(opt)
-  et = time.perf_counter() - st
+  et = perf_counter() - st
   if DEBUG >= 1: print(f"optimizer({et:6.2f} s to search) space {search_space:8d} with tm {recommendation.loss:5.2f} ms vs baseline {baseline:5.2f} ms, a {baseline/recommendation.loss:5.2f}x gain : {k.colored_shape()}")
   return recommendation.value if recommendation.loss < baseline else "BASELINE"
 
@@ -201,7 +202,7 @@ def hand_coded_optimizations(k:Linearizer):
   upcasted_axis = set()
   while prod(k.sts[0].shape[:k.first_reduce]) >= 1024:
     xb_choices = []
-    for axis, upcast_amount in itertools.product(range(k.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
+    for axis, upcast_amount in product(range(k.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
       # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis not in upcasted_axis and k.full_shape[axis]%upcast_amount == 0 and any(k.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in k.upcasted_axis(buf_index)) for buf_index in range(len(k.sts))):
         xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in k.sts), sum(st.views[-1].strides[axis] for st in k.sts), axis, upcast_amount))

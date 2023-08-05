@@ -1,6 +1,6 @@
 from __future__ import annotations
 from abc import abstractmethod
-import functools
+from functools import reduce, cached_property
 from math import gcd
 from tinygrad.helpers import partition
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
@@ -22,9 +22,9 @@ class Node:
     if strip_parens and ret[0] == '(' and ret[-1] == ')': ret = ret[1:-1]
     return ret
   def vars(self): return []
-  @functools.cached_property
+  @cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
-  @functools.cached_property
+  @cached_property
   def hash(self) -> int: return hash(self.key)
   def __repr__(self): return "<"+self.key+">"
   def __hash__(self): return self.hash
@@ -193,7 +193,7 @@ class ModNode(OpNode):
 
 class RedNode(Node):
   def __init__(self, nodes:List[Node]): self.nodes = nodes
-  def vars(self): return functools.reduce(lambda l,x: l+x.vars(), self.nodes, [])
+  def vars(self): return reduce(lambda l,x: l+x.vars(), self.nodes, [])
 
 class SumNode(RedNode):
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum

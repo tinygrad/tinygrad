@@ -1,4 +1,5 @@
-import os, atexit, itertools
+import os, atexit
+from itertools import product
 try:
   import networkx as nx  # type: ignore
 except ImportError:
@@ -77,6 +78,6 @@ def prune_graph():
   dead_nodes = []
   for n in G.nodes:
     if 'prunable' in G.nodes[n] and G.nodes[n]['prunable']:
-      G.add_edges_from([(x, y) for (x,_),(_,y) in itertools.product(G.in_edges(n), G.out_edges(n))])
+      G.add_edges_from([(x, y) for (x,_),(_,y) in product(G.in_edges(n), G.out_edges(n))])
       dead_nodes.append(n)
   G.remove_nodes_from(dead_nodes)

@@ -1,6 +1,7 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
-import os, subprocess, pathlib
+import os, subprocess
 import Metal, Cocoa, libdispatch # type: ignore
+from pathlib import Path
 from typing import List, Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType
@@ -55,7 +56,7 @@ class MetalProgram:
       unwrap(arc.addComputePipelineFunctionsWithDescriptor_error_(desc, None))
       unwrap(arc.serializeToURL_error_(Cocoa.NSURL.URLWithString_("file:///tmp/shader.bin"), None))
       # clone https://github.com/dougallj/applegpu.git in tinygrad/disassemblers
-      os.system(f"cd {pathlib.Path(__file__).parent.parent.parent}/disassemblers/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
+      os.system(f"cd {Path(__file__).parent.parent.parent}/disassemblers/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
     self.pipeline_state = unwrap(METAL.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
 
   def __call__(self, global_size, local_size, *bufs, wait=False):

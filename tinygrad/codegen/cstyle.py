@@ -1,5 +1,6 @@
 from typing import Final, Dict, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Union
-import math, collections
+from collections import defaultdict
+from math import isnan, isinf
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, MemOp, ConstOp
 from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, colored, getenv, prod, DType
@@ -50,8 +51,8 @@ class CStyleLanguage(NamedTuple):
 
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int], var_dtype) -> str:
-    if math.isnan(x): val = "NAN"
-    elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
+    if isnan(x): val = "NAN"
+    elif isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     else: val = f"{x}" + ("f" if isinstance(x, float) else "")
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
 
@@ -191,7 +192,7 @@ class CStyleCodegen(Linearizer):
   supports_float4_alu: bool = True
 
   # for renaming
-  kernel_cnt: Final[DefaultDict[str, int]] = collections.defaultdict(int)
+  kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   kernel_name_cache: Final[Dict[str, Tuple[str, str]]] = {}
 
   def codegen(self):

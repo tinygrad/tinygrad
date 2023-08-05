@@ -1,5 +1,6 @@
 from typing import Callable, List, Tuple, Any, Dict, cast, Union
-import functools, itertools
+from functools import partial
+from itertools import chain
 from tinygrad.helpers import DEBUG, DType
 
 from tinygrad.lazy import Device
@@ -17,12 +18,12 @@ class TinyJit:
     self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], int, DType]]= {}   # (kernel_number, buffer_number) -> (input_name, expected_size, expected_type)
 
   # add support for instance methods
-  def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
+  def __get__(self, obj, objtype): return partial(self.__call__, obj)
 
   def __call__(self, *args, **kwargs) -> Any:
     if Device.DEFAULT not in JIT_SUPPORTED_DEVICE: return self.fxn(*args, **kwargs)  # only jit on supported device
     # NOTE: this cast is needed since although we know realize will create a ".realized" DeviceBuffer, the type checker doesn't
-    input_rawbuffers: Dict[Union[int, str], RawBuffer] = {cast(Union[int, str], k):cast(RawBuffer, v.realize().lazydata.realized) for k,v in itertools.chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
+    input_rawbuffers: Dict[Union[int, str], RawBuffer] = {cast(Union[int, str], k):cast(RawBuffer, v.realize().lazydata.realized) for k,v in chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
     if self.cnt >= 2:

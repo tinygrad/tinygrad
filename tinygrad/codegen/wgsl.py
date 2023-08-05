@@ -3,7 +3,7 @@ from tinygrad.helpers import dtypes, DType
 from tinygrad.codegen.cstyle import CStyleLanguage
 from typing import List, Union
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-import math
+from math import isnan, isinf
 from typing import Tuple
 
 type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
@@ -27,8 +27,8 @@ class WGSLLanguage(CStyleLanguage):
     return f"var<workgroup> {name}: array<f32,{size}>;"
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
-    if math.isnan(x): val = "nan()"
-    elif math.isinf(x): val = ("-" if x < 0 else "") + "0x1.fffffep+127f"
+    if isnan(x): val = "nan()"
+    elif isinf(x): val = ("-" if x < 0 else "") + "0x1.fffffep+127f"
     else: val = f"{x}" + ("" if dtypes.is_int(var_dtype) else "f")
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
 

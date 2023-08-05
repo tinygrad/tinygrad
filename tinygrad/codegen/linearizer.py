@@ -1,7 +1,8 @@
 from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict, Iterator, Union, Sequence
-import itertools, math
+from itertools import product
 from collections import defaultdict
 from enum import Enum, auto
+from math import inf
 
 from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
@@ -103,11 +104,11 @@ def expand_node(idx:Node) -> List[Node]:
   if isinstance(idx, Variable): return [idx] if idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)]
   if isinstance(idx, NumNode): return [idx]
   if isinstance(idx, MulNode): return [x*idx.b for x in expand_node(idx.a)]
-  if isinstance(idx, SumNode): return [Variable.sum(list(it)) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
+  if isinstance(idx, SumNode): return [Variable.sum(list(it)) for it in product(*[expand_node(x) for x in idx.nodes])]
   raise NotImplementedError(idx)
 
 def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
-  for x in itertools.product(*[expand_node(idx) for idx in idxs[::-1]]):
+  for x in product(*[expand_node(idx) for idx in idxs[::-1]]):
     yield x[::-1]
 
 class MemOp(NamedTuple):
@@ -201,7 +202,7 @@ class Linearizer:
     # print early
     if DEBUG >= 5: self.printbufs("early")
 
-  def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
+  def shape_offsets(self, i): return product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
   def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]
 
   def upcasted_axis(self, i):
@@ -214,7 +215,7 @@ class Linearizer:
     if self.upcasted == 0: return [0]
     upcasted_i = self.upcasted_axis(i)
     acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple([1 if r else s for s,_,r in upcasted_i[::-1]])))]
-    return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
+    return [sum(t) for t in product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
   def get_upcast_dim(self, i) -> List[int]:
     should_upcast = self.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
@@ -224,7 +225,7 @@ class Linearizer:
     if isinstance(self.bufs[i].realized, RawConst): const = self.bufs[i].realized._buf
 
     expanded_nodes = [expand_node(idx) for idx in idxs]
-    _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
+    _idxs = [x[::-1] for x in product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
 
     amt = 1
@@ -253,7 +254,7 @@ class Linearizer:
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
     expanded_nodes = [expand_node(idx) for idx in idxs]
-    _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
+    _idxs = [x[::-1] for x in product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
 
     store_offset = dict(zip(_idxs, store))
@@ -338,7 +339,7 @@ class Linearizer:
       fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
       # define accumulator
-      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -inf}[cast(ReduceOps, self.reduceop.op)])
 
       # reduce loop
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
@@ -422,7 +423,7 @@ class Linearizer:
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -inf}[cast(ReduceOps, self.reduceop.op)])
 
         # late reduce loop
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
@@ -622,7 +623,7 @@ class Linearizer:
     if global_dims > 0:
       if global_max:
         tmp = global_max[:global_dims] + (local_max[:self.local_dims] if local_max else [])
-        if max(global_max) < max(self.full_shape[:global_dims]): self.reshape_and_permute(lambda x: self._limit_size(x, tmp + [math.inf] * (len(self.full_shape)-len(tmp))), None)
+        if max(global_max) < max(self.full_shape[:global_dims]): self.reshape_and_permute(lambda x: self._limit_size(x, tmp + [inf] * (len(self.full_shape)-len(tmp))), None)
         assert max(global_max) >= max(self.full_shape[:global_dims]), f"device max allocation {max(self.full_shape[:global_dims])} exceeds global dim maximum {max(global_max)}"
       for i in range(global_dims-1):
         if self.full_shape[i] > global_max[i]:
