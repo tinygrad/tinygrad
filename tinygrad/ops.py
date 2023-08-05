@@ -152,8 +152,8 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], opts, renderer, runtime, synchronize=lambda: None):
-    self.buffer, self.opts, self.renderer, self.runtime, self.synchronize = buffer, opts, renderer, runtime, synchronize
+  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, runtime, synchronize=lambda: None):
+    self.buffer, self.linearizer_opts, self.renderer, self.runtime, self.synchronize = buffer, linearizer_opts, renderer, runtime, synchronize
     self.method_cache: Dict[Any, ASTRunner] = {}
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):
@@ -176,7 +176,7 @@ class Compiled:
       output.realized = self.buffer(prod(output.shape), output.dtype, **kwargs)
 
     from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(ast, output, self.opts)
+    k = Linearizer(ast, output, self.linearizer_opts)
 
     # compilation time
     def get_program():
