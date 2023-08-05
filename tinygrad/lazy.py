@@ -95,14 +95,14 @@ def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movement
 
 lazycache: LightWeakValueDictionary = LightWeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType):
-  #print("create_lazybuffer", device, shape, optype, op, dtype)
-
   # fromcpu aren't cached
   if not LAZYCACHE or (optype is LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}): return LazyBuffer(device, st, optype, op, dtype)
 
   # wop is the deduping key. i feel this used to compare more deeply
   wop = (device, dtype, optype, ref(op))
-  if wop in lazycache: return lazycache[wop]
+  if wop in lazycache:
+    for x in op.buffers: x.children.add(lazycache[wop])
+    return lazycache[wop]
 
   lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype)
   return ret
