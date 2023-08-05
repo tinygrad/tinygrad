@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time
 from functools import partialmethod, reduce
-from itertools import accumulate, filterfalse
+from itertools import accumulate
 from operator import add
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
@@ -289,7 +289,7 @@ class Tensor:
       orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
     else:
       orig_slices += [slice(None)] * (len(self.shape) - num_slices)
-    valid_slices = list(filterfalse(lambda x: x is None, orig_slices))
+    valid_slices = [x for x in orig_slices if x is not None]
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     new_slice = tuple([(s, e) if st else (e+1, s+1) for s, e, st in zip(start, stop, strides)])
