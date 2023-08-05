@@ -7,8 +7,7 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
-
-def is_sym_int(x: Any) -> bool: return isinstance(x, int) or isinstance(x, Node)
+def is_sym_int(x: Any) -> bool: return x.__class__ in (int, Node)
 def sym_vars(x: Union[Node, int]) -> List[Variable]: return [] if isinstance(x, int) else x.vars()
 
 class Node:
@@ -114,7 +113,7 @@ class Node:
     if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes):
       new_nodes = Node.factorize(new_nodes)
     if num_node_sum: new_nodes.append(NumNode(num_node_sum))
-    return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
+    return create_rednode(SumNode, new_nodes) if new_nodes[1:] else new_nodes[0] if new_nodes else NumNode(0)
 
   @staticmethod
   def ands(nodes:List[Node]) -> Node:
@@ -124,7 +123,7 @@ class Node:
 
     # filter 1s
     nodes = [x for x in nodes if x.min != x.max]
-    return create_rednode(AndNode, nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
+    return create_rednode(AndNode, nodes) if nodes[1:] else nodes[0] if nodes else NumNode(1)
 
 # 4 basic node types
 
