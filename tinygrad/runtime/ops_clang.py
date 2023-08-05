@@ -66,7 +66,7 @@ class ClangProgram:
     if wait: st = time.monotonic()
     #self.fxn(*[x._buf for x in args])
     try:
-      regs = [UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2] 
+      regs = [getattr(unicorn.arm64_const, f'UC_ARM64_REG_X{i}') for i in range(len(args))]
       addr = self.end + 4 
       for i, x in enumerate(args):
         self.mu.mem_write(addr, args[i]._buffer().tobytes())
