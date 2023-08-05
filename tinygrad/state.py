@@ -72,7 +72,7 @@ def torch_load(fn:str):
     # upstream LLaMA also does this conversion:
     # https://github.com/facebookresearch/llama/blob/6c7fe276574e78057f917549435a2554000a876d/llama/generation.py#L95
     # TODO: should this be done in the example instead? or maybe we don't need this anymore with better bfloat16 support
-    if storage[1] == dtypes.bfloat16:
+    if storage[1] is dtypes.bfloat16:
       ret = ret.to("LLVM").half().to(Device.DEFAULT)
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk

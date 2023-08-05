@@ -54,7 +54,7 @@ class Token(NamedTuple):
     if self.offset is None: return self.name
     assert self.dtype in [dtypes._float4, dtypes._float2]
     return self.name+"."+"xyzw"[int(self.offset)]
-  def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
+  def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype is dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
 # TODO: the next three functions are poorly written
 def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
@@ -78,7 +78,7 @@ def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
 
 def to_float4(x:List[Token]) -> Optional[Token]:
   if all_same(x): return x[0]
-  if all_same([y.name for y in x]) and all(y.dtype == dtypes._float4 and y.offset == i for i,y in enumerate(x)):
+  if all_same([y.name for y in x]) and all(y.dtype is dtypes._float4 and y.offset == i for i,y in enumerate(x)):
     return Token(x[0].name, dtypes._float4)
   return None
 
@@ -140,7 +140,7 @@ class Linearizer:
 
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
-    self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
+    self.ast = ast.src[0] if ast.op is MovementOps.RESHAPE else ast
 
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)
@@ -248,7 +248,7 @@ class Linearizer:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, 0.0 if not dtypes.is_int(self.bufs[i].dtype) else 0)) if const is None else \
                      self.uop(UOps.LOAD, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], ConstOp(const, valid))
-      ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
+      ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype is not dtypes.float else cache[key])
     return ret
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
@@ -464,9 +464,9 @@ class Linearizer:
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
     # MULACC fusion. TODO: this is copied from Interpreted
-    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
+    if x.op is ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op is BinaryOps.MUL:
       x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
-    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL:
+    if x.op is ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op is UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op is BinaryOps.MUL:
       x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
     if x.op in {BinaryOps.ADD, BinaryOps.MUL}:
       # Reorder sources to put constants first so get_grouped_maybe_float4 can fold the op
@@ -478,12 +478,12 @@ class Linearizer:
       if x.op in ops:
         ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), ops[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.supports_float4_alu)]
       else:
-        ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op not in {BinaryOps.CMPEQ, TernaryOps.WHERE})]
+        ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype is dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op not in {BinaryOps.CMPEQ, TernaryOps.WHERE})]
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
       # scatter
       for i,j in ret:
         for o,k in enumerate(i):
-          ordered_ret[k] = Token(j.name, j.dtype, o) if j.dtype == dtypes._float4 else j
+          ordered_ret[k] = Token(j.name, j.dtype, o) if j.dtype is dtypes._float4 else j
       assert all(isinstance(x, Token) for x in ordered_ret), "some tokens didn't get scattered?"
       self.saved_exprs[x] = cast(List[Token], ordered_ret)
     return self.saved_exprs[x]

@@ -106,8 +106,8 @@ def hand_coded_optimizations(k:Linearizer):
   # should use tensor cores?
   # first, confirm it's a straightforward mulacc on a device with real locals
   tensor_cores_allowed = getenv("TC", 1) != 0 and (getenv("TC", 1) == 2 or (k.bufs[0].device == "METAL" and getenv("CI", "") != "true"))
-  if tensor_cores_allowed and k.reduceop and k.reduceop.op == ReduceOps.SUM and \
-      isinstance(k.reduceop.src[0], LazyOp) and k.reduceop.src[0].op == BinaryOps.MUL and \
+  if tensor_cores_allowed and k.reduceop and k.reduceop.op is ReduceOps.SUM and \
+      isinstance(k.reduceop.src[0], LazyOp) and k.reduceop.src[0].op is BinaryOps.MUL and \
       isinstance(k.reduceop.src[0].src[0], LazyBuffer) and isinstance(k.reduceop.src[0].src[1], LazyBuffer) and hasattr(k, 'lang') and len(k.lang.lid):
     buf0 = k.bufs.index(k.reduceop.src[0].src[0])
     buf1 = k.bufs.index(k.reduceop.src[0].src[1])

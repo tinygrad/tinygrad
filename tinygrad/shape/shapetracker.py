@@ -274,7 +274,7 @@ class ShapeTracker:
   # *** entry point for external ***
 
   def movement_op(self, op: MovementOps, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
-    assert isinstance(arg, tuple) and (len(arg) == len(self.shape) or op == MovementOps.RESHAPE), f"arg {arg} for {op} doesn't match dim of shape {self.shape}"
+    assert isinstance(arg, tuple) and (len(arg) == len(self.shape) or op is MovementOps.RESHAPE), f"arg {arg} for {op} doesn't match dim of shape {self.shape}"
     dispatch[op](self, arg)
     return self
 
