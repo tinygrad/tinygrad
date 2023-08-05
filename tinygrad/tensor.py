@@ -14,18 +14,17 @@ from tinygrad.ops import LoadOps
 # An instantiation of the Function is the Context
 class Function:
   def __init__(self, device:str, *tensors:Tensor):
-    self.device, self.parents, self.needs_input_grad, self.requires_grad = device, tensors, (tensors[0].requires_grad,), tensors[0].requires_grad
-    if tensors[1:]:
-      for t in tensors[1:]: self.needs_input_grad += (t.requires_grad,)
-      self.requires_grad = True if True in self.needs_input_grad else None if None in self.needs_input_grad else False
+    self.device, self.parents, self.needs_input_grad, self.requires_grad = device, tensors, [tensors[0].requires_grad], tensors[0].requires_grad
+    for t in tensors[1:]: self.needs_input_grad += [t.requires_grad,]
+    self.requires_grad = True if True in self.needs_input_grad else None if None in self.needs_input_grad else False
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
   def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
 
   @classmethod
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
-    data = (x[0].lazydata,)
-    for t in x[1:]: data += (t.lazydata,)
+    data = [x[0].lazydata]
+    for t in x[1:]: data += [t.lazydata]
     ret = Tensor((ctx:=fxn(x[0].device, *x)).forward(*data, **kwargs), device=ctx.device, requires_grad=ctx.requires_grad, canonical=True)
     if ctx.requires_grad and not Tensor.no_grad: ret._ctx = ctx    # used by autograd engine
     return ret

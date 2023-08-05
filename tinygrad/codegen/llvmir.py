@@ -1,5 +1,5 @@
 from typing import Final, Dict, Callable, Any, List, Optional
-import functools
+from functools import reduce
 from llvmlite import ir  # type: ignore
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token, MemOp, ConstOp
 from tinygrad.helpers import dtypes
