@@ -17,7 +17,7 @@ args = {
 }[platform.system()]
 CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n'
 ADDRESS = 0x10000
-mock_lm = {"sinf": np.sin, "sqrtf": np.sqrt, "exp2f": partial(math.pow,2), "log2f": np.log2}
+mock_lm = {"sinf": np.sin, "sqrtf": np.sqrt, "exp2f": np.exp2, "log2f": np.log2}
 
 # callback for tracing instructions
 def hook_code(external_calls, uc, address, size, user_data):
