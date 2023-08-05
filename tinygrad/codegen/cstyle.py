@@ -41,11 +41,12 @@ class CStyleLanguage(NamedTuple):
   }
 
   # returns a str expression of the casted xs with the given type
-  def render_cast(self, x:List[str], var_dtype:DType) -> str:
+  def render_cast(self, x:List[str], var_dtype:DType, bitcast:bool=False) -> str:
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
+    if len(x) == 1: return f"*({var_dtype.name}*)(&{x[0]})" if bitcast else f"({var_dtype.name})({x[0]})"
     assert self.float4 is not None, "cast is not supported on this platform"
     if var_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
-    if var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
+    elif var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   # returns a str expression of the const with the given type
@@ -170,8 +171,8 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
       assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
       # TODO: instead of dtypes.float, a base type
       kk(lang.render_store(args.name, args.memory_dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, args.local))
-    elif uop == UOps.CAST and newvar is not None and newvar.dtype.sz > 1:
-      kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
+    elif uop == UOps.CAST and newvar is not None: # and newvar.dtype.sz > 1:
+      kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype, args)};")
     elif uop == UOps.DEFINE_LOCAL:
       if lang.external_local_bufs:
         prekernel.append(lang.render_local(args[0], args[1]))
