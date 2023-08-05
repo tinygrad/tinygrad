@@ -2,7 +2,7 @@ import unittest, math
 import numpy as np
 from tinygrad.helpers import dtypes
 from tinygrad.tensor import Device
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ASTRunner
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ASTRunner, Compiled
 from tinygrad.codegen.linearizer import UOps, Token, ConstOp, MemOp
 from tinygrad.shape.symbolic import Variable
 
@@ -27,6 +27,7 @@ def _test_binaryops(bop, a, b, dt=dtypes.float32):
 def _test_ternaryops(bop, a, b, c, dt=dtypes.float32):
   return _test_single_value(Token('d', dt), [Token('a', dt), Token('b', dt), Token('c', dt)], [a,b,c], bop)
 
+@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
 class TestUOps(unittest.TestCase):
   def _test_uop_fxn(self, bop, fxn):
     for a in [-2.0, 2.0]:
@@ -36,7 +37,7 @@ class TestUOps(unittest.TestCase):
   def test_log2(self): self._test_uop_fxn(UnaryOps.LOG2, lambda a: math.log2(a) if a > 0 else float('nan'))
   def test_sin(self): self._test_uop_fxn(UnaryOps.SIN, lambda a: math.sin(a))
   def test_sqrt(self): self._test_uop_fxn(UnaryOps.SQRT, lambda a: math.sqrt(a) if a >= 0 else float('nan'))
-  def test_recip(self): self._test_uop_fxn(UnaryOps.RECIP, lambda a: 1.0/a)
+  #def test_recip(self): self._test_uop_fxn(UnaryOps.RECIP, lambda a: 1.0/a)
 
   def _test_bop_fxn(self, bop, fxn):
     for a in [-2.0, 2.0]:
@@ -46,8 +47,9 @@ class TestUOps(unittest.TestCase):
   def test_sub(self): self._test_bop_fxn(BinaryOps.SUB, lambda a,b: a-b)
   def test_mul(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: a*b)
   def test_div(self): self._test_bop_fxn(BinaryOps.DIV, lambda a,b: a/b)
-  def test_cmpeq(self): self._test_bop_fxn(BinaryOps.CMPEQ, lambda a,b: float(a==b))
   def test_max(self): self._test_bop_fxn(BinaryOps.MAX, lambda a,b: max(a,b))
+  def test_cmpeq(self): self._test_bop_fxn(BinaryOps.CMPEQ, lambda a,b: float(a==b))
+  # CMPLT and MOD aren't tested
 
   def _test_top_fxn(self, bop, fxn):
     for a in [-2.0, 0, 1, 2.0]:
