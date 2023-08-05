@@ -43,7 +43,6 @@ def train_resnet():
   scheduler = CosineAnnealingLR(optimizer, epochs)
   print(f"training with batch size {BS} for {epochs} epochs")
 
-  @TinyJit
   def train_step(X, Y):
     optimizer.zero_grad()
     out = model.forward(X)
@@ -51,7 +50,16 @@ def train_resnet():
     loss.backward()
     optimizer.step()
     scheduler.step()
-    return loss.realize(), out
+    return loss, out
+  
+  def calculate_accuracy(out, Y, top_n):
+    out_top_n = np.argpartition(out.cpu().numpy(), -top_n, axis=-1)[:, -top_n:]
+    YY = np.expand_dims(Y, axis=1)
+    YY = np.repeat(YY, top_n, axis=1)
+
+    eq_elements = np.equal(out_top_n, YY)
+    top_n_acc = np.count_nonzero(eq_elements) / eq_elements.size * top_n
+    return top_n_acc
 
   Tensor.training = True
   steps_in_epoch = math.floor(len(get_val_files()) / BS)
@@ -62,12 +70,11 @@ def train_resnet():
       loss, out = train_step(X, Y)
       et = time.time()
 
-      cat = np.argmax(out.cpu().numpy(), axis=-1)
-      accuracy = (cat == Y).mean()
-      t.set_description(f"loss: {loss.numpy().item():.3f} | acc: {accuracy:.2f}")
-
+      t.set_description(f"loss: {loss.numpy().item():.3f}")
+      top_1_acc = calculate_accuracy(out, Y, 1)
       wandb.log({"loss": loss.numpy().item(), 
-                 "acc": accuracy,
+                 "top_1_acc": top_1_acc,
+                 "lr": scheduler.get_lr().cpu().numpy().item(),
                  "forward_time": et - st,}
       )
 
