@@ -292,7 +292,7 @@ class Tensor:
     valid_slices = [x for x in orig_slices if x is not None]
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
-    new_slice = tuple([(s, e) if st else (e+1, s+1) for s, e, st in zip(start, stop, strides)])
+    new_slice = tuple([(s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides)])
     new_shape = tuple([e - s for s, e in new_slice])
     # Shrink
     sliced_tensor = self.shrink(new_slice)
