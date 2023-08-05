@@ -48,8 +48,7 @@ def kernel_optimize(k, create_k, runtime):
   force_fp32 = ng.p.Choice([True, False])
   opt_params = ng.p.Tuple(*opts)
   instrumentation = ng.p.Instrumentation(opt_params, force_fp32)
-
-  optimizer = ng.optimizers.NGOpt(parametrization=instrumentation, budget=min(search_space, 200))
+  optimizer = ng.optimizers.NGOpt(parametrization=instrumentation, budget=min(search_space, 500))
   if DEBUG >= 1: print("optimizer start", k.colored_shape(), "in search space", search_space)
   recommendation = optimizer.minimize(opt)
   apply_opt(k, recommendation.value[0][0])
