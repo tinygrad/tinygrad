@@ -247,7 +247,7 @@ class Linearizer:
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         if const is not None:
-          cache[key] = self.uop(UOps.LOAD, Token(f"acc{mnum(i)}_{len(cache)}", localtype if localtype.sz > 1 else dtypes.float32), [], ConstOp(const, valid))   # NOTE: accumulators are always float32
+          cache[key] = self.uop(UOps.LOAD, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], ConstOp(const, valid))
         else:
           cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, 0.0 if not dtypes.is_int(self.bufs[i].dtype) else 0))
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype.sz > 1 else cache[key])

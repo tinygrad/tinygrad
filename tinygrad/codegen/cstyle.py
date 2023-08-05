@@ -61,7 +61,7 @@ class CStyleLanguage(NamedTuple):
     if isinstance(buf_dtype, ImageDType):
       assert output_dtype == dtypes._float4, "images must be float4"
       return f"read_imagef({buf_name}, smp, (int2)({idx[0].render(render_cl)}, {idx[1].render(render_cl)}))"
-    if self.uses_vload and buf_dtype == dtypes.float16:
+    if self.uses_vload and buf_dtype == dtypes.float16 and output_dtype == dtypes.float32:
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx.render(render_cl, strip_parens=True)})"
     if output_dtype.sz > 1:
       return f"({output_dtype.name})(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})))"
@@ -92,7 +92,7 @@ class CStyleLanguage(NamedTuple):
     if isinstance(buf_dtype, ImageDType):
       assert var_dtype == dtypes._float4, "images must be float4"
       return f"write_imagef({buf_name}, (int2)({idx[0].render(render_cl)}, {idx[1].render(render_cl)}), {var_name});"
-    if self.uses_vload and buf_dtype == dtypes.float16:
+    if self.uses_vload and buf_dtype == dtypes.float16 and var_dtype == dtypes.float32:
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx.render(render_cl, strip_parens=True)});"
     if var_dtype.sz > 1:
       return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
