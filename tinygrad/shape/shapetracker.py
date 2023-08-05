@@ -137,7 +137,7 @@ def _reshape(view: View, new_shape:Tuple[int, ...]) -> Tuple[View, bool]:
       next_stride *= new_dim
     if acc != d: break
   else:
-    while len(strides) < len(new_shape): strides.append(0)
+    strides += [0,] * (len(new_shape) - len(strides))
     mask, extra = _reshape_mask(view, new_shape)
     if not extra: return View(new_shape, tuple(reversed(strides)), view.offset, mask), False
 
