@@ -69,8 +69,6 @@ class DType(NamedTuple):
   np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
   sz: int = 1
   def __repr__(self): return f"dtypes.{self.name}"
-  @property
-  def key(self): return (self.name)
 
 # dependent typing?
 class ImageDType(DType):
