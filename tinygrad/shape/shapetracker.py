@@ -237,7 +237,7 @@ class ShapeTracker:
 
   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
     # reshape into symbolic shape, update the variable value
-    if all(isinstance(s, int) for s in self.shape) and len(new_vars:=list(s for s in new_shape if isinstance(s, Variable))) > 0:
+    if sum(self.shape).__class__ is int and (new_vars:=list(s for s in new_shape if isinstance(s, Variable))):
       assert len(new_vars) == 1, "only one variable is supported in a shape"
       new_var, new_val = new_vars[0], prod(self.shape) // prod(s for s in new_shape if isinstance(s, int))
       if new_var.val is None:
@@ -248,16 +248,15 @@ class ShapeTracker:
     if self.views[-1].shape == new_shape: return self
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
-    if all(isinstance(s, int) for s in self.shape) and all(isinstance(s, int) for s in new_shape):
-      assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
+    assert sum(self.shape + new_shape).__class__ is int and prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
     new_view, extra = _reshape(self.views[-1], new_shape)
     if extra: self.views.append(new_view)
     else: self.views[-1] = new_view
     return self
 
   def permute(self, axis: Tuple[int, ...]):
-    assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
-    assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
+    assert all(isinstance(x, int) and (0 <= x < len(self.shape)) for x in axis), f"invalid permute {axis} for {self.shape}"
+    assert len(set(axis)) == len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
     self.views[-1] = View(tuple([self.views[-1].shape[a] for a in axis]), tuple([self.views[-1].strides[a] for a in axis]), self.views[-1].offset, tuple([self.views[-1].mask[a] for a in axis]) if self.views[-1].mask is not None else None)
     return self
 
