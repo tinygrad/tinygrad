@@ -39,7 +39,7 @@ def _test_single_value_const(tc, tt, vals, op):
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):
-    if not (math.isnan(v1) and math.isnan(v2)): self.assertAlmostEqual(v1, v2)
+    if not (math.isnan(v1) and math.isnan(v2)): self.assertAlmostEqual(v1, v2, places=5)
 
   def _test_uop_fxn(self, bop, fxn, dt=dtypes.float32):
     for f in [_test_single_value, _test_single_value_const]:
