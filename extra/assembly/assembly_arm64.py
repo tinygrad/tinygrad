@@ -4,7 +4,8 @@ from extra.assembly.assembly import AssemblyCodegen, Register
 from typing import Tuple, Set, Dict
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.codegen.linearizer import UOps, ConstOp
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import dtypes, CI
+
 
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 def compute_offsets(total):
@@ -20,7 +21,7 @@ class ARM64Codegen(AssemblyCodegen):
     var_size = 0
     prev_uop = None
     ins = [] 
-    x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (11,12,13,14,15,16,17,18,19,20)]
+    x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (10,11,12,13,14,15,16,17,18,19,20)]
     s_regs = ['s' + str(i) for i in reversed(range(3,30))]
     type_to_reg = {dtypes.half: 'h', dtypes.float32: 's', dtypes.bool: 'x',dtypes.int8:'w', dtypes.int32: 'w', dtypes.int64: 'x', dtypes.uint8:'w', dtypes.uint32: 'w', dtypes.uint64: 'x'}
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
@@ -101,21 +102,26 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"{alu[arg]} {rtor[vin[0].nm]}, s0")
           ins.append(f"fcsel {rtor[out.nm]},{rtor[vin[2].nm]}, {rtor[vin[1].nm]}, eq")
         elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
-          save_regs = [k for k in rtor.keys() if k != out.nm and k not in mem_vars]
-          ins.append(f"sub sp, sp, #{(len(save_regs))*16}")
-          # Save the registers before they are cleared by func call  
-          for i,k in enumerate(save_regs,1):
-            ins.append(f"str {rtor[k]}, [sp, #{16*i}]")
-          ins.append("stp x29, x30, [sp, #0]!")
-          ins.append("mov x29, sp")
-          ins.append(f"fmov s0, {rtor[vin[0].nm]}")
-          ins.append(alu[arg])
-          ins.append(f"fmov {rtor[out.nm]}, s0")
-          ins.append("mov sp, x29")
-          ins.append("ldp x29, x30, [sp], #0")
-          for i,k in enumerate(save_regs,1):
-            ins.append(f"ldr {rtor[k]}, [sp, #{16*i}]")
-          ins.append(f"add sp, sp, #{len(save_regs)*16}")
+          if CI:
+            ins.append(f"fmov s0, {rtor[vin[0].nm]}")
+            ins.append(f"bl {alu[arg][4:]}")
+            ins.append(f"fmov {rtor[out.nm]}, s0")
+          else:
+            save_regs = [k for k in rtor.keys() if k != out.nm and k not in mem_vars]
+            ins.append(f"sub sp, sp, #{(len(save_regs))*16}")
+            # Save the registers before they are cleared by func call  
+            for i,k in enumerate(save_regs,1):
+              ins.append(f"str {rtor[k]}, [sp, #{16*i}]")
+            ins.append("stp x29, x30, [sp, #0]!")
+            ins.append("mov x29, sp")
+            ins.append(f"fmov s0, {rtor[vin[0].nm]}")
+            ins.append(alu[arg])
+            ins.append(f"fmov {rtor[out.nm]}, s0")
+            ins.append("mov sp, x29")
+            ins.append("ldp x29, x30, [sp], #0")
+            for i,k in enumerate(save_regs,1):
+              ins.append(f"ldr {rtor[k]}, [sp, #{16*i}]")
+            ins.append(f"add sp, sp, #{len(save_regs)*16}")
         elif arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
           ins.append(f"{alu[arg]} {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}" if not dtypes.is_float(vin[0][1]) else f"fcmp {rtor[vin[0].nm]}, {rtor[vin[1].nm]}")
         elif arg == BinaryOps.MOD:
