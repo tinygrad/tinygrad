@@ -52,7 +52,7 @@ class Token(NamedTuple):
       assert self.offset is None
       return f"{self.dtype.name} {self.name}"
     if self.offset is None: return self.name
-    assert self.dtype in [dtypes._float4, dtypes._float2]
+    assert self.dtype in [dtypes._float4, dtypes._float2], f"{self.dtype} isn't okay with offset {self.offset}"
     return self.name+"."+"xyzw"[int(self.offset)]
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
@@ -234,20 +234,22 @@ class Linearizer:
     cache: Dict[str, Token] = {}
     ret = []
     for _idx in _idxs:
+      localtype = self.bufs[i].dtype
       if amt > 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
-        localtype = dtypes._float4 if amt == 4 else dtypes._float2  # NOTE: this includes a CAST
         if idx.render() != ((idx//amt)*amt).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
-          localtype = self.bufs[i].dtype
+        else:
+          localtype = dtypes._float4 if amt == 4 else dtypes._float2  # NOTE: this includes a CAST
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
-        localtype = self.bufs[i].dtype
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, 0.0 if not dtypes.is_int(self.bufs[i].dtype) else 0)) if const is None else \
-                     self.uop(UOps.LOAD, Token(f"acc{mnum(i)}_{len(cache)}", dtypes.float32), [], ConstOp(const, valid))   # NOTE: accumulators are always float32
+        if const is not None:
+          cache[key] = self.uop(UOps.LOAD, Token(f"acc{mnum(i)}_{len(cache)}", localtype if localtype.sz > 1 else dtypes.float32), [], ConstOp(const, valid))   # NOTE: accumulators are always float32
+        else:
+          cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, 0.0 if not dtypes.is_int(self.bufs[i].dtype) else 0))
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype.sz > 1 else cache[key])
     return ret
 
