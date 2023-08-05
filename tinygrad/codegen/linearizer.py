@@ -235,12 +235,11 @@ class Linearizer:
     ret = []
     for _idx in _idxs:
       if amt > 1:
-        assert self.bufs[i].dtype == dtypes.float32, "multiload must be float32"
         idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
-        localtype = dtypes._float4 if amt == 4 else dtypes._float2
+        localtype = dtypes._float4 if amt == 4 else dtypes._float2  # NOTE: this includes a CAST
         if idx.render() != ((idx//amt)*amt).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
-          localtype = dtypes.float32
+          localtype = self.bufs[i].dtype
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
         localtype = self.bufs[i].dtype
@@ -248,7 +247,7 @@ class Linearizer:
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, 0.0 if not dtypes.is_int(self.bufs[i].dtype) else 0)) if const is None else \
-                     self.uop(UOps.LOAD, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], ConstOp(const, valid))
+                     self.uop(UOps.LOAD, Token(f"acc{mnum(i)}_{len(cache)}", dtypes.float32), [], ConstOp(const, valid))   # NOTE: accumulators are always float32
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype.sz > 1 else cache[key])
     return ret
 
