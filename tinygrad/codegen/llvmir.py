@@ -1,4 +1,4 @@
-from typing import Final, Dict, Callable, Any, List, Optional
+from typing import Final, Dict, Callable, Any, List, Optional, Tuple
 import functools
 from llvmlite import ir  # type: ignore
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token, MemOp, ConstOp
@@ -32,7 +32,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   TernaryOps.WHERE: lambda builder,x,y,z: builder.select(builder.fcmp_unordered("!=", x, ir.Constant(ir.FloatType(), 0), flags=('fast',)), y, z, flags=('fast',)),
 }
 
-def uops_to_llvm_ir(uops:List[UOp]) -> str:
+def uops_to_llvm_ir(uops:List[UOp]) -> Tuple[str, Optional[List[int]], Optional[List[int]]]:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 
@@ -131,11 +131,11 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
       lvars[newvar] = code_for_op[args](bb[-1], *[lvars[x] for x in vin])
 
   bb[-1].ret_void()
-  return str(module)
+  return str(module), None, None
 
 class LLVMIRCodegen(Linearizer):
   def codegen(self):
     self.process()
     # no optimize, this doesn't support local
     self.linearize()
-    return ASTRunner('exec', uops_to_llvm_ir(self.uops), op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name)
+    return ASTRunner('exec', *uops_to_llvm_ir(self.uops), op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name)

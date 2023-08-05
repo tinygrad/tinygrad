@@ -195,7 +195,5 @@ class CStyleCodegen(Linearizer):
     if self.lang.global_max: self.limit_global_dims(len(self.lang.gid), self.lang.global_max, self.lang.local_max)  # NOTE: this is optional now
     self.linearize()
 
-    prg, global_size, local_size = uops_to_cstyle(self.function_name, self.uops, self.lang)
-
-    return ASTRunner(self.function_name, prg, global_size, local_size,
+    return ASTRunner(self.function_name, *uops_to_cstyle(self.function_name, self.uops, self.lang),
       op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name)
