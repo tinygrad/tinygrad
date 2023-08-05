@@ -247,7 +247,7 @@ class Linearizer:
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         if const is not None:
-          cache[key] = self.uop(UOps.LOAD, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], ConstOp(const, valid))
+          cache[key] = self.uop(UOps.LOAD, Token(f"acc{mnum(i)}_{len(cache)}", dtypes.from_np(localtype.np) if localtype.__class__ == ImageDType else localtype), [], ConstOp(const, valid))
         else:
           cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, 0.0 if not dtypes.is_int(self.bufs[i].dtype) else 0))
       ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype.sz > 1 else cache[key])
@@ -464,7 +464,7 @@ class Linearizer:
   def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
     if x.__class__ is not LazyOp: return loaded_buffers[x]
     if x.op == UnaryOps.NOOP: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa)  # cast isn't an ALU op
-    if x.op == UnaryOps.CAST: return [self.uop(UOps.CAST, ssa('casted', x.arg[0]), [y], x.arg[1]) for y in self.ast_parse(x.src[0], acc, loaded_buffers, ssa)]  # cast isn't an ALU op
+    if x.op == UnaryOps.CAST: return [self.uop(UOps.CAST, ssa('casted', x.arg[0]), [y], x.arg[1]) if y.dtype.__class__ != ImageDType and x.arg[0].__class__ != ImageDType else y for y in self.ast_parse(x.src[0], acc, loaded_buffers, ssa)]  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
     # MULACC fusion. TODO: this is copied from Interpreted
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
