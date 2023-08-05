@@ -181,12 +181,7 @@ def get_run_onnx(onnx_model: ModelProto):
         if 'broadcast' in opt: inp[1] = inp[1].reshape([-1 if i == opt['broadcast'] else 1 for i in range(len(inp[0].shape))])
         if n.op_type == "Add": ret = inp[0] + inp[1]
         if n.op_type == "Sub": ret = inp[0] - inp[1]
-        if n.op_type == "Mul": 
-          print(inp[0])
-          print(inp[1])
-          print(inp[0].numpy())
-          print(inp[1].numpy())
-          ret = (inp[0] * inp[1]).cast(inp[0].dtype)
+        if n.op_type == "Mul": ret = (inp[0] * inp[1]).cast(inp[0].dtype)
         if n.op_type == "Pow": ret = (inp[0] ** inp[1]).cast(inp[0].dtype)
       elif n.op_type == "Split":
         if 'axis' not in opt: opt['axis'] = 0
