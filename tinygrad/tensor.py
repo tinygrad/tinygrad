@@ -360,9 +360,7 @@ class Tensor:
     return self.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
   # TODO: make this nicer with syntactic sugar in slice
-  def chunk(self, num, dim):
-    steps = [slice(k, k + ceil(self.shape[dim]/num)) for k in range(0, self.shape[dim], ceil(self.shape[dim]/num))]
-    return [self[(slice(None),)*len(self.shape[:dim]) + (s,)] for s in steps]
+  def chunk(self, num, dim): return [self[(slice(None),)*len(self.shape[:dim]) + (slice(k,k + ceil(self.shape[dim]/num)),)] for k in range(0, self.shape[dim], ceil(self.shape[dim]/num))]
 
   def squeeze(self, dim=None):
     if dim is None: return self if 1 not in self.shape else self.reshape(*[size for size in self.shape if size != 1])
