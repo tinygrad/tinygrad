@@ -32,11 +32,10 @@ class LazyOp:
   buffers: Tuple[LazyBuffer, ...]
 
   def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None):
-    self.op = op
-    self.src = src
-    self.arg = arg
+    self.op, self.src, self.arg, self.buffers = op, src, arg, ()
     try:
-      self.buffers = tuple([y for x in src for y in x.buffers])
+      for x in src:
+        self.buffers += x.buffers
     except AttributeError:
       # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
       pass
