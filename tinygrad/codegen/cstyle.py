@@ -171,7 +171,7 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
       assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
       # TODO: instead of dtypes.float, a base type
       kk(lang.render_store(args.name, args.memory_dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, args.local))
-    elif uop == UOps.CAST and newvar is not None: # and newvar.dtype.sz > 1:
+    elif uop == UOps.CAST and newvar is not None:
       kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype, args)};")
     elif uop == UOps.DEFINE_LOCAL:
       if lang.external_local_bufs:

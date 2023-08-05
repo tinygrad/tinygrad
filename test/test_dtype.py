@@ -58,8 +58,6 @@ class TestBFloat16DType(unittest.TestCase):
     with self.assertRaises(AssertionError):
       _test_cast(Tensor([100000], dtype=dtypes.float32), dtypes.bfloat16, [100000])
 
-  # torch.tensor([10000, -1, -1000, -10000, 20]).type(torch.bfloat16)
-
   @unittest.skipIf(Device.DEFAULT not in ["LLVM"], "bf16 only on LLVM")
   def test_bf16(self):
     t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.bfloat16)
