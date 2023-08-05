@@ -51,6 +51,9 @@ def kernel_optimize(k, create_k, runtime):
   optimizer = ng.optimizers.NGOpt(parametrization=instrumentation, budget=min(search_space, 500))
   if DEBUG >= 1: print("optimizer start", k.colored_shape(), "in search space", search_space)
   recommendation = optimizer.minimize(opt)
-  apply_opt(k, recommendation.value[0][0])
-  if k.uses_float32_calculations: k.uses_float32_calculations = recommendation.value[0][1]
-  if DEBUG >= 1: print("optimizer hit", k.colored_shape(), "with fp32=",recommendation.value[0][1], "in search space", search_space)
+  try:
+    apply_opt(k, recommendation.value[0][0])
+    if k.uses_float32_calculations: k.uses_float32_calculations = recommendation.value[0][1]
+    if DEBUG >= 1: print("optimizer hit", k.colored_shape(), "with fp32=",recommendation.value[0][1], "in search space", search_space)
+  except Exception as e:
+    if DEBUG >= 1: print(f"optimizer failed becauase {e}")
