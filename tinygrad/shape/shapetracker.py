@@ -131,7 +131,7 @@ def get_pad_args(shape:Tuple[int,...], arg:Tuple[Tuple[int, int], ...]):
 
 @functools.lru_cache(maxsize=None)
 def get_unsafe_resize_offset(strides, arg):
-  return sum([s * x[0] for s, x in zip(strides,arg)])
+  return sum(s * x[0] for s, x in zip(strides,arg))
 
 class ShapeTracker:
   __slots__ = "views"
@@ -150,7 +150,7 @@ class ShapeTracker:
   def key(self) -> Tuple[View, ...]: return tuple(self.views)
 
   # this is the real size (ish)
-  def size(self): return prod([s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])
+  def size(self): return prod(s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0)
 
   # these are multiview strides, value is None if it's not a simple strided dimension
   # TODO: this can be shared code between simplify and merge_views
@@ -266,7 +266,7 @@ class ShapeTracker:
     assert all(isinstance(x, int) and x != 0 for x in mul), f"invalid stride {mul} for {self.shape}"
     strides = tuple([z*m for z,m in zip(self.views[-1].strides, mul)])
     new_shape = tuple([(s+(abs(m)-1))//abs(m) for s,m in zip(self.views[-1].shape, mul)])
-    offset = sum([(s-1)*z for s,z,m in zip(self.views[-1].shape, self.views[-1].strides, mul) if m < 0])
+    offset = sum((s-1)*z for s,z,m in zip(self.views[-1].shape, self.views[-1].strides, mul) if m < 0)
     mask = tuple([(((mx if m > 0 else s-my)+(abs(m)-1))//abs(m), ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(self.views[-1].mask, self.views[-1].shape, mul)]) if self.views[-1].mask is not None else None
     self.views[-1] = View(new_shape, strides, self.views[-1].offset + offset, mask)
     return self
@@ -294,7 +294,7 @@ def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Opt
       if i < len(new_shape) - 1: i += 1
     else:
       axis_groups[i].append(old_shape_i)
-      axis_group_size = prod([old_shape[x] for x in axis_groups[i]])
+      axis_group_size = prod(old_shape[x] for x in axis_groups[i])
       # Move to next axes group if total size of all dimensions match.
       if axis_group_size == new_shape[i]:
         if i < len(new_shape) - 1: i += 1

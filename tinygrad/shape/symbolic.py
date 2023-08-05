@@ -238,8 +238,8 @@ class AndNode(RedNode):
 
 def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   ret = typ(nodes)
-  if typ == SumNode: ret.min, ret.max = (sum([x.min for x in nodes]), sum([x.max for x in nodes]))
-  elif typ == AndNode: ret.min, ret.max = (min([x.min for x in nodes]), max([x.max for x in nodes]))
+  if typ == SumNode: ret.min, ret.max = (sum(x.min for x in nodes), sum(x.max for x in nodes))
+  elif typ == AndNode: ret.min, ret.max = (min(x.min for x in nodes), max(x.max for x in nodes))
   return create_node(ret)
 
 render_python: Dict[Type, Callable] = {
