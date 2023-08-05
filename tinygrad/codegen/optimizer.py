@@ -5,7 +5,6 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.lazy import LazyBuffer
 
 # auto opt is disabled
-"""
 import time
 from typing import Callable
 def apply_opt(k, x):
@@ -25,14 +24,14 @@ def apply_opt(k, x):
 
 UPCASTS = [1,2,3,4,5,6,7,8]
 LOCALS = [1,2,3,4,5,6,7,8,16,24,32]
-def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], runtime, baseline):
+def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, baseline):
   import nevergrad as ng
   def opt(x):
     try:
       k = create_k()
       k.process()
       apply_opt(k, x)
-      prg = k.codegen().build(runtime)
+      prg = to_prg(k)
       first_tm = prg.exec(k.bufs, force_wait=True, optimizing=True)
       if baseline*5 < first_tm*1000: return first_tm*1000  # very slow
       tm = min([first_tm]+[prg.exec(k.bufs, force_wait=True, optimizing=True) for _ in range(2)])*1000
@@ -61,7 +60,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], runt
 
 # optimization
 global_db = None
-def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], runtime):
+def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg):
   global global_db
 
   k.process()
@@ -78,16 +77,15 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], runtime):
     def get_baseline():
       k = create_k()
       hand_coded_optimizations(k)
-      prg = k.codegen().build(runtime)
+      prg = to_prg(k)
       return min([prg.exec(k.bufs, force_wait=True, optimizing=True) for _ in range(5)])*1000
-    choice = kernel_optimize_search(k, create_k, runtime, get_baseline())
+    choice = kernel_optimize_search(k, create_k, to_prg, get_baseline())
     if global_db is not None:
       global_db[skey] = choice
       global_db.sync()
 
   if choice == "BASELINE": hand_coded_optimizations(k)
   else: apply_opt(k, choice)
-"""
 
 def required_optimizations(k:Linearizer, early_only=False):
   for buf_index,buf in enumerate(k.bufs):

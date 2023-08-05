@@ -156,6 +156,13 @@ class Compiled:
     self.buffer, self.linearizer_opts, self.renderer, self.runtime, self.synchronize = buffer, linearizer_opts, renderer, runtime, synchronize
     self.method_cache: Dict[Any, ASTRunner] = {}
 
+  def to_program(self, k):
+    k.linearize()
+    src, global_size, local_size = self.renderer(k.function_name, k.uops)
+    return ASTRunner(k.function_name, src, global_size, local_size,
+                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
+                      display_name=k.display_name).build(self.runtime)
+
   def exec_ast(self, ast:LazyOp, output, **kwargs):
     # all movementops do nothing in a Compiled buffer!
     if ast.op in MovementOps and ast.src[0].__class__ is not LazyOp and ast.src[0].realized: return ast.src[0].realized
@@ -180,21 +187,13 @@ class Compiled:
 
     # compilation time
     def get_program():
-      from tinygrad.codegen.optimizer import hand_coded_optimizations
-      #if getenv("KOPT"):
-      #  kernel_optimize(k, lambda: Linearizer(ast, output, self.opts), self.runtime)
-      #elif not getenv("NOOPT"):
-      hand_coded_optimizations(k)
-      k.linearize()
-      src, global_size, local_size = self.renderer(k.function_name, k.uops)
-      return ASTRunner(k.function_name, src, global_size, local_size,
-                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
-                      display_name=k.display_name).build(self.runtime)
+      from tinygrad.codegen.optimizer import kernel_optimize, hand_coded_optimizations
+      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, output, self.linearizer_opts), self.to_program)
+      elif not getenv("NOOPT"): hand_coded_optimizations(k)
+      return self.to_program(k)
 
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
-      if k.key not in self.method_cache:
-        self.method_cache[k.key] = get_program()
-      elif DEBUG >= 5: print(f"method cache hit : {k.key}")
+      if k.key not in self.method_cache: self.method_cache[k.key] = get_program()
       prg = self.method_cache[k.key]
     else:
       prg = get_program()
