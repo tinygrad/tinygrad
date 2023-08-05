@@ -46,7 +46,7 @@ class CStyleLanguage(NamedTuple):
     if len(x) == 1: return f"*({var_dtype.name}*)(&{x[0]})" if bitcast else f"({var_dtype.name})({x[0]})"
     assert self.float4 is not None, "cast is not supported on this platform"
     if var_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
-    elif var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
+    if var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   # returns a str expression of the const with the given type
