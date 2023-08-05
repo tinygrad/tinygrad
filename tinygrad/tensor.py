@@ -318,14 +318,14 @@ class Tensor:
     final_shape = []
     sub = [0] * len(tensor_found)
     it_shape = iter(new_shape)
-    for n,i in enumerate(orig_slices):
-      if isinstance(i, (int, slice)):
+    for i,s in enumerate(orig_slices):
+      if isinstance(s, (int, slice)):
         dim_shape = next(it_shape)
-        if isinstance(i, slice): final_shape.append(dim_shape)
+        if isinstance(s, slice): final_shape.append(dim_shape)
         elif tensor_found:
-          for n_ in range(len(tensor_found)):
-            if tensor_found[n_][0] > n: sub[n_] -= 1
-      else: # i is None
+          for i_ in range(len(tensor_found)):
+            if tensor_found[i_][0] > i: sub[i_] -= 1
+      else: # s is None
         final_shape.append(1)
     ret = sliced_tensor.reshape(tuple(final_shape))  # Reshape
     # Fancy/tensor indexing
@@ -333,8 +333,8 @@ class Tensor:
       for i,s in enumerate(sub): tensor_found[i] = (tensor_found[i][0]+s, tensor_found[i][1])
       dim = [i[0] for i in tensor_found]
       idx = [-i[1].sign().minimum(0) * ret.shape[i[0]] + i[1] for i in tensor_found]
-      max_sh = max([i.ndim for i in idx])
-      idx = [i if i.ndim == max_sh else i.reshape(*[1]*(max_sh-i.ndim), *i.shape) for i in idx]
+      max_dim = max(idx, key=lambda i: i.ndim).ndim
+      idx = [i if i.ndim == max_dim else i.reshape(*[1]*(max_dim-i.ndim), *i.shape) for i in idx]
       sum_dim = [d if n==0 else d+i.ndim-n for n,(d,i) in enumerate(zip(dim,idx))]
       ret = ret._gather(idx, sum_dim)
       if dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1:
@@ -356,9 +356,9 @@ class Tensor:
   def gather(self: Tensor, idx: Tensor, dim: int):
     assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
     if dim < 0: dim += self.ndim
-    self_idx = list(range(self.ndim))
-    sum_dim = [dim] + [i-n if n < dim else idx.ndim+i-n-1 for n,i in enumerate(self_idx[:dim] + self_idx[dim+1:])]
-    idx_arange = [idx] + [Tensor.arange(idx.shape[i], requires_grad=False) for i in self_idx[:dim]] + [Tensor.arange(idx.shape[i], requires_grad=False).reshape(*[1]*(n+1), idx.shape[i]) for n,i in enumerate(self_idx[dim+1:])]
+    self_dim = list(range(self.ndim))
+    sum_dim = [dim] + [i-n if n < dim else idx.ndim+i-n-1 for n,i in enumerate(self_dim[:dim] + self_dim[dim+1:])]
+    idx_arange = [idx] + [Tensor.arange(idx.shape[i], requires_grad=False) for i in self_dim[:dim]] + [Tensor.arange(idx.shape[i], requires_grad=False).reshape(*[1]*(n+1), idx.shape[i]) for n,i in enumerate(self_dim[dim+1:])]
     return self._gather(idx_arange, sum_dim)
 
   def cat(self, *args, dim=0):
