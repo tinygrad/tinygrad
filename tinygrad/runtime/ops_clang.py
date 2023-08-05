@@ -4,6 +4,7 @@ from tinygrad.helpers import fromimport, getenv, DEBUG
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 from unicorn import *
+import struct
 from unicorn.arm64_const import *
 from keystone import *
 
@@ -38,38 +39,25 @@ class ClangProgram:
         os.rename(fn+'.tmp', fn)
     else:
       if DEBUG >= 5: print(prg)
-      if getenv('ARM64'):
-        prg = """
-        ldr x0,[x15]
-        """
+      if getenv('CI'):
+        # Remove headers and ret
+        prg = '\n'.join(prg.split('\n')[5:-2])
+        
+        # Convert to bytes
         ks = Ks(KS_ARCH_ARM64, KS_MODE_LITTLE_ENDIAN)
         output, count = ks.asm(prg)
-        print(bytes(output))
         #subprocess.check_output(args=('as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
         #subprocess.check_output(args=('clang -lm -shared -fPIC '+fn+'.o -o'+fn).split())
-        #with open(fn+'.o', 'rb') as file:
-    # Read the contents of the file
-        #  output = file.read()
-
-  # Now `output` contains the contents of the file
-        #print(output)
-        #output = b"\xa0\x00\x80\xd2'"
         output = bytes(output)
-        print(len(output))
         mu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
         # map 2MB memory for this emulation
         mu.mem_map(ADDRESS, 2 * 1024 * 1024)
         # write machine code to be emulated to memory
         mu.mem_write(ADDRESS, output)
-         # tracing all basic blocks with customized callback
-        mu.hook_add(UC_HOOK_BLOCK, hook_block)
-        # tracing one instruction with customized callback
-        mu.hook_add(UC_HOOK_CODE, hook_code, begin=ADDRESS, end=ADDRESS)
-        self.program_len = len(output)
+
+        self.start = ADDRESS 
+        self.end = ADDRESS + len(output) 
         self.mu = mu
-        # initialize machine registers
-         
-        #comment
         #subprocess.check_output(args=('clang -lm -shared -fPIC '+fn+'.o -o'+fn).split())
     #self.lib = ctypes.CDLL(fn)
     #self.fxn = self.lib[name]
@@ -78,20 +66,20 @@ class ClangProgram:
     if wait: st = time.monotonic()
     #self.fxn(*[x._buf for x in args])
     try:
-      #regs = [UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2] 
-      #addr = align(ADDRESS + self.program_len)
-      #addrs = [0x10008]
-      # for i, x in enumerate(args):
-      self.mu.mem_write(0x10008, bytes([0x5]))
-      # self.mu.mem_write(addrs[1], args[1]._buffer().tobytes())
-      # self.mu.reg_write(regs[1], addrs[1])
-      #self.mu.reg_write(UC_ARM64_REG_X11, 0x12345678)
-      #self.mu.reg_write(UC_ARM64_REG_X13, 0x10008)
-      self.mu.reg_write(UC_ARM64_REG_X15, 0x10008)
+      regs = [UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2] 
+      addr = self.end + 8 
+      for i, x in enumerate(args):
+        self.mu.mem_write(addr, args[i]._buffer().tobytes())
+        self.mu.reg_write(regs[i], addr)
+        addr += 8 
 
-      self.mu.emu_start(ADDRESS, ADDRESS+self.program_len)
+      self.mu.emu_start(self.start, self.end)
       x0 = self.mu.reg_read(UC_ARM64_REG_X0)
-      print(">>> X15 = 0x%x" %x0)
+      val = self.mu.mem_read(x0, 4)
+      print(">>> X0 = 0x%x" %x0)
+      print(">>> mem = 0x%s" %val)
+      print(struct.unpack('f', val)[0])
+      args[0]._buf = val 
     except UcError as e:
       print("ERROR: %s" % e)
     if wait: return time.monotonic()-st
