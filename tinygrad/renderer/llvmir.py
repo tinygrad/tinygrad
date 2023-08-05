@@ -1,9 +1,9 @@
 from typing import Final, Dict, Callable, Any, List, Optional, Tuple
 import functools
 from llvmlite import ir  # type: ignore
-from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token, MemOp, ConstOp
+from tinygrad.codegen.linearizer import UOps, UOp, Token, MemOp, ConstOp
 from tinygrad.helpers import dtypes
-from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, TernaryOps
+from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
 
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 def int_const(x): return ir.Constant(ir.IntType(64), x)
@@ -132,11 +132,3 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
 
   bb[-1].ret_void()
   return str(module), None, None
-
-class LLVMIRCodegen(Linearizer):
-  def codegen(self):
-    self.process()
-    # no optimize, this doesn't support local
-    self.linearize()
-    return ASTRunner(self.function_name, *uops_to_llvm_ir(self.function_name, self.uops),
-                     op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name)
