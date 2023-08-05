@@ -351,9 +351,7 @@ class Tensor:
     return first.cat(*unsqueezed_tensors, dim=dim)
 
   def repeat(self, repeats):
-    base_shape = self.shape
-    if len(repeats) > self.ndim:
-      base_shape = (1,) * (len(repeats) - self.ndim) + base_shape
+    base_shape = (1,) * (len(repeats) - self.ndim) + self.shape if len(repeats) > self.ndim else self.shape
     new_shape = [x for i in range(len(base_shape)) for x in [1, base_shape[i]]]
     expand_shape = [x for r,s in zip(repeats, base_shape) for x in [r,s]]
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
