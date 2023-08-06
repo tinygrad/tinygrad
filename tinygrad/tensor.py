@@ -443,7 +443,7 @@ class Tensor:
       xup = xup.reshape(*prefix, *flatten((k,o,s) for k,o,s in zip(k_, o_, s_)))
       xup = xup.slice(slc_prefix + flatten(((0,k), (0,o), (0,1)) for k,o in zip(k_, o_)))
       xup = xup.reshape(*prefix, *flatten((k,o) for k,o in zip(k_, o_)))
-      return xup.permute(*range(len(prefix)), *[len(prefix)+i*2+1 for i in range(len(k_))], *[len(prefix)+i*2 for i in range(len(k_))])
+      return xup.permute(*range(lp:=len(prefix)), *[lp+i*2+1 for i in range(len(k_))], *[lp+i*2 for i in range(len(k_))])
     # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
     o_ = [(i+(s-k))//s for i,s,k in zip(i_, s_, k_)]
     xup = self.slice(slc_prefix + [(0,o*s) for o,s in zip(o_, s_)])
@@ -453,7 +453,7 @@ class Tensor:
       prefix += _insert_dims
       slc_prefix += [(0,x) for x in _insert_dims]
     xup = xup.slice(slc_prefix + flatten(((0,o), (0,k)) for o,k in zip(o_, k_)))
-    return xup.permute(*range(len(prefix)), *[len(prefix)+i*2 for i in range(len(k_))], *[len(prefix)+i*2+1 for i in range(len(k_))])
+    return xup.permute(*range(lp:=len(prefix)), *[lp+i*2 for i in range(len(k_))], *[lp+i*2+1 for i in range(len(k_))])
 
   # NOTE: these work for more than 2D
   def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
@@ -502,7 +502,7 @@ class Tensor:
 
   def cumsum(self, axis=0):
     axis = (axis + self.ndim) if axis < 0 else axis
-    x = self.permute(*(i for i in range(self.ndim) if i != axis), axis)
+    x = self.permute(*[i for i in range(self.ndim) if i != axis], axis)
     return x.reshape(1, 1, -1, self.shape[axis]).conv2d(Tensor.ones(1, 1, 1, self.shape[axis], dtype=self.dtype, device=self.device), padding=(self.shape[axis]-1, 0, 0, 0)).reshape(*x.shape).permute(*range(axis), self.ndim - 1, *range(axis, self.ndim-1))
 
   # ***** mlops (unary) *****
@@ -655,7 +655,6 @@ class Tensor:
   def __ne__(self, x) -> Tensor: return 1.0-self.eq(x)  # type: ignore
 
   # ***** functional nn ops *****
-
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
     return x.add(bias) if bias is not None else x
