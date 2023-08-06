@@ -145,7 +145,7 @@ def benchmark_model(m):
       except AssertionError as e:
         error_info = str(e).split('\n')
         print(f"{nm_}: answer mismatch to onnxruntime with shape onnxruntime={correct_ret.shape} | {nm_}={ret.shape}, {error_info[1],  error_info[3],  error_info[4]}")
-        if not isinstance(CSV[nm_], str): CSV[nm_] = f"failed correctness check"
+        CSV[nm_] = f"failed correctness check"
 
   if open_csv is None:
     open_csv = csv.DictWriter(open('onnx_inference_speed.csv', 'w', newline=''), fieldnames=list(CSV.keys()))
