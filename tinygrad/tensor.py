@@ -493,11 +493,11 @@ class Tensor:
     return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
 
   def dot(self, w:Tensor) -> Tensor:
-    n1, n2 = len(self.shape), len(w.shape)
-    assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
-    assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"
-    x = self.reshape(*self.shape[0:-1], *[1]*min(n1-1, n2-1, 1), self.shape[-1])
-    w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
+    m1, m2 = [1]*min(len(self.shape)-1, len(w.shape)-1, 1), -min(len(w.shape), 2)
+    assert len(self.shape) != 0 and len(w.shape) != 0, f"both arguments to matmul need to be at least 1D, but they are {len(self.shape)}D and {len(w.shape)}D"
+    assert self.shape[-1] == w.shape[-min(len(w.shape), 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(len(w.shape), 2)]})"
+    x = self.reshape(*self.shape[:-1], *m1, self.shape[-1])
+    w = w.reshape(*w.shape[:-2], *m1, *w.shape[m2:]).transpose(-1, m2)
     return (x*w).sum(-1)
 
   def cumsum(self, axis=0):
