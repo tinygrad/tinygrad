@@ -102,26 +102,21 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"{alu[arg]} {rtor[vin[0].nm]}, s0")
           ins.append(f"fcsel {rtor[out.nm]},{rtor[vin[2].nm]}, {rtor[vin[1].nm]}, eq")
         elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
-          if CI:
-            ins.append(f"fmov s0, {rtor[vin[0].nm]}")
-            ins.append(f"bl {alu[arg][4:]}")
-            ins.append(f"fmov {rtor[out.nm]}, s0")
-          else:
-            save_regs = [k for k in rtor.keys() if k != out.nm and k not in mem_vars]
-            ins.append(f"sub sp, sp, #{(len(save_regs))*16}")
-            # Save the registers before they are cleared by func call  
-            for i,k in enumerate(save_regs,1):
-              ins.append(f"str {rtor[k]}, [sp, #{16*i}]")
-            ins.append("stp x29, x30, [sp, #0]!")
-            ins.append("mov x29, sp")
-            ins.append(f"fmov s0, {rtor[vin[0].nm]}")
-            ins.append(alu[arg])
-            ins.append(f"fmov {rtor[out.nm]}, s0")
-            ins.append("mov sp, x29")
-            ins.append("ldp x29, x30, [sp], #0")
-            for i,k in enumerate(save_regs,1):
-              ins.append(f"ldr {rtor[k]}, [sp, #{16*i}]")
-            ins.append(f"add sp, sp, #{len(save_regs)*16}")
+          save_regs = [k for k in rtor.keys() if k != out.nm and k not in mem_vars]
+          ins.append(f"sub sp, sp, #{(len(save_regs))*16}")
+          # Save the registers before they are cleared by func call  
+          for i,k in enumerate(save_regs,1):
+            ins.append(f"str {rtor[k]}, [sp, #{16*i}]")
+          ins.append("stp x29, x30, [sp, #0]!")
+          ins.append("mov x29, sp")
+          ins.append(f"fmov s0, {rtor[vin[0].nm]}")
+          ins.append(alu[arg])
+          ins.append(f"fmov {rtor[out.nm]}, s0")
+          ins.append("mov sp, x29")
+          ins.append("ldp x29, x30, [sp], #0")
+          for i,k in enumerate(save_regs,1):
+            ins.append(f"ldr {rtor[k]}, [sp, #{16*i}]")
+          ins.append(f"add sp, sp, #{len(save_regs)*16}")
         elif arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
           ins.append(f"{alu[arg]} {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}" if not dtypes.is_float(vin[0][1]) else f"fcmp {rtor[vin[0].nm]}, {rtor[vin[1].nm]}")
         elif arg == BinaryOps.MOD:
