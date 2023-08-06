@@ -7,7 +7,7 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
-def is_sym_int(x: Any) -> bool: return x.__class__ in (int, Node)
+def is_sym_int(x: Any) -> bool: return x.__class__ is int or isinstance(x, Node)
 def sym_vars(x: Union[Node, int]) -> List[Variable]: return [] if isinstance(x, int) else x.vars()
 
 class Node:
