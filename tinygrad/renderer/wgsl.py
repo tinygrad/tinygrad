@@ -11,8 +11,6 @@ class WGSLLanguage(CStyleLanguage):
   gid = [f"i32(gindex.{'xyz'[x]})" for x in range(3)]
   lid = [f"i32(lindex.{'xyz'[x]})" for x in range(3)]
   size_prefix = "let"
-  global_max = [65535, 65535, 65535]
-  local_max = [256, 256, 64]
   barrier="workgroupBarrier();"
   generic_var_prefix = "var "
   external_local_bufs = True

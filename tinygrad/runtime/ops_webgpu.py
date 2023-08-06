@@ -14,6 +14,7 @@ device = get_default_device()
 class WebGPUProgram:
   def __init__(self, name: str, prg: str): self.name,self.prg = name,device.create_shader_module(code=prg)
   def __call__(self, global_size, local_size, *bufs, wait=False):
+    assert len(bufs) <= 8, "WEBGPU only supports 8 buffers"
     binding_layouts = [{"binding": i, "visibility": wgpu.ShaderStage.COMPUTE, "buffer": {"type": wgpu.BufferBindingType.storage}} for i in range(len(bufs))]
     bindings = [{"binding": i, "resource": {"buffer": x._buf, "offset": 0, "size": x._buf.size}} for i, x in enumerate(bufs)]
     bind_group_layout = device.create_bind_group_layout(entries=binding_layouts)
@@ -37,4 +38,5 @@ class RawWebGPUBuffer(RawBufferCopyIn):
 
 renderer = functools.partial(uops_to_cstyle, WGSLLanguage())
 WebGpuBuffer = Compiled(RawWebGPUBuffer, LinearizerOptions(supported_vector_sizes = {dtypes.float: []},
-                                                           supported_vector_sizes_alu = {dtypes.float: []}), renderer, WebGPUProgram)
+                                                           supported_vector_sizes_alu = {dtypes.float: []},
+                                                           local_max=[256, 256, 64], global_max=[65535, 65535, 65535]), renderer, WebGPUProgram)

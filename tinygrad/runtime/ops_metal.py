@@ -2,14 +2,9 @@
 import os, subprocess, pathlib, functools
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
-<<<<<<< HEAD
-from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
-=======
 from tinygrad.codegen.linearizer import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType
->>>>>>> 7b8d06c9f1de51124ade80f2214b110f0bde4b90
+from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferMapped
 

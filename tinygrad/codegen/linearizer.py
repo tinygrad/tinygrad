@@ -54,7 +54,7 @@ class Token(NamedTuple):
       assert self.offset is None
       return f"{self.dtype.name} {self.name}"
     if self.offset is None: return self.name
-    assert self.dtype.is_vector_type, self
+    assert self.dtype.is_vector_type, f"{self.dtype} isn't okay with offset {self.offset}"
     selector = f".{'xyzw'[int(self.offset)]}" if self.offset < 4 else f".s{'0123456789aAbBcCdDeEfF'[int(self.offset)]}"
     return self.name + selector
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
@@ -124,7 +124,7 @@ class MemOp(NamedTuple):
   invalid_value: Union[float, int] = 0.0
 
 class ConstOp(NamedTuple):
-  value: float
+  value: Union[float, int]
 
   # shared
   valid: Variable
@@ -143,6 +143,7 @@ class LinearizerOptions(NamedTuple):
   supported_vector_sizes_alu: Dict[DType, List[int]] = {dtypes.float: []}
   uses_float32_calculations: bool = True
   has_local: bool = True
+  # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
   global_max: Optional[List[int]] = None
   local_max: Optional[List[int]] = None
   is_nvidia: Optional[bool] = None

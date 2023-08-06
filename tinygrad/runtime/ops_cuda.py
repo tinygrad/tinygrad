@@ -2,11 +2,7 @@ import subprocess, time, re, hashlib, tempfile, os, functools
 from typing import Optional
 import numpy as np
 from pycuda.compiler import compile as cuda_compile # type: ignore
-<<<<<<< HEAD
-from tinygrad.helpers import DEBUG, getenv, fromimport, colored, dtypes
-=======
-from tinygrad.helpers import DEBUG, getenv, colored
->>>>>>> 7b8d06c9f1de51124ade80f2214b110f0bde4b90
+from tinygrad.helpers import DEBUG, getenv, colored, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer
 from tinygrad.codegen.linearizer import LinearizerOptions
@@ -85,7 +81,7 @@ class CUDAProgram:
       return start.time_till(end)*1e-3
 
 renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
-  kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
+  kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", make_vector_prefix="make_",
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
   half_prekernel = """
@@ -98,4 +94,4 @@ renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
   """))
 CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supported_vector_sizes={dtypes.float: [2,4]}, 
                                                        supported_vector_sizes_alu = {dtypes.float: []},
-                                                       global_max = [65535, 65535, 2147483647]), renderer, CUDAProgram, cuda.Context.synchronize)
+                                                       global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]), renderer, CUDAProgram, cuda.Context.synchronize)
