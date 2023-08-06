@@ -205,11 +205,11 @@ transform_test = [
 def fetch_batches(X, Y, BS, seed, is_train=False):
   while True:
     set_seed(seed)
-    # here only shuffle by batches
+    # TODO shuffle individual instance instead of shuffling only batches
     order = list(range(0, X.shape[0], BS))
     random.shuffle(order)
     for i in order:
-      # padding to match buffer size during JIT
+      # padding the last batch in order to match buffer size during JIT
       batch_end = min(i+BS, Y.shape[0])
       x = X[batch_end-BS:batch_end,:]
       # Need fancy indexing support to remove numpy
@@ -236,7 +236,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
     Y_train = np.random.randint(0,10,size=(N), dtype=np.int32)
     X_test, Y_test = X_train, Y_train
   else:
-    X_train, Y_train, X_test, Y_test = fetch_cifar()    # they are disk tensor now
+    X_train, Y_train, X_test, Y_test = fetch_cifar()
 
   # precompute whitening patches
   W = whitening(X_train.sequential(transform_test))
@@ -245,8 +245,8 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
 
   # parse the training params into bias and non-bias
   params_dict = get_state_dict(model)
-  params_non_bias = []
   params_bias = []
+  params_non_bias = []
   for params in params_dict:
     if params_dict[params].requires_grad is not False:
       if 'bias' in params:
@@ -259,7 +259,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
 
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
   initial_div_factor = 1e16
-  final_lr_ratio = 0.07 
+  final_lr_ratio = 0.07
   pct_start = hyp['opt']['percent_start']
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']     ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'] ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
@@ -269,7 +269,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
     out = model(X)
     loss = cross_entropy(out, Y, label_smoothing=0.2)
     if not getenv("DISABLE_BACKWARD"):
-      # 0 for bias and 1 for non-bias
+      # index 0 for bias and 1 for non-bias
       optimizer[0].zero_grad()
       optimizer[1].zero_grad()
       loss.backward()
