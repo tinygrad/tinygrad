@@ -561,9 +561,7 @@ class Tensor:
     if reverse: x, y = y, x
     if x.shape == y.shape: return fxn.apply(x, y)
 
-    len_x_shape, len_y_shape = len(x.shape), len(y.shape)
-
-    if len_y_shape < len_x_shape: y = y.reshape((1,) * (len_x_shape - len_y_shape) + y.shape)
+    if (len_y_shape:=len(y.shape)) < (len_x_shape:=len(x.shape)): y = y.reshape((1,) * (len_x_shape - len_y_shape) + y.shape)
     else: x = x.reshape((1,) * (len_y_shape - len_x_shape) + x.shape)
 
     shape_ret = tuple([max(x, y) for x, y in zip(x.shape, y.shape)])
@@ -579,8 +577,8 @@ class Tensor:
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     if x.__class__ is not Tensor and not reverse:
       # simple pow identities
-      if x < 0: return (1.0/self).pow(-x)
       if x == 2.0: return self*self
+      if x < 0: return (1.0/self).pow(-x)
       if x == 1.0: return self
       if x == 0.5: return self.sqrt()
     ar = self.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(log(abs(x))).exp()
