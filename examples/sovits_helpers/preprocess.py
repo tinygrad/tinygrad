@@ -1,6 +1,7 @@
 import librosa
 from tinygrad.tensor import Tensor
 import torchaudio
+import soundfile
 
 # from https://github.com/svc-develop-team/so-vits-svc/
 class Slicer:
@@ -124,7 +125,7 @@ def cut(audio_path, db_thresh=-30, min_len=5000):
 
 def chunks2audio(audio_path, chunks):
     chunks = dict(chunks)
-    audio, sr = torchaudio.load(audio_path)
+    audio, sr = load_audiofile(audio_path)
     audio = Tensor(audio.numpy())
     if len(audio.shape) == 2 and audio.shape[1] >= 2:
         audio = audio.mean(0).unsqueeze(0)
@@ -135,3 +136,13 @@ def chunks2audio(audio_path, chunks):
         if tag[0] != tag[1]:
             result.append((v["slice"], audio[int(tag[0]):int(tag[1])]))
     return result, sr
+
+def load_audiofile(filepath:str, frame_offset:int=0, num_frames:int=-1, channels_first:bool=True):
+  with soundfile.SoundFile(filepath, "r") as file_:
+    frames = file_._prepare_read(frame_offset, None, num_frames)
+    waveform = file_.read(frames, "float32", always_2d=True)
+    sample_rate = file_.samplerate
+
+  waveform = Tensor(waveform)
+  if channels_first: waveform = waveform.transpose(0, 1)
+  return waveform, sample_rate

@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, getenv
 from tinygrad.state import torch_load
 from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present, get_hparams_from_file, load_checkpoint, weight_norm, HParams
-from examples.sovits_helpers import slicer
+from examples.sovits_helpers import preprocess
 from examples.sovits_helpers.f0_predictor import PMF0Predictor
 
 import soundfile
@@ -742,15 +742,7 @@ def split_list_by_n(list_collection, n, pre=0):
   for i in range(0, len(list_collection), n):
     yield list_collection[i-pre if i-pre>=0 else i: i + n]
 
-def load_audiofile(filepath:str, frame_offset:int=0, num_frames:int=-1, channels_first:bool=True):
-  with soundfile.SoundFile(filepath, "r") as file_:
-    frames = file_._prepare_read(frame_offset, None, num_frames)
-    waveform = file_.read(frames, "float32", always_2d=True)
-    sample_rate = file_.samplerate
 
-  waveform = Tensor(waveform)
-  if channels_first: waveform = waveform.transpose(0, 1)
-  return waveform, sample_rate
 
 
 SO_VITS_SVC_PATH = Path(__file__).parent.parent / "weights/So-VITS-SVC"
@@ -817,8 +809,8 @@ if __name__=="__main__":
   ### Loading audio and slicing ###
   assert os.path.isfile(AUDIO_PATH)
   assert Path(AUDIO_PATH).suffix == ".wav"
-  chunks = slicer.cut(AUDIO_PATH, db_thresh=slice_db)
-  audio_data, audio_sr = slicer.chunks2audio(AUDIO_PATH, chunks)
+  chunks = preprocess.cut(AUDIO_PATH, db_thresh=slice_db)
+  audio_data, audio_sr = preprocess.chunks2audio(AUDIO_PATH, chunks)
 
   per_size = int(clip_seconds * audio_sr)
   lg_size = int(lg_num * audio_sr)
@@ -847,7 +839,7 @@ if __name__=="__main__":
 
       ### Infer START ###
       infer_start = time.time()
-      wav, sr = load_audiofile(raw_path)
+      wav, sr = preprocess.load_audiofile(raw_path)
       resample = Resample(sr, target_sample)
       wav = resample(wav).numpy()[0]
       speaker_id = spk2id[speaker]
