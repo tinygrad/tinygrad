@@ -1,9 +1,8 @@
 import numpy as np
 import torch
 import unittest
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 from tinygrad.state import get_parameters
-from tinygrad.helpers import getenv
 from tinygrad.nn.optim import Adam
 from extra.lr_scheduler import MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR, OneCycleLR
 from extra.training import train, evaluate
@@ -81,7 +80,6 @@ class TestLrScheduler(unittest.TestCase):
   def test_multisteplr(self): self._test_multisteplr(10, {'milestones': [1, 2, 7]}, 1e-6, 1e-6)
   def test_multisteplr_gamma(self): self._test_multisteplr(10, {'milestones': [1, 2, 7], 'gamma': 0.1337}, 1e-6, 1e-6)
 
-  @unittest.skipIf(getenv("CI","") != "" and Device.DEFAULT == "WEBGPU", "")
   def test_reducelronplateau(self): self._test_reducelronplateau(100, {}, 1e-6, 1e-6)
   def test_reducelronplateau_max(self): self._test_reducelronplateau(100, {'mode': 'max'}, 1e-6, 1e-6)
   def test_reducelronplateau_factor(self): self._test_reducelronplateau(100, {'factor': 0.1337}, 1e-6, 1e-6)
