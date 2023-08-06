@@ -602,7 +602,7 @@ class Tensor:
 
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
     # TODO: ensure self is non-differentiable, could mess with ceil/float though
-    dtype = self.dtype if self.dtype is not dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
+    dtype = self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
     x: Tensor = self
     y: Tensor = Tensor(input_, device=self.device, requires_grad=False, dtype=dtype, canonical=True) if not isinstance(input_, Tensor) else input_
     z: Tensor = Tensor(other, device=self.device, requires_grad=False, dtype=dtype, canonical=True) if not isinstance(other, Tensor) else other

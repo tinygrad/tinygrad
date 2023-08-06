@@ -209,7 +209,7 @@ class SumNode(RedNode):
         else:
           rest.append(x)
           _gcd = gcd(_gcd, x.b)
-          if x.__class__ is MulNode and divisor == 1 and b%x.b == 0: divisor = x.b
+          if x.__class__ == MulNode and divisor == 1 and b%x.b == 0: divisor = x.b
       else:
         rest.append(x)
         _gcd = 1

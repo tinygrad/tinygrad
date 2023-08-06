@@ -45,8 +45,8 @@ class CStyleLanguage(NamedTuple):
   def render_cast(self, x:List[str], var_dtype:DType) -> str:
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "cast is not supported on this platform"
-    if var_dtype is dtypes._float4: return f"{self.float4}({','.join(x)})"
-    if var_dtype is dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
+    if var_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
+    if var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   # returns a str expression of the const with the given type
@@ -59,9 +59,9 @@ class CStyleLanguage(NamedTuple):
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
-      assert output_dtype is dtypes._float4, "images must be float4"
+      assert output_dtype == dtypes._float4, "images must be float4"
       return f"read_imagef({buf_name}, smp, (int2)({idx[0].render(render_cl)}, {idx[1].render(render_cl)}))"
-    if self.uses_vload and buf_dtype is dtypes.float16:
+    if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx.render(render_cl, strip_parens=True)})"
     if output_dtype.sz > 1:
       return f"({output_dtype.name})(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})))"
@@ -83,16 +83,16 @@ class CStyleLanguage(NamedTuple):
     prg = ''.join([f"{self.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
-    if self.half_prekernel and any(dtype is dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
+    if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
 
     return prg, global_size[::-1], local_size[::-1]
 
   # returns a str statement that does the store
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
-      assert var_dtype is dtypes._float4, "images must be float4"
+      assert var_dtype == dtypes._float4, "images must be float4"
       return f"write_imagef({buf_name}, (int2)({idx[0].render(render_cl)}, {idx[1].render(render_cl)}), {var_name});"
-    if self.uses_vload and buf_dtype is dtypes.float16:
+    if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx.render(render_cl, strip_parens=True)});"
     if var_dtype.sz > 1:
       return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
@@ -121,7 +121,7 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
   def kk(s): kernel.append("  "*depth+s)
 
   for uop,newvar,vin,args in uops:
-    if uop is UOps.LOOP:
+    if uop == UOps.LOOP:
       for i,var in enumerate(args[0]):
         if args[1] == "global" and lang.gid:
           kk(add_gl_dimension(lang.size_prefix, args, i, var, global_size, lang.gid))
@@ -131,9 +131,9 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
           if getenv("NOUNROLL") and not isinstance(var, NumNode): kk("#pragma unroll(1)")   # prevent loop unrolling
           kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, var.min, var.max))
       depth += 1
-    elif uop is UOps.BARRIER:
+    elif uop == UOps.BARRIER:
       kk(lang.barrier)
-    elif uop is UOps.ENDLOOP:
+    elif uop == UOps.ENDLOOP:
       if args[1] == "local" and len(lang.lid):
         # TODO: this is a bit of a hack. the local loop isn't real on the GPU
         kk(f"if ({Variable.sum(args[0]).render(render_cl)} == 0) {{")
@@ -145,7 +145,7 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
           pend_close = None
         depth -= 1
         kk("}"*len(args[0]) + f" /* {args[1]} */")
-    elif uop is UOps.WMMA:
+    elif uop == UOps.WMMA:
       # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
       kk("{ simdgroup_float8x8 a,b,c;")
       kk(f"a.thread_elements()[0] = {vin[0].render()}; a.thread_elements()[1] = {vin[1].render()};")
@@ -153,10 +153,10 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
       kk(f"c.thread_elements()[0] = {vin[4].render()}; c.thread_elements()[1] = {vin[5].render()};")
       kk("simdgroup_multiply_accumulate(c, a, b, c);")
       kk(f"{vin[4].render()} = c.thread_elements()[0]; {vin[5].render()} = c.thread_elements()[1]; }}")
-    elif uop is UOps.ALU:
+    elif uop == UOps.ALU:
       assert newvar is not None
       kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")
-    elif uop is UOps.LOAD:
+    elif uop == UOps.LOAD:
       assert newvar is not None and isinstance(args, (MemOp, ConstOp))
       # valids are handled here
       if args.valid.max == 0:
@@ -167,18 +167,18 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
         val = lang.render_load(newvar.dtype, args.name, args.memory_dtype, args.idx, args.local)
       if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(args.invalid_value, newvar.dtype))
       kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = {val};")
-    elif uop is UOps.STORE:
+    elif uop == UOps.STORE:
       assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
       # TODO: instead of dtypes.float, a base type
       kk(lang.render_store(args.name, args.memory_dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, args.local))
-    elif uop is UOps.CAST and newvar is not None and newvar.dtype.sz > 1:
+    elif uop == UOps.CAST and newvar is not None and newvar.dtype.sz > 1:
       kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
-    elif uop is UOps.DEFINE_LOCAL:
+    elif uop == UOps.DEFINE_LOCAL:
       if lang.external_local_bufs:
         prekernel.append(lang.render_local(args[0], args[1]))
       else:
         kk(lang.render_local(args[0], args[1]))
-    elif uop is UOps.DEFINE_GLOBAL:
+    elif uop == UOps.DEFINE_GLOBAL:
       bufs.append(args)
     else:
       raise RuntimeError(f"failed to render {uop}")
