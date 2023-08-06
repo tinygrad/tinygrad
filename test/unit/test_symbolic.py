@@ -24,22 +24,28 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 3, 8)<3, 0, 0, "0")
     self.helper_test_variable(Variable("a", 3, 8)<2, 0, 0, "0")
 
-  def test_ge_divides(self):
-    expr = (Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512
-    self.helper_test_variable(expr, 0, 1, "((idx*4)<512)")
-    self.helper_test_variable(expr//4, 0, 1, "(idx<128)")
-
-  def test_ge_divides_and(self):
-    expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
-                          (Variable("idx2", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512])
-    self.helper_test_variable(expr//4, 0, 1, "((idx1<128) and (idx2<128))")
-    expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
-                          (Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7)) < 512])
-    self.helper_test_variable(expr//4, 0, 1, "((((FLOAT8_INDEX//4)+idx2)<128) and (idx1<128))")
-
   def test_lt_factors(self):
     expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256)) < 512])
     self.helper_test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)")
+
+  def test_operations_on_LtNode(self):
+    lt = Variable("a", 3, 8) < 4
+    self.helper_test_variable(lt  * 1, 0, 1, "(a<4)")
+    self.helper_test_variable(lt  * 2, 0, 2, "((a<4)*2)")
+    self.helper_test_variable(lt // 1, 0, 1, "(a<4)")
+    self.helper_test_variable(lt // 2, 0, 0, "0")
+    gt = Variable("a", 3, 8) > 4
+    self.helper_test_variable(gt  * 1, 0, 1, "((a*-1)<-4)")
+    self.helper_test_variable(gt  * 2, 0, 2, "(((a*-1)<-4)*2)")
+    self.helper_test_variable(gt // 1, 0, 1, "((a*-1)<-4)")
+    self.helper_test_variable(gt // 2, 0, 0, "0")
+
+  def test_operations_on_AndNode(self):
+    and_node = Variable.ands([Variable("a", 3, 8) < 4, Variable("b", 0, 18) > 7])
+    self.helper_test_variable(and_node  * 1, 0, 1, "(((b*-1)<-7) and (a<4))")
+    self.helper_test_variable(and_node  * 2, 0, 2, "((((b*-1)<-7) and (a<4))*2)")
+    self.helper_test_variable(and_node // 1, 0, 1, "(((b*-1)<-7) and (a<4))")
+    self.helper_test_variable(and_node // 2, 0, 0, "0")
 
   def test_div_becomes_num(self):
     assert isinstance(Variable("a", 2, 3)//2, NumNode)
