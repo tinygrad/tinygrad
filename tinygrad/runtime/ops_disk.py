@@ -17,9 +17,7 @@ class RawDiskBuffer(RawBufferMapped):
     else:
       buf[2] += 1
     # NOTE: we don't call super since disk tensors don't use RAM
-    # self.size, self.dtype, self._buf = size, dtype, buf
-    super().__init__(size, dtype, buf)
-
+    self.size, self.dtype, self._buf = size, dtype, buf
   def __del__(self):
     self._buf[2] -= 1
     if self._buf[2] == 0: self._buf[0].close()

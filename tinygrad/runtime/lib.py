@@ -4,15 +4,15 @@ from typing import TypeVar, Type, Any
 from tinygrad.helpers import DType, dtypes, prod, GlobalCounters
 
 _T = TypeVar("_T")
-from dataclasses import dataclass
-@dataclass(frozen=True)
 class RawBuffer:  # pylint: disable=abstract-method
-  size: int
-  dtype: DType
-  _buf: Any = None
-  def __post_init__(self): GlobalCounters.mem_used += self.size*self.dtype.itemsize
-  def __del__(self):  # NOTE: if it fails on init (bad dtype), it won't have a dtype.itemsize
-    if hasattr(self.dtype, 'itemsize'): GlobalCounters.mem_used -= self.size*self.dtype.itemsize
+  def __init__(self, size:int, dtype:DType, buf:Any=None):
+    self.size: int = size
+    self.dtype: DType = dtype
+    self._buf = buf
+    self._memsz: int = size*dtype.itemsize
+    GlobalCounters.mem_used += self._memsz
+  def __del__(self):  # NOTE: if it fails on init (bad dtype), it won't have a _memsz
+    if hasattr(self, '_memsz'): GlobalCounters.mem_used -= self._memsz
   def __repr__(self): return f"buffer<{self.size}, {self.dtype}>"
   @property
   def key(self): return (self.size, self.dtype)
