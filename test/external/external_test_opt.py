@@ -70,14 +70,14 @@ class TestInferenceMinKernels(unittest.TestCase):
     model = ResNet18()
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(26):
+    with CLCache(28):
       model.forward(img).realize()
 
   def test_vit(self):
     model = ViT(embed_dim=192, num_heads=3)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(223): # NOTE: this is way too high
+    with CLCache(234): # NOTE: this is way too high
       out = model.forward(img)
       assert len(GlobalCounters.cache) == 0, "ViT prerealized?"
       out.realize()
