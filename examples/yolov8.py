@@ -282,9 +282,7 @@ class SPPF:
     c_ = c1 // 2  # hidden channels
     self.cv1 = Conv_Block(c1, c_, 1, 1, padding=None)
     self.cv2 = Conv_Block(c_ * 4, c2, 1, 1, padding=None)
-
-    # TODO: this pads with 0s, whereas torch function pads with -infinity. This results in a < 2% difference in prediction which does not make a difference visually.
-    self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=k, stride=1)
+    self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2), value=float('-inf')).max_pool2d(kernel_size=k, stride=1)
 
   def __call__(self, x):
     x = self.cv1(x)
@@ -433,7 +431,7 @@ if __name__ == '__main__':
   draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)
 
 # TODO for later:
-#  1. Fix SPPF minor difference due to maxpool
+#  (update: DONE) Fix SPPF minor difference due to maxpool
 #  2. AST exp overflow warning while on cpu
 #  3. Make NMS faster
 #  4. Add video inference and webcam support
