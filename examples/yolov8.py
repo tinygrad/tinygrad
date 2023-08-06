@@ -276,7 +276,7 @@ class C2f:
     z = y[0]
     for i in y[1:]: z = z.cat(i, dim=1)
     return self.cv2(z)
-
+  
 class SPPF:
   def __init__(self, c1, c2, k=5):
     c_ = c1 // 2  # hidden channels
@@ -431,7 +431,7 @@ if __name__ == '__main__':
   draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)
 
 # TODO for later:
-#  (update: DONE) Fix SPPF minor difference due to maxpool
+#  (update: Padding with -inf done, but still a minor difference in preds) Fix SPPF minor difference due to maxpool
 #  2. AST exp overflow warning while on cpu
 #  3. Make NMS faster
 #  4. Add video inference and webcam support
