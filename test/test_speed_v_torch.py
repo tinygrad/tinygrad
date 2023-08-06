@@ -112,7 +112,7 @@ def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_
   def f2(tiny_dat): return tiny_conv(tiny_dat).realize()
   helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d} k:{kernel_size}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
 
-@unittest.skipIf(getenv("BIG") != 1, "no big tests")
+@unittest.skipIf(getenv("BIG") == 0, "no big tests")
 class TestBigSpeed(unittest.TestCase):
   def test_add(self):
     def f(a, b): return a+b
@@ -130,7 +130,7 @@ class TestBigSpeed(unittest.TestCase):
   def test_large_conv_3x3(self): helper_test_conv(bs=4, in_chans=128, out_chans=128, kernel_size=3, img_size_y=130, img_size_x=130)
   def test_large_conv_5x5(self): helper_test_conv(bs=4, in_chans=128, out_chans=128, kernel_size=5, img_size_y=130, img_size_x=130)
 
-@unittest.skipIf((getenv("BIG") == 1), "only big tests")
+@unittest.skipIf(getenv("BIG") == 1, "only big tests")
 class TestSpeed(unittest.TestCase):
   def test_sub(self):
     def f(a, b): return a-b
