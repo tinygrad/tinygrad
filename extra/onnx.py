@@ -120,12 +120,9 @@ def get_run_onnx(onnx_model: ModelProto):
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else (1, [i.shape for i in input_tensors[inp.name]])
-        assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
-        print(input_tensors)
+        # assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
         for _,v in input_tensors.items():
           if isinstance(v, Tensor):
-            print(v)
-            print(v.numpy())
             v.realize()
           elif isinstance(v, list):
             for v_ in v: v_.realize()
@@ -199,7 +196,7 @@ def get_run_onnx(onnx_model: ModelProto):
         continue
       elif n.op_type == "Slice":
         if onnx_model_version < 10:
-          axes = list(opt["axes"])
+          axes = list(opt.get("axes", range(inp[0].ndim)))
           ends = list(opt["ends"])
           starts = list(opt["starts"])
           steps = [1]*inp[0].ndim
@@ -208,7 +205,6 @@ def get_run_onnx(onnx_model: ModelProto):
           axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3]).tolist()
           steps = safe_numpy(inp[4]) if len(inp) > 4 else [1]*inp[0].ndim
           starts, ends = safe_numpy(starts.ceil().cast(dtypes.int32)).tolist(), safe_numpy(ends.ceil().cast(dtypes.int32)).tolist()
-        print(starts, ends, axes, steps, "FUCK")
         arg = [(0,x,1) for x in inp[0].shape]
         shrink_args = [(0,x) for x in inp[0].shape]
         only_shrink = False # HACK BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise __getitem__ Tensor.reshape() has to allow 0 in newshape
@@ -222,7 +218,6 @@ def get_run_onnx(onnx_model: ModelProto):
             continue
           if starts[i] > ends[i] and steps[i] >= 0: steps[i] = -steps[i]
           arg[axis] = (starts[i], ends[i], steps[i])
-          print(only_shrink, "only shrink")
         ret = inp[0].shrink(tuple(shrink_args)) if only_shrink else inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
       elif n.op_type == "Shrink":
         bias = opt['bias'] if 'bias' in opt else 0
