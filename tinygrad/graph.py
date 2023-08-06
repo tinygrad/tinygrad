@@ -48,6 +48,8 @@ def str_dtype(dtyp):
   ret = str(dtyp)[7:]
   return "" if ret == 'float' else f"\n{ret}"
 
+
+TOP_COLORS = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#ff8080"}
 def log_op(ret: LazyBuffer, ast: LazyOp, show_graph: Optional[bool] = None, phantom=False):
   if show_graph is None: show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
@@ -58,7 +60,7 @@ def log_op(ret: LazyBuffer, ast: LazyOp, show_graph: Optional[bool] = None, phan
   cnts[optype] += 1
   if DEBUG >= 6: print(f"{op} : {', '.join([f'{x.shape}-<{nm(x)}>' for x in inp])} -> {ret.shape}-<{nm(ret)}>")
   if show_graph:
-    top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#ff8080"}
+    
     dashed = (optype is LoadOps and hasattr(ret, "_backing")) or (hasattr(ret, "st") and not ret.st.contiguous)  # type: ignore
 
     for x in inp:
@@ -68,7 +70,7 @@ def log_op(ret: LazyBuffer, ast: LazyOp, show_graph: Optional[bool] = None, phan
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
 
     G.nodes[nm(ret)]['label'] = (str(set(x.shape for x in inp))+"\n"+str(ret.shape) if optype is ReduceOps else str(ret.shape))+str_dtype(ret.dtype)
-    G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('60' if phantom else ('80' if dashed else str()))) if optype in top_colors else "#ffffff"
+    G.nodes[nm(ret)]['fillcolor'] = (TOP_COLORS[optype] + ('60' if phantom else ('80' if dashed else str()))) if optype in TOP_COLORS else "#ffffff"
     G.nodes[nm(ret)]['color'] = 'white' if phantom else 'black'
     G.nodes[nm(ret)]['style'] = ('filled, dashed' if dashed else 'filled')
     G.nodes[nm(ret)]['prunable'] = optype in [LoadOps, MovementOps]
