@@ -52,7 +52,7 @@ class Token(NamedTuple):
       assert self.offset is None
       return f"{self.dtype.name} {self.name}"
     if self.offset is None: return self.name
-    assert self.dtype in [dtypes._float4, dtypes._float2]
+    assert self.dtype in [dtypes._float4, dtypes._float2], f"{self.dtype} isn't okay with offset {self.offset}"
     return self.name+"."+"xyzw"[int(self.offset)]
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
@@ -121,7 +121,7 @@ class MemOp(NamedTuple):
   invalid_value: Union[float, int] = 0.0
 
 class ConstOp(NamedTuple):
-  value: float
+  value: Union[float, int]
 
   # shared
   valid: Variable
