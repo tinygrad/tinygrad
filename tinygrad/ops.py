@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict,
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg
-import tinygrad.lazy as lazy
+
 if TYPE_CHECKING:
   from tinygrad.lazy import LazyBuffer
 
@@ -51,8 +51,9 @@ class LazyOp:
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
+    from tinygrad.lazy import elementwise_op
     assert self.op in BinaryOps or self.op in UnaryOps or self.op in TernaryOps
-    return lazy.elementwise_op(self.op, *[z.replace_with_movement_ops(ops) for z in self.src], arg=self.arg)   # type: ignore
+    return elementwise_op(self.op, *[z.replace_with_movement_ops(ops) for z in self.src], arg=self.arg)   # type: ignore
 
   @property
   def st(self): raise NotImplementedError
