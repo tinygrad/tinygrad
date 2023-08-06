@@ -38,8 +38,7 @@ def benchmark(mnm, nm, fxn):
   CSV[nm] = min(tms)*1e-6
   return min(tms), ret
 
-#BASE = pathlib.Path(__file__).parent.parent.parent / "weights" / "onnx"
-BASE = pathlib.Path("/tmp/onnx")
+BASE = pathlib.Path(__file__).parent.parent.parent / "weights" / "onnx"
 def benchmark_model(m):
   global open_csv, CSV
   CSV = {"model": m}
@@ -74,7 +73,7 @@ def benchmark_model(m):
   benchmark(m, "torch_mps", lambda: torch_mps_model(*torch_mps_inputs))
 
   if open_csv is None:
-    open_csv = csv.DictWriter(open('onnx_inference_speed.csv', 'w', newline=''), fieldnames=list(CSV.keys()))
+    open_csv = csv.DictWriter(open('/tmp/speed.csv', 'w', newline=''), fieldnames=list(CSV.keys()))
     open_csv.writeheader()
   open_csv.writerow(CSV)
 
