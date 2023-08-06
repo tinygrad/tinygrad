@@ -16,6 +16,8 @@ jobs:
       uses: actions/checkout@v3
     - name: Run model inference benchmark
       run: python3 test/external/external_model_benchmark.py
+    - name: Run 10 CIFAR training steps
+      run: STEPS=10 python3 examples/hlb_cifar10.py
     - uses: actions/upload-artifact@v3
       with:
         name: ONNX Inference Speed (Mac)
@@ -29,6 +31,8 @@ jobs:
       uses: actions/checkout@v3
     - name: Run model inference benchmark
       run: python3 test/external/external_model_benchmark.py
+    - name: Run 10 CIFAR training steps
+      run: STEPS=10 python3 examples/hlb_cifar10.py
     - uses: actions/upload-artifact@v3
       with:
         name: ONNX Inference Speed (AMD)
