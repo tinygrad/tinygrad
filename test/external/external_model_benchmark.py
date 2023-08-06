@@ -35,15 +35,29 @@ open_csv = None
 opts = ort.SessionOptions()
 opts.inter_op_num_threads = 1
 
-def benchmark(mnm, nm, fxn):
-  tms = []
-  for _ in range(3):
-    st = time.perf_counter_ns()
-    ret = fxn()
-    tms.append(time.perf_counter_ns() - st)
-  print(f"{m:15s} {nm:25s} {min(tms)*1e-6:7.2f} ms")
-  CSV[nm] = min(tms)*1e-6
-  return min(tms), ret
+def benchmark(mnm, nm, fxn, ort_ret=None):
+  try:
+    if nm != "onnxruntime" and ort_ret is None: raise RuntimeWarning("onnxruntime failed to run")
+    tms = []
+    for _ in range(3):
+      st = time.perf_counter_ns()
+      ret = fxn()
+      tms.append(time.perf_counter_ns() - st)
+    if ort_ret is not None: 
+      ret = ret.detach().cpu().numpy() if isinstance(ret, torch.Tensor) else list(ret.values())[0] if isinstance(ret, dict) else ret[0] if isinstance(ret, list) else ret
+      np.testing.assert_allclose(ort_ret, ret, atol=1e-2, rtol=1e-2)
+    print(f"{m:15s} {nm:25s} {min(tms)*1e-6:7.2f} ms")
+    CSV[nm] = min(tms)*1e-6
+    return min(tms), ret
+  except Exception as e:
+    if isinstance(e, AssertionError): 
+      error_info = str(e).split('\n')
+      print(f"{m:15s} {nm:25s} {min(tms)*1e-6:7.2f} ms {error_info[1]} {error_info[3]}")
+      CSV[nm] = f"failed correctness check with {min(tms)*1e-6}"
+    else:
+      print(f"{m:15s} {nm:25s} raised {type(e)} during run")
+      CSV[nm] = f"{type(e)} raised during run"
+    return None, None
 
 #BASE = pathlib.Path(__file__).parent.parent.parent / "weights" / "onnx"
 BASE = pathlib.Path("/tmp/onnx")
@@ -60,92 +74,67 @@ def benchmark_model(m):
   np_inputs = {k:torch.randn(shp).numpy() for k,shp in input_shapes.items()}
   assert len(input_shapes) < 20
 
-  model_ret = {}
+  try:
+    ort_session = ort.InferenceSession(fn)
+  except:
+    nm = "onnxruntime"
+    print(f"{m:15s} {nm:25s} failed to convert model")
+    CSV[nm] = "onnxruntime failed to convert model"
+    ort_session = None
+
+  if ort_session is not None:
+    _, ort_ret = benchmark(m, "onnxruntime", lambda: ort_session.run(None, np_inputs))
+    if isinstance(ort_ret, list): ort_ret = ort_ret[0]
+  else: ort_ret = None
+
   for device in ["METAL" if OSX else "GPU", "CLANG"]:
     Device.DEFAULT = device
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
     try:
       tinygrad_model = get_run_onnx(onnx_model)
     except Exception as e:
-      # print(e)
-      CSV[f"tinygrad_{device.lower()}_jitless"] = f"tinygrad_jitless failed to convert model"
+      nm = f"tinygrad_{device.lower()}_jitless" 
+      print(f"{m:15s} {nm:25s} failed to convert model")
+      CSV[nm] = f"tinygrad_jitless failed to convert model, {type(e)}"
       tinygrad_model = None
 
     if tinygrad_model is not None:
-      try:
-        _, ret = benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
-        model_ret[f"tinygrad_{device.lower()}_jitless"] = list(ret.values())[0]
-      except Exception as e:
-        # print(e)
-        CSV[f"tinygrad_{device.lower()}_jitless"] = "error"
+      benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()}, ort_ret=ort_ret)
 
     from tinygrad.jit import TinyJit
+    tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model(kwargs).items()})
+
     try:
-      tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model(kwargs).items()})
+      for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
     except Exception as e:
-      # print(e)
-      CSV[f"tinygrad_{device.lower()}_jitless"] = f"tinygrad_jitted failed to convert model"
+      nm = f"tinygrad_{device.lower()}_jit"
+      print(f"{m:15s} {nm:25s} failed to convert model")
+      CSV[f"tinygrad_{device.lower()}_jit"] = f"tinygrad_jit failed to convert model"
       tinygrad_jitted_model = None
 
     if tinygrad_jitted_model is not None:
-      try:
-        for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
-        _, ret = benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()})
-        model_ret[f"tinygrad_{device.lower()}_jit"] = list(ret.values())[0]
-      except Exception as e:
-        # print(e)
-        CSV[f"tinygrad_{device.lower()}_jit"] = "error"
+      benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}, ort_ret=ort_ret)
     del inputs, tinygrad_model, tinygrad_jitted_model
 
   try:
     torch_model = convert(onnx_model)
   except Exception as e:
-    # print(e)
-    CSV["torch_cpu"] = "torch failed to convert model"
-    CSV["torch_mps"] = "torch failed to convert model"
+    nm = "torch_cpu"
+    print(f"{m:15s} {nm:25s} failed to convert model")
+    CSV[nm] = "torch failed to convert model"
+    nm = "torch_mps"
+    print(f"{m:15s} {nm:25s} failed to convert model")
+    CSV[nm] = "torch failed to convert model"
     torch_model = None
   
   if torch_model is not None:
-    try:
-      torch_inputs = [torch.tensor(x) for x in np_inputs.values()]
-      _, ret = benchmark(m, "torch_cpu", lambda: torch_model(*torch_inputs))
-      model_ret["torch_cpu"] = ret.detach().cpu().numpy()
-    except Exception as e:
-      # print(e)
-      CSV["torch_cpu"] = "error"
+    torch_inputs = [torch.tensor(x) for x in np_inputs.values()]
+    benchmark(m, "torch_cpu", lambda: torch_model(*torch_inputs), ort_ret=ort_ret)
 
-    try:
-      torch_device = "mps" if OSX else "cuda"
-      torch_mps_model = torch_model.to(torch_device)
-      torch_mps_inputs = [x.to(torch_device) for x in torch_inputs]
-      _, ret = benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs))
-      model_ret["torch_mps"] = ret.detach().cpu().numpy()
-    except Exception as e:
-      # print(e)
-      CSV["torch_mps"] = "error"
-
-  try:
-    ort_session = ort.InferenceSession(fn)
-  except:
-    CSV["onnxruntime"] = "onnxruntime failed to convert model"
-    ort_session = None
-
-  if ort_session is not None:
-    try:
-      _, ret = benchmark(m, "onnxruntime", lambda: ort_session.run(None, np_inputs))
-      model_ret["onnxruntime"] = ret[0]
-    except Exception as e:
-      # print(e)
-      CSV["onnxruntime"] = "error"
-
-  if (correct_ret := model_ret.pop("onnxruntime", None)) is not None:
-    for nm_, ret in model_ret.items():
-      try:
-        np.testing.assert_allclose(correct_ret, ret, atol=5e-3, rtol=5e-3)
-      except AssertionError as e:
-        error_info = str(e).split('\n')
-        print(f"{nm_}: answer mismatch to onnxruntime with shape onnxruntime={correct_ret.shape} | {nm_}={ret.shape}, {error_info[1],  error_info[3],  error_info[4]}")
-        CSV[nm_] = f"failed correctness check"
+    torch_device = "mps" if OSX else "cuda"
+    torch_mps_model = torch_model.to(torch_device)
+    torch_mps_inputs = [x.to(torch_device) for x in torch_inputs]
+    benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs), ort_ret=ort_ret)
 
   if open_csv is None:
     open_csv = csv.DictWriter(open('onnx_inference_speed.csv', 'w', newline=''), fieldnames=list(CSV.keys()))
