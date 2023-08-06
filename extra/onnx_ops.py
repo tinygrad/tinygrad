@@ -156,37 +156,30 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
   seq_pads = [math.ceil(i) for i in seq_pads]
   seq_axes = safe_numpy(axes).astype(np.int32).tolist() if axes is not None else None
   base_shape = x.shape
-  pads = _format_padding(seq_pads)
+  # pads = _format_padding(seq_pads)
+  pads = _format_padding(seq_pads, ndims=len(x.shape), axes=seq_axes)
   if mode == "wrap":
     repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(pads, base_shape)]
     new_shape = [s*r for s,r in zip(base_shape, repeat_args)]
     shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh) if dim[1]%sh != 0 else nsh) for dim, sh, nsh in zip(pads, base_shape, new_shape)]
     return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
   elif mode == "reflect":
-    # repeat, shrink to x.shape, (padder == x).where(x, padder)
-    # shape move [s-1 for s in x.shape]
-    # padder = Tensor.zeros_like(x)
     for i,s in enumerate(x.shape):
+      flipped_x = x.flip(i).realize() # TODO realize here so that in else: x is not flipped twice?
       if pads[i] == (0,0): continue
-      elif pads[i][0] and not pads[i][1]: x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (0,s) for i_ in range(x.ndim)])) + x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
-      elif not pads[i][0] and pads[i][1]: x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (s,0) for i_ in range(x.ndim)])) + x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
-      else: x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (0,s+pads[i][1]) for i_ in range(x.ndim)])) + x.flip(i).shrink(tuple([(0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+      elif pads[i][0] and not pads[i][1]: x = flipped_x.shrink(tuple([(0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (0,s) for i_ in range(x.ndim)])) + x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+      elif not pads[i][0] and pads[i][1]: x = flipped_x.shrink(tuple([(0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (s,0) for i_ in range(x.ndim)])) + x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+      else: x = flipped_x.shrink(tuple([(0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (0,s+pads[i][1]) for i_ in range(x.ndim)])) + flipped_x.shrink(tuple([(0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
     return x
   elif mode == "edge":
-    n_pads = [(n,pad) for n,pad in enumerate(pads)][::-1]
-    for n, pad in n_pads: # TODO theres probably a way to do this with less code
-      if pad == (0,0): continue
-      pad_st, pad_ed = pad
-      st_slice_arg = [(0,s) if dim != n else (0,1) for dim,s in enumerate(x.shape)]
-      ed_slice_arg = [(0,s) if dim != n else (s-1, s) for dim,s in enumerate(x.shape)]
-      st_repeat_arg = [(1) if i != n else (pad_st) for i in range(x.ndim)]
-      ed_repeat_arg = [(1) if i != n else (pad_ed) for i in range(x.ndim)]
-      pad_st = x.shrink(tuple(st_slice_arg)).repeat(st_repeat_arg)
-      pad_ed = x.shrink(tuple(ed_slice_arg)).repeat(ed_repeat_arg)
-      x = pad_st.cat(x, dim=n).cat(pad_ed, dim=n)
+    for i,s in enumerate(x.shape):
+      if pads[i] == (0,0): continue
+      elif pads[i][0] and not pads[i][1]: x = x.shrink(tuple([(0,s_) if i_ != i else (0,1) for i_,s_ in enumerate(x.shape)])).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (0,s) for i_ in range(x.ndim)])) + x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+      elif not pads[i][0] and pads[i][1]: x = x.shrink(tuple([(0,s_) if i_ != i else (s_-1, s_) for i_,s_ in enumerate(x.shape)])).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+      else: x = x.shrink(tuple([(0,s_) if i_ != i else (0,1) for i_,s_ in enumerate(x.shape)])).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (0,s+pads[i][1]) for i_ in range(x.ndim)])) + x.shrink(tuple([(0,s_) if i_ != i else (s_-1, s_) for i_,s_ in enumerate(x.shape)])).expand([pads[i][1] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
     return x
   elif mode == "constant":
-    return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value) # CHANGE THIS
+    return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value)
 
 def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
   if dilations != 1: raise NotImplementedError(f"dilations != 1 not supported, dilations:{dilations}")
