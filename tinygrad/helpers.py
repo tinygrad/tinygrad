@@ -10,7 +10,7 @@ OSX = platform.system() == "Darwin"
 CI = os.getenv("CI", "") != ""
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
-def argfix(*x): return tuple(x if type(x[0]) is int else x[0])
+def argfix(*x): return () if not x else tuple(x if type(x[0]) is int else x[0])
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def all_same(items): return len(set(items)) == 1 if len(items) > 1 else True
 def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
