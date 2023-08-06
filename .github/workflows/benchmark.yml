@@ -14,7 +14,7 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Run metal ops test
+    - name: Run model inference benchmark
       run: python3 test/external/external_model_benchmark.py
     - uses: actions/upload-artifact@v3
       with:
@@ -27,7 +27,7 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Run metal ops test
+    - name: Run model inference benchmark
       run: python3 test/external/external_model_benchmark.py
     - uses: actions/upload-artifact@v3
       with:
