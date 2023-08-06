@@ -61,8 +61,24 @@ class ConvTranspose2d:
     bound = 1 / math.sqrt(prod(self.weight.shape[1:]))
     self.bias = Tensor.uniform(out_channels, low=-bound, high=bound) if bias else None
 
-  def __call__(self, x):
-    return x.conv_transpose2d(self.weight, self.bias, padding=self.padding, output_padding=self.output_padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
+  def _output_padding(self, x, output_size, stride, padding, kernel_size, num_spatial_dims, dilation):
+    padding = (padding,)*num_spatial_dims if isinstance(padding, int) else tuple(padding)
+    stride = (stride,)*num_spatial_dims if isinstance(stride, int) else tuple(stride)
+    dilation = (dilation,)*num_spatial_dims if isinstance(dilation, int) else tuple(dilation)
+    has_batch_dim = len(x.shape) == num_spatial_dims + 2
+    num_non_spatial_dims = 2 if has_batch_dim else 1
+    if len(output_size) == num_non_spatial_dims + num_spatial_dims:
+      output_size = output_size[num_non_spatial_dims:]
+    assert len(output_size) == num_spatial_dims, f"ConvTranspose{num_spatial_dims}D: for {x.dim()}D input, output_size must have {num_spatial_dims} or {num_non_spatial_dims + num_spatial_dims} elements (got {len(output_size)})"
+    min_sizes = [((x.shape[d + num_non_spatial_dims] - 1) * stride[d] - 2 * padding[d] + (dilation[d] if dilation is not None else 1) * (kernel_size[d] - 1) + 1) for d in range(num_spatial_dims)]
+    return [output_size[d] - min_sizes[d] for d in range(num_spatial_dims)]
+  
+  def __call__(self, x, output_size=None, num_spatial_dims=2):
+    # TODO: num_spatial_dims is a hack that allows ConvTranspose2d to be used as ConvTransposeNd
+    output_padding = self.output_padding
+    if output_size is not None:
+      output_padding = self._output_padding(x, output_size, self.stride, self.padding, self.kernel_size, num_spatial_dims, self.dilation)
+    return x.conv_transpose2d(self.weight, self.bias, padding=self.padding, output_padding=output_padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
