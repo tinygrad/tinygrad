@@ -196,7 +196,7 @@ def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), o
   for i in range(0, strides[0] * size[0], strides[0]):
     for j in range(0, strides[1] * size[1], strides[1]):
       for k in range(0, strides[2] * size[2], strides[2]):
-        out = mdl_run(Tensor(inputs[..., i:roi_shape[0]+i,j:roi_shape[1]+j, k:roi_shape[2]+k]))
+        out = mdl_run(Tensor(inputs[..., i:roi_shape[0]+i,j:roi_shape[1]+j, k:roi_shape[2]+k])).numpy()
         result[..., i:roi_shape[0]+i, j:roi_shape[1]+j, k:roi_shape[2]+k] += out * norm_patch
         norm_map[..., i:roi_shape[0]+i, j:roi_shape[1]+j, k:roi_shape[2]+k] += norm_patch
   result /= norm_map

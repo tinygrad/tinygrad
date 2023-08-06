@@ -1,4 +1,3 @@
-
 from tqdm import tqdm
 from tinygrad.helpers import getenv
 from tinygrad.nn import optim
@@ -20,13 +19,13 @@ def train_unet3d(target=0.908, roi_shape=(128,128,128)):
   from extra.training import lr_warmup
   from models.unet3d import UNet3D
   Tensor.training = True
-  in_channels, n_class, BS = 1, 3, 8
+  in_channels, n_class, BS = 1, 3, 2
   mdl = UNet3D(in_channels, n_class)
-  lr_warmup_epochs = 0
-  init_lr = 1e-4
-  lr = 1.0
+  lr_warmup_epochs = 200
+  init_lr, lr = 1e-4, 0.8
+  max_epochs = 4000
   opt = optim.SGD(get_parameters(mdl), lr=init_lr)
-  for epoch in range(4000):
+  for epoch in range(max_epochs):
     if epoch <= lr_warmup_epochs and lr_warmup_epochs > 0:
       lr_warmup(opt, init_lr, lr, epoch, lr_warmup_epochs)
     for image, label in (t := tqdm(iterate(BS=BS, val=False, roi_shape=roi_shape), total=len(get_train_files())//BS)):
