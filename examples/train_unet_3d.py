@@ -97,6 +97,7 @@ def fetch_kits19(num_cases=210, train_test_split=0.8):
     else:
       X_test.append(imaging)
       Y_test.append(segmentation)
+  exit()
   return X_train, Y_train, X_test, Y_test
 
 def get_case(cid):
@@ -105,7 +106,7 @@ def get_case(cid):
   imaging_url = f"https://kits19.sfo2.digitaloceanspaces.com/master_{cid}.nii.gz"
   imaging_fp = os.path.join(BASE, f"case_{cid}", "imaging.nii.gz")
   download_file(imaging_url, imaging_fp)
-  segmentation_url = f"https://raw.githubusercontent.com/neheller/kits19/blob/master/data/case_{cid}/segmentation.nii.gz"
+  segmentation_url = f"https://github.com/neheller/kits19/raw/master/data/case_{cid}/segmentation.nii.gz" # f"https://raw.githubusercontent.com/neheller/kits19/blob/master/data/case_{cid}/segmentation.nii.gz"
   segmentation_pf = os.path.join(BASE, f"case_{cid}", "segmentation.nii.gz")
   download_file(segmentation_url, segmentation_pf)
   # https://nipy.org/nibabel/images_and_memory.html#use-the-array-proxy-instead-of-get-fdata
