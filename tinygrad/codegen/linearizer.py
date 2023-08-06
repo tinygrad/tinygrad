@@ -139,6 +139,7 @@ class LinearizerOptions(NamedTuple):
   supports_float4: bool = True
   supports_float4_alu: bool = True
   has_local: bool = True
+  # NOTE: these two should in z,y,x(reversed) order for cstyle backends, since they are reversed in codegen
   global_max: Optional[List[int]] = None
   local_max: Optional[List[int]] = None
 
