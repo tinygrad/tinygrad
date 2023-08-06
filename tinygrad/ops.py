@@ -86,7 +86,7 @@ class Interpreted:
     self.to_underlying = to_underlying
     self.synchronize = lambda: None
     self.codegen = None
-        
+
   def exec_ast(self, ast:LazyOp, output=None, context=None, **kwargs):
     if TernaryOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
