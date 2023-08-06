@@ -97,7 +97,6 @@ def fetch_kits19(num_cases=210, train_test_split=0.8):
     else:
       X_test.append(imaging)
       Y_test.append(segmentation)
-  exit()
   return X_train, Y_train, X_test, Y_test
 
 def get_case(cid):
