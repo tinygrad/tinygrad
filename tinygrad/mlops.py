@@ -10,12 +10,12 @@ class Contiguous(Function):
   def backward(self, grad_output): return grad_output
 
 class Cast(Function):
-  __slots__ = "input_dtype"
-  def forward(self, x, dtype):
-    self.input_dtype = x.dtype
-    return x.cast(dtype)
+  __slots__ = "input_dtype", "bitcast"
+  def forward(self, x, dtype, bitcast=False):
+    self.input_dtype, self.bitcast = x.dtype, bitcast
+    return x.cast((dtype, bitcast))
   def backward(self, grad_output):
-    return grad_output.cast(self.input_dtype)
+    return grad_output.cast((self.input_dtype, self.bitcast))
 
 # ************* unary ops *************
 
@@ -26,6 +26,7 @@ class Sin(Function):
     return x.unary_op(UnaryOps.SIN)
   def backward(self, grad: LazyBuffer) -> LazyBuffer:
     return self.x.const_like(pi / 2).binary_op(BinaryOps.SUB, self.x).unary_op(UnaryOps.SIN).binary_op(BinaryOps.MUL, grad)
+
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
   __slots__ = "ret"

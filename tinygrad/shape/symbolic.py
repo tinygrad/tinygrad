@@ -85,7 +85,7 @@ class Node:
   def num(num:int) -> NumNode: return NumNode(num)
 
   @staticmethod
-  def factorize(nodes:List[Node]):
+  def factorize(nodes:List[Node]) -> List[Node]:
     mul_groups: Dict[Node, int] = {}
     for x in nodes:
       a,b = (x.a,x.b) if isinstance(x, MulNode) else (x,1)
@@ -100,15 +100,9 @@ class Node:
 
     new_nodes: List[Node] = []
     num_node_sum = 0
-
-    # flatten all sumnodes and gather numnodes
-    for node in nodes:
-      if node.__class__ not in (NumNode, SumNode): new_nodes.append(node)
-      elif node.__class__ is NumNode: num_node_sum += node.b
-      elif isinstance(node, SumNode):  # mypy wants the isinstance
-        for sub_node in node.flat_components:
-          if sub_node.__class__ is NumNode: num_node_sum += sub_node.b
-          else: new_nodes.append(sub_node)
+    for node in SumNode(nodes).flat_components:
+      if node.__class__ is NumNode: num_node_sum += node.b
+      else: new_nodes.append(node)
 
     if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes):
       new_nodes = Node.factorize(new_nodes)
