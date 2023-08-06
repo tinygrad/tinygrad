@@ -4,17 +4,21 @@ import time
 import onnx
 import torch
 import numpy as np
+import onnxruntime as ort
+ort.set_default_logger_severity(3) # 0:Verbose, 1:Info, 2:Warning, 3:Error, 4:Fatal
+torch.set_num_threads(1)
 from onnx2torch import convert
 from extra.utils import download_file
 from extra.onnx import get_run_onnx
+from tinygrad.helpers import OSX
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import Device
 
 MODELS = {
-  "resnet50": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
-  "openpilot": "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx",
-  "efficientnet": "https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
-  "shufflenet": "https://github.com/onnx/models/raw/main/vision/classification/shufflenet/model/shufflenet-9.onnx",
+  # "resnet50": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
+  # "openpilot": "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx",
+  # "efficientnet": "https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
+  # "shufflenet": "https://github.com/onnx/models/raw/main/vision/classification/shufflenet/model/shufflenet-9.onnx",
 
   # broken in torch MPS
   "zfnet": "https://github.com/onnx/models/raw/main/vision/classification/zfnet-512/model/zfnet512-9.onnx",
@@ -28,6 +32,8 @@ MODELS = {
 
 CSV = {}
 open_csv = None
+opts = ort.SessionOptions()
+opts.inter_op_num_threads = 1
 
 def benchmark(mnm, nm, fxn):
   tms = []
@@ -42,7 +48,6 @@ def benchmark(mnm, nm, fxn):
 #BASE = pathlib.Path(__file__).parent.parent.parent / "weights" / "onnx"
 BASE = pathlib.Path("/tmp/onnx")
 def benchmark_model(m):
-  print(m)
   global open_csv, CSV
   CSV = {"model": m}
 
@@ -56,31 +61,46 @@ def benchmark_model(m):
   assert len(input_shapes) < 20
 
   model_ret = {}
-  for device in ["METAL", "CLANG"]:
+  for device in ["METAL" if OSX else "GPU", "CLANG"]:
     Device.DEFAULT = device
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
     try:
       tinygrad_model = get_run_onnx(onnx_model)
-      _, ret = benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
-      model_ret[f"tinygrad_{device.lower()}_jitless"] = list(ret.values())[0]
     except Exception as e:
-      CSV[f"tinygrad_{device.lower()}_jitless"] = "error"
+      # print(e)
+      CSV[f"tinygrad_{device.lower()}_jitless"] = f"tinygrad_jitless failed to convert model"
+      tinygrad_model = None
+
+    if tinygrad_model is not None:
+      try:
+        _, ret = benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
+        model_ret[f"tinygrad_{device.lower()}_jitless"] = list(ret.values())[0]
+      except Exception as e:
+        # print(e)
+        CSV[f"tinygrad_{device.lower()}_jitless"] = "error"
 
     from tinygrad.jit import TinyJit
-    tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model(kwargs).items()})
     try:
-      for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
-      _, ret = benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()})
-      model_ret[f"tinygrad_{device.lower()}_jit"] = list(ret.values())[0]
+      tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model(kwargs).items()})
     except Exception as e:
-      print(e)
-      CSV[f"tinygrad_{device.lower()}_jit"] = "error"
+      # print(e)
+      CSV[f"tinygrad_{device.lower()}_jitless"] = f"tinygrad_jitted failed to convert model"
+      tinygrad_jitted_model = None
+
+    if tinygrad_jitted_model is not None:
+      try:
+        for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
+        _, ret = benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()})
+        model_ret[f"tinygrad_{device.lower()}_jit"] = list(ret.values())[0]
+      except Exception as e:
+        # print(e)
+        CSV[f"tinygrad_{device.lower()}_jit"] = "error"
     del inputs, tinygrad_model, tinygrad_jitted_model
 
   try:
     torch_model = convert(onnx_model)
   except Exception as e:
-    print(e)
+    # print(e)
     CSV["torch_cpu"] = "torch failed to convert model"
     CSV["torch_mps"] = "torch failed to convert model"
     torch_model = None
@@ -91,19 +111,19 @@ def benchmark_model(m):
       _, ret = benchmark(m, "torch_cpu", lambda: torch_model(*torch_inputs))
       model_ret["torch_cpu"] = ret.detach().cpu().numpy()
     except Exception as e:
-      print(e)
+      # print(e)
       CSV["torch_cpu"] = "error"
 
     try:
-      torch_mps_model = torch_model.to('mps')
-      torch_mps_inputs = [x.to('mps') for x in torch_inputs]
-      _, ret = benchmark(m, "torch_mps", lambda: torch_mps_model(*torch_mps_inputs))
+      torch_device = "mps" if OSX else "cuda"
+      torch_mps_model = torch_model.to(torch_device)
+      torch_mps_inputs = [x.to(torch_device) for x in torch_inputs]
+      _, ret = benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs))
       model_ret["torch_mps"] = ret.detach().cpu().numpy()
     except Exception as e:
-      print(e)
+      # print(e)
       CSV["torch_mps"] = "error"
 
-  import onnxruntime as ort
   try:
     ort_session = ort.InferenceSession(fn)
   except:
@@ -115,7 +135,7 @@ def benchmark_model(m):
       _, ret = benchmark(m, "onnxruntime", lambda: ort_session.run(None, np_inputs))
       model_ret["onnxruntime"] = ret[0]
     except Exception as e:
-      print(e)
+      # print(e)
       CSV["onnxruntime"] = "error"
 
   if (correct_ret := model_ret.pop("onnxruntime", None)) is not None:
