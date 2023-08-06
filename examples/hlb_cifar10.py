@@ -24,18 +24,14 @@ bias_scaler = 56
 
 hyp = {
     'opt': {
-        #'bias_lr':        1.64 * bias_scaler/512, # TODO: Is there maybe a better way to express the bias and batchnorm scaling? :'))))
-        #'non_bias_lr':    1.64 / 512,
-        #'bias_decay':     1.08 * 6.45e-4 * batchsize/bias_scaler,
-        #'non_bias_decay': 1.08 * 6.45e-4 * batchsize,
-        'bias_lr':        0.0138319916999336 * bias_scaler,
-        'non_bias_lr':    0.0138319916999336,
-        'bias_decay':     0.07324837942480592 / bias_scaler,
-        'non_bias_decay': 0.07324837942480592,
-        'momentum':       0.8632474768028381,
+        'bias_lr':        1.64 * bias_scaler/512, # TODO: Is there maybe a better way to express the bias and batchnorm scaling? :'))))
+        'non_bias_lr':    1.64 / 512,
+        'bias_decay':     1.08 * 6.45e-4 * batchsize/bias_scaler,
+        'non_bias_decay': 1.08 * 6.45e-4 * batchsize,
+        'momentum':       0.85,
         'percent_start':  0.25,
         'scaling_factor': 1./9,
-        'loss_scale_scaler': 1./128, # * Regularizer inside the loss summing (range: ~1/512 - 16+). FP8 should help with this somewhat too, whenever it comes out. :)
+        'loss_scale_scaler': 1./512, # * Regularizer inside the loss summing (range: ~1/512 - 16+). 
     },
     'net': {
         'whitening': {
@@ -56,8 +52,7 @@ def set_seed(seed):
   np.random.seed(getenv('SEED', seed))
   random.seed(getenv('SEED', seed))
 
-num_classes = 10
-
+# ========== Model ==========
 # TODO remove dependency on torch, mainly unfold and eigh
 def whitening(X):
   import torch
@@ -73,7 +68,7 @@ def whitening(X):
   def _eigens(patches):
     n,c,h,w = patches.shape
     Σ = _cov(patches.reshape(n, c*h*w))
-    Λ, V = torch.linalg.eigh(Σ, UPLO='L')
+    Λ, V = torch.linalg.eigh(Σ, UPLO='U')
     return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
 
   X = torch.tensor(X.numpy())
@@ -86,7 +81,6 @@ class ConvGroup:
   def __init__(self, channels_in, channels_out, short, se=True):
     self.short, self.se = short, se and not short
     self.conv = [nn.Conv2d(channels_in if i == 0 else channels_out, channels_out, kernel_size=3, padding=1, bias=False) for i in range(1 if short else 3)]
-    # eps needs to be 1e-5 to support fp16 but currently it will drop val acc on fp32
     self.norm = [nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.5) for _ in range(1 if short else 3)]
     if self.se: self.se1, self.se2 = nn.Linear(channels_out, channels_out//16), nn.Linear(channels_out//16, channels_out)
 
@@ -104,29 +98,29 @@ class SpeedyResNet:
   def __init__(self, W):
     self.whitening = W
     self.net = [
-      nn.Conv2d(12, 64, kernel_size=1),
-      # eps needs to be 1e-5 to support fp16 but currently it will drop val acc on fp32
-      nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.5),
+      nn.Conv2d(12, 32, kernel_size=1),
       lambda x: x.relu(),
-      ConvGroup(64, 128, short=False),
-      ConvGroup(128, 256, short=True),
+      ConvGroup(32, 64, short=False),
+      ConvGroup(64, 256, short=True),
       ConvGroup(256, 512, short=False),
       lambda x: x.max((2,3)),
-      nn.Linear(512, num_classes, bias=False)
+      nn.Linear(512, 10, bias=False),
+      lambda x: x.mul(hyp['opt']['scaling_factor'])
     ]
-  # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to do the rest conv layers
     forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
-    if not training and getenv('TTA', 0)==1: return forward(x)*0.5 + forward(x[..., ::-1])*0.5
+    if not training: return forward(x)*0.5 + forward(x[..., ::-1])*0.5
     return forward(x)
 
+# ========== Loss ==========
 def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
   y = (1 - label_smoothing)*y + label_smoothing / y.shape[1]
   if reduction=='none': return -x.log_softmax(axis=1).mul(y).sum(axis=1)
   if reduction=='sum': return -x.log_softmax(axis=1).mul(y).sum(axis=1).sum()
   return -x.log_softmax(axis=1).mul(y).sum(axis=1).mean()
 
+# ========== Preprocessing ==========
 # TODO currently this only works for RGB in format of NxCxHxW and pads the HxW
 # implemented in recursive fashion but figuring out how to switch indexing dim
 # during the loop was a bit tricky
@@ -146,7 +140,6 @@ def pad_reflect(X, padding) -> Tensor:
 
 # return a mask in the format of BS x C x H x W where H x W are in bool
 def make_square_mask(X, mask_size):
-  # create a mask
   is_even = int(mask_size % 2 == 0)
   center_max = X.shape[-2]-mask_size//2-is_even
   center_min = mask_size//2-is_even
@@ -169,6 +162,24 @@ def random_crop(X, crop_size=32):
 
   return X_cropped.reshape((-1, 3, crop_size, crop_size))
 
+transform = [
+  lambda x: x.to(device=Device.DEFAULT).float(),
+  lambda x: x / 255.0, # scale
+  lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1), # normalize
+  lambda x: x.reshape((-1,3,32,32)),
+  lambda x: pad_reflect(x, ((0,0),(0,0),(2,2),(2,2))),
+  lambda x: random_crop(x),
+  lambda x: Tensor.where(Tensor.rand(x.shape[0],1,1,1) < 0.5, x[..., ::-1], x), # flip LR
+]
+
+transform_test = [
+  lambda x: x.to(device=Device.DEFAULT).float(),
+  lambda x: x / 255.0,
+  lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1),
+  lambda x: x.reshape((-1,3,32,32)),
+]
+
+# origianl repo uses cutmix after epoch 6
 def cutmix(X, Y, mask_size=5, p=0.5, mix=True):
   if Tensor.rand(1) > 0.5: return X, Y
 
@@ -184,24 +195,6 @@ def cutmix(X, Y, mask_size=5, p=0.5, mix=True):
   Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
   return X_cutmix, Y_cutmix
 
-transform = [
-  lambda x: x.to(device=Device.DEFAULT).float(),
-  lambda x: x / 255.0, # scale
-  lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1), # normalize
-  lambda x: x.reshape((-1,3,32,32)),
-  lambda x: pad_reflect(x, ((0,0),(0,0),(2,2),(2,2))),
-  lambda x: random_crop(x),
-  lambda x: Tensor.where(Tensor.rand(x.shape[0],1,1,1) < 0.5, x[..., ::-1], x), # flip LR
-  # ideally cutmix can also be placed here but it also takes y
-]
-
-transform_test = [
-  lambda x: x.to(device=Device.DEFAULT).float(),
-  lambda x: x / 255.0,
-  lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1),
-  lambda x: x.reshape((-1,3,32,32)),
-]
-
 def fetch_batches(X, Y, BS, seed, is_train=False):
   while True:
     set_seed(seed)
@@ -214,11 +207,7 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
       x = X[batch_end-BS:batch_end,:]
       # Need fancy indexing support to remove numpy
       y = Tensor(np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()])
-      if not is_train:
-        x = x.sequential(transform_test)
-      else:
-        # ideally put cutmix inside transform
-        x, y = cutmix(x.sequential(transform), y)
+      x = x.sequential(transform) if is_train else x.sequential(transform_test)
       yield x, y
 
     if not is_train: break
@@ -264,10 +253,12 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']     ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'] ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
 
+  loss_batchsize_scaler = 512/BS
   @TinyJit
   def train_step_jitted(model, optimizer, lr_scheduler, X, Y):
     out = model(X)
-    loss = cross_entropy(out, Y, label_smoothing=0.2)
+    loss = cross_entropy(out, Y, reduction='none' ,label_smoothing=0.2).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
+
     if not getenv("DISABLE_BACKWARD"):
       # index 0 for bias and 1 for non-bias
       optimizer[0].zero_grad()
@@ -299,6 +290,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
   batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
   while i <= STEPS:
     X, Y = next(batcher)
+    if i >= 600: X, Y = cutmix(X, Y)
     if i%100 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
