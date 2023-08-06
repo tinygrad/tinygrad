@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import List, Optional
 import base64
 import multiprocessing
-import subprocess as sp
 import numpy as np
 from extra.utils import download_file
 from tinygrad.state import torch_load, load_state_dict
@@ -204,7 +203,8 @@ class Whisper:
       explicit_n_vocab=n_vocab,
       pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
       mergeable_ranks=ranks,
-      special_tokens=special_tokens)
+      special_tokens=special_tokens
+      )
 
   def load_state_dict(self, state_dict):
     load_state_dict(self, state_dict)
@@ -217,14 +217,16 @@ class Whisper:
     audio_features = self.encoder(Tensor(segment)).realize()
     tokens = Tensor([initial_tokens], dtype=dtypes.int64).repeat((segment.shape[0], 1))
     sum_logprobs = Tensor.zeros(audio_features.shape[0])
-    _ = [np.nan] * tokens.shape[0]
+    no_speech_probs = [np.nan] * tokens.shape[0]
+    threshold = 0.005
     for _ in range(sample_len):
       logits = self.decoder(tokens, audio_features)
       probs_at_sot = logits[:, initial_tokens.index(self.encoding._special_tokens["<|startoftranscript|>"])].softmax(axis=-1)
-      _ = probs_at_sot[:, self.encoding._special_tokens["<|nospeech|>"]].numpy().tolist()
+      no_speech_probs = probs_at_sot[:, self.encoding._special_tokens["<|nospeech|>"]].numpy().tolist()
       logits = logits[:, -1]
       tokens, completed = decoder.update(tokens, logits, sum_logprobs)
       if completed: break
+    if any(i>threshold for i in no_speech_probs): pass # TODO detect no speech
     tokens = tokens.reshape(n_audio, n_group, -1)
     sum_logprobs = sum_logprobs.reshape(n_audio, n_group)
     tokens, sum_logprobs = decoder.finalize(tokens, sum_logprobs)
@@ -244,7 +246,7 @@ _CHUNK_LENGTH = 30
 N_SAMPLES = _CHUNK_LENGTH * _RATE
 N_FRAMES = N_SAMPLES // _HOP_LENGTH
 
-def pad_or_trim(array, length=N_SAMPLES, axis=-1):
+def _pad_or_trim(array, length=N_SAMPLES, axis=-1):
   if array.shape[axis] > length:
     array = array.take(indices=range(length), axis=axis)
   if array.shape[axis] < length:
@@ -253,24 +255,14 @@ def pad_or_trim(array, length=N_SAMPLES, axis=-1):
     array = np.pad(array, pad_widths)
   return array
 
-def load_wav(file):
-  cmd = ["ffmpeg", "-nostdin", "-threads", "0", "-i", file, "-f", "s16le", "-ac", "1", "-acodec", "pcm_s16le", "-ar", str(_RATE), "-"]
-  try: out = sp.run(cmd, capture_output=True, check=True).stdout
-  except sp.CalledProcessError as e: raise RuntimeError(f"Failed to load audio {e.stderr.decode()}") from e
-  return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
-
-def prep_audio(waveform=None, sr=_RATE, padding=0) -> Tensor:
-  N_FFT = 400
-  HOP_LENGTH = 160
-  N_MELS = 80
+def _prep_audio(waveform=None, sr=_RATE, padding=0) -> Tensor:
+  _N_FFT = 400
+  _N_MELS = 80
   if padding > 0: waveform = np.pad(waveform, (0, padding))
-  if waveform is None: waveform = np.zeros(N_FFT, dtype=np.float32)
-  stft = librosa.stft(waveform, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.float32)
-  magnitudes = stft[..., :-1] ** 2
-  mel_spec = librosa.filters.mel(sr=sr, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
-  log_spec = np.log10(np.clip(mel_spec, 1e-10, mel_spec.max() + 1e8))
+  S = np.abs(librosa.stft(waveform, n_fft=_N_FFT, hop_length=_HOP_LENGTH))**2
+  mel_spec = librosa.feature.melspectrogram(S=S, sr=sr, n_fft=_N_FFT, n_mels=_N_MELS)
+  log_spec = np.log10(np.clip(mel_spec, 1e-10, mel_spec.max()*10))
   log_spec = (log_spec + 4.0) / 4.0
-  #print(waveform.shape, log_spec.shape)
   return log_spec
 
 _LANGUAGES = {
@@ -302,7 +294,7 @@ _MODELS = {
 }
 
 def listener(q):
-  prep_audio()
+  _prep_audio()
   p = pyaudio.PyAudio()
   stream = p.open(format=pyaudio.paInt16, channels=1, rate=_RATE, input=True, frames_per_buffer=_CHUNK)
   print("listening")
@@ -331,21 +323,30 @@ def load_model(name: str = None):
   model.encoding = model.get_encoding()
   return model
 
+def transcribe(model, waveform, logprob_threshold=-1.0, no_speech_threshold=0.6):
+  mel = _prep_audio(waveform, padding=N_SAMPLES)
+  content_frames = mel.shape[-1] - N_FRAMES
+  print(content_frames)
+  initial_tokens = [model.encoding._special_tokens["<|startoftranscript|>"], model.encoding._special_tokens["<|en|>"],
+                    model.encoding._special_tokens["<|transcribe|>"]]
+  seek, texts = 0, []
+  while seek < content_frames:
+    mel_segment = mel[:, seek:seek+N_FRAMES]
+    mel_segment = _pad_or_trim(mel_segment, N_FRAMES)
+    print(mel_segment.shape[-1])
+    segment_size = min(N_FRAMES, content_frames - seek)
+    texts += model.decode_segment(mel_segment, initial_tokens)
+    seek += segment_size
+  return "".join(texts)
+
 if __name__ == "__main__":
   model = load_model()
 
   if len(sys.argv) > 1:
     # offline
-    waveform, sample_rate = librosa.load(sys.argv[1], normalize=True)
-    log_spec = prep_audio(waveform, sr=sample_rate)
-    lst = [model.encoding._special_tokens["<|startoftranscript|>"]]
-    dat = model.encoder(Tensor(log_spec)).realize()
-    for i in range(50):
-      out = model.decoder(Tensor([lst]), dat)
-      out.realize()
-      idx = out[0,-1].numpy().argmax()
-      lst.append(idx)
-      print(model.encoding.decode(lst))
+    waveform, sample_rate = librosa.load(sys.argv[1], mono=True, sr=None)
+    assert sample_rate == _RATE
+    print(transcribe(model, waveform)) # .translate(str.maketrans("", "", string.punctuation)).lower())
   else:
     # online
     q = multiprocessing.Queue()
@@ -364,7 +365,7 @@ if __name__ == "__main__":
         did_read = True
       if did_read:
         last_total = total.shape[1]
-        log_spec = prep_audio(waveform=Tensor(total).numpy())
+        log_spec = _prep_audio(waveform=Tensor(total).numpy())
         encoded_audio = model.encoder(Tensor(log_spec)).realize()
       out = model.decoder(Tensor([lst]), encoded_audio).realize()
       idx = out[0,-1].numpy().argmax()
