@@ -13,11 +13,5 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.11
-    - name: Install Dependencies
-      run: pip install -e '.[metal,testing]'
     - name: Run metal ops test
       run: python3 test/external/external_model_benchmark.py
