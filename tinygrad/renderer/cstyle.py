@@ -1,8 +1,8 @@
-from typing import Final, Dict, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Union
-import math, collections
-from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, MemOp, ConstOp
-from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import ImageDType, dtypes, colored, getenv, prod, DType
+from typing import Dict, List, Optional, NamedTuple, Tuple, Union
+import math
+from tinygrad.codegen.linearizer import UOps, UOp, MemOp, ConstOp
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.helpers import ImageDType, dtypes, getenv, prod, DType
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
 
 # div is different in cl than python
@@ -20,11 +20,14 @@ class CStyleLanguage(NamedTuple):
   barrier: str = ""
   gid: List[str] = []
   lid: List[str] = []
+  global_max: List[int] = []
+  local_max: List[int] = []
   extra_args: List[str] = []
   float4: Optional[str] = None
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
   external_local_bufs: bool = False
+  uses_ptr_arithmetic: bool = False
   code_for_op: Dict = {
     UnaryOps.EXP2: lambda x: f"exp2({x})",
     UnaryOps.LOG2: lambda x: f"log2({x})",
@@ -61,7 +64,7 @@ class CStyleLanguage(NamedTuple):
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx.render(render_cl, strip_parens=True)})"
     if output_dtype.sz > 1:
       return f"({output_dtype.name})(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})))"
-    return f"{buf_name}[{idx.render(render_cl)}]"
+    return f"*({buf_name}+{idx.render(render_cl, strip_parens=True)})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx.render(render_cl)}]"
 
   def render_local(self, name:str, size:int):
     return self.smem_prefix + f"float {name}[{size}];"
@@ -72,11 +75,11 @@ class CStyleLanguage(NamedTuple):
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
 
-  def render_kernel(self, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str,List[int],List[int]]:
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str,List[int],List[int]]:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix) for i,(name,dtype) in enumerate(bufs)]
-    prg = ''.join([f"{self.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
+    prg = ''.join([f"{self.kernel_prefix} void {function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
@@ -92,7 +95,7 @@ class CStyleLanguage(NamedTuple):
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx.render(render_cl, strip_parens=True)});"
     if var_dtype.sz > 1:
       return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
-    return f"{buf_name}[{idx.render(render_cl)}] = {var_name};"
+    return f"*({buf_name}+{idx.render(render_cl, strip_parens=True)}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx.render(render_cl)}] = {var_name};"
 
 def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:List[str]):
   # for M1 tensor core stuff, support > 3 dims
@@ -103,12 +106,14 @@ def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:Li
     lidx = Variable(xid[0], 0, prod(x.max+1 for x in args[0][2:])-1)
     lidx = (lidx//((lidx.max+1)//local_size[-1]))%(var.max+1)
     assert lidx.max == var.max and lidx.min == var.min
-    return f"{{ {prefix} {var.expr} = {lidx.render(render_cl)};  /* {var.max+1} */"
+    return "{" if isinstance(var, NumNode) else f"{{ {prefix} {var.expr} = {lidx.render(render_cl)};  /* {var.max+1} */"
   local_size.append(var.max+1)
-  return f"{{ {prefix} {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
+  return "{" if isinstance(var, NumNode) else f"{{ {prefix} {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
-def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
-  kernel,global_size,local_size,prekernel = [],[],[],[]
+def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> Tuple[str, List[int], List[int]]:
+  global_size: List[int] = []
+  local_size: List[int] = []
+  kernel,prekernel = [],[]
   pend_close = None
   bufs = []
   depth = 0
@@ -117,19 +122,13 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
   for uop,newvar,vin,args in uops:
     if uop == UOps.LOOP:
       for i,var in enumerate(args[0]):
-        if isinstance(var, NumNode):
-          if args[1] == "global" and lang.gid: global_size.append(1)
-          if args[1] == "local" and lang.lid: local_size.append(1)
-          # one number, not an index
-          kk("{")
+        if args[1] == "global" and lang.gid:
+          kk(add_gl_dimension(lang.size_prefix, args, i, var, global_size, lang.gid))
+        elif args[1] == "local" and lang.lid:
+          kk(add_gl_dimension(lang.size_prefix, args, i, var, local_size, lang.lid))
         else:
-          if args[1] == "global" and lang.gid:
-            kk(add_gl_dimension(lang.size_prefix, args, i, var, global_size, lang.gid))
-          elif args[1] == "local" and lang.lid:
-            kk(add_gl_dimension(lang.size_prefix, args, i, var, local_size, lang.lid))
-          else:
-            if getenv("NOUNROLL"): kk("#pragma unroll(1)")   # prevent loop unrolling
-            kk(lang.render_for(var.expr, var.min, var.max))
+          if getenv("NOUNROLL") and not isinstance(var, NumNode): kk("#pragma unroll(1)")   # prevent loop unrolling
+          kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, var.min, var.max))
       depth += 1
     elif uop == UOps.BARRIER:
       kk(lang.barrier)
@@ -183,33 +182,4 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
     else:
       raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(kernel, bufs, global_size, local_size, prekernel)
-
-class CStyleCodegen(Linearizer):
-  lang: ClassVar[CStyleLanguage] = CStyleLanguage()
-  supports_constant_folding: bool = True
-  supports_float4: bool = True
-  supports_float4_alu: bool = True
-
-  # for renaming
-  kernel_cnt: Final[DefaultDict[str, int]] = collections.defaultdict(int)
-  kernel_name_cache: Final[Dict[str, Tuple[str, str]]] = {}
-
-  def codegen(self):
-    self.process()
-    self.hand_coded_optimizations()
-    self.limit_global_dims(len(self.lang.gid))  # NOTE: this is optional now
-    self.linearize()
-
-    prg, global_size, local_size = uops_to_cstyle(self.uops, self.lang)
-
-    # painfully name the function something unique
-    if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]
-    else:
-      CStyleCodegen.kernel_cnt[self.function_name] += 1
-      suffix = f"{'n'+str(CStyleCodegen.kernel_cnt[self.function_name]-1)}" if CStyleCodegen.kernel_cnt[self.function_name] > 1 else ""
-      CStyleCodegen.kernel_name_cache[prg] = function_name, display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
-
-    return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
-      global_size, local_size,
-      op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=display_name)
+  return lang.render_kernel(function_name, kernel, bufs, global_size, local_size, prekernel)
