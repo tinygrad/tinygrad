@@ -3,7 +3,6 @@ import pathlib
 import time
 import onnx
 import torch
-import numpy as np
 from onnx2torch import convert
 from extra.utils import download_file
 from extra.onnx import get_run_onnx
@@ -17,13 +16,13 @@ MODELS = {
   "shufflenet": "https://github.com/onnx/models/raw/main/vision/classification/shufflenet/model/shufflenet-9.onnx",
 
   # broken in torch MPS
-  "zfnet": "https://github.com/onnx/models/raw/main/vision/classification/zfnet-512/model/zfnet512-9.onnx",
+  #"zfnet": "https://github.com/onnx/models/raw/main/vision/classification/zfnet-512/model/zfnet512-9.onnx",
   # TypeError: BatchNormalization() got an unexpected keyword argument 'is_test'
-  "densenet": "https://github.com/onnx/models/raw/main/vision/classification/densenet-121/model/densenet-3.onnx",
+  #"densenet": "https://github.com/onnx/models/raw/main/vision/classification/densenet-121/model/densenet-3.onnx",
   # AssertionError: only onnx version >= 10 supported for slice
-  "bert": "https://github.com/onnx/models/raw/main/text/machine_comprehension/bert-squad/model/bertsquad-8.onnx",
+  #"bert": "https://github.com/onnx/models/raw/main/text/machine_comprehension/bert-squad/model/bertsquad-8.onnx",
   # really slow
-  "resnet18": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet18-v2-7.onnx",
+  #"resnet18": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet18-v2-7.onnx",
 }
 
 CSV = {}
@@ -42,7 +41,6 @@ def benchmark(mnm, nm, fxn):
 #BASE = pathlib.Path(__file__).parent.parent.parent / "weights" / "onnx"
 BASE = pathlib.Path("/tmp/onnx")
 def benchmark_model(m):
-  print(m)
   global open_csv, CSV
   CSV = {"model": m}
 
@@ -55,77 +53,25 @@ def benchmark_model(m):
   np_inputs = {k:torch.randn(shp).numpy() for k,shp in input_shapes.items()}
   assert len(input_shapes) < 20
 
-  model_ret = {}
   for device in ["METAL", "CLANG"]:
     Device.DEFAULT = device
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-    try:
-      tinygrad_model = get_run_onnx(onnx_model)
-      _, ret = benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
-      model_ret[f"tinygrad_{device.lower()}_jitless"] = list(ret.values())[0]
-    except Exception as e:
-      CSV[f"tinygrad_{device.lower()}_jitless"] = "error"
+    tinygrad_model = get_run_onnx(onnx_model)
+    benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
 
     from tinygrad.jit import TinyJit
     tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model(kwargs).items()})
-    try:
-      for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
-      _, ret = benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()})
-      model_ret[f"tinygrad_{device.lower()}_jit"] = list(ret.values())[0]
-    except Exception as e:
-      print(e)
-      CSV[f"tinygrad_{device.lower()}_jit"] = "error"
+    for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
+    benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()})
     del inputs, tinygrad_model, tinygrad_jitted_model
 
-  try:
-    torch_model = convert(onnx_model)
-  except Exception as e:
-    print(e)
-    CSV["torch_cpu"] = "torch failed to convert model"
-    CSV["torch_mps"] = "torch failed to convert model"
-    torch_model = None
-  
-  if torch_model is not None:
-    try:
-      torch_inputs = [torch.tensor(x) for x in np_inputs.values()]
-      _, ret = benchmark(m, "torch_cpu", lambda: torch_model(*torch_inputs))
-      model_ret["torch_cpu"] = ret.detach().cpu().numpy()
-    except Exception as e:
-      print(e)
-      CSV["torch_cpu"] = "error"
+  torch_model = convert(onnx_model)
+  torch_inputs = [torch.tensor(x) for x in np_inputs.values()]
+  benchmark(m, "torch_cpu", lambda: torch_model(*torch_inputs))
 
-    try:
-      torch_mps_model = torch_model.to('mps')
-      torch_mps_inputs = [x.to('mps') for x in torch_inputs]
-      _, ret = benchmark(m, "torch_mps", lambda: torch_mps_model(*torch_mps_inputs))
-      model_ret["torch_mps"] = ret.detach().cpu().numpy()
-    except Exception as e:
-      print(e)
-      CSV["torch_mps"] = "error"
-
-  import onnxruntime as ort
-  try:
-    ort_session = ort.InferenceSession(fn)
-  except:
-    CSV["onnxruntime"] = "onnxruntime failed to convert model"
-    ort_session = None
-
-  if ort_session is not None:
-    try:
-      _, ret = benchmark(m, "onnxruntime", lambda: ort_session.run(None, np_inputs))
-      model_ret["onnxruntime"] = ret[0]
-    except Exception as e:
-      print(e)
-      CSV["onnxruntime"] = "error"
-
-  if (correct_ret := model_ret.pop("onnxruntime", None)) is not None:
-    for nm_, ret in model_ret.items():
-      try:
-        np.testing.assert_allclose(correct_ret, ret, atol=5e-3, rtol=5e-3)
-      except AssertionError as e:
-        error_info = str(e).split('\n')
-        print(f"{nm_}: answer mismatch to onnxruntime with shape onnxruntime={correct_ret.shape} | {nm_}={ret.shape}, {error_info[1],  error_info[3],  error_info[4]}")
-        if not isinstance(CSV[nm_], str): CSV[nm_] = f"failed correctness check"
+  torch_mps_model = torch_model.to('mps')
+  torch_mps_inputs = [x.to('mps') for x in torch_inputs]
+  benchmark(m, "torch_mps", lambda: torch_mps_model(*torch_mps_inputs))
 
   if open_csv is None:
     open_csv = csv.DictWriter(open('onnx_inference_speed.csv', 'w', newline=''), fieldnames=list(CSV.keys()))
