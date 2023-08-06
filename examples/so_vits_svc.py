@@ -1,24 +1,18 @@
+import sys, os, logging, time, io, math, argparse, numpy as np
+from pathlib import Path
+from typing import Tuple, Optional
 from tinygrad import nn
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, getenv
 from tinygrad.state import torch_load
-from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present, get_hparams_from_file, load_checkpoint, weight_norm, HParams, convert_pad_shape
-import numpy as np
-import math
-import os
-import logging
-import sys
-from typing import Tuple
-from pathlib import Path
-from typing import Optional
-import time
-import io
+from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present, get_hparams_from_file, load_checkpoint, weight_norm, HParams
+from examples.sovits_helpers import slicer
+from examples.sovits_helpers.f0_predictor import PMF0Predictor
+
 import soundfile
 
 # TODO: this is tragic. remove this
-import torch
 import torchaudio
-
 
 # original code: https://github.com/svc-develop-team/so-vits-svc
 
@@ -333,12 +327,6 @@ def lengths_to_padding_mask(lens: Tensor) -> Tensor:
   mask = mask.expand(bsz, -1) >= lens.reshape(bsz, 1).expand(-1, max_lens)
   return mask.cast(dtypes.bool)
 
-class GradMultiply:
-  def forward(ctx, x, scale=1):
-    ctx.scale = scale
-    res = x.to(x.device)  # clone
-    return res
-
 class Sequential:  # allows recursive sequential
   def __init__(self, list): self.list=list
   def __call__(self, x: Tensor): return x.sequential(self.list)
@@ -579,6 +567,46 @@ class Generator:
       x = xs / self.num_kernels
     return self.conv_post(x.leakyrelu()).tanh()
 
+# sinc_interp_hann audio resampling 
+class Resample:
+  def __init__(self, orig_freq:int=16000, new_freq:int=1600, lowpass_filter_width:int=6, rolloff:float=0.99, beta:Optional[float]=None, dtype:Optional[dtypes]=None):
+    self.orig_freq, self.new_freq, self.lowpass_filter_width, self.rolloff, self.beta = orig_freq, new_freq, lowpass_filter_width, rolloff, beta
+    self.gcd = math.gcd(int(self.orig_freq), int(self.new_freq))
+    self.kernel, self.width = self._get_sinc_resample_kernel(dtype) if self.orig_freq != self.new_freq else (None, None)
+  def __call__(self, waveform:Tensor) -> Tensor:
+    if self.orig_freq == self.new_freq: return waveform
+    return self._apply_sinc_resample_kernel(waveform)
+  def _apply_sinc_resample_kernel(self, waveform:Tensor):
+    if not waveform.is_floating_point(): raise TypeError(f"Waveform tensor expected to be of type float, but received {waveform.dtype}.")
+    orig_freq, new_freq = (int(self.orig_freq) // self.gcd), (int(self.new_freq) // self.gcd)
+    shape = waveform.shape
+    waveform = waveform.reshape(-1, shape[-1])  # pack batch
+    num_wavs, length = waveform.shape
+    target_length = int(math.ceil(new_freq * length / orig_freq))
+    waveform = waveform.pad2d((self.width, self.width + orig_freq))
+    resampled = waveform[:, None].conv2d(self.kernel, stride=orig_freq)
+    resampled = resampled.transpose(1, 2).reshape(num_wavs, -1)
+    resampled = resampled[..., :target_length]
+    resampled = resampled.reshape(shape[:-1] + resampled.shape[-1:])  # unpack batch
+    return resampled
+  def _get_sinc_resample_kernel(self, dtype=None):
+    orig_freq, new_freq = (int(self.orig_freq) // self.gcd), (int(self.new_freq) // self.gcd)
+    if self.lowpass_filter_width <= 0: raise ValueError("Low pass filter width should be positive.")
+    base_freq = min(orig_freq, new_freq)
+    base_freq *= self.rolloff
+    width = math.ceil(self.lowpass_filter_width * orig_freq / base_freq)
+    idx = Tensor.arange(-width, width + orig_freq, dtype=(dtype if dtype is not None else dtypes.float32))[None, None] / orig_freq
+    t = Tensor.arange(0, -new_freq, -1, dtype=dtype)[:, None, None] / new_freq + idx
+    t *= base_freq
+    t = t.clip(-self.lowpass_filter_width, self.lowpass_filter_width)
+    window = (t * math.pi / self.lowpass_filter_width / 2).cos() ** 2
+    t *= math.pi
+    scale = base_freq / orig_freq
+    kernels = Tensor.where(t == 0, Tensor(1.0, dtype=t.dtype).to(t.device), t.sin() / t)
+    kernels *= window * scale 
+    if dtype is None: kernels = kernels.cast(dtype=dtypes.float32)
+    return kernels, width
+
 # TODO: this is ugly
 def f0_to_coarse(f0 : Tensor):
   f0_mel = 1127 * (1 + f0 / 700).log()
@@ -618,9 +646,8 @@ def get_unit_f0(wav, tran, cluster_infer_ratio, speaker, hop_length, target_samp
   f0 = f0 * 2 ** (tran / 12)
   f0 = f0.unsqueeze(0)
   uv = uv.unsqueeze(0)
-  resamp_16k = torchaudio.transforms.Resample(target_sample, 16000)
-  wav16k = resamp_16k(torch.from_numpy(wav[None,:]))[0].numpy()
-  wav16k = Tensor(wav16k)
+  resamp_16k = Resample(target_sample, 16000)
+  wav16k = resamp_16k(Tensor(wav[None,:]))[0]
   return wav16k, f0, uv
 
 def repeat_expand_2d(content, target_len, mode="left"): # content : [h, t]
@@ -629,7 +656,6 @@ def repeat_expand_2d(content, target_len, mode="left"): # content : [h, t]
 
 # TODO this is __very__ slow. Any way to make it faster?
 def repeat_expand_2d_left(content, target_len): # content : [h, t]
-  #print(content.shape)
   target = Tensor.zeros([content.shape[0], target_len], dtype=dtypes.float32).to(content.device)
   src_len = content.shape[-1]
   target = Tensor.zeros([content.shape[0], target_len], dtype=dtypes.float32).to(content.device)
@@ -637,23 +663,13 @@ def repeat_expand_2d_left(content, target_len): # content : [h, t]
   current_pos = 0
   dim = content.shape[0]
   pad_val = target_len - 1
-  #print(f"target_len={target_len}")
-  #print(temp)
   for i in range(target_len):
-    mask = tilde(Tensor.ones(dim, 1).pad2d((i,pad_val-i,0,0)).cast(dtypes.bool))
-    if i < temp[current_pos+1]:
-
-      # target[:, i] = content[:, current_pos]
-      fill = content[:, current_pos].reshape(dim,1).pad2d((i,pad_val-i,0,0))
-      target = Tensor.where(mask, target, fill)
-
-    else:
+    if i >= temp[current_pos+1]:
       current_pos += 1
-
-      # target[:, i] = content[:, current_pos]
-      fill = content[:, current_pos].reshape(dim,1).pad2d((i,pad_val-i,0,0))
-      target = Tensor.where(mask, target, fill)
-
+    # target[:, i] = content[:, current_pos]
+    mask = tilde(Tensor.ones(dim, 1).pad2d((i,pad_val-i,0,0)).cast(dtypes.bool))
+    fill = content[:, current_pos].reshape(dim,1).pad2d((i,pad_val-i,0,0))
+    target = Tensor.where(mask, target, fill)
   return target
 
 def load_contentvec(model) -> ContentVec:
@@ -726,6 +742,17 @@ def split_list_by_n(list_collection, n, pre=0):
   for i in range(0, len(list_collection), n):
     yield list_collection[i-pre if i-pre>=0 else i: i + n]
 
+def load_audiofile(filepath:str, frame_offset:int=0, num_frames:int=-1, channels_first:bool=True):
+  with soundfile.SoundFile(filepath, "r") as file_:
+    frames = file_._prepare_read(frame_offset, None, num_frames)
+    waveform = file_.read(frames, "float32", always_2d=True)
+    sample_rate = file_.samplerate
+
+  waveform = Tensor(waveform)
+  if channels_first: waveform = waveform.transpose(0, 1)
+  return waveform, sample_rate
+
+
 SO_VITS_SVC_PATH = Path(__file__).parent.parent / "weights/So-VITS-SVC"
 VITS_MODELS = { # config_path, weights_path, config_url, weights_url
   "saul_goodman" : (SO_VITS_SVC_PATH / "config_saul_gman.json", SO_VITS_SVC_PATH / "pretrained_saul_gman.pth", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/G_80000.pth"),
@@ -738,11 +765,13 @@ ENCODER_MODELS = { # weights_path, weights_url
 AUDIO_PATH = Path(__file__).parent.parent / "recording.wav"
 RESULT_PATH = Path(__file__).parent.parent / "output.wav"
 
-from examples.sovits_helpers import slicer
-from examples.sovits_helpers.f0_predictor import PMF0Predictor
-
 if __name__=="__main__":
   logging.basicConfig(stream=sys.stdout, level=(logging.INFO if DEBUG < 1 else logging.DEBUG))
+  """
+  parser = argparse.ArgumentParser()
+  parser.add_argument("--model_to_use", default="drake", help=f"Specify the model to use. Default is 'drake'. All supported models: {VITS_MODELS.keys()}")
+  args = parser.parse_args()
+  """
 
   encoder_model = "contentvec"
   vits_model = "drake"
@@ -776,7 +805,7 @@ if __name__=="__main__":
   shallow_diffuison = False
   only_diffusion = False
   speaker = "drake01"
-  spk_mix = False
+  #spk_mix = False
   tran = 0.
   cluster_infer_ratio = 0.
   cr_threshold = 0.05
@@ -806,10 +835,7 @@ if __name__=="__main__":
       audio.extend(list(pad_array(_audio, length)))
       global_frame += length // hop_length
       continue
-    if per_size != 0:
-      datas = split_list_by_n(data, per_size, lg_size)
-    else:
-      datas = [data]
+    datas = [data] if per_size == 0 else split_list_by_n(data, per_size, lg_size) 
     for k, dat in enumerate(datas):
       per_length = int(np.ceil(len(dat) / audio_sr * target_sample)) if clip_seconds!=0 else length
       if clip_seconds != 0: raise NotImplementedError("Lets see if thats not too much")
@@ -821,43 +847,40 @@ if __name__=="__main__":
 
       ### Infer START ###
       infer_start = time.time()
-      torchaudio.set_audio_backend("soundfile")
-      wav, sr = torchaudio.load(raw_path)
-      audio_resample_transform = torchaudio.transforms.Resample(sr, target_sample)  # :(
-      wav = audio_resample_transform(wav).numpy()[0]
-      if spk_mix: raise NotImplementedError("spk_mix not forseen")
-      else:
-        speaker_id = spk2id[speaker]
-        if not speaker_id and type(speaker) is int:
-          if len(spk2id.__dict__) >= speaker: speaker_id = speaker
-        if speaker_id is None: raise RuntimeError(f"speaker={speaker} not in the speaker list")
-        sid = Tensor([int(speaker_id)], dtype=dtypes.int64).unsqueeze(0)  # TODO: self.device
+      wav, sr = load_audiofile(raw_path)
+      resample = Resample(sr, target_sample)
+      wav = resample(wav).numpy()[0]
+      speaker_id = spk2id[speaker]
+      if not speaker_id and type(speaker) is int:
+        if len(spk2id.__dict__) >= speaker: speaker_id = speaker
+      if speaker_id is None: raise RuntimeError(f"speaker={speaker} not in the speaker list")
+      sid = Tensor([int(speaker_id)], dtype=dtypes.int64).unsqueeze(0)  # TODO: self.device
 
-        wav16k, f0, uv = get_unit_f0(wav=wav,
-                                tran=tran,
-                                cluster_infer_ratio=cluster_infer_ratio,
-                                speaker=speaker,
-                                hop_length=hop_length,
-                                target_sample=target_sample,
-                                cr_threshold=cr_threshold,
-                                unit_interpolate_mode=unit_interpolate_mode)
+      wav16k, f0, uv = get_unit_f0(wav=wav,
+                              tran=tran,
+                              cluster_infer_ratio=cluster_infer_ratio,
+                              speaker=speaker,
+                              hop_length=hop_length,
+                              target_sample=target_sample,
+                              cr_threshold=cr_threshold,
+                              unit_interpolate_mode=unit_interpolate_mode)
 
-        n_frames = f0.shape[1]
+      n_frames = f0.shape[1]
 
-        start = time.time()
-        c = contentvec256L9.encoder(wav16k)
-        c = repeat_expand_2d(c.squeeze(0), f0.shape[1], unit_interpolate_mode)
-        c = c.unsqueeze(0).realize()
-        enc_time = time.time() - start
+      start = time.time()
+      c = contentvec256L9.encoder(wav16k)
+      c = repeat_expand_2d(c.squeeze(0), f0.shape[1], unit_interpolate_mode)
+      c = c.unsqueeze(0).realize()
+      enc_time = time.time() - start
 
-        start = time.time()
-        out_audio, f0 = net_g.infer(c, f0=f0, uv=uv, g=sid, noise_scale=noise_scale, vol=None)
-        out_audio = out_audio[0,0].float().realize()
-        vits_time = time.time() - start
+      start = time.time()
+      out_audio, f0 = net_g.infer(c, f0=f0, uv=uv, g=sid, noise_scale=noise_scale, vol=None)
+      out_audio = out_audio[0,0].float().realize()
+      vits_time = time.time() - start
 
-        infer_time = time.time() - infer_start
-        logging.info("total infer time:{:.2f}s, speech_enc time:{:.2f}s, vits time:{:.2f}s".format(infer_time, enc_time, vits_time))
-      ### Infer END ###
+      infer_time = time.time() - infer_start
+      logging.info("total infer time:{:.2f}s, speech_enc time:{:.2f}s, vits time:{:.2f}s".format(infer_time, enc_time, vits_time))
+    ### Infer END ###
 
       out_sr, out_frame = out_audio.shape[-1], n_frames
       global_frame += out_frame
