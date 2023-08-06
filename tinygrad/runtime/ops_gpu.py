@@ -1,12 +1,13 @@
 from __future__ import annotations
-import pathlib
+import pathlib, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
-from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
+from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
-from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
+from tinygrad.codegen.linearizer import LinearizerOptions
+from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
@@ -17,7 +18,6 @@ if DEBUG >= 5:
   early_exec = fromimport("extra.helpers", "enable_early_exec")()
 
 class _CL:
-  def __init__(self): self.events_in_flight = []
   def post_init(self, device=None):
     platforms: List[List[cl.Device]] = [y for y in ([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()] + [x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()]) if len(y)]
     self.cl_platform = cl.get_platforms()[getenv('CL_PLATFORM', 0)]
@@ -25,8 +25,6 @@ class _CL:
     if DEBUG >= 1: print(f"using devices: {[ctx.devices[0].hashable_model_and_version_identifier for ctx in self.cl_ctxs]}")
     self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(ctx, device=ctx.devices[0], properties=cl.command_queue_properties.PROFILING_ENABLE) for ctx in self.cl_ctxs]
   def synchronize(self):
-    for evt in self.events_in_flight: evt.wait()
-    self.events_in_flight.clear()
     for q in self.cl_queue: q.finish()
 CL = _CL()
 CL.post_init() if not getenv("DELAYED_RUNTIME_INIT", False) else None
@@ -43,13 +41,14 @@ class CLBuffer(RawBufferCopyInOut):
     setattr(buf, 'device', int(device))  # device is tracked on the underlying buffer
     super().__init__(size, dtype, buf)
 
-  def _copyin(self, x: np.ndarray):
+  def _copyin(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
-    CL.events_in_flight.append(cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False))
+    self.event = cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False)
   def _copyout(self, x:np.ndarray):
-    CL.synchronize()
     assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
-    cl.enqueue_copy(CL.cl_queue[self._buf.device], x, self._buf, is_blocking=True)
+    buf = cl.Buffer(CL.cl_ctxs[self._buf.device], cl.mem_flags.WRITE_ONLY | cl.mem_flags.USE_HOST_PTR, 0, hostbuf=x.data)
+    mapped, event = cl.enqueue_map_buffer(CL.cl_queue[self._buf.device], buf, cl.map_flags.WRITE, 0, self.size, dtype=self.dtype.np, is_blocking=False)
+    with mapped.base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped, self._buf, is_blocking=True, wait_for=[event])
 
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
@@ -78,7 +77,7 @@ class CLProgram:
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
     cl_bufs = [x._buf if isinstance(x, CLBuffer) else x for x in bufs]
-    e = self.clprgs[cl_bufs[0].device](CL.cl_queue[cl_bufs[0].device], [g*l for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *cl_bufs)
+    e = self.clprgs[cl_bufs[0].device](CL.cl_queue[cl_bufs[0].device], [g*l for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *cl_bufs, wait_for=[x.event for x in bufs if isinstance(x, CLBuffer) and hasattr(x, "event")])
     if wait:
       e.wait()
       try:
@@ -87,13 +86,11 @@ class CLProgram:
         return None
     return None
 
-class CLCodegen(CStyleCodegen):
-  lang = CStyleLanguage(
-    kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
-    half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
-    barrier = "barrier(CLK_LOCAL_MEM_FENCE);",
-    gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=False)
-  is_nvidia = CL.cl_ctxs[0].devices[0].name.startswith('NVIDIA')
-  uses_float32_calculations = False
-
-GPUBuffer = Compiled(CLBuffer, fromimport("tinygrad.codegen.assembly_rdna", "RDNACodegen") if getenv("RDNA") else CLCodegen, CLProgram, CL.synchronize)
+renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
+  kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
+  half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
+  barrier = "barrier(CLK_LOCAL_MEM_FENCE);", make_vector_prefix = "",
+  gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=False))
+GPUBuffer = Compiled(CLBuffer, LinearizerOptions(supported_vector_sizes={dtypes.float: [2,4,8]},
+                                                 supported_vector_sizes_alu = {dtypes.float: [2,4,8]},
+                                                 uses_float32_calculations=False, is_nvidia=CL.cl_ctxs[0].devices[0].name.startswith('NVIDIA')), renderer, CLProgram, CL.synchronize)

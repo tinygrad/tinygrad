@@ -4,7 +4,7 @@ from enum import Enum, auto
 import functools
 from typing import Dict, Tuple, Union, List, Optional, Callable, cast, NamedTuple
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode
+from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, is_sym_int
 
 # these ops live here
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
@@ -14,8 +14,10 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tu
   assert len(shape) == len(strides)
   ret = [(shape[0], strides[0])] if len(shape) > 0 else []
   for i in range(1, len(shape)):
-    if (strides[i] != 0 and ret[-1][1] == shape[i]*strides[i]) or ret[-1][0] == 1 or (strides[i] == 0 and ret[-1][1] == 0):
+    if ret[-1][1] == shape[i]*strides[i] or ret[-1][0] == 1:
       ret[-1] = (ret[-1][0] * shape[i], strides[i])
+    elif shape[i] == 1:
+      continue
     else:
       ret.append((shape[i], strides[i]))
   return tuple(ret)
@@ -56,7 +58,7 @@ class View(ViewInternal):
 
   # generate an expression if you have a single idx variable
   def expr_node(self, idx=None) -> Node:
-    if idx is None: idx = Variable('idx', 0, prod(self.shape))
+    if idx is None: idx = Variable('idx', 0, prod(self.shape)-1)
     ret: List[Node] = [Variable.num(self.offset)] if self.offset else []
     acc = 1
     for d,s in reversed(self.shape_strides):
@@ -86,8 +88,8 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   return tuple([st if s != 1 else 0 for st, s in zip(strides, shape)])
 
 @functools.lru_cache(maxsize=None)
-def view_from_shape(shape:Tuple[int, ...]) -> View:
-  assert all(isinstance(x, int) for x in shape)
+def view_from_shape(shape:Tuple[Union[Node, int], ...]) -> View:
+  assert all(is_sym_int(x) for x in shape)
   return View(tuple(shape), strides_for_shape(shape))
 
 @functools.lru_cache(maxsize=None)
@@ -158,11 +160,11 @@ class ShapeTracker:
     return real_offset.b
 
   # NOTE: if a stride is not always valid, it will be None
-  def real_strides(self, ignore_valid=False) -> Tuple[Optional[int], ...]:
+  def real_strides(self, ignore_valid=False) -> Tuple[Optional[Union[Node, int]], ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx, valid = self.expr_idxs(idxs)
-    ret: List[Optional[int]] = [None] * len(self.views[-1].shape)
+    ret: List[Optional[Union[Node, int]]] = [None] * len(self.views[-1].shape)
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
       if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
         ret[idxs.index(this_dim.a)] = this_dim.b
@@ -225,18 +227,29 @@ class ShapeTracker:
     self.__unsafe_resize(arg)
     return self
 
-  def expand(self, new_shape: Tuple[int, ...]) -> ShapeTracker:
+  def expand(self, new_shape: Tuple[Union[Node,int], ...]) -> ShapeTracker:
     assert len(new_shape) == len(self.views[-1].shape)
-    assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
+    assert all(is_sym_int(x) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)]) if self.views[-1].mask else None
     self.views[-1] = View(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
     return self
 
-  def reshape(self, new_shape: Tuple[int, ...]):
+  def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
+    # reshape into symbolic shape, update the variable value
+    if all(isinstance(s, int) for s in self.shape) and len(new_vars:=list(s for s in new_shape if isinstance(s, Variable))) > 0:
+      assert len(new_vars) == 1, "only one variable is supported in a shape"
+      new_var, new_val = new_vars[0], prod(self.shape) // prod(s for s in new_shape if isinstance(s, int))
+      if new_var.val is None:
+        assert new_var.min <= new_val <= new_var.max, f"variable value {new_val} out of range [{new_var.min}, {new_var.max}]"
+        new_var.val = new_val
+      else: assert new_var.val == new_val, f"value conflicts, was {new_var.val}, set to {new_val}"
+
     if self.views[-1].shape == new_shape: return self
-    assert all(isinstance(x, int) and x > 0 for x in new_shape), f"shape must be ints and can't contain 0 or negative numbers {new_shape}"
-    assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
+    assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
+    # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
+    if all(isinstance(s, int) for s in self.shape) and all(isinstance(s, int) for s in new_shape):
+      assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
     new_view, extra = _reshape(self.views[-1], new_shape)
     if extra: self.views.append(new_view)
     else: self.views[-1] = new_view
@@ -280,11 +293,11 @@ def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Opt
     if new_shape[i] == 1 and old_shape[old_shape_i] != 1:
       if i < len(new_shape) - 1: i += 1
     else:
-      if new_shape[i] % old_shape[old_shape_i] != 0 or prod([old_shape[x] for x in axis_groups[i]]) * old_shape[old_shape_i] > new_shape[i]:
-        return None
       axis_groups[i].append(old_shape_i)
+      axis_group_size = prod([old_shape[x] for x in axis_groups[i]])
       # Move to next axes group if total size of all dimensions match.
-      if prod([old_shape[x] for x in axis_groups[i]]) == new_shape[i]:
+      if axis_group_size == new_shape[i]:
         if i < len(new_shape) - 1: i += 1
+      elif axis_group_size > new_shape[i]: return None
       old_shape_i += 1
   return axis_groups

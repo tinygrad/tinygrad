@@ -8,9 +8,9 @@ class LR_Scheduler:
   def __init__(self, optimizer: Optimizer):
     self.optimizer = optimizer
     self.epoch_counter = Tensor([0], requires_grad=False)
-  
+
   def get_lr(self): pass
-  
+
   def step(self) -> None:
     lr = self.get_lr()
     self.epoch_counter.assign(self.epoch_counter + 1).realize()
@@ -37,13 +37,13 @@ class ReduceLROnPlateau(LR_Scheduler):
     self.bad_epoch = 0
 
     if mode == "min": self.threshold *= -1
-  
+
   def is_better(self, current: float) -> bool:
     dynamic_threshold = self.best*(1+self.threshold) if self.threshold_mode == "rel" else self.best+self.threshold
     if self.mode == "min":
       return current < dynamic_threshold
     return current > dynamic_threshold
-  
+
   def step(self, current: float) -> None:
     self.epoch_counter.assign(self.epoch_counter + 1).realize()
     if self.is_better(current):
@@ -51,7 +51,7 @@ class ReduceLROnPlateau(LR_Scheduler):
       self.best = current
     else:
       self.bad_epoch += 1
-    
+
     if self.bad_epoch > self.patience:
       self.optimizer.lr *= self.factor
       self.bad_epoch = 0
@@ -83,7 +83,7 @@ class OneCycleLR(LR_Scheduler):
   @staticmethod
   def _annealing_linear(start: Tensor, end: Tensor, pct: Tensor) -> Tensor: return ((end - start) * pct + start)
 
-  def get_lr(self) -> Tensor: 
+  def get_lr(self) -> Tensor:
     return (self.epoch_counter < self.total_steps*self.pct_start).where(
       self._annealing_linear(self.initial_lr, self.max_lr, self.epoch_counter/(self.total_steps*self.pct_start)),
       self._annealing_linear(self.max_lr, self.min_lr, (self.epoch_counter-(self.total_steps*self.pct_start))/(self.total_steps*(1-self.pct_start)))

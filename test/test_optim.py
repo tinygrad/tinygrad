@@ -5,6 +5,9 @@ import torch
 import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import Adam, SGD, AdamW
+import pytest
+
+pytestmark = pytest.mark.exclude_cuda
 
 np.random.seed(1337)
 x_init = np.random.randn(1,4).astype(np.float32)

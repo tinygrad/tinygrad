@@ -1,4 +1,4 @@
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict, Iterator, Union, Sequence
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict, Iterator, Union, Sequence, Final
 import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
@@ -103,7 +103,7 @@ def get_grouped_maybe_vector(*values:List[Token], grouping_allowed=True, amt=VEC
 
 # TODO: generic visitor pattern?
 def expand_node(idx:Node) -> List[Node]:
-  if isinstance(idx, Variable):  return [idx] if idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)]
+  if isinstance(idx, Variable): return [idx] if idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)]
   if isinstance(idx, NumNode): return [idx]
   if isinstance(idx, MulNode): return [x*idx.b for x in expand_node(idx.a)]
   if isinstance(idx, SumNode): return [Variable.sum(list(it)) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
@@ -137,14 +137,21 @@ class UOp(NamedTuple):
   arg: Any
   def __repr__(self): return f"{str(self.uop):20s}: {str(self.out) if self.out is not None else '':25s} {str(self.vin):32s} {self.arg}"
 
-class Linearizer:
+class LinearizerOptions(NamedTuple):
+  # TODO: make this generic with a list of supported types
   supported_vector_sizes: Dict[DType, List[int]] = {dtypes.float: []}
   supported_vector_sizes_alu: Dict[DType, List[int]] = {dtypes.float: []}
-  uses_float32_calculations = True
+  uses_float32_calculations: bool = True
+  has_local: bool = True
+  global_max: Optional[List[int]] = None
+  local_max: Optional[List[int]] = None
+  is_nvidia: Optional[bool] = None
 
-  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
+class Linearizer:
+  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, opts:LinearizerOptions):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
+    self.opts = opts
 
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)
@@ -218,9 +225,9 @@ class Linearizer:
     acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
-  def get_upcast_dim(self, i):
-    vector_types = [dtypes.float32,] if self.uses_float32_calculations else [dtypes.float32, dtypes.float16, dtypes.int8, dtypes.int32, dtypes.int64, ]
-    should_upcast = len(self.supported_vector_sizes.get(self.bufs[i].dtype, self.supported_vector_sizes[dtypes.float])) > 0 and (self.bufs[i].dtype in vector_types or isinstance(self.bufs[i].dtype, ImageDType))
+  def get_upcast_dim(self, i) -> List[int]:
+    vector_types = [dtypes.float32,] if self.opts.uses_float32_calculations else [dtypes.float32, dtypes.float16, dtypes.int8, dtypes.int32, dtypes.int64, ]
+    should_upcast = len(self.opts.supported_vector_sizes.get(self.bufs[i].dtype, self.opts.supported_vector_sizes[dtypes.float])) > 0 and (self.bufs[i].dtype in vector_types or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
@@ -230,7 +237,7 @@ class Linearizer:
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
     amt = 1
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in self.supported_vector_sizes.get(self.bufs[i].dtype, self.supported_vector_sizes[dtypes.float]):
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in self.opts.supported_vector_sizes.get(self.bufs[i].dtype, self.opts.supported_vector_sizes[dtypes.float]):
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     cache: Dict[str, Token] = {}
@@ -238,15 +245,15 @@ class Linearizer:
     for _idx in _idxs:
       if amt > 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
-        localtype = dtypes.get_vector_type(dtypes.float if self.uses_float32_calculations else self.bufs[i].dtype, amt)
+        localtype = dtypes.get_vector_type(dtypes.float if self.opts.uses_float32_calculations else self.bufs[i].dtype, amt)
         accumtype = dtypes.get_vector_type(dtypes.float, amt) if getenv('ACCUM_FLOAT', 1) else localtype
         if idx.render() != ((idx//amt)*amt).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
-          localtype = dtypes.float if self.uses_float32_calculations else self.bufs[i].dtype 
+          localtype = dtypes.float if self.opts.uses_float32_calculations else self.bufs[i].dtype 
           accumtype = dtypes.float if getenv('ACCUM_FLOAT', 1) else localtype
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
-        localtype = dtypes.float if self.uses_float32_calculations else self.bufs[i].dtype 
+        localtype = dtypes.float if self.opts.uses_float32_calculations else self.bufs[i].dtype 
         accumtype = dtypes.float if getenv('ACCUM_FLOAT', 1) else localtype
       key = f"{localtype}{idx.render()}{valid.render()}"
       if key not in cache:
@@ -263,7 +270,7 @@ class Linearizer:
 
     store_offset = dict(zip(_idxs, store))
     # float4 grouping
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in self.supported_vector_sizes.get(self.bufs[i].dtype, self.supported_vector_sizes[dtypes.float]):
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in self.opts.supported_vector_sizes.get(self.bufs[i].dtype, self.opts.supported_vector_sizes[dtypes.float]):
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (expanded_nodes[upcast_dim[0]][0],) + k[upcast_dim[0]+1:]
@@ -274,7 +281,7 @@ class Linearizer:
         idx, valid = self.sts[i].expr_idxs(k)
         assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
         assert valid.min == 1, "stores are always valid"
-        dt = dtypes.get_vector_type(dtypes.get_normal_type(dtypes.float if self.uses_float32_calculations else self.bufs[i].dtype), amt=amt) 
+        dt = dtypes.get_vector_type(dtypes.get_normal_type(dtypes.float if self.opts.uses_float32_calculations else self.bufs[i].dtype), amt=amt) 
         if all_same([x.name for x in out_tokens]) and tuple(range(amt)) == tuple(x.offset for x in out_tokens) and out_tokens[0].dtype == self.bufs[i].dtype:
           store_offset_new[k] = Token(out_tokens[0].name, dt)
         else:
@@ -286,7 +293,13 @@ class Linearizer:
       if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
       self.uop(UOps.STORE, None, [var], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid))
 
+  kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
+    self.process()
+
+    # limit dims if we need to
+    if self.opts.global_max and self.opts.local_max: self.limit_global_dims(3, self.opts.global_max, self.opts.local_max)
+
     # uops
     self.uops: List[UOp] = []
     self.saved_exprs: Dict[LazyOp, List[Token]] = dict()
@@ -300,12 +313,12 @@ class Linearizer:
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
-      self.bufs.append(LocalBuffer("temp", self.sts[-1].size(), dtype=dtypes.float if (getenv('ACCUM_FLOAT', 1) or self.uses_float32_calculations) else self.bufs[-1].dtype))
-      self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size(), dtypes.float if (getenv('ACCUM_FLOAT', 1) or self.uses_float32_calculations) else self.bufs[-1].dtype))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size(), dtype=dtypes.float if (getenv('ACCUM_FLOAT', 1) or self.opts.uses_float32_calculations) else self.bufs[-1].dtype))
+      self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size(), dtypes.float if (getenv('ACCUM_FLOAT', 1) or self.opts.uses_float32_calculations) else self.bufs[-1].dtype))
 
     # define local buffers
     for lb in self.local_alias.values():
-      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size(), dtypes.float if (getenv('ACCUM_FLOAT', 1) or self.uses_float32_calculations) else self.bufs[-1].dtype))
+      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size(), dtypes.float if (getenv('ACCUM_FLOAT', 1) or self.opts.uses_float32_calculations) else self.bufs[-1].dtype))
 
     # print
     if DEBUG >= 3: self.printbufs()
@@ -460,6 +473,12 @@ class Linearizer:
       # end the global loop
       self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
+    # name the function something unique
+    Linearizer.kernel_cnt[self.function_name] += 1
+    suffix = f"{'n'+str(Linearizer.kernel_cnt[self.function_name]-1)}" if Linearizer.kernel_cnt[self.function_name] > 1 else ""
+    self.function_name, self.display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
+    return self
+
   _OT = TypeVar("_OT")
   def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None) -> _OT:
     self.uops.append(UOp(uop, cast(Optional[Token], out), vin, arg))
@@ -501,10 +520,10 @@ class Linearizer:
       buf_cast_dtype = [v.dtype if v.offset is None else dtypes.get_normal_type(v.dtype) for val in values for v in val if v.dtype.priority == highest_priority]
       if len(buf_cast_dtype) > 0: cast_dtype = buf_cast_dtype[0]
       # Special case for NVIDIA
-      is_nvidia = self.__getattribute__('is_nvidia') if hasattr(self, 'is_nvidia') else False
+      is_nvidia = self.opts.is_nvidia if self.opts.is_nvidia is not None else False
       if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and is_nvidia: cast_dtype = dtypes.float
       # Group values
-      grouping_allowed = VECTOR_SIZE in self.supported_vector_sizes_alu.get(cast_dtype, self.supported_vector_sizes_alu[dtypes.float])
+      grouping_allowed = VECTOR_SIZE in self.opts.supported_vector_sizes_alu.get(cast_dtype, self.opts.supported_vector_sizes_alu[dtypes.float])
       grouped = list(get_grouped_maybe_vector(*values, acc, grouping_allowed=grouping_allowed, amt=VECTOR_SIZE) if use_accum else 
                  get_grouped_maybe_vector(*values, grouping_allowed=grouping_allowed and x.op not in {BinaryOps.CMPEQ, TernaryOps.WHERE}, amt=VECTOR_SIZE))
       # Cast grouped values if required
@@ -520,7 +539,7 @@ class Linearizer:
       for idx, val in grouped:
         val = [self.casts.get(v, v) for v in val] # cast if needed
         val_dtype = dtypes.get_vector_type(val[0].dtype, VECTOR_SIZE) if any(x.dtype.is_vector_type and x.offset is None for x in val) else dtypes.get_normal_type(val[0].dtype)
-        val_dtype = (dtypes._float4 if any(x.dtype.is_vector_type and x.offset is None for x in val) else dtypes.float) if self.uses_float32_calculations else val_dtype
+        val_dtype = (dtypes._float4 if any(x.dtype.is_vector_type and x.offset is None for x in val) else dtypes.float) if self.opts.uses_float32_calculations else val_dtype
         ret.append((idx, self.uop(UOps.ALU, val[-1] if use_accum else ssa('alu', val_dtype),
                     list(val), ops.get(x.op, x.op))))
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
@@ -639,15 +658,41 @@ class Linearizer:
     for i,x in enumerate(rets): self.sts[i].reshape(tuple([y[0] for y in x]))
 
   # ******************** GPU simplifiers ********************
+  def _limit_size(self, x: Tuple[int], max_size: List) -> Tuple[int, ...]:
+    new_shape,dims = list(x), len(x)
+    for i in range(dims):
+      next_idx = (i + 1) % dims
+      while new_shape[i] > max_size[i]:
+        new_shape[i] = new_shape[i] // 2
+        if (new_shape[next_idx] <= max_size[next_idx]):
+          new_shape[next_idx] = new_shape[next_idx] * 2
+        else:
+          next_idx = (next_idx + 1) % dims
+          new_shape[next_idx] = new_shape[next_idx] * 2
+    return tuple(new_shape)
 
-  def limit_global_dims(self, limit):
+  def limit_global_dims(self, limit: int, global_max: List[int], local_max: List[int]):
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
     # NOTE: this might make multiview shapetrackers
-    if limit and (self.first_reduce-self.local_dims) > limit:
+    if (self.first_reduce-self.local_dims) > limit:
       num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
       if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
+    # Check the global allocation limit, current the global_size will be flipped during codegen
+    # and then padded right with 1s if its length < 3 which makes this part a bit awkward to write
+    global_dims = self.first_reduce-self.local_dims
+    if global_dims > 0:
+      if global_max:
+        tmp = global_max[:global_dims] + (local_max[:self.local_dims] if local_max else [])
+        if max(global_max) < max(self.full_shape[:global_dims]): self.reshape_and_permute(lambda x: self._limit_size(x, tmp + [math.inf] * (len(self.full_shape)-len(tmp))), None)
+        assert max(global_max) >= max(self.full_shape[:global_dims]), f"device max allocation {max(self.full_shape[:global_dims])} exceeds global dim maximum {max(global_max)}"
+      for i in range(global_dims-1):
+        if self.full_shape[i] > global_max[i]:
+          order = list(range(len(self.full_shape)))
+          order[i], order[global_dims-1] = order[global_dims-1], order[i]
+          self.reshape_and_permute(None, order)
+          if DEBUG >= 3: print("permuted global dim", order, "due to allocation exceeds global limit")
 
   def alias_buffer(self, i, pattern):
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
@@ -662,170 +707,6 @@ class Linearizer:
           bst *= shp[j]
 
     self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
-    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size(), dtype=dtypes.float if self.uses_float32_calculations else self.bufs[-1].dtype))
+    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size(), dtype=dtypes.float if self.opts.uses_float32_calculations else self.bufs[-1].dtype))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
-
-  def required_optimizations(self, early_only=False):
-    for buf_index,buf in enumerate(self.bufs):
-      unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes(ignore_valid=True) if self.sts[buf_index].shape[i]%4 == 0]
-      if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype.__class__ is ImageDType:
-        assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
-        if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
-          self.shift_to(unit_stride_axes_mul_4[0], 4)
-          self.upcast()
-
-  def hand_coded_optimizations(self):
-    if getenv("NOOPT"): return
-
-    # if there's images in the earlybufs, we have to make an axis the 4 loading one
-    self.required_optimizations(early_only=True)
-
-    # simplify
-    self.simplify_ones()
-
-    # should use tensor cores?
-    # first, confirm it's a straightforward mulacc on a device with real locals
-    tensor_cores_allowed = getenv("TC", 1) != 0 and (getenv("TC", 1) == 2 or (self.bufs[0].device == "METAL" and getenv("CI", "") != "true"))
-    if tensor_cores_allowed and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
-       isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
-       isinstance(self.reduceop.src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[1], LazyBuffer) and hasattr(self, 'lang') and len(self.lang.lid):
-      buf0 = self.bufs.index(self.reduceop.src[0].src[0])
-      buf1 = self.bufs.index(self.reduceop.src[0].src[1])
-      buf0_strides = self.sts[buf0].real_strides()
-      buf1_strides = self.sts[buf1].real_strides()
-      axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%8 == 0]
-      axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%8 == 0]
-      if len(axis_buf0) and len(axis_buf1) and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce) == 1:
-        if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1)
-        self.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
-
-        # TODO: select axis in smart way
-        s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
-        global_count = self.first_reduce
-
-        # upcast first
-        if self.full_shape[self.first_reduce] > 8: self.shift_to(self.first_reduce, 8)
-        self.upcast()
-
-        # 2 locals
-        self.shift_to(s1, 8, insert_before=self.first_reduce)  # axis 2
-        self.shift_to(s0, 8, insert_before=self.first_reduce)  # axis 3
-
-        # permuted+upcast for tensor cores
-        self.shift_to(global_count, 4, insert_before=self.first_reduce)
-        self.shift_to(global_count+1, 4, insert_before=self.first_reduce)
-        self.shift_to(self.first_reduce-1, 2)
-        self.upcast()
-
-        # final global upcast
-        for ax in [s1, s0]:
-          for upc in [4,3,2]:
-            if self.full_shape[ax]%upc == 0:
-              self.shift_to(ax, upc)
-              self.upcast()
-              break
-
-        # alias buffer
-        self.local_dims = self.first_reduce - global_count
-        alias_pattern = [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2)
-        self.alias_buffer(buf0, alias_pattern)
-        self.alias_buffer(buf1, alias_pattern)
-
-        # very late upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
-        if self.use_tensor_cores and self.full_shape[s0] % 2 == 0:
-          self.shift_to(s0, 2, insert_before=self.first_reduce-self.local_dims)
-          self.local_dims += 1
-          self.exclude_local_upcast += 1
-
-        # early exit
-        return
-
-    # are we grouping? (requires local shape support)
-    if not self.vector_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
-      # TODO: use 1024 if it's allowed in a smarter way
-      for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
-        if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
-          self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
-          self.group_for_reduce.append(sz)
-          break
-
-    # are we upcasting in mid reduce? (only for images)
-    if self.bufs[0].dtype.name.startswith('image') and not self.vector_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
-      axes = self.sts[0].unit_stride_axes()
-      assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
-      if self.sts[0].shape[axes[0]]%VECTOR_SIZE == 0:
-        self.shift_to(axes[0], VECTOR_SIZE, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
-        self.group_for_reduce.append(VECTOR_SIZE)
-
-    # now do everything required
-    self.required_optimizations()
-
-    # simplify (sets first_reduce)
-    self.simplify_ones()
-
-    # use more opencl indexing if the output buffer is an image and we have room
-    if self.bufs[0].dtype.name.startswith('image') and self.first_reduce+len(self.group_for_reduce) < 3:
-      base_shape = self.bufs[0].dtype.shape
-      if (base_shape[0]*base_shape[1]) % self.sts[0].shape[0] == 0 and self.sts[0].shape[0]//base_shape[0] != 0:
-        if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
-        self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
-        self.simplify_ones()
-
-    # no more opt if we are grouping
-    if self.group_for_reduce: return
-
-    # **** below this line need to be optional and benchmarked ****
-
-    # potentially do more upcasts of non reduce axes based on a heuristic
-    upcasted_axis = set()
-    while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
-      xb_choices = []
-      for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,VECTOR_SIZE]):   # consider all the non reduce axes, and a VECTOR_SIZE reduce
-        # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
-        if axis not in upcasted_axis and self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
-          xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in self.sts), sum(st.views[-1].strides[axis] for st in self.sts), axis, upcast_amount))
-      if len(xb_choices):
-        xb_choices = sorted(xb_choices)
-        if DEBUG >= 4: print(f"float4 merging axis : {xb_choices}")
-        self.shift_to(xb_choices[0][2], amount=xb_choices[0][3])
-        self.upcast()
-        self.simplify_ones()
-        upcasted_axis.add(xb_choices[0][2])
-      else:
-        break
-
-    # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
-    if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
-      if (s:=self.full_unupcasted_shape[-1]) <= 32:
-        self.upcast()
-        # if it's small, upcast a second reduce dimension too
-        if self.first_reduce < (self.shape_len-self.upcasted) and s <= 3 and self.full_unupcasted_shape[-1] <= 3: self.upcast()
-      else:
-        for splits in [VECTOR_SIZE]:
-          if self.full_unupcasted_shape[-1]%splits == 0:
-            self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
-            self.upcast()
-            break
-
-    # if nothing at all is upcasted and it's easy to, do an upcast
-    # TODO: this is breaking the tests
-    for splits in [VECTOR_SIZE]:
-      if self.upcasted == 0 and len(self.full_unupcasted_shape) > 0 and self.full_unupcasted_shape[-1] % splits == 0:
-        self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
-        self.upcast()
-
-    # **** local groups ****
-
-    for axis in range(self.first_reduce - self.local_dims - 1, -1, -1):
-      local_size = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
-      if self.full_shape[axis] == 1: continue
-      last_try = self.local_dims == 0 and axis == 0
-      if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))) or last_try:
-        for sz in [x for x in (([32] if last_try else []) + [16,8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 128]:
-          self.shift_to(axis, sz, insert_before=self.first_reduce-self.local_dims)
-          self.local_dims += 1
-          break
-      if self.local_dims >= 3: break
-    self.simplify_ones()
-
