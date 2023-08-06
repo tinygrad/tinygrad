@@ -1133,8 +1133,7 @@ class TestOps(unittest.TestCase):
     c = torch.randint(low=-5, high=5, size=(10,1,14,1,1,1), requires_grad=False)
     d = torch.randint(high=4, size=(10,1,1,14,1,1), requires_grad=False)
     e = torch.randint(high=1, size=(10,1,1,1,13,1), requires_grad=False)
-    i, j, k, o, p = [Tensor(tor.numpy(), dtype=dtypes.float32, requires_grad=False) for tor in [a,b,c,d,e]]
-    print(i.realize().dtype)
+    i, j, k, o, p = [Tensor(tor.numpy(), requires_grad=False).float() for tor in [a,b,c,d,e]]
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,e], lambda x: x[:,j,k,o,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,:], lambda x: x[:,j,k,o,:])
