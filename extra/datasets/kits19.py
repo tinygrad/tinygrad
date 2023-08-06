@@ -144,10 +144,14 @@ def preprocess(file_path, val=False, roi_shape=(128,128,128)):
 def iterate(BS=1, val=True, shuffle=False, roi_shape=(128,128,128)):
   files = get_val_files() if val else get_train_files()
   if shuffle: random.shuffle(files)
-  for file in files:
+  file_num = 0
+  while file_num < len(files):
     Xs, Ys = [], []
     for _ in range(BS):
-      X, Y = preprocess(file, val=val, roi_shape=roi_shape)
+      if file_num >= len(files):
+        break
+      X, Y = preprocess(files[file_num], val=val, roi_shape=roi_shape)
+      file_num += 1
       Xs.append(X)
       Ys.append(Y)
     yield (np.array(Xs), np.array(Ys))
