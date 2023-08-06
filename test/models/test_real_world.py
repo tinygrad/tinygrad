@@ -39,7 +39,7 @@ def derandomize_model(model):
   for p in get_parameters(model):
     p.lazydata = derandomize(p.lazydata)
     p.realize()
-
+#test
 class TestRealWorld(unittest.TestCase):
   @unittest.skipUnless(not CI, "too big for CI")
   def test_stable_diffusion(self):
