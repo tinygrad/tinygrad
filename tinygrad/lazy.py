@@ -280,6 +280,7 @@ class LazyBuffer:
     for op, arg in ops: y = MOVEMENT_OPS_DISPATCHER[op](y, arg)
     return y
 
+UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
 def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
   new_srcs = []
   for x in srcs:
@@ -292,8 +293,7 @@ def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
       assert isinstance(bx.op.src[0], LazyBuffer)
       bx = bx.op.src[0]
     # NOTE: can't push pads past anything where f(0, 0) != 0 or f(0) != 0
-    unsafe_pad_ops = {BinaryOps.DIV, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
-    if not bx.realized and bx.optype is BinaryOps and len(bx.children) <= 1 and len(mops) and (all(x[0] is not MovementOps.PAD for x in mops) or all(x.op not in unsafe_pad_ops for x in bx.op.get_lazyops())):
+    if not bx.realized and bx.optype is BinaryOps and len(bx.children) <= 1 and len(mops) and (all(x[0] is not MovementOps.PAD for x in mops) or all(x.op not in UNSAFE_PAD_OPS for x in bx.op.get_lazyops())):
       new_srcs.append(bx.op.replace_with_movement_ops(mops[::-1]))
     else:
       new_srcs.append(x)
