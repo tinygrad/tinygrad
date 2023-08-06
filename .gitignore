@@ -12,7 +12,6 @@ dist
 /env
 a.out
 boxes.jpg
-weights/*
 pandecode.dump
 vertex.bin
 recognize*
@@ -31,9 +30,9 @@ extra/datasets/kits/
 extra/datasets/COCO/
 extra/datasets/audio*
 venv
-examples/webgpu/net.js
-examples/webgpu/net.safetensors
+examples/net.*[js,json,safetensors]
 node_modules
 package.json
 package-lock.json
 temp
+*.csv

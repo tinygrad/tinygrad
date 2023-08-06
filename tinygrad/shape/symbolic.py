@@ -9,6 +9,7 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
 
 def is_sym_int(x: Any) -> bool: return isinstance(x, int) or isinstance(x, Node)
+def sym_vars(x: Union[Node, int]) -> List[Variable]: return [] if isinstance(x, int) else x.vars()
 
 class Node:
   b: Union[Node, int]
@@ -27,6 +28,7 @@ class Node:
   def hash(self) -> int: return hash(self.key)
   def __repr__(self): return "<"+self.key+">"
   def __hash__(self): return self.hash
+  def __bool__(self): return not (self.max == self.min == 0)
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
@@ -38,7 +40,7 @@ class Node:
   def __gt__(self, b:Union[Node,int]): return (-self) < (-b)
   def __ge__(self, b:Union[Node,int]): return (-self) < (-b+1)
   def __lt__(self, b:Union[Node,int]):
-    if self == b: return False
+    if self == b: return NumNode(0)
     lhs = self
     if isinstance(lhs, SumNode):
       muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
@@ -84,7 +86,7 @@ class Node:
   def num(num:int) -> NumNode: return NumNode(num)
 
   @staticmethod
-  def factorize(nodes:List[Node]):
+  def factorize(nodes:List[Node]) -> List[Node]:
     mul_groups: Dict[Node, int] = {}
     for x in nodes:
       a,b = (x.a,x.b) if isinstance(x, MulNode) else (x,1)
@@ -99,15 +101,9 @@ class Node:
 
     new_nodes: List[Node] = []
     num_node_sum = 0
-
-    # flatten all sumnodes and gather numnodes
-    for node in nodes:
-      if node.__class__ not in (NumNode, SumNode): new_nodes.append(node)
-      elif node.__class__ is NumNode: num_node_sum += node.b
-      elif isinstance(node, SumNode):  # mypy wants the isinstance
-        for sub_node in node.flat_components:
-          if sub_node.__class__ is NumNode: num_node_sum += sub_node.b
-          else: new_nodes.append(sub_node)
+    for node in SumNode(nodes).flat_components:
+      if node.__class__ is NumNode: num_node_sum += node.b
+      else: new_nodes.append(node)
 
     if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes):
       new_nodes = Node.factorize(new_nodes)
@@ -118,7 +114,7 @@ class Node:
   def ands(nodes:List[Node]) -> Node:
     if not nodes: return NumNode(1)
     if len(nodes) == 1: return nodes[0]
-    if any(x.min == x.max == 0 for x in nodes): return NumNode(0)
+    if any(not x for x in nodes): return NumNode(0)
 
     # filter 1s
     nodes = [x for x in nodes if x.min != x.max]
@@ -158,7 +154,9 @@ class OpNode(Node):
 class LtNode(OpNode):
   def __mul__(self, b: Union[Node, int]): return (self.a*b) < (self.b*b)
   def __floordiv__(self, b: int, _=False): return (self.a//b) < (self.b//b)
-  def get_bounds(self) -> Tuple[int, int]: return int(self.a.max < self.b), int(self.a.min < self.b)
+  def get_bounds(self) -> Tuple[int, int]:
+    if isinstance(self.b, int): return int(self.a.max < self.b), int(self.a.min < self.b)
+    return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min > self.b.max else (0, 1)
 
 class MulNode(OpNode):
   def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul

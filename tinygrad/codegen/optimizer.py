@@ -1,10 +1,12 @@
-from typing import Callable
-import itertools, time
+import itertools
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType
 from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.lazy import LazyBuffer
 
+# auto opt is disabled
+import time
+from typing import Callable
 def apply_opt(k, x):
   for axis, amt, typ in x:
     if axis is None or amt == 1: continue
@@ -22,17 +24,17 @@ def apply_opt(k, x):
 
 UPCASTS = [1,2,3,4,5,6,7,8]
 LOCALS = [1,2,3,4,5,6,7,8,16,24,32]
-def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], runtime, baseline):
+def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, baseline):
   import nevergrad as ng
   def opt(x):
     try:
       k = create_k()
       k.process()
       apply_opt(k, x)
-      prg = k.codegen().build(runtime)
-      first_tm = prg.exec(k.bufs, force_wait=True)
+      prg = to_prg(k)
+      first_tm = prg.exec(k.bufs, force_wait=True, optimizing=True)
       if baseline*5 < first_tm*1000: return first_tm*1000  # very slow
-      tm = min([first_tm]+[prg.exec(k.bufs, force_wait=True) for _ in range(2)])*1000
+      tm = min([first_tm]+[prg.exec(k.bufs, force_wait=True, optimizing=True) for _ in range(2)])*1000
       return tm
     except Exception:
       if DEBUG >= 3:
@@ -58,7 +60,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], runt
 
 # optimization
 global_db = None
-def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], runtime):
+def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg):
   global global_db
 
   k.process()
@@ -75,9 +77,9 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], runtime):
     def get_baseline():
       k = create_k()
       hand_coded_optimizations(k)
-      prg = k.codegen().build(runtime)
-      return min([prg.exec(k.bufs, force_wait=True) for _ in range(5)])*1000
-    choice = kernel_optimize_search(k, create_k, runtime, get_baseline())
+      prg = to_prg(k)
+      return min([prg.exec(k.bufs, force_wait=True, optimizing=True) for _ in range(5)])*1000
+    choice = kernel_optimize_search(k, create_k, to_prg, get_baseline())
     if global_db is not None:
       global_db[skey] = choice
       global_db.sync()
@@ -108,7 +110,7 @@ def hand_coded_optimizations(k:Linearizer):
   tensor_cores_allowed = getenv("TC", 1) != 0 and (getenv("TC", 1) == 2 or (k.bufs[0].device == "METAL" and getenv("CI", "") != "true"))
   if tensor_cores_allowed and k.reduceop and k.reduceop.op == ReduceOps.SUM and \
       isinstance(k.reduceop.src[0], LazyOp) and k.reduceop.src[0].op == BinaryOps.MUL and \
-      isinstance(k.reduceop.src[0].src[0], LazyBuffer) and isinstance(k.reduceop.src[0].src[1], LazyBuffer) and hasattr(k, 'lang') and len(k.lang.lid):
+      isinstance(k.reduceop.src[0].src[0], LazyBuffer) and isinstance(k.reduceop.src[0].src[1], LazyBuffer) and k.opts.has_local:
     buf0 = k.bufs.index(k.reduceop.src[0].src[0])
     buf1 = k.bufs.index(k.reduceop.src[0].src[1])
     buf0_strides = k.sts[buf0].real_strides()
@@ -160,7 +162,7 @@ def hand_coded_optimizations(k:Linearizer):
       # early exit
       return
 
-  if hasattr(k, 'lang') and len(k.lang.smem_prefix):
+  if k.opts.has_local:
     # are we grouping? (requires local shape support)
     if not k.float4_axis(0) and k.first_reduce <= 2 and k.first_reduce + 1 <= k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
@@ -237,7 +239,7 @@ def hand_coded_optimizations(k:Linearizer):
 
   # **** local groups ****
 
-  if hasattr(k, 'lang') and len(k.lang.lid):
+  if k.opts.has_local:
     for axis in range(k.first_reduce - k.local_dims - 1, -1, -1):
       local_size = prod(k.full_shape[k.first_reduce-k.local_dims:k.first_reduce])
       if k.full_shape[axis] == 1: continue
