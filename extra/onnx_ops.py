@@ -137,9 +137,9 @@ def _format_padding(onnx_pads, ndims=None, axes=None):
 def _padding(X, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None):
   if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
   if pads is None: return X
-  np_pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
-  zero_padded = X.pad(tuple(np_pads))
-  constant_padder = Tensor.zeros_like(X).pad(tuple(np_pads), value=constant_value)
+  pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
+  zero_padded = X.pad(tuple(pads))
+  constant_padder = Tensor.zeros_like(X).pad(tuple(pads), value=constant_value)
   return zero_padded + constant_padder
 
 def _auto_pad(X, auto_pad, strides, kernel_shape, dilations):
@@ -156,20 +156,53 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
   seq_pads = [math.ceil(i) for i in seq_pads]
   seq_axes = safe_numpy(axes).astype(np.int32).tolist() if axes is not None else None
   base_shape = x.shape
-  pads_ = _format_padding(seq_pads)
+  pads = _format_padding(seq_pads)
   if mode == "wrap":
-    repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(pads_, base_shape)]
+    repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(pads, base_shape)]
     new_shape = [s*r for s,r in zip(base_shape, repeat_args)]
-    shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh) if dim[1]%sh != 0 else nsh) for dim, sh, nsh in zip(pads_, base_shape, new_shape)]
+    shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh) if dim[1]%sh != 0 else nsh) for dim, sh, nsh in zip(pads, base_shape, new_shape)]
     return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
   elif mode == "reflect":
+    # assert Padding size should be less than the corresponding input dimension
     '''
-    print(x.numpy())
+    def pad_reflect(X, padding) -> Tensor:
+      p = padding[3]
+      s = X.shape[3]
+
+      X_lr = X[...,:,1:1+p[0]].flip(3).pad(((0,0),(0,0),(0,0),(0,s+p[0]))) + X[...,:,-1-p[1]:-1].flip(3).pad(((0,0),(0,0),(0,0),(s+p[1],0)))
+      X = X.pad(((0,0),(0,0),(0,0),p)) + X_lr
+
+      p = padding[2]
+      s = X.shape[2]
+      X_lr = X[...,1:1+p[0],:].flip(2).pad(((0,0),(0,0),(0,s+p[0]),(0,0))) + X[...,-1-p[1]:-1,:].flip(2).pad(((0,0),(0,0),(s+p[1],0),(0,0)))
+      X = X.pad(((0,0),(0,0),p,(0,0))) + X_lr'''
+
+    print(x.shape, "orig shape")
+    print(pads, "FUCK")
     # repeat, shrink to x.shape, (padder == x).where(x, padder)
-    repeat_args = [(1) if pads_[i] == (0,0) else (2 + math.ceil(pads_[i][0]/x.shape[i]) + math.ceil(pads_[i][1]/x.shape[i])) for i in range(x.ndim)]
-    shrink_args = [(s-1 + (s - pads_[dim][0])%s, s + s*(repeat_args[dim]-1) - (s - pads_[dim][0])%s) for dim,s in enumerate(x.shape)] 
+    # shape move [s-1 for s in x.shape]
+    # padder = Tensor.zeros_like(x)
+    for i,s in enumerate(x.shape):
+      print(i, "fuck")
+      if pads[i] == (0,0): continue
+      elif pads[i][0] and not pads[i][1]: x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (0,s) for i_ in range(x.ndim)])) + x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+      elif not pads[i][0] and pads[i][1]: x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (s,0) for i_ in range(x.ndim)])) + x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+      else: 
+        x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (0,s+pads[i][1]) for i_ in range(x.ndim)])) + x.flip(i).shrink(tuple([(0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+        print(x.numpy())
+    return x
+    
+        
+
+    print(x.numpy())
+    exit()
+    # repeat_args = [(1) if pads[i] == (0,0) else (1 + math.floor(pads[i][0]/x.shape[i]) + math.ceil(pads[i][1]/x.shape[i])) for i in range(x.ndim)]
+    # shrink_args = [(s-1 + (s - pads[dim][0])%s, s + s*(repeat_args[dim]-1) - (s - pads[dim][0])%s) for dim,s in enumerate(x.shape)] 
+    # print(repeat_args)
+    # print(shrink_args)
     # padder = x.flip([n for n in range(x.ndim)]).repeat(repeat_args).shrink(tuple(shrink_args))
-    padder = x.flip([n for n in range(x.ndim)]).repeat(repeat_args).shrink(tuple(shrink_args))
+    # padder = x.flip([d for d in range(x.ndim) if pads_[d] != (0,0)]).repeat(repeat_args)
+    padder = padder.shrink(tuple(shrink_args))
     x = x.pad(tuple(pads_))
     # ret = (padder == x).where(x, padder)
     print(padder.shape)
@@ -177,7 +210,6 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     print(x.shape)
     print(x.numpy())
     exit()
-    '''
     n_pads = [(n,pad) for n,pad in enumerate(pads_)][::-1]
     for n, pad in n_pads: # TODO theres probably a way to do this with less code
       if pad == (0,0): continue
@@ -191,7 +223,7 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
       x = b.cat(x, dim=n).cat(e, dim=n)
     return x
   elif mode == "edge":
-    n_pads = [(n,pad) for n,pad in enumerate(pads_)][::-1]
+    n_pads = [(n,pad) for n,pad in enumerate(pads)][::-1]
     for n, pad in n_pads: # TODO theres probably a way to do this with less code
       if pad == (0,0): continue
       pad_st, pad_ed = pad
@@ -204,7 +236,7 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
       x = pad_st.cat(x, dim=n).cat(pad_ed, dim=n)
     return x
   elif mode == "constant":
-    return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value)
+    return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value) # CHANGE THIS
 
 def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
   if dilations != 1: raise NotImplementedError(f"dilations != 1 not supported, dilations:{dilations}")
@@ -428,11 +460,6 @@ def SoftmaxCrossEntropyLoss(scores, labels, weights=None, ignore_index=None, red
   if reduction == "mean": loss = loss.sum() / (loss == 0).where(0, 1).sum() if weights is None else loss.sum() / weights.sum()
   elif reduction == "sum": loss = loss.sum()
   return loss, y
-
-# TODO get rid of _gather(), replace with logic from Tensor.gather()
-def _gather(input: Tensor, indices: Tensor):
-  reshape_arg = [1]*input.ndim + [input.shape[-1]]
-  return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]))*input).sum(indices.ndim)
 
 def ArrayFeatureExtractor(input, indices): return input.gather(indices, input.ndim-1)
 def Gather(input, indices, axis=0):
