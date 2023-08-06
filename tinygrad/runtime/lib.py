@@ -38,8 +38,9 @@ class RawBufferMapped(RawBufferCopyIn):
   def _copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
 
 # this one is simple enough that i moved it out of the runtimes
+dtype2ctype = {dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16, dtypes.bfloat16: ctypes.c_int16, dtypes.int8: ctypes.c_int8, dtypes.uint8: ctypes.c_uint8, dtypes.bool: ctypes.c_uint8, dtypes.int32: ctypes.c_int32, dtypes.int64: ctypes.c_int64}
 class RawMallocBuffer(RawBufferMapped):
-  def __init__(self, size, dtype: DType): super().__init__(size, dtype, ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16, dtypes.bfloat16: ctypes.c_int16, dtypes.int8: ctypes.c_int8, dtypes.uint8: ctypes.c_uint8, dtypes.bool: ctypes.c_uint8, dtypes.int32: ctypes.c_int32, dtypes.int64: ctypes.c_int64}[dtype] * size)())
+  def __init__(self, size, dtype: DType): super().__init__(size, dtype, (dtype2ctype[dtype] * size)())
   def _buffer(self): return memoryview(self._buf)
 
 class RawBufferCopyInOut(RawBufferCopyIn):
