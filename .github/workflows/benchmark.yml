@@ -18,5 +18,18 @@ jobs:
       run: python3 test/external/external_model_benchmark.py
     - uses: actions/upload-artifact@v3
       with:
-        name: ONNX Inference Speed
+        name: ONNX Inference Speed (Mac)
+        path: onnx_inference_speed.csv
+  testamdbenchmark:
+    name: AMD Benchmark
+    runs-on: [self-hosted, Linux]
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Run metal ops test
+      run: python3 test/external/external_model_benchmark.py
+    - uses: actions/upload-artifact@v3
+      with:
+        name: ONNX Inference Speed (AMD)
         path: onnx_inference_speed.csv
