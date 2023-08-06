@@ -1,0 +1,21 @@
+name: Benchmarks
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  testmacbenchmark:
+    name: Mac Benchmark
+    runs-on: self-hosted
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Run metal ops test
+      run: python3 test/external/external_model_benchmark.py
+    - uses: actions/upload-artifact@v3
+      with:
+        name: ONNX Inference Speed
+        path: onnx_inference_speed.csv
