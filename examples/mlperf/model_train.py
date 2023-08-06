@@ -16,32 +16,32 @@ def train_resnet():
   from extra.datasets.imagenet import iterate, get_val_files
   from extra.lr_scheduler import CosineAnnealingLR
 
-  def cross_entropy(out, Y, label_smoothing=0):
+  def sparse_categorical_crossentropy(out, Y, label_smoothing=0):
     num_classes = out.shape[-1]
-    YY = Y.flatten().astype(np.int32)
-    y = np.zeros((YY.shape[0], num_classes), np.float32)
-    y[range(y.shape[0]),YY] = -1.0*num_classes
-    y = y.reshape(list(Y.shape)+[num_classes])
-    y = Tensor(y)
+    y_counter = Tensor.arange(num_classes, requires_grad=False).unsqueeze(0).expand(Y.numel(), num_classes)
+    y = (y_counter == Y.flatten().reshape(-1, 1)).where(-1.0 * num_classes, 0)
+    y = y.reshape(*Y.shape, num_classes)
     return (1 - label_smoothing) * out.mul(y).mean() + (-1 * label_smoothing * out.mean())
   
+  @TinyJit
   def train_step(X, Y):
     optimizer.zero_grad()
     out = model.forward(X)
-    loss = cross_entropy(out, Y, label_smoothing=0.1)
+    loss = sparse_categorical_crossentropy(out, Y, label_smoothing=0.1)
     loss.backward()
     optimizer.step()
     scheduler.step()
-    return loss, out
+    return loss.realize(), out.realize()
   
+  @TinyJit
   def eval_step(X, Y):
     out = model.forward(X)
-    loss = cross_entropy(out, Y, label_smoothing=0.1)
-    return loss, out
+    loss = sparse_categorical_crossentropy(out, Y, label_smoothing=0.1)
+    return loss.realize(), out.realize()
   
   def calculate_accuracy(out, Y, top_n):
     out_top_n = np.argpartition(out.cpu().numpy(), -top_n, axis=-1)[:, -top_n:]
-    YY = np.expand_dims(Y, axis=1)
+    YY = np.expand_dims(Y.numpy(), axis=1)
     YY = np.repeat(YY, top_n, axis=1)
 
     eq_elements = np.equal(out_top_n, YY)
@@ -72,13 +72,13 @@ def train_resnet():
     # train loop
     Tensor.training = True
     for X, Y in (t := tqdm(iterate(bs=BS, val=True), total=steps_in_train_epoch)):
-      X = Tensor(X, requires_grad=False)
+      X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
       st = time.time()
       loss, out = train_step(X, Y)
       et = time.time()
 
       t.set_description(f"loss: {loss.numpy().item():.3f}")
-      wandb.log({"train/loss": loss.numpy().item(), 
+      wandb.log({"train/loss": loss.numpy().item(),
                  "train/forward_time": et - st,
                  "lr": scheduler.get_lr().cpu().numpy().item(),
       })
@@ -90,7 +90,7 @@ def train_resnet():
     eval_top_5_acc = []
     Tensor.training = False
     for X, Y in (t := tqdm(iterate(bs=BS, val=True), total=steps_in_val_epoch)):
-      X = Tensor(X, requires_grad=False)
+      X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
       st = time.time()
       loss, out = eval_step(X, Y)
       et = time.time()
@@ -136,5 +136,3 @@ if __name__ == "__main__":
     if nm in globals():
       print(f"training {m}")
       globals()[nm]()
-
-
