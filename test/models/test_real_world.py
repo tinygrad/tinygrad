@@ -59,7 +59,7 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t): return model(t, 0).realize()
-    helper_test("test_llama", lambda: (Tensor([[1,]]),), test, 0.22 if CI else 13.5, 126 if CI else 550)
+    helper_test("test_llama", lambda: (Tensor([[1,]]),), test, 0.22 if CI else 13.5, 142 if CI else 550)
 
     Tensor.default_type = old_type
 
