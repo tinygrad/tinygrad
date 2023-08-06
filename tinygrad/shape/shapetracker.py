@@ -76,7 +76,7 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
   assert len(idxs) == len(shape), "need an idx for all dimensions"
   acc = 1
   ret = []
-  for tidx,d in reversed(list(zip(idxs, shape))):
+  for tidx,d in list(zip(idxs, shape))[::-1]:
     ret.append(tidx * acc)
     acc *= d
   return Variable.sum(ret)
@@ -178,7 +178,7 @@ class ShapeTracker:
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
   def _expr_idx(self, idx, valid):
-    for v in reversed(self.views[0:-1]):
+    for v in self.views[:-1][::-1]:
       valid = v.expr_node_mask(idx, valid)
       idx = v.expr_node(idx)
     return idx, valid
