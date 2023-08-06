@@ -95,14 +95,14 @@ def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movement
 
 lazycache: LightWeakValueDictionary = LightWeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType):
-  #print("create_lazybuffer", device, shape, optype, op, dtype)
-
   # fromcpu aren't cached
   if not LAZYCACHE or (optype is LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}): return LazyBuffer(device, st, optype, op, dtype)
 
   # wop is the deduping key. i feel this used to compare more deeply
   wop = (device, dtype, optype, ref(op))
-  if wop in lazycache: return lazycache[wop]
+  if wop in lazycache:
+    for x in op.buffers: x.children.add(lazycache[wop])
+    return lazycache[wop]
 
   lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype)
   return ret
@@ -367,7 +367,7 @@ def _realize_rand(buffer: LazyBuffer) -> None:
   buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=buffer.shape, dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args()) # type: ignore
 
 def _realize_const(buffer: LazyBuffer) -> None:
-  if hasattr(Device[buffer.device].codegen, 'supports_constant_folding'):
+  if isinstance(Device[buffer.device], Compiled) and buffer.device not in ["LLVM"]:  # consts are broken in LLVM in NaN/inf
     buffer.realized = RawConst(1, buffer.dtype, float(buffer.op.arg))
   else:
     buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args())
