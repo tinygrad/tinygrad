@@ -259,9 +259,10 @@ def _prep_audio(waveform=None, sr=_RATE, padding=0) -> Tensor:
   _N_FFT = 400
   _N_MELS = 80
   if padding > 0: waveform = np.pad(waveform, (0, padding))
-  S = np.abs(librosa.stft(waveform, n_fft=_N_FFT, hop_length=_HOP_LENGTH))**2
+  S = np.abs(librosa.stft(waveform, n_fft=_N_FFT, hop_length=_HOP_LENGTH, win_length=_N_FFT, window=librosa.filters.get_window("hann", _N_FFT), pad_mode="reflect"))**2
   mel_spec = librosa.feature.melspectrogram(S=S, sr=sr, n_fft=_N_FFT, n_mels=_N_MELS)
-  log_spec = np.log10(np.clip(mel_spec, 1e-10, mel_spec.max()*10))
+  log_spec = np.log10(np.clip(mel_spec, a_min=1e-10, a_max=None))
+  log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
   return log_spec
 
