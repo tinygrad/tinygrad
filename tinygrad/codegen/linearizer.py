@@ -145,7 +145,7 @@ class Linearizer:
 
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)
-    self.arg_bufs = {x:f"data{i}" for i,x in enumerate(dedup([x.realized for x in self.bufs if buf_is_kernel_arg(x)]))}
+    self.arg_bufs = {x:f"data{i}" for i,x in enumerate(dict.fromkeys([x.realized for x in self.bufs if buf_is_kernel_arg(x)]))}
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
@@ -168,11 +168,11 @@ class Linearizer:
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
-    assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
+    assert len(set(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None
 
     # get earlybufs, before the one reduce op
-    self.earlybufs = dedup(self.reduceop.buffers) if self.reduceop else []
+    self.earlybufs = tuple(dict.fromkeys((self.reduceop.buffers))) if self.reduceop else []
 
     # create new shapetrackers inside this kernel, we will permute them
     self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]

@@ -133,7 +133,7 @@ class ASTRunner:
     return self
 
   def exec(self, bufs, force_wait=False, optimizing=False) -> Optional[float]:
-    rawbufs = dedup([x.realized for x in bufs if buf_is_kernel_arg(x)])
+    rawbufs: List[RawBuffer] = list(dict.fromkeys([x.realized for x in bufs if buf_is_kernel_arg(x)]))  # dedup
     if GlobalCounters.cache is not None and not optimizing: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs, force_wait=force_wait)
 
@@ -154,7 +154,7 @@ class Compiled:
   def __init__(self, buffer: Type[RawBuffer], codegen, runtime, synchronize=lambda: None):
     self.buffer, self.codegen, self.runtime, self.synchronize = buffer, codegen, runtime, synchronize
     self.method_cache: Dict[str, ASTRunner] = {}
-
+  
   def exec_ast(self, ast:LazyOp, output, **kwargs):
     # all movementops do nothing in a Compiled buffer!
     if ast.op in MovementOps and ast.src[0].__class__ is not LazyOp and ast.src[0].realized: return ast.src[0].realized

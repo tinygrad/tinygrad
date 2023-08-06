@@ -9,7 +9,7 @@ ShapeType = Tuple[int, ...]
 OSX = platform.system() == "Darwin"
 CI = os.getenv("CI", "") != ""
 
-def dedup(x): return [] if not x else list(x) if len(x) == 1 else list(dict.fromkeys(x))   # retains list order
+def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x): return tuple(x if type(x[0]) is int else x[0])
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def all_same(items): return len(set(items)) == 1 if len(items) > 1 else True
