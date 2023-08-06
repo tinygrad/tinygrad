@@ -86,12 +86,12 @@ class ConvGroup:
 
   def __call__(self, x):
     x = self.conv[0](x).max_pool2d(2)
-    x = self.norm[0](x).relu()
+    x = self.norm[0](x).gelu()
     if self.short: return x
     residual = x
-    mult = self.se2((self.se1(residual.mean((2,3)))).relu()).sigmoid().reshape(x.shape[0], x.shape[1], 1, 1) if self.se else 1.0
-    x = self.norm[1](self.conv[1](x)).relu()
-    x = self.norm[2](self.conv[2](x) * mult).relu()
+    mult = self.se2((self.se1(residual.mean((2,3)))).gelu()).sigmoid().reshape(x.shape[0], x.shape[1], 1, 1) if self.se else 1.0
+    x = self.norm[1](self.conv[1](x)).gelu()
+    x = self.norm[2](self.conv[2](x) * mult).gelu()
     return x + residual
 
 class SpeedyResNet:
@@ -99,7 +99,7 @@ class SpeedyResNet:
     self.whitening = W
     self.net = [
       nn.Conv2d(12, 32, kernel_size=1),
-      lambda x: x.relu(),
+      lambda x: x.gelu(),
       ConvGroup(32, 64, short=False),
       ConvGroup(64, 256, short=True),
       ConvGroup(256, 512, short=False),
@@ -290,7 +290,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
   batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
   while i <= STEPS:
     X, Y = next(batcher)
-    if i >= 600: X, Y = cutmix(X, Y)
+    if i >= 500: X, Y = cutmix(X, Y)
     if i%100 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
