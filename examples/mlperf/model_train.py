@@ -41,8 +41,10 @@ def train_unet3d(target=0.908, roi_shape=(128,128,128)):
       for image, label in iterate():
         pred, label = sliding_window_inference(mdl, image, label, roi_shape)
         s += get_dice_score(pred, label).mean()
+      val_dice_score = s / len(get_val_files())
+      print(f"[Epoch {epoch}] Val dice score: {val_dice_score:.4f}. Target: {target}")
       Tensor.training = True
-      if s / len(get_val_files()) >= target:
+      if val_dice_score >= target:
         break
 
 def train_rnnt():
