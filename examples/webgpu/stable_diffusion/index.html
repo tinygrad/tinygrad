@@ -16,13 +16,18 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
 * {  text-align: center;  font-family: monospace; }
 </style>
 <title>tinygrad has WebGPU</title>
+
+<script type="module">
+    import ClipTokenizer from './clip_tokenizer.js';
+    window.clipTokenizer = new ClipTokenizer();
+</script>
 <script src="./net.js"></script>
 </head>
 <body>
 <h1>WebGPU <a href="https://github.com/geohot/tinygrad">tinygrad</a> StableDiffusion!</h1>
 <div id="mybox">
 <input type="text" id="prompt" placeholder="write your prompt here" value="a horse sized cat eating a bagel" hidden>
-<input class="bigg" type="button" onclick="runNet()" value="Run">
+<input id="btnRunNet" class="bigg" type="button"  value="Run">
 </div>
 <br/>
 <canvas id="canvas" width="512" height="512"> </canvas>
@@ -31,6 +36,8 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
 <div id="time"></div>
 </div>
 <script>
+    window.addEventListener('load', function() {
+    console.log(window.clipTokenizer.encodeForCLIP("A horse sized cat eating a bagel."));
 	var NumpyLoader = (function () {
     function asciiDecode(buf) {
         return String.fromCharCode.apply(null, new Uint8Array(buf));
@@ -162,33 +169,38 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
 		resultText.innerHTML = "ready"
 	}
 
-	const runNet = () => {
-		if (!net) error("Net not loaded yet.");
 
-		NumpyLoader.ajax("./latent_tensor.npy", async (input) => {
-			console.log(input.data);
-			const out = await timer(() => net(input.data));
-			
-			let pixels = []
-			let pixelCounter = 0
+    document.getElementById("btnRunNet").addEventListener("click", function(e) {
+            if (!net) error("Net not loaded yet.");
 
-			for (let j = 0; j < 512; j++) {
-				for (let k = 0; k < 512; k++) {
-					pixels.push(out[pixelCounter])
-					pixels.push(out[pixelCounter+1])
-					pixels.push(out[pixelCounter+2])
-					pixels.push(255)
-					pixelCounter += 3
-				}
-			}
-			
-			ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), 512, 512), 0, 0);
-			console.log(out);
-			console.log("Success");
-		});
-	};
+            NumpyLoader.ajax("./test_prompt.npy", async (input) => {
+                console.log(input.data);
+                const out = await timer(() => net(input.data));
+                
+                let pixels = []
+                let pixelCounter = 0
 
-	loadLet();
+                for (let j = 0; j < 512; j++) {
+                    for (let k = 0; k < 512; k++) {
+                        pixels.push(out[pixelCounter])
+                        pixels.push(out[pixelCounter+1])
+                        pixels.push(out[pixelCounter+2])
+                        pixels.push(255)
+                        pixelCounter += 3
+                    }
+                }
+                
+                ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), 512, 512), 0, 0);
+                console.log(out);
+                console.log("Success");
+            });
+        }, false);
+
+	
+
+	    loadLet();
+    })
+    
 </script>
 </body>
 </html>

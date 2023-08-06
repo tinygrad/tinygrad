@@ -184,11 +184,11 @@ class ResBlock:
     self.skip_connection = Conv2d(channels, out_channels, 1) if channels != out_channels else lambda x: x
 
   def __call__(self, x, emb):
-    h = x.sequential(self.in_layers)
-    emb_out = emb.sequential(self.emb_layers)
-    h = h + emb_out.reshape(*emb_out.shape, 1, 1)
-    h = h.sequential(self.out_layers)
-    ret = self.skip_connection(x) + h
+    h = x.sequential(self.in_layers).realize()
+    emb_out = emb.sequential(self.emb_layers).realize()
+    h = h + emb_out.reshape(*emb_out.shape, 1, 1).realize()
+    h = h.sequential(self.out_layers).realize()
+    ret = (self.skip_connection(x) + h).realize()
     return ret
 
 class CrossAttention:
@@ -261,13 +261,13 @@ class SpatialTransformer:
   def __call__(self, x, context=None):
     b, c, h, w = x.shape
     x_in = x
-    x = self.norm(x)
-    x = self.proj_in(x)
-    x = x.reshape(b, c, h*w).permute(0,2,1)
+    x = self.norm(x).realize()
+    x = self.proj_in(x).realize()
+    x = x.reshape(b, c, h*w).permute(0,2,1).realize()
     for block in self.transformer_blocks:
       x = block(x, context=context)
-    x = x.permute(0,2,1).reshape(b, c, h, w)
-    ret = self.proj_out(x) + x_in
+    x = x.permute(0,2,1).reshape(b, c, h, w).realize()
+    ret = (self.proj_out(x) + x_in).realize()
     return ret
 
 class Downsample:
@@ -288,8 +288,8 @@ class Upsample:
 
 def timestep_embedding(timesteps, dim, max_period=10000):
   half = dim // 2
-  freqs = (-math.log(max_period) * Tensor.arange(half) / half).exp()
-  args = timesteps * freqs
+  freqs = (-math.log(max_period) * Tensor.arange(half) / half).exp().realize()
+  args = (timesteps * freqs).realize()
   return Tensor.cat(args.cos(), args.sin()).reshape(1, -1)
 
 class UNetModel:
@@ -342,6 +342,7 @@ class UNetModel:
     # TODO: real time embedding
     t_emb = timestep_embedding(timesteps, 320)
     emb = t_emb.sequential(self.time_embed)
+    
 
     def run(x, bb):
       if isinstance(bb, ResBlock): x = bb(x, emb)
@@ -584,80 +585,21 @@ class StableDiffusion:
     self.first_stage_model = AutoencoderKL()
     self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = CLIPTextTransformer()))
 
-  def forward(self, prompt_tensor):
-    '''context = self.cond_stage_model.transformer.text_model(prompt_tensor).realize()
-
-    unconditional_prompt = Tensor([
-      [49406, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 
-       49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 
-       49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 
-       49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 
-       49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 
-       49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 
-       49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407]
-    ])
-
-    unconditional_context = self.cond_stage_model.transformer.text_model(unconditional_prompt).realize()
-
-    return context'''
-
-    '''def get_model_output(latent, timestep):
-      # put into diffuser
-      latent_exp = latent.expand(2, *latent.shape[1:]).realize()
-      timestep_exp = timestep.expand(2, *timestep.shape[1:]).realize()
-      uncond_cat = unconditional_context.cat(context, dim=0).realize()
-
-      latents = self.model.diffusion_model(latent_exp, timestep_exp, uncond_cat)
-      unconditional_latent, latent = latents[0:1], latents[1:2]
-
-      unconditional_guidance_scale = 7.5
-      scaled_latent =  (unconditional_guidance_scale * (latent - unconditional_latent)).realize()
-      e_t = (unconditional_latent + scaled_latent).realize()
-      return e_t
-    
-    timesteps = list(range(1, 1000, 1000//5))
-    print(f"running for {timesteps} timesteps")
-    alphas = [model.alphas_cumprod.numpy()[t] for t in timesteps]
-    alphas_prev = [1.0] + alphas[:-1]
-
-    def get_x_prev_and_pred_x0(x, e_t, index):
-      temperature = 1
-      a_t, a_prev = alphas[index], alphas_prev[index]
-      sigma_t = 0
-      sqrt_one_minus_at = math.sqrt(1-a_t)
-      #print(a_t, a_prev, sigma_t, sqrt_one_minus_at)
-
-      pred_x0 = (x - sqrt_one_minus_at * e_t) / math.sqrt(a_t)
-
-      # direction pointing to x_t
-      dir_xt = math.sqrt(1. - a_prev - sigma_t**2) * e_t
-      noise = sigma_t * Tensor.randn(*x.shape) * temperature
-
-      x_prev = math.sqrt(a_prev) * pred_x0 + dir_xt #+ noise
-      return x_prev, pred_x0
-
-    # start with random noise
-    latent = Tensor.randn(1,4,64,64)
-
-    # this is diffusion
-    for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
-      # GlobalCounters.reset()
-      t.set_description("%3d %3d" % (index, timestep))
-      e_t = get_model_output(latent, Tensor([timestep]))
-      x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t, index)
-      latent = x_prev
-      latent.realize()
-    '''
-
-    # upsample latent space to image with autoencoder
-    x = self.first_stage_model.post_quant_conv(1/0.18215 * prompt_tensor)
+  # JIT the model in multiple steps to allow dynamic parameter control (feed random latent tensor, and variable timesteps)
+  def run_cond_stage(self, prompt_tensor):
+    return self.cond_stage_model.transformer.text_model(prompt_tensor)
+  
+  def run_diffuser(self, latent):
+    return latent
+  
+  def run_decoder(self, latent):
+    x = self.first_stage_model.post_quant_conv(1/0.18215 * latent)
     x = self.first_stage_model.decoder(x)
 
     # make image correct size and scale
     x = (x + 1.0) / 2.0
-    x = (x.reshape(3,512,512).permute(1,2,0).clip(0,1)*255)
+    return (x.reshape(3,512,512).permute(1,2,0).clip(0,1)*255)
 
-    return x
 
   # TODO: make __call__ run the model
 
@@ -718,8 +660,11 @@ if __name__ == "__main__":
 
   timesteps = list(range(1, 1000, 1000//args.steps))
   print(f"running for {timesteps} timesteps")
+  print(model.alphas_cumprod.numpy())
   alphas = [model.alphas_cumprod.numpy()[t] for t in timesteps]
+  print(alphas)
   alphas_prev = [1.0] + alphas[:-1]
+  print(alphas[:-1])
 
   def get_x_prev_and_pred_x0(x, e_t, index):
     temperature = 1
@@ -735,6 +680,8 @@ if __name__ == "__main__":
     noise = sigma_t * Tensor.randn(*x.shape) * temperature
 
     x_prev = math.sqrt(a_prev) * pred_x0 + dir_xt #+ noise
+    print(x_prev)
+    print(pred_x0)
     return x_prev, pred_x0
 
   # start with random noise
@@ -742,6 +689,7 @@ if __name__ == "__main__":
 
   # this is diffusion
   for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
+    print(f'index={index}')
     GlobalCounters.reset()
     t.set_description("%3d %3d" % (index, timestep))
     e_t = get_model_output(latent, Tensor([timestep]))

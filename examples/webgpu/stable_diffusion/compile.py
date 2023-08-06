@@ -53,7 +53,7 @@ if __name__ == "__main__":
   #Tensor([tokenizer.encode("The brain drawn in the style of Da Vinci sketch")]
 
   print(tokenizer.encode(""))
-  run, special_names = jit_model(model, Tensor.randn(1,4,64,64))
+  run, special_names = jit_model(model, Tensor([tokenizer.encode("")]))
   functions, statements, bufs, _ = compile_net(run, special_names)
   
   state = get_state_dict(model)

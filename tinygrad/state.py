@@ -22,6 +22,8 @@ def safe_save(tensors:Dict[str, Tensor], fn:str):
   metadata, offset = {}, 0
   for k,v in tensors.items():
     metadata[k] = {'dtype': inverse_safe_dtypes[v.dtype], 'shape': list(v.shape), 'data_offsets':[offset, offset+v.nbytes()]}
+    if "time_embed" in k:
+      print(k)
     offset += v.nbytes()
   j = json.dumps(metadata, separators=(',', ':'))
   j += "\x20"*((8-len(j)%8)%8)
