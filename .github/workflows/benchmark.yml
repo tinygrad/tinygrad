@@ -1,7 +1,9 @@
 name: Benchmarks
 
 on:
-  push
+  push:
+    branches:
+      - master
 
 jobs:
   testmacbenchmark:
