@@ -29,6 +29,32 @@ def is_contiguous(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> bool: retur
 def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
   return tuple([stride if shp != 1 else 0 for stride, shp in zip(strides, shape)])
 
+@functools.lru_cache(maxsize=None)
+def _expr_node_mask(shape, mask, idx, valid) -> Node:
+  expr = [valid] if valid is not None else []
+  if mask is not None:
+    acc = 1
+    for ns,(x,y) in list(zip(shape, mask))[::-1]:
+      base = ((idx//acc) % ns)
+      expr += [base >= x, base < y]
+      acc *= ns
+  return Variable.ands(expr)
+
+@functools.lru_cache(maxsize=None)
+def _expr_node(shape, offset, shape_strides, idx) -> Node:
+  if idx is None: idx = Variable('idx', 0, prod(shape)-1)
+  ret: List[Node] = [Variable.num(offset)] if offset else []
+  acc = 1
+  for d,s in shape_strides[::-1]:
+    ret.append(((idx//acc)%d)*s)
+    acc *= d
+  return Variable.sum(ret)
+
+@functools.lru_cache(maxsize=None)
+def _expr_idxs(shape, offset, strides, idxs):
+  assert len(idxs) == len(shape), f"need an idx for all dimensions {idxs} vs {shape}"
+  return Variable.sum([Variable.num(offset)] + [idx*st for idx,sh,st in zip(idxs, shape, strides) if sh != 1 and st != 0])
+
 class ViewInternal(NamedTuple):
   shape:Tuple[int, ...]
   strides:Tuple[int, ...]
@@ -46,30 +72,13 @@ class View(ViewInternal):
     return super().__new__(cls, shape, strides, offset, mask, contiguous, to_shape_strides(shape, strides))
   def __init__(self, shape, strides=None, offset=0, mask=None, contiguous=False, shape_strides=()): super().__init__()
 
-  def expr_node_mask(self, idx, valid=None) -> Node:
-    expr = [valid] if valid is not None else []
-    if self.mask is not None:
-      acc = 1
-      for ns,(x,y) in reversed(list(zip(self.shape, self.mask))):
-        base = ((idx//acc) % ns)
-        expr += [base >= x, base < y]
-        acc *= ns
-    return Variable.ands(expr)
+  def expr_node_mask(self, idx, valid=None) -> Node: return _expr_node_mask(self.shape, self.mask, idx, valid)
 
   # generate an expression if you have a single idx variable
-  def expr_node(self, idx=None) -> Node:
-    if idx is None: idx = Variable('idx', 0, prod(self.shape)-1)
-    ret: List[Node] = [Variable.num(self.offset)] if self.offset else []
-    acc = 1
-    for d,s in reversed(self.shape_strides):
-      ret.append(((idx//acc)%d)*s)
-      acc *= d
-    return Variable.sum(ret)
+  def expr_node(self, idx=None) -> Node: return _expr_node(self.shape, self.offset, self.shape_strides, idx)
 
   # generate an expression if you have a variable or expression for each index
-  def expr_idxs(self, idxs) -> Node:
-    assert len(idxs) == len(self.shape), f"need an idx for all dimensions {idxs} vs {self.shape}"
-    return Variable.sum([Variable.num(self.offset)] + [idx*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
+  def expr_idxs(self, idxs) -> Node: return _expr_idxs(self.shape, self.offset, self.strides, idxs)
 
 @functools.lru_cache(maxsize=None)
 def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
