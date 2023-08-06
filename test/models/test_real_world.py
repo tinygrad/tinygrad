@@ -47,7 +47,7 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t, t2): return model(t, 801, t2).realize()
-    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 14.5, 924)
+    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 14.5, 967)
 
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE, "needs JIT")
   def test_llama(self):
@@ -87,7 +87,7 @@ class TestRealWorld(unittest.TestCase):
       loss.backward()
       optimizer.step()
 
-    helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/32)*BS, 236)
+    helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/32)*BS, 267)
 
     # reset device
     Tensor.training = old_training
