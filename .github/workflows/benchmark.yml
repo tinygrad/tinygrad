@@ -17,5 +17,4 @@ jobs:
       run: python3 test/external/external_model_benchmark.py
     - uses: actions/upload-artifact@v3
       with:
-        name: onnx_model_benchmark.csv
-        path: /tmp/speed.csv
+        path: onnx_inference_speed.csv
