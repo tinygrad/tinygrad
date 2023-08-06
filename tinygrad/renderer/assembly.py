@@ -31,10 +31,13 @@ class AssemblyLanguage(NamedTuple):
   supports_load3: bool = False
   sin_is_sin2pi: bool = False
   no_div: bool = False
+
+  #  FIXME: cleanup?
+  # stateful
   cnts:DefaultDict[Tuple[DType, bool], int] = defaultdict(int)
   tor: Dict[Any, Register] = {}
-  ins = []
   bufs_cnt = 0
+  ins = []
 
   def newreg(self, tok, dtype=dtypes.float32, scalar=False):
     if isinstance(tok, Token): dtype = tok.dtype  # this
@@ -98,6 +101,7 @@ class AssemblyLanguage(NamedTuple):
 # s registers are the addresses and non local indexes
 def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
   # ins = []
+  lang.ins = []
   # FIXME: Think this is taken care of by DEFINE_GLOBAL now?
   # ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64, scalar=True), [], f"buf{i}") for i in range(len(self.bufs))]
   global_size, local_size = [], []
@@ -113,7 +117,6 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
       lang.ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
       lang.ins.append(AssemblyInstruction(UOps.ALU, lang.newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
     elif uop == UOps.LOOP:
-      print("We should inc a size?", args)
       if args[1] == "global":
         for i,var in enumerate(args[0]):
           global_size.append(var.max+1)
@@ -184,7 +187,6 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
       lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared')))
 
   # define registers
-  print(f"{lang.cnts=}")
   lang.ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)) for dtype,c in lang.cnts.items()] + lang.ins
 
   if DEBUG >= 4:
