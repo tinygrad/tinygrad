@@ -38,7 +38,8 @@ def benchmark(mnm, nm, fxn):
   CSV[nm] = min(tms)*1e-6
   return min(tms), ret
 
-BASE = pathlib.Path(__file__).parent.parent.parent / "weights" / "onnx"
+#BASE = pathlib.Path(__file__).parent.parent.parent / "weights" / "onnx"
+BASE = pathlib.Path("/tmp/onnx")
 def benchmark_model(m):
   global open_csv, CSV
   CSV = {"model": m}
