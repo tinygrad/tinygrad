@@ -19,6 +19,7 @@ MODELS = {
   "openpilot": "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx",
   "efficientnet": "https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
   "shufflenet": "https://github.com/onnx/models/raw/main/vision/classification/shufflenet/model/shufflenet-9.onnx",
+  "googlenet": "https://github.com/onnx/models/raw/main/vision/body_analysis/age_gender/models/age_googlenet.onnx",
 
   # broken in torch MPS
   "zfnet": "https://github.com/onnx/models/raw/main/vision/classification/zfnet-512/model/zfnet512-9.onnx",
@@ -28,6 +29,10 @@ MODELS = {
   "bert": "https://github.com/onnx/models/raw/main/text/machine_comprehension/bert-squad/model/bertsquad-8.onnx",
   # really slow
   "resnet18": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet18-v2-7.onnx",
+  # requires upsample
+  "retinanet": "https://github.com/onnx/models/raw/main/vision/object_detection_segmentation/retinanet/model/retinanet-9.onnx",
+  # AssertionError:
+  "maskrcnn": "https://github.com/onnx/models/raw/main/vision/object_detection_segmentation/mask-rcnn/model/MaskRCNN-12.onnx",
 }
 
 CSV = {}
@@ -50,10 +55,10 @@ def benchmark(mnm, nm, fxn, ort_ret=None):
     CSV[nm] = min(tms)*1e-6
     return min(tms), ret
   except Exception as e:
-    if isinstance(e, AssertionError): 
+    if isinstance(e, AssertionError) and str(e)[1:7] == "Not eq": 
       error_info = str(e).split('\n')
       print(f"{m:15s} {nm:25s} {min(tms)*1e-6:7.2f} ms {error_info[1]} {error_info[3]}")
-      CSV[nm] = f"failed correctness check with {min(tms)*1e-6}"
+      CSV[nm] = f"failed correctness check"
     else:
       print(f"{m:15s} {nm:25s} raised {type(e)} during run")
       CSV[nm] = f"{type(e)} raised during run"
