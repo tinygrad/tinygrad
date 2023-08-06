@@ -4,11 +4,12 @@ on:
   push:
     branches:
       - master
+      - update_benchmark
 
 jobs:
   testmacbenchmark:
     name: Mac Benchmark
-    runs-on: self-hosted
+    runs-on: [self-hosted, macOS]
 
     steps:
     - name: Checkout Code
