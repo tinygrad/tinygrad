@@ -205,7 +205,7 @@ def hand_coded_optimizations(k:Linearizer):
     for axis, upcast_amount in product(range(k.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
       # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis not in upcasted_axis and k.full_shape[axis]%upcast_amount == 0 and any(k.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in k.upcasted_axis(buf_index)) for buf_index in range(len(k.sts))):
-        xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in k.sts), sum(st.views[-1].strides[axis] for st in k.sts), axis, upcast_amount))
+        xb_choices.append((sum([st.views[-1].strides[axis]>0 for st in k.sts]), sum([st.views[-1].strides[axis] for st in k.sts]), axis, upcast_amount))
     if xb_choices:
       xb_choices = sorted(xb_choices)
       if DEBUG >= 4: print(f"float4 merging axis : {xb_choices}")
@@ -217,7 +217,7 @@ def hand_coded_optimizations(k:Linearizer):
       break
 
   # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
-  if k.first_reduce < (k.shape_len-k.upcasted) and (len(list(k.shape_offsets(k.full_buf_index))) <= 4 or not any(r for _,_,r in k.upcasted_axis(k.full_buf_index))):
+  if k.first_reduce < (k.shape_len-k.upcasted) and (len(tuple(k.shape_offsets(k.full_buf_index))) <= 4 or not any(r for _,_,r in k.upcasted_axis(k.full_buf_index))):
     if (s:=k.full_unupcasted_shape[-1]) <= 32:
       k.upcast()
       # if it's small, upcast a second reduce dimension too

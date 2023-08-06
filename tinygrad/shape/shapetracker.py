@@ -131,7 +131,7 @@ def get_pad_args(shape:Tuple[int,...], arg:Tuple[Tuple[int, int], ...]):
 
 @functools.lru_cache(maxsize=None)
 def get_unsafe_resize_offset(strides, arg):
-  return sum(s * x[0] for s, x in zip(strides,arg))
+  return sum([s * x[0] for s, x in zip(strides,arg)])
 
 class ShapeTracker:
   __slots__ = "views"

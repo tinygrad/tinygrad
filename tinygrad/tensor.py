@@ -278,7 +278,7 @@ class Tensor:
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
     val = list(val) if isinstance(val, tuple) else [val]
-    if (num_slices := sum(isinstance(v, (slice, int)) for v in val)) > len(self.shape):
+    if (num_slices := sum([isinstance(v, (slice, int)) for v in val])) > len(self.shape):
       raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     orig_slices = list(val)
     ellipses_found = [i for i, v in enumerate(val) if v is Ellipsis]
