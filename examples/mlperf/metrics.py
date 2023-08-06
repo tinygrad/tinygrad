@@ -2,6 +2,8 @@ import re
 import string
 from collections import Counter
 import numpy as np
+from tinygrad.tensor import Tensor
+
 
 def levenshtein(a, b):
   n, m = len(a), len(b)
@@ -30,20 +32,28 @@ def word_error_rate(x, y):
   return float(scores) / words, float(scores), words
 
 def one_hot(arr, num_classes=3):
-  res = np.eye(num_classes)[np.array(arr).reshape(-1)]
-  arr = res.reshape(list(arr.shape) + [num_classes])
-  arr = arr.transpose((0, 4, 1, 2, 3)).astype(np.float32)
+  res = np.eye(num_classes)[np.array(arr.astype(int)).reshape(-1)]
+  arr = res.reshape([arr.shape[0]] + [num_classes] + list(arr.shape[2:]))
+  arr = arr.astype(np.float32)
   return arr
 
 def get_dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6):
-  channel_axis, reduce_axis = 1, tuple(range(2, len(prediction.shape)))
-  prediction = prediction.argmax(axis=channel_axis)
-  prediction, target= one_hot(prediction)[:, 1:], one_hot(target)[:, 1:]
-  intersection = np.sum(prediction * target, axis=reduce_axis)
-  target_sum = np.sum(target, axis=reduce_axis)
-  prediction_sum = np.sum(prediction, axis=reduce_axis)
-  result = (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
-  return result[0]
+  reduce_axis = list(range(2, len(prediction.shape)))
+  prediction = prediction.softmax(channel_axis)
+  assert target.shape == prediction.shape, f"Target and prediction shape do not match. Target: ({target.shape}), prediction: ({prediction.shape})."
+  intersection = (target * prediction).sum(axis=reduce_axis)
+  target_sum = target.sum(axis=reduce_axis)
+  prediction_sum = prediction.sum(axis=reduce_axis)
+  return (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
+
+def dice_ce_loss(y_pred, y_true, n_classes):
+  y_true = one_hot(y_true, n_classes)
+  y_true = Tensor(y_true, requires_grad=False)
+  cross_entropy = -y_true.mul(y_pred.clip(1e-10, 1).log()).mean()
+  dice_score = get_dice_score(y_pred, y_true)
+  dice_loss = (Tensor.ones_like(dice_score) - dice_score).mean()
+  loss = (dice_loss + cross_entropy) / 2
+  return loss
 
 def normalize_string(s):
   s = "".join(c for c in s.lower() if c not in string.punctuation)
