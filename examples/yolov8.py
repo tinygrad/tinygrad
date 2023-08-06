@@ -276,7 +276,7 @@ class C2f:
     z = y[0]
     for i in y[1:]: z = z.cat(i, dim=1)
     return self.cv2(z)
-  
+
 class SPPF:
   def __init__(self, c1, c2, k=5):
     c_ = c1 // 2  # hidden channels
@@ -290,6 +290,7 @@ class SPPF:
     x3 = self.maxpool(x2)
     x4 = self.maxpool(x3)
     return self.cv2(x.cat(x2, x3, x4, dim=1))
+
 
 class DFL:
   def __init__(self, c1=16):
