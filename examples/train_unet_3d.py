@@ -12,7 +12,7 @@ from tinygrad.state import get_parameters
 from tinygrad.tensor import Tensor
 
 
-### Architecture definition 
+### Architecture definition
 # Based off https://github.com/mlcommons/training/blob/master/image_segmentation/pytorch/model/unet3d.py
 
 class DownsampleBlock:
@@ -35,7 +35,7 @@ class OutputLayer:
   def __call__(self, x):
     # The relu activation is not in the MLPerf implementation
     return self.conv(x).relu()
-    
+
 class UpsampleBlock:
   def __init__(self, in_channels, out_channels):
     self.in_channels = in_channels
@@ -78,7 +78,7 @@ class Unet3D:
       x = upsample(x, skip)
     x = self.output(x)
     return x
-    
+
 
 ### Data download/loading ###
 # Data is from the KITS19 challenge: https://kits19.grand-challenge.org/
@@ -98,7 +98,7 @@ def fetch_kits19(num_cases=210, train_test_split=0.8):
       X_test.append(imaging)
       Y_test.append(segmentation)
   return X_train, Y_train, X_test, Y_test
-    
+
 def get_case(cid):
   BASE = Path(__file__).parent.parent / "data"
   cid = f"{cid:05d}"
@@ -143,9 +143,9 @@ def get_one_hot(targets, nb_classes):
 def epoch(is_training, model, X, Y, optim, n_classes, noloss=False):
   Tensor.training = is_training
   for step in (t := trange(len(X), disable=getenv('CI', False))):
-    x = Tensor(np.asarray(X[step], dtype=np.float32), requires_grad=False).unsqueeze(0).unsqueeze(0)
+    x = Tensor(np.asarray(X[step][:50,:50,:50], dtype=np.float32), requires_grad=False).unsqueeze(0).unsqueeze(0)
     y = Y[step]
-    y = np.asarray(y, dtype=np.int32)
+    y = np.asarray(y, dtype=np.int32)[:50,:50,:50]
     y = get_one_hot(y, n_classes)
     y = Tensor(y, requires_grad=False)
     out = model(x)
