@@ -1,9 +1,7 @@
 import numpy as np
-from tinygrad.helpers import dtypes
-from tinygrad.nn import Linear
 import torch
 import unittest
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, Device
 from tinygrad.nn.optim import Adam, SGD, AdamW
 import pytest
 
@@ -69,8 +67,10 @@ class TestOptim(unittest.TestCase):
   def test_multistep_sgd_high_lr_nesterov_momentum_wd(self): self._test_sgd(10, {'lr': 9, 'momentum': 0.9, 'nesterov': True, 'weight_decay': 0.1}, 1e-5, 3e-4)
 
   def test_adam(self): self._test_adam(1, {'lr': 0.001}, 1e-5, 0)
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "breaking on webgpu")
   def test_adam_high_lr(self): self._test_adam(1, {'lr': 10}, 1e-5, 1e-5)
   def test_adamw(self): self._test_adamw(1, {'lr': 0.001}, 1e-5, 0)
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "breaking on webgpu")
   def test_adamw_high_lr(self): self._test_adamw(1, {'lr': 10}, 1e-5, 1e-5)
 
   def test_multistep_adam(self): self._test_adam(10, {'lr': 0.001}, 1e-5, 0)

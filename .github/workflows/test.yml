@@ -185,7 +185,7 @@ jobs:
       run: DEBUG=2 METAL=1 python -m pytest test/test_jit.py
     # TODO: why not testing the whole test/?
     - name: Run webgpu pytest
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto -m 'webgpu'
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto --ignore test/models/ --ignore test/test_linearizer.py test/
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
 
