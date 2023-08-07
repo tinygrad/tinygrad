@@ -64,6 +64,9 @@ class TestUOps(unittest.TestCase):
   def test_cmpeq(self): self._test_bop_fxn(BinaryOps.CMPEQ, lambda a,b: float(a==b))
   # CMPLT and MOD aren't tested
 
+  # doesn't work in LLVM
+  #def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: a+b, dtypes.int32)
+
   def _test_top_fxn(self, bop, fxn, dt=dtypes.float32):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0, 1, 2.0]:

@@ -3,9 +3,11 @@ import pathlib
 import time
 import onnx
 import torch
+torch.set_num_threads(1)
 from onnx2torch import convert
 from extra.utils import download_file
 from extra.onnx import get_run_onnx
+from tinygrad.helpers import OSX
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import Device
 
@@ -38,7 +40,8 @@ def benchmark(mnm, nm, fxn):
   CSV[nm] = min(tms)*1e-6
   return min(tms), ret
 
-BASE = pathlib.Path(__file__).parent.parent.parent / "weights" / "onnx"
+#BASE = pathlib.Path(__file__).parent.parent.parent / "weights" / "onnx"
+BASE = pathlib.Path("/tmp/onnx")
 def benchmark_model(m):
   global open_csv, CSV
   CSV = {"model": m}
@@ -52,7 +55,7 @@ def benchmark_model(m):
   np_inputs = {k:torch.randn(shp).numpy() for k,shp in input_shapes.items()}
   assert len(input_shapes) < 20
 
-  for device in ["METAL", "CLANG"]:
+  for device in ["METAL" if OSX else "GPU", "CLANG"]:
     Device.DEFAULT = device
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
     tinygrad_model = get_run_onnx(onnx_model)
@@ -68,12 +71,13 @@ def benchmark_model(m):
   torch_inputs = [torch.tensor(x) for x in np_inputs.values()]
   benchmark(m, "torch_cpu", lambda: torch_model(*torch_inputs))
 
-  torch_mps_model = torch_model.to('mps')
-  torch_mps_inputs = [x.to('mps') for x in torch_inputs]
-  benchmark(m, "torch_mps", lambda: torch_mps_model(*torch_mps_inputs))
+  torch_device = "mps" if OSX else "cuda"
+  torch_mps_model = torch_model.to(torch_device)
+  torch_mps_inputs = [x.to(torch_device) for x in torch_inputs]
+  benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs))
 
   if open_csv is None:
-    open_csv = csv.DictWriter(open('/tmp/speed.csv', 'w', newline=''), fieldnames=list(CSV.keys()))
+    open_csv = csv.DictWriter(open('onnx_inference_speed.csv', 'w', newline=''), fieldnames=list(CSV.keys()))
     open_csv.writeheader()
   open_csv.writerow(CSV)
 
