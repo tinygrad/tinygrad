@@ -53,6 +53,7 @@ class Token(NamedTuple):
   name: str
   dtype: DType
   offset: Optional[int] = None
+  const_zero: bool = False
   def render(self, with_type=False):
     if with_type:
       assert self.offset is None
@@ -259,8 +260,8 @@ class Linearizer:
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        self.load_cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{load_i}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value)) if this_const is None else \
-                               self.uop(UOps.LOAD, Token(f"{'const' if acc is None else 'acc'}{mnum(i)}_{load_i}", localtype), [], ConstOp(this_const, valid))
+        self.load_cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{load_i}", localtype, const_zero=valid.max == 0), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value)) if this_const is None else \
+                               self.uop(UOps.LOAD, Token(f"{'const' if acc is None else 'acc'}{mnum(i)}_{load_i}", localtype, const_zero=valid.max == 0), [], ConstOp(this_const, valid))
       ret.append(Token(self.load_cache[key].name, self.load_cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
 
@@ -499,6 +500,16 @@ class Linearizer:
     return out
 
   def uop_alu(self, out: Token, vin: List[Token], op: Op) -> Token:
+    fold_result = None
+    if any(v.const_zero for v in vin):
+      if op in [UnaryOps.NOOP, UnaryOps.SIN, UnaryOps.SQRT]: fold_result = vin[0]
+      elif op == BinaryOps.ADD: fold_result = vin[1] if vin[0].const_zero else vin[0]
+      elif op == BinaryOps.SUB: fold_result = vin[0] if vin[1].const_zero else None
+      elif op == BinaryOps.MUL: fold_result = vin[0] if vin[0].const_zero else vin[1]
+    if fold_result is not None:
+      if DEBUG >= 5: print(f"    zero fold alu op: {fold_result} <- {vin} {op}")
+      return fold_result
+
     key = (op, tuple(vin))
     if key not in self.saved_exprs: self.saved_exprs[key] = self.uop(UOps.ALU, out, vin, op)
     return self.saved_exprs[key]

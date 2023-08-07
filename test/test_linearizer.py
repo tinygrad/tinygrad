@@ -56,5 +56,20 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
     assert num_ops <= 1, "more alu uops than needed"
 
+  def test_zero_fold(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
+    r = Tensor.stack([a, b])
+    ast = r.lazydata.op
+    r = r.realize()  # realize an output buffer
+    k = Linearizer(ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts)
+    k.process()
+    k.upcast()
+    k.linearize()
+    num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
+    assert num_ops == 0, "more alu uops than needed"
+
 if __name__ == '__main__':
   unittest.main()
