@@ -329,8 +329,7 @@ class Tensor:
       else: # s is None
         final_shape.append(1)
     ret = sliced_tensor.reshape(tuple(final_shape))  # Reshape
-    # Fancy/tensor indexing
-    if tensor_found:
+    if tensor_found: # Fancy/tensor indexing
       assert tensor_found[0][1].is_floating_point(), f"Tensor idx is dtype: {tensor_found[0][1].dtype}, should be float"
       for i,s in enumerate(sub): tensor_found[i] = (tensor_found[i][0]+s, tensor_found[i][1])
       dim = [i[0] for i in tensor_found]
