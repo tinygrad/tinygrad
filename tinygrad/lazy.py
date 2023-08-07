@@ -9,6 +9,7 @@ from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten,
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.shape.shapetracker import MovementOps, ShapeTracker, View, get_contraction
+from tinygrad.shape.symbolic import Variable, sym_vars
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, TernaryOps, ReduceOps, LoadOps, OpType, LazyOp
 from tinygrad.runtime.lib import RawBufferMapped, RawConst, RawBuffer
 
@@ -94,14 +95,14 @@ def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movement
 
 lazycache: LightWeakValueDictionary = LightWeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType):
-  #print("create_lazybuffer", device, shape, optype, op, dtype)
-
   # fromcpu aren't cached
   if not LAZYCACHE or (optype is LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}): return LazyBuffer(device, st, optype, op, dtype)
 
   # wop is the deduping key. i feel this used to compare more deeply
   wop = (device, dtype, optype, ref(op))
-  if wop in lazycache: return lazycache[wop]
+  if wop in lazycache:
+    for x in op.buffers: x.children.add(lazycache[wop])
+    return lazycache[wop]
 
   lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype)
   return ret
@@ -270,6 +271,7 @@ class LazyBuffer:
   def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
   def map_buffers(self, real_srcs: Dict[Any, Any]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[Any]: return []
+  def get_variable_buffers(self) -> Dict[Variable, LazyBuffer]: return {v:LazyBuffer.loadop(LoadOps.FROM, (1,), dtypes.int32, self.device, src=LazyBuffer.fromCPU(np.array([v.val], dtype=np.int32))) for s in self.shape for v in sym_vars(s)}
   def replace_with_movement_ops(self: LazyBuffer, ops:List[Tuple[MovementOps, Any]]) -> LazyBuffer:
     y = self
     for op, arg in ops: y = MOVEMENT_OPS_DISPATCHER[op](y, arg)
@@ -365,7 +367,7 @@ def _realize_rand(buffer: LazyBuffer) -> None:
   buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=buffer.shape, dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args()) # type: ignore
 
 def _realize_const(buffer: LazyBuffer) -> None:
-  if hasattr(Device[buffer.device].codegen, 'supports_constant_folding'):
+  if isinstance(Device[buffer.device], Compiled) and buffer.device not in ["LLVM"]:  # consts are broken in LLVM in NaN/inf
     buffer.realized = RawConst(1, buffer.dtype, float(buffer.op.arg))
   else:
     buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args())

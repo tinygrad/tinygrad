@@ -50,7 +50,7 @@ def infer(model, img):
   # if you want to look at the outputs
   """
   import matplotlib.pyplot as plt
-  plt.plot(out.numpy()[0])
+  plt.plot(out[0])
   plt.show()
   """
   return out, retimg
@@ -85,10 +85,7 @@ if __name__ == "__main__":
     cap.release()
     cv2.destroyAllWindows()
   else:
-    if url.startswith('http'):
-      img = Image.open(io.BytesIO(fetch(url)))
-    else:
-      img = Image.open(url)
+    img = Image.open(io.BytesIO(fetch(url)))
     st = time.time()
     out, _ = infer(model, img)
     print(np.argmax(out), np.max(out), lbls[np.argmax(out)])

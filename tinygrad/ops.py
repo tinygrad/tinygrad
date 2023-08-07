@@ -133,17 +133,17 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg, **self.runtime_args)
     return self
 
-  def exec(self, bufs) -> Optional[float]:
+  def exec(self, bufs, force_wait=False, optimizing=False) -> Optional[float]:
     rawbufs = dedup([x.realized for x in bufs if buf_is_kernel_arg(x)])
-    if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
-    return self(rawbufs)
+    if GlobalCounters.cache is not None and not optimizing: GlobalCounters.cache.append((self, rawbufs))
+    return self(rawbufs, force_wait=force_wait)
 
   def __call__(self, rawbufs:List[RawBuffer], jit=False, force_wait=False) -> Optional[float]:
     if et := self.clprg((self.global_size + [1]*(3-len(self.global_size))) if self.global_size is not None else None,
                         (self.local_size + [1]*(3-len(self.local_size))) if self.local_size is not None else None,
                         *rawbufs, wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
     if DEBUG >= 2:
-      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(29-ansilen(self.display_name))) if self.display_name is not None else self.name:26s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {int(self.op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(33-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {int(self.op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {self.mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
     GlobalCounters.kernel_count += 1
     GlobalCounters.global_ops += self.op_estimate
@@ -152,9 +152,16 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], codegen, runtime, synchronize=lambda: None):
-    self.buffer, self.codegen, self.runtime, self.synchronize = buffer, codegen, runtime, synchronize
-    self.method_cache: Dict[str, ASTRunner] = {}
+  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, runtime, synchronize=lambda: None):
+    self.buffer, self.linearizer_opts, self.renderer, self.runtime, self.synchronize = buffer, linearizer_opts, renderer, runtime, synchronize
+    self.method_cache: Dict[Any, ASTRunner] = {}
+
+  def to_program(self, k):
+    k.linearize()
+    src, global_size, local_size = self.renderer(k.function_name, k.uops)
+    return ASTRunner(k.function_name, src, global_size, local_size,
+                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
+                      display_name=k.display_name).build(self.runtime)
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):
     # all movementops do nothing in a Compiled buffer!
@@ -175,16 +182,21 @@ class Compiled:
     if not output.realized:
       output.realized = self.buffer(prod(output.shape), output.dtype, **kwargs)
 
-    # compilation time
-    k = self.codegen(ast, output)
+    from tinygrad.codegen.linearizer import Linearizer
+    k = Linearizer(ast, output, self.linearizer_opts)
 
-    # this is the default now
+    # compilation time
+    def get_program():
+      from tinygrad.codegen.optimizer import kernel_optimize, hand_coded_optimizations
+      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, output, self.linearizer_opts), self.to_program)
+      elif not getenv("NOOPT"): hand_coded_optimizations(k)
+      return self.to_program(k)
+
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
-      if k.key not in self.method_cache: self.method_cache[k.key] = k.codegen().build(self.runtime)
-      elif DEBUG >= 5: print(f"method cache hit : {k.key}")
+      if k.key not in self.method_cache: self.method_cache[k.key] = get_program()
       prg = self.method_cache[k.key]
     else:
-      prg = k.codegen().build(self.runtime)
+      prg = get_program()
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 

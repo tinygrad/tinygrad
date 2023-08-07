@@ -217,7 +217,7 @@ from tinygrad.runtime.lib import RawMallocBuffer
 # ClangProgram is the simplest runtime (in tinygrad/runtime/ops_clang.py, code 7/10)
 # __init__ calls clang, and __call__ calls the function in the *.so outputted by clang
 # in CLANG, global_size and local_size are ignored
-from tinygrad.runtime.ops_clang import ClangProgram, ClangCodegen
+from tinygrad.runtime.ops_clang import ClangProgram
 
 # a concrete example looks like this, this adds two size 1 RawBuffer
 # first we create two numpy buffers containing 2 and 3
@@ -229,7 +229,7 @@ input_a, input_b = RawMallocBuffer.fromCPU(numpy_a), RawMallocBuffer.fromCPU(num
 output = RawMallocBuffer(1, dtypes.float32)
 
 # compile the program, run it, and 2+3 does indeed equal 5
-program = ClangProgram("add", f"{ClangCodegen.lang.kernel_prefix} void add(float *a, float *b, float *c) {{ *a = *b + *c; }}")
+program = ClangProgram("add", f"void add(float *a, float *b, float *c) {{ *a = *b + *c; }}")
 program(None, None, output, input_a, input_b)  # NOTE: the None are for global_size and local_size
 print(output.toCPU())
 assert output.toCPU()[0] == 5, "it's still 5"
@@ -270,9 +270,8 @@ result = Tensor(2).realize() + Tensor(3).realize()
 result.lazydata.realized = Device[Device.DEFAULT].buffer(prod(result.shape), result.dtype)
 
 # use the real Linearizer to linearize 2+3
-from tinygrad.codegen.linearizer import Linearizer
-linearizer = Linearizer(result.lazydata.op, result.lazydata)
-linearizer.process()
+from tinygrad.codegen.linearizer import Linearizer, LinearizerOptions
+linearizer = Linearizer(result.lazydata.op, result.lazydata, LinearizerOptions())
 linearizer.linearize()
 
 # print the uops
@@ -280,12 +279,13 @@ for uop in linearizer.uops: print(uop)
 
 # output:
 """
+UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.float)
 UOps.LOOP           :                           []                               ([], 'global')
 UOps.LOOP           :                           []                               ([], 'local')
-UOps.LOAD           : <val1_0>                  []                               MemOp(i=1, idx=<0>, valid=<1>)
-UOps.LOAD           : <val2_0>                  []                               MemOp(i=2, idx=<0>, valid=<1>)
-UOps.ALU            : <alu0>                    [<val1_0>, <val2_0>]             BinaryOps.ADD
-UOps.STORE          :                           [<alu0>]                         MemOp(i=0, idx=<0>, valid=<1>)
+UOps.LOAD           : <acc1_0>                  []                               ConstOp(value=2.0, valid=<1>, invalid_value=0.0)
+UOps.LOAD           : <acc2_0>                  []                               ConstOp(value=3.0, valid=<1>, invalid_value=0.0)
+UOps.ALU            : <alu0>                    [<acc1_0>, <acc2_0>]             BinaryOps.ADD
+UOps.STORE          :                           [<alu0>]                         MemOp(name='data0', idx=<0>, local=False, memory_dtype=dtypes.float, valid=<1>, invalid_value=0.0)
 UOps.ENDLOOP        :                           []                               ([], 'global+local')
 """
 
