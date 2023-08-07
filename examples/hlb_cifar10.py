@@ -41,9 +41,9 @@ hyp = {
         'batch_norm_momentum': .5, # * Don't forget momentum is 1 - momentum here (due to a quirk in the original paper... >:( )
         'conv_norm_pow': 2.6,
         'cutmix_size': 3,
-        'cutmix_steps': 500,
+        'cutmix_steps': 588,        # original repo used epoch 6 which is roughly 6*98=582 STEPS
         'pad_amount': 2,
-        'base_depth': 64 ## This should be a factor of 8 in some way to stay tensor core friendly
+        'base_depth': 64            # This should be a factor of 8 in some way to stay tensor core friendly
     }
 }
 
@@ -179,8 +179,7 @@ transform_test = [
   lambda x: x.reshape((-1,3,32,32)),
 ]
 
-# origianl repo uses cutmix after epoch 6
-def cutmix(X, Y, mask_size=5, p=0.5, mix=True):
+def cutmix(X, Y, mask_size=6, p=0.5, mix=True):
   if Tensor.rand(1) > 0.5: return X, Y
 
   mask = make_square_mask(X, mask_size)
@@ -198,15 +197,14 @@ def cutmix(X, Y, mask_size=5, p=0.5, mix=True):
 def fetch_batches(X, Y, BS, seed, is_train=False):
   while True:
     set_seed(seed)
-    # TODO shuffle individual instance instead of shuffling only batches
-    order = list(range(0, X.shape[0], BS))
+    order = list(range(0, X.shape[0]))
     random.shuffle(order)
-    for i in order:
+    for i in range(0, X.shape[0], BS):
       # padding the last batch in order to match buffer size during JIT
       batch_end = min(i+BS, Y.shape[0])
-      x = X[batch_end-BS:batch_end,:]
-      # Need fancy indexing support to remove numpy
-      y = Tensor(np.eye(10, dtype=np.float32)[Y[batch_end-BS:batch_end].numpy()])
+      # TODO need indexing support for tinygrad Tensor
+      x = Tensor(X.numpy()[order[batch_end-BS:batch_end],:])
+      y = Tensor(np.eye(10, dtype=np.float32)[Y.numpy()[order[batch_end-BS:batch_end]]])
       x = x.sequential(transform) if is_train else x.sequential(transform_test)
       yield x, y
 
