@@ -1,0 +1,80 @@
+name: Benchmarks
+
+on:
+  push:
+    branches:
+      - master
+      - update_benchmark
+
+jobs:
+  testmacbenchmark:
+    name: Mac Benchmark
+    runs-on: [self-hosted, macOS]
+    env:
+      PYTHONPATH: .
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Run model inference benchmark
+      run: python3 test/external/external_model_benchmark.py
+    - name: Test speed vs torch
+      run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+    - name: Run Stable Diffusion
+      run: |
+        ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
+        ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
+        time python3 examples/stable_diffusion.py --noshow
+    - name: Run LLaMA
+      run: |
+        ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
+        python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+    - name: Run 10 CIFAR training steps
+      run: |
+        ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+        STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+    - uses: actions/upload-artifact@v3
+      with:
+        name: Speed (Mac)
+        path: |
+          onnx_inference_speed.csv
+          torch_speed.txt
+          train_cifar.txt
+          llama_unjitted.txt
+          llama_jitted.txt
+
+  testamdbenchmark:
+    name: AMD Benchmark
+    runs-on: [self-hosted, Linux]
+    env:
+      PYTHONPATH: .
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Run model inference benchmark
+      run: python3 test/external/external_model_benchmark.py
+    - name: Test speed vs torch
+      run: BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+    - name: Run Stable Diffusion
+      run: |
+        ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
+        ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
+        time DEBUG=1 python3 examples/stable_diffusion.py --noshow
+    - name: Run LLaMA
+      run: |
+        ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
+        python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+    - name: Run 10 CIFAR training steps
+      run: |
+        ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+        STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+    - uses: actions/upload-artifact@v3
+      with:
+        name: Speed (AMD)
+        path: |
+          onnx_inference_speed.csv
+          torch_speed.txt
+          train_cifar.txt
+          llama_unjitted.txt
+          llama_jitted.txt
