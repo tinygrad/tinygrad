@@ -187,7 +187,7 @@ def pad_reflect(X, size=2) -> Tensor:
 
   return X
 
-# return a binary mask in the format of BS x C x H x W where H x W contains a random square mask 
+# return a binary mask in the format of BS x C x H x W where H x W contains a random square mask
 def make_square_mask(X, mask_size):
   is_even = int(mask_size % 2 == 0)
   center_max = X.shape[-2]-mask_size//2-is_even
