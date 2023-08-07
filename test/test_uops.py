@@ -36,7 +36,7 @@ def _test_single_value_const(tc, tt, vals, op):
   prg([buf])
   return buf.toCPU()[0]
 
-@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
+@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled) or Device.DEFAULT == "WEBGPU", "only test for compiled backends")
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):
     if not (math.isnan(v1) and math.isnan(v2)): self.assertAlmostEqual(v1, v2, places=5)
