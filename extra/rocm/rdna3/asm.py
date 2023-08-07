@@ -54,7 +54,7 @@ print(colored("running program", "green"))
 G = 512
 FLOPS *= 100000*G*G  # loop * global_size
 for i in range(3):
-  tm = prg([G, G], [256, 1], buf, wait=True)
+  tm = prg([G//256, G], [256, 1], buf, wait=True)
   print(f"ran in {tm*1e3:.2f} ms, {FLOPS/(tm*1e9):.2f} GFLOPS")
 
 print(colored("transferring buffer", "green"))
