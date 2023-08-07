@@ -194,6 +194,10 @@ if getenv("GPU") or getenv("METAL"): # skip tests with 0 shape tensors for GPU a
   backend_test.exclude('test_slice_start_out_of_bounds_cpu')
   backend_test.exclude('test_split_zero_size_splits_opset13_cpu')
   backend_test.exclude('test_split_zero_size_splits_opset18_cpu')
+  backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
+elif getenv("CLANG"): # linearizer does not allow reshape to 0
+  backend_test.exclude('test_slice_start_out_of_bounds_cpu')
+  backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
 
 
 # disable model tests for now since they are slow
