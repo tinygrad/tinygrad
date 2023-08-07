@@ -31,7 +31,7 @@ hyp = {
         'momentum':       0.85,
         'percent_start':  0.25,
         'scaling_factor': 1./9,
-        'loss_scale_scaler': 1./512, # * Regularizer inside the loss summing (range: ~1/512 - 16+). 
+        'loss_scale_scaler': 1./512, # regularizer inside the loss summing (range: ~1/512 - 16+). 
     },
     'net': {
         'whitening': {
@@ -41,7 +41,7 @@ hyp = {
         'batch_norm_momentum': .5, # * Don't forget momentum is 1 - momentum here (due to a quirk in the original paper... >:( )
         'conv_norm_pow': 2.6,
         'cutmix_size': 3,
-        'cutmix_epochs': 6,
+        'cutmix_steps': 500,
         'pad_amount': 2,
         'base_depth': 64 ## This should be a factor of 8 in some way to stay tensor core friendly
     }
@@ -290,7 +290,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
   batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
   while i <= STEPS:
     X, Y = next(batcher)
-    if i >= 500: X, Y = cutmix(X, Y)
+    if i >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y)
     if i%100 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
