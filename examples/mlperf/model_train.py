@@ -13,7 +13,7 @@ import time
 def train_resnet():
   # TODO: Resnet50-v1.5
   from models.resnet import ResNet50
-  from extra.datasets.imagenet import iterate, get_val_files
+  from extra.datasets.imagenet import iterate, get_train_files, get_val_files
   from extra.lr_scheduler import CosineAnnealingLR
 
   def sparse_categorical_crossentropy(out, Y, label_smoothing=0):
@@ -66,12 +66,12 @@ def train_resnet():
   scheduler = CosineAnnealingLR(optimizer, epochs)
   print(f"training with batch size {BS} for {epochs} epochs")
 
-  steps_in_train_epoch = math.floor(len(get_val_files()) / BS)
+  steps_in_train_epoch = math.floor(len(get_train_files()) / BS)
   steps_in_val_epoch = math.floor(len(get_val_files()) / BS)
   for e in range(epochs):
     # train loop
     Tensor.training = True
-    for X, Y in (t := tqdm(iterate(bs=BS, val=True), total=steps_in_train_epoch)):
+    for X, Y in (t := tqdm(iterate(bs=BS, val=False), total=steps_in_train_epoch)):
       X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
       st = time.time()
       loss, out = train_step(X, Y)
