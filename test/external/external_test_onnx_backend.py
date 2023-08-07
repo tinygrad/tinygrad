@@ -167,6 +167,35 @@ backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # anti
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
 backend_test.exclude('test_identity_sequence_cpu') # type_proto has no shape or dim_value
 
+if getenv("GPU") or getenv("METAL"): # skip tests with 0 shape tensors for GPU and METAL backends
+  backend_test.exclude('test_reduce_l1_default_axes_keepdims_example_cpu')
+  backend_test.exclude('test_reduce_l1_default_axes_keepdims_example_expanded_cpu')
+  backend_test.exclude('test_reduce_l1_default_axes_keepdims_random_cpu')
+  backend_test.exclude('test_reduce_l1_default_axes_keepdims_random_expanded_cpu')
+  backend_test.exclude('test_reduce_l2_default_axes_keepdims_example_cpu')
+  backend_test.exclude('test_reduce_l2_default_axes_keepdims_example_expanded_cpu')
+  backend_test.exclude('test_reduce_l2_default_axes_keepdims_random_cpu')
+  backend_test.exclude('test_reduce_l2_default_axes_keepdims_random_expanded_cpu')
+  backend_test.exclude('test_reduce_log_sum_default_cpu')
+  backend_test.exclude('test_reduce_log_sum_default_expanded_cpu')
+  backend_test.exclude('test_reduce_mean_default_axes_keepdims_example_cpu')
+  backend_test.exclude('test_reduce_mean_default_axes_keepdims_random_cpu')
+  backend_test.exclude('test_reduce_sum_default_axes_keepdims_example_cpu')
+  backend_test.exclude('test_reduce_sum_default_axes_keepdims_random_cpu')
+  backend_test.exclude('test_reduce_sum_empty_axes_input_noop_example_cpu')
+  backend_test.exclude('test_reduce_sum_negative_axes_keepdims_random_cpu')
+  backend_test.exclude('test_reduce_sum_square_default_axes_keepdims_example_cpu')
+  backend_test.exclude('test_reduce_sum_square_default_axes_keepdims_example_expanded_cpu')
+  backend_test.exclude('test_reduce_sum_square_default_axes_keepdims_random_cpu')
+  backend_test.exclude('test_reduce_sum_square_default_axes_keepdims_random_expanded_cpu')
+  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
+  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
+  backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
+  backend_test.exclude('test_slice_start_out_of_bounds_cpu')
+  backend_test.exclude('test_split_zero_size_splits_opset13_cpu')
+  backend_test.exclude('test_split_zero_size_splits_opset18_cpu')
+
+
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):
   for x in backend_test.test_suite:
