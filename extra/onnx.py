@@ -120,7 +120,7 @@ def get_run_onnx(onnx_model: ModelProto):
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else (1, [i.shape for i in input_tensors[inp.name]])
-        # assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
+        #assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
         for _,v in input_tensors.items():
           if isinstance(v, Tensor):
             v.realize()
@@ -179,7 +179,7 @@ def get_run_onnx(onnx_model: ModelProto):
         if n.op_type == "Add": ret = inp[0] + inp[1]
         if n.op_type == "Sub": ret = inp[0] - inp[1]
         if n.op_type == "Mul": ret = (inp[0] * inp[1]).cast(inp[0].dtype)
-        if n.op_type == "Pow": ret = (inp[0] ** inp[1]).cast(inp[0].dtype)
+        if n.op_type == "Pow": ret = (inp[0].float() ** inp[1].float()).cast(inp[0].dtype)
       elif n.op_type == "Split":
         if 'axis' not in opt: opt['axis'] = 0
         if 'num_outputs' in opt or len(inp) == 1:

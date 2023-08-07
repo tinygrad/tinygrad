@@ -1,7 +1,7 @@
 from tinygrad.nn import Conv2d
 from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod, dtypes
+from tinygrad.helpers import prod, dtypes, argfix
 from extra.onnx import safe_numpy
 import numpy as np
 import functools
@@ -91,7 +91,7 @@ def _batchnorm(self:Tensor, weight:Optional[Tensor], bias:Optional[Tensor], mean
 
 # TODO: this is copied from tinygrad/nn/__init__.py
 # spatial is from opset 7 and has since been removed
-def BatchNormalization(X, scale, B, input_mean, input_var, epsilon=1e-05, momentum=0.9, training_mode=0, spatial=1, is_test=0, consumed_inputs=None):
+def BatchNormalization(X, scale, B, input_mean, input_var, epsilon=1e-05, momentum=0.9, training_mode=0, spatial=1, is_test=0):
   if training_mode:
     x_detached = X.detach()
     current_mean = x_detached.mean(axis=(0,2,3))
@@ -376,13 +376,14 @@ def MeanVarianceNormalization(input, axis=(0, 2, 3)):
   return (input - data_mean) / (std + 1e-9)
 
 def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, reduction="mean"):
+  target = target.cast(dtypes.float32)
   N, C, i_shape = input.shape[0], input.shape[1], input.shape
   t_shape = target.shape
   if len(input.shape) != 3:
     input = input.reshape((N, C, -1))
     target = target.reshape((N, -1))
   if weight is not None:
-    mask = target.unsqueeze(-1) == Tensor.arange(C,dtype=dtypes.int32).repeat((N, 1, 1))
+    mask = target.unsqueeze(-1) == Tensor.arange(C).repeat((N, 1, 1))
     weight = (mask * weight).sum(axis=-1)
   if ignore_index is not None:
     cond = (target == ignore_index)
