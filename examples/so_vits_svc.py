@@ -5,6 +5,7 @@ from tinygrad import nn
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, getenv
 from tinygrad.state import torch_load
+from tinygrad.jit import TinyJit
 from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present, get_hparams_from_file, load_checkpoint, weight_norm, HParams
 from examples.sovits_helpers import preprocess
 import soundfile
@@ -470,6 +471,7 @@ class TextEncoder:
 
 class Upsample:
   def __init__(self, scale_factor):
+    assert scale_factor % 1 == 0, "Only integer scale factor allowed."
     self.scale = int(scale_factor)
   def forward(self, x:Tensor):
     repeats = tuple([1] * len(x.shape) + [self.scale])
@@ -574,26 +576,40 @@ class Generator:
     return self.conv_post(x.leakyrelu()).tanh()
 
 def repeat_expand_2d(content, target_len, mode="left"): # content : [h, t]
-  if mode == "left": return repeat_expand_2d_left(content, target_len)
-  raise NotImplementedError(f"unit_interpolation_mode={mode} not supported.")
+  print(f"target_len={target_len}, content.shape={content.shape}")
+  if mode == "left": return repeat_expand_2d_left(content.realize(), target_len)
+  #else: return repeat_expand_2d_nearest(content, target_len)
+  raise RuntimeError("Mode: {mode} not supported.")
 
 # TODO this is __very__ slow. Any way to make it faster?
 def repeat_expand_2d_left(content, target_len): # content : [h, t]
   target = Tensor.zeros([content.shape[0], target_len], dtype=dtypes.float32).to(content.device)
   src_len = content.shape[-1]
   target = Tensor.zeros([content.shape[0], target_len], dtype=dtypes.float32).to(content.device)
-  temp = np.arange(src_len+1) * target_len / src_len
+  temp = Tensor.arange(src_len+1) * target_len / src_len
   current_pos = 0
   dim = content.shape[0]
   pad_val = target_len - 1
   for i in range(target_len):
-    if i >= temp[current_pos+1]:
+    if i >= temp[current_pos+1].numpy():
       current_pos += 1
     # target[:, i] = content[:, current_pos]
     mask = tilde(Tensor.ones(dim, 1).pad2d((i,pad_val-i,0,0)).cast(dtypes.bool))
     fill = content[:, current_pos].reshape(dim,1).pad2d((i,pad_val-i,0,0))
     target = Tensor.where(mask, target, fill)
-  return target
+  return target.realize()
+
+# TODO no idea how this can be done in a fast way in tinygrad (or without writing custom kernel like pytorch)
+# Nearest interpolation with an integral scale factor is already implemented in Upsample (this file)
+# Bute here, scale = target_len / content.shape[-1] would be a float...
+# How to do this without writing slow loops in python?
+# Torch does it with a custom kernel
+"""
+def repeat_expand_2d_nearest(content, target_len):
+  import torch
+  content = content[None,:,:]
+  return Tensor(torch.nn.functional.interpolate(torch.from_numpy(content.numpy()), target_len, mode="nearest")[0].numpy())
+"""
 
 def load_fairseq_cfg(checkpoint_path):
   assert os.path.isfile(checkpoint_path)
@@ -762,13 +778,13 @@ if __name__=="__main__":
       # ContentVec infer
       start = time.time()
       c = contentvec256L9.encode(wav16k)
-      c = repeat_expand_2d(c.squeeze(0), f0.shape[1], unit_interpolate_mode)
+      c = repeat_expand_2d(c.squeeze(0), f0.shape[1], unit_interpolate_mode)  # this one is slow
       c = c.unsqueeze(0).realize()
       enc_time = time.time() - start
 
       # VITS infer
       vits_start = time.time()
-      out_audio, f0 = net_g.infer(c, f0=f0, uv=uv, g=sid, noise_scale=noise_scale, vol=None)
+      out_audio, f0 = net_g.infer(c, f0=f0.realize(), uv=uv.realize(), g=sid.realize(), noise_scale=noise_scale, vol=None)
       out_audio = out_audio[0,0].float().realize()
       vits_time = time.time() - vits_start
 

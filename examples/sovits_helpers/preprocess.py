@@ -173,7 +173,7 @@ class Slicer:
 
 # sinc_interp_hann audio resampling
 class Resample:
-  def __init__(self, orig_freq:int=16000, new_freq:int=1600, lowpass_filter_width:int=6, rolloff:float=0.99, beta:Optional[float]=None, dtype:Optional[dtypes]=None):
+  def __init__(self, orig_freq:int=16000, new_freq:int=16000, lowpass_filter_width:int=6, rolloff:float=0.99, beta:Optional[float]=None, dtype:Optional[dtypes]=None):
     self.orig_freq, self.new_freq, self.lowpass_filter_width, self.rolloff, self.beta = orig_freq, new_freq, lowpass_filter_width, rolloff, beta
     self.gcd = math.gcd(int(self.orig_freq), int(self.new_freq))
     self.kernel, self.width = self._get_sinc_resample_kernel(dtype) if self.orig_freq != self.new_freq else (None, None)
@@ -221,7 +221,7 @@ def cut(audio_path, db_thresh=-30, min_len=5000):
       sr=sr,
       threshold=db_thresh,
       min_length=min_len,
-      max_sil_kept=300  # TODO
+      #max_sil_kept=300  # TODO
   )
   chunks = slicer.slice(audio)
   return chunks
