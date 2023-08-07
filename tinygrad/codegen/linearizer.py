@@ -492,7 +492,7 @@ class Linearizer:
     if DEBUG >= 4: print(self.uops[-1])
     return out
 
-  def uop_alu(self, out: _OT, vin: List[Token], arg: Op) -> _OT:
+  def uop_alu(self, out: Token, vin: List[Token], arg: Op) -> Token:
     key = (arg, tuple(vin))
     if key not in self.saved_exprs:
       self.saved_exprs[key] = self.uop(UOps.ALU, out, vin, arg)
@@ -525,7 +525,7 @@ class Linearizer:
       for o,k in enumerate(i):
         ordered_ret[k] = Token(j.name, j.dtype, o) if j.dtype == dtypes._float4 else j
     assert all(isinstance(x, Token) for x in ordered_ret), "some tokens didn't get scattered?"
-    return ordered_ret
+    return cast(List[Token], ordered_ret)
 
   @property
   def first_reduce(self) -> int: return [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True)
