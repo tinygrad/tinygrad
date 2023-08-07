@@ -104,10 +104,12 @@ class TextDecoder:
     return x @ self.token_embedding.weight.T
 
 class Whisper:
-  def __init__(self, dims, tok):
+  def __init__(self, dims, tok, name):
     self.encoder = AudioEncoder(**dims)
     self.decoder = TextDecoder(**dims)
     self.tokenizer = tok
+    self.name = name
+
   def __call__(self, mel:Tensor, tokens:Tensor):
     return self.decoder(tokens, self.encoder(mel))
 
@@ -182,21 +184,23 @@ def load_wav(file):
   except sp.CalledProcessError as e: raise RuntimeError(f"Failed to load audio {e.stderr.decode()}") from e
   return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
 
+# mel filterbank is the same at all times, so we don't take chances
 @functools.lru_cache(None)
-def get_filters(sample_rate, n_fft, n_mels): return mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels)
+def get_filters(): 
+  download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/mel_filters.npz", BASE / "mel_filters.npz")
+  return np.load(BASE / "mel_filters.npz")[f"mel_{N_MELS}"]
 
 def prep_audio(audio, padding) -> Tensor:
   if padding > 0: audio = np.pad(audio, (0, padding))
   stft = tinystft(audio, n_fft=N_FFT, hop_length=HOP_LENGTH, window=get_window(N_FFT))
   magnitudes = np.abs(stft[..., :-1]) ** 2
-  mel_spec = get_filters(RATE, N_FFT, N_MELS) @ magnitudes
+  mel_spec = get_filters() @ magnitudes
   log_spec = np.log10(np.clip(mel_spec, a_min=1e-10, a_max=None))
   log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
   return log_spec
 
 def listener(q, record_seconds):
-  prep_audio(np.zeros(300), RATE)
   import sounddevice as sd
   print("listening")
   def callback(indata, frames, time, status):
@@ -205,6 +209,32 @@ def listener(q, record_seconds):
   with sd.InputStream(callback=callback, channels=1, samplerate=RATE, blocksize=CHUNK):
     sd.sleep(record_seconds * 1000)
   print("done listening")
+
+def online_mode(model, record_seconds, task_prompt):
+  q = multiprocessing.Queue()
+  p = multiprocessing.Process(target=listener, args=(q, record_seconds))
+  p.daemon = True
+  p.start()
+  lst = task_prompt
+  total = None
+  did_read = False
+  for _ in range(0, int(RATE / CHUNK * record_seconds)):
+    while not q.empty() or total is None:
+      waveform = q.get()
+      if total is None: total = waveform
+      else: total = np.concatenate([total, waveform], axis=1)
+      did_read = True
+    if did_read:
+      log_spec = prep_audio(total, 0)
+      encoded_audio = model.encoder(Tensor(log_spec)).realize()
+    out = model.decoder(Tensor([lst]), encoded_audio).realize()
+    idx = out[0,-1].numpy().argmax()
+    lst.append(idx)
+    dec = model.tokenizer.decode(lst)
+    print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
+    if dec.endswith("<|endoftext|>"):
+      #total = total[:, 320*(len(lst)-1):]
+      lst = [model.tokenizer._special_tokens["<|startoftranscript|>"]]
 
 def pad_or_trim(array, length=N_SAMPLES, axis=-1):
   if array.shape[axis] > length:
@@ -247,20 +277,24 @@ class MaximumLikelihoodRanker:
     lengths = [[len(t) for t in s] for s in tokens]
     return [np.argmax(scores(p, l) for p, l in zip(sum_logprobs, lengths))]
 
-def load_whisper_model(model_name, weights_folder=Path(__file__).parent.parent / "weights"):
+def load_whisper_model(model_name):
   assert model_name in WHISPER_MODELS, "Model not found. Please choose from the following: {}".format(list(WHISPER_MODELS.keys()))
   fn = BASE / f"whisper-{model_name}.pt"
   download_file(WHISPER_MODELS[model_name], fn)
   state = torch_load(fn)
   tok = get_encoding(state['dims']['n_vocab'], not (model_name.endswith(".en")))
-  model = Whisper(state['dims'], tok)
+  model = Whisper(state['dims'], tok, model_name)
   load_state_dict(model, state['model_state_dict'])
   return model
 
-def make_initial_prompt(model, lang, translate=False):
-  lang = "<|" + lang + "|>"
-  task = "<|translate|>" if translate else "<|transcribe|>"
-  return [model.tokenizer._special_tokens[i] for i in ["<|startoftranscript|>", lang, task]]
+"""Setting wrong model type will result in decimation of the model performance."""
+def make_initial_prompt(model, lang="en", translate=False):
+  tasks = ["<|startoftranscript|>"]
+  if not ".en" in model.name:
+    tasks.append("<|" + lang + "|>")
+    tasks.append("<|translate|>" if translate else "<|transcribe|>")
+  tasks.append("<|notimestamps|>")
+  return [model.tokenizer._special_tokens[i] for i in tasks]
 
 def decode_segment(segment, initial_tokens, model, sample_len=224, n_audio=1, n_group=1):
   if segment.ndim == 2: segment = np.expand_dims(segment, axis=0)
@@ -307,41 +341,16 @@ if __name__ == "__main__":
   parser.add_argument('--file', type=str, default=None, help='file to transcribe')
   parser.add_argument('--lang', type=str, default="en", help='language to transcribe')
   parser.add_argument('--translate', action='store_true', help='translate to english')
-  parser.add_argument('--recordlength', type=int, default=5, help='record for n seconds')
+  parser.add_argument('--recordlength', type=int, default=5, help='record for n seconds, should be less than 30')
   args = parser.parse_args()
-  assert args.lang in LANGUAGES, f"Language {args.lang} not found. Please choose from the following:\n{list(LANGUAGES.keys())}"
-  if args.model.endswith(".en") and args.lang != "en":
-    print("WARNING: using english-only model with non-english language")
-  lang = "<|" + args.lang + "|>"
-  task = "<|translate|>" if args.translate else "<|transcribe|>"
+
+  assert args.lang in LANGUAGES, f'Language {args.lang} not found. Please choose from the following:\n{list(LANGUAGES.keys())}'
+  assert args.recordlength < 30, f'Recordlength should be less than 30'
+
   model= load_whisper_model(args.model)
   task_prompt = make_initial_prompt(model, args.lang, args.translate)
 
   if args.file:
     print(transcribe_wav(args.file, model, task_prompt))
   else:
-    q = multiprocessing.Queue()
-    p = multiprocessing.Process(target=listener, args=(q, args.recordlength))
-    p.daemon = True
-    p.start()
-    lst = task_prompt.copy()
-    total = None
-    did_read = False
-    for i in range(0, int(RATE / CHUNK * args.recordlength)):
-      while not q.empty() or total is None:
-        waveform = q.get()
-        if total is None: total = waveform
-        else: total = np.concatenate([total, waveform], axis=1)
-        did_read = True
-      if did_read:
-        last_total = total.shape[1]
-        log_spec = prep_audio(total, 0)
-        encoded_audio = model.encoder(Tensor(log_spec)).realize()
-      out = model.decoder(Tensor([lst]), encoded_audio).realize()
-      idx = out[0,-1].numpy().argmax()
-      lst.append(idx)
-      dec = model.tokenizer.decode(lst)
-      print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
-      if dec.endswith("<|endoftext|>"):
-        #total = total[:, 320*(len(lst)-1):]
-        lst = [model.tokenizer._special_tokens["<|startoftranscript|>"]]
+    online_mode(model, args.recordlength, task_prompt)

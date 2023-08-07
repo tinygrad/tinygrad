@@ -3,19 +3,20 @@ from examples.whisper import make_initial_prompt, transcribe_wav, WHISPER_MODELS
 from extra.datasets.librispeech import ci, BASEDIR
 from examples.mlperf.metrics import word_error_rate
 import numpy as np
+from tinygrad.helpers import GlobalCounters
 
 WER = {}
 
 def output_wer(wer: dict):
   for (k,v) in wer.items():
-    print(f"{k}: {(np.average(v)*100):.2f}%")
-    print(f"{k}: {np.count_nonzero(v)} out of {len(v)} samples have errors, {(np.count_nonzero(v)/len(v)*100):.2f}%")
+    print(f"{k}: WER is {(np.average(v)*100):.2f}")
+    print(f"{k}: {np.count_nonzero(v)} out of {len(v)} samples have mistakes, {(np.count_nonzero(v)/len(v)*100):.2f}%")
 
 def eval_whisper(model, model_name, start, end, verbose=2):
   diff = difflib.Differ()
   for c in ci[start:end]:
     fn = BASEDIR / c["files"][0]["fname"]
-    predicted = "".join(transcribe_wav(fn, model, make_initial_prompt(model, "en"))).translate(str.maketrans("", "", string.punctuation)).lower()
+    predicted = "".join(transcribe_wav(fn, model, make_initial_prompt(model))).translate(str.maketrans("", "", string.punctuation)).lower()
     transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
     current_wer = word_error_rate([predicted], [transcript])[0]
     WER[model_name] = np.append(WER[model_name], current_wer)
@@ -33,7 +34,7 @@ if __name__ == "__main__":
   parser.add_argument("--step-size", type=int, default=None, help="Each step it runs all models on all samples in a step, ")
   args = parser.parse_args()
   models = WHISPER_MODELS if args.models is None else {x:WHISPER_MODELS[x] for x in args.models if x in WHISPER_MODELS}
-  # large-v2 appears twice in the list, usually it's not the problem, but here we load a bunch of models, so it's better to remove it
+  # large-v2 and large are the same model
   if "large" in models:
     models["large-v2"] = models["large"]
     del models["large"]
@@ -43,6 +44,7 @@ if __name__ == "__main__":
   if args.single:
     num_samples = 1
     step_size = 1
+  print("Running eval on  the following models:", list(models.keys()))
   for i in range(0, num_samples, step_size):
     for j in models:
       print(f"evaluating {j} on {step_size} sample(s)")
@@ -53,3 +55,4 @@ if __name__ == "__main__":
       del model
   print("Results of a run:")
   output_wer(WER)
+  print('Total kernels: ', GlobalCounters.kernel_count)
