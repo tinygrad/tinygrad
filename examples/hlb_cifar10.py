@@ -22,24 +22,24 @@ BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 
 bias_scaler = 56
 
 hyp = {
-    'opt': {
-        'bias_lr':        1.64 * bias_scaler/512,
-        'non_bias_lr':    1.64 / 512,
-        'bias_decay':     1.08 * 6.45e-4 * BS/bias_scaler,
-        'non_bias_decay': 1.08 * 6.45e-4 * BS,
-        'momentum':       0.85,
-        'percent_start':  0.25,
-        'scaling_factor': 1./9,
-        'loss_scale_scaler': 1./512, # regularizer inside the loss summing (range: ~1/512 - 16+). 
-    },
-    'net': {
-        'kernel_size': 2,           # kernel size for the whitening layer
-        'batch_norm_momentum': .5,
-        'conv_norm_pow': 2.6,
-        'cutmix_size': 3,
-        'cutmix_steps': 588,        # original repo used epoch 6 which is roughly 6*98=588 STEPS
-        'pad_amount': 2
-    }
+  'opt': {
+    'bias_lr':        1.64 * bias_scaler/512,
+    'non_bias_lr':    1.64 / 512,
+    'bias_decay':     1.08 * 6.45e-4 * BS/bias_scaler,
+    'non_bias_decay': 1.08 * 6.45e-4 * BS,
+    'momentum':       0.85,
+    'percent_start':  0.25,
+    'scaling_factor': 1./9,
+    'loss_scale_scaler': 1./512,  # regularizer inside the loss summing (range: ~1/512 - 16+). 
+  },
+  'net': {
+      'kernel_size': 2,             # kernel size for the whitening layer
+      'batch_norm_momentum': .5,
+      'conv_norm_pow': 2.6,
+      'cutmix_size': 3,
+      'cutmix_steps': 588,          # original repo used epoch 6 which is roughly 6*98=588 STEPS
+      'pad_amount': 2
+  }
 }
 
 def set_seed(seed):
@@ -70,46 +70,6 @@ def whitening(X, kernel_size=hyp['net']['kernel_size']):
   W = Tensor((V/torch.sqrt(Λ+1e-2)[:,None,None,None]).numpy(), requires_grad=False)
 
   return W
-
-# # Allows us to set default arguments for the whole convolution itself.
-# # Having an outer class like this does add space and complexity but offers us
-# # a ton of freedom when it comes to hacking in unique functionality for each layer type
-# class Conv(nn.Conv2d):
-#     def __init__(self, *args, norm=False, **kwargs):
-#         kwargs = {**default_conv_kwargs, **kwargs}
-#         super().__init__(*args, **kwargs)
-#         self.kwargs = kwargs
-#         self.norm = norm
-
-#     def forward(self, x):
-#         if self.training and self.norm:
-#             # TODO: Do/should we always normalize along dimension 1 of the weight vector(s), or the height x width dims too?
-#             with torch.no_grad():
-#                 F.normalize(self.weight.data, p=self.norm)
-#         return super().forward(x)
-
-# class Linear(nn.Linear):
-#     def __init__(self, *args, norm=False, **kwargs):
-#         super().__init__(*args, **kwargs)
-#         self.kwargs = kwargs
-#         self.norm = norm
-
-#     def forward(self, x):
-#         if self.training and self.norm:
-#             # TODO: Normalize on dim 1 or dim 0 for this guy?
-#             with torch.no_grad():
-#                 F.normalize(self.weight.data, p=self.norm)
-#         return super().forward(x)
-
-# class Conv(nn.Conv2d):
-#   def __init__(self, *args, norm=False, **kwargs):
-#     super().__init__(*args, kernel_size=3, padding=0, bias=False, **kwargs)
-#     self.norm = norm
-
-#   def __call__(self, x):
-#     if self.training and self.norm:
-#       Tensor.no_grad = True
-#     return super().__call__(x)
 
 class BatchNorm(nn.BatchNorm2d):
   def __init__(self, num_features):
