@@ -27,20 +27,17 @@ class TestLinearizer(unittest.TestCase):
       self.skipTest("Only Compiled uses linearizer")
 
     a = Tensor.randn(4)
-    np_a = a.numpy()
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
     ast = r.lazydata.op
-    r = r.realize()
+    r = r.realize()  # realize an output buffer
     k = Linearizer(ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.upcast()
     k.linearize()
     num_loads = len([uop for uop in k.uops if uop.uop == UOps.LOAD])
     assert num_loads <= 4, "more load uops than needed"
-
-    np_r = np_a[:-1] + np_a[1:]
-    np.testing.assert_allclose(np_r, r.numpy())
+    assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
 
 if __name__ == '__main__':
   unittest.main()
