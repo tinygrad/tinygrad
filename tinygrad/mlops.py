@@ -10,12 +10,12 @@ class Contiguous(Function):
   def backward(self, grad_output): return grad_output
 
 class Cast(Function):
-  __slots__ = "input_dtype"
-  def forward(self, x, dtype):
-    self.input_dtype = x.dtype
-    return x.cast(dtype)
+  __slots__ = "input_dtype", "bitcast"
+  def forward(self, x, dtype, bitcast=False):
+    self.input_dtype, self.bitcast = x.dtype, bitcast
+    return x.cast((dtype, bitcast))
   def backward(self, grad_output):
-    return grad_output.cast(self.input_dtype)
+    return grad_output.cast((self.input_dtype, self.bitcast))
 
 # ************* unary ops *************
 
