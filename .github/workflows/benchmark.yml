@@ -20,6 +20,7 @@ jobs:
     - name: Run Stable Diffusion
       run: |
         ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
+        ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
         time python3 examples/stable_diffusion.py --noshow
     - name: Run LLaMA
       run: |
@@ -51,6 +52,7 @@ jobs:
     - name: Run Stable Diffusion
       run: |
         ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
+        ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
         time python3 examples/stable_diffusion.py --noshow
     - name: Run LLaMA
       run: |
