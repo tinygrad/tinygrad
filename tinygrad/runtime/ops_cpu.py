@@ -16,7 +16,7 @@ base_fxn_for_op: Dict[Op, Callable] = {
   MovementOps.RESHAPE: lambda x, arg: x.reshape(arg), MovementOps.SHRINK: lambda x, arg: x[tuple(slice(p[0], p[1], None) for p in arg)],
 }
 
-def promote_type(np_func:Callable, *args): return np.promote_types(np.float32, np_func(*args))
+def promote_types(x, y): return ret if (ret := np.promote_types(x.dtype, y.dtype)) != np.float64 else np.float32
 def match_types(x, y):
   up = x.dtype if dtypes.from_np(x.dtype).priority > dtypes.from_np(y.dtype).priority else y.dtype
   return x.astype(up, copy=False), y.astype(up, copy=False)
