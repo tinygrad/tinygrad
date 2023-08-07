@@ -288,12 +288,13 @@ def load_whisper_model(model_name):
   return model
 
 """Setting wrong model type will result in decimation of the model performance."""
-def make_initial_prompt(model, lang="en", translate=False):
+def make_initial_prompt(model, lang="en", translate=False, timestamps=True):
   tasks = ["<|startoftranscript|>"]
   if not ".en" in model.name:
     tasks.append("<|" + lang + "|>")
     tasks.append("<|translate|>" if translate else "<|transcribe|>")
-  tasks.append("<|notimestamps|>")
+  if not timestamps:
+    tasks.append("<|notimestamps|>")
   return [model.tokenizer._special_tokens[i] for i in tasks]
 
 def decode_segment(segment, initial_tokens, model, sample_len=224, n_audio=1, n_group=1):
