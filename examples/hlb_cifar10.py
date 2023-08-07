@@ -48,7 +48,7 @@ hyp = {
 
 def set_seed(seed):
   Tensor.manual_seed(getenv('SEED', seed)) # Deterministic
-  np.random.seed(getenv('SEED', seed))
+  #np.random.seed(getenv('SEED', seed))
   random.seed(getenv('SEED', seed))
 
 # ========== Model ==========
@@ -75,14 +75,6 @@ def whitening(X):
   W = Tensor((V/torch.sqrt(Λ+1e-2)[:,None,None,None]).numpy(), requires_grad=False)
 
   return W
-
-# class BatchNorm(nn.BatchNorm2d):
-#     def __init__(self, num_features, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'], weight=False, bias=True):
-#         super().__init__(num_features, eps=eps, momentum=momentum)
-#         self.weight.data.fill_(1.0)
-#         self.bias.data.fill_(0.0)
-#         self.weight.requires_grad = weight
-#         self.bias.requires_grad = bias
 
 # # Allows us to set default arguments for the whole convolution itself.
 # # Having an outer class like this does add space and complexity but offers us
@@ -124,14 +116,20 @@ def whitening(X):
 #       Tensor.no_grad = True
 #     return super().__call__(x)
 
+class BatchNorm(nn.BatchNorm2d):
+  def __init__(self, num_features):
+    super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'], affine=True)
+    self.weight.requires_grad = False
+    self.bias.requires_grad = True
+
 class ConvGroup:
   def __init__(self, channels_in, channels_out):
-    self.conv1 = nn.Conv2d(channels_in, channels_out, kernel_size=3, padding=1, bias=False)
+    self.conv1 = nn.Conv2d(channels_in,  channels_out, kernel_size=3, padding=1, bias=False)
     self.conv2 = nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
 
-    self.norm1 = nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.5)
-    self.norm2 = nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.5)
-  
+    self.norm1 = BatchNorm(channels_out)
+    self.norm2 = BatchNorm(channels_out)
+
   def __call__(self, x):
     x = self.conv1(x)
     x = x.max_pool2d(2)
@@ -189,7 +187,7 @@ def pad_reflect(X, size=2) -> Tensor:
 
   return X
 
-# return a mask in the format of BS x C x H x W where H x W are in bool
+# return a binary mask in the format of BS x C x H x W where H x W contains a random square mask 
 def make_square_mask(X, mask_size):
   is_even = int(mask_size % 2 == 0)
   center_max = X.shape[-2]-mask_size//2-is_even
@@ -231,7 +229,7 @@ transform_test = [
 ]
 
 def cutmix(X, Y, mask_size=3, p=0.5):
-  if Tensor.rand(1) > 0.5: return X, Y
+  if Tensor.rand(1) > p: return X, Y
 
   # fill the square with randomly selected images from the same batch
   mask = make_square_mask(X, mask_size)
@@ -340,7 +338,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
     X, Y = next(batcher)
     if i >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
     if i%100 == 0 and i > 1:
-      # TODO using Tensor.training = False here actually brick batchnorm
+      # TODO use Tensor.training = False here actually brick batchnorm
       corrects = []
       losses = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
