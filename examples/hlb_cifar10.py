@@ -24,7 +24,7 @@ bias_scaler = 56
 
 hyp = {
     'opt': {
-        'bias_lr':        1.64 * bias_scaler/512, # TODO: Is there maybe a better way to express the bias and batchnorm scaling? :'))))
+        'bias_lr':        1.64 * bias_scaler/512,
         'non_bias_lr':    1.64 / 512,
         'bias_decay':     1.08 * 6.45e-4 * batchsize/bias_scaler,
         'non_bias_decay': 1.08 * 6.45e-4 * batchsize,
@@ -41,9 +41,8 @@ hyp = {
         'batch_norm_momentum': .5, # * Don't forget momentum is 1 - momentum here (due to a quirk in the original paper... >:( )
         'conv_norm_pow': 2.6,
         'cutmix_size': 3,
-        'cutmix_steps': 588,        # original repo used epoch 6 which is roughly 6*98=582 STEPS
-        'pad_amount': 2,
-        'base_depth': 64            # This should be a factor of 8 in some way to stay tensor core friendly
+        'cutmix_steps': 588,        # original repo used epoch 6 which is roughly 6*98=588 STEPS
+        'pad_amount': 2
     }
 }
 
@@ -124,7 +123,8 @@ def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:floa
 # TODO currently this only works for RGB in format of NxCxHxW and pads the HxW
 # implemented in recursive fashion but figuring out how to switch indexing dim
 # during the loop was a bit tricky
-def pad_reflect(X, padding) -> Tensor:
+def pad_reflect(X, size=2) -> Tensor:
+  padding = ((0,0),(0,0),(size,size),(size,size))
   p = padding[3]
   s = X.shape[3]
 
@@ -167,7 +167,7 @@ transform = [
   lambda x: x / 255.0, # scale
   lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1), # normalize
   lambda x: x.reshape((-1,3,32,32)),
-  lambda x: pad_reflect(x, ((0,0),(0,0),(2,2),(2,2))),
+  lambda x: pad_reflect(x, size=hyp['net']['pad_amount']),
   lambda x: random_crop(x),
   lambda x: Tensor.where(Tensor.rand(x.shape[0],1,1,1) < 0.5, x[..., ::-1], x), # flip LR
 ]
@@ -179,16 +179,15 @@ transform_test = [
   lambda x: x.reshape((-1,3,32,32)),
 ]
 
-def cutmix(X, Y, mask_size=6, p=0.5, mix=True):
+def cutmix(X, Y, mask_size=3, p=0.5):
   if Tensor.rand(1) > 0.5: return X, Y
 
+  # fill the square with randomly selected images from the same batch
   mask = make_square_mask(X, mask_size)
-
-  if not mix: return Tensor.where(mask, Tensor.rand(*X.shape), X), Y
-
-  # TODO shuffle instead of reverse, currently is not supported
-  X_patch = X[::-1,...]
-  Y_patch = Y[::-1]
+  order = list(range(0, X.shape[0]))
+  random.shuffle(order) 
+  X_patch = Tensor(X.numpy()[order,...])
+  Y_patch = Tensor(Y.numpy()[order])
   X_cutmix = Tensor.where(mask, X_patch, X)
   mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
   Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
@@ -288,7 +287,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
   batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
   while i <= STEPS:
     X, Y = next(batcher)
-    if i >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y)
+    if i >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
     if i%100 == 0 and i > 1:
       # batchnorm is frozen, no need for Tensor.training=False
       corrects = []
