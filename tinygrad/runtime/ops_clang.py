@@ -18,12 +18,10 @@ args = {
 CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n'
 ADDRESS = 0x10000
 STACK_ADDR = 0x40000000
-SIZE = 1000 * 1024 * 1024
-mock_lm = {"_sinf": np.sin, "_sqrtf": np.sqrt, "_exp2f": np.exp2, "_log2f": np.log2}
+SIZE = 20 * 1024 * 1024
+mock_lm = {"sinf": np.sin, "sqrtf": np.sqrt, "exp2f": np.exp2, "log2f": np.log2}
 # callback for tracing instructions
 def hook_code(fn, uc, address, size, user_data):
-  if fn == '_log2f':
-    print(uc.reg_read(UC_ARM64_REG_S0))
   s0_float = struct.unpack('f', struct.pack('I', uc.reg_read(UC_ARM64_REG_S0)))[0]
   #print(s0_float, fn, mock_lm[fn](s0_float))
   res = mock_lm[fn](s0_float)
@@ -43,15 +41,15 @@ class ClangProgram:
       if DEBUG >= 5: print(prg)
       if CI:
         # Remove headers and ret
-        prg = prg.split('\n')[6:-2]
-        self.stack_size = 0 
+        prg = prg.split('\n')[6:-3]
         self.lm_calls = {(i*4+ADDRESS): ins.split(" ")[1] for i, ins in enumerate(prg) if ins[:2] == 'bl'}
         #each instruction 4 bytes
-        prg = "\n".join(ins if i*4+ADDRESS not in self.lm_calls else "mov x10, xzr" for i, ins in enumerate(prg))
-        ks = Ks(KS_ARCH_ARM64, KS_MODE_LITTLE_ENDIAN)
-        output, _ = ks.asm(prg)
-        output = bytes(output)
-        self.prg = output
+        prg = "\n".join(ins if i*4+ADDRESS not in self.lm_calls else "add xzr,xzr,xzr" for i, ins in enumerate(prg))
+        subprocess.check_output(args=('as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
+        subprocess.check_output(args=('objcopy -O binary --only-section=.text '+fn+ '.o ' + fn +'.bin').split())
+        with open(fn+'.bin', 'rb') as f:
+          data = f.read()
+        self.prg = data
         return
       subprocess.check_output(args=('as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
       subprocess.check_output(args=('clang -lm -shared -fPIC '+fn+'.o -o'+fn).split())
@@ -63,13 +61,12 @@ class ClangProgram:
     if not CI:
       self.fxn(*[x._buf for x in args])
     else:
-      try:
+      try: 
         mu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
-        # map 2MB memory for this emulation
         reserve_mem = reduce(lambda total, arg: total + arg.size * arg.dtype.itemsize, args, 0)
-        reserve_stack = self.stack_size 
+        #reserve_stack = self.stack_size 
         mu.mem_map(ADDRESS, (reserve_mem + len(self.prg) + 4095) & ~(4095))
-        mu.mem_map(STACK_ADDR, SIZE )
+        mu.mem_map(STACK_ADDR, SIZE)
         # write machine code to be emulated to memory
         mu.mem_write(ADDRESS, self.prg)
         for k,v in self.lm_calls.items():
@@ -86,10 +83,9 @@ class ClangProgram:
           addr += args[i].size * args[i].dtype.itemsize 
 
         for i, addr in enumerate(to_stack):
-          print("______________")
           mu.mem_write((STACK_ADDR+SIZE-(len(args[8:])+1)*8) + ((8*i)), addr)
 
-        mu.reg_write(UC_ARM64_REG_SP, STACK_ADDR+SIZE-0x10)
+        mu.reg_write(UC_ARM64_REG_SP, STACK_ADDR+SIZE-(len(args[8:])+1)*8)
         mu.emu_start(ADDRESS, ADDRESS + len(self.prg))
         args[0]._buf = mu.mem_read(mu.reg_read(UC_ARM64_REG_X0), args[0].size * args[0].dtype.itemsize)
       except UcError as e:

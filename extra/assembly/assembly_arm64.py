@@ -153,4 +153,4 @@ class ARM64Codegen(AssemblyCodegen):
       if out is not None and out.nm in mem_vars:
         ins.append(f"mov x15, {mem_vars[out.nm]}")
         ins.append(f"str {rtor[out.nm]}, [sp, x15]")
-    return "test", "\n".join([f"//varsize,{var_size}",".arch armv8-a",".text", f".global {get_name('test')}",".p2align 2", f"{get_name('test')}:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins  + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret;"+"\n"])
+    return "test", "\n".join([f"//varsize,{var_size}",".arch armv8-a",".text", f".global {get_name('test')}",".p2align 2", f"{get_name('test')}:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins  + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret", "\n"])
