@@ -186,7 +186,7 @@ def load_wav(file):
 
 # mel filterbank is the same at all times, so we don't take chances
 @functools.lru_cache(None)
-def get_filters(): 
+def get_filters():
   download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/mel_filters.npz", BASE / "mel_filters.npz")
   return np.load(BASE / "mel_filters.npz")[f"mel_{N_MELS}"]
 
