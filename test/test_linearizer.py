@@ -26,18 +26,20 @@ class TestLinearizer(unittest.TestCase):
     if not isinstance(Device[Device.DEFAULT], Compiled):
       self.skipTest("Only Compiled uses linearizer")
 
-    a = Tensor.randn(2)
+    a = Tensor.randn(4)
     np_a = a.numpy()
-    r = a[0] + a[0]
+    # these are of size 3 to avoid float4 coalesce
+    r = a[:-1] + a[1:]
     ast = r.lazydata.op
     r = r.realize()
     k = Linearizer(ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts)
     k.process()
+    k.upcast()
     k.linearize()
     num_loads = len([uop for uop in k.uops if uop.uop == UOps.LOAD])
-    assert num_loads == 1, "more load uops than needed"
+    assert num_loads <= 4, "more load uops than needed"
 
-    np_r = np_a[0] + np_a[0]
+    np_r = np_a[:-1] + np_a[1:]
     np.testing.assert_allclose(np_r, r.numpy())
 
 if __name__ == '__main__':
