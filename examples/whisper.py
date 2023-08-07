@@ -32,7 +32,7 @@ class MultiHeadAttention:
     self.key = nn.Linear(n_state, n_state, bias=False)
     self.value = nn.Linear(n_state, n_state)
     self.out = nn.Linear(n_state, n_state)
-
+  
   def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None):
     q = self.query(x)
     k = self.key(xa or x)
@@ -143,11 +143,9 @@ BASE = Path(__file__).parent.parent / "weights"
 
 def get_encoding(n_vocab_in, is_multilingual=True):
   if is_multilingual:
-    print("loading multilingual model")
     download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/multilingual.tiktoken", BASE / "multilingual.tiktoken")
     ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(BASE / "multilingual.tiktoken") if line)}
   else:
-    print("loading english model")
     download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/gpt2.tiktoken", BASE / "gpt2.tiktoken")
     ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(BASE / "gpt2.tiktoken") if line)}
   n_vocab = len(ranks)
@@ -260,6 +258,11 @@ def load_whisper_model(model_name, weights_folder=Path(__file__).parent.parent /
   load_state_dict(model, state['model_state_dict'])
   return model
 
+def make_initial_prompt(model, lang, translate=False):
+  lang = "<|" + lang + "|>"
+  task = "<|translate|>" if translate else "<|transcribe|>"
+  return [model.tokenizer._special_tokens[i] for i in ["<|startoftranscript|>", lang, task]]
+
 def decode_segment(segment, initial_tokens, model, sample_len=224, n_audio=1, n_group=1):
   if segment.ndim == 2: segment = np.expand_dims(segment, axis=0)
   texts, sample_begin = [], len(initial_tokens)
@@ -290,20 +293,18 @@ def decode_segment(segment, initial_tokens, model, sample_len=224, n_audio=1, n_
 def transcribe_wav(fn, model, task_prompt, logprob_threshold=-1.0, no_speech_threshold=0.6):
   mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
   content_frames = mel.shape[-1] - N_FRAMES
-  initial_tokens = [model.tokenizer._special_tokens[i] for i in task_prompt]
   seek, texts = 0, []
   while seek < content_frames:
     mel_segment = mel[:, seek:seek+N_FRAMES]
     mel_segment = pad_or_trim(mel_segment, N_FRAMES)
     segment_size = min(N_FRAMES, content_frames - seek)
-    texts += decode_segment(mel_segment, initial_tokens, model)
+    texts += decode_segment(mel_segment, task_prompt, model)
     seek += segment_size
   return "".join(texts)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Run Whisper in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--model', type=str, default="tiny", help='model to use')
-  parser.add_argument('--test', action='store_true', help='run tests')
   parser.add_argument('--file', type=str, default=None, help='file to transcribe')
   parser.add_argument('--lang', type=str, default="en", help='language to transcribe')
   parser.add_argument('--translate', action='store_true', help='translate to english')
@@ -314,17 +315,17 @@ if __name__ == "__main__":
     print("WARNING: using english-only model with non-english language")
   lang = "<|" + args.lang + "|>"
   task = "<|translate|>" if args.translate else "<|transcribe|>"
-  prompt = ["<|startoftranscript|>", f"<|{args.lang}|>", f"<|{'translate' if args.translate else 'transcribe'}|>"]
   model= load_whisper_model(args.model)
+  task_prompt = make_initial_prompt(model, args.lang, args.translate)
 
   if args.file:
-    print(transcribe_wav(args.file))
+    print(transcribe_wav(args.file, model, task_prompt))
   else:
     q = multiprocessing.Queue()
     p = multiprocessing.Process(target=listener, args=(q, args.recordlength))
     p.daemon = True
     p.start()
-    lst = prompt.copy()
+    lst = task_prompt.copy()
     total = None
     did_read = False
     for i in range(0, int(RATE / CHUNK * args.recordlength)):
