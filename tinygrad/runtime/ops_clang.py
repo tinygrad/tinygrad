@@ -1,5 +1,5 @@
 import os, time, ctypes, hashlib, subprocess, platform, tempfile
-from functools import partial
+from functools import partial, reduce
 from tinygrad.ops import Compiled
 from tinygrad.helpers import fromimport, getenv, DEBUG, CI
 from tinygrad.runtime.lib import RawMallocBuffer
@@ -18,17 +18,19 @@ args = {
 CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n'
 ADDRESS = 0x10000
 STACK_ADDR = 0x40000000
-STACK_ENTRY_SIZE = 8
-STACK_SIZE = 20 * 1024 * 1024
-mock_lm = {"sinf": np.sin, "sqrtf": np.sqrt, "exp2f": np.exp2, "log2f": np.log2}
+SIZE = 1000 * 1024 * 1024
+mock_lm = {"_sinf": np.sin, "_sqrtf": np.sqrt, "_exp2f": np.exp2, "_log2f": np.log2}
 # callback for tracing instructions
 def hook_code(fn, uc, address, size, user_data):
+  if fn == '_log2f':
+    print(uc.reg_read(UC_ARM64_REG_S0))
   s0_float = struct.unpack('f', struct.pack('I', uc.reg_read(UC_ARM64_REG_S0)))[0]
+  #print(s0_float, fn, mock_lm[fn](s0_float))
   res = mock_lm[fn](s0_float)
   uc.reg_write(UC_ARM64_REG_S0, struct.unpack('I', struct.pack('f', res))[0])
 
 class ClangProgram:
-  def __init__(self, name:str, prg:str, binary:bool=False):
+  def __init__(self, name:str, prg:str, binary:bool=False, var_size:int=0):
     # TODO: is there a way to not write this to disk?
     fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
     if not binary:
@@ -41,24 +43,15 @@ class ClangProgram:
       if DEBUG >= 5: print(prg)
       if CI:
         # Remove headers and ret
-        prg = prg.split('\n')[5:-2]
-        matches = {(i*4+ADDRESS): s.split(" ")[1] for i,s in enumerate(prg) if s.find('bl') != -1}
+        prg = prg.split('\n')[6:-2]
+        self.stack_size = 0 
+        self.lm_calls = {(i*4+ADDRESS): ins.split(" ")[1] for i, ins in enumerate(prg) if ins[:2] == 'bl'}
         #each instruction 4 bytes
-        prg = "\n".join(line if line.find('bl') == -1 else "mov x10, xzr" for line in prg)
+        prg = "\n".join(ins if i*4+ADDRESS not in self.lm_calls else "mov x10, xzr" for i, ins in enumerate(prg))
         ks = Ks(KS_ARCH_ARM64, KS_MODE_LITTLE_ENDIAN)
         output, _ = ks.asm(prg)
         output = bytes(output)
-        mu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
-        # map 2MB memory for this emulation
-        mu.mem_map(ADDRESS, 20 * 1024 * 1024)
-        mu.mem_map(STACK_ADDR, STACK_SIZE)
-        # write machine code to be emulated to memory
-        mu.mem_write(ADDRESS, output)
-        for k,v in matches.items():
-          mu.hook_add(UC_HOOK_CODE, partial(hook_code, v), begin=k, end=k)
-        self.start = ADDRESS 
-        self.end = ADDRESS + len(output) 
-        self.mu = mu
+        self.prg = output
         return
       subprocess.check_output(args=('as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
       subprocess.check_output(args=('clang -lm -shared -fPIC '+fn+'.o -o'+fn).split())
@@ -71,19 +64,34 @@ class ClangProgram:
       self.fxn(*[x._buf for x in args])
     else:
       try:
-        addr = self.end
-        self.mu.reg_write(UC_ARM64_REG_SP, STACK_ADDR+STACK_SIZE-(len(args[8:])+1)*8)
-        sp = self.mu.reg_read(UC_ARM64_REG_SP)
+        mu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        # map 2MB memory for this emulation
+        reserve_mem = reduce(lambda total, arg: total + arg.size * arg.dtype.itemsize, args, 0)
+        reserve_stack = self.stack_size 
+        mu.mem_map(ADDRESS, (reserve_mem + len(self.prg) + 4095) & ~(4095))
+        mu.mem_map(STACK_ADDR, SIZE )
+        # write machine code to be emulated to memory
+        mu.mem_write(ADDRESS, self.prg)
+        for k,v in self.lm_calls.items():
+          mu.hook_add(UC_HOOK_CODE, partial(hook_code, v), begin=k, end=k)
+
+        addr = ADDRESS + len(self.prg)
+        to_stack = []
         for i in range(len(args)):
-          self.mu.mem_write(addr, args[i]._buffer().tobytes())
+          mu.mem_write(addr, args[i]._buffer().tobytes())
           if i<=7: 
-            self.mu.reg_write(getattr(unicorn.arm64_const, f'UC_ARM64_REG_X{i}'), addr)
+            mu.reg_write(getattr(unicorn.arm64_const, f'UC_ARM64_REG_X{i}'), addr)
           else:
-            self.mu.mem_write(sp + (8*(i-8)), addr.to_bytes(8, 'little'))
+            to_stack.append(addr.to_bytes(8, 'little'))
           addr += args[i].size * args[i].dtype.itemsize 
 
-        self.mu.emu_start(self.start, self.end)
-        args[0]._buf = self.mu.mem_read(self.mu.reg_read(UC_ARM64_REG_X0), args[0].size * args[0].dtype.itemsize)
+        for i, addr in enumerate(to_stack):
+          print("______________")
+          mu.mem_write((STACK_ADDR+SIZE-(len(args[8:])+1)*8) + ((8*i)), addr)
+
+        mu.reg_write(UC_ARM64_REG_SP, STACK_ADDR+SIZE-0x10)
+        mu.emu_start(ADDRESS, ADDRESS + len(self.prg))
+        args[0]._buf = mu.mem_read(mu.reg_read(UC_ARM64_REG_X0), args[0].size * args[0].dtype.itemsize)
       except UcError as e:
         print("ERROR: %s" % e)
     if wait: return time.monotonic()-st
