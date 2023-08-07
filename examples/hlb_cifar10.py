@@ -17,28 +17,24 @@ from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
 
-# TODO adjust dict for hyperparameters
+BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
-batchsize = 512
 bias_scaler = 56
 
 hyp = {
     'opt': {
         'bias_lr':        1.64 * bias_scaler/512,
         'non_bias_lr':    1.64 / 512,
-        'bias_decay':     1.08 * 6.45e-4 * batchsize/bias_scaler,
-        'non_bias_decay': 1.08 * 6.45e-4 * batchsize,
+        'bias_decay':     1.08 * 6.45e-4 * BS/bias_scaler,
+        'non_bias_decay': 1.08 * 6.45e-4 * BS,
         'momentum':       0.85,
         'percent_start':  0.25,
         'scaling_factor': 1./9,
         'loss_scale_scaler': 1./512, # regularizer inside the loss summing (range: ~1/512 - 16+). 
     },
     'net': {
-        'whitening': {
-            'kernel_size': 2,
-            'num_examples': 50000,
-        },
-        'batch_norm_momentum': .5, # * Don't forget momentum is 1 - momentum here (due to a quirk in the original paper... >:( )
+        'kernel_size': 2,           # kernel size for the whitening layer
+        'batch_norm_momentum': .5,
         'conv_norm_pow': 2.6,
         'cutmix_size': 3,
         'cutmix_steps': 588,        # original repo used epoch 6 which is roughly 6*98=588 STEPS
@@ -48,18 +44,17 @@ hyp = {
 
 def set_seed(seed):
   Tensor.manual_seed(getenv('SEED', seed)) # Deterministic
-  #np.random.seed(getenv('SEED', seed))
   random.seed(getenv('SEED', seed))
 
 # ========== Model ==========
 # TODO remove dependency on torch, mainly unfold and eigh
-def whitening(X):
+def whitening(X, kernel_size=hyp['net']['kernel_size']):
   import torch
   def _cov(X):
     X = X/np.sqrt(X.size(0) - 1)
     return X.t() @ X
 
-  def _patches(data, patch_size=(2,2)):
+  def _patches(data, patch_size=(kernel_size,kernel_size)):
     h, w = patch_size
     c = data.size(1)
     return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w)
@@ -217,7 +212,7 @@ transform = [
   lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1), # normalize
   lambda x: x.reshape((-1,3,32,32)),
   lambda x: pad_reflect(x, size=hyp['net']['pad_amount']),
-  lambda x: random_crop(x),
+  lambda x: random_crop(x, crop_size=32),
   lambda x: Tensor.where(Tensor.rand(x.shape[0],1,1,1) < 0.5, x[..., ::-1], x), # flip LR
 ]
 
@@ -259,11 +254,9 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     if not is_train: break
     seed += 1
 
-def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
+def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   set_seed(seed)
   Tensor.training = True
-
-  BS, EVAL_BS, STEPS = getenv("BS", bs), getenv('EVAL_BS', eval_bs), getenv("STEPS", steps)
 
   if getenv("FAKEDATA"):
     N = 2048
@@ -294,7 +287,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
 
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
   initial_div_factor = 1e16
-  final_lr_ratio = 0.07
+  final_lr_ratio = 0.08
   pct_start = hyp['opt']['percent_start']
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']     ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'] ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
