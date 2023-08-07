@@ -61,14 +61,14 @@ def train_resnet():
 
   BS = 16
   lr = 0.256 * (BS / 256)  # Linearly scale from BS=256, lr=0.256
-  epochs = 50
+  epochs = 100
   optimizer = optim.SGD(parameters, lr, momentum=.875, weight_decay=1/2**15)
   scheduler = CosineAnnealingLR(optimizer, epochs)
   print(f"training with batch size {BS} for {epochs} epochs")
 
   steps_in_train_epoch = math.floor(len(get_val_files()) / BS)
   steps_in_val_epoch = math.floor(len(get_val_files()) / BS)
-  for _ in range(epochs):
+  for e in range(epochs):
     # train loop
     Tensor.training = True
     for X, Y in (t := tqdm(iterate(bs=BS, val=True), total=steps_in_train_epoch)):
@@ -83,30 +83,31 @@ def train_resnet():
                  "lr": scheduler.get_lr().cpu().numpy().item(),
       })
     
-    # "eval" loop
-    eval_loss = []
-    eval_times = []
-    eval_top_1_acc = []
-    eval_top_5_acc = []
-    Tensor.training = False
-    for X, Y in (t := tqdm(iterate(bs=BS, val=True), total=steps_in_val_epoch)):
-      X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
-      st = time.time()
-      loss, out = eval_step(X, Y)
-      et = time.time()
+    # "eval" loop. Evaluate every 4 epochs, starting with epoch 1
+    if e % 4 == 1:
+      eval_loss = []
+      eval_times = []
+      eval_top_1_acc = []
+      eval_top_5_acc = []
+      Tensor.training = False
+      for X, Y in (t := tqdm(iterate(bs=BS, val=True), total=steps_in_val_epoch)):
+        X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
+        st = time.time()
+        loss, out = eval_step(X, Y)
+        et = time.time()
 
-      top_1_acc = calculate_accuracy(out, Y, 1)
-      top_5_acc = calculate_accuracy(out, Y, 5)
-      eval_loss.append(loss.numpy().item())
-      eval_times.append(et - st)
-      eval_top_1_acc.append(top_1_acc)
-      eval_top_5_acc.append(top_5_acc)
+        top_1_acc = calculate_accuracy(out, Y, 1)
+        top_5_acc = calculate_accuracy(out, Y, 5)
+        eval_loss.append(loss.numpy().item())
+        eval_times.append(et - st)
+        eval_top_1_acc.append(top_1_acc)
+        eval_top_5_acc.append(top_5_acc)
 
-    wandb.log({"eval/loss": sum(eval_loss) / len(eval_loss),
-               "eval/forward_time": sum(eval_times) / len(eval_times),
-               "eval/top_1_acc": sum(eval_top_1_acc) / len(eval_top_1_acc),
-               "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
-    })
+      wandb.log({"eval/loss": sum(eval_loss) / len(eval_loss),
+                "eval/forward_time": sum(eval_times) / len(eval_times),
+                "eval/top_1_acc": sum(eval_top_1_acc) / len(eval_top_1_acc),
+                "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
+      })
 
 def train_retinanet():
   # TODO: Retinanet
