@@ -99,5 +99,12 @@ with Context(VARIABLE=1):
     test()
     self.assertEqual(VARIABLE.value, 0)
 
+  def test_context_exit_reverts_updated_values(self):
+    D = ContextVar("D", 1)
+    D.value = 2
+    with Context(D=3):
+      ...
+    assert D.value == 2, f"Expected D to be 2, but was {D.value}. Indicates that Context.__exit__ did not restore to the correct value."
+
 if __name__ == '__main__':
   unittest.main()

@@ -686,8 +686,8 @@ if __name__ == '__main__':
   hps = get_hparams_from_file(config_path)
 
   # If model has multiple speakers, validate speaker id and retrieve name if available.
-  model_has_multiple_spakers = hps.data.n_speakers > 0
-  if model_has_multiple_spakers:
+  model_has_multiple_speakers = hps.data.n_speakers > 0
+  if model_has_multiple_speakers:
     logging.info(f"Model has {hps.data.n_speakers} speakers")
     if args.speaker_id >= hps.data.n_speakers: raise ValueError(f"Speaker ID {args.speaker_id} is invalid for this model.")
     speaker_name = "?"
@@ -723,7 +723,7 @@ if __name__ == '__main__':
   stn_tst = text_mapper.get_text(text_to_synthesize, hps.data.add_blank, hps.data.text_cleaners)
   logging.debug(f"Converted input text to tensor \"{text_to_synthesize}\" -> Tensor({stn_tst.shape}): {stn_tst.numpy()}")
   x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
-  sid = Tensor([args.speaker_id], dtype=dtypes.int64) if model_has_multiple_spakers else None
+  sid = Tensor([args.speaker_id], dtype=dtypes.int64) if model_has_multiple_speakers else None
 
   # Perform inference.
   start_time = time.time()
@@ -733,7 +733,7 @@ if __name__ == '__main__':
 
   # Save the audio output.
   audio_data = (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
-  out_path = Path(args.out_path or Path(args.out_dir)/f"{args.model_to_use}{f'_sid_{args.speaker_id}' if model_has_multiple_spakers else ''}_{args.base_name}.wav")
+  out_path = Path(args.out_path or Path(args.out_dir)/f"{args.model_to_use}{f'_sid_{args.speaker_id}' if model_has_multiple_speakers else ''}_{args.base_name}.wav")
   out_path.parent.mkdir(parents=True, exist_ok=True)
   with wave.open(str(out_path), 'wb') as wav_file:
     wav_file.setnchannels(args.num_channels)

@@ -7,16 +7,15 @@ from tinygrad.lazy import Device
 from tinygrad.state import get_state_dict
 from tinygrad.ops import Compiled
 
+class FakeProgram:
+  def __init__(self, name:str, prg:str): pass
+  def __call__(self, global_size, local_size, *bufs, wait=False): pass
+
 class TestLLaMASpeed(unittest.TestCase):
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
   def test_llama_compile(self):
-    # TODO: with default device
-    old_default = Device.DEFAULT
-    Device.DEFAULT = "FAKE"
-
-    # use the codegen from the real device
-    Device['fake'].codegen = Device[old_default].codegen
-    print("using", Device['fake'].codegen)
+    backup_program = Device[Device.DEFAULT].runtime
+    Device[Device.DEFAULT].runtime = FakeProgram
 
     print("testing llama python run time")
     model = Transformer(**MODEL_PARAMS[1]["7B"]["args"])
@@ -26,8 +25,7 @@ class TestLLaMASpeed(unittest.TestCase):
     print("assigned empty tensors, doing warmup")
 
     def run_llama(st, empty_method_cache=True):
-      #print(f"clearing {len(Device['fake'].method_cache)} from method cache")
-      if empty_method_cache: Device['fake'].method_cache.clear()
+      if empty_method_cache: Device[Device.DEFAULT].method_cache.clear()
       tms = [time.perf_counter()]
       for i in range(10):
         model(Tensor([[2]]), i).realize()
@@ -42,8 +40,7 @@ class TestLLaMASpeed(unittest.TestCase):
     run_llama("profile")
     stop_profile(pr, sort='time', frac=0.1)
 
-    # reset device
-    Device.DEFAULT = old_default
+    Device[Device.DEFAULT].runtime = backup_program
 
 if __name__ == '__main__':
   unittest.main()

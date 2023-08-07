@@ -477,7 +477,7 @@ def bytes_to_unicode():
   The reversible bpe codes work on unicode strings.
   This means you need a large # of unicode characters in your vocab if you want to avoid UNKs.
   When you're at something like a 10B token dataset you end up needing around 5K for decent coverage.
-  This is a signficant percentage of your normal, say, 32K bpe vocab.
+  This is a significant percentage of your normal, say, 32K bpe vocab.
   To avoid that, we want lookup tables between utf-8 bytes and unicode strings.
   And avoids mapping to whitespace/control characters the bpe code barfs on.
   """
@@ -592,6 +592,7 @@ if __name__ == "__main__":
   parser.add_argument('--steps', type=int, default=5, help="Number of steps in diffusion")
   parser.add_argument('--prompt', type=str, default="a horse sized cat eating a bagel", help="Phrase to render")
   parser.add_argument('--out', type=str, default=os.path.join(tempfile.gettempdir(), "rendered.png"), help="Output filename")
+  parser.add_argument('--noshow', action='store_true', help="Don't show the image")
   args = parser.parse_args()
 
   Tensor.no_grad = True
@@ -674,4 +675,4 @@ if __name__ == "__main__":
   print(f"saving {args.out}")
   im.save(args.out)
   # Open image.
-  im.show()
+  if not args.noshow: im.show()
