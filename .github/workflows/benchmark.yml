@@ -17,6 +17,15 @@ jobs:
       run: python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+    - name: Run Stable Diffusion
+      run: |
+        ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
+        time python3 examples/stable_diffusion.py --noshow
+    - name: Run LLaMA
+      run: |
+        ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
+        python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - uses: actions/upload-artifact@v3
@@ -26,6 +35,8 @@ jobs:
           onnx_inference_speed.csv
           torch_speed.txt
           train_cifar.txt
+          llama_unjitted.txt
+          llama_jitted.txt
 
   testamdbenchmark:
     name: AMD Benchmark
@@ -37,6 +48,15 @@ jobs:
       run: python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+    - name: Run Stable Diffusion
+      run: |
+        ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
+        time python3 examples/stable_diffusion.py --noshow
+    - name: Run LLaMA
+      run: |
+        ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
+        python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - uses: actions/upload-artifact@v3
@@ -46,3 +66,5 @@ jobs:
           onnx_inference_speed.csv
           torch_speed.txt
           train_cifar.txt
+          llama_unjitted.txt
+          llama_jitted.txt
