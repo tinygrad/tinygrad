@@ -1,5 +1,4 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
-# to use in another file load model 
 import argparse
 import sys, math, string, difflib, base64, functools, itertools, multiprocessing
 import subprocess as sp
@@ -32,7 +31,7 @@ class MultiHeadAttention:
     self.key = nn.Linear(n_state, n_state, bias=False)
     self.value = nn.Linear(n_state, n_state)
     self.out = nn.Linear(n_state, n_state)
-  
+
   def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None):
     q = self.query(x)
     k = self.key(xa or x)

@@ -45,10 +45,11 @@ if __name__ == "__main__":
     step_size = 1
   for i in range(0, num_samples, step_size):
     for j in models:
-      model = load_whisper_model(j)
       print(f"evaluating {j} on {step_size} sample(s)")
+      model = load_whisper_model(j)
       eval_whisper(model, j, i, max(i+step_size, num_samples), verbose=args.verbose)
-      
+      if args.verbose > 0: 
+        print("-"*128)
       del model
   print("Results of a run:")
   output_wer(WER)
