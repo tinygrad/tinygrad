@@ -492,12 +492,12 @@ class Linearizer:
     if DEBUG >= 4: print(self.uops[-1])
     return out
 
-  def uop_alu(self, out: Token, vin: List[Token], arg: Op) -> Token:
-    key = (arg, tuple(vin))
+  def uop_alu(self, out: Token, vin: List[Token], op: Op) -> Token:
+    key = (op, tuple(vin))
     if key not in self.saved_exprs:
-      self.saved_exprs[key] = self.uop(UOps.ALU, out, vin, arg)
+      self.saved_exprs[key] = self.uop(UOps.ALU, out, vin, op)
     else:
-      if DEBUG >= 5: print(f"    cached alu op: {self.saved_exprs[key]} <- {vin} {arg}")
+      if DEBUG >= 5: print(f"    cached alu op: {self.saved_exprs[key]} <- {vin} {op}")
     return self.saved_exprs[key]
 
   def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
