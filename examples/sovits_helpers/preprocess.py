@@ -256,4 +256,4 @@ def get_unit_f0(wav:Tensor, tran, hop_length, target_sample, f0_filter=False) ->
   f0 = (f0 * 2 ** (tran / 12)).unsqueeze(0)
   uv = Tensor(uv.astype(np.float32)).float().unsqueeze(0)
   wav16k = sinc_interp_resample(wav[None,:], target_sample, 16000)[0]
-  return wav16k, f0, uv
+  return wav16k.realize(), f0.realize(), uv.realize()

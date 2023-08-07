@@ -5,7 +5,6 @@ from tinygrad import nn
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, getenv
 from tinygrad.state import torch_load
-from tinygrad.jit import TinyJit
 from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present, get_hparams_from_file, load_checkpoint, weight_norm, HParams
 from examples.sovits_helpers import preprocess
 import soundfile
@@ -25,7 +24,7 @@ class ContentVec:
   # TODO: self.label_embs_concat and self.final_proj dims are hardcoded
   # and depend on fairseq.data.dictionary Dictionary in the checkpoint.
   # This param can't yet be loaded since there is no pickle for it. See with DEBUG=2.
-  # This means that the model only works with the given weights
+  # This means that the model only works with the given weights (they are the same for every svc model)
   def __init__(self, cfg: HParams):
     self.feature_grad_mult, self.untie_final_proj = cfg.feature_grad_mult, cfg.untie_final_proj
     feature_enc_layers = eval(cfg.conv_feature_layers)
@@ -76,10 +75,21 @@ class ContentVec:
     logging.debug(f"{cls.__name__}: Loaded model with cfg={cfg}")
     return enc
 
-class ContentVec256L9:
-  def __init__(self, model:ContentVec):
-    self.hidden_dim = 256
+class SpeechEncoder:
+  def __init__(self, hidden_dim, model:ContentVec):
+    self.hidden_dim = hidden_dim
     self.model = model
+
+  def encode(self, ): raise NotImplementedError("implement me")
+
+  @classmethod
+  def load_model(cls, checkpoint_path:str, checkpoint_url:str):
+    contentvec = ContentVec.load_model(checkpoint_path, checkpoint_url)
+    return cls(contentvec)
+
+class ContentVec256L9(SpeechEncoder):
+  def __init__(self, model:ContentVec):
+    super().__init__(hidden_dim=256, model=model)
 
   def encode(self, wav: Tensor):
     feats = wav
@@ -92,10 +102,19 @@ class ContentVec256L9:
     feats = self.model.final_proj(logits[0])
     return feats.transpose(1,2)
 
-  @classmethod
-  def load_model(cls, checkpoint_path:str, checkpoint_url:str):
-    contentvec = ContentVec.load_model(checkpoint_path, checkpoint_url)
-    return cls(contentvec)
+class ContentVec768L12(SpeechEncoder):
+  def __init__(self, model:ContentVec):
+    super().__init__(hidden_dim=768, model=model)
+
+  def encode(self, wav: Tensor):
+    feats = wav
+    if len(feats.shape) == 2:  # double channels
+      feats = feats.mean(-1)
+    assert len(feats.shape) == 1, feats.dim()
+    feats = feats.reshape(1, -1)
+    padding_mask = Tensor.zeros_like(feats).cast(dtypes.bool)
+    logits = self.model.extract_features(feats.to(wav.device), padding_mask=padding_mask.to(wav.device), output_layer=12)
+    return logits[0].transpose(1,2)
 
 class TransformerEncoder:
   def __init__(self, cfg: HParams):
@@ -576,9 +595,8 @@ class Generator:
     return self.conv_post(x.leakyrelu()).tanh()
 
 def repeat_expand_2d(content, target_len, mode="left"): # content : [h, t]
-  print(f"target_len={target_len}, content.shape={content.shape}")
   if mode == "left": return repeat_expand_2d_left(content.realize(), target_len)
-  #else: return repeat_expand_2d_nearest(content, target_len)
+  elif mode == "nearest": return repeat_expand_2d_nearest(content, target_len)
   raise RuntimeError("Mode: {mode} not supported.")
 
 # TODO this is __very__ slow. Any way to make it faster?
@@ -604,12 +622,10 @@ def repeat_expand_2d_left(content, target_len): # content : [h, t]
 # Bute here, scale = target_len / content.shape[-1] would be a float...
 # How to do this without writing slow loops in python?
 # Torch does it with a custom kernel
-"""
 def repeat_expand_2d_nearest(content, target_len):
   import torch
   content = content[None,:,:]
   return Tensor(torch.nn.functional.interpolate(torch.from_numpy(content.numpy()), target_len, mode="nearest")[0].numpy())
-"""
 
 def load_fairseq_cfg(checkpoint_path):
   assert os.path.isfile(checkpoint_path)
@@ -677,69 +693,96 @@ def get_sid(spk2id:HParams, speaker:str) -> Tensor:
   if speaker_id is None: raise RuntimeError(f"speaker={speaker} not in the speaker list")
   return Tensor([int(speaker_id)], dtype=dtypes.int64).unsqueeze(0)  # TODO: self.device
 
+def get_encoder(ssl_dim) -> SpeechEncoder:
+  if ssl_dim == 256: return ContentVec256L9
+  if ssl_dim == 768: return ContentVec768L12
+
+#########################################################################################
+# CODE: https://github.com/svc-develop-team/so-vits-svc
+#########################################################################################
+# CONTENTVEC:
+#   CODE: https://github.com/auspicious3000/contentvec
+#   PAPER: https://arxiv.org/abs/2204.09224
+#########################################################################################
+# INSTALLATION: dependencies are for preprocessing and loading/saving audio.
+# pip3 install soundfile, librosa, praat-parselmouth
+#########################################################################################
+# CAUTION: IMPORTANT: The drake weights on huggingface [0], are marked as unsafe.
+#          Use them at your own risk. All the other weights are not marked unsafe.
+#          [0] - https://huggingface.co/jaspa/so-vits-svc/tree/main/aubrey
+#########################################################################################
+# INFO: METAL: If you use metal as backend, the output sound quality gets worse.
+# INFO: After speech encoder, the encoding needs to be interpolated before it can be fed
+#       into VITS. Currently, this process is very slow,
+#       but you can chose a faster implementation with
+#       --interpolate_mode "nearest". This will use torch though.
+#       See comments for repeat_expand_2d().
+#########################################################################################
+# EXAMPLE USAGE:
+# GPU=1 python3 examples/so_vits_svc.py --model tf2spy --file ~/recording.wav
+#########################################################################################
 SO_VITS_SVC_PATH = Path(__file__).parent.parent / "weights/So-VITS-SVC"
 VITS_MODELS = { # config_path, weights_path, config_url, weights_url
   "saul_goodman" : (SO_VITS_SVC_PATH / "config_saul_gman.json", SO_VITS_SVC_PATH / "pretrained_saul_gman.pth", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/G_80000.pth"),
-  "drake" : (SO_VITS_SVC_PATH / "config_drake.json", SO_VITS_SVC_PATH / "pretrained_drake.pth", "missing", "missing")
+  "drake" : (SO_VITS_SVC_PATH / "config_drake.json", SO_VITS_SVC_PATH / "pretrained_drake.pth", "https://huggingface.co/jaspa/so-vits-svc/resolve/main/aubrey/config_aubrey.json", "https://huggingface.co/jaspa/so-vits-svc/resolve/main/aubrey/pretrained_aubrey.pth"),
+  "cartman" : (SO_VITS_SVC_PATH / "config_cartman.json", SO_VITS_SVC_PATH / "pretrained_cartman.pth", "https://huggingface.co/marcoc2/so-vits-svc-4.0-models/resolve/main/EricCartman/config.json", "https://huggingface.co/marcoc2/so-vits-svc-4.0-models/resolve/main/EricCartman/G_10200.pth"),
+  "tf2spy" : (SO_VITS_SVC_PATH / "config_tf2spy.json", SO_VITS_SVC_PATH / "pretrained_tf2spy.pth", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/TF2_spy_60k/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/TF2_spy_60k/G_60000.pth"),
+  "tf2heavy" : (SO_VITS_SVC_PATH / "config_tf2heavy.json", SO_VITS_SVC_PATH / "pretrained_tf2heavy.pth", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/TF2_heavy_100k/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/TF2_heavy_100k/G_100000.pth"),
+  "lady_gaga" : (SO_VITS_SVC_PATH / "config_gaga.json", SO_VITS_SVC_PATH / "pretrained_gaga.pth", "https://huggingface.co/marcoc2/so-vits-svc-4.0-models/resolve/main/LadyGaga/config.json", "https://huggingface.co/marcoc2/so-vits-svc-4.0-models/resolve/main/LadyGaga/G_14400.pth")
 }
 ENCODER_MODELS = { # weights_path, weights_url
   "contentvec": (SO_VITS_SVC_PATH / "contentvec_checkpoint.pt", "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/hubert_base.pt")
 }
-
-AUDIO_PATH = Path(__file__).parent.parent / "recording.wav"
-RESULT_PATH = Path(__file__).parent.parent / "output.wav"
-
+ENCODER_MODEL = "contentvec"
 if __name__=="__main__":
   logging.basicConfig(stream=sys.stdout, level=(logging.INFO if DEBUG < 1 else logging.DEBUG))
-  """
   parser = argparse.ArgumentParser()
-  parser.add_argument("--model_to_use", default="drake", help=f"Specify the model to use. Default is 'drake'. All supported models: {VITS_MODELS.keys()}")
+  parser.add_argument("-m", "--model", default=None, help=f"Specify the model to use. All supported models: {VITS_MODELS.keys()}", required=True)
+  parser.add_argument("-f", "--file", default=None, help=f"Specify the path of the input file", required=True)
+  parser.add_argument("--out_dir", default=str(Path(__file__).parent.parent / "temp"), help="Specify the output path.")
+  parser.add_argument("--out_path", default=None, help="Specify the full output path. Overrides the --out_dir and --name parameter.")
+  parser.add_argument("--base_name", default="test", help="Specify the base of the output file name. Default is 'test'.")
+  parser.add_argument("--speaker", default=None, help="If not specified, the first available speaker is chosen. Usually there is only one speaker per model.")
+  parser.add_argument("--noise_scale", default=0.4)
+  parser.add_argument("--tran", default=0.0, help="Pitch shift, supports positive and negative (semitone) values. Default 0.0")
+  parser.add_argument("--interpolate_mode", default="left", help="Interpolate mode to scale output of speech encoder to f0 frequency. Default 'left', other option 'nearest' is faster but only supported by torch.")
+  parser.add_argument("--pad_seconds", default=0.5)
+  parser.add_argument("--lg_num", default=0.0)
+  parser.add_argument("--clip_seconds", default=0.0)
+  parser.add_argument("--slice_db", default=-40)
   args = parser.parse_args()
-  """
 
-  encoder_model = "contentvec"
-  vits_model = "drake"
-  encoder_location = ENCODER_MODELS[encoder_model]
+  vits_model = args.model
+  encoder_location = ENCODER_MODELS[ENCODER_MODEL]
   vits_location = VITS_MODELS[vits_model]
 
+  if Tensor.empty(1).device == "METAL": logging.warning("Running on metal results in poor output quality.")
   Tensor.no_grad = True
   Tensor.training = False
 
-  # 1. ContentVec
-  contentvec256L9 = ContentVec256L9.load_model(encoder_location[0], encoder_location[1])
-  # 2. Synthesizer
-  net_g, hps = Synthesizer.load_model(config_path=vits_location[0], config_url=vits_location[2], weights_path=vits_location[1], weights_url=vits_location[3])
+  # Synthesizer
+  net_g, hps = Synthesizer.load_model(vits_location[0], vits_location[2], vits_location[1], vits_location[3])
+  # ContentVec
+  Encoder = get_encoder(hps.model.ssl_dim)
+  encoder = Encoder.load_model(encoder_location[0], encoder_location[1])
 
   target_sample = hps.data.sampling_rate
   spk2id = hps.spk
-  unit_interpolate_mode = hps.data.unit_interpolate_mode if hasattr(hps.data, "unit_interpolate_mode") and hps.data.unit_interpolate_mode is not None else 'left'
+  unit_interpolate_mode = hps.data.unit_interpolate_mode if hasattr(hps.data, "unit_interpolate_mode") and hps.data.unit_interpolate_mode is not None else args.interpolate_mode
   vol_embedding = hps.model.vol_embedding if hasattr(hps.data, "vol_embedding") and hps.model.vol_embedding is not None else False
-  speech_encoder = hps.model.speech_encoder if hasattr(hps.data, "speech_encoder") and hps.model.speech_encoder is not None else 'vec256l9'
   feature_retrieval = False
   hop_length = hps.data.hop_length
   target_sample = hps.data.sampling_rate
 
-  assert unit_interpolate_mode == "left"
-
   # args
-  slice_db = -40
-  clip_seconds = 0.
-  lg_num = 0.  # linear gradient
-  pad_seconds = 0.5
-  shallow_diffuison = False
-  only_diffusion = False
-  speaker = "drake01"
-  #spk_mix = False
-  tran = 0.
-  #cluster_infer_ratio = 0.
-  #cr_threshold = 0.05
-  noise_scale = 0.4
+  slice_db, clip_seconds, lg_num, pad_seconds, tran, noise_scale, audio_path = args.slice_db, args.clip_seconds, args.lg_num, args.pad_seconds, args.tran, args.noise_scale, args.file
+  speaker = args.speaker if args.speaker is not None else list(hps.spk.__dict__.keys())[0]
 
   ### Loading audio and slicing ###
-  assert os.path.isfile(AUDIO_PATH)
-  assert Path(AUDIO_PATH).suffix == ".wav"
-  chunks = preprocess.cut(AUDIO_PATH, db_thresh=slice_db)
-  audio_data, audio_sr = preprocess.chunks2audio(AUDIO_PATH, chunks)
+  assert os.path.isfile(audio_path)
+  assert Path(audio_path).suffix == ".wav"
+  chunks = preprocess.cut(audio_path, db_thresh=slice_db)
+  audio_data, audio_sr = preprocess.chunks2audio(audio_path, chunks)
 
   per_size = int(clip_seconds * audio_sr)
   lg_size = int(lg_num * audio_sr)
@@ -777,14 +820,14 @@ if __name__=="__main__":
 
       # ContentVec infer
       start = time.time()
-      c = contentvec256L9.encode(wav16k)
-      c = repeat_expand_2d(c.squeeze(0), f0.shape[1], unit_interpolate_mode)  # this one is slow
+      c = encoder.encode(wav16k)
+      c = repeat_expand_2d(c.squeeze(0), f0.shape[1], unit_interpolate_mode)  # interpolate speech encoding to match f0
       c = c.unsqueeze(0).realize()
       enc_time = time.time() - start
 
       # VITS infer
       vits_start = time.time()
-      out_audio, f0 = net_g.infer(c, f0=f0.realize(), uv=uv.realize(), g=sid.realize(), noise_scale=noise_scale, vol=None)
+      out_audio, f0 = net_g.infer(c, f0=f0, uv=uv, g=sid, noise_scale=noise_scale, vol=None)
       out_audio = out_audio[0,0].float().realize()
       vits_time = time.time() - vits_start
 
@@ -802,4 +845,7 @@ if __name__=="__main__":
       audio.extend(list(_audio))
 
   audio = np.array(audio)
-  soundfile.write(RESULT_PATH, audio, target_sample, format="flac")
+  out_path = Path(args.out_path or Path(args.out_dir)/f"{args.model}{f'_spk_{speaker}'}_{args.base_name}.wav")
+  out_path.parent.mkdir(parents=True, exist_ok=True)
+  soundfile.write(out_path, audio, target_sample, format="flac")
+  logging.info(f"Saved audio output to {out_path}")
