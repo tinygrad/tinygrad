@@ -7,7 +7,6 @@ from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 from unicorn import *
 import struct
 from unicorn.arm64_const import *
-from keystone import *
 import math
 import numpy as np
 args = {
