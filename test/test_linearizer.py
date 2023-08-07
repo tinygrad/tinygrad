@@ -26,7 +26,7 @@ class TestLinearizer(unittest.TestCase):
     if not isinstance(Device[Device.DEFAULT], Compiled):
       self.skipTest("Only Compiled uses linearizer")
 
-    a = Tensor.randn(4)
+    a = Tensor.randn(4).realize()
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
     ast = r.lazydata.op
