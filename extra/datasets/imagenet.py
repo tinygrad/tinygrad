@@ -59,7 +59,7 @@ def iterate(bs=32, val=True, shuffle=True):
   if shuffle: random.shuffle(order)
   from multiprocessing import Pool
   p = Pool(16)
-  for i in range(0, len(files), bs):
+  for i in range(0, len(files), bs)[:-1]:  # Don't get last batch so all batch shapes are consistent
     X = p.starmap(image_load, zip([files[i] for i in order[i:i+bs]], repeat(val)))
     Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
     yield (np.array(X), np.array(Y))

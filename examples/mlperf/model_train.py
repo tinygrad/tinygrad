@@ -2,10 +2,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.state import get_parameters
 from tinygrad.nn import optim
-from tinygrad.helpers import getenv, dtypes
+from tinygrad.helpers import getenv
 from tqdm import tqdm
 import numpy as np
-import math
 import random
 import wandb
 import time
@@ -66,8 +65,8 @@ def train_resnet():
   scheduler = CosineAnnealingLR(optimizer, epochs)
   print(f"training with batch size {BS} for {epochs} epochs")
 
-  steps_in_train_epoch = math.floor(len(get_train_files()) / BS)
-  steps_in_val_epoch = math.floor(len(get_val_files()) / BS)
+  steps_in_train_epoch = (len(get_train_files()) // BS) - 1
+  steps_in_val_epoch = (len(get_val_files()) // BS) - 1
   for e in range(epochs):
     # train loop
     Tensor.training = True
