@@ -59,6 +59,8 @@ extern "C" __global__ void test(float* c, __half* a, __half* b) {{
       for (int x = 0; x < {KX}; x++) {{
         a_frag[x][ele] = a[{N}*lane + (k+ele) + x*{16*N}];
       }}
+    }}
+    for (int ele = 0; ele < 16; ++ele) {{
       for (int y = 0; y < {KY}; y++) {{
         b_frag[y][ele] = b[(k+ele)*{N} + lane + y*16];
       }}
