@@ -30,7 +30,9 @@ jobs:
         python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
         JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run 10 CIFAR training steps
-      run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+      run: |
+        ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+        STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - uses: actions/upload-artifact@v3
       with:
         name: Speed (Mac)
@@ -64,7 +66,9 @@ jobs:
         python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
         JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run 10 CIFAR training steps
-      run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+      run: |
+        ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+        STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - uses: actions/upload-artifact@v3
       with:
         name: Speed (AMD)
