@@ -18,7 +18,7 @@ def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
   for input in grouped_inputs:
     X, G, H = input
     X.grad = norm_coefficient * X + G
-    X.grad.requires_grad = False # TODO manually turning off requires_grad
+    X.grad.requires_grad = False # TODO manually turning off requires_grad, see onnx.py:119
     H.requires_grad = False
     H.assign(H.detach() + X.grad * X.grad).realize()
     H_adaptive = H.sqrt() + epsilon
@@ -196,10 +196,9 @@ def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=N
   if ceil_mode: auto_pad = "SAME_UPPER"
   ret = _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-len(kernel_shape):], strides=strides, kernel_shape=kernel_shape, dilations=dilations)
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations)
-  ret_shape = ret.shape
-  ret_len = prod(ret.shape)
-  X_len = prod(X.shape)
-  indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)) * Tensor.arange(X_len).reshape(1, X_len).expand(ret_len, X_len)).sum(1).reshape(ret_shape).cast(dtypes.int64)
+  ret_len = ret.numel()
+  X_len = X.numel()
+  indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)) * Tensor.arange(X_len).reshape(1, X_len).expand(ret_len, X_len)).sum(1).reshape(ret.shape).cast(dtypes.int64)
   if storage_order: indices = indices.transpose(indices.ndim-2, indices.ndim-1)
   return ret, indices
 
@@ -224,15 +223,14 @@ def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=Non
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=padding)
 
 def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, output_shape=None, output_padding=0, strides=1):
-  if auto_pad != "NOTSET":
-    if not kernel_shape: kernel_shape = W.shape[-len(strides):]
-    pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
-  ret = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding)
-  # HACK: Need smarter way of determining ret shape and output_shape
-  # out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
+  if not kernel_shape: kernel_shape = W.shape
+  if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
   if output_shape and not output_padding:
-    output_padding = [os - rs for os, rs in zip(output_shape, ret.shape[-2:])]
-    ret = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding)
+    strides_ = [1]*(3) + [strides] if isinstance(strides, int) else [1]*(4-len(strides)) + list(strides)
+    dilations_ = [1]*(3) + [dilations] if isinstance(dilations, int) else [1]*(4-len(dilations)) + list(dilations)
+    out_sh = [st*(xs-1) + (ks-1)*di+1 for st, xs, ks, di in zip(strides_, X.shape, kernel_shape, dilations_)]
+    output_padding = [os - rs for os, rs in zip(output_shape, out_sh[-len(output_shape):])]
+  ret = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding)
   return ret
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
