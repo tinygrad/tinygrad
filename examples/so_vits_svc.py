@@ -711,7 +711,6 @@ def get_encoder(ssl_dim) -> SpeechEncoder:
 #          Use them at your own risk. All the other weights are not marked unsafe.
 #          [0] - https://huggingface.co/jaspa/so-vits-svc/tree/main/aubrey
 #########################################################################################
-# INFO: METAL: If you use metal as backend, the output sound quality gets worse.
 # INFO: After speech encoder, the encoding needs to be interpolated before it can be fed
 #       into VITS. Currently, this process is very slow,
 #       but you can chose a faster implementation with
@@ -756,7 +755,6 @@ if __name__=="__main__":
   encoder_location = ENCODER_MODELS[ENCODER_MODEL]
   vits_location = VITS_MODELS[vits_model]
 
-  if Tensor.empty(1).device == "METAL": logging.warning("Running on metal results in poor output quality.")
   Tensor.no_grad = True
   Tensor.training = False
 
