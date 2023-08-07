@@ -17,7 +17,6 @@ from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
 
 # TODO adjust dict for hyperparameters
-default_conv_kwargs = {'kernel_size': 3, 'padding': 'same', 'bias': False}
 
 batchsize = 512
 bias_scaler = 56
@@ -76,6 +75,16 @@ def whitening(X):
 
   return W
 
+# class Conv(nn.Conv2d):
+#   def __init__(self, *args, norm=False, **kwargs):
+#     super().__init__(*args, kernel_size=3, padding=0, bias=False, **kwargs)
+#     self.norm = norm
+  
+#   def __call__(self, x):
+#     if self.training and self.norm:
+#       Tensor.no_grad = True
+#     return super().__call__(x)
+
 class ConvGroup:
   def __init__(self, channels_in, channels_out, short, se=True):
     self.short, self.se = short, se and not short
@@ -107,6 +116,7 @@ class SpeedyResNet:
       lambda x: x.mul(hyp['opt']['scaling_factor'])
     ]
   def __call__(self, x, training=True):
+    print(self.net[2].conv[0].weight.training)
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to do the rest conv layers
     forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
     if not training: return forward(x)*0.5 + forward(x[..., ::-1])*0.5
@@ -185,7 +195,7 @@ def cutmix(X, Y, mask_size=3, p=0.5):
   # fill the square with randomly selected images from the same batch
   mask = make_square_mask(X, mask_size)
   order = list(range(0, X.shape[0]))
-  random.shuffle(order) 
+  random.shuffle(order)
   X_patch = Tensor(X.numpy()[order,...])
   Y_patch = Tensor(Y.numpy()[order])
   X_cutmix = Tensor.where(mask, X_patch, X)
@@ -289,7 +299,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
     X, Y = next(batcher)
     if i >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
     if i%100 == 0 and i > 1:
-      # batchnorm is frozen, no need for Tensor.training=False
+      # TODO using Tensor.training = False here would actually brick batchnorm
       corrects = []
       losses = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
