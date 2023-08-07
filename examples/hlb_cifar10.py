@@ -4,6 +4,7 @@
 # https://siboehm.com/articles/22/CUDA-MMM
 import time
 import random
+from typing import Any
 import numpy as np
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from tinygrad import nn
@@ -75,31 +76,72 @@ def whitening(X):
 
   return W
 
+# class BatchNorm(nn.BatchNorm2d):
+#     def __init__(self, num_features, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'], weight=False, bias=True):
+#         super().__init__(num_features, eps=eps, momentum=momentum)
+#         self.weight.data.fill_(1.0)
+#         self.bias.data.fill_(0.0)
+#         self.weight.requires_grad = weight
+#         self.bias.requires_grad = bias
+
+# # Allows us to set default arguments for the whole convolution itself.
+# # Having an outer class like this does add space and complexity but offers us
+# # a ton of freedom when it comes to hacking in unique functionality for each layer type
+# class Conv(nn.Conv2d):
+#     def __init__(self, *args, norm=False, **kwargs):
+#         kwargs = {**default_conv_kwargs, **kwargs}
+#         super().__init__(*args, **kwargs)
+#         self.kwargs = kwargs
+#         self.norm = norm
+
+#     def forward(self, x):
+#         if self.training and self.norm:
+#             # TODO: Do/should we always normalize along dimension 1 of the weight vector(s), or the height x width dims too?
+#             with torch.no_grad():
+#                 F.normalize(self.weight.data, p=self.norm)
+#         return super().forward(x)
+
+# class Linear(nn.Linear):
+#     def __init__(self, *args, norm=False, **kwargs):
+#         super().__init__(*args, **kwargs)
+#         self.kwargs = kwargs
+#         self.norm = norm
+
+#     def forward(self, x):
+#         if self.training and self.norm:
+#             # TODO: Normalize on dim 1 or dim 0 for this guy?
+#             with torch.no_grad():
+#                 F.normalize(self.weight.data, p=self.norm)
+#         return super().forward(x)
+
 # class Conv(nn.Conv2d):
 #   def __init__(self, *args, norm=False, **kwargs):
 #     super().__init__(*args, kernel_size=3, padding=0, bias=False, **kwargs)
 #     self.norm = norm
-  
+
 #   def __call__(self, x):
 #     if self.training and self.norm:
 #       Tensor.no_grad = True
 #     return super().__call__(x)
 
 class ConvGroup:
-  def __init__(self, channels_in, channels_out, short, se=True):
-    self.short, self.se = short, se and not short
-    self.conv = [nn.Conv2d(channels_in if i == 0 else channels_out, channels_out, kernel_size=3, padding=1, bias=False) for i in range(1 if short else 3)]
-    self.norm = [nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.5) for _ in range(1 if short else 3)]
-    if self.se: self.se1, self.se2 = nn.Linear(channels_out, channels_out//16), nn.Linear(channels_out//16, channels_out)
+  def __init__(self, channels_in, channels_out):
+    self.conv1 = nn.Conv2d(channels_in, channels_out, kernel_size=3, padding=1, bias=False)
+    self.conv2 = nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
 
+    self.norm1 = nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.5)
+    self.norm2 = nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.5)
+  
   def __call__(self, x):
-    x = self.conv[0](x).max_pool2d(2)
-    x = self.norm[0](x).gelu()
-    if self.short: return x
+    x = self.conv1(x)
+    x = x.max_pool2d(2)
+    x = self.norm1(x)
+    x = x.gelu()
     residual = x
-    mult = self.se2((self.se1(residual.mean((2,3)))).gelu()).sigmoid().reshape(x.shape[0], x.shape[1], 1, 1) if self.se else 1.0
-    x = self.norm[1](self.conv[1](x)).gelu()
-    x = self.norm[2](self.conv[2](x) * mult).gelu()
+    x = self.conv2(x)
+    x = self.norm2(x)
+    x = x.gelu()
+
     return x + residual
 
 class SpeedyResNet:
@@ -108,15 +150,14 @@ class SpeedyResNet:
     self.net = [
       nn.Conv2d(12, 32, kernel_size=1),
       lambda x: x.gelu(),
-      ConvGroup(32, 64, short=False),
-      ConvGroup(64, 256, short=True),
-      ConvGroup(256, 512, short=False),
+      ConvGroup(32, 64),
+      ConvGroup(64, 256),
+      ConvGroup(256, 512),
       lambda x: x.max((2,3)),
       nn.Linear(512, 10, bias=False),
       lambda x: x.mul(hyp['opt']['scaling_factor'])
     ]
   def __call__(self, x, training=True):
-    print(self.net[2].conv[0].weight.training)
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to do the rest conv layers
     forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
     if not training: return forward(x)*0.5 + forward(x[..., ::-1])*0.5
@@ -299,7 +340,7 @@ def train_cifar(bs=512, eval_bs=500, steps=1000, seed=32):
     X, Y = next(batcher)
     if i >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
     if i%100 == 0 and i > 1:
-      # TODO using Tensor.training = False here would actually brick batchnorm
+      # TODO using Tensor.training = False here actually brick batchnorm
       corrects = []
       losses = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
