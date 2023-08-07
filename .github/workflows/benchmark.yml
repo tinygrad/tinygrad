@@ -21,12 +21,12 @@ jobs:
       run: |
         ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
-        time python3 examples/stable_diffusion.py --noshow
+        time CI=true python3 examples/stable_diffusion.py --noshow
     - name: Run LLaMA
       run: |
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
-        python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
-        JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+        CI=true python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        JIT=1 CI=true python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - uses: actions/upload-artifact@v3
@@ -53,12 +53,12 @@ jobs:
       run: |
         ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
-        time python3 examples/stable_diffusion.py --noshow
+        time CI=true python3 examples/stable_diffusion.py --noshow
     - name: Run LLaMA
       run: |
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
-        python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
-        JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+        CI=true python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        JIT=1 CI=true python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - uses: actions/upload-artifact@v3
