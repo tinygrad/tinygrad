@@ -298,7 +298,7 @@ class Linearizer:
     # uops
     self.uops: List[UOp] = []
     self.load_cache: Dict[str, Token] = {}
-    self.saved_exprs: Dict[Any, List[Token]] = dict()
+    self.saved_exprs: Dict[Any, Token] = dict()
 
     # add global buffers
     for buf,name in self.arg_bufs.items():
