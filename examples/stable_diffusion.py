@@ -592,6 +592,7 @@ if __name__ == "__main__":
   parser.add_argument('--steps', type=int, default=5, help="Number of steps in diffusion")
   parser.add_argument('--prompt', type=str, default="a horse sized cat eating a bagel", help="Phrase to render")
   parser.add_argument('--out', type=str, default=os.path.join(tempfile.gettempdir(), "rendered.png"), help="Output filename")
+  parser.add_argument('--noshow', action='store_true', help="Don't show the image")
   args = parser.parse_args()
 
   Tensor.no_grad = True
@@ -674,4 +675,4 @@ if __name__ == "__main__":
   print(f"saving {args.out}")
   im.save(args.out)
   # Open image.
-  im.show()
+  if not args.noshow: im.show()

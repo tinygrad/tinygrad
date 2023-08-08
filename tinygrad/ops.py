@@ -113,7 +113,7 @@ class FlopCounter:
     return ret
 from tinygrad.shape.shapetracker import ShapeTracker
 shape_fxn_for_op: Dict[Op, Callable] = {
-  UnaryOps.CAST: lambda self,dtype: (self.shape, dtype, self.consume_flops()),   # cast uses no flops
+  UnaryOps.CAST: lambda self,arg: (self.shape, arg[0], self.consume_flops()),   # cast uses no flops
   **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op != UnaryOps.CAST},
   **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
   **{op:lambda self,new_shape: (new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
@@ -152,9 +152,16 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], codegen, runtime, synchronize=lambda: None):
-    self.buffer, self.codegen, self.runtime, self.synchronize = buffer, codegen, runtime, synchronize
-    self.method_cache: Dict[str, ASTRunner] = {}
+  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, runtime, synchronize=lambda: None):
+    self.buffer, self.linearizer_opts, self.renderer, self.runtime, self.synchronize = buffer, linearizer_opts, renderer, runtime, synchronize
+    self.method_cache: Dict[Any, ASTRunner] = {}
+
+  def to_program(self, k):
+    k.linearize()
+    src, global_size, local_size = self.renderer(k.function_name, k.uops)
+    return ASTRunner(k.function_name, src, global_size, local_size,
+                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
+                      display_name=k.display_name).build(self.runtime)
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):
     # all movementops do nothing in a Compiled buffer!
@@ -175,22 +182,21 @@ class Compiled:
     if not output.realized:
       output.realized = self.buffer(prod(output.shape), output.dtype, **kwargs)
 
-    # compilation time
-    k = self.codegen(ast, output)
+    from tinygrad.codegen.linearizer import Linearizer
+    k = Linearizer(ast, output, self.linearizer_opts)
 
-    # this is the default now
-    if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
+    # compilation time
+    def get_program():
       from tinygrad.codegen.optimizer import kernel_optimize, hand_coded_optimizations
-      if k.key not in self.method_cache:
-        if getenv("KOPT"):
-          kernel_optimize(k, lambda: self.codegen(ast, output), self.runtime)
-        elif not getenv("NOOPT"):
-          hand_coded_optimizations(k)
-        self.method_cache[k.key] = k.codegen().build(self.runtime)
-      elif DEBUG >= 5: print(f"method cache hit : {k.key}")
+      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, output, self.linearizer_opts), self.to_program)
+      elif not getenv("NOOPT"): hand_coded_optimizations(k)
+      return self.to_program(k)
+
+    if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
+      if k.key not in self.method_cache: self.method_cache[k.key] = get_program()
       prg = self.method_cache[k.key]
     else:
-      prg = k.codegen().build(self.runtime)
+      prg = get_program()
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 

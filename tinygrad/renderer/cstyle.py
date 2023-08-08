@@ -1,7 +1,7 @@
-from typing import Dict, ClassVar, List, Optional, NamedTuple, Tuple, Union
+from typing import Dict, List, Optional, NamedTuple, Tuple, Union
 import math
-from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, MemOp, ConstOp
-from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, TernaryOps
+from tinygrad.codegen.linearizer import UOps, UOp, MemOp, ConstOp
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, getenv, prod, DType
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
 
@@ -110,7 +110,7 @@ def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:Li
   local_size.append(var.max+1)
   return "{" if isinstance(var, NumNode) else f"{{ {prefix} {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
-def uops_to_cstyle(function_name:str, uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
+def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> Tuple[str, List[int], List[int]]:
   global_size: List[int] = []
   local_size: List[int] = []
   kernel,prekernel = [],[]
@@ -183,17 +183,3 @@ def uops_to_cstyle(function_name:str, uops:List[UOp], lang:CStyleLanguage) -> Tu
       raise RuntimeError(f"failed to render {uop}")
 
   return lang.render_kernel(function_name, kernel, bufs, global_size, local_size, prekernel)
-
-class CStyleCodegen(Linearizer):
-  lang: ClassVar[CStyleLanguage] = CStyleLanguage()
-  supports_constant_folding: bool = True
-  supports_float4: bool = True
-  supports_float4_alu: bool = True
-
-  def codegen(self):
-    self.process()
-    if self.lang.global_max: self.limit_global_dims(len(self.lang.gid), self.lang.global_max, self.lang.local_max)  # NOTE: this is optional now
-    self.linearize()
-
-    return ASTRunner(self.function_name, *uops_to_cstyle(self.function_name, self.uops, self.lang),
-      op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name)

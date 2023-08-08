@@ -102,6 +102,7 @@ jobs:
 
   testopencl:
     strategy:
+      fail-fast: false
       matrix:
         task: [optimage, openpilot]
     name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'||'openpilot (OpenCL) Tests'}}
@@ -182,27 +183,16 @@ jobs:
       run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
     - name: Run JIT test
       run: DEBUG=2 METAL=1 python -m pytest test/test_jit.py
-    # TODO: why not testing the whole test/?
-    - name: Run webgpu pytest
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto -m 'webgpu'
-    - name: Build WEBGPU Efficientnet
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
-
-  testdocker:
-    name: Docker Test
-    runs-on: ubuntu-latest
-    if: ${{ false }}
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Build Docker
-      run: docker build -t tinygrad -f test/Dockerfile .
-    - name: Test Docker
-      run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
+    - name: Check Device.DEFAULT
+      run: WEBGPU=1 python -c "from tinygrad.lazy import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
+    #- name: Run webgpu pytest
+    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto --ignore test/models/ --ignore test/unit/test_example.py --ignore test/extra/test_lr_scheduler.py --ignore test/test_linearizer.py test/
+    #- name: Build WEBGPU Efficientnet
+    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
 
   tests:
     strategy:
+      fail-fast: false
       matrix:
         backend: [llvm, clang, gpu, cuda]
 

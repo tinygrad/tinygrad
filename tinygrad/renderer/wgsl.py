@@ -1,6 +1,6 @@
-from tinygrad.codegen.cstyle import render_cl
+from tinygrad.renderer.cstyle import render_cl
 from tinygrad.helpers import dtypes, DType
-from tinygrad.codegen.cstyle import CStyleLanguage
+from tinygrad.renderer.cstyle import CStyleLanguage
 from typing import List, Union
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 import math
@@ -11,8 +11,6 @@ class WGSLLanguage(CStyleLanguage):
   gid = [f"i32(gindex.{'xyz'[x]})" for x in range(3)]
   lid = [f"i32(lindex.{'xyz'[x]})" for x in range(3)]
   size_prefix = "let"
-  global_max = [65535, 65535, 65535]
-  local_max = [256, 256, 64]
   barrier="workgroupBarrier();"
   generic_var_prefix = "var "
   external_local_bufs = True
