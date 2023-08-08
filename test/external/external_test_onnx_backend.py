@@ -158,7 +158,7 @@ backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to imple
 
 # rest of the failing tests
 backend_test.exclude('test_averagepool_2d_dilations_cpu') # dilations != 1 not supported for avgpool
-backend_test.exclude('test_convtranspose_autopad_same_cpu') # requires another way of determining ret shape
+backend_test.exclude('test_convtranspose_autopad_same_cpu') # TODO do this
 backend_test.exclude('test_optional_has_element_empty_optional_input_cpu') # Attempts to create Tensor from None
 backend_test.exclude('test_range_int32_type_negative_delta_expanded_cpu') # AttributeProto.GRAPH not implemented
 backend_test.exclude('test_reshape_allowzero_reordered_cpu') # reshaping to 0 shape
@@ -195,7 +195,8 @@ if getenv("GPU") or getenv("METAL"): # skip tests with 0 shape tensors for GPU a
   backend_test.exclude('test_split_zero_size_splits_opset13_cpu')
   backend_test.exclude('test_split_zero_size_splits_opset18_cpu')
   backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
-elif getenv("CLANG"): # linearizer does not allow reshape to 0
+elif getenv("CLANG") or getenv("LLVM"): # compiled buffers
+  # linearizer does not allow reshape to 0
   backend_test.exclude('test_slice_start_out_of_bounds_cpu')
   backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
 
