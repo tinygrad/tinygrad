@@ -707,10 +707,6 @@ def get_encoder(ssl_dim) -> SpeechEncoder:
 # INSTALLATION: dependencies are for preprocessing and loading/saving audio.
 # pip3 install soundfile, librosa, praat-parselmouth
 #########################################################################################
-# CAUTION: IMPORTANT: The drake weights on huggingface [0], are marked as unsafe.
-#          Use them at your own risk. All the other weights are not marked unsafe.
-#          [0] - https://huggingface.co/jaspa/so-vits-svc/tree/main/aubrey
-#########################################################################################
 # INFO: After speech encoder, the encoding needs to be interpolated before it can be fed
 #       into VITS. Currently, this process is very slow,
 #       but you can chose a faster implementation with
