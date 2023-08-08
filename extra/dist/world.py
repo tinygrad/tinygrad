@@ -65,16 +65,11 @@ class Send(Function):
     self.target_rank, self.shape, self.dtype = target_rank, x.shape, x.dtype
     _send_lb(x, target_rank, cache_id=cache_id)
     return x
-  def backward(self, _:LazyBuffer) -> LazyBuffer:
-    return _recv_lb(self.shape, self.dtype, self.target_rank)
 
 class Recv(Function):
   def forward(self, x:LazyBuffer, target_rank:int, cache_id:Optional[str]=None) -> LazyBuffer:
     self.target_rank, self.cache_id = target_rank, cache_id
     return _recv_lb(x.shape, x.dtype, target_rank)
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    _send_lb(grad_output, self.target_rank, cache_id=self.cache_id)
-    return grad_output
 
 def send(x:Tensor, target_rank:int, cache_id:Optional[str]=None) -> Tensor: return Send.apply(x, target_rank=target_rank, cache_id=cache_id)
 def recv(x:Tensor, target_rank:int, cache_id:Optional[str]=None) -> Tensor: return Recv.apply(x, target_rank=target_rank, cache_id=cache_id)
