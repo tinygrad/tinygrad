@@ -34,7 +34,7 @@ hyp = {
   'net': {
       'kernel_size': 2,             # kernel size for the whitening layer
       'batch_norm_momentum': .5,
-      'cutmix_size': 3,
+      'cutmix_size': 6,
       'cutmix_steps': 588,          # original repo used epoch 6 which is roughly 6*98=588 STEPS
       'pad_amount': 2
   }
@@ -242,7 +242,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
 
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
   initial_div_factor = 1e16
-  final_lr_ratio = 0.02
+  final_lr_ratio = 0.022
   pct_start = hyp['opt']['percent_start']
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']     ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'] ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
