@@ -4,7 +4,6 @@
 # https://siboehm.com/articles/22/CUDA-MMM
 import time
 import random
-from typing import Any
 import numpy as np
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from tinygrad import nn
@@ -35,7 +34,6 @@ hyp = {
   'net': {
       'kernel_size': 2,             # kernel size for the whitening layer
       'batch_norm_momentum': .5,
-      'conv_norm_pow': 2.6,
       'cutmix_size': 3,
       'cutmix_steps': 588,          # original repo used epoch 6 which is roughly 6*98=588 STEPS
       'pad_amount': 2
@@ -101,7 +99,7 @@ class SpeedyResNet:
   def __init__(self, W):
     self.whitening = W
     self.net = [
-      nn.Conv2d(12, 32, kernel_size=1),
+      nn.Conv2d(12, 32, kernel_size=1, bias=False),
       lambda x: x.gelu(),
       ConvGroup(32, 64),
       ConvGroup(64, 256),
@@ -113,8 +111,8 @@ class SpeedyResNet:
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to do the rest conv layers
     forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
-    if not training: return forward(x)*0.5 + forward(x[..., ::-1])*0.5
-    return forward(x)
+    # if not training: return forward(x)*0.5 + forward(x[..., ::-1])*0.5
+    return forward(x) if training else forward(x)*0.5 + forward(x[..., ::-1])*0.5
 
 # ========== Loss ==========
 def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
@@ -247,7 +245,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
 
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
   initial_div_factor = 1e16
-  final_lr_ratio = 0.08
+  final_lr_ratio = 0.04
   pct_start = hyp['opt']['percent_start']
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']     ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'] ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
