@@ -7,15 +7,16 @@ torch.set_num_threads(1)
 from onnx2torch import convert
 from extra.utils import download_file
 from extra.onnx import get_run_onnx
-from tinygrad.helpers import OSX
+from tinygrad.helpers import OSX, DEBUG
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import Device
 
 MODELS = {
-  "resnet50": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
-  "openpilot": "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx",
-  "efficientnet": "https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
-  "shufflenet": "https://github.com/onnx/models/raw/main/vision/classification/shufflenet/model/shufflenet-9.onnx",
+  #"resnet50": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
+  #"openpilot": "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx",
+  #"efficientnet": "https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
+  #"shufflenet": "https://github.com/onnx/models/raw/main/vision/classification/shufflenet/model/shufflenet-9.onnx",
+  "commavq": "https://github.com/commaai/commavq/raw/master/models/gpt2m.onnx",
 
   # broken in torch MPS
   #"zfnet": "https://github.com/onnx/models/raw/main/vision/classification/zfnet-512/model/zfnet512-9.onnx",
@@ -53,7 +54,10 @@ def benchmark_model(m):
   excluded = {inp.name for inp in onnx_model.graph.initializer}
   input_shapes = {inp.name:tuple(x.dim_value if x.dim_value != 0 else 1 for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input if inp.name not in excluded}
   np_inputs = {k:torch.randn(shp).numpy() for k,shp in input_shapes.items()}
-  assert len(input_shapes) < 20
+  assert len(input_shapes) < 30, f"too many input shapes {len(input_shapes)}"
+
+  # print input names
+  if DEBUG >= 2: print([inp.name for inp in onnx_model.graph.input if inp.name not in excluded])
 
   for device in ["METAL" if OSX else "GPU", "CLANG"]:
     Device.DEFAULT = device
