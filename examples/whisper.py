@@ -1,6 +1,6 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 import argparse
-import sys, math, string, difflib, base64, functools, itertools, multiprocessing
+import base64, functools, itertools, multiprocessing
 import subprocess as sp
 from pathlib import Path
 from typing import Optional
@@ -10,7 +10,7 @@ from tinygrad.state import torch_load, load_state_dict
 from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
 from extra.utils import download_file
-from extra.datasets.librispeech import ci, BASEDIR, get_window, mel, tinystft
+import extra.datasets.librispeech as librispeech
 
 # audio hyperparameters
 RATE = 16000
@@ -182,12 +182,12 @@ def load_wav(file):
 # mel filterbank is the same at all times, so we don't take any chances
 @functools.lru_cache(None)
 def get_filters():
-  download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/mel_filters.npz", BASE / "mel_filters.npz")
+  download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/mel_filters.npz", BASE / "whisper_mel_filters.npz")
   return np.load(BASE / "mel_filters.npz")[f"mel_{N_MELS}"]
 
 def prep_audio(audio, padding) -> Tensor:
   if padding > 0: audio = np.pad(audio, (0, padding))
-  stft = tinystft(audio, n_fft=N_FFT, hop_length=HOP_LENGTH, window=get_window(N_FFT))
+  stft = librispeech.stft(audio, n_fft=N_FFT, hop_length=HOP_LENGTH, window=librispeech.get_window(N_FFT))
   magnitudes = np.abs(stft[..., :-1]) ** 2
   mel_spec = get_filters() @ magnitudes
   log_spec = np.log10(np.clip(mel_spec, a_min=1e-10, a_max=None))

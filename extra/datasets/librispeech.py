@@ -93,10 +93,7 @@ def frame(x, frame_length, hop_length):
   slices[-1] = slice(0, None, hop_length)
   return xw[tuple(slices)]
 
-def tinystft(y, n_fft, hop_length, window):
-  import warnings
-  warnings.simplefilter("ignore", np.ComplexWarning)
-  
+def stft(y, n_fft, hop_length, window):
   def pad_center(data: np.ndarray, size: int) -> np.ndarray:
     axis = -1
     n = data.shape[axis]
@@ -152,14 +149,14 @@ def tinystft(y, n_fft, hop_length, window):
     else:
       post_shape = list(y_frames_pre.shape)
       post_shape[-1] = 0
-      y_frames_post = np.empty_like(y_frames_pre, shape=post_shape, dtype=np.float32)
+      y_frames_post = np.empty_like(y_frames_pre, shape=post_shape, dtype=np.complex64)
 
   y_frames = frame(y[..., start:], frame_length=n_fft, hop_length=hop_length)
 
   shape = list(y_frames.shape)
   shape[-2] = 1 + n_fft // 2
   shape[-1] += extra
-  stft_matrix = np.zeros(shape, order="F", dtype=np.float32)
+  stft_matrix = np.zeros(shape, order="F", dtype=np.complex64)
 
   if extra > 0:
     off_start = y_frames_pre.shape[-1]
@@ -197,7 +194,7 @@ def feature_extract(x, x_lens):
   x = np.concatenate((np.expand_dims(x[:, 0], 1), x[:, 1:] - 0.97 * x[:, :-1]), axis=1)
 
   # stft
-  x = tinystft(x, n_fft=512, window=WINDOW, hop_length=160, win_length=320, center=True, pad_mode="reflect")
+  x = stft(x, n_fft=512, window=WINDOW, hop_length=160, win_length=320, center=True, pad_mode="reflect")
   x = np.stack((x.real, x.imag), axis=-1)
 
   # power spectrum
