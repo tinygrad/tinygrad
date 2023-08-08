@@ -18,8 +18,8 @@ from tinygrad.jit import TinyJit
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
+# hyper-parameters were exactly the same as the original repo
 bias_scaler = 56
-
 hyp = {
   'opt': {
     'bias_lr':        1.64 * bias_scaler/512,
@@ -29,7 +29,7 @@ hyp = {
     'momentum':       0.85,
     'percent_start':  0.25,
     'scaling_factor': 1./9,
-    'loss_scale_scaler': 1./512,  # regularizer inside the loss summing (range: ~1/512 - 16+). 
+    'loss_scale_scaler': 1./512,    # (range: ~1/512 - 16+) was 1/128 from original repo w/ FP16
   },
   'net': {
       'kernel_size': 2,             # kernel size for the whitening layer
@@ -45,6 +45,31 @@ def set_seed(seed):
   random.seed(getenv('SEED', seed))
 
 # ========== Model ==========
+# def whitening(X, kernel_size=hyp['net']['kernel_size']):
+#   def _cov(X):
+#     X = X/np.sqrt(X.shape[0] - 1)
+#     return X.T @ X
+
+#   def _patches(data, patch_size=(kernel_size,kernel_size)):
+#     import torch
+#     h, w = patch_size
+#     data = torch.tensor(data)
+#     c = data.size(1)
+#     return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w).numpy()
+
+#   def _eigens(patches):
+#     n,c,h,w = patches.shape
+#     Σ = _cov(patches.reshape(n, c*h*w))
+#     Λ, V = np.linalg.eigh(Σ, UPLO='U')
+#     # return Λ.flip(0), V.T.reshape(c*h*w, c, h, w).flip(0)
+#     return np.flip(Λ, 0), np.flip(V.T.reshape(c*h*w, c, h, w), 0)
+
+#   # X = torch.tensor(X.numpy())
+#   Λ, V = _eigens(_patches(X.numpy()))
+#   W = Tensor(V/np.sqrt(Λ+1e-2)[:,None,None,None], requires_grad=False)
+
+#   return W
+
 # TODO remove dependency on torch, mainly unfold and eigh
 def whitening(X, kernel_size=hyp['net']['kernel_size']):
   import torch
@@ -109,9 +134,8 @@ class SpeedyResNet:
       lambda x: x.mul(hyp['opt']['scaling_factor'])
     ]
   def __call__(self, x, training=True):
-    # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to do the rest conv layers
+    # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with 
     forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
-    # if not training: return forward(x)*0.5 + forward(x[..., ::-1])*0.5
     return forward(x) if training else forward(x)*0.5 + forward(x[..., ::-1])*0.5
 
 # ========== Loss ==========
@@ -282,6 +306,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
 
   # https://www.anandtech.com/show/16727/nvidia-announces-geforce-rtx-3080-ti-3070-ti-upgraded-cards-coming-in-june
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
+
   best_eval = -1
   i = 0
   batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
@@ -289,7 +314,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
     X, Y = next(batcher)
     if i >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
     if i%100 == 0 and i > 1:
-      # TODO use Tensor.training = False here actually brick batchnorm
+      # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
       corrects = []
       losses = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
