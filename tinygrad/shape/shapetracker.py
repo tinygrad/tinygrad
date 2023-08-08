@@ -109,9 +109,9 @@ def _reshape(view: View, new_shape:Tuple[int, ...]) -> Tuple[View, bool]:
         if x == 1 and y != (0, 1):
           new_mask_tuple = ((0,0),) * len(new_shape)
           break
-      else:
-        new_mask: List[Tuple[int, int]] = [y for x,y in zip(shape, mask) if x != 1]
-        new_mask_tuple = tuple([(0,1) if x == 1 else new_mask.pop(0) for x in new_shape])
+        else:
+          new_mask: List[Tuple[int, int]] = [y for x,y in zip(shape, mask) if x != 1]
+          new_mask_tuple = tuple([(0,1) if x == 1 else new_mask.pop(0) for x in new_shape])
     return View(new_shape, new_strides_tuple, offset, new_mask_tuple), False
 
   new_view = View(new_shape)
