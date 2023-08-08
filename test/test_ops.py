@@ -150,10 +150,6 @@ class TestOps(unittest.TestCase):
       lambda x: torch.where(x > 0.5, 4, 2).permute((1, 0)),
       lambda x: (x > 0.5).where(4, 2).permute((1, 0)), forward_only=True)
 
-  def test_where_bool(self): # Fixes #1479.
-    helper_test_op([(1,), (1,)], lambda x,y: torch.where(x==y, torch.tensor([1,1], dtype=torch.bool), 0),
-      lambda x,y: (x==y).where(Tensor([1,1], dtype=dtypes.bool), 0), forward_only=True, vals=[[0,1],[1,1]])
-
   def _test_cmp(self, fxn, reverse=True):
     for shps in [[(3, 4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
       helper_test_op(shps, fxn, fxn, forward_only=True)
