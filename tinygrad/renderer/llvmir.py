@@ -118,8 +118,8 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
       idx = args.idx.render(render_llvm, bb[-1])
       element = lvars[vin[0]]
       if args.memory_dtype != vin[0].dtype:
-        if dtypes.is_int(args.memory_dtype):
-          element = bb[-1].fptoui(element, dtype_to_llvm_dtype[args.memory_dtype]) if dtypes.is_unsigned(args.memory_dtype) else bb[-1].fptosi(element, dtype_to_llvm_dtype[args.memory_dtype])
+        if dtypes.is_int(args.memory_dtype) or args.memory_dtype == dtypes.bool:
+          element = bb[-1].fptoui(element, dtype_to_llvm_dtype[args.memory_dtype]) if dtypes.is_unsigned(args.memory_dtype) or args.memory_dtype == dtypes.bool else bb[-1].fptosi(element, dtype_to_llvm_dtype[args.memory_dtype])
         elif args.memory_dtype == dtypes.bfloat16:
           element = bb[-1].bitcast(element, ir.IntType(32))
           element = bb[-1].lshr(element, ir.Constant(ir.IntType(32), 16))
