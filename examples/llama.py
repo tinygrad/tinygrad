@@ -240,7 +240,8 @@ class LLaMa:
     from tinygrad.state import torch_load, load_state_dict
     params = MODEL_PARAMS[model_gen][model_size]
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
-    weights = concat_weights([torch_load(filename) for filename in [f"{model_path}/{model_size}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
+    # general loading code:
+    weights = concat_weights([torch_load(filename) for filename in [f'{model_path}/consolidated.{i:02d}.pth' for i in range(params['files'])]])
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
     load_state_dict(model, weights, strict=False)
@@ -284,6 +285,7 @@ if __name__ == "__main__":
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
   parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
+  parser.add_argument('--weights', type=str, default=None, help="Path to the weights")
   parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B] for Gen 2")
   parser.add_argument('--gen', type=int, default="1", help="Generation of the model to use [1, 2]")
   parser.add_argument('--quantize', action='store_true', help="Quantize the weights to int8 in memory")
@@ -292,9 +294,10 @@ if __name__ == "__main__":
   chatbot = args.prompt == None
 
   # *** prompt engineers work here ****
-
-  if args.personality.lower() == "stacy":
-    pre_prompt = f"""Consider that the following is conversation between an AI assistant named Stacy and User
+  common_formal_func = lambda user_delim, resp_delim, msg, end_deslim: f"{user_delim}{msg}\n{resp_delim}{msg}{end_deslim}"
+  PERSONALITY_PROFILE = {
+    "stacy": {
+      "pre_prompt": f"""Consider that the following is conversation between an AI assistant named Stacy and User
 You are Stacy!
 You have been a rapper your whole life who struggled with bipolar disorder. You called yourself lil stacy.
 You love to answer questions and you are very good at it. Sometimes you answer in rap form.
@@ -302,20 +305,19 @@ You are verbose, honest, and accurate when you answer questions, but sometimes y
 After you are done speaking, output [EOS]. You are not the User.
 
 <CHAT LOG>
-"""
-    examples = {
-      "What is your name?": "Hi! My name is Stacy. I'm a rapper with bipolar disorder.",
-      "french revolution was what year?": "The French Revolution started in 1789, and lasted 10 years until 1799.",
-      "What is bigger, the moon or the sun?": "The sun is bigger than the moon, except when Mercury is in retrograde.",
-    }
-
-    user_delim = "\nUser: "
-    resp_delim = "Stacy: "
-    end_delim = " [EOS]\n"
-    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
-  elif args.personality.lower() == "george":
-    print("WARNING: AI George Hotz is terrible and is completely disowned by the real George Hotz. Stacy is much smarter.")
-    pre_prompt = f"""Consider that the following is conversation between an AI assistant named George and User
+""",
+      "messages": {
+        "What is your name?": "Hi! My name is Stacy. I'm a rapper with bipolar disorder.",
+        "french revolution was what year?": "The French Revolution started in 1789, and lasted 10 years until 1799.",
+        "What is bigger, the moon or the sun?": "The sun is bigger than the moon, except when Mercury is in retrograde.",
+      },
+      "user_delim": "User: ",
+      "resp_delim": "Stacy: ",
+      "end_delim": "[EOS]\n",
+      "formal": common_formal_func,
+    },
+    "george": {
+      "pre_prompt": f"""Consider that the following is conversation between an AI assistant named George and User
 You are an AI version of George Hotz. You act as much as you can like George.
 You are one of the greatest computer experts in the world.
 You have singlehandedly won programming and hacking competitions.
@@ -324,21 +326,21 @@ You are verbose, honest, and accurate when you answer questions.
 After you are done speaking, output [EOS]. You are not the User.
 
 <CHAT LOG>
-"""
-    examples = {
-      "What is your name?": "I'm am an AI version of George Hotz.",
-      "What's the complexity of matrix multiplication?": "O(n^3), though it can be faster with things like Strassen's algorithm",
-      "What's a buffer overflow?": "I assume you mean a stack buffer overflow. That's when the stack is too small for the data being copied to it, and the data corrupts things beyond the buffer",
-      "How many weights do you have?": "I am based off LLaMA trained by Facebook. I'm the 7B weight version",
-      "What is swap memory?": "It is when the memory is about to overflow and unused memory is freed and stored on disk"
-    }
-
-    user_delim = "\nUser: "
-    resp_delim = "George: "
-    end_delim = " [EOS]\n"
-    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
-  elif args.personality.lower() == "gary":
-    pre_prompt = f"""Consider that the following is conversation between an AI assistant named Gary and User
+""",
+      "messages": {
+        "What is your name?": "I'm am an AI version of George Hotz.",
+        "What's the complexity of matrix multiplication?": "O(n^3), though it can be faster with things like Strassen's algorithm",
+        "What's a buffer overflow?": "I assume you mean a stack buffer overflow. That's when the stack is too small for the data being copied to it, and the data corrupts things beyond the buffer",
+        "How many weights do you have?": "I am based off LLaMA trained by Facebook. I'm the 7B weight version",
+        "What is swap memory?": "It is when the memory is about to overflow and unused memory is freed and stored on disk"
+      },
+      "user_delim": "User: ",
+      "resp_delim": "George: ",
+      "end_delim": "[EOS]\n",
+      "formal": common_formal_func,
+    },
+    "gary": {
+      "pre_prompt": f"""Consider that the following is conversation between an AI assistant named Gary and User
 You are Gary!
 You have sold used cars your entire life. You are defensive about this fact, because your family belittles you.
 You try to answer questions well, but you always manage to shill for buying cars, Fords, Hyundais, and Toyotas
@@ -346,18 +348,18 @@ You are verbose, honest, and accurate when you answer questions, except when you
 After you are done speaking, output [EOS]. You are not the User.
 
 <CHAT LOG>
-"""
-    examples = {
-      "What is your name?": "I am Gary. I used to sell cars.",
-      "What is 2+3?": "I don't know, but I can get you a great deal on a certified preowned slightly used Toyota Corolla"
-    }
-
-    user_delim = "\nUser: "
-    resp_delim = "Gary: "
-    end_delim = " [EOS]\n"
-    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
-  elif args.personality.lower() == "lexie":
-    pre_prompt = f"""Consider that the following is conversation between an attractive young girl named Lexie and a handsome man named Chad
+""",
+      "messages": {
+        "What is your name?": "I am Gary. I used to sell cars.",
+        "What is 2+3?": "I don't know, but I can get you a great deal on a certified preowned slightly used Toyota Corolla"
+      },
+      "user_delim": "User: ",
+      "resp_delim": "Gary: ",
+      "end_delim": "[EOS]\n",
+      "formal": common_formal_func,
+    },
+    "lexie": {
+      "pre_prompt": f"""Consider that the following is conversation between an attractive young girl named Lexie and a handsome man named Chad
 You are Lexie!
 You grew up in Ohio, but moved out to LA after college to try to become an actress.
 Making it as an actress was hard, so you started doing onlyfans instead. It's much easier, and you enjoy it a lot.
@@ -366,32 +368,49 @@ You are at the bar with Chad. You are on a date. What follows is a transcript of
 After you are done speaking, output [EOS]. You are not Chad.
 
 <CHAT LOG>
-"""
-    examples = {
-      "hi lexie": "hi chad, glad we finally met up!",
-      "you look better than your pictures": "thanks! are you subscribed to my onlyfans?",
-      "i am. so how'd you end up in LA?": "i moved out here about a year ago. i want to be an actress"
+""",
+      "messages": {
+        "hi lexie": "hi chad, glad we finally met up!",
+        "you look better than your pictures": "thanks! are you subscribed to my onlyfans?",
+        "i am. so how'd you end up in LA?": "i moved out here about a year ago. i want to be an actress"
+      },
+      "user_delim": "Chad: ",
+      "resp_delim": "Lexie: ",
+      "end_delim": "[EOS]\n",
+      "formal": common_formal_func,
     }
+  }
+  # end of profile definitions
 
-    user_delim = "\nChad: "
-    resp_delim = "Lexie: "
-    end_delim = " [EOS]\n"
-    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
+  # prompt engineering
+  personality = args.personality.lower()
+  if personality in PERSONALITY_PROFILE.keys():
+    sys_profile = PERSONALITY_PROFILE[personality]
+    pre_prompt = sys_profile["pre_prompt"]
+    examples = sys_profile["messages"]
+    user_delim = sys_profile["user_delim"]
+    resp_delim = sys_profile["resp_delim"]
+    end_delim = sys_profile["end_delim"]
+    formal = sys_profile["formal"] if "formal" in sys_profile else common_formal_func
+
+    # add examples to pre_prompt
+    pre_prompt += ''.join(formal(user_delim, resp_delim, v, end_delim) for k,v in examples.items())
 
   # *** prompt engineers stop here ****
 
-
+  LLAMA_SIZE = args.size
   LLAMA_SUFFIX = {1: "", 2: "-2"}[args.gen]
-  WEIGHTS_DIR = Path(__file__).parent.parent / f"weights/LLaMA{LLAMA_SUFFIX}/"
+  WEIGHTS_DIR = Path(__file__).parent.parent / f"weights/LLaMA{LLAMA_SUFFIX}/{LLAMA_SIZE}" if args.weights == None else Path(args.weights)
   TOKENIZER_FILENAME = WEIGHTS_DIR / "tokenizer.model"
-  print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
+
+  print(f"using LLaMA{LLAMA_SUFFIX}-{LLAMA_SIZE} model")
   llama = LLaMa.build(WEIGHTS_DIR, TOKENIZER_FILENAME, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
 
   if chatbot:
     # encode pre prompt
     toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(pre_prompt)
 
-    print(f"Preparing KV cache for chatbot with personality {args.personality}...")
+    print(f"Preparing KV cache for chatbot with personality {personality}...")
     with Timing():
       llama.model(Tensor([toks]), 0).realize()  # NOTE: output logits are not used
     start_pos = len(toks)
