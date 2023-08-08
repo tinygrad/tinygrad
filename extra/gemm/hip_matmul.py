@@ -34,7 +34,7 @@ prog = HIPProgram("test", f"""
 #define F32
 typedef float float8 __attribute__((ext_vector_type(8)));
 typedef _Float16 half16 __attribute__((ext_vector_type(16)));
-extern "C" __global__ void test(float* c, __half* a, __half* b) {{
+extern "C" __global__ void __launch_bounds__ (128, 1) test(float* c, __half* a, __half* b) {{
   const int gx = blockIdx.x;
   const int gy = blockIdx.y*4 + threadIdx.y;
 
