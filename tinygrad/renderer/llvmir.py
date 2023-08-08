@@ -104,8 +104,8 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
           val = bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [idx], inbounds=True))
 
         if args.memory_dtype != newvar.dtype:
-          if dtypes.is_int(args.memory_dtype):
-            val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(args.memory_dtype) else bb[-1].sitofp(val, ir.FloatType())
+          if dtypes.is_int(args.memory_dtype) or args.memory_dtype == dtypes.bool:
+            val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(args.memory_dtype) or args.memory_dtype == dtypes.bool else bb[-1].sitofp(val, ir.FloatType())
           elif args.memory_dtype == dtypes.bfloat16:
             val = bb[-1].sext(val, ir.IntType(32))
             val = bb[-1].shl(val, ir.Constant(ir.IntType(32), 16))
