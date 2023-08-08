@@ -11,14 +11,14 @@ def output_wer(wer: dict):
     print(f"{k}: WER is {(np.average(v)*100):.2f}")
     print(f"{k}: {np.count_nonzero(v)} out of {len(v)} samples have mistakes, {(np.count_nonzero(v)/len(v)*100):.2f}%")
 
-def eval_whisper(model, model_name, start, end, verbose=2):
+def eval_whisper(model, start, end, verbose=2):
   diff = difflib.Differ()
   for c in ci[start:end]:
     fn = BASEDIR / c["files"][0]["fname"]
     predicted = "".join(transcribe_wav(fn, model, make_initial_prompt(model))).translate(str.maketrans("", "", string.punctuation)).lower()
     transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
     current_wer = word_error_rate([predicted], [transcript])[0]
-    WER[model_name] = np.append(WER[model_name], current_wer)
+    WER[model.name] = np.append(WER[model.name], current_wer)
     
     if (verbose > 0 and predicted != transcript) or (verbose > 1):
       print("-" * 128, f"{fn.stem}\n", sep="\n")
@@ -47,7 +47,7 @@ if __name__ == "__main__":
     for j in models:
       print(f"evaluating {j} on {step_size} sample(s)")
       model = load_whisper_model(j)
-      eval_whisper(model, j, i, max(i+step_size, num_samples), verbose=args.verbose)
+      eval_whisper(model, i, max(i+step_size, num_samples), verbose=args.verbose)
       if args.verbose > 0: 
         print("-"*128)
       del model

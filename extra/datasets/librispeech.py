@@ -21,64 +21,6 @@ with open(BASEDIR / "dev-clean-wav.json") as f:
   ci = json.load(f)
 
 #stft and mel functions were ripped out of librosa, which pulled too many dependencies
-def mel_frequencies(n_mels, fmin, fmax):
-    #use approximation, not exact, should be good enough, need to check
-  def hz_to_mel(frequencies):
-    frequencies = np.asanyarray(frequencies)
-    f_min = 0.0
-    f_sp = 200.0 / 3
-    mels = (frequencies - f_min) / f_sp
-    min_log_hz = 1000.0
-    min_log_mel = (min_log_hz - f_min) / f_sp
-    logstep = np.log(6.4) / 27.0
-
-    if frequencies.ndim:
-        log_t = frequencies >= min_log_hz
-        mels[log_t] = min_log_mel + np.log(frequencies[log_t] / min_log_hz) / logstep
-    elif frequencies >= min_log_hz:
-        mels = min_log_mel + np.log(frequencies / min_log_hz) / logstep
-
-    return mels
-  
-  def mel_to_hz(mels):
-    mels = np.asanyarray(mels)
-    freqs = 200.0 / 3 * mels
-    min_log_hz = 1000.0
-    min_log_mel = (min_log_hz - 0.0) / (200.0 / 3)
-    logstep = np.log(6.4) / 27.0
-
-    if mels.ndim:
-      log_t = mels >= min_log_mel
-      freqs[log_t] = min_log_hz * np.exp(logstep * (mels[log_t] - min_log_mel))
-    elif mels >= min_log_mel:
-      freqs = min_log_hz * np.exp(logstep * (mels - min_log_mel))
-
-    return freqs
-
-  min_mel = hz_to_mel(fmin)
-  max_mel = hz_to_mel(fmax)
-  mels = np.linspace(min_mel, max_mel, n_mels)
-  hz = mel_to_hz(mels)
-  return hz
-
-def mel(sr, n_fft, n_mels):
-  n_mels = int(n_mels)
-  weights = np.zeros((n_mels, int(1 + n_fft // 2)), dtype=np.float32)
-  fftfreqs = np.fft.rfftfreq(n=n_fft, d=1.0 / sr)
-  mel_f = mel_frequencies(n_mels=n_mels + 2, fmin=0, fmax=float(sr)/2)
-  fdiff = np.diff(mel_f)
-  ramps = np.subtract.outer(mel_f, fftfreqs)
-
-  for i in range(n_mels):
-    lower = -ramps[i] / fdiff[i]
-    upper = ramps[i + 2] / fdiff[i + 1]
-    weights[i] = np.maximum(0, np.minimum(lower, upper))
-
-  if not np.all((mel_f[:-2] == 0) | (weights.max(axis=1) > 0)):
-    print('Empty filters in mel frequency basis. Some channels will produce empty responses.')
-
-  return weights
-
 def frame(x, frame_length, hop_length):
   out_strides = x.strides + tuple([x.strides[-1]])
   out_strides = x.strides + tuple([x.strides[-1]])
@@ -184,7 +126,8 @@ def stft(y, n_fft, hop_length, window):
 @functools.lru_cache(None)
 def get_window(n_fft): return (1 - np.cos(2 * math.pi * np.arange(n_fft) / n_fft)) / 2
 
-FILTER_BANK = np.expand_dims(mel(sr=16000, n_fft=512, n_mels=80), 0)
+#was generated with mel(sr=16000, n_fft=512, n_mels=80)
+FILTER_BANK = np.expand_dims(np.load(pathlib.Path(__file__).parent / "rnnt_mel_filters.npz")["mel_80"], 0)
 WINDOW = get_window(320)
 
 def feature_extract(x, x_lens):
