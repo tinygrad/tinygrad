@@ -34,7 +34,7 @@ hyp = {
   'net': {
       'kernel_size': 2,             # kernel size for the whitening layer
       'batch_norm_momentum': .5,
-      'cutmix_size': 6,
+      'cutmix_size': 3,
       'cutmix_steps': 588,          # original repo used epoch 6 which is roughly 6*98=588 STEPS
       'pad_amount': 2
   }
@@ -46,8 +46,6 @@ def set_seed(seed):
 
 # ========== Model ==========
 def whitening(X, kernel_size=hyp['net']['kernel_size']):
-  from numpy.lib.stride_tricks import sliding_window_view
-
   def _cov(X):
     X = X/np.sqrt(X.shape[0] - 1)
     return X.T @ X
@@ -55,7 +53,7 @@ def whitening(X, kernel_size=hyp['net']['kernel_size']):
   def _patches(data, patch_size=(kernel_size,kernel_size)):
     h, w = patch_size
     c = data.shape[1]
-    return sliding_window_view(data, window_shape=(h,w), axis=(2,3)).transpose((0,3,2,1,4,5)).reshape((-1,c,h,w))
+    return np.lib.stride_tricks.sliding_window_view(data, window_shape=(h,w), axis=(2,3)).transpose((0,3,2,1,4,5)).reshape((-1,c,h,w))
 
   def _eigens(patches):
     n,c,h,w = patches.shape
