@@ -598,7 +598,7 @@ class Tensor:
     return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan)
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
-  def maximum(self, x:Union[Tensor, float]) -> Tensor: return (self<x).where(x, self)
+  def maximum(self, x:Union[Tensor, float]) -> Tensor: return (self<x).detach().where(x, (self>x).detach().where(self, (self+x)/2))
   def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
 
   # ***** broadcasted trinary mlops *****
@@ -654,8 +654,8 @@ class Tensor:
   def __gt__(self, x) -> Tensor: return self._broadcasted(mlops.Less, x, True)
   def __ge__(self, x) -> Tensor: return 1.0-(self<x)
   def __le__(self, x) -> Tensor: return 1.0-(self>x)
-  def __ne__(self, x) -> Tensor: return (self<x) + (self>x)
-  def __eq__(self, x) -> Tensor: return 1.0-(self != x)
+  def __ne__(self, x) -> Tensor: return (self<x) + (self>x)   # type: ignore
+  def __eq__(self, x) -> Tensor: return 1.0-(self != x)       # type: ignore
 
   # ***** functional nn ops *****
 
