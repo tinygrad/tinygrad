@@ -45,54 +45,27 @@ def set_seed(seed):
   random.seed(getenv('SEED', seed))
 
 # ========== Model ==========
-# def whitening(X, kernel_size=hyp['net']['kernel_size']):
-#   def _cov(X):
-#     X = X/np.sqrt(X.shape[0] - 1)
-#     return X.T @ X
-
-#   def _patches(data, patch_size=(kernel_size,kernel_size)):
-#     import torch
-#     h, w = patch_size
-#     data = torch.tensor(data)
-#     c = data.size(1)
-#     return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w).numpy()
-
-#   def _eigens(patches):
-#     n,c,h,w = patches.shape
-#     Σ = _cov(patches.reshape(n, c*h*w))
-#     Λ, V = np.linalg.eigh(Σ, UPLO='U')
-#     # return Λ.flip(0), V.T.reshape(c*h*w, c, h, w).flip(0)
-#     return np.flip(Λ, 0), np.flip(V.T.reshape(c*h*w, c, h, w), 0)
-
-#   # X = torch.tensor(X.numpy())
-#   Λ, V = _eigens(_patches(X.numpy()))
-#   W = Tensor(V/np.sqrt(Λ+1e-2)[:,None,None,None], requires_grad=False)
-
-#   return W
-
-# TODO remove dependency on torch, mainly unfold and eigh
 def whitening(X, kernel_size=hyp['net']['kernel_size']):
-  import torch
+  from numpy.lib.stride_tricks import sliding_window_view
+
   def _cov(X):
-    X = X/np.sqrt(X.size(0) - 1)
-    return X.t() @ X
+    X = X/np.sqrt(X.shape[0] - 1)
+    return X.T @ X
 
   def _patches(data, patch_size=(kernel_size,kernel_size)):
     h, w = patch_size
-    c = data.size(1)
-    return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w)
+    c = data.shape[1]
+    return sliding_window_view(data, window_shape=(h,w), axis=(2,3)).transpose((0,3,2,1,4,5)).reshape((-1,c,h,w))
 
   def _eigens(patches):
     n,c,h,w = patches.shape
     Σ = _cov(patches.reshape(n, c*h*w))
-    Λ, V = torch.linalg.eigh(Σ, UPLO='U')
-    return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
+    Λ, V = np.linalg.eigh(Σ, UPLO='U')
+    return np.flip(Λ, 0), np.flip(V.T.reshape(c*h*w, c, h, w), 0)
 
-  X = torch.tensor(X.numpy())
-  Λ, V = _eigens(_patches(X))
-  W = Tensor((V/torch.sqrt(Λ+1e-2)[:,None,None,None]).numpy(), requires_grad=False)
+  Λ, V = _eigens(_patches(X.numpy()))
 
-  return W
+  return Tensor(V/np.sqrt(Λ+1e-2)[:,None,None,None], requires_grad=False)
 
 class BatchNorm(nn.BatchNorm2d):
   def __init__(self, num_features):
@@ -269,7 +242,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
 
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
   initial_div_factor = 1e16
-  final_lr_ratio = 0.04
+  final_lr_ratio = 0.02
   pct_start = hyp['opt']['percent_start']
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']     ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'] ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
