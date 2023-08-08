@@ -36,7 +36,7 @@ for j in range(1):
       for x in range(KX):
         c = (y*KX+x)*8
         a = (KY*KX*8) + y*8
-        b = (KY*KX*8) + x*8
+        b = (KY*KX*8) + (KY*8) + x*8
         gen.append(f"v_wmma_f32_16x16x16_f16 v[{c}:{c+7}], v[{a}:{a+7}], v[{b}:{b+7}], v[{c}:{c+7}]")
         FLOPS += 16*8*2
   else:
