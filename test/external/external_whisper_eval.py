@@ -6,11 +6,6 @@ import numpy as np
 
 WER = {}
 
-def output_wer(wer: dict):
-  for (k,v) in wer.items():
-    print(f"{k}: WER is {(np.average(v)*100):.2f}")
-    print(f"{k}: {np.count_nonzero(v)} out of {len(v)} samples have mistakes, {(np.count_nonzero(v)/len(v)*100):.2f}%")
-
 def eval_whisper(model, start, end, verbose=2):
   diff = difflib.Differ()
   for c in ci[start:end]:
@@ -48,8 +43,12 @@ if __name__ == "__main__":
       print(f"evaluating {j} on {step_size} sample(s)")
       model = load_whisper_model(j)
       eval_whisper(model, i, max(i+step_size, num_samples), verbose=args.verbose)
-      if args.verbose > 0: 
+      print("-"*128)
+      if args.verbose > 0:
+        print(f"Results of {j} after {i+step_size} samples: {np.average(WER[j]*100):.2f}")
         print("-"*128)
       del model
   print("Results of a run:")
-  output_wer(WER)
+  for (k,v) in WER.items():
+    print(f"{k}: WER is {(np.average(v)*100):.2f}")
+    print(f"{k}: {np.count_nonzero(v)} out of {len(v)} samples have mistakes, {(np.count_nonzero(v)/len(v)*100):.2f}%")
