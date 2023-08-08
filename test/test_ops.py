@@ -173,7 +173,7 @@ class TestOps(unittest.TestCase):
     self.assertRaises(RuntimeError, (t1 == t2).sum().backward)
     tt1 = Tensor.ones(4, requires_grad=True)
     tt2 = Tensor.ones(4, requires_grad=True)
-    self.assertRaises(RuntimeError, (tt1.eq(tt2)).sum().backward)
+    self.assertRaises(RuntimeError, (tt1 == tt2).sum().backward)
 
   def test_cmp_lt_backwards(self):
     t1 = torch.ones(4, requires_grad=True)

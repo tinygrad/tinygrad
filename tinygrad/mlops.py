@@ -35,7 +35,7 @@ class Relu(Function):
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    mask = self.ret.const_like(1).binary_op(BinaryOps.SUB, self.ret.binary_op(BinaryOps.CMPEQ, self.ret.const_like(0)))
+    mask = self.ret.const_like(0).binary_op(BinaryOps.CMPLT, self.ret)
     return mask.binary_op(BinaryOps.MUL, grad_output)
 
 class Log(Function):
@@ -96,7 +96,7 @@ class Max(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # 1s in locations where the max was chosen (can be two locations)
-    max_is_1s = self.x.binary_op(BinaryOps.CMPEQ, self.ret.expand(self.x.shape))
+    max_is_1s = self.x.const_like(1).binary_op(BinaryOps.SUB, self.x.binary_op(BinaryOps.CMPLT, self.ret.expand(self.x.shape)))
 
     # sum of locations, averaged
     div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape).expand(self.x.shape)
@@ -107,24 +107,9 @@ class Max(Function):
 
 # ************* binary ops *************
 
-class Equal(Function):
+class Less(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    return x.binary_op(BinaryOps.CMPEQ, y)
-
-class Maximum(Function):
-  __slots__ = "x", "y", "ret"
-  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    self.x, self.y = x, y
-    self.ret = x.binary_op(BinaryOps.MAX, y)
-    return self.ret
-
-  def backward(self, grad_output:LazyBuffer):
-    mask = self.y.binary_op(BinaryOps.CMPEQ, self.ret)
-    eq = self.x.binary_op(BinaryOps.CMPEQ, self.y)
-    splitter = eq.const_like(2).binary_op(BinaryOps.SUB, eq).binary_op(BinaryOps.DIV, eq.const_like(2))
-
-    return grad_output.binary_op(BinaryOps.MUL, mask.const_like(1).binary_op(BinaryOps.SUB, mask).binary_op(BinaryOps.ADD, eq)).binary_op(BinaryOps.MUL, splitter) if self.needs_input_grad[0] else None, \
-           grad_output.binary_op(BinaryOps.MUL, mask).binary_op(BinaryOps.MUL, splitter) if self.needs_input_grad[1] else None
+    return x.binary_op(BinaryOps.CMPLT, y)
 
 class Add(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
