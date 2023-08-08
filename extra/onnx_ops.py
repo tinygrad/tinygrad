@@ -157,7 +157,6 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
   seq_pads = [math.ceil(i) for i in seq_pads]
   seq_axes = safe_numpy(axes).astype(np.int32).tolist() if axes is not None else None
   base_shape = x.shape
-  # pads = _format_padding(seq_pads)
   pads = _format_padding(seq_pads, ndims=len(x.shape), axes=seq_axes)
   if mode == "wrap":
     repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(pads, base_shape)]
@@ -231,7 +230,7 @@ def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_
   if output_shape and not output_padding:
     out_sh = [st*(xs-1) + (ks-1)*di+1 if n < 2 else st*(xs-1) + (ks-1)*di+1 - pads[n-2] - pads[n-1] for n, (st, xs, ks, di) in enumerate(zip(strides_, X.shape, kernel_shape, dilations_))]
     output_padding = [os - rs for os, rs in zip(output_shape, out_sh[-len(output_shape):])]
-  return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding) 
+  return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding)
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
 def Dropout(data, ratio=0.5, training_mode=False, seed=None):
