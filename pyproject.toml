@@ -1,0 +1,51 @@
+[tool.poetry]
+name = "tinygrad"
+version = "0.6.0"
+description = "You like pytorch? You like micrograd? You love tinygrad! <3"
+authors = ["George Hotz"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+numpy = "^1.24.0"
+requests = "^2.31.0"
+Pillow = "^10.0.0"
+tqdm = "^4.65.0"
+networkx = "^3.1"
+pyopencl = "^2023.1.1"
+PyYAML = "^6.0.1"
+llvmlite = {version = "^0.40.1", optional = true}
+triton = {version = ">=2.0.0.dev20221202", optional = true}
+wgpu = {version = "^0.9.4", optional = true}
+pyobjc-framework-metal = {version = "^9.2", optional = true}
+pyobjc-framework-cocoa = {version = "^9.2", optional = true}
+pyobjc-framework-libdispatch = {version = "^9.2", optional = true}
+
+[tool.poetry.group.dev.dependencies]
+flake8 = {version = ">=5.0.0", optional = true}
+pylint = {version = "^2.17.5", optional = true}
+mypy = {version = "^1.4.1", optional = true}
+pre-commit = {version = "^3.3.3", optional = true}
+torch = {version = "^2.0.1", optional = true}
+pytest = {version = "^7.4.0", optional = true}
+pytest-xdist = {version = "^3.3.1", optional = true}
+onnx = {version = "^1.14.0", optional = true}
+onnx2torch = {version = "^1.5.11", optional = true}
+opencv-python = {version = "^4.8.0.74", optional = true}
+tabulate = {version = "^0.9.0", optional = true}
+safetensors = {version = "^0.3.2", optional = true}
+types-pyyaml = {version = "^6.0.12.11", optional = true}
+cloudpickle = {version = "^2.2.1", optional = true}
+
+[tool.poetry.extras]
+llvm = ["llvmlite"]
+triton = ["triton"]
+webgpu = ["wgpu"]
+metal = ["pyobjc-framework-metal", "pyobjc-framework-cocoa", "pyobjc-framework-libdispatch"]
+linting = ["flake8", "pylint", "mypy", "pre-commit"]
+testing = ["torch", "pytest", "pytest-xdist", "onnx", "onnx2torch", "opencv-python", "tabulate", "safetensors", "types-pyyaml", "cloudpickle"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
