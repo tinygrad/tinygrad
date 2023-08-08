@@ -16,8 +16,8 @@ from tinygrad.runtime.ops_hip import RawHIPBuffer, HIPProgram
 #   4194304    324.76 us, would be  52899.88 GFLOPS matmul, 154.98 GB/s
 
 N = getenv("N", 2048)
-KX = getenv("KX", 2)
-KY = getenv("KY", 2)
+KX = getenv("KX", 4)
+KY = getenv("KY", 4)
 assert N%(16*KX) == 0, f"N must be multiple of {16*KX}"
 assert N%(16*KY) == 0, f"N must be multiple of {16*KY}"
 FLOPS = N*N*N*2
@@ -38,12 +38,12 @@ extern "C" __global__ void __launch_bounds__ (128, 1) test(float* c, __half* a, 
   const int gx = blockIdx.x;
   const int gy = blockIdx.y*4 + threadIdx.y;
 
-  c += gx*{KX*16}*{N} + gy*{KY*16};
-  a += gx*{KX*16}*{N};
-  b += gy*{KY*16};
-
   const int lIdx = threadIdx.x;
   const int lane = lIdx%16;
+
+  c += gx*{KX*16}*{N} + gy*{KY*16} + (lIdx / 16)*{N} + lane;
+  a += gx*{KX*16}*{N} + {N}*lane;
+  b += gy*{KY*16} + lane;
 
   half16 a_frag[{KX}];
   half16 b_frag[{KY}];
@@ -57,12 +57,12 @@ extern "C" __global__ void __launch_bounds__ (128, 1) test(float* c, __half* a, 
     __syncthreads();
     for (int ele = 0; ele < 16; ++ele) {{
       for (int x = 0; x < {KX}; x++) {{
-        a_frag[x][ele] = a[{N}*lane + (k+ele) + x*{16*N}];
+        a_frag[x][ele] = a[(k+ele) + x*{16*N}];
       }}
     }}
     for (int ele = 0; ele < 16; ++ele) {{
       for (int y = 0; y < {KY}; y++) {{
-        b_frag[y][ele] = b[(k+ele)*{N} + lane + y*16];
+        b_frag[y][ele] = b[(k+ele)*{N} + y*16];
       }}
     }}
     for (int y = 0; y < {KY}; y++) {{
@@ -77,13 +77,12 @@ extern "C" __global__ void __launch_bounds__ (128, 1) test(float* c, __half* a, 
   }}
 
   for (int ele = 0; ele < 8; ++ele) {{
-    const int r = ele * 2 + (lIdx / 16);
     for (int y = 0; y < {KY}; y++) {{
       for (int x = 0; x < {KX}; x++) {{
         #ifdef F32
-          c[{N}*r + lane + y*16 + x*{16*N}] = c_frag[y][x][ele];
+          c[ele*{2*N} + y*16 + x*{16*N}] = c_frag[y][x][ele];
         #else
-          c[{N}*r + lane + y*16 + x*{16*N}] = c_frag[y][x][ele*2];
+          c[ele*{2*N} + y*16 + x*{16*N}] = c_frag[y][x][ele*2];
         #endif
       }}
     }}
