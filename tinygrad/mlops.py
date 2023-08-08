@@ -108,7 +108,6 @@ class Max(Function):
 # ************* binary ops *************
 
 class Less(Function):
-  __slots__ = "ret"
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     return x.binary_op(BinaryOps.CMPLT, y)
 
