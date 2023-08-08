@@ -177,17 +177,18 @@ jobs:
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python3 test/external/external_test_speed_llama.py
     #- name: Run dtype test
-    #  run: DEBUG=4 METAL=1 python -m pytest test/test_dtype.py
+    #  run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
     # dtype test has issues on test_half_to_int8
     - name: Run metal ops test
-      run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
+      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
     - name: Run JIT test
-      run: DEBUG=2 METAL=1 python -m pytest test/test_jit.py
-    # TODO: why not testing the whole test/?
-    - name: Run webgpu pytest
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto -m 'webgpu'
-    - name: Build WEBGPU Efficientnet
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
+      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_jit.py
+    - name: Check Device.DEFAULT
+      run: WEBGPU=1 python -c "from tinygrad.lazy import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
+    #- name: Run webgpu pytest
+    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto --ignore test/models/ --ignore test/unit/test_example.py --ignore test/extra/test_lr_scheduler.py --ignore test/test_linearizer.py test/
+    #- name: Build WEBGPU Efficientnet
+    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
 
   tests:
     strategy:

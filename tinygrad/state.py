@@ -2,7 +2,7 @@ import os, json, pathlib, zipfile, pickle
 from tqdm import tqdm
 from typing import Dict, Union, List
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters
+from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters, CI
 from tinygrad.shape.shapetracker import strides_for_shape
 from tinygrad.lazy import Device
 
@@ -48,7 +48,7 @@ def load_state_dict(model, state_dict, strict=True):
   with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
     model_state_dict = get_state_dict(model)
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict): print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
-    for k,v in (t := tqdm(model_state_dict.items())):
+    for k,v in (t := tqdm(model_state_dict.items(), disable=CI)):
       t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}")
       if k not in state_dict and not strict:
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
