@@ -20,40 +20,41 @@ BASEDIR = pathlib.Path(__file__).parent / "librispeech"
 with open(BASEDIR / "dev-clean-wav.json") as f:
   ci = json.load(f)
 
-#stft and mel functions were ripped out of librosa, pulled too many dependencies
+#stft and mel functions were ripped out of librosa, which pulled too many dependencies
 def mel_frequencies(n_mels, fmin, fmax):
     #use approximation, not exact, should be good enough, need to check
   def hz_to_mel(frequencies):
     frequencies = np.asanyarray(frequencies)
-
-    # Fill in the linear part
     f_min = 0.0
     f_sp = 200.0 / 3
-
     mels = (frequencies - f_min) / f_sp
-
-    # Fill in the log-scale part
     min_log_hz = 1000.0
     min_log_mel = (min_log_hz - f_min) / f_sp
     logstep = np.log(6.4) / 27.0
+
     if frequencies.ndim:
         log_t = frequencies >= min_log_hz
         mels[log_t] = min_log_mel + np.log(frequencies[log_t] / min_log_hz) / logstep
     elif frequencies >= min_log_hz:
         mels = min_log_mel + np.log(frequencies / min_log_hz) / logstep
+
     return mels
+  
   def mel_to_hz(mels):
     mels = np.asanyarray(mels)
     freqs = 200.0 / 3 * mels
     min_log_hz = 1000.0
     min_log_mel = (min_log_hz - 0.0) / (200.0 / 3)
     logstep = np.log(6.4) / 27.0
+
     if mels.ndim:
       log_t = mels >= min_log_mel
       freqs[log_t] = min_log_hz * np.exp(logstep * (mels[log_t] - min_log_mel))
     elif mels >= min_log_mel:
       freqs = min_log_hz * np.exp(logstep * (mels - min_log_mel))
+
     return freqs
+
   min_mel = hz_to_mel(fmin)
   max_mel = hz_to_mel(fmax)
   mels = np.linspace(min_mel, max_mel, n_mels)
@@ -169,6 +170,7 @@ def tinystft(y, n_fft, hop_length, window):
         stft_matrix[..., -off_end:] = np.fft.rfft(fft_window * y_frames_post, axis=-2)
   else:
     off_start = 0
+
   MAX_MEM_BLOCK = 2**8 * 2**10
   n_columns = int(
     MAX_MEM_BLOCK // (np.prod(y_frames.shape[:-1]) * y_frames.itemsize)
@@ -179,6 +181,7 @@ def tinystft(y, n_fft, hop_length, window):
     stft_matrix[..., bl_s + off_start : bl_t + off_start] = np.fft.rfft(
         fft_window * y_frames[..., bl_s:bl_t], axis=-2
     )
+
   return stft_matrix
 
 @functools.lru_cache(None)

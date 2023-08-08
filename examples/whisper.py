@@ -173,18 +173,13 @@ def get_encoding(n_vocab_in, is_multilingual=True):
     mergeable_ranks=ranks,
     special_tokens=special_tokens)
 
-def img(x):
-  import matplotlib.pyplot as plt
-  plt.imshow(x.numpy())
-  plt.show()
-
 def load_wav(file):
   cmd = ["ffmpeg", "-nostdin", "-threads", "0", "-i", file, "-f", "s16le", "-ac", "1", "-acodec", "pcm_s16le", "-ar", str(RATE), "-"]
   try: out = sp.run(cmd, capture_output=True, check=True).stdout
   except sp.CalledProcessError as e: raise RuntimeError(f"Failed to load audio {e.stderr.decode()}") from e
   return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
 
-# mel filterbank is the same at all times, so we don't take chances
+# mel filterbank is the same at all times, so we don't take any chances
 @functools.lru_cache(None)
 def get_filters():
   download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/mel_filters.npz", BASE / "mel_filters.npz")
@@ -210,6 +205,7 @@ def listener(q, record_seconds):
     sd.sleep(record_seconds * 1000)
   print("done listening")
 
+# a bit broken, but it generally works
 def online_mode(model, record_seconds, task_prompt):
   q = multiprocessing.Queue()
   p = multiprocessing.Process(target=listener, args=(q, record_seconds))
@@ -287,7 +283,6 @@ def load_whisper_model(model_name):
   load_state_dict(model, state['model_state_dict'])
   return model
 
-"""Setting wrong model type will result in decimation of the model performance."""
 def make_initial_prompt(model, lang="en", translate=False, timestamps=True):
   tasks = ["<|startoftranscript|>"]
   if not ".en" in model.name:

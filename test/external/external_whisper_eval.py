@@ -3,7 +3,6 @@ from examples.whisper import make_initial_prompt, transcribe_wav, WHISPER_MODELS
 from extra.datasets.librispeech import ci, BASEDIR
 from examples.mlperf.metrics import word_error_rate
 import numpy as np
-from tinygrad.helpers import GlobalCounters
 
 WER = {}
 
@@ -20,6 +19,7 @@ def eval_whisper(model, model_name, start, end, verbose=2):
     transcript = c["transcript"].translate(str.maketrans("", "", string.punctuation))
     current_wer = word_error_rate([predicted], [transcript])[0]
     WER[model_name] = np.append(WER[model_name], current_wer)
+    
     if (verbose > 0 and predicted != transcript) or (verbose > 1):
       print("-" * 128, f"{fn.stem}\n", sep="\n")
       sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
@@ -29,10 +29,10 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Evaluate whisper on librispeech', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--models', type=str, default=None, nargs="+", help="Which model to evaluate, if not specified, will use eval all available models")
   parser.add_argument('--verbose', type=int, default=2, help="Verbosity level, 0: only print final WER, 1: print WER only for failed samples, 2: print WER for all samples")
-  parser.add_argument('--single', action='store_true', help="Run all models on single sample, to check whether they are working")
   parser.add_argument("--num-samples", type=int, default=None, help="Number of samples to run on")
   parser.add_argument("--step-size", type=int, default=None, help="Each step it runs all models on all samples in a step, ")
   args = parser.parse_args()
+
   models = WHISPER_MODELS if args.models is None else {x:WHISPER_MODELS[x] for x in args.models if x in WHISPER_MODELS}
   # large-v2 and large are the same model
   if "large" in models:
@@ -41,9 +41,7 @@ if __name__ == "__main__":
   num_samples = len(ci) if args.num_samples is None else min(args.num_samples, len(ci))
   step_size = num_samples if args.step_size is None else min(args.step_size, num_samples)
   WER = {j:np.array([]) for j in models}
-  if args.single:
-    num_samples = 1
-    step_size = 1
+
   print("Running eval on  the following models:", list(models.keys()))
   for i in range(0, num_samples, step_size):
     for j in models:
@@ -55,4 +53,3 @@ if __name__ == "__main__":
       del model
   print("Results of a run:")
   output_wer(WER)
-  print('Total kernels: ', GlobalCounters.kernel_count)
