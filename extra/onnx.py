@@ -32,7 +32,7 @@ def get_run_onnx(onnx_model: ModelProto):
   def type_parse(type_proto: TypeProto):
     while True:
       attr = type_proto.WhichOneof('value')
-      if attr == 'tensor_type': return tuple(x.dim_value for x in getattr(type_proto, attr).shape.dim)
+      if attr == 'tensor_type': return tuple(x.dim_value if x.dim_value != 0 else 1 for x in getattr(type_proto, attr).shape.dim)
       elif attr == 'sequence_type':
         type_proto = getattr(type_proto, attr).elem_type
         attr = type_proto.WhichOneof('value')
@@ -109,6 +109,7 @@ def get_run_onnx(onnx_model: ModelProto):
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
       shape = type_parse(inp.type)
+      print(shape)
       if len(shape) >= 1 and shape[0] == 0 and shape != (0,): shape = tuple([1]+list(shape[1:]))   # 1 batch size
       if inp.name in inputs:
         if isinstance(inputs[inp.name], Tensor):
@@ -120,7 +121,7 @@ def get_run_onnx(onnx_model: ModelProto):
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else (1, [i.shape for i in input_tensors[inp.name]])
-        #assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
+        assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
         for _,v in input_tensors.items():
           if isinstance(v, Tensor):
             v.realize()
@@ -208,6 +209,8 @@ def get_run_onnx(onnx_model: ModelProto):
         arg = [(0,x,1) for x in inp[0].shape]
         shrink_args = [(0,x) for x in inp[0].shape]
         only_shrink = False # HACK BUT SOME TESTS [s:e:st], st > 1 and s == e. otherwise __getitem__ Tensor.reshape() has to allow 0 in newshape
+        print(axes, ends, starts, steps)
+        '''
         for i, axis in enumerate(axes):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
           starts[i], ends[i] = starts[i] + inp[0].shape[axis] if starts[i] < 0 else starts[i], ends[i] + inp[0].shape[axis] if ends[i] < 0 else ends[i]
@@ -219,6 +222,7 @@ def get_run_onnx(onnx_model: ModelProto):
           if starts[i] > ends[i] and steps[i] >= 0: steps[i] = -steps[i]
           arg[axis] = (starts[i], ends[i], steps[i])
         ret = inp[0].shrink(tuple(shrink_args)) if only_shrink else inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
+        ''' 
       elif n.op_type == "Shrink":
         bias = opt['bias'] if 'bias' in opt else 0
         ret = (inp[0] < -opt['lambd'])*(inp[0]+bias) + (inp[0] > opt['lambd'])*(inp[0]-bias)

@@ -410,7 +410,7 @@ def Gather(input, indices, axis=0):
     input_sh = list(input.shape)
     ret_shape = input_sh[:axis] + list(indices.shape) + input_sh[axis+1:]
     if indices.ndim > 1: indices = indices.flatten()
-    indices = [input_sh[axis]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
+    indices = [int(safe_numpy(indices))] if indices.shape == () else [input_sh[axis]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
     args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(input_sh)] for i in indices]
     return input.shrink(arg=tuple(args[0])).cat(*[input.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
   else: # NOTE faster gather with larger indices probably, fixed number of kernels, but exceeds 199 kernels for openpilot
