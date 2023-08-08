@@ -115,7 +115,7 @@ def get_run_onnx(onnx_model: ModelProto):
           input_tensors[inp.name] = inputs[inp.name]
         elif isinstance(inputs[inp.name], list):
           input_tensors[inp.name] = [Tensor(i, requires_grad=False) for i in inputs[inp.name]]
-        elif domain == "ai.onnx.preview.training":
+        elif domain == "ai.onnx.preview.training": # not sure if in real use the domain is "ai.onnx.preview.training"
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True) # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizers
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
