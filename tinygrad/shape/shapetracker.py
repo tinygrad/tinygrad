@@ -126,8 +126,6 @@ def _reshape_mask(view: View, new_shape:Tuple[int, ...]) -> Tuple[Optional[Tuple
 def _reshape(view: View, new_shape:Tuple[int, ...]) -> Tuple[View, bool]:
   if view.contiguous or (view.shape == new_shape): return View(new_shape), False
   strides, reverse_shape = [], reversed(new_shape)
-  # shape_strides[0][0] == 1 implies view.shape consists only of 1's
-  if view.shape_strides[0][0] == 1: return View(new_shape, offset=view.offset), False
   for d, s in reversed(view.shape_strides):
     acc, next_stride = 1, s
     while acc < d:
