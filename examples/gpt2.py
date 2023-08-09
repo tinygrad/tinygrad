@@ -7,7 +7,8 @@ from tqdm import trange
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple
 
-from tinygrad.helpers import getenv, dtypes
+from tinygrad.helpers import Timing, getenv, dtypes, DEBUG
+from tinygrad.ops import GlobalCounters
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
@@ -152,12 +153,16 @@ class GPT2:
     self.model = model
     self.tokenizer = tokenizer
 
-  def greedy_until(self, prompt:str, max_length, temperature):
+  def greedy_until(self, prompt:str, max_length:int, temperature:float, timing:bool=False):
     toks = self.tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})
     start_pos = 0
-    for _ in trange(max_length):
-      logits = self.model(Tensor([toks[start_pos:]]), start_pos).realize()[:, -1, :]
-      tok = sample(logits, temperature)
+    for _ in trange(max_length, disable=(timing==True)):
+      if args.timing: print("")
+      st = GlobalCounters.time_sum_s
+      with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=timing):
+        logits = self.model(Tensor([toks[start_pos:]]), start_pos).realize()[:, -1, :]
+      with Timing("sync in ", enabled=timing):
+        tok = sample(logits, temperature)
       start_pos = len(toks)
       toks.append(tok)
       output = self.tokenizer.decode(toks)
@@ -174,10 +179,11 @@ if __name__ == "__main__":
   parser.add_argument('--count', type=int, default=100, help="Max number of tokens to generate")
   parser.add_argument('--temperature', type=float, default=0.8, help="Temperature in the softmax")
   parser.add_argument('--model_size', type=str, default="gpt2-medium", help="Size of model to use [gpt2, gpt2-medium, gpt2-large, gpt2-xl]")
+  parser.add_argument('--timing', action='store_true', help="Print timing per token")
   args = parser.parse_args()
 
   print(f"using {args.model_size}")
   gpt2 = GPT2.build(args.model_size)
   print('Generating text...')
-  y = gpt2.greedy_until(args.prompt, args.count, args.temperature)
+  y = gpt2.greedy_until(args.prompt, args.count, args.temperature, timing=args.timing)
   print(y)
