@@ -35,15 +35,15 @@ prog = HIPProgram("test", f"""
 typedef float float8 __attribute__((ext_vector_type(8)));
 typedef _Float16 half16 __attribute__((ext_vector_type(16)));
 extern "C" __global__ void __launch_bounds__ (128, 1) test(float* c, __half* a, __half* b) {{
-  const int gx = blockIdx.x;
-  const int gy = blockIdx.y*4 + threadIdx.y;
+  const int gx = blockIdx.x*2 + threadIdx.y;
+  const int gy = blockIdx.y*2 + threadIdx.z;
 
   const int lIdx = threadIdx.x;
   const int lane = lIdx%16;
 
-  c += gx*{KX*16}*{N} + gy*{KY*16} + (lIdx / 16)*{N} + lane;
-  a += gx*{KX*16}*{N} + {N}*lane;
-  b += gy*{KY*16} + lane;
+  c += gx*{KX*16}*{N} + gy*{KY*16} + (lIdx/16)*{N} + lane;
+  a += gx*{KX*16}*{N};
+  b += gy*{KY*16};
 
   half16 a_frag[{KX}];
   half16 b_frag[{KY}];
@@ -57,12 +57,12 @@ extern "C" __global__ void __launch_bounds__ (128, 1) test(float* c, __half* a, 
     __syncthreads();
     for (int ele = 0; ele < 16; ++ele) {{
       for (int x = 0; x < {KX}; x++) {{
-        a_frag[x][ele] = a[(k+ele) + x*{16*N}];
+        a_frag[x][ele] = a[(k+ele) + x*{16*N} + {N}*lane];
       }}
     }}
     for (int ele = 0; ele < 16; ++ele) {{
       for (int y = 0; y < {KY}; y++) {{
-        b_frag[y][ele] = b[(k+ele)*{N} + y*16];
+        b_frag[y][ele] = b[(k+ele)*{N} + y*16 + lane];
       }}
     }}
     for (int y = 0; y < {KY}; y++) {{
@@ -96,7 +96,7 @@ def timeit(fxn):
   #print(f"{ret*1e6:.2f} us")
   return et
 
-global_size, local_size = [N//(KX*16), N//(KY*16*4), 1], [32, 4, 1]
+global_size, local_size = [N//(KX*16*2), N//(KY*16*2), 1], [32, 2, 2]
 print("global/local size", global_size, local_size, f"local_size:{prod(local_size)} total_size:{prod(global_size+local_size)}")
 tm = min([timeit(lambda: prog(global_size, local_size, a, b, c, wait=True)) for _ in range(1000)])
 na = a.toCPU().reshape(N,N)
