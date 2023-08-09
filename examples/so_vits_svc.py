@@ -291,9 +291,9 @@ class ConvFeatureExtractionModel():
         return conv
       assert (is_layer_norm and is_group_norm) == False, "layer norm and group norm are exclusive"
       if is_layer_norm:
-        return [make_conv(), partial(Tensor.dropout, p=dropout),[partial(Tensor.transpose, ax1=-2, ax2=-1), Fp32LayerNorm(dim, elementwise_affine=True), partial(Tensor.transpose, ax1=-2, ax2=-1)], Tensor.gelu]
+        return [make_conv(), partial(Tensor.dropout, p=dropout),[partial(Tensor.transpose, ax1=-2, ax2=-1), nn.LayerNorm(dim, elementwise_affine=True), partial(Tensor.transpose, ax1=-2, ax2=-1)], Tensor.gelu]
       elif is_group_norm and mode == "default":
-        return [make_conv(), partial(Tensor.dropout, p=dropout), Fp32GroupNorm(dim, dim, affine=True), Tensor.gelu]
+        return [make_conv(), partial(Tensor.dropout, p=dropout), nn.GroupNorm(dim, dim, affine=True), Tensor.gelu]
       elif is_group_norm and mode == "group_norm_masked":
         return [make_conv(), partial(Tensor.dropout, p=dropout), GroupNormMasked(dim, dim, affine=True), Tensor.gelu]
       else:
@@ -347,23 +347,6 @@ class SamePad:
     if self.remove > 0:
       x = x[:, :, : -self.remove]
     return x
-
-class Fp32LayerNorm(nn.LayerNorm):
-  def __init__(self, *args, **kwargs): super().__init__(*args, **kwargs)
-  def __call__(self, input: Tensor):
-    self.weight = self.weight.float() if self.weight is not None else None
-    self.bias = self.bias.float() if self.bias is not None else None
-    output = super().__call__(input.float())
-    return output.cast(input.dtype)
-
-class Fp32GroupNorm(nn.GroupNorm):
-  def __init__(self, *args, **kwargs):
-    super().__init__(*args, **kwargs)
-  def __call__(self, input: Tensor):
-    self.weight = self.weight.float() if self.weight is not None else None
-    self.bias = self.bias.float() if self.bias is not None else None
-    output = super().__call__(input.float())
-    return output.cast(input.dtype)
 
 class CondLayerNorm:  # https://github.com/auspicious3000/contentvec/blob/main/contentvec/modules/cond_layer_norm.py#L10
   # this one is a bit weird since it has slightly different constructor args than nn.LayerNorm
@@ -625,14 +608,19 @@ def load_checkpoint_enc(checkpoint_path, model: ContentVec, optimizer=None, skip
             parent, skip = obj, True
             if k == "weight_g": weight_g = v
             else: weight_v = v
-          if not skip: obj = getattr(obj, k)
+          if not skip:
+            parent = obj
+            obj = getattr(obj, k)
       if weight_g and weight_v:
         setattr(obj, "weight_g", weight_g.numpy())
         setattr(obj, "weight_v", weight_v.numpy())
         obj, v = getattr(parent, "weight"), weight_norm(weight_v, weight_g, 0)
         weight_g, weight_v, parent, skip = None, None, None, False
       if not skip and obj.shape == v.shape:
-        obj.assign(v.to(obj.device))
+        if "feature_extractor" in key and (isinstance(parent, nn.GroupNorm) or isinstance(parent, nn.LayerNorm)):  # cast
+          obj.assign(v.to(obj.device).float())
+        else:
+          obj.assign(v.to(obj.device))
       elif not skip: logging.error(f"MISMATCH SHAPE IN {key}, {obj.shape} {v.shape}")
     except Exception as e: raise e
   logging.info(f"Loaded checkpoint '{checkpoint_path}' in {time.time() - start_time:.4f}s")
