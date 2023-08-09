@@ -249,8 +249,7 @@ class Linearizer:
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
         localtype = dtypes.float32
-      key = f"{localtype}{idx.render()}{valid.render()}"
-      this_const, valid, key = (invalid_value, cast(Variable, Variable.num(1)), f"{localtype}INVALID") if valid.max == 0 else (const, valid, key)
+      this_const, valid, key = (invalid_value, cast(Variable, Variable.num(1)), f"{localtype}INVALID") if valid.max == 0 else (const, valid, f"{localtype}{idx.render()}{valid.render()}")
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value)) if this_const is None else \
