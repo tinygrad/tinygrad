@@ -473,7 +473,6 @@ class Synthesizer:
     logging.debug(f"{cls.__name__}:Loaded model with hps: {hps}")
     return net_g, hps
 
-
 class TextEncoder:
   def __init__(self, out_channels, hidden_channels, kernel_size, n_layers, gin_channels=0, filter_channels=None, n_heads=None, p_dropout=None):
     self.out_channels, self.hidden_channels, self.kernel_size, self.n_layers, self.gin_channels = out_channels, hidden_channels, kernel_size, n_layers, gin_channels
