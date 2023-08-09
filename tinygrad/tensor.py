@@ -680,6 +680,9 @@ class Tensor:
     mask = (Tensor.rand(*self.shape, requires_grad=False) >= p).cast(dtypes.bool)
     return self * mask * (1/(1.0 - p))
 
+  def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False) -> Tensor:
+    return (query @ key.transpose(-2,-1) / sqrt(query.shape[-1])).softmax(-1).dropout(dropout_p) @ value
+
   # ***** cast ops *****
 
   def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
