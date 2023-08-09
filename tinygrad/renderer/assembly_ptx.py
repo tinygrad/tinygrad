@@ -16,7 +16,7 @@ class PTXLanguage(AssemblyLanguage):
 
 def specialize_to_ptx(lang, function_name, asm):
   ins = [".version 8.2", ".target " + arch(), ".address_size 64",
-         f".visible .entry {function_name}({', '.join(f'.param .u64 buf{i}' for i in range(lang.bufs_cnt))}) {{"]
+         f".visible .entry {function_name}({', '.join(f'.param .u64 data{i}' for i in range(lang.bufs_cnt))}) {{"]
 
   alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
          BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.eq", UnaryOps.SQRT: "sqrt.approx",
@@ -29,7 +29,7 @@ def specialize_to_ptx(lang, function_name, asm):
     elif uop == UOps.DEFINE_LOCAL:
       ins.append(f".shared .align 4 .b8 {arg[0]}[{arg[1]*4}];")
     elif uop == UOps.SPECIAL:
-      if arg.startswith('buf'):
+      if arg.startswith('data'):
         ins.append(f"ld.param.u64 {out}, [{arg}];")
         # TODO: is this needed?
         ins.append(f"cvta.to.global.u64 {out}, {out};")
@@ -69,5 +69,4 @@ def specialize_to_ptx(lang, function_name, asm):
 def uops_to_ptx_asm(function_name:str, uops:List[UOp]):
   lang = PTXLanguage()
   global_size, local_size = uops_to_asmstyle(lang, function_name, uops)
-  print(f"{global_size=}, {local_size=}")
   return specialize_to_ptx(lang, function_name, lang.ins), global_size[::-1], local_size[::-1]

@@ -151,8 +151,7 @@ class Linearizer:
 
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)
-    if not getenv("PTX"): self.arg_bufs = {x:f"data{i}" for i,x in enumerate(dedup([x.realized for x in self.bufs if buf_is_kernel_arg(x)]))}
-    else: self.arg_bufs = {x:f"buf{i}" for i,x in enumerate(dedup([x.realized for x in self.bufs if buf_is_kernel_arg(x)]))} # FIXME: cleanup
+    self.arg_bufs = {x:f"data{i}" for i,x in enumerate(dedup([x.realized for x in self.bufs if buf_is_kernel_arg(x)]))}
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.

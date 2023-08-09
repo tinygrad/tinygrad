@@ -100,8 +100,9 @@ class AssemblyLanguage(NamedTuple):
 
 # s registers are the addresses and non local indexes
 def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
-  # ins = []
-  lang.ins = []
+  lang.ins.clear()
+  lang.tor.clear()
+  lang.cnts.clear()
   # FIXME: Think this is taken care of by DEFINE_GLOBAL now?
   # ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64, scalar=True), [], f"buf{i}") for i in range(len(self.bufs))]
   global_size, local_size = [], []
@@ -110,12 +111,11 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
     if uop == UOps.DEFINE_GLOBAL:
       lang.bufs_cnt += 1
       # lang.ins.append(AssemblyInstruction(UOps.SPECIAL, lang.newreg(args[0], dtype=args[1], scalar=True), [], args[0])) #FIXME: Why don't we use the passed dtype?
-      lang.ins.append(AssemblyInstruction(UOps.SPECIAL, lang.newreg(args[0], dtype=dtypes.uint64, scalar=True), [], args[0])) #FIXME: should we set scalar=True?
-    # if uop == UOps.CONST and newvar is not None:
-    #   lang.ins.append(AssemblyInstruction(UOps.CONST, newreg(newvar, dtype=newvar.dtype), [], args))
+      lang.ins.append(AssemblyInstruction(UOps.SPECIAL, lang.newreg(args[0], dtype=dtypes.uint64, scalar=True), [], args[0]))
     elif uop == UOps.DEFINE_LOCAL:
       lang.ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
-      lang.ins.append(AssemblyInstruction(UOps.ALU, lang.newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
+      # lang.ins.append(AssemblyInstruction(UOps.ALU, lang.newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
+      lang.ins.append(AssemblyInstruction(UOps.ALU, lang.newreg(args[0], dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
     elif uop == UOps.LOOP:
       if args[1] == "global":
         for i,var in enumerate(args[0]):
