@@ -20,10 +20,10 @@ BASEDIR = pathlib.Path(__file__).parent / "librispeech"
 with open(BASEDIR / "dev-clean-wav.json") as f:
   ci = json.load(f)
 
-#stft function was ripped out of librosa, which pulled too many dependencies
+#stft function was ripped out of librosa, which pulled too many dependencies, and simplified for our use case, if you need more features - scipy.signal.stft
 def stft(y, n_fft = 2048, hop_length = None, win_length = None, pad_mode = "constant"):
-    win_length = win_length if win_length is not None else n_fft
-    hop_length = hop_length if hop_length is not None else int(win_length // 4)
+    win_length = win_length or n_fft
+    hop_length = hop_length or int(win_length // 4)
     fft = np.fft
     dtype = np.complex64
     assert hop_length > 0 and isinstance(hop_length, int), f"hop_length={hop_length} must be a positive integer"

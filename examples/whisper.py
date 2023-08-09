@@ -301,7 +301,7 @@ def decode_segment(segment, initial_tokens, model, sample_len=224, n_audio=1, n_
   tokens = Tensor([initial_tokens], dtype=dtypes.int64).repeat((segment.shape[0], 1))
   sum_logprobs = Tensor.zeros(audio_features.shape[0])
   [np.nan] * tokens.shape[0]
-  for i in range(sample_len):
+  for _ in range(sample_len):
     logits = model.decoder(tokens, audio_features)
     probs_at_sot = logits[:, initial_tokens.index(model.tokenizer._special_tokens["<|startoftranscript|>"])].softmax(axis=-1)
     probs_at_sot[:, model.tokenizer._special_tokens["<|nospeech|>"]].numpy().tolist()
@@ -314,9 +314,9 @@ def decode_segment(segment, initial_tokens, model, sample_len=224, n_audio=1, n_
   tokens = [[t[sample_begin:(t == model.tokenizer.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
   selected = sequence_ranker.rank(tokens, sum_logprobs)
   tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
-  ts_tokens = [f"<|{i * 0.02:.2f}|>" for i in range(1501)]
-  tokens = [model.tokenizer.decode(t[1:]).strip() for t in tokens]
-  texts.extend([t for t in tokens if t not in ts_tokens])
+  # remove special tokens
+  tokens = [[t for t in s if t not in model.tokenizer._special_tokens.values()] for s in tokens]
+  texts.extend([model.tokenizer.decode(t).strip() for t in tokens])
   return texts
 
 def transcribe_wav(fn, model: Whisper, task_prompt, logprob_threshold=-1.0, no_speech_threshold=0.6):
