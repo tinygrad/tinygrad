@@ -26,7 +26,7 @@ class TestLazyBuffer(unittest.TestCase):
           helper(a[(slice(start, None, stride),)*ndims])
 
   def test_shuffle_pad_ops_cmpeq(self):
-    y = Tensor([1]).cat(Tensor([1]).eq(0)).numpy()
+    y = Tensor([1]).cat(Tensor([1]) == 0).numpy()
     z = Tensor([1, 0]).numpy()
     np.testing.assert_allclose(y, z)
 
