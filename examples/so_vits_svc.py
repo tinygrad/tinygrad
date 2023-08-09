@@ -594,22 +594,19 @@ class Generator:
     return self.conv_post(x.leakyrelu()).tanh()
 
 def repeat_expand_2d(content, target_len, mode="left"): # content : [h, t]
-  if mode == "left": return repeat_expand_2d_left(content, target_len)
+  if mode == "left": return repeat_expand_2d_left(content.realize(), target_len)
   elif mode == "nearest": return repeat_expand_2d_nearest(content, target_len)
   raise RuntimeError("Mode: {mode} not supported.")
 
 def repeat_expand_2d_left(content, target_len): # content : [h, t]
-  content = content.numpy()
-  target = np.zeros((content.shape[0], target_len), dtype=np.float32)
   src_len = content.shape[-1]
-  target = np.zeros((content.shape[0], target_len), dtype=np.float32)
   temp = np.arange(src_len+1) * target_len / src_len
-  current_pos = 0
+  current_pos, cols = 0, []
   for i in range(target_len):
     if i >= temp[current_pos+1]:
       current_pos += 1
-    target[:, i] = content[:, current_pos]
-  return Tensor(target)
+    cols.append(content[:, current_pos])
+  return Tensor.stack(cols).transpose(0, 1)
 
 # TODO no idea how this can be done in a fast way in tinygrad (or without writing custom kernel like pytorch)
 # Nearest interpolation with an integral scale factor is already implemented in Upsample (this file)
