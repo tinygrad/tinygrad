@@ -251,34 +251,15 @@ class TransformerSentenceEncoderLayer:
 # from examples/whisper.py. Renamed attributes for weight loading and allow bias on k_proj, also transpose
 class MultiHeadAttention:
   def __init__(self, n_state, n_head):
-    self.n_head = n_head
-    self.n_state = n_state
-    self.q_proj = nn.Linear(n_state, n_state)
-    self.k_proj = nn.Linear(n_state, n_state)
-    self.v_proj = nn.Linear(n_state, n_state)
-    self.out_proj = nn.Linear(n_state, n_state)
-
+    self.n_state, self.n_head = n_state, n_head
+    self.q_proj, self.k_proj, self.v_proj, self.out_proj = [nn.Linear(n_state, n_state) for _ in range(4)]
   def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None):
     x = x.transpose(0,1)  # TxBxC -> BxTxC
-    q = self.q_proj(x)
-    k = self.k_proj(xa or x)
-    v = self.v_proj(xa or x)
-    wv, qk = self.qkv_attention(q, k, v, mask)
-    # NOTE: we aren't returning qk
+    q, k, v = self.q_proj(x), self.k_proj(xa or x), self.v_proj(xa or x)
+    q, k, v = [x.reshape(*q.shape[:2], self.n_head, -1) for x in (q, k, v)]
+    wv = Tensor.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), None).transpose(1, 2).reshape(*x.shape[:2], -1)
     ret =  self.out_proj(wv).transpose(0,1)  # BxTxC -> TxBxC
     return ret
-
-  def qkv_attention(self, q, k, v, mask=None):
-    mask=None
-    n_batch, n_ctx, n_state = q.shape
-    scale = (n_state // self.n_head) ** -0.25
-    q = q.reshape(*q.shape[:2], self.n_head, -1).permute(0, 2, 1, 3) * scale
-    k = k.reshape(*k.shape[:2], self.n_head, -1).permute(0, 2, 3, 1) * scale
-    v = v.reshape(*v.shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
-    qk = q @ k
-    if mask is not None: qk = qk + mask[:n_ctx, :n_ctx]
-    w = qk.softmax(-1)
-    return (w @ v).permute(0, 2, 1, 3).flatten(start_dim=2), qk.detach()
 
 class ConvFeatureExtractionModel():
   def __init__(self, conv_layers, dropout=.0, mode="default", conv_bias=False):
