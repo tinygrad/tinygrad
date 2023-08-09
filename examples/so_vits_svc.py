@@ -126,7 +126,7 @@ class TransformerEncoder:
       # for training: layer.weights need to be weight_normed
       return layer
     self.dropout, self.embedding_dim, self.layer_norm_first, self.layerdrop, self.num_layers, self.num_layers_1 = cfg.dropout, cfg.encoder_embed_dim, cfg.layer_norm_first, cfg.encoder_layerdrop, cfg.encoder_layers, cfg.encoder_layers_1
-    self.pos_conv = [make_conv(), SamePad(cfg.conv_pos), Tensor.gelu]
+    self.pos_conv, self.pos_conv_remove = [make_conv()], (1 if cfg.conv_pos % 2 == 0 else 0)
     self.layers = [
       TransformerSentenceEncoderLayer(embedding_dim=self.embedding_dim,
                                       ffn_embedding_dim=cfg.encoder_ffn_embed_dim,
@@ -170,7 +170,9 @@ class TransformerEncoder:
       tmp_mask = padding_mask.unsqueeze(-1).repeat((1, 1, x.shape[-1]))
       tmp_mask = tilde(tmp_mask.cast(dtypes.bool))
       x = tmp_mask.where(x, 0)
-    x_conv = x.transpose(1,2).sequential(self.pos_conv)
+    x_conv = self.pos_conv[0](x.transpose(1,2))
+    if self.pos_conv_remove > 0: x_conv = x_conv[:, :, : -self.pos_conv_remove]
+    x_conv = x_conv.gelu()
     x_conv = x_conv.transpose(1, 2)
     x = x + x_conv
     x = x.transpose(0, 1)  # B x T x C -> T x B x C
@@ -320,14 +322,6 @@ def lengths_to_padding_mask(lens: Tensor) -> Tensor:
   mask = Tensor.arange(max_lens).to(lens.device).reshape(1, max_lens)
   mask = mask.expand(bsz, -1) >= lens.reshape(bsz, 1).expand(-1, max_lens)
   return mask.cast(dtypes.bool)
-
-class SamePad:
-  def __init__(self, kernel_size, causal=False):
-    self.remove = (kernel_size - 1) if causal else (1 if kernel_size % 2 == 0 else 0)
-  def __call__(self, x):
-    if self.remove > 0:
-      x = x[:, :, : -self.remove]
-    return x
 
 class CondLayerNorm:  # https://github.com/auspicious3000/contentvec/blob/main/contentvec/modules/cond_layer_norm.py#L10
   # this one is a bit weird since it has slightly different constructor args than nn.LayerNorm
