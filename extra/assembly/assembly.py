@@ -138,7 +138,7 @@ class AssemblyCodegen(Linearizer):
       elif uop == UOps.ALU and newvar is not None:
         out = newreg(newvar) if newvar not in tor else tor[newvar]
         # this is the only thing that can violate SSA
-        if args in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
+        if args in [BinaryOps.CMPLT]:
           pred_reg = newreg((newvar, 'pred'), dtype=dtypes.bool)
           ins.append(AssemblyInstruction(UOps.ALU, pred_reg, [tor[x] for x in vin], args))
           ins.append(AssemblyInstruction(UOps.CAST, out, [pred_reg], args))
