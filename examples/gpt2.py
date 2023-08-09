@@ -96,10 +96,10 @@ class TransformerBlock:
     return (h + self.mlp(self.ln_2(h))).realize()
 
   def __call__(self, x:Tensor, start_pos:int, mask:Optional[Tensor]):
-    xq, xk, xv = self._pre(x)
+    xq, xk, xv = self._pre(x) if mask is None else self.pre(x)
     # inner_attention can't be jitted because it's dynamic based on start_pos
     output = self.attn.inner_attention(xq, xk, xv, start_pos, mask)
-    return self._post(x, output)
+    return self._post(x, output) if mask is None else self.post(x, output)
 
 class Transformer:
   def __init__(self, dim, n_heads, n_layers, norm_eps=1e-5, vocab_size=50257, linear=Linear, max_seq_len=1024):
