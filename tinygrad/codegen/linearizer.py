@@ -159,7 +159,7 @@ class Linearizer:
 
   def get_buffer_name(self, i):
     if self.bufs[i].__class__ == LocalBuffer: return self.bufs[i].name
-    assert self.bufs[i].realized.__class__ is not RawConst # constants shouldn't be loaded with memops
+    assert self.bufs[i].realized.__class__ is not RawConst  # constants shouldn't be loaded with memops
     return self.arg_bufs[self.bufs[i].realized]
 
   def process(self) -> None:
