@@ -28,7 +28,7 @@ def stft(y, n_fft = 2048, hop_length = None, win_length = None, pad_mode = "cons
     dtype = np.complex64
     assert hop_length > 0 and isinstance(hop_length, int), f"hop_length={hop_length} must be a positive integer"
     assert pad_mode in ["constant", "reflect"], f"pad_mode='{pad_mode}' is not supported. Choose 'constant' or 'reflect'."
-
+    assert n_fft <= y.shape[-1], f"n_fft={n_fft} is too large for input signal of length={y.shape[-1]}"
     fft_window = np.hanning(win_length)
     axis = -1
     n = fft_window.shape[axis]
@@ -39,13 +39,10 @@ def stft(y, n_fft = 2048, hop_length = None, win_length = None, pad_mode = "cons
     shape = [1] * (1 + y.ndim)
     shape[-2] = fft_window.shape[0]
     fft_window = fft_window.reshape(shape)
-
     padding = [(0, 0) for _ in range(y.ndim)]
     start = int(np.ceil(n_fft // 2 / hop_length))
     padding[-1] = (n_fft // 2, n_fft // 2)
     y = np.pad(y, padding, mode=pad_mode)
-
-    assert n_fft <= y.shape[-1], f"n_fft={n_fft} is too large for input signal of length={y.shape[-1]}"
     # split it into frames
     out_strides = y[..., start:].strides + tuple([y[..., start:].strides[-1]])
     x_shape_trimmed = list(y[..., start:].shape)
@@ -56,7 +53,6 @@ def stft(y, n_fft = 2048, hop_length = None, win_length = None, pad_mode = "cons
     slices = [slice(None)] * y_frames.ndim
     slices[-1] = slice(0, None, hop_length)
     y_frames = y_frames[tuple(slices)]
-
     shape = list(y_frames.shape)
     shape[-2] = 1 + n_fft // 2
     stft_matrix = np.zeros(shape, dtype=dtype, order="F")
