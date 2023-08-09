@@ -224,9 +224,8 @@ class Linearizer:
     should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
-  def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
-    load_type = "val" if const is None else "acc"
-    if isinstance(self.bufs[i].realized, RawConst): const = self.bufs[i].realized._buf
+  def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[Token]:
+    const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
 
     expanded_nodes = [expand_node(idx) for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
@@ -247,11 +246,11 @@ class Linearizer:
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
         localtype = dtypes.float32
-      key = f"{load_type}{localtype}{const if load_type == 'val' and const is not None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
+      key = f"{acc}{localtype}{const if acc is None and const is not None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        self.load_cache[key] = self.uop(UOps.LOAD, Token(f"{load_type}{mnum(i)}_{load_i}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, 0.0 if not dtypes.is_int(self.bufs[i].dtype) else 0)) if const is None else \
-                               self.uop(UOps.LOAD, Token(f"{load_type}{mnum(i)}_{load_i}", localtype), [], ConstOp(const, valid))
+        self.load_cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{load_i}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, 0.0 if not dtypes.is_int(self.bufs[i].dtype) else 0)) if const is None else \
+                               self.uop(UOps.LOAD, Token(f"{'const' if acc is None else 'acc'}{mnum(i)}_{load_i}", localtype), [], ConstOp(const, valid))
       ret.append(Token(self.load_cache[key].name, self.load_cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
 
