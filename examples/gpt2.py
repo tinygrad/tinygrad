@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # pip3 install tiktoken
 
-import functools, math
+import functools, argparse
 import numpy as np
 from tqdm import trange
 np.set_printoptions(linewidth=200)
@@ -51,15 +51,8 @@ class Attention:
 
     # save the cache
     self.cache_k, self.cache_v = keys.realize(), values.realize()
-
-    xq = xq.transpose(1, 2)
-    keys = keys.transpose(1, 2)
-    values = values.transpose(1, 2)
-    scores = xq.matmul(keys.transpose(2, 3)) / math.sqrt(self.head_dim)
-    if mask is not None:
-      scores = scores + mask
-    scores = scores.softmax()  # this is casted to float
-    return scores.matmul(values).transpose(1, 2).reshape(bsz, seqlen, -1)
+    xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
+    return xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1)
 
   # NOTE: this is not called
   def __call__(self, x:Tensor, start_pos:int, mask:Optional[Tensor]) -> Tensor:
@@ -174,11 +167,17 @@ class GPT2:
 
 if __name__ == "__main__":
   Tensor.no_grad = True
-  model_size = "gpt2-medium"
   print(f"using {Device.DEFAULT} backend")
-  print(f"using {model_size}")
 
-  gpt2 = GPT2.build(model_size)
+  parser = argparse.ArgumentParser(description='Run GPT2 in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser.add_argument('--prompt', type=str, default="What is the answer to life, the universe, and everything?", help="Phrase to start with")
+  parser.add_argument('--count', type=int, default=100, help="Max number of tokens to generate")
+  parser.add_argument('--temperature', type=float, default=0.8, help="Temperature in the softmax")
+  parser.add_argument('--model_size', type=str, default="gpt2-medium", help="Size of model to use [gpt2, gpt2-medium, gpt2-large, gpt2-xl]")
+  args = parser.parse_args()
+
+  print(f"using {args.model_size}")
+  gpt2 = GPT2.build(args.model_size)
   print('Generating text...')
-  y = gpt2.greedy_until('What is the answer to life, the universe, and everything?', 100, 1)
+  y = gpt2.greedy_until(args.prompt, args.count, args.temperature)
   print(y)
