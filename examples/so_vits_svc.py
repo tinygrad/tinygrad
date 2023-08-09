@@ -1,4 +1,5 @@
-import sys, os, logging, time, io, math, argparse, numpy as np
+import sys, os, logging, time, io, math, argparse, operator, numpy as np
+from functools import partial, reduce
 from pathlib import Path
 from typing import Tuple, Optional
 from tinygrad import nn
@@ -125,7 +126,7 @@ class TransformerEncoder:
       # for training: layer.weights need to be weight_normed
       return layer
     self.dropout, self.embedding_dim, self.layer_norm_first, self.layerdrop, self.num_layers, self.num_layers_1 = cfg.dropout, cfg.encoder_embed_dim, cfg.layer_norm_first, cfg.encoder_layerdrop, cfg.encoder_layers, cfg.encoder_layers_1
-    self.pos_conv = Sequential([make_conv(), SamePad(cfg.conv_pos), GELU()])
+    self.pos_conv = [make_conv(), SamePad(cfg.conv_pos), Tensor.gelu]
     self.layers = [
       TransformerSentenceEncoderLayer(embedding_dim=self.embedding_dim,
                                       ffn_embedding_dim=cfg.encoder_ffn_embed_dim,
@@ -169,7 +170,7 @@ class TransformerEncoder:
       tmp_mask = padding_mask.unsqueeze(-1).repeat((1, 1, x.shape[-1]))
       tmp_mask = tilde(tmp_mask.cast(dtypes.bool))
       x = tmp_mask.where(x, 0)
-    x_conv = self.pos_conv(x.transpose(1, 2))
+    x_conv = x.transpose(1,2).sequential(self.pos_conv)
     x_conv = x_conv.transpose(1, 2)
     x = x + x_conv
     x = x.transpose(0, 1)  # B x T x C -> T x B x C
@@ -288,23 +289,15 @@ class ConvFeatureExtractionModel():
         conv = nn.Conv1d(n_in, n_out, k, stride=stride, bias=conv_bias)
         conv.weight = Tensor.kaiming_normal(*conv.weight.shape)
         return conv
-      class SequentialMasked(Sequential):  # https://github.com/auspicious3000/contentvec/blob/main/contentvec/models/wav2vec/wav2vec2_1.py#L56
-        def __init__(self, list): super().__init__(list)
-        def __call__(self, x, mask):
-          x = self.list[0](x)
-          x = self.list[1](x)
-          x = self.list[2](x, mask)
-          x = self.list[3](x)
-          return x
       assert (is_layer_norm and is_group_norm) == False, "layer norm and group norm are exclusive"
       if is_layer_norm:
-        return Sequential([make_conv(), Dropout(p=dropout), Sequential([TransposeLast(), Fp32LayerNorm(dim, elementwise_affine=True), TransposeLast()]), GELU()])
+        return [make_conv(), partial(Tensor.dropout, p=dropout),[partial(Tensor.transpose, ax1=-2, ax2=-1), Fp32LayerNorm(dim, elementwise_affine=True), partial(Tensor.transpose, ax1=-2, ax2=-1)], Tensor.gelu]
       elif is_group_norm and mode == "default":
-        return Sequential([make_conv(), Dropout(p=dropout), Fp32GroupNorm(dim, dim, affine=True), GELU()])
+        return [make_conv(), partial(Tensor.dropout, p=dropout), Fp32GroupNorm(dim, dim, affine=True), Tensor.gelu]
       elif is_group_norm and mode == "group_norm_masked":
-        return SequentialMasked([make_conv(), Dropout(p=dropout), GroupNormMasked(dim, dim, affine=True), GELU()])
+        return [make_conv(), partial(Tensor.dropout, p=dropout), GroupNormMasked(dim, dim, affine=True), Tensor.gelu]
       else:
-        return Sequential([make_conv(), Dropout(p=dropout), GELU()])
+        return [make_conv(), partial(Tensor.dropout, p=dropout), Tensor.gelu]
     in_d = 1
     self.conv_layers = []
     for i, cl in enumerate(conv_layers):
@@ -323,11 +316,15 @@ class ConvFeatureExtractionModel():
         lengths_org = tilde(padding_mask.cast(dtypes.bool)).cast(dtypes.int64).sum(1)  # ensure padding_mask is bool for tilde
         lengths = (((lengths_org - k) / stride) + 1).floor().cast(dtypes.int64)
         padding_mask = tilde(lengths_to_padding_mask(lengths)).cast(dtypes.int64)  # lengths_to_padding_mask returns bool tensor
-      x = self.conv_layers[0](x, padding_mask)  # padding_mask is numeric
+      x = self.conv_layers[0][0](x)  # padding_mask is numeric
+      x = self.conv_layers[0][1](x)
+      x = self.conv_layers[0][2](x, padding_mask)
+      x = self.conv_layers[0][3](x)
     else:
-      x = self.conv_layers[0](x)  # default
+      x = x.sequential(self.conv_layers[0])  # default
     for _, conv in enumerate(self.conv_layers[1:], start=1):
-      x = conv(x)
+      conv = reduce(lambda a,b: operator.iconcat(a,b if isinstance(b, list) else [b]), conv, [])  # flatten
+      x = x.sequential(conv)
     return x
 
 # helpers:
@@ -343,19 +340,6 @@ def lengths_to_padding_mask(lens: Tensor) -> Tensor:
   mask = mask.expand(bsz, -1) >= lens.reshape(bsz, 1).expand(-1, max_lens)
   return mask.cast(dtypes.bool)
 
-class Sequential:  # allows recursive sequential
-  def __init__(self, list): self.list=list
-  def __call__(self, x: Tensor): return x.sequential(self.list)
-  def __getitem__(self, i: int): return self.list[i]  # for loading weights
-
-class Dropout:
-  def __init__(self, p=0.5): self.p=p
-  def __call__(self, x: Tensor): return x.dropout(self.p)
-
-class GELU:
-  def __init__(self): pass
-  def __call__(self, x: Tensor): return x.gelu()
-
 class SamePad:
   def __init__(self, kernel_size, causal=False):
     self.remove = (kernel_size - 1) if causal else (1 if kernel_size % 2 == 0 else 0)
@@ -363,13 +347,6 @@ class SamePad:
     if self.remove > 0:
       x = x[:, :, : -self.remove]
     return x
-
-class TransposeLast:
-  def __init__(self, deconstruct_idx=None): self.deconstruct_idx = deconstruct_idx
-  def __call__(self, x: Tensor):
-    if self.deconstruct_idx is not None:
-      x = x[self.deconstruct_idx]
-    return x.transpose(-2, -1)
 
 class Fp32LayerNorm(nn.LayerNorm):
   def __init__(self, *args, **kwargs): super().__init__(*args, **kwargs)
