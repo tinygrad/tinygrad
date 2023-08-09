@@ -700,7 +700,7 @@ def get_encoder(ssl_dim) -> SpeechEncoder:
 #   PAPER: https://arxiv.org/abs/2204.09224
 #########################################################################################
 # INSTALLATION: dependencies are for preprocessing and loading/saving audio.
-# pip3 install soundfile, librosa, praat-parselmouth
+# pip3 install soundfile librosa praat-parselmouth
 #########################################################################################
 # EXAMPLE USAGE:
 # GPU=1 python3 examples/so_vits_svc.py --model tf2spy --file ~/recording.wav
