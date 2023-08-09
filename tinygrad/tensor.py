@@ -680,11 +680,10 @@ class Tensor:
     mask = (Tensor.rand(*self.shape, requires_grad=False) >= p).cast(dtypes.bool)
     return self * mask * (1/(1.0 - p))
 
-  @staticmethod
-  def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False) -> Tensor:
-    if is_causal: attn_mask = Tensor.ones(query.shape[-2], key.shape[-2], requires_grad=False).tril(0).cast(dtypes.bool)
+  def scaled_dot_product_attention(self, key: Tensor, value: Tensor, attn_mask:Optional[Tensor]=None, dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
+    if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False).tril(0).cast(dtypes.bool)
     if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), attn_mask)
-    return (query @ key.transpose(-2,-1) / sqrt(query.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
+    return (self @ key.transpose(-2,-1) / sqrt(self.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
 
   # ***** cast ops *****
 
