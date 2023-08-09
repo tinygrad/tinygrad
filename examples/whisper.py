@@ -187,7 +187,7 @@ def get_filters():
 
 def prep_audio(audio, padding) -> Tensor:
   if padding > 0: audio = np.pad(audio, (0, padding))
-  stft = librispeech.stft(audio, n_fft=N_FFT, hop_length=HOP_LENGTH, window=librispeech.get_window(N_FFT))
+  stft = librispeech.stft(audio, n_fft=N_FFT, hop_length=HOP_LENGTH)
   magnitudes = np.abs(stft[..., :-1]) ** 2
   mel_spec = get_filters() @ magnitudes
   log_spec = np.log10(np.clip(mel_spec, a_min=1e-10, a_max=None))
@@ -314,12 +314,12 @@ def decode_segment(segment, initial_tokens, model, sample_len=224, n_audio=1, n_
   tokens = [[t[sample_begin:(t == model.tokenizer.eot_token).nonzero()[0][0]] for t in s] for s in tokens]
   selected = sequence_ranker.rank(tokens, sum_logprobs)
   tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
-  texts.extend([model.tokenizer.decode(t[1:]).strip() for t in tokens])
-  sum_logprobs = [lp[i] for i, lp in zip(selected, sum_logprobs)]
-  [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
+  ts_tokens = [f"<|{i * 0.02:.2f}|>" for i in range(1501)]
+  tokens = [model.tokenizer.decode(t[1:]).strip() for t in tokens]
+  texts.extend([t for t in tokens if t not in ts_tokens])
   return texts
 
-def transcribe_wav(fn, model, task_prompt, logprob_threshold=-1.0, no_speech_threshold=0.6):
+def transcribe_wav(fn, model: Whisper, task_prompt, logprob_threshold=-1.0, no_speech_threshold=0.6):
   mel = prep_audio(load_wav(fn), padding=N_SAMPLES)
   content_frames = mel.shape[-1] - N_FRAMES
   seek, texts = 0, []
