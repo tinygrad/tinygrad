@@ -168,7 +168,7 @@ class TransformerEncoder:
       assert padding_mask.shape == x.shape[:len(padding_mask.shape)]  # first few dims of x must match padding_mask
       tmp_mask = padding_mask.unsqueeze(-1).repeat((1, 1, x.shape[-1]))
       tmp_mask = tilde(tmp_mask.cast(dtypes.bool))
-      x = Tensor.where(tmp_mask, x, 0)
+      x = tmp_mask.where(x, 0)
     x_conv = self.pos_conv(x.transpose(1, 2))
     x_conv = x_conv.transpose(1, 2)
     x = x + x_conv
@@ -511,14 +511,14 @@ class SineGen():
     #rand_ini[:, 0] = 0
     m = Tensor.ones(f0_values.shape[0]).unsqueeze(1).pad2d((0,f0_values.shape[2]-1,0,0)).cast(dtypes.bool)
     m = tilde(m)
-    rand_ini = Tensor.where(m, rand_ini, 0)
+    rand_ini = m.where(rand_ini, 0)
 
     #rad_values[:, 0, :] = rad_values[:, 0, :] + rand_ini
     tmp = rad_values[:, 0, :] + rand_ini
     m = Tensor.ones(tmp.shape).pad2d((0,0,0,rad_values.shape[1]-1,0)).cast(dtypes.bool)
     m = tilde(m)
     tmp = tmp.unsqueeze(1).pad2d((0,0,0,rad_values.shape[1]-1,0))
-    rad_values = Tensor.where(m, rad_values, tmp)
+    rad_values = m.where(rad_values, tmp)
 
     tmp_over_one = mod(rad_values.cumsum(1), 1)
     tmp_over_one_idx = padDiff(tmp_over_one) < 0
