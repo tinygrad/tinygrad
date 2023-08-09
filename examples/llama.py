@@ -74,15 +74,7 @@ class Attention:
 
     # save the cache
     self.cache_k, self.cache_v = keys.realize(), values.realize()
-
-    xq = xq.transpose(1, 2)
-    keys = keys.transpose(1, 2)
-    values = values.transpose(1, 2)
-    scores = xq.matmul(keys.transpose(2, 3)) / math.sqrt(self.head_dim)
-    if mask is not None:
-      scores = scores + mask
-    scores = scores.softmax()  # this is casted to float
-    return scores.matmul(values).transpose(1, 2).reshape(bsz, seqlen, -1)
+    return Tensor.scaled_dot_product_attention(xq.transpose(1,2), keys.transpose(1,2), values.transpose(1,2), mask).reshape(bsz, seqlen, -1)
 
   # NOTE: this is not called
   def __call__(self, x:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
