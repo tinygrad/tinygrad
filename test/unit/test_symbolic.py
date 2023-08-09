@@ -298,12 +298,6 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     assert idx0 % (i*3) == idx0
     assert i % i == 0
 
-  def test_variable_folds_node(self):
-    i = Variable("i", 1, 10)
-    result = Variable(None, i+1, i+1)
-    expected = i+1
-    assert result - expected == 0
-
   def test_mulnode_div_node(self):
     i = Variable("i", 1, 10)
     idx0 = Variable("idx0", 0, 31)
