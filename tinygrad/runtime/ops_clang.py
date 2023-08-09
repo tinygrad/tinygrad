@@ -16,15 +16,18 @@ args = {
 }[platform.system()]
 CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n'
 ADDRESS = 0x10000
-STACK_ADDR = 0x40000000
-SIZE = 20 * 1024 * 1024
+STACK_ADDR = 0x20000000
+SIZE = 40 * 1024 * 1024
+PAGE_SIZE = 0x1000
+PAGE_MASK = ~(PAGE_SIZE - 1)
 mock_lm = {"sinf": np.sin, "sqrtf": np.sqrt, "exp2f": np.exp2, "log2f": np.log2}
 # callback for tracing instructions
+
 def hook_code(fn, uc, address, size, user_data):
-  s0_float = struct.unpack('f', struct.pack('I', uc.reg_read(UC_ARM64_REG_S0)))[0]
-  #print(s0_float, fn, mock_lm[fn](s0_float))
-  res = mock_lm[fn](s0_float)
-  uc.reg_write(UC_ARM64_REG_S0, struct.unpack('I', struct.pack('f', res))[0])
+  s_in = struct.unpack('f', struct.pack('I', uc.reg_read(getattr(unicorn.arm64_const, f'UC_ARM64_REG_S{fn[2][1:]}'))))[0]
+  s_out = getattr(unicorn.arm64_const, f'UC_ARM64_REG_S{fn[1][1:]}')
+  res = mock_lm[fn[0]](s_in)
+  uc.reg_write(s_out, struct.unpack('I', struct.pack('f', res))[0])
 
 class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False, var_size:int=0):
@@ -41,9 +44,17 @@ class ClangProgram:
       if CI:
         # Remove headers and ret
         prg = prg.split('\n')[6:-3]
-        self.lm_calls = {(i*4+ADDRESS): ins.split(" ")[1] for i, ins in enumerate(prg) if ins[:2] == 'bl'}
+        lm_calls = {}
+        n = 0
+        for i, ins in enumerate(prg):
+          if ins[:2] == 'bl':
+            lm_calls[(n*4+ADDRESS)] = ins.split(" ")[1:]
+            prg[i] = "nop"
+          if ins[:4] != 'loop':
+            n+=1
+        self.lm_calls = lm_calls
         #each instruction 4 bytes
-        prg = "\n".join(ins if i*4+ADDRESS not in self.lm_calls else "add xzr,xzr,xzr" for i, ins in enumerate(prg))
+        prg = "\n".join(prg)
         subprocess.check_output(args=('as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
         subprocess.check_output(args=('objcopy -O binary --only-section=.text '+fn+ '.o ' + fn +'.bin').split())
         with open(fn+'.bin', 'rb') as f:
@@ -62,9 +73,8 @@ class ClangProgram:
     else:
       try: 
         mu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
-        reserve_mem = reduce(lambda total, arg: total + arg.size * arg.dtype.itemsize, args, 0)
-        #reserve_stack = self.stack_size 
-        mu.mem_map(ADDRESS, (reserve_mem + len(self.prg) + 4095) & ~(4095))
+        reserve_mem = (reduce(lambda total, arg: total + arg.size * arg.dtype.itemsize, args, len(self.prg)) + 4095) & ~(4095)
+        mu.mem_map(ADDRESS, reserve_mem)
         mu.mem_map(STACK_ADDR, SIZE)
         # write machine code to be emulated to memory
         mu.mem_write(ADDRESS, self.prg)
@@ -78,11 +88,8 @@ class ClangProgram:
           if i<=7: 
             mu.reg_write(getattr(unicorn.arm64_const, f'UC_ARM64_REG_X{i}'), addr)
           else:
-            to_stack.append(addr.to_bytes(8, 'little'))
+            mu.mem_write((STACK_ADDR+SIZE-(len(args[8:])+1)*8) + ((8*(i-8))), addr.to_bytes(8, 'little'))
           addr += args[i].size * args[i].dtype.itemsize 
-
-        for i, addr in enumerate(to_stack):
-          mu.mem_write((STACK_ADDR+SIZE-(len(args[8:])+1)*8) + ((8*i)), addr)
 
         mu.reg_write(UC_ARM64_REG_SP, STACK_ADDR+SIZE-(len(args[8:])+1)*8)
         mu.emu_start(ADDRESS, ADDRESS + len(self.prg))
