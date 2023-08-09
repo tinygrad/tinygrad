@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, sym_vars
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, sym_vars, sym_render
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -257,8 +257,7 @@ class TestSymbolicVars(unittest.TestCase):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
-    # TODO: update this after we support symbolic * symbolic
-    assert (a + b * c).vars() == [a, b]
+    assert (a + b * c).vars() == [a, b, c]
     assert (a % 3 + b // 5).vars() == [a, b]
     assert (a + b + c - a).vars() == [b, c]
 
@@ -276,6 +275,74 @@ class TestSymbolicMinMax(unittest.TestCase):
     assert max(1, a) == max(a, 1) == a
     assert min(1, a) == min(a, 1) == 1
 
+class TestSymRender(unittest.TestCase):
+  def test_sym_render(self):
+    a = Variable("a", 1, 8)
+    assert sym_render(a) == "a"
+    assert sym_render(1) == "1"
+    assert sym_render(a+1) == "(1+a)"
+
+class TestSymbolicSymbolicOps(unittest.TestCase):
+  def test_node_div_node(self):
+    i = Variable("i", 1, 10)
+    idx0 = Variable("idx0", 0, i*3-1)
+    assert NumNode(0) // (Variable("i", 1, 10)*128) == 0
+    assert NumNode(127) // (Variable("i", 1, 10)*128) == 0
+    assert idx0 // (i*3) == 0
+
+  def test_node_mod_node(self):
+    i = Variable("i", 1, 10)
+    idx0 = Variable("idx0", 0, i*3-1)
+    assert NumNode(0) % (Variable("i", 1, 10)*128) == 0
+    assert NumNode(127) % (Variable("i", 1, 10)*128) == 127
+    assert idx0 % (i*3) == idx0
+    assert i % i == 0
+
+  def test_variable_folds_node(self):
+    i = Variable("i", 1, 10)
+    result = Variable(None, i+1, i+1)
+    expected = i+1
+    assert result - expected == 0
+
+  def test_mulnode_div_node(self):
+    i = Variable("i", 1, 10)
+    idx0 = Variable("idx0", 0, 31)
+    assert (idx0*i) // i == idx0
+    assert (idx0*(i*128)) // i == (idx0*128)
+    assert (idx0*(i*4+4)) // (i+1) == (idx0*4)
+
+  def test_mulnode_mod_node(self):
+    i = Variable("i", 1, 10)
+    idx0 = Variable("idx0", 0, 31)
+    assert (idx0*i) % i == 0
+    assert (idx0*(i*128)) % i == 0
+    assert (idx0*(i*4+4)) % (i+1) == 0
+    assert (idx0*(i*4+4)+1) % (i+1) == 1
+
+  def test_sumnode_divmod_sumnode(self):
+    i = Variable("i", 1, 10)
+    idx0 = Variable("idx0", 0, 7)
+    idx1 = Variable("idx1", 0, 3)
+    idx2 = Variable("idx2", 0, i)
+
+    result = (idx0*(i*4+4)+idx1*(i+1)+idx2) // (i+1)
+    excepted = idx0*4+idx1
+    assert result - excepted == 0
+    result = (idx0*(i*4+4)+idx1*(i+1)+idx2) % (i+1)
+    excepted = idx2
+    assert result - excepted == 0
+
+  def test_sumnode_div_mulnode(self):
+    i = Variable("i", 1, 10)
+    idx0 = Variable("idx0", 0, 31)
+    idx1 = Variable("idx1", 0, 1)
+    idx2 = Variable("idx2", 0, 15)
+    idx3 = Variable("idx3", 0, i-1)
+    idx4 = Variable("idx4", 0, 3)
+
+    result = (idx0*(i*128)+idx1*(i*64)+idx2*(i*4) + idx3*4+idx4) // (i*4)
+    excepted = idx0*32+idx1*16+idx2
+    assert result - excepted == 0
+
 if __name__ == '__main__':
   unittest.main()
-

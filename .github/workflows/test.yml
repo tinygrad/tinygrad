@@ -183,6 +183,8 @@ jobs:
       run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
     - name: Run JIT test
       run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_jit.py
+    - name: Run symbolic shapetracker test
+      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py
     - name: Check Device.DEFAULT
       run: WEBGPU=1 python -c "from tinygrad.lazy import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
     #- name: Run webgpu pytest

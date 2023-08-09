@@ -2,8 +2,19 @@ import unittest
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import GlobalCounters
+
+def _setUp():
+  GlobalCounters.var_vals = {}
+  GlobalCounters.var_bufs = {}
+def _tearDown():
+  GlobalCounters.var_vals = {}
+  GlobalCounters.var_bufs = {}
 
 class TestSymbolic(unittest.TestCase):
+  def setUp(self): _setUp()
+  def tearDown(self): _tearDown()
+
   def test_symbolic_st(self):
     x = Variable("x", 1, 100)
     st = ShapeTracker((x, 3))
@@ -39,14 +50,17 @@ class TestSymbolic(unittest.TestCase):
     assert st.real_strides() == (i+j+k, 1)
 
 class TestSymbolicReshape(unittest.TestCase):
+  def setUp(self): _setUp()
+  def tearDown(self): _tearDown()
+
   def test_reshape_into_symbols_simple(self):
     for i in range(1, 5):
       vi = Variable("i", 1, 10)
       assert Tensor.rand(i, 4).reshape(vi, 4).shape == (vi, 4)
-      assert vi.val == i
+      assert GlobalCounters.var_vals[vi] == i
       vi = Variable("i", 1, 10)
       assert Tensor.rand(i, 6).reshape(vi, 2, 3).shape == (vi, 2, 3)
-      assert vi.val == i
+      assert GlobalCounters.var_vals[vi] == i
 
   def test_reshape_symbols_reshape_ints(self):
     for i in range(1, 5):
@@ -62,7 +76,7 @@ class TestSymbolicReshape(unittest.TestCase):
       vi = Variable("i", 1, 10)
       a = Tensor.rand(i, 4).reshape(vi, 4)
       b = Tensor.rand(i, 3).reshape(vi, 3)
-      assert vi.val == i
+      assert GlobalCounters.var_vals[vi] == i
 
   def test_reshape_reuse_var_different_value_fail(self):
     for i in range(1, 5):
@@ -85,12 +99,31 @@ class TestSymbolicReshape(unittest.TestCase):
     with self.assertRaises(AssertionError):
       t = Tensor.rand(3, 4).reshape(Variable("too_big", 100, 200), 4)
 
+  def test_two_symbol_reshape(self):
+    vi = Variable("i", 1, 10)
+    vj = Variable("j", 1, 10)
+    t1 = Tensor.rand(3, 5).reshape(vi, 5)
+    t2 = Tensor.rand(5, 4).reshape(5, vj)
+    t = t1@t2
+    assert t.shape == (vi, vj)
+    t = t.reshape(1, vi*vj)
+    assert t.shape == (1, vi*vj)
+    t = t.reshape(vj, vi)
+    assert t.shape == (vj, vi)
+
 class TestSymbolicExpand(unittest.TestCase):
+  def setUp(self): _setUp()
+  def tearDown(self): _tearDown()
+
   def test_expand_into_symbols(self):
     vi = Variable("i", 1, 10)
+    vj = Variable("j", 1, 10)
+    # this sets values for vi, vj, which is required if we want to expand into it because reshape checks inferred shape
+    Tensor.rand(3).reshape(vi)
+    Tensor.rand(3).reshape(vj)
+
     a = Tensor([[1], [2], [3]]).expand((3, vi))
     assert a.shape == (3, vi)
-    vj = Variable("j", 1, 10)
     a = a.reshape(3, vi, 1).expand((3, vi, vj))
     assert a.shape == (3, vi, vj)
 
@@ -99,3 +132,45 @@ class TestSymbolicExpand(unittest.TestCase):
     a = Tensor.rand(3, 4).reshape(3, vi)
     a = a + 1
     assert a.shape == (3, vi)
+
+class TestSymbolicSameVariables(unittest.TestCase):
+  def setUp(self): _setUp()
+  def tearDown(self): _tearDown()
+
+  def test_same_var_same_value_work(self):
+    vi = Variable("i", 1, 10)
+    a = Tensor.rand(3, 4).reshape(3, vi)
+    b = Tensor.rand(4, 5).reshape(vi, 5)
+    c = a@b
+
+  def test_same_name_different_var_same_value_work(self):
+    vi1 = Variable("i", 1, 10)
+    vi2 = Variable("i", 1, 10)
+    a = Tensor.rand(3, 4).reshape(3, vi1)
+    b = Tensor.rand(4, 5).reshape(vi2, 5)
+    c = a@b
+
+  def test_same_name_different_var_different_value_work(self):
+    vi1 = Variable("i", 1, 10)
+    a = Tensor.rand(3, 4).reshape(3, vi1)
+    assert GlobalCounters.var_vals[vi1] == 4
+    vi2 = Variable("i", 1, 10)
+    b = Tensor.rand(4, 5).reshape(4, vi2)
+    assert GlobalCounters.var_vals[vi1] == 5
+    assert GlobalCounters.var_vals[vi2] == 5
+    # TODO: improve this? but we also want Variable("i", 1, 10) - Variable("i", 1, 10) == 0
+
+  def test_different_var_same_value_fail(self):
+    a = Tensor.rand(3, 4).reshape(3, Variable("i", 1, 10))
+    b = Tensor.rand(4, 5).reshape(Variable("j", 1, 10), 5)
+    with self.assertRaises(AssertionError):
+      c = a@b
+
+  def test_same_var_different_value_fail(self):
+    vi = Variable("i", 1, 10)
+    a = Tensor.rand(3, 4).reshape(3, vi)
+    with self.assertRaises(AssertionError):
+      b = Tensor.rand(7, 5).reshape(vi, 5)
+
+if __name__ == '__main__':
+  unittest.main()

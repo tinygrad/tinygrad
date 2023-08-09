@@ -2,14 +2,20 @@ from __future__ import annotations
 from abc import abstractmethod
 import functools
 from math import gcd
-from tinygrad.helpers import partition
+from tinygrad.helpers import partition, GlobalCounters
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
 
-def is_sym_int(x: Any) -> bool: return isinstance(x, int) or isinstance(x, Node)
+def is_sym_int(x: Any) -> bool: return isinstance(x, (int, Node))
 def sym_vars(x: Union[Node, int]) -> List[Variable]: return [] if isinstance(x, int) else x.vars()
+
+def sym_infer(expr) -> int:
+  if isinstance(expr, int): return expr
+  local_vars = {k.expr: v for k,v in GlobalCounters.var_vals.items()}
+  exec("INFERRED="+render_python[type(expr)](expr, ops=None, ctx=None), None, local_vars)  # pylint: disable=exec-used
+  return local_vars["INFERRED"]
 
 class Node:
   b: Union[Node, int]
@@ -63,7 +69,11 @@ class Node:
 
   # *** complex ops ***
 
-  def __floordiv__(self, b:int, factoring_allowed=True):
+  def __rfloordiv__(self, b:int): raise RuntimeError(f"not supported: {b} // {self}")
+  def __floordiv__(self, b:Union[Node,int], factoring_allowed=True):
+    if isinstance(b, Node):
+      if b - self.max > 0: return NumNode(0)
+      raise RuntimeError(f"not supported: {self} // {b}")
     assert b != 0
     if b < 0: return (self//-b)*-1
     if b == 1: return self
@@ -75,7 +85,12 @@ class Node:
       return (self + -offset*b).__floordiv__(b, factoring_allowed=False) + offset
     return create_node(DivNode(self, b))
 
-  def __mod__(self, b:int):
+  def __rmod__(self, b:int): raise RuntimeError(f"not supported: {b} % {self}")
+  def __mod__(self, b:Union[Node,int]):
+    if isinstance(b, Node):
+      if b - self.max > 0: return self
+      if self - b == 0: return NumNode(0)
+      raise RuntimeError(f"not supported: {self} % {b}")
     assert b > 0
     if b == 1: return NumNode(0)
     if self.min >= 0 and self.max < b: return self
@@ -125,60 +140,83 @@ class Node:
 class Variable(Node):
   def __new__(cls, expr:Optional[str], nmin:int, nmax:int):
     assert nmin >= 0 and nmin <= nmax
-    if nmin == nmax: return NumNode(nmin)
+    if nmin == nmax: return NumNode(nmin) if isinstance(nmin, int) else nmin
     return super().__new__(cls)
 
   def __init__(self, expr:Optional[str], nmin:int, nmax:int):
-    self.expr, self.min, self.max = expr, nmin, nmax
-    self.val: Optional[int] = None
+    self.expr, self.min, self.max, self.set = expr, nmin, nmax, False
   def vars(self): return [self]
 
 class NumNode(Node):
   def __init__(self, num:int):
     self.b, self.min, self.max = num, num, num
   def __int__(self): return self.b
+  def __eq__(self, other): return self.b == other
+  def __hash__(self): return self.hash  # needed with __eq__ override
 
 def create_node(ret:Node):
   assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {type(ret)} {ret}"
-  if ret.min == ret.max: return NumNode(ret.min)
+  if ret.min == ret.max: return NumNode(ret.min) if isinstance(ret.min, int) else ret.min
   return ret
 
 class OpNode(Node):
   def __init__(self, a:Node, b:Union[Node, int]):
     self.a, self.b = a, b
     self.min, self.max = self.get_bounds()
-  def vars(self): return self.a.vars()
+  def vars(self): return self.a.vars() + (self.b.vars() if isinstance(self.b, Node) else [])
   @abstractmethod
   def get_bounds(self) -> Tuple[int, int]: pass
 
 class LtNode(OpNode):
   def __mul__(self, b: Union[Node, int]): return (self.a*b) < (self.b*b)
-  def __floordiv__(self, b: int, _=False): return (self.a//b) < (self.b//b)
+  def __floordiv__(self, b: Union[Node, int], _=False):
+    assert isinstance(b, int), f"not supported: {self} // {b}"
+    return (self.a//b) < (self.b//b)
   def get_bounds(self) -> Tuple[int, int]:
     if isinstance(self.b, int): return int(self.a.max < self.b), int(self.a.min < self.b)
     return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min > self.b.max else (0, 1)
 
 class MulNode(OpNode):
   def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul
-  def __floordiv__(self, b: int, factoring_allowed=False): # NOTE: mod negative isn't handled right
-    assert isinstance(self.b, int)
+  def __floordiv__(self, b: Union[Node, int], factoring_allowed=False): # NOTE: mod negative isn't handled right
+    if isinstance(b, Node):
+      assert isinstance(self.b, Node), f"not supported: {self} // {b}"
+      if b - self.b == 0: return self.a
+      if b - self.a == 0: return self.b
+      if isinstance(self.b, MulNode):
+        if b - self.b.b == 0: return create_node(MulNode(self.a, self.b.a))
+        if b - self.b.a == 0: return create_node(MulNode(self.a, self.b.b))
+      elif isinstance(self.b, SumNode):
+        if self.b % b == 0: return create_node(MulNode(self.a, self.b // b))
+      raise RuntimeError(f"not supported: {self} // {b}")
     if self.b % b == 0: return self.a*(self.b//b)
     if b % self.b == 0 and self.b > 0: return self.a//(b//self.b)
     return Node.__floordiv__(self, b, factoring_allowed)
-  def __mod__(self, b: int):
+  def __mod__(self, b: Union[Node, int]):
+    if isinstance(b, Node):
+      if b - self.b == 0 or b - self.a == 0 or b - self.a*self.b == 0: return NumNode(0)
+      if isinstance(self.b, MulNode):
+        if b - self.b.b == 0 or b - self.b.a == 0: return NumNode(0)
+      elif isinstance(self.b, SumNode):
+        if self.b % b == 0: return NumNode(0)
+      if b - self.max > 0: return self
+      raise RuntimeError(f"not supported: {self} % {b}")
     a = (self.a * (self.b%b))
     return Node.__mod__(a, b)
   def get_bounds(self) -> Tuple[int, int]:
     return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
 
 class DivNode(OpNode):
-  def __floordiv__(self, b: int, _=False): return self.a//(self.b*b) # two divs is one div
+  def __floordiv__(self, b: Union[Node, int], _=False):
+    assert isinstance(b, int), f"not supported: {self} // {b}"
+    return self.a//(self.b*b) # two divs is one div
   def get_bounds(self) -> Tuple[int, int]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
 
 class ModNode(OpNode):
-  def __floordiv__(self, b: int, factoring_allowed=True):
+  def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
+    assert isinstance(b, int), f"not supported: {self} // {b}"
     if (self.b % b == 0): return (self.a//b) % (self.b//b) # put the div inside mod
     return Node.__floordiv__(self, b, factoring_allowed)
   def get_bounds(self) -> Tuple[int, int]:
@@ -191,11 +229,36 @@ class RedNode(Node):
 
 class SumNode(RedNode):
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
-  def __floordiv__(self, b: int, factoring_allowed=True):
-    if b == 1: return self
-    if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
+  def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     fully_divided: List[Node] = []
     rest: List[Node] = []
+    if isinstance(b, SumNode):
+      numerator_num = sum([node.b for node in self.flat_components if node.__class__ is NumNode])
+      denominator_num = sum([node.b for node in b.flat_components if node.__class__ is NumNode])
+      if numerator_num and denominator_num and numerator_num % denominator_num == 0:
+        attempt = numerator_num // denominator_num
+        if b * attempt - self == 0: return NumNode(attempt)
+    elif isinstance(b, MulNode) and isinstance(b.b, int):  # try to divide b.b if it's int
+      fully_divided, rest = [], []
+      for x in self.flat_components:
+        if x % b.b == 0: fully_divided.append(x // b.b)
+        else: rest.append(x)
+      rest_sum = create_rednode(SumNode, rest)
+      if b - rest_sum.max > 0: return create_rednode(SumNode, fully_divided) // b.a
+    if isinstance(b, Node):  # try to divide the whole b
+      fully_divided, rest = [], []
+      for x in self.flat_components:
+        try:
+          if x % b == 0: fully_divided.append(x // b)
+          else: rest.append(x)
+        except RuntimeError:
+          rest.append(x)
+      rest_sum = create_rednode(SumNode, rest)
+      if b - rest_sum.max > 0: return create_rednode(SumNode, fully_divided)
+      raise RuntimeError(f"not supported: {self} // {b}")
+    if b == 1: return self
+    if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
+    fully_divided, rest = [], []
     _gcd = b
     divisor = 1
     for x in self.flat_components:
@@ -212,7 +275,23 @@ class SumNode(RedNode):
     if divisor > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(divisor) // (b//divisor)
     return Node.sum(fully_divided) + Node.__floordiv__(Node.sum(rest), b)
 
-  def __mod__(self, b: int):
+  def __mod__(self, b: Union[Node, int]):
+    if isinstance(b, SumNode):
+      numerator_num = sum([node.b for node in self.flat_components if node.__class__ is NumNode])
+      denominator_num = sum([node.b for node in b.flat_components if node.__class__ is NumNode])
+      if numerator_num and denominator_num and numerator_num % denominator_num == 0:
+        attempt = numerator_num // denominator_num
+        if b * attempt - self == 0: return NumNode(0)
+    if isinstance(b, Node):
+      indivisible = []
+      for node in self.nodes:
+        try:
+          if node % b != 0: indivisible.append(node)
+        except RuntimeError:
+          indivisible.append(node)
+      sum_indivisible = create_rednode(SumNode, indivisible)
+      if b - sum_indivisible.max > 0: return sum_indivisible
+      raise RuntimeError(f"not supported: {self} % {b}")
     new_nodes: List[Node] = []
     for x in self.nodes:
       if x.__class__ is NumNode: new_nodes.append(Variable.num(x.b%b))
@@ -228,7 +307,7 @@ class SumNode(RedNode):
 
 class AndNode(RedNode):
   def __mul__(self, b: Union[Node, int]): Variable.ands([x*b for x in self.nodes])
-  def __floordiv__(self, b: int, _=True): return Variable.ands([x//b for x in self.nodes])
+  def __floordiv__(self, b: Union[Node, int], _=True): return Variable.ands([x//b for x in self.nodes])
 
 def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   ret = typ(nodes)
@@ -236,13 +315,17 @@ def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   elif typ == AndNode: ret.min, ret.max = (min([x.min for x in nodes]), max([x.max for x in nodes]))
   return create_node(ret)
 
+@functools.lru_cache(maxsize=None)
+def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
+def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
+
 render_python: Dict[Type, Callable] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}]" if ctx == "DEBUG" else f"{self.expr}",
   NumNode: lambda self,ops,ctx: f"{self.b}",
-  MulNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}*{self.b})",
+  MulNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}*{sym_render(self.b)})",
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",
   ModNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}%{self.b})",
-  LtNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}<{self.b})",
+  LtNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}<{sym_render(self.b)})",
   SumNode: lambda self,ops,ctx: f"({'+'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
   AndNode: lambda self,ops,ctx: f"({' and '.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
 }
