@@ -6,7 +6,6 @@ if __name__ == "__main__":
 from extra.dist import world
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
-import numpy as np
 
 @TinyJit
 def send_jit(t, target_rank, cache_id=None) -> Tensor:
@@ -14,7 +13,6 @@ def send_jit(t, target_rank, cache_id=None) -> Tensor:
 
 @TinyJit
 def recv_jit(t, target_rank, cache_id=None) -> Tensor:
-  (t + 1).realize() # this does nothing but make sure that jit doesn't error
   return world.recv(t, target_rank, cache_id=cache_id).realize()
 
 def run():
@@ -32,11 +30,13 @@ def run():
     if rank == 0:
       send_jit(t, 1, cache_id="test")
     elif rank == 1:
-      t2 = recv_jit(t, 0, cache_id="test")
+      t2 = Tensor.empty(2048, 2048)
+      recv_jit(t2, 0, cache_id="test")
 
     # recv from rank 1
     if rank == 0:
-      t2 = recv_jit(t, 1, cache_id="test2")
+      t2 = Tensor.empty(2048, 2048)
+      recv_jit(t2, 1, cache_id="test2")
     elif rank == 1:
       send_jit(t2, 0, cache_id="test2")
 
