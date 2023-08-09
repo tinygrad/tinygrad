@@ -6,7 +6,7 @@ import numpy as np
 
 WER = {}
 
-def eval_whisper(model, start, end, verbose=2):
+def eval_whisper(model, start, end, verbose):
   diff = difflib.Differ()
   for c in ci[start:end]:
     fn = BASEDIR / c["files"][0]["fname"]
@@ -15,7 +15,7 @@ def eval_whisper(model, start, end, verbose=2):
     current_wer = word_error_rate([predicted], [transcript])[0]
     WER[model.name] = np.append(WER[model.name], current_wer)
     
-    if (verbose > 0 and predicted != transcript) or (verbose > 1):
+    if (verbose > 1 and predicted != transcript) or (verbose > 2):
       print("-" * 128, f"{fn.stem}\n", sep="\n")
       sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
       print(f"\nword error rate: {current_wer:.4f}")
@@ -23,7 +23,7 @@ def eval_whisper(model, start, end, verbose=2):
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Evaluate whisper on librispeech', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--models', type=str, default=None, nargs="+", help="Which model to evaluate, if not specified, will use eval all available models")
-  parser.add_argument('--verbose', type=int, default=2, help="Verbosity level, 0: only print final WER, 1: print WER only for failed samples, 2: print WER for all samples")
+  parser.add_argument('--verbose', type=int, default=1, help="Verbosity level, 0: only print final WER, 1: print WER for each model eval 2: print failed samples, 3: print all samples")
   parser.add_argument("--num-samples", type=int, default=None, help="Number of samples to run on")
   parser.add_argument("--step-size", type=int, default=None, help="Each step it runs all models on all samples in a step, ")
   args = parser.parse_args()
