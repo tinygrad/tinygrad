@@ -183,7 +183,7 @@ def load_wav(file):
 @functools.lru_cache(None)
 def get_filters():
   download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/mel_filters.npz", BASE / "whisper_mel_filters.npz")
-  return np.load(BASE / "mel_filters.npz")[f"mel_{N_MELS}"]
+  return np.load(BASE / "whisper_mel_filters.npz")[f"mel_{N_MELS}"]
 
 def prep_audio(audio, padding) -> Tensor:
   if padding > 0: audio = np.pad(audio, (0, padding))
