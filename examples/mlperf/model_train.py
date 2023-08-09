@@ -13,7 +13,7 @@ def train_retinanet():
   pass
 
 def train_unet3d(target=0.908, roi_shape=(128,128,128)):
-  from examples.mlperf.metrics import dice_ce_loss, get_dice_score
+  from examples.mlperf.metrics import dice_ce_loss, get_dice_score, one_hot
   from extra.datasets.kits19 import (get_train_files, get_val_files, iterate,
                                      sliding_window_inference)
   from extra.training import lr_warmup
@@ -40,7 +40,9 @@ def train_unet3d(target=0.908, roi_shape=(128,128,128)):
       s = 0
       for image, label in iterate(BS=BS, val=True):
         pred, label = sliding_window_inference(mdl, image, label, roi_shape)
-        s += get_dice_score(pred, label).mean()
+        label = one_hot(label, n_class)
+        label = Tensor(label, requires_grad=False)
+        s += get_dice_score(pred, label).mean().numpy()
       val_dice_score = s / len(get_val_files())
       print(f"[Epoch {epoch}] Val dice score: {val_dice_score:.4f}. Target: {target}")
       Tensor.training = True

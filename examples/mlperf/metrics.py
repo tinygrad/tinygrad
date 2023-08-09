@@ -38,6 +38,8 @@ def one_hot(arr, num_classes=3):
   return arr
 
 def get_dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6):
+  if not isinstance(prediction, Tensor):
+    prediction = Tensor(prediction)
   reduce_axis = list(range(2, len(prediction.shape)))
   prediction = prediction.softmax(channel_axis)
   assert target.shape == prediction.shape, f"Target and prediction shape do not match. Target: ({target.shape}), prediction: ({prediction.shape})."
