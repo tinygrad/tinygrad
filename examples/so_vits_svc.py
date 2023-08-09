@@ -317,19 +317,17 @@ class ConvFeatureExtractionModel():
 
   def __call__(self, x:Tensor, padding_mask:Tensor):  # TODO: refactor this later
     x = x.unsqueeze(1)  # BxT -> BxCxT
-    for i, conv in enumerate(self.conv_layers) :
-      if i == 0:
-        if self.mode == "group_norm_masked":
-          if padding_mask is not None:
-            _, k, stride = self.cl
-            lengths_org = tilde(padding_mask.cast(dtypes.bool)).cast(dtypes.int64).sum(1)  # ensure padding_mask is bool for tilde
-            lengths = (((lengths_org - k) / stride) + 1).floor().cast(dtypes.int64)
-            padding_mask = tilde(lengths_to_padding_mask(lengths)).cast(dtypes.int64)  # lengths_to_padding_mask returns bool tensor
-          x = conv(x, padding_mask)  # padding_mask is numeric
-        else:
-          x = conv(x)  # default
-      else:
-        x = conv(x)
+    if self.mode == "group_norm_masked":
+      if padding_mask is not None:
+        _, k, stride = self.cl
+        lengths_org = tilde(padding_mask.cast(dtypes.bool)).cast(dtypes.int64).sum(1)  # ensure padding_mask is bool for tilde
+        lengths = (((lengths_org - k) / stride) + 1).floor().cast(dtypes.int64)
+        padding_mask = tilde(lengths_to_padding_mask(lengths)).cast(dtypes.int64)  # lengths_to_padding_mask returns bool tensor
+      x = self.conv_layers[0](x, padding_mask)  # padding_mask is numeric
+    else:
+      x = self.conv_layers[0](x)  # default
+    for _, conv in enumerate(self.conv_layers[1:], start=1):
+      x = conv(x)
     return x
 
 # helpers:
