@@ -10,6 +10,7 @@ jobs:
   testmacbenchmark:
     name: Mac Benchmark
     runs-on: [self-hosted, macOS]
+    if: github.repository_owner == 'tinygrad'
     env:
       PYTHONPATH: .
     steps:
@@ -46,6 +47,7 @@ jobs:
   testamdbenchmark:
     name: AMD Benchmark
     runs-on: [self-hosted, Linux]
+    if: github.repository_owner == 'tinygrad'
     env:
       PYTHONPATH: .
     steps:
