@@ -158,9 +158,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     elif uop == UOps.LOAD:
       assert newvar is not None and isinstance(args, (MemOp, ConstOp))
       # valids are handled here
-      if args.valid.max == 0:
-        val = lang.render_const(args.invalid_value, newvar.dtype)
-      elif isinstance(args, ConstOp):
+      if isinstance(args, ConstOp):
         val = lang.render_const(args.value, newvar.dtype)
       else:
         val = lang.render_load(newvar.dtype, args.name, args.memory_dtype, args.idx, args.local)
