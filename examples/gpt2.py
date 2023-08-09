@@ -125,39 +125,25 @@ class Transformer:
 # **** files and arguments ****
 
 MODEL_PARAMS = {
-  'gpt2':
-  {
-    'args' : dict(n_layers=12, n_heads=12, dim=768),  # 124M params
-    'url'  : 'https://huggingface.co/gpt2/resolve/main/pytorch_model.bin'
-  },
-  'gpt2-medium':
-  {
-    'args' : dict(n_layers=24, n_heads=16, dim=1024),  # 350M params
-    'url'  : 'https://huggingface.co/gpt2-medium/resolve/main/pytorch_model.bin'
-  },
-  'gpt2-large':
-  {
-    'args' : dict(n_layers=36, n_heads=20, dim=1280),  # 774M params
-    'url'  : 'https://huggingface.co/gpt2-large/resolve/main/pytorch_model.bin'
-  },
-  'gpt2-xl':
-  {
-    'args' : dict(n_layers=48, n_heads=25, dim=1600),  # 1558M params
-    'url'  : 'https://huggingface.co/gpt2-xl/resolve/main/pytorch_model.bin'
-  }
+  'gpt2':         dict(n_layers=12, n_heads=12, dim=768),   # 124M params
+  'gpt2-medium':  dict(n_layers=24, n_heads=16, dim=1024),  # 350M params
+  'gpt2-large':   dict(n_layers=36, n_heads=20, dim=1280),  # 774M params
+  'gpt2-xl':      dict(n_layers=48, n_heads=25, dim=1600),  # 1558M params
 }
+
+def get_url(model_size): return f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'
 
 class GPT2:
   @staticmethod
   def build(model_size="gpt2"):
+    import tiktoken
     from tinygrad.state import torch_load, load_state_dict
     from extra.utils import fetch_as_file
-    import tiktoken
     tokenizer = tiktoken.get_encoding("gpt2")
 
     params = MODEL_PARAMS[model_size]
-    model = Transformer(**params['args'])
-    weights = torch_load(fetch_as_file(params['url']))
+    model = Transformer(**params)
+    weights = torch_load(fetch_as_file(get_url(model_size)))
     # special treatment for the Conv1D weights we need to transpose
     transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
     for k in weights.keys():
@@ -188,8 +174,11 @@ class GPT2:
 
 if __name__ == "__main__":
   Tensor.no_grad = True
+  model_size = "gpt2-medium"
   print(f"using {Device.DEFAULT} backend")
-  gpt2 = GPT2.build("gpt2-medium")
+  print(f"using {model_size}")
+
+  gpt2 = GPT2.build(model_size)
   print('Generating text...')
   y = gpt2.greedy_until('What is the answer to life, the universe, and everything?', 100, 1)
   print(y)
