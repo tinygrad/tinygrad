@@ -595,27 +595,22 @@ class Generator:
     return self.conv_post(x.leakyrelu()).tanh()
 
 def repeat_expand_2d(content, target_len, mode="left"): # content : [h, t]
-  if mode == "left": return repeat_expand_2d_left(content.realize(), target_len)
+  if mode == "left": return repeat_expand_2d_left(content, target_len)
   elif mode == "nearest": return repeat_expand_2d_nearest(content, target_len)
   raise RuntimeError("Mode: {mode} not supported.")
 
-# TODO this is __very__ slow. Any way to make it faster?
 def repeat_expand_2d_left(content, target_len): # content : [h, t]
-  target = Tensor.zeros([content.shape[0], target_len], dtype=dtypes.float32).to(content.device)
+  content = content.numpy()
+  target = np.zeros((content.shape[0], target_len), dtype=np.float32)
   src_len = content.shape[-1]
-  target = Tensor.zeros([content.shape[0], target_len], dtype=dtypes.float32).to(content.device)
-  temp = Tensor.arange(src_len+1) * target_len / src_len
+  target = np.zeros((content.shape[0], target_len), dtype=np.float32)
+  temp = np.arange(src_len+1) * target_len / src_len
   current_pos = 0
-  dim = content.shape[0]
-  pad_val = target_len - 1
   for i in range(target_len):
-    if i >= temp[current_pos+1].numpy():
+    if i >= temp[current_pos+1]:
       current_pos += 1
-    # target[:, i] = content[:, current_pos]
-    mask = tilde(Tensor.ones(dim, 1).pad2d((i,pad_val-i,0,0)).cast(dtypes.bool))
-    fill = content[:, current_pos].reshape(dim,1).pad2d((i,pad_val-i,0,0))
-    target = Tensor.where(mask, target, fill)
-  return target.realize()
+    target[:, i] = content[:, current_pos]
+  return Tensor(target)
 
 # TODO no idea how this can be done in a fast way in tinygrad (or without writing custom kernel like pytorch)
 # Nearest interpolation with an integral scale factor is already implemented in Upsample (this file)
@@ -706,12 +701,6 @@ def get_encoder(ssl_dim) -> SpeechEncoder:
 #########################################################################################
 # INSTALLATION: dependencies are for preprocessing and loading/saving audio.
 # pip3 install soundfile, librosa, praat-parselmouth
-#########################################################################################
-# INFO: After speech encoder, the encoding needs to be interpolated before it can be fed
-#       into VITS. Currently, this process is very slow,
-#       but you can chose a faster implementation with
-#       --interpolate_mode "nearest". This will use torch though.
-#       See comments for repeat_expand_2d().
 #########################################################################################
 # EXAMPLE USAGE:
 # GPU=1 python3 examples/so_vits_svc.py --model tf2spy --file ~/recording.wav
