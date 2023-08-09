@@ -138,6 +138,13 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
             lang.ins.append(AssemblyInstruction(UOps.ALU, lang.tor[var], [lang.tor[var], 1], BinaryOps.ADD))
             pred = lang.render_alu(BinaryOps.CMPLT, lang.tor[var], var.max+1, dtypes.bool)
             lang.ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], ("$loop_"+var.expr, True)))
+      elif args[1] == "local":
+        lang.ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [], None))
+      elif args[1] == "global+local":
+        lang.ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [], None))
+        #FIXME: doublecheck when we need sync
+      # elif args[1] == "global":
+      #   lang.ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [], None))
     elif uop == UOps.CAST and newvar is not None:
       # TODO: we should reconsider outputting CAST in the linearizer. these are needless copies
       out = lang.newreg(newvar)
