@@ -105,7 +105,7 @@ jobs:
       fail-fast: false
       matrix:
         task: [optimage, openpilot, multigpu]
-    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'||'openpilot (OpenCL) Tests'}}
+    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'|| matrix.task=='openpilot'&&'openpilot (OpenCL) Tests'|| matrix.task=='multigpu'&&'MultiGPU Tests'}}
     runs-on: ubuntu-20.04
     timeout-minutes: 20
 
