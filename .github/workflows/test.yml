@@ -275,35 +275,6 @@ jobs:
         if: matrix.backend=='cuda'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
 
-  testarm64:
-    name: ARM64 Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-      - name: Setup qemu
-        uses: docker/setup-qemu-action@v2
-        with:
-          platforms: arm64
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-        with:
-          buildkitd-flags: --debug
-      - name: Build arm64 image
-        uses: docker/build-push-action@v4
-        with:
-          file: test/extra/arm64_dockerfile
-          platforms: linux/arm64
-          load: true
-          push: false
-          tags: tinygrad-arm64
-          # TODO: cache with output name.
-          cache-from: type=gha
-          cache-to: type=gha
-      - name: Test Ops
-        run: docker run -t -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 /usr/bin/env python3 -m pytest -n=auto test/test_ops.py
-      - name: Test dtypes
-        run: docker run -t -e ENABLE_METHOD_CACHE=1 -e CI=1 -e ARM64=1 -e CLANG=1 tinygrad-arm64 /usr/bin/env python3 -m pytest -n=auto test/test_dtype.py
   testunicorn:
     name: ARM64 unicorn Test
     runs-on: ubuntu-latest
@@ -322,6 +293,6 @@ jobs:
       - name: Install dependencies
         run: pip install -e '.[testing,arm]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Test Ops
-        run: pytest -n=auto test/test_ops.py
+        run: pytest -n=auto test/ -k 'not (test_nn.py and test_conv_transpose2d)'||'test' -m 'not exclude_clang'
       - name: Test dtypes
         run: python3 -m pytest -n=auto test/test_dtype.py
