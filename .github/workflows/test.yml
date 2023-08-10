@@ -157,7 +157,7 @@ jobs:
       - if: ${{ matrix.task == 'multigpu' }}
         name: Test multigpu
         run: |
-          python test/external/dist/test_world.py
+          PYTHONPATH="." python test/external/dist/test_world.py
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests
