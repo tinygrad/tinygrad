@@ -33,10 +33,10 @@ class MultiHeadAttention:
     self.out = nn.Linear(n_state, n_state)
 
   def __call__(self, x: Tensor, xa: Optional[Tensor] = None, mask: Optional[Tensor] = None):
-      q = self.query(x).reshape(*x.shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
-      k = self.key(xa or x).reshape(*(xa or x).shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
-      v = self.value(xa or x).reshape(*(xa or x).shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
-      return self.out(q.scaled_dot_product_attention(k, v, attn_mask=mask).permute(0, 2, 1, 3).flatten(start_dim=2))
+    q = self.query(x).reshape(*x.shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
+    k = self.key(xa or x).reshape(*(xa or x).shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
+    v = self.value(xa or x).reshape(*(xa or x).shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
+    return self.out(q.scaled_dot_product_attention(k, v, attn_mask=mask).permute(0, 2, 1, 3).flatten(start_dim=2))
 
 class ResidualAttentionBlock:
   def __init__(self, n_state, n_head, cross_attention=False):
