@@ -34,7 +34,7 @@ class ClangProgram:
         os.rename(fn+'.tmp', fn)
     else:
       if DEBUG >= 5: print(prg)
-      if CI:
+      if CI and getenv('ARM64'):
         prg = prg.split('\n')
         self.varsize = int(prg[0].split(" ")[1])
         self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
@@ -50,9 +50,7 @@ class ClangProgram:
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()
-    if not CI:
-      self.fxn(*[x._buf for x in args])
-    else:
+    if CI and getenv('ARM64'):
       mu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
       total_mem = (reduce(lambda total, arg: total + arg.size * arg.dtype.itemsize, args, len(self.prg)+self.varsize) + 4095) & ~(4095)
       mu.mem_map(ADDRESS, total_mem)
@@ -66,6 +64,8 @@ class ClangProgram:
       mu.reg_write(UC_ARM64_REG_SP, ADDRESS + total_mem - (len(args[8:])+1)*8)
       mu.emu_start(ADDRESS, ADDRESS + len(self.prg))
       args[0]._buf = mu.mem_read(mu.reg_read(UC_ARM64_REG_X0), args[0].size * args[0].dtype.itemsize)
+    else:
+      self.fxn(*[x._buf for x in args])
     if wait: return time.monotonic()-st
 
 class ClangCodegen(CStyleCodegen):
