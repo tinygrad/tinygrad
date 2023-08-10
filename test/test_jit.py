@@ -7,8 +7,8 @@ import pytest
 
 pytestmark = pytest.mark.webgpu
 
-# NOTE: METAL fails, might be platform and optimization options dependent.
-@unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["METAL", "WEBGPU"], f"no JIT on {Device.DEFAULT}")
+# METAL needs the following wrapper: pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
+@unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT != "WEBGPU", f"no JIT on {Device.DEFAULT}")
 class TestJit(unittest.TestCase):
   def test_simple_jit(self):
     @TinyJit
