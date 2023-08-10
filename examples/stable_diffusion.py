@@ -29,7 +29,7 @@ class AttnBlock:
 
     # compute attention
     b,c,h,w = q.shape
-    q,k,v = [y.reshape(b,c,h*w).transpose(1,2) for y in (q,k,v)]
+    q,k,v = [x.reshape(b,c,h*w).transpose(1,2) for x in (q,k,v)]
     h_ = Tensor.scaled_dot_product_attention(q,k,v).transpose(1,2).reshape(b,c,h,w)
     return x + self.proj_out(h_)
 
@@ -172,10 +172,8 @@ class CrossAttention:
   def __call__(self, x, context=None):
     context = x if context is None else context
     q,k,v = self.to_q(x), self.to_k(context), self.to_v(context)
-    q = q.reshape(x.shape[0], -1, self.num_heads, self.head_size)
-    k = k.reshape(x.shape[0], -1, self.num_heads, self.head_size)
-    v = v.reshape(x.shape[0], -1, self.num_heads, self.head_size)
-    attention = Tensor.scaled_dot_product_attention(q.transpose(1,2), k.transpose(1,2), v.transpose(1,2)).transpose(1,2)
+    q,k,v = [y.reshape(x.shape[0], -1, self.num_heads, self.head_size).transpose(1,2) for y in (q,k,v)]
+    attention = Tensor.scaled_dot_product_attention(q, k, v).transpose(1,2)
     h_ = attention.reshape(shape=(x.shape[0], -1, self.num_heads * self.head_size))
     return h_.sequential(self.to_out)
 
