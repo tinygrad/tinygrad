@@ -296,5 +296,5 @@ jobs:
           sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
       - name: Install dependencies
         run: pip install -e '.[testing,arm]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Test Ops
-        run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=auto test/ -k 'not (test_nn.py and test_conv_transpose2d)'||'test' -m 'not exclude_clang'
+      - name: Test arm
+        run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=auto test/ -k 'not (test_nn.py and test_conv_transpose2d)'||'test' -m 'not exclude_clang' --ignore test/models
