@@ -50,7 +50,7 @@ def run():
   print(f"rank {rank} passed")
 
 if __name__ == "__main__":
-  devices = ["gpu:0", "gpu:1"]
+  devices = ["gpu:0", "gpu:1" if not CI else "gpu:0"]
   world_size = len(devices)
 
   dist.init_oob(world_size)
