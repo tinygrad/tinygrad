@@ -7,7 +7,8 @@ import functools
 import math
 from collections import defaultdict
 
-_type_to_letter = {dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a', dtypes.uint32: 'u', dtypes.uint64: 'b', dtypes._float4: 'x'}
+_type_to_letter = {dtypes.int8: 'c', dtypes.float16: 'h', dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a', dtypes.uint32: 'u', dtypes.uint64: 'b', dtypes._float4: 'x',
+                   dtypes.uint16: 's', dtypes.uint8: 'uc'}
 def type_to_letter(x): return _type_to_letter[x[0]].upper() if x[1] else _type_to_letter[x[0]]
 
 class Register(NamedTuple):
@@ -110,11 +111,9 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
   for uop,newvar,vin,args in uops:
     if uop == UOps.DEFINE_GLOBAL:
       lang.bufs_cnt += 1
-      # lang.ins.append(AssemblyInstruction(UOps.SPECIAL, lang.newreg(args[0], dtype=args[1], scalar=True), [], args[0])) #FIXME: Why don't we use the passed dtype?
       lang.ins.append(AssemblyInstruction(UOps.SPECIAL, lang.newreg(args[0], dtype=dtypes.uint64, scalar=True), [], args[0]))
     elif uop == UOps.DEFINE_LOCAL:
       lang.ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
-      # lang.ins.append(AssemblyInstruction(UOps.ALU, lang.newreg("buf-1", dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
       lang.ins.append(AssemblyInstruction(UOps.ALU, lang.newreg(args[0], dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
     elif uop == UOps.LOOP:
       if args[1] == "global":
@@ -128,7 +127,6 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
       else:
         for var in args[0]:
           if not isinstance(var, NumNode):  # TODO: why is this coming through?
-            # lang.ins.append(AssemblyInstruction(UOps.CONST, lang.newreg(var, dtype=dtypes.int32, scalar=True), [], 0))
             lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(var, dtype=dtypes.int32, scalar=True), [], ConstOp(0, None))) #FIXME: what should valid be here?
             lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
     elif uop == UOps.ENDLOOP:
@@ -173,26 +171,31 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(newvar, dtype=newvar.dtype), [], args))
       else: # args is MemOp
         idx, treg, off = lang.addr_w_offset(args)
-        reg = lang.newreg(newvar, dtype=newvar.dtype, scalar=(idx.scalar and (not isinstance(treg, Register) or treg.scalar))) # and not dtypes.is_float(newvar.dtype)))
+        reg = lang.newreg(newvar, dtype=args.memory_dtype, scalar=(idx.scalar and (not isinstance(treg, Register) or treg.scalar))) # and not dtypes.is_float(newvar.dtype)))
         if args.valid.min == 0:
-          #FIXME: We have MemOp w/ args.valid.min = 0 then do a ConstOp. Is this right? What is args.valid exactly
-          # lang.ins.append(AssemblyInstruction(UOps.CONST, reg, [], 0))
           lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], ConstOp(0, args.valid)))
           if args.valid.max == 1:
             pred = args.valid.render(lang.render_ops, lang)
             lang.ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
         if args.valid.max == 1:
           # NOTE: you can't compute the index in here, because it assumes it's all available later
-          # lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if args.i != -1 else 'shared')))
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared')))
+          if args.memory_dtype == dtypes.float16:
+            lreg = lang.newreg((newvar, "fromfakebits16"), dtype=dtypes.float16)
+            lang.ins.append(AssemblyInstruction(UOps.LOAD, lreg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', "bits16")))
+            lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lreg], (off, 'global' if not args.local else 'shared', dtypes.uint16)))
+          else:
+            lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
         if args.valid.min == 0 and args.valid.max == 1:
           lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
           skipload_branch += 1
     elif uop == UOps.STORE:
       idx, treg, off = lang.addr_w_offset(args)
-      # lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if args.i != -1 else 'shared')))
-      lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared')))
-
+      if (dtypes.is_int(args.memory_dtype) and dtypes.is_float(lang.tor[vin[0]].dtype)) or (dtypes.is_float(args.memory_dtype) and dtypes.is_int(lang.tor[vin[0]].dtype)):
+        reg = lang.newreg((lang.tor[vin[0]], args.memory_dtype), dtype=args.memory_dtype)
+        lang.ins.append(AssemblyInstruction(UOps.CAST, lang.tor[vin[0]], [reg], args))
+        lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, reg] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
+      else:
+        lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
   # define registers
   lang.ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)) for dtype,c in lang.cnts.items()] + lang.ins
 

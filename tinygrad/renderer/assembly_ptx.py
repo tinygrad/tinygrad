@@ -6,7 +6,8 @@ from tinygrad.helpers import dtypes
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.runtime.ops_cuda import arch
 
-dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "f16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32"}
+dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "f16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.int8: "s8", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32",
+                   dtypes.uint16: "u16", dtypes.uint8: "u8"}
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 
 # https://docs.nvidia.com/cuda/parallel-thread-execution/#
@@ -48,13 +49,28 @@ def specialize_to_ptx(lang, function_name, asm):
     elif uop == UOps.LOAD:
       if isinstance(arg, ConstOp):
         ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {'0f'+float_to_hex(arg.value) if dtypes.is_float(out.dtype) else arg.value};")
-      else:
-        ins.append(f"ld.{arg[1]}.{dtype_to_nvtype[out.dtype]} {out}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
+      else: # memop
+        # ins.append(f"ld.{arg[1]}.{dtype_to_nvtype[out.dtype]} {out}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
+        if arg[2] == "bits16":
+          ins.append(f"ld.{arg[1]}.b16 {out}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
+        else:
+          ins.append(f"ld.{arg[1]}.{dtype_to_nvtype[arg[2]]} {out}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
     elif uop == UOps.STORE:
-      ins.append(f"st.{arg[1]}.{dtype_to_nvtype[vin[1].dtype]} [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {vin[1]};")
+      ins.append(f"st.{arg[1]}.{dtype_to_nvtype[arg[2]]} [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {vin[1]};")
     elif uop == UOps.CAST:
       if vin[0].dtype == dtypes.bool:
         ins.append(f"selp.{dtype_to_nvtype[out.dtype]} {out}, 0f3F800000, 0f00000000, {vin[0]};")
+      # Rounding modifier is mandatory in all of the following cases:
+      #    float-to-float conversions, when destination type is smaller than source type
+      #    All float-to-int conversions
+      #    All int-to-float conversions
+      #    All conversions involving .f16x2, .e4m3x2, .e5m2x2,.bf16x2 and .tf32 instruction types.
+      # These only differ in rounding modifier
+      # FIXME: cleanup, add remaining rounding modifier cases
+      elif dtypes.is_int(out.dtype) and dtypes.is_float(vin[0].dtype):
+        ins.append(f"cvt.rz.{dtype_to_nvtype[vin[0].dtype]}.{dtype_to_nvtype[out.dtype]} {vin[0]}, {out};")
+      elif dtypes.is_int(vin[0].dtype) and dtypes.is_float(out.dtype):
+        ins.append(f"cvt.rzi.{dtype_to_nvtype[vin[0].dtype]}.{dtype_to_nvtype[out.dtype]} {vin[0]}, {out};")
       else:
         ins.append(f"cvt.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
     elif uop == UOps.LABEL:
