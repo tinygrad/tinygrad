@@ -32,24 +32,11 @@ class MultiHeadAttention:
     self.value = nn.Linear(n_state, n_state)
     self.out = nn.Linear(n_state, n_state)
 
-  def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None):
-    q = self.query(x)
-    k = self.key(xa or x)
-    v = self.value(xa or x)
-    wv, qk = self.qkv_attention(q, k, v, mask)
-    # NOTE: we aren't returning qk
-    return self.out(wv)
-
-  def qkv_attention(self, q, k, v, mask=None):
-    _, n_ctx, n_state = q.shape
-    scale = (n_state // self.n_head) ** -0.25
-    q = q.reshape(*q.shape[:2], self.n_head, -1).permute(0, 2, 1, 3) * scale
-    k = k.reshape(*k.shape[:2], self.n_head, -1).permute(0, 2, 3, 1) * scale
-    v = v.reshape(*v.shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
-    qk = q @ k
-    if mask is not None: qk = qk + mask[:n_ctx, :n_ctx]
-    w = qk.softmax(-1)
-    return (w @ v).permute(0, 2, 1, 3).flatten(start_dim=2), qk.detach()
+  def __call__(self, x: Tensor, xa: Optional[Tensor] = None, mask: Optional[Tensor] = None):
+      q = self.query(x).reshape(*x.shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
+      k = self.key(xa or x).reshape(*(xa or x).shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
+      v = self.value(xa or x).reshape(*(xa or x).shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
+      return self.out(q.scaled_dot_product_attention(k, v, attn_mask=mask).permute(0, 2, 1, 3).flatten(start_dim=2))
 
 class ResidualAttentionBlock:
   def __init__(self, n_state, n_head, cross_attention=False):
