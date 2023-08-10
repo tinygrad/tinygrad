@@ -1,5 +1,7 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib
+from weakref import KeyedRef, ref
+from _weakref import _remove_dead_weakref # type: ignore
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 from math import prod # noqa: F401 # pylint:disable=unused-import
@@ -123,3 +125,34 @@ class GlobalCounters:
   cache: ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
+
+# Stripped down version of a WeakSet
+class LightWeakSet:
+  __slots__ = 'data', '__weakref__'
+  def __init__(self):
+    self.data = set()
+  def __len__(self): return len(self.data)
+  def add(self, item): self.data.add(ref(item, self._remove))
+  def discard(self, item): self.data.discard(ref(item))
+  def _remove(self, item):
+    try: ref(self)().data.remove(item)  # type: ignore[union-attr]
+    except (AttributeError, KeyError): pass
+
+# Stripped down version of a WeakValueDictionary
+class LightWeakValueDictionary:
+  __slots__ = 'data', '__weakref__'
+  def __init__(self):
+    self.data = {}
+
+  def __getitem__(self, key):
+    o = self.data[key]()
+    if o is None: raise KeyError(key)
+    else: return o
+
+  def __len__(self): return len(self.data)
+  def __delitem__(self, key): del self.data[key]
+  def __setitem__(self, key, value): self.data[key] = KeyedRef(value, self._remove, key)
+  def __contains__(self, key): return key in self.data
+  def _remove(self, wr):
+    try: _remove_dead_weakref(ref(self)().data, wr.key)  # type: ignore[union-attr]
+    except (AttributeError, KeyError): pass
