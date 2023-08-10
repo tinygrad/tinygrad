@@ -24,8 +24,6 @@ with open(BASEDIR / "dev-clean-wav.json") as f:
 def stft(y, n_fft = 2048, hop_length = None, win_length = None, pad_mode = "constant"):
     win_length = win_length or n_fft
     hop_length = hop_length or int(win_length // 4)
-    fft = np.fft
-    dtype = np.complex64
     assert hop_length > 0 and isinstance(hop_length, int), f"hop_length={hop_length} must be a positive integer"
     assert pad_mode in ["constant", "reflect"], f"pad_mode='{pad_mode}' is not supported. Choose 'constant' or 'reflect'."
     assert n_fft <= y.shape[-1], f"n_fft={n_fft} is too large for input signal of length={y.shape[-1]}"
@@ -55,13 +53,13 @@ def stft(y, n_fft = 2048, hop_length = None, win_length = None, pad_mode = "cons
     y_frames = y_frames[tuple(slices)]
     shape = list(y_frames.shape)
     shape[-2] = 1 + n_fft // 2
-    stft_matrix = np.zeros(shape, dtype=dtype, order="F")
+    stft_matrix = np.zeros(shape, dtype=np.complex64, order="F")
     MAX_MEM_BLOCK = 2 ** 8 * 2 ** 10
     n_columns = int(MAX_MEM_BLOCK // (np.prod(y_frames.shape[:-1]) * y_frames.itemsize))
     n_columns = max(n_columns, 1)
     for bl_s in range(0, y_frames.shape[-1], n_columns):
         bl_t = min(bl_s + n_columns, y_frames.shape[-1])
-        stft_matrix[..., bl_s:bl_t] = fft.rfft(fft_window * y_frames[..., bl_s:bl_t], axis=-2)
+        stft_matrix[..., bl_s:bl_t] = np.fft.rfft(fft_window * y_frames[..., bl_s:bl_t], axis=-2)
     return stft_matrix
 
 #was generated with mel(sr=16000, n_fft=512, n_mels=80)
