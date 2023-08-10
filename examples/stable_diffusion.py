@@ -363,7 +363,6 @@ class CLIPAttention:
     src_len = key_states.shape[1]
     value_states = value_states.reshape(*proj_shape)
 
-    causal_attention_mask = causal_attention_mask.reshape(bsz * self.num_heads, tgt_len, src_len)
     attn_output = Tensor.scaled_dot_product_attention(query_states, key_states, value_states, attn_mask=causal_attention_mask)
     attn_output = attn_output.reshape(bsz, self.num_heads, tgt_len, self.head_dim)
     attn_output = attn_output.permute(0,2,1,3)
