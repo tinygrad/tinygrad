@@ -124,8 +124,6 @@ class GlobalCounters:
   kernel_count: ClassVar[int] = 0
   mem_used: ClassVar[int] = 0   # NOTE: this is not reset
   cache: ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
-  var_vals: ClassVar[Dict[Any, int]] = {}  # Dict[Variable, int]
-  var_bufs: ClassVar[Dict[Any, Any]] = {}  # Dict[Variable, RawBuffer]
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
 

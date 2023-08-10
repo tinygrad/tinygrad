@@ -278,9 +278,11 @@ class TestSymbolicMinMax(unittest.TestCase):
 class TestSymRender(unittest.TestCase):
   def test_sym_render(self):
     a = Variable("a", 1, 8)
+    b = Variable("b", 1, 10)
     assert sym_render(a) == "a"
     assert sym_render(1) == "1"
     assert sym_render(a+1) == "(1+a)"
+    assert sym_render(a*b) == "(a*b)"
 
 class TestSymbolicSymbolicOps(unittest.TestCase):
   def test_node_div_node(self):
@@ -295,48 +297,25 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     idx0 = Variable("idx0", 0, i*3-1)
     assert NumNode(0) % (Variable("i", 1, 10)*128) == 0
     assert NumNode(127) % (Variable("i", 1, 10)*128) == 127
+    assert NumNode(128) % (Variable("i", 1, 10)*128 + 128) == 128
     assert idx0 % (i*3) == idx0
     assert i % i == 0
 
-  def test_mulnode_div_node(self):
+  def test_mulnode_divmod_node(self):
     i = Variable("i", 1, 10)
     idx0 = Variable("idx0", 0, 31)
-    assert (idx0*i) // i == idx0
-    assert (idx0*(i*128)) // i == (idx0*128)
     assert (idx0*(i*4+4)) // (i+1) == (idx0*4)
-
-  def test_mulnode_mod_node(self):
-    i = Variable("i", 1, 10)
-    idx0 = Variable("idx0", 0, 31)
-    assert (idx0*i) % i == 0
-    assert (idx0*(i*128)) % i == 0
     assert (idx0*(i*4+4)) % (i+1) == 0
-    assert (idx0*(i*4+4)+1) % (i+1) == 1
+    assert (idx0*i) % i == 0
 
   def test_sumnode_divmod_sumnode(self):
     i = Variable("i", 1, 10)
     idx0 = Variable("idx0", 0, 7)
     idx1 = Variable("idx1", 0, 3)
     idx2 = Variable("idx2", 0, i)
-
-    result = (idx0*(i*4+4)+idx1*(i+1)+idx2) // (i+1)
-    excepted = idx0*4+idx1
-    assert result - excepted == 0
-    result = (idx0*(i*4+4)+idx1*(i+1)+idx2) % (i+1)
-    excepted = idx2
-    assert result - excepted == 0
-
-  def test_sumnode_div_mulnode(self):
-    i = Variable("i", 1, 10)
-    idx0 = Variable("idx0", 0, 31)
-    idx1 = Variable("idx1", 0, 1)
-    idx2 = Variable("idx2", 0, 15)
-    idx3 = Variable("idx3", 0, i-1)
-    idx4 = Variable("idx4", 0, 3)
-
-    result = (idx0*(i*128)+idx1*(i*64)+idx2*(i*4) + idx3*4+idx4) // (i*4)
-    excepted = idx0*32+idx1*16+idx2
-    assert result - excepted == 0
+    assert (idx0*(i*4+4)+idx1*(i+1)+idx2) // (i+1) == idx0*4+idx1
+    assert (idx0*(i*4+4)+idx1*(i+1)+idx2) % (i+1) == idx2
+    assert (i+1) % (i*128+128) == (i+1)
 
 if __name__ == '__main__':
   unittest.main()
