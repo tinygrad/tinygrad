@@ -290,9 +290,10 @@ jobs:
         with:
           path: '~/.cache/pip'
           key: unicorn 
-      run: |
-        sudo apt-get update -y && \
-        sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+      - name: Install cross-assembler
+        run: |
+          sudo apt-get update -y && \
+          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
       - name: Install dependencies
         run: pip install -e '.[testing,arm]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Test Ops
