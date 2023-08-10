@@ -432,7 +432,7 @@ class TestMaskedShapeTracker(unittest.TestCase):
     assert len(self.st.views) == 1
     self.st.assert_same()
   
-  @unittest.skip("Can't do this yet")
+  @unittest.skip("Can't make this optimization yet")
   def test_reshape_combining_2(self):
     self.st = CheckingShapeTracker((1,1,5))
     self.st.pad(((3,6), (0,0), (0,5)))
@@ -440,7 +440,7 @@ class TestMaskedShapeTracker(unittest.TestCase):
     assert len(self.st.views) == 1
     self.st.assert_same()
 
-  @unittest.skip("Can't do this yet")
+  @unittest.skip("Can't make this optimization yet")
   def test_reshape_splitting_combining(self):
     self.st = CheckingShapeTracker((1,5,5))
     self.st.pad(((0,4), (0,5), (0,0)))
@@ -457,7 +457,7 @@ class TestMaskedShapeTracker(unittest.TestCase):
     self.st.reshape((1, 1, 5, 6, 3, 5, 1, 1))
     assert len(self.st.views) == 1
     self.st.assert_same()
-    self.st.reshape((1, 1, 5, 6, 1, 3, 5, 1))
+    self.st.reshape((1, 5, 6, 1, 3, 1, 5, 1))
     assert len(self.st.views) == 1
     self.st.assert_same()
 
@@ -478,6 +478,32 @@ class TestMaskedShapeTracker(unittest.TestCase):
     self.st.assert_same()
     self.st.reshape((1, 3, 1, 2, 1))
     self.st.assert_same()
+
+  def test_expanded_reshaped(self):
+    self.st = CheckingShapeTracker((1, 3, 2, 1))
+    self.st.expand((5, 3, 2, 2))
+    self.st.pad(((0,0), (0,3), (0,0), (0, 0)))
+    self.st.reshape((5, 2, 3, 2, 2))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+  
+  def test_splitting_big(self):
+    self.st = CheckingShapeTracker((1, 5, 1, 15, 1))
+    self.st.pad(((0,0), (0,5), (0,0), (0,15), (0,0)))
+    self.st.reshape((10, 1, 30))
+    self.st.permute((2,1,0))
+    self.st.reshape((2,3,5,2,5))
+    assert len(self.st.views) == 1
+    v = self.st.views[-1]
+    assert v.strides == (15, 5, 1, 75, 15) and v.mask == ((0, 1), (0, 3), (0, 5), (0, 1), (0, 5))
+  
+  def test_combining_big(self):
+    self.st = CheckingShapeTracker((1,3,1,5,3,1))
+    self.st.pad(((0,0),(2,2),(0,0),(0,0),(0,0),(0,0)))
+    self.st.reshape((1,1,1,105,1,1))
+    assert len(self.st.views) == 1
+    v = self.st.views[-1]
+    assert v.strides == (0, 0, 0, 1, 0, 0) and v.mask == ((0, 1), (0, 1), (0, 1), (30, 75), (0, 1), (0, 1)), v.offset == -30
 
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):

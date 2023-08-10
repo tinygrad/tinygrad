@@ -102,23 +102,29 @@ def _reshape_mask(view: View, new_shape:Tuple[int, ...]) -> Tuple[Optional[Tuple
   r_masks, r_shape, r_new_shape = reversed(cast(Tuple[Tuple[int, int],...], view.mask)), reversed(view.shape), reversed(new_shape)
   stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
   while len(new_mask) < len(new_shape):
-    if mask[1]-mask[0] < 1: return ((0,0),)*len(new_shape), False
-    if old_dim == new_dim: # easy, can just copy the mask
+    if mask[1]-mask[0] < 1: # if the mask is never valid, just return all zeros
+      return ((0,0),)*len(new_shape), False
+    if old_dim == new_dim*stride: # easy, can just copy the mask
       new_mask.append((mask[0]//stride, (mask[1]-1)//stride+1))
       stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
-    elif old_dim < new_dim: # reshaping a mask to a larger dimension
-      next_mask = next(r_masks, (0,1)) 
-      # if the current dimension is masked, we cannot merge unless the next mask has a range of 1
-      if (mask[0]!=0 or mask[1]!=old_dim) and next_mask[1]-next_mask[0]!=1: return view.mask, True
-      mask = (next_mask[0]*old_dim+mask[0], (next_mask[1]-1)*old_dim+mask[1])
-      old_dim *= next(r_shape, 1) # we merge this dimension with the next and try again
-    else: # old_dim > new_dim
-      if (mask[0]%new_dim!=0 or mask[1]%new_dim!=0) and mask[0]//new_dim!=(mask[1]-1)//new_dim: # cannot split if the reshape cuts across the mask
+    elif old_dim > new_dim: # splitting the old mask
+      # we cannot split if the reshape cuts across the mask
+      if (mask[0]%(new_dim*stride)!=0 or mask[1]%(new_dim*stride)!=0) and mask[0]//(new_dim*stride)!=(mask[1]-1)//(new_dim*stride):
         return view.mask, True
-      new_mask.append((mask[0]%new_dim//stride, (((mask[1]-1)%new_dim+1)-1)//stride+1))
+      new_mask.append((mask[0]%(new_dim*stride)//stride, (mask[1]-1)%(new_dim*stride)//stride+1))
+      # the remaining mask still needs to be split, we need to determine the mask for the next dimension  
+      # we maintain the stride 
       stride *= new_dim
-      new_dim *= next(r_new_shape, 1)
-  for mask in (mask, *r_masks): # if the old shape has leading 1s, need to make sure their mask is (0,1)
+      new_dim = next(r_new_shape, 1)
+    elif old_dim < new_dim*stride: # combining masks
+      next_mask = next(r_masks, (0,1)) 
+      # if the current dimension is masked, we cannot merge unless the next masks have an index range of 1
+      if (mask[0]!=0 or mask[1]!=old_dim) and next_mask[1]-next_mask[0]!=1:
+        return view.mask, True
+      # we combine the current mask with the next and go through the loop again with the next dimension
+      mask = (next_mask[0]*old_dim+mask[0], (next_mask[1]-1)*old_dim+mask[1])
+      old_dim *= next(r_shape, 1) 
+  for mask in (mask, *r_masks): # if the old shape has leading 1s, need to make sure their mask is (0,1), otherwise the mask is zero'd
     if mask != (0,1): return ((0,0),)*len(new_shape), False
   return tuple(reversed(new_mask)), False
 
@@ -127,12 +133,12 @@ def _reshape(view: View, new_shape:Tuple[int, ...]) -> Tuple[View, bool]:
   if view.contiguous or (view.shape == new_shape): return View(new_shape), False
   strides, reverse_shape = [], reversed(new_shape)
   for d, s in reversed(view.shape_strides):
-    acc, next_stride = 1, s
+    acc, new_stride = 1, s
     while acc < d:
       new_dim = next(reverse_shape)
       acc *= new_dim
-      strides.append(next_stride)
-      next_stride *= new_dim
+      strides.append(new_stride)
+      new_stride *= new_dim
     if acc != d: break
   else:
     strides += [0,] * (len(new_shape) - len(strides))
