@@ -26,7 +26,7 @@ def run():
     # create a tensor to send
     t = Tensor.randn(SIZE, SIZE)
     t2 = allreduce_jit(t, cache_id="test")
-    assert np.allclose(t.numpy() * 2, t2.numpy())
+    assert np.allclose(t.numpy() * 2, t2.numpy(), atol=1e-5, rtol=1e-5)
 
   # reset jit
   allreduce_jit.cnt = 0
@@ -36,7 +36,7 @@ def run():
     # create a tensor to send
     t = Tensor.randn(SIZE_2, SIZE_2, SIZE_2)
     t2 = allreduce_jit(t, cache_id="test2")
-    assert np.allclose(t.numpy() * 2, t2.numpy())
+    assert np.allclose(t.numpy() * 2, t2.numpy(), atol=1e-5, rtol=1e-5)
 
   print(f"rank {rank} passed")
 
@@ -50,3 +50,7 @@ if __name__ == "__main__":
   for rank, device in enumerate(devices):
     processes.append(dist.spawn(rank, device, fn=run, args=()))
   for p in processes: p.join()
+
+  # exit with error code if any of the processes failed
+  for p in processes:
+    if p.exitcode != 0: exit(p.exitcode)

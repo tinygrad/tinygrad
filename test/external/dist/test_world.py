@@ -59,3 +59,7 @@ if __name__ == "__main__":
   for rank, device in enumerate(devices):
     processes.append(dist.spawn(rank, device, fn=run, args=()))
   for p in processes: p.join()
+
+  # exit with error code if any of the processes failed
+  for p in processes:
+    if p.exitcode != 0: exit(p.exitcode)
