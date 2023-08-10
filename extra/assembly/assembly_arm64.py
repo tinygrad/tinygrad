@@ -103,10 +103,7 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"fcsel {rtor[out.nm]},{rtor[vin[2].nm]}, {rtor[vin[1].nm]}, eq")
         elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
           save_regs = [k for k in rtor.keys() if k != out.nm and k not in mem_vars]
-          if CI:
-#            ins.append(f"fmov s0, {rtor[vin[0].nm]}")
-            ins.append(f"{alu[arg]} {rtor[out.nm]} {rtor[vin[0].nm]}")
-#            ins.append(f"fmov {rtor[out.nm]}, s0")
+          if CI: ins.append(f"{alu[arg]} {rtor[out.nm]} {rtor[vin[0].nm]}")
           else:
             ins.append(f"sub sp, sp, #{(len(save_regs))*16}")
             # Save the registers before they are cleared by func call  
@@ -158,4 +155,4 @@ class ARM64Codegen(AssemblyCodegen):
       if out is not None and out.nm in mem_vars:
         ins.append(f"mov x15, {mem_vars[out.nm]}")
         ins.append(f"str {rtor[out.nm]}, [sp, x15]")
-    return "test", "\n".join([f"//varsize,{var_size}",".arch armv8-a",".text", f".global {get_name('test')}",".p2align 2", f"{get_name('test')}:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins  + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret", "\n"])
+    return "test", "\n".join([f"//varsize {var_size}",".arch armv8-a",".text", f".global {get_name('test')}",".p2align 2", f"{get_name('test')}:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins  + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret", "\n"])
