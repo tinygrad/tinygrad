@@ -206,19 +206,15 @@ def get_run_onnx(onnx_model: ModelProto):
           steps = safe_numpy(inp[4]) if len(inp) > 4 else [1]*inp[0].ndim
           starts, ends = safe_numpy(starts.ceil().cast(dtypes.int32)).tolist(), safe_numpy(ends.ceil().cast(dtypes.int32)).tolist()
         arg = [(0,x,1) for x in inp[0].shape]
-        shrink_args = [(0,x) for x in inp[0].shape]
-        only_shrink = False # HACK otherwise need to copy __getitem__ over here
         for i, axis in enumerate(axes):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
           starts[i], ends[i] = starts[i] + inp[0].shape[axis] if starts[i] < 0 else starts[i], ends[i] + inp[0].shape[axis] if ends[i] < 0 else ends[i]
           starts[i], ends[i] = max(0, min(starts[i], inp[0].shape[axis])), max(0, min(ends[i], inp[0].shape[axis]))
-          shrink_args[axis] = (starts[i], ends[i])
-          if starts[i] == ends[i]:
-            only_shrink = True
-            continue
           if starts[i] > ends[i] and steps[i] >= 0: steps[i] = -steps[i]
           arg[axis] = (starts[i], ends[i], steps[i])
-        ret = inp[0].shrink(tuple(shrink_args)) if only_shrink else inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
+        new_shape = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in arg)
+        if any(s==e for s,e in new_shape): ret = inp[0].shrink(new_shape)
+        else: ret = inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
       elif n.op_type == "Shrink":
         bias = opt['bias'] if 'bias' in opt else 0
         ret = (inp[0] < -opt['lambd'])*(inp[0]+bias) + (inp[0] > opt['lambd'])*(inp[0]-bias)
