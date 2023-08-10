@@ -4,11 +4,9 @@ from tinygrad.ops import Compiled
 from tinygrad.helpers import fromimport, getenv, DEBUG, CI
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
-from unicorn import *
 import struct
-from unicorn.arm64_const import *
-import math
 import numpy as np
+if CI and getenv('ARM64'): from unicorn import Uc, arm64_const
 args = {
   'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
   'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'exp':''},
@@ -16,11 +14,12 @@ args = {
 }[platform.system()]
 CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n'
 ADDRESS = 0x10000
+
 # Unicorn doesn't support external calls 
 mock_lm = {"sinf": np.sin, "sqrtf": np.sqrt, "exp2f": np.exp2, "log2f": np.log2}
 def hook_code(fn, uc, address, size, user_data):
-  s_in = struct.unpack('f', struct.pack('I', uc.reg_read(getattr(unicorn.arm64_const, f'UC_ARM64_REG_S{fn[2][1:]}'))))[0]
-  uc.reg_write(getattr(unicorn.arm64_const, f'UC_ARM64_REG_S{fn[1][1:]}'), struct.unpack('I', struct.pack('f', mock_lm[fn[0]](s_in)))[0])
+  s_in = struct.unpack('f', struct.pack('I', uc.reg_read(getattr(arm64_const, f'UC_ARM64_REG_S{fn[2][1:]}'))))[0]
+  uc.reg_write(getattr(arm64_const, f'UC_ARM64_REG_S{fn[1][1:]}'), struct.unpack('I', struct.pack('f', mock_lm[fn[0]](s_in)))[0])
 
 class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False, var_size:int=0):
@@ -51,19 +50,20 @@ class ClangProgram:
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()
     if CI and getenv('ARM64'):
-      mu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+      #fromimport("unicorn.arm64_const", "*")
+      mu = Uc(arm64_const.UC_ARCH_ARM64, arm64_const.UC_MODE_ARM)
       total_mem = (reduce(lambda total, arg: total + arg.size * arg.dtype.itemsize, args, len(self.prg)+self.varsize) + 4095) & ~(4095)
       mu.mem_map(ADDRESS, total_mem)
-      for addr, fn in self.ext_calls.items(): mu.hook_add(UC_HOOK_CODE, partial(hook_code, fn), begin=addr, end=addr)
+      for addr, fn in self.ext_calls.items(): mu.hook_add(arm64_const.UC_HOOK_CODE, partial(hook_code, fn), begin=addr, end=addr)
       mu.mem_write(ADDRESS, self.prg + b''.join(bytes(arg._buf) for arg in args))
       addr = ADDRESS + len(self.prg)
       for i, arg in enumerate(args):
-        if i<=7: mu.reg_write(getattr(unicorn.arm64_const, f'UC_ARM64_REG_X{i}'), addr)
+        if i<=7: mu.reg_write(getattr(arm64_const, f'UC_ARM64_REG_X{i}'), addr)
         else: mu.mem_write(ADDRESS + total_mem - (len(args[8:])+1)*8 + 8*(i-8), addr.to_bytes(8, 'little'))
         addr += arg.size * arg.dtype.itemsize
-      mu.reg_write(UC_ARM64_REG_SP, ADDRESS + total_mem - (len(args[8:])+1)*8)
+      mu.reg_write(arm64_const.UC_ARM64_REG_SP, ADDRESS + total_mem - (len(args[8:])+1)*8)
       mu.emu_start(ADDRESS, ADDRESS + len(self.prg))
-      args[0]._buf = mu.mem_read(mu.reg_read(UC_ARM64_REG_X0), args[0].size * args[0].dtype.itemsize)
+      args[0]._buf = mu.mem_read(mu.reg_read(arm64_const.UC_ARM64_REG_X0), args[0].size * args[0].dtype.itemsize)
     else:
       self.fxn(*[x._buf for x in args])
     if wait: return time.monotonic()-st
