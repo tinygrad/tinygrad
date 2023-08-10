@@ -144,6 +144,7 @@ class LinearizerOptions(NamedTuple):
   global_max: Optional[List[int]] = None
   local_max: Optional[List[int]] = None
 
+REDUCE_MAP = {ReduceOps.SUM: 0.0, ReduceOps.MAX: -inf}
 class Linearizer:
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, opts:LinearizerOptions):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
@@ -351,7 +352,8 @@ class Linearizer:
       fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
       # define accumulator
-      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -inf}[cast(ReduceOps, self.reduceop.op)])
+      assert isinstance(self.reduceop.op, ReduceOps)
+      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, REDUCE_MAP[self.reduceop.op])
 
       # reduce loop
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
@@ -435,7 +437,8 @@ class Linearizer:
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -inf}[cast(ReduceOps, self.reduceop.op)])
+        assert isinstance(self.reduceop.op, ReduceOps)
+        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, REDUCE_MAP[self.reduceop.op])
 
         # late reduce loop
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
