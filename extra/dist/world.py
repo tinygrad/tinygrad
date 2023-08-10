@@ -59,7 +59,7 @@ def _send_lb(x:LazyBuffer, target_rank:int, cache_id:Optional[str]=None) -> None
 
 # receive a lazybuffer from the target rank
 def _recv_lb(x:LazyBuffer, target_rank:int) -> LazyBuffer:
-  _recv_rb(x.realize().realized, target_rank)
+  _recv_rb(x.contiguous().realize().realized, target_rank)
   return x
 
 class Send(Function):
