@@ -104,7 +104,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [optimage, openpilot]
+        task: [optimage, openpilot, multigpu]
     name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'||'openpilot (OpenCL) Tests'}}
     runs-on: ubuntu-20.04
     timeout-minutes: 20
@@ -154,6 +154,10 @@ jobs:
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test tensor core ops
         run: GPU=1 TC=2 python3 -m pytest -n=auto test/test_ops.py
+      - if: ${{ matrix.task == 'multigpu' }}
+        name: Test multigpu
+        run: |
+          python test/external/dist/test_world.py
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests

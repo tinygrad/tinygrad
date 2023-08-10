@@ -4,8 +4,9 @@ if __name__ == "__main__":
   dist.preinit()
 
 from extra.dist import world
-from tinygrad.helpers import getenv
+from tinygrad.helpers import CI, getenv
 from tinygrad.tensor import Tensor
+import numpy as np
 
 @TinyJit
 def send_jit(t, target_rank, cache_id=None) -> Tensor:
@@ -14,6 +15,8 @@ def send_jit(t, target_rank, cache_id=None) -> Tensor:
 @TinyJit
 def recv_jit(t, target_rank, cache_id=None) -> Tensor:
   return world.recv(t, target_rank, cache_id=cache_id).realize()
+
+SIZE = 2048 if not CI else 2
 
 def run():
   # set a deterministic seed so that both ranks generate the same random tensor
@@ -24,18 +27,18 @@ def run():
   # loop 3 times to make sure it works with the jit
   for _ in range(3):
     # create a tensor to send
-    t = Tensor.randn(2048, 2048)
+    t = Tensor.randn(SIZE, SIZE)
 
     # send to rank 1
     if rank == 0:
       send_jit(t, 1, cache_id="test")
     elif rank == 1:
-      t2 = Tensor.empty(2048, 2048)
+      t2 = Tensor.empty(SIZE, SIZE)
       recv_jit(t2, 0, cache_id="test")
 
     # recv from rank 1
     if rank == 0:
-      t2 = Tensor.empty(2048, 2048)
+      t2 = Tensor.empty(SIZE, SIZE)
       recv_jit(t2, 1, cache_id="test2")
     elif rank == 1:
       send_jit(t2, 0, cache_id="test2")
