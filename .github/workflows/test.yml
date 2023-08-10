@@ -293,6 +293,6 @@ jobs:
       - name: Install dependencies
         run: pip install -e '.[testing,arm]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Test Ops
-        run: pytest -n=auto test/ -k 'not (test_nn.py and test_conv_transpose2d)'||'test' -m 'not exclude_clang'
+        run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=auto test/test_ops.py -k 'not (test_nn.py and test_conv_transpose2d)'||'test' -m 'not exclude_clang'
       - name: Test dtypes
-        run: python3 -m pytest -n=auto test/test_dtype.py
+        run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=auto test/test_dtype.py
