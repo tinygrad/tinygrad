@@ -74,15 +74,7 @@ class Attention:
 
     # save the cache
     self.cache_k, self.cache_v = keys.realize(), values.realize()
-
-    xq = xq.transpose(1, 2)
-    keys = keys.transpose(1, 2)
-    values = values.transpose(1, 2)
-    scores = xq.matmul(keys.transpose(2, 3)) / math.sqrt(self.head_dim)
-    if mask is not None:
-      scores = scores + mask
-    scores = scores.softmax()  # this is casted to float
-    return scores.matmul(values).transpose(1, 2).reshape(bsz, seqlen, -1)
+    return Tensor.scaled_dot_product_attention(xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2), mask).transpose(1, 2).reshape(bsz, seqlen, -1)
 
   # NOTE: this is not called
   def __call__(self, x:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
@@ -126,10 +118,11 @@ class TransformerBlock:
     return (h + self.feed_forward(self.ffn_norm(h))).realize()
 
   def __call__(self, x:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]):
-    xq, xk, xv = self._pre(x, freqs_cis)
+    # if mask is not None, x's shape is dymanic based on user input and pre/post can't be jitted
+    xq, xk, xv = self._pre(x, freqs_cis) if mask is None else self.pre(x, freqs_cis)
     # inner_attention can't be jitted because it's dynamic based on start_pos
     output = self.attention.inner_attention(xq, xk, xv, start_pos, mask)
-    return self._post(x, output)
+    return self._post(x, output) if mask is None else self.post(x, output)
 
 class Transformer:
   def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None):
