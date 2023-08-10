@@ -151,7 +151,7 @@ class ARM64Codegen(AssemblyCodegen):
       elif uop == UOps.LABEL:
         ins.append(f"{arg[1:]}:")
       prev_uop=uop
-      # store regs into memory if neede 
+      # store regs into memory if needed 
       if out is not None and out.nm in mem_vars:
         ins.append(f"mov x15, {mem_vars[out.nm]}")
         ins.append(f"str {rtor[out.nm]}, [sp, x15]")
