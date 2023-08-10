@@ -6,7 +6,7 @@ from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 import struct
 import numpy as np
-if CI and getenv('ARM64'): from unicorn import Uc, arm64_const
+if CI and getenv('ARM64'): from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, arm64_const
 args = {
   'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
   'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'exp':''},
@@ -38,7 +38,7 @@ class ClangProgram:
         self.varsize = int(prg[0].split(" ")[1])
         self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
         prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n']) 
-        subprocess.check_output(args=('as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
+        subprocess.check_output(args=('aarch64-linux-gnu-as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
         subprocess.check_output(args=('objcopy -O binary --only-section=.text '+fn+ '.o ' + fn +'.bin').split())
         self.prg = open(fn + '.bin', 'rb').read()
         return
@@ -51,10 +51,10 @@ class ClangProgram:
     if wait: st = time.monotonic()
     if CI and getenv('ARM64'):
       #fromimport("unicorn.arm64_const", "*")
-      mu = Uc(arm64_const.UC_ARCH_ARM64, arm64_const.UC_MODE_ARM)
+      mu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
       total_mem = (reduce(lambda total, arg: total + arg.size * arg.dtype.itemsize, args, len(self.prg)+self.varsize) + 4095) & ~(4095)
       mu.mem_map(ADDRESS, total_mem)
-      for addr, fn in self.ext_calls.items(): mu.hook_add(arm64_const.UC_HOOK_CODE, partial(hook_code, fn), begin=addr, end=addr)
+      for addr, fn in self.ext_calls.items(): mu.hook_add(UC_HOOK_CODE, partial(hook_code, fn), begin=addr, end=addr)
       mu.mem_write(ADDRESS, self.prg + b''.join(bytes(arg._buf) for arg in args))
       addr = ADDRESS + len(self.prg)
       for i, arg in enumerate(args):
