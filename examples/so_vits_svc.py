@@ -1,7 +1,9 @@
+# original implementation: https://github.com/svc-develop-team/so-vits-svc
+from __future__ import annotations
 import sys, os, logging, time, io, math, argparse, operator, numpy as np
 from functools import partial, reduce
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Type
 from tinygrad import nn
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, getenv
@@ -9,8 +11,6 @@ from tinygrad.state import torch_load
 from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present, get_hparams_from_file, load_checkpoint, weight_norm, HParams
 from examples.sovits_helpers import preprocess
 import soundfile
-
-# original code: https://github.com/svc-develop-team/so-vits-svc
 
 DEBUG = getenv("DEBUG")
 
@@ -20,78 +20,16 @@ F0_MIN = 50.0
 F0_MEL_MIN = 1127 * np.log(1 + F0_MIN / 700)
 F0_MEL_MAX = 1127 * np.log(1 + F0_MAX / 700)
 
-# original code for contentvec: https://github.com/auspicious3000/contentvec/
-class ContentVec:
-  # TODO: self.label_embs_concat and self.final_proj dims are hardcoded
-  # and depend on fairseq.data.dictionary Dictionary in the checkpoint.
-  # This param can't yet be loaded since there is no pickle for it. See with DEBUG=2.
-  # This means that the model only works with the given weights (they are the same for every svc model)
-  def __init__(self, cfg: HParams):
-    self.feature_grad_mult, self.untie_final_proj = cfg.feature_grad_mult, cfg.untie_final_proj
-    feature_enc_layers = eval(cfg.conv_feature_layers)
-    self.embed = feature_enc_layers[-1][0]
-    final_dim = cfg.final_dim if cfg.final_dim > 0 else cfg.encoder_embed_dim
-    self.feature_extractor = ConvFeatureExtractionModel(conv_layers=feature_enc_layers, dropout=0.0, mode=cfg.extractor_mode, conv_bias=cfg.conv_bias)
-    self.post_extract_proj = nn.Linear(self.embed, cfg.encoder_embed_dim) if self.embed != cfg.encoder_embed_dim else None
-    self.encoder = TransformerEncoder(cfg)
-    self.layer_norm = nn.LayerNorm(self.embed)
-    self.final_proj = nn.Linear(cfg.encoder_embed_dim, final_dim * 1) if self.untie_final_proj else nn.Linear(cfg.encoder_embed_dim, final_dim)
-    self.mask_emb = Tensor.uniform(cfg.encoder_embed_dim, dtype=dtypes.float32)
-    self.label_embs_concat = Tensor.uniform(504, final_dim, dtype=dtypes.float32)
-
-  def forward_features(self, source, padding_mask):
-    if self.feature_grad_mult > 0:
-      features = self.feature_extractor(source, padding_mask)
-      if self.feature_grad_mult != 1.0:
-        features = features  # GradMultiply.forward(features, self.feature_grad_mult): this isn't required for inference
-    else:
-      features = self.feature_extractor(source, padding_mask)
-    return features
-
-  def forward_padding_mask(self, features, padding_mask):
-    # replaces original forward_padding_mask for batch inference
-    lengths_org = tilde(padding_mask.cast(dtypes.bool)).cast(dtypes.int64).sum(1)  # ensure its bool for tilde
-    lengths = (lengths_org - 400).float().div(320).floor().cast(dtypes.int64) + 1  # intermediate float to divide
-    padding_mask = lengths_to_padding_mask(lengths)
-    return padding_mask
-
-  def extract_features(self, source: Tensor, spk_emb:Tensor=None, padding_mask=None, ret_conv=False, output_layer=None, tap=False):
-    features = self.forward_features(source, padding_mask)
-    if padding_mask is not None:
-      padding_mask = self.forward_padding_mask(features, padding_mask)
-    features = features.transpose(1, 2)
-    features = self.layer_norm(features)
-    if self.post_extract_proj is not None:
-      features = self.post_extract_proj(features)
-    x, layer_results = self.encoder(features, spk_emb, padding_mask=padding_mask, layer=(None if output_layer is None else output_layer - 1), tap=tap)
-    res = features if ret_conv else x
-    return res, padding_mask
-
-  @classmethod
-  def load_model(cls, checkpoint_path:str, checkpoint_url:str):
-    download_if_not_present(checkpoint_path, checkpoint_url)
-    cfg = load_fairseq_cfg(checkpoint_path)
-    enc = cls(cfg.model)
-    _ = load_checkpoint_enc(checkpoint_path, enc, None)
-    logging.debug(f"{cls.__name__}: Loaded model with cfg={cfg}")
-    return enc
-
 class SpeechEncoder:
-  def __init__(self, hidden_dim, model:ContentVec):
-    self.hidden_dim = hidden_dim
-    self.model = model
-
+  def __init__(self, hidden_dim, model:ContentVec): self.hidden_dim, self.model = hidden_dim, model
   def encode(self, ): raise NotImplementedError("implement me")
-
   @classmethod
-  def load_model(cls, checkpoint_path:str, checkpoint_url:str):
-    contentvec = ContentVec.load_model(checkpoint_path, checkpoint_url)
+  def load_from_pretrained(cls, checkpoint_path:str, checkpoint_url:str) -> ContentVec:
+    contentvec = ContentVec.load_from_pretrained(checkpoint_path, checkpoint_url)
     return cls(contentvec)
 
 class ContentVec256L9(SpeechEncoder):
-  def __init__(self, model:ContentVec):
-    super().__init__(hidden_dim=256, model=model)
-
+  def __init__(self, model:ContentVec): super().__init__(hidden_dim=256, model=model)
   def encode(self, wav: Tensor):
     feats = wav
     if len(feats.shape) == 2:  # double channels
@@ -104,9 +42,7 @@ class ContentVec256L9(SpeechEncoder):
     return feats.transpose(1,2)
 
 class ContentVec768L12(SpeechEncoder):
-  def __init__(self, model:ContentVec):
-    super().__init__(hidden_dim=768, model=model)
-
+  def __init__(self, model:ContentVec): super().__init__(hidden_dim=768, model=model)
   def encode(self, wav: Tensor):
     feats = wav
     if len(feats.shape) == 2:  # double channels
@@ -116,6 +52,54 @@ class ContentVec768L12(SpeechEncoder):
     padding_mask = Tensor.zeros_like(feats).cast(dtypes.bool)
     logits = self.model.extract_features(feats.to(wav.device), padding_mask=padding_mask.to(wav.device), output_layer=12)
     return logits[0].transpose(1,2)
+
+# original code for contentvec: https://github.com/auspicious3000/contentvec/
+class ContentVec:
+  # self.final_proj dims are hardcoded and depend on fairseq.data.dictionary Dictionary in the checkpoint. This param can't yet be loaded since there is no pickle for it. See with DEBUG=2.
+  # This means that the ContentVec only works with the hubert weights used in all SVC models
+  def __init__(self, cfg: HParams):
+    self.feature_grad_mult, self.untie_final_proj = cfg.feature_grad_mult, cfg.untie_final_proj
+    feature_enc_layers = eval(cfg.conv_feature_layers)
+    self.embed = feature_enc_layers[-1][0]
+    final_dim = cfg.final_dim if cfg.final_dim > 0 else cfg.encoder_embed_dim
+    self.feature_extractor = ConvFeatureExtractionModel(conv_layers=feature_enc_layers, dropout=0.0, mode=cfg.extractor_mode, conv_bias=cfg.conv_bias)
+    self.post_extract_proj = nn.Linear(self.embed, cfg.encoder_embed_dim) if self.embed != cfg.encoder_embed_dim else None
+    self.encoder = TransformerEncoder(cfg)
+    self.layer_norm = nn.LayerNorm(self.embed)
+    self.final_proj = nn.Linear(cfg.encoder_embed_dim, final_dim * 1) if self.untie_final_proj else nn.Linear(cfg.encoder_embed_dim, final_dim)
+    self.mask_emb = Tensor.uniform(cfg.encoder_embed_dim, dtype=dtypes.float32)
+    self.label_embs_concat = Tensor.uniform(504, final_dim, dtype=dtypes.float32)
+  def forward_features(self, source, padding_mask):
+    if self.feature_grad_mult > 0:
+      features = self.feature_extractor(source, padding_mask)
+      if self.feature_grad_mult != 1.0: pass  # training: GradMultiply.forward(features, self.feature_grad_mult)
+    else:
+      features = self.feature_extractor(source, padding_mask)
+    return features
+  def forward_padding_mask(self, features, padding_mask):  # replaces original forward_padding_mask for batch inference
+    lengths_org = tilde(padding_mask.cast(dtypes.bool)).cast(dtypes.int64).sum(1)  # ensure its bool for tilde
+    lengths = (lengths_org - 400).float().div(320).floor().cast(dtypes.int64) + 1  # intermediate float to divide
+    padding_mask = lengths_to_padding_mask(lengths)
+    return padding_mask
+  def extract_features(self, source: Tensor, spk_emb:Tensor=None, padding_mask=None, ret_conv=False, output_layer=None, tap=False):
+    features = self.forward_features(source, padding_mask)
+    if padding_mask is not None:
+      padding_mask = self.forward_padding_mask(features, padding_mask)
+    features = features.transpose(1, 2)
+    features = self.layer_norm(features)
+    if self.post_extract_proj is not None:
+      features = self.post_extract_proj(features)
+    x, _ = self.encoder(features, spk_emb, padding_mask=padding_mask, layer=(None if output_layer is None else output_layer - 1), tap=tap)
+    res = features if ret_conv else x
+    return res, padding_mask
+  @classmethod
+  def load_from_pretrained(cls, checkpoint_path:str, checkpoint_url:str) -> ContentVec:
+    download_if_not_present(checkpoint_path, checkpoint_url)
+    cfg = load_fairseq_cfg(checkpoint_path)
+    enc = cls(cfg.model)
+    _ = load_checkpoint_enc(checkpoint_path, enc, None)
+    logging.debug(f"{cls.__name__}: Loaded model with cfg={cfg}")
+    return enc
 
 class TransformerEncoder:
   def __init__(self, cfg: HParams):
@@ -128,39 +112,17 @@ class TransformerEncoder:
     self.dropout, self.embedding_dim, self.layer_norm_first, self.layerdrop, self.num_layers, self.num_layers_1 = cfg.dropout, cfg.encoder_embed_dim, cfg.layer_norm_first, cfg.encoder_layerdrop, cfg.encoder_layers, cfg.encoder_layers_1
     self.pos_conv, self.pos_conv_remove = [make_conv()], (1 if cfg.conv_pos % 2 == 0 else 0)
     self.layers = [
-      TransformerSentenceEncoderLayer(embedding_dim=self.embedding_dim,
-                                      ffn_embedding_dim=cfg.encoder_ffn_embed_dim,
-                                      num_attention_heads=cfg.encoder_attention_heads,
-                                      dropout=0.0,  # training: dropout=self.dropout,
-                                      attention_dropout=0.0,  # training: attention_dropout=cfg.attention_dropout,
-                                      activation_dropout=0.0,  # training: activation_dropout=cfg.activation_dropout,
-                                      activation_fn=cfg.activation_fn,
-                                      layer_norm_first=self.layer_norm_first,
-                                      cond_layer_norm=False)
-      for _ in range(cfg.encoder_layers)
+      TransformerEncoderLayer(self.embedding_dim, cfg.encoder_ffn_embed_dim, cfg.encoder_attention_heads, self.dropout, cfg.attention_dropout, cfg.activation_dropout, cfg.activation_fn, self.layer_norm_first, cond_layer_norm=False if (i < cfg.encoder_layers) else True)
+      for i in range(cfg.encoder_layers + cfg.encoder_layers_1)
       ]
-    for _ in range(cfg.encoder_layers_1):  # this one uses CondLayerNorm
-      self.layers.append(
-        TransformerSentenceEncoderLayer(embedding_dim=self.embedding_dim,
-                                        ffn_embedding_dim=cfg.encoder_ffn_embed_dim,
-                                        num_attention_heads=cfg.encoder_attention_heads,
-                                        dropout=0.0,  # dropout=self.dropout,
-                                        attention_dropout=0.0,  # training: attention_dropout=cfg.attention_dropout,
-                                        activation_dropout=0.0,  # training: activation_dropout=cfg.activation_dropout,
-                                        activation_fn=cfg.activation_fn,
-                                        layer_norm_first=self.layer_norm_first,
-                                        cond_layer_norm=True)
-      )
     self.layer_norm = nn.LayerNorm(self.embedding_dim)
     self.cond_layer_norm = CondLayerNorm(self.embedding_dim) if cfg.encoder_layers_1 > 0 else None
     # training: apply init_bert_params
-
   def __call__(self, x, spk_emb, padding_mask=None, layer=None, tap=False):
     x, layer_results = self.extract_features(x, spk_emb, padding_mask, layer, tap)
     if self.layer_norm_first and layer is None:
       x = self.cond_layer_norm(x, spk_emb) if (self.num_layers_1 > 0) else self.layer_norm(x)
     return x, layer_results
-
   def extract_features(self, x: Tensor, spk_emb: Tensor, padding_mask=None, tgt_layer=None, tap=False):
     if tgt_layer is not None:  # and not self.training
       assert tgt_layer >= 0 and tgt_layer < len(self.layers)
@@ -172,10 +134,8 @@ class TransformerEncoder:
       x = tmp_mask.where(x, 0)
     x_conv = self.pos_conv[0](x.transpose(1,2))
     if self.pos_conv_remove > 0: x_conv = x_conv[:, :, : -self.pos_conv_remove]
-    x_conv = x_conv.gelu()
-    x_conv = x_conv.transpose(1, 2)
-    x = x + x_conv
-    x = x.transpose(0, 1)  # B x T x C -> T x B x C
+    x_conv = x_conv.gelu().transpose(1, 2)
+    x = (x + x_conv).transpose(0, 1)  # B x T x C -> T x B x C
     if not self.layer_norm_first: x = self.layer_norm(x)
     x = x.dropout(p=self.dropout)
     layer_results = []
@@ -197,35 +157,23 @@ class TransformerEncoder:
     x = x.transpose(0, 1)  # T x B x C -> B x T x C
     return x, layer_results
 
-class TransformerSentenceEncoderLayer:
+class TransformerEncoderLayer:
   def __init__(self, embedding_dim=768.0, ffn_embedding_dim=3072.0, num_attention_heads=8.0, dropout=0.1, attention_dropout=0.1, activation_dropout=0.1, activation_fn="relu", layer_norm_first=False, cond_layer_norm=False):
     def get_activation_fn(activation):
-      if activation == "relu":
-        return Tensor.relu
-      if activation == "gelu":
-        return Tensor.gelu
-      else:
-        raise RuntimeError(f"activation function={activation} is not forseen")
-    self.embedding_dim, self.dropout, self.activation_dropout, self.layer_norm_first, self.num_attention_heads = embedding_dim, dropout, activation_dropout, layer_norm_first, num_attention_heads
-    self.activation_fn = get_activation_fn(activation_fn)
-    self.cond_layer_norm = cond_layer_norm
+      if activation == "relu": return Tensor.relu
+      if activation == "gelu": return Tensor.gelu
+      else: raise RuntimeError(f"activation function={activation} is not forseen")
+    self.embedding_dim, self.dropout, self.activation_dropout, self.layer_norm_first, self.num_attention_heads, self.cond_layer_norm, self.activation_fn = embedding_dim, dropout, activation_dropout, layer_norm_first, num_attention_heads, cond_layer_norm, get_activation_fn(activation_fn)
     self.self_attn = MultiHeadAttention(self.embedding_dim, self.num_attention_heads)
     self.self_attn_layer_norm = nn.LayerNorm(self.embedding_dim) if not cond_layer_norm else CondLayerNorm(self.embedding_dim)
     self.fc1 = nn.Linear(self.embedding_dim, ffn_embedding_dim)
     self.fc2 = nn.Linear(ffn_embedding_dim, self.embedding_dim)
     self.final_layer_norm = nn.LayerNorm(self.embedding_dim) if not cond_layer_norm else CondLayerNorm(self.embedding_dim)
-
-  def __call__(self, x:Tensor, self_attn_mask:Tensor=None, self_attn_padding_mask:Tensor=None, emb:Tensor=None, need_weights=False):  # TODO: refactor this later
-    # TODO: might need to do the following to self_attn_padding_mask:
-    #self_attn_padding_mask = self_attn_padding_mask.view(x.shape[0], 1, 1, self_attn_padding_mask.shape[1]).expand(-1, self.num_attention_heads, -1, -1).reshape(x.shape[0] * self.num_attention_heads, 1, self_attn_padding_mask.shape[1]) if self_attn_padding_mask is not None else None
-    assert self_attn_mask == None
-    assert emb == None
-    assert self_attn_padding_mask is not None
+  def __call__(self, x:Tensor, self_attn_mask:Tensor=None, self_attn_padding_mask:Tensor=None, emb:Tensor=None, need_weights=False):
+    #self_attn_padding_mask = self_attn_padding_mask.reshape(x.shape[0], 1, 1, self_attn_padding_mask.shape[1]).expand(-1, self.num_attention_heads, -1, -1).reshape(x.shape[0] * self.num_attention_heads, 1, self_attn_padding_mask.shape[1]) if self_attn_padding_mask is not None else None
+    assert self_attn_mask is None and self_attn_padding_mask is not None
     residual = x
     if self.layer_norm_first:
-      #if self_attn_mask is None and self_attn_padding_mask is not None: self_attn_mask = self_attn_padding_mask
-      #elif self_attn_padding_mask is None and self_attn_mask is not None: self_attn_padding_mask = self_attn_mask
-      #mask = self_attn_mask.cast(dtypes.bool) + self_attn_padding_mask.cast(dtypes.bool) if (self_attn_mask is not None) else None  # logical or them here
       x = self.self_attn_layer_norm(x) if not self.cond_layer_norm else self.self_attn_layer_norm(x, emb)
       x = self.self_attn(x=x, mask=self_attn_padding_mask)
       x = x.dropout(self.dropout)
@@ -250,7 +198,6 @@ class TransformerSentenceEncoderLayer:
       x = self.final_layer_norm(x) if not self.cond_layer_norm else self.final_layer_norm(x, emb)
     return x
 
-# from examples/whisper.py. Renamed attributes for weight loading and allow bias on k_proj, also transpose
 class MultiHeadAttention:
   def __init__(self, n_state, n_head):
     self.n_state, self.n_head = n_state, n_head
@@ -266,7 +213,6 @@ class MultiHeadAttention:
 class ConvFeatureExtractionModel():
   def __init__(self, conv_layers, dropout=.0, mode="default", conv_bias=False):
     assert mode in {"default", "group_norm_masked", "layer_norm"}
-    self.mode = mode
     def block(n_in, n_out, k, stride, is_layer_norm=False, is_group_norm=False, conv_bias=False):
       def make_conv():
         conv = nn.Conv1d(n_in, n_out, k, stride=stride, bias=conv_bias)
@@ -281,17 +227,14 @@ class ConvFeatureExtractionModel():
         return [make_conv(), partial(Tensor.dropout, p=dropout), GroupNormMasked(dim, dim, affine=True), Tensor.gelu]
       else:
         return [make_conv(), partial(Tensor.dropout, p=dropout), Tensor.gelu]
-    in_d = 1
-    self.conv_layers = []
+    in_d, self.conv_layers, self.mode = 1, [], mode
     for i, cl in enumerate(conv_layers):
       assert len(cl) == 3, "invalid conv definition: " + str(cl)
       (dim, k, stride) = cl
-      if i == 0:
-        self.cl = cl
+      if i == 0: self.cl = cl
       self.conv_layers.append(block(in_d, dim, k, stride, is_layer_norm=(mode == "layer_norm"), is_group_norm=((mode == "default" or mode == "group_norm_masked") and i == 0), conv_bias=conv_bias))
       in_d = dim
-
-  def __call__(self, x:Tensor, padding_mask:Tensor):  # TODO: refactor this later
+  def __call__(self, x:Tensor, padding_mask:Tensor):
     x = x.unsqueeze(1)  # BxT -> BxCxT
     if self.mode == "group_norm_masked":
       if padding_mask is not None:
@@ -310,21 +253,7 @@ class ConvFeatureExtractionModel():
       x = x.sequential(conv)
     return x
 
-# helpers:
-def randn_like(x): return Tensor.randn(*x.shape, dtype=x.dtype).to(device=x.device)
-
-def tilde(x: Tensor) -> Tensor:
-  if x.dtype == dtypes.bool: return (1 - x).cast(dtypes.bool)
-  return (x + 1) * -1  # this seems to be what the ~ operator does in pytorch for non bool
-
-def lengths_to_padding_mask(lens: Tensor) -> Tensor:
-  bsz, max_lens = lens.shape[0], lens.max().numpy().item()
-  mask = Tensor.arange(max_lens).to(lens.device).reshape(1, max_lens)
-  mask = mask.expand(bsz, -1) >= lens.reshape(bsz, 1).expand(-1, max_lens)
-  return mask.cast(dtypes.bool)
-
 class CondLayerNorm:  # https://github.com/auspicious3000/contentvec/blob/main/contentvec/modules/cond_layer_norm.py#L10
-  # this one is a bit weird since it has slightly different constructor args than nn.LayerNorm
   def __init__(self, dim_last, eps=1e-5, dim_spk=256, elementwise_affine=True):
     self.dim_last, self.eps, self.dim_spk, self.elementwise_affine = dim_last, eps, dim_spk, elementwise_affine
     if self.elementwise_affine:
@@ -338,46 +267,40 @@ class CondLayerNorm:  # https://github.com/auspicious3000/contentvec/blob/main/c
     weights, bias = self.weight_ln(spk_emb), self.bias_ln(spk_emb)
     return weights * x + bias
 
-# TODO: not actually used in our case. maybe implement later
-class GroupNormMasked:
+class GroupNormMasked:  # https://github.com/auspicious3000/contentvec/blob/d746688a32940f4bee410ed7c87ec9cf8ff04f74/contentvec/modules/fp32_group_norm.py#L16
   def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
     self.num_groups, self.num_channels, self.eps, self.affine = num_groups, num_channels, eps, affine
-    self.weight, self.bias = (Tensor.ones(num_channels)), (Tensor.zeros(num_channels))  if self.affine else (None, None)
-    raise NotImplementedError("not needed for for this case")
-  def __call__(self, x, mask):
-    pass
+    self.weight, self.bias = (Tensor.ones(num_channels)), (Tensor.zeros(num_channels)) if self.affine else (None, None)
+  def __call__(self, x:Tensor, mask:Tensor):
+    bsz, n_c, length = x.shape
+    assert n_c % self.num_groups == 0
+    x = x.reshape(bsz, self.num_groups, n_c // self.num_groups, length)
+    if mask is None: mask = Tensor.ones_like(x)
+    else: mask = mask.reshape(bsz, 1, 1, length)
+    x = x * mask
+    lengths = mask.sum(axis=3, keepdim=True)
+    assert x.shape[2] == 1
+    mean_ = x.mean(dim=3, keepdim=True)
+    mean = mean_ * length / lengths
+    var = (((x.std(axis=3, keepdim=True) ** 2) + mean_**2) * length / lengths - mean**2) + self.eps
+    return x.add(-mean).div(var.sqrt()).reshape(bsz, n_c, length).mul(self.weight.reshape(1,-1,1)).add(self.bias.reshape(1,-1,1))
 
 class Synthesizer:
   def __init__(self, spec_channels, segment_size, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gin_channels, ssl_dim, n_speakers, sampling_rate=44100, vol_embedding=False, n_flow_layer=4, **kwargs):
     self.spec_channels, self.inter_channels, self.hidden_channels, self.filter_channels, self.n_heads, self.n_layers, self.kernel_size, self.p_dropout, self.resblock, self.resblock_kernel_sizes, self.resblock_dilation_sizes, self.upsample_rates, self.upsample_initial_channel, self.upsample_kernel_sizes, self.segment_size, self.n_speakers, self.gin_channels, self.vol_embedding = spec_channels, inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, segment_size, n_speakers, gin_channels, vol_embedding
     self.emb_g = nn.Embedding(n_speakers, gin_channels)
-    if vol_embedding:
-      self.emb_vol = nn.Linear(1, hidden_channels)
+    if vol_embedding: self.emb_vol = nn.Linear(1, hidden_channels)
     self.pre = nn.Conv1d(ssl_dim, hidden_channels, kernel_size=5, padding=2)
     self.enc_p = TextEncoder(inter_channels, hidden_channels, kernel_size, n_layers, filter_channels=filter_channels, n_heads=n_heads, p_dropout=p_dropout)
     self.dec = Generator(sampling_rate, inter_channels, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gin_channels)
     self.enc_q = PosteriorEncoder(spec_channels, inter_channels, hidden_channels, 5, 1, 16, gin_channels=gin_channels)
     self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, n_flow_layer, gin_channels=gin_channels)
     self.emb_uv = nn.Embedding(vocab_size=2, embed_size=hidden_channels)
-    self.character_mix = False
-  def EnableCharacterMix(self, n_speakers_map, device):
-    self.speaker_map = Tensor.zeros((n_speakers_map, 1, 1, self.gin_channels)).to(device)
-    for i in range(n_speakers_map):
-      self.speaker_map[i] = self.emb_g(Tensor([[i]], dtype=dtypes.int64).to(device))
-    self.speaker_map = self.speaker_map.unsqueeze(0).to(device)
-    self.character_mix = True
   def infer(self, c:Tensor, f0:Tensor, uv:Tensor, g:Tensor=None, noise_scale=0.35, seed=52468, vol=None) -> Tuple[Tensor, Tensor]:
     Tensor.manual_seed(getenv('SEED', seed))
     c_lengths = (Tensor.ones([c.shape[0]]) * c.shape[-1]).to(c.device)
-    if self.character_mix and g.shape[0] > 1:  # [N, S]  *  [S, B, 1, H]
-      g = g.reshape((g.shape[0], g.shape[1], 1, 1, 1))  # [N, S, B, 1, 1]
-      g = g * self.speaker_map  # [N, S, B, 1, H]
-      g = g.sum(dim=1) # [N, 1, B, 1, H]
-      g = g.transpose(0, -1).transpose(0, -2).squeeze(0) # [B, H, N]
-    else:
-      if len(g.shape) == 1:
-        g = g.unsqueeze(0)
-      g = self.emb_g(g).transpose(1, 2)
+    if len(g.shape) == 1: g = g.unsqueeze(0)
+    g = self.emb_g(g).transpose(1, 2)
     x_mask = sequence_mask(c_lengths, c.shape[2]).unsqueeze(1).cast(c.dtype)
     vol = self.emb_vol(vol[:,:,None]).transpose(1,2) if vol is not None and self.vol_embedding else 0
     x = self.pre(c) * x_mask + self.emb_uv(uv.cast(dtypes.int64)).transpose(1, 2) + vol
@@ -397,7 +320,7 @@ class Synthesizer:
     f0_coarse = f0_coarse + ((f0_coarse >= F0_BIN) * (F0_BIN - 1))
     return f0_coarse
   @classmethod
-  def load_model(cls, config_path:str, config_url:str, weights_path:str, weights_url:str):
+  def load_from_pretrained(cls, config_path:str, config_url:str, weights_path:str, weights_url:str) -> Synthesizer:
     download_if_not_present(config_path, config_url)
     hps = get_hparams_from_file(config_path)
     download_if_not_present(weights_path, weights_url)
@@ -433,11 +356,10 @@ class SineGen():
   def __init__(self, samp_rate, harmonic_num=0, sine_amp=0.1, noise_std=0.003, voice_threshold=0, flag_for_pulse=False):
     self.sine_amp, self.noise_std, self.harmonic_num, self.sampling_rate, self.voiced_threshold, self.flag_for_pulse = sine_amp, noise_std, harmonic_num, samp_rate, voice_threshold, flag_for_pulse
     self.dim = self.harmonic_num + 1
-  def _f02uv(self, f0):
-    return (f0 > self.voiced_threshold).float()  #generate uv signal
+  def _f02uv(self, f0): return (f0 > self.voiced_threshold).float()  #generate uv signal
   def _f02sine(self, f0_values):
     def padDiff(x : Tensor): return (x.pad2d((0,0,-1,1)) - x).pad2d((0,0,0,-1))
-    def mod(x: Tensor, n: int) -> Tensor: return x - n * x.div(n).floor()  # TODO: this is what the % operator does in pytorch.
+    def mod(x: Tensor, n: int) -> Tensor: return x - n * x.div(n).floor()  # this is what the % operator does in pytorch.
     rad_values = mod((f0_values / self.sampling_rate) , 1)  # convert to F0 in rad
     rand_ini = Tensor.rand(f0_values.shape[0], f0_values.shape[2], device=f0_values.device)  # initial phase noise
 
@@ -463,7 +385,6 @@ class SineGen():
 
     sines = ((rad_values + cumsum_shift).cumsum(1) * 2 * np.pi).sin()
     return sines
-
   def forward(self, f0, upp=None):
     fn = f0.mul(Tensor([[range(1, self.harmonic_num + 2)]], dtype=dtypes.float32).to(f0.device))
     sine_waves = self._f02sine(fn) * self.sine_amp  #generate sine waveforms
@@ -493,16 +414,12 @@ class Generator:
     self.f0_upsamp = Upsample(scale_factor=np.prod(upsample_rates))
     self.m_source = SourceHnNSF(sampling_rate, harmonic_num=8)
     resblock = ResBlock1 if resblock == '1' else ResBlock2
-    self.ups, self.noise_convs = [], []
+    self.ups, self.noise_convs, self.resblocks = [], [], []
     for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
       c_cur = upsample_initial_channel//(2**(i+1))
       self.ups.append(nn.ConvTranspose1d(upsample_initial_channel//(2**i), c_cur, k, u, padding=(k-u)//2))
-      if i + 1 < len(upsample_rates):  # TODO: make oneliner after debugging
-        stride_f0 = int(np.prod(upsample_rates[i + 1:]))
-        self.noise_convs.append(nn.Conv1d(1, c_cur, kernel_size=stride_f0 * 2, stride=stride_f0, padding=(stride_f0+1) // 2))
-      else:
-        self.noise_convs.append(nn.Conv1d(1, c_cur, kernel_size=1))
-    self.resblocks = []
+      stride_f0 = int(np.prod(upsample_rates[i + 1:]))
+      self.noise_convs.append(nn.Conv1d(1, c_cur, kernel_size=stride_f0 * 2, stride=stride_f0, padding=(stride_f0+1) // 2) if (i + 1 < len(upsample_rates)) else nn.Conv1d(1, c_cur, kernel_size=1))
     for i in range(len(self.ups)):
       ch = upsample_initial_channel // (2 ** (i + 1))
       for _, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes)):
@@ -526,10 +443,19 @@ class Generator:
       x = xs / self.num_kernels
     return self.conv_post(x.leakyrelu()).tanh()
 
-def repeat_expand_2d(content, target_len, mode="left"): # content : [h, t]
-  if mode == "left": return repeat_expand_2d_left(content.realize(), target_len)
-  elif mode == "nearest": return repeat_expand_2d_nearest(content, target_len)
-  raise RuntimeError("Mode: {mode} not supported.")
+# **** helpers ****
+
+def randn_like(x:Tensor) -> Tensor: return Tensor.randn(*x.shape, dtype=x.dtype).to(device=x.device)
+
+def tilde(x: Tensor) -> Tensor:
+  if x.dtype == dtypes.bool: return (1 - x).cast(dtypes.bool)
+  return (x + 1) * -1  # this seems to be what the ~ operator does in pytorch for non bool
+
+def lengths_to_padding_mask(lens:Tensor) -> Tensor:
+  bsz, max_lens = lens.shape[0], lens.max().numpy().item()
+  mask = Tensor.arange(max_lens).to(lens.device).reshape(1, max_lens)
+  mask = mask.expand(bsz, -1) >= lens.reshape(bsz, 1).expand(-1, max_lens)
+  return mask.cast(dtypes.bool)
 
 def repeat_expand_2d_left(content, target_len): # content : [h, t]
   src_len = content.shape[-1]
@@ -541,28 +467,11 @@ def repeat_expand_2d_left(content, target_len): # content : [h, t]
     cols.append(content[:, current_pos])
   return Tensor.stack(cols).transpose(0, 1)
 
-# TODO no idea how this can be done in a fast way in tinygrad (or without writing custom kernel like pytorch)
-# Nearest interpolation with an integral scale factor is already implemented in Upsample (this file)
-# Bute here, scale = target_len / content.shape[-1] would be a float...
-# How to do this without writing slow loops in python?
-# Torch does it with a custom kernel
-def repeat_expand_2d_nearest(content, target_len):
-  import torch
-  content = content[None,:,:]
-  return Tensor(torch.nn.functional.interpolate(torch.from_numpy(content.numpy()), target_len, mode="nearest")[0].numpy())
-
 def load_fairseq_cfg(checkpoint_path):
   assert os.path.isfile(checkpoint_path)
   state = torch_load(checkpoint_path)
-  cfg = None
-  learning_rate = state["cfg"]["lr_scheduler"]["lr"][0]
-  epoch = state["extra_state"]["train_iterator"]["epoch"]
-  if "cfg" in state and state["cfg"] is not None:
-    cfg = state["cfg"]
-  elif "args" in state and state["args"] is not None:
-    raise NotImplementedError  # TODO: not required for the checkpoint files yet encountered
-  else:
-    raise RuntimeError(f"Neither args nor cfg exist in state keys = {state.keys()}")
+  cfg = state["cfg"] if ("cfg" in state and state["cfg"] is not None) else None
+  if cfg is None: raise RuntimeError(f"No cfg exist in state keys = {state.keys()}")
   return HParams(**cfg)
 
 def load_checkpoint_enc(checkpoint_path, model: ContentVec, optimizer=None, skip_list=[]):
@@ -603,8 +512,7 @@ def load_checkpoint_enc(checkpoint_path, model: ContentVec, optimizer=None, skip
 
 def pad_array(arr, target_length):
   current_length = arr.shape[0]
-  if current_length >= target_length:
-    return arr
+  if current_length >= target_length: return arr
   pad_width = target_length - current_length
   pad_left = pad_width // 2
   pad_right = pad_width - pad_left
@@ -620,9 +528,9 @@ def get_sid(spk2id:HParams, speaker:str) -> Tensor:
   if not speaker_id and type(speaker) is int:
     if len(spk2id.__dict__) >= speaker: speaker_id = speaker
   if speaker_id is None: raise RuntimeError(f"speaker={speaker} not in the speaker list")
-  return Tensor([int(speaker_id)], dtype=dtypes.int64).unsqueeze(0)  # TODO: self.device
+  return Tensor([int(speaker_id)], dtype=dtypes.int64).unsqueeze(0)
 
-def get_encoder(ssl_dim) -> SpeechEncoder:
+def get_encoder(ssl_dim) -> Type[SpeechEncoder]:
   if ssl_dim == 256: return ContentVec256L9
   if ssl_dim == 768: return ContentVec768L12
 
@@ -663,7 +571,6 @@ if __name__=="__main__":
   parser.add_argument("--speaker", default=None, help="If not specified, the first available speaker is chosen. Usually there is only one speaker per model.")
   parser.add_argument("--noise_scale", default=0.4)
   parser.add_argument("--tran", default=0.0, help="Pitch shift, supports positive and negative (semitone) values. Default 0.0")
-  parser.add_argument("--interpolate_mode", default="left", help="Interpolate mode to scale output of speech encoder to f0 frequency. Default 'left', other option 'nearest' is faster but only supported by torch.")
   parser.add_argument("--pad_seconds", default=0.5)
   parser.add_argument("--lg_num", default=0.0)
   parser.add_argument("--clip_seconds", default=0.0)
@@ -671,33 +578,24 @@ if __name__=="__main__":
   args = parser.parse_args()
 
   vits_model = args.model
-  encoder_location = ENCODER_MODELS[ENCODER_MODEL]
-  vits_location = VITS_MODELS[vits_model]
+  encoder_location, vits_location = ENCODER_MODELS[ENCODER_MODEL], VITS_MODELS[vits_model]
 
-  Tensor.no_grad = True
-  Tensor.training = False
-
-  # Synthesizer
-  net_g, hps = Synthesizer.load_model(vits_location[0], vits_location[2], vits_location[1], vits_location[3])
-  # ContentVec
+  Tensor.no_grad, Tensor.training = True, False
+  # Get Synthesizer and ContentVec
+  net_g, hps = Synthesizer.load_from_pretrained(vits_location[0], vits_location[2], vits_location[1], vits_location[3])
   Encoder = get_encoder(hps.model.ssl_dim)
-  encoder = Encoder.load_model(encoder_location[0], encoder_location[1])
+  encoder = Encoder.load_from_pretrained(encoder_location[0], encoder_location[1])
 
-  target_sample = hps.data.sampling_rate
-  spk2id = hps.spk
-  unit_interpolate_mode = hps.data.unit_interpolate_mode if hasattr(hps.data, "unit_interpolate_mode") and hps.data.unit_interpolate_mode is not None else args.interpolate_mode
+  # model config args
+  target_sample, spk2id, hop_length, target_sample = hps.data.sampling_rate, hps.spk, hps.data.hop_length, hps.data.sampling_rate
   vol_embedding = hps.model.vol_embedding if hasattr(hps.data, "vol_embedding") and hps.model.vol_embedding is not None else False
-  feature_retrieval = False
-  hop_length = hps.data.hop_length
-  target_sample = hps.data.sampling_rate
 
   # args
   slice_db, clip_seconds, lg_num, pad_seconds, tran, noise_scale, audio_path = args.slice_db, args.clip_seconds, args.lg_num, args.pad_seconds, args.tran, args.noise_scale, args.file
   speaker = args.speaker if args.speaker is not None else list(hps.spk.__dict__.keys())[0]
 
   ### Loading audio and slicing ###
-  assert os.path.isfile(audio_path)
-  assert Path(audio_path).suffix == ".wav"
+  assert os.path.isfile(audio_path) and Path(audio_path).suffix == ".wav"
   chunks = preprocess.cut(audio_path, db_thresh=slice_db)
   audio_data, audio_sr = preprocess.chunks2audio(audio_path, chunks)
 
@@ -731,14 +629,14 @@ if __name__=="__main__":
       ### Infer START ###
       wav, sr = preprocess.load_audiofile(raw_path)
       wav = preprocess.sinc_interp_resample(wav, sr, target_sample)[0]
-      wav16k, f0, uv = preprocess.get_unit_f0(wav, tran, hop_length, target_sample, unit_interpolate_mode)
+      wav16k, f0, uv = preprocess.get_unit_f0(wav, tran, hop_length, target_sample)
       sid = get_sid(spk2id, speaker)
       n_frames = f0.shape[1]
 
       # ContentVec infer
       start = time.time()
       c = encoder.encode(wav16k)
-      c = repeat_expand_2d(c.squeeze(0), f0.shape[1], unit_interpolate_mode)  # interpolate speech encoding to match f0
+      c = repeat_expand_2d_left(c.squeeze(0).realize(), f0.shape[1])  # interpolate speech encoding to match f0
       c = c.unsqueeze(0).realize()
       enc_time = time.time() - start
 
@@ -758,7 +656,6 @@ if __name__=="__main__":
       pad_len = int(target_sample * pad_seconds)
       _audio = _audio[pad_len:-pad_len]
       _audio = pad_array(_audio, per_length)
-
       audio.extend(list(_audio))
 
   audio = np.array(audio)
