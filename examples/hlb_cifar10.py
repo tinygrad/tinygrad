@@ -199,7 +199,7 @@ def cutmix(X, Y, mask_size=3, p=0.5):
 
 def fetch_batches(X, Y, BS, seed, is_train=False):
   rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
-  if not is_train: rank, world_size = min(rank, 3), min(world_size, 4)
+  if not is_train: rank, world_size = min(rank, 4), min(world_size, 5)
   while True:
     set_seed(seed)
     order = list(range(0, X.shape[0]))
@@ -210,6 +210,7 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
       # TODO need indexing support for tinygrad Tensor
       x = Tensor(X.numpy()[order[batch_end-BS:batch_end],:])
       y = Tensor(np.eye(10, dtype=np.float32)[Y.numpy()[order[batch_end-BS:batch_end]]])
+      # further split batch if distributed
       if getenv("DIST"):
         x = x[BS*rank//world_size:BS*(rank+1)//world_size]
         y = y[BS*rank//world_size:BS*(rank+1)//world_size]
@@ -327,11 +328,11 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
       correct_sum, correct_len = sum(corrects), len(corrects)
       if getenv("DIST"):
         if rank == 0:
-          for j in range(1, 4):
+          for j in range(1, 5):
             recv_sum, recv_len = OOB.recv(j)
             correct_sum += recv_sum
             correct_len += recv_len
-        elif rank <= 4:
+        elif rank < 5:
           OOB.send((correct_sum, correct_len), 0)
 
       # only rank 0 prints
