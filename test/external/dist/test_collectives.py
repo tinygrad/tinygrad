@@ -18,17 +18,16 @@ SIZE_2 = 255 if not CI else 3
 def run():
   # set a deterministic seed so that both ranks generate the same random tensor
   Tensor.manual_seed(42)
-  np.random.seed(42)
 
   rank = getenv("RANK")
 
   # loop 3 times to make sure it works with the jit
   for _ in range(3):
     # create a tensor to send
-    t = Tensor.randn(SIZE)
-    t2 = allreduce_jit(t, cache_id="test")
-    print(t.numpy() * 2, t2.numpy())
-    assert np.allclose(t.numpy() * 2, t2.numpy(), atol=1e-5, rtol=1e-5)
+    t = Tensor.zeros(SIZE, SIZE) if rank == 0 else Tensor.ones(SIZE, SIZE)
+    t2 = allreduce_jit(t.contiguous().realize(), cache_id="test")
+    print(t2.numpy())
+    assert np.allclose(np.ones((SIZE, SIZE)), t2.numpy())
 
   # reset jit
   allreduce_jit.cnt = 0
@@ -36,9 +35,9 @@ def run():
   # test uneven chunk sizes
   for _ in range(3):
     # create a tensor to send
-    t = Tensor.randn(SIZE_2, SIZE_2, SIZE_2)
-    t2 = allreduce_jit(t, cache_id="test2")
-    assert np.allclose(t.numpy() * 2, t2.numpy(), atol=1e-5, rtol=1e-5)
+    t = Tensor.ones(SIZE_2, SIZE_2, SIZE_2) if rank == 0 else Tensor.zeros(SIZE_2, SIZE_2, SIZE_2)
+    t2 = allreduce_jit(t.contiguous().realize(), cache_id="test2")
+    assert np.allclose(np.ones((SIZE_2, SIZE_2, SIZE_2)), t2.numpy())
 
   print(f"rank {rank} passed")
 
