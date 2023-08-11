@@ -1,5 +1,5 @@
 from typing import Tuple, Optional
-from tinygrad.helpers import argsort, ShapeType
+from tinygrad.helpers import argsort, ShapeType, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
@@ -11,50 +11,49 @@ class Contiguous(Function):
 
 class Cast(Function):
   __slots__ = "input_dtype", "bitcast"
-  def forward(self, x, dtype, bitcast=False):
+  def forward(self, x:LazyBuffer, dtype:DType, bitcast=False):
     self.input_dtype, self.bitcast = x.dtype, bitcast
     return x.cast((dtype, bitcast))
-  def backward(self, grad_output):
+  def backward(self, grad_output:LazyBuffer):
     return grad_output.cast((self.input_dtype, self.bitcast))
 
 # ************* unary ops *************
 
 class Sin(Function):
   __slots__ = "x"
-  def forward(self, x: LazyBuffer) -> LazyBuffer:
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
     return x.unary_op(UnaryOps.SIN)
-  def backward(self, grad: LazyBuffer) -> LazyBuffer:
-    return self.x.const_like(math.pi / 2).binary_op(BinaryOps.SUB, self.x).unary_op(UnaryOps.SIN).binary_op(BinaryOps.MUL, grad)
+  def backward(self, grad:LazyBuffer) -> LazyBuffer:
+    return ((math.pi / 2) - self.x).unary_op(UnaryOps.SIN) * grad
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
   __slots__ = "ret"
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.binary_op(BinaryOps.MAX, x.const_like(0))
+    self.ret = x.binary_op(BinaryOps.MAX, 0)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    mask = self.ret.const_like(0).binary_op(BinaryOps.CMPLT, self.ret)
-    return mask.binary_op(BinaryOps.MUL, grad_output)
+    return (0 < self.ret) * grad_output
 
 class Log(Function):
   __slots__ = "x"
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return x.unary_op(UnaryOps.LOG2).binary_op(BinaryOps.MUL, x.const_like(math.log(2)))
+    return x.unary_op(UnaryOps.LOG2) * math.log(2)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.binary_op(BinaryOps.DIV, self.x)
+    return grad_output / self.x
 
 class Exp(Function):
   __slots__ = "ret"
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.binary_op(BinaryOps.MUL, x.const_like(1/math.log(2))).unary_op(UnaryOps.EXP2)
+    self.ret = (x * (1/math.log(2))).unary_op(UnaryOps.EXP2)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.ret.binary_op(BinaryOps.MUL, grad_output)
+    return self.ret * grad_output
 
 class Sqrt(Function):
   __slots__ = "ret"
@@ -63,7 +62,7 @@ class Sqrt(Function):
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.binary_op(BinaryOps.DIV, self.ret.binary_op(BinaryOps.MUL, self.ret.const_like(2)))
+    return grad_output / (self.ret * 2)
 
 # NOTE: the implicit derivative of sigmoid is not stable
 # https://towardsdatascience.com/derivative-of-the-sigmoid-function-536880cf918e
@@ -71,11 +70,11 @@ class Sqrt(Function):
 class Sigmoid(Function):
   __slots__ = "ret"
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.const_like(1).binary_op(BinaryOps.DIV, x.const_like(1).binary_op(BinaryOps.ADD, x.binary_op(BinaryOps.MUL, x.const_like(-1/math.log(2))).unary_op(UnaryOps.EXP2)))
+    self.ret = 1 / (1 + (x * (-1/math.log(2))).unary_op(UnaryOps.EXP2))
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.ret.binary_op(BinaryOps.MUL, self.ret.const_like(1).binary_op(BinaryOps.SUB, self.ret)).binary_op(BinaryOps.MUL, grad_output)
+    return (self.ret * (1 - self.ret)) * grad_output
 
 # ************* reduce ops *************
 
@@ -96,24 +95,19 @@ class Max(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # 1s in locations where the max was chosen (can be two locations)
-    max_is_1s = self.x.const_like(1).binary_op(BinaryOps.SUB, self.x.binary_op(BinaryOps.CMPLT, self.ret.expand(self.x.shape)))
-
-    # sum of locations, averaged
+    max_is_1s = 1.0 - (self.x < self.ret.expand(self.x.shape))
     div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape).expand(self.x.shape)
-    max_is_amount = max_is_1s.binary_op(BinaryOps.DIV, div)
-
-    grad_output_expanded = grad_output.expand(self.x.shape)
-    return max_is_amount.binary_op(BinaryOps.MUL, grad_output_expanded)
+    return (max_is_1s / div) * grad_output.expand(self.x.shape)
 
 # ************* binary ops *************
 
 class Less(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    return x.binary_op(BinaryOps.CMPLT, y)
+    return x < y
 
 class Add(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    return x.binary_op(BinaryOps.ADD, y)
+    return x + y
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output if self.needs_input_grad[0] else None, \
@@ -121,31 +115,31 @@ class Add(Function):
 
 class Sub(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    return x.binary_op(BinaryOps.SUB, y)
+    return x - y
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output if self.needs_input_grad[0] else None, \
-           grad_output.const_like(0).binary_op(BinaryOps.SUB, grad_output) if self.needs_input_grad[1] else None
+           -grad_output if self.needs_input_grad[1] else None
 
 class Mul(Function):
   __slots__ = 'x', 'y'
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     self.x, self.y = x, y
-    return x.binary_op(BinaryOps.MUL, y)
+    return x * y
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-    return self.y.binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[0] else None, \
-           self.x.binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[1] else None
+    return self.y * grad_output if self.needs_input_grad[0] else None, \
+           self.x * grad_output if self.needs_input_grad[1] else None
 
 class Div(Function):
   __slots__ = 'x', 'y'
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     self.x, self.y = x, y
-    return x.binary_op(BinaryOps.DIV, y)
+    return x / y
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-    return grad_output.binary_op(BinaryOps.DIV, self.y) if self.needs_input_grad[0] else None, \
-           grad_output.const_like(0).binary_op(BinaryOps.SUB, grad_output).binary_op(BinaryOps.MUL, self.x).binary_op(BinaryOps.DIV, self.y.binary_op(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None
+    return grad_output / self.y if self.needs_input_grad[0] else None, \
+           (-grad_output * self.x) / (self.y * self.y) if self.needs_input_grad[1] else None
 
 # ************* ternary ops *************
 
@@ -157,8 +151,8 @@ class Where(Function):
 
   def backward(self, grad_output:LazyBuffer):
     return None, \
-           self.x.ternary_op(TernaryOps.WHERE, grad_output, self.x.const_like(0)) if self.needs_input_grad[1] else None, \
-           self.x.ternary_op(TernaryOps.WHERE, self.x.const_like(0), grad_output) if self.needs_input_grad[2] else None
+           self.x.ternary_op(TernaryOps.WHERE, grad_output, 0) if self.needs_input_grad[1] else None, \
+           self.x.ternary_op(TernaryOps.WHERE, 0, grad_output) if self.needs_input_grad[2] else None
 
 # ************* movement ops *************
 
