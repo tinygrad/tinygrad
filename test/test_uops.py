@@ -44,29 +44,30 @@ class TestUOps(unittest.TestCase):
 
   def _test_uop_fxn(self, bop, fxn, dt=dtypes.float32):
     for f in [_test_single_value, _test_single_value_const]:
-      for a in [-2.0, 2.0]:
+      for a in [-2.0, 0.0, 1.0, 2.0]:
         self._equal(f(Token('c', dt), [Token('a', dt)], [a], bop), fxn(a))
   def test_exp2(self): self._test_uop_fxn(UnaryOps.EXP2, lambda a: np.exp2(a))
-  def test_log2(self): self._test_uop_fxn(UnaryOps.LOG2, lambda a: math.log2(a) if a > 0 else float('nan'))
+  def test_log2(self): self._test_uop_fxn(UnaryOps.LOG2, lambda a: math.log2(a) if a > 0 else float('-inf' if a==0 else 'nan'))
   def test_sin(self): self._test_uop_fxn(UnaryOps.SIN, lambda a: math.sin(a))
   def test_sqrt(self): self._test_uop_fxn(UnaryOps.SQRT, lambda a: math.sqrt(a) if a >= 0 else float('nan'))
   #def test_recip(self): self._test_uop_fxn(UnaryOps.RECIP, lambda a: 1.0/a)
 
   def _test_bop_fxn(self, bop, fxn, dt=dtypes.float32):
     for f in [_test_single_value, _test_single_value_const]:
-      for a in [-2.0, 2.0]:
-        for b in [-3.0, 3.0]:
+      for a in [-2.0, 0.0, 1.0, 2.0]:
+        for b in [-3.0, 0.0, 1.0, 3.0]:
           self._equal(f(Token('c', dt), [Token('a', dt), Token('b', dt)], [a,b], bop), fxn(a,b))
   def test_add(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: a+b)
   def test_sub(self): self._test_bop_fxn(BinaryOps.SUB, lambda a,b: a-b)
   def test_mul(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: a*b)
-  def test_div(self): self._test_bop_fxn(BinaryOps.DIV, lambda a,b: a/b)
+  def test_div(self): self._test_bop_fxn(BinaryOps.DIV, lambda a,b: a/b if b != 0 else a*float('inf'))
   def test_max(self): self._test_bop_fxn(BinaryOps.MAX, lambda a,b: max(a,b))
   def test_cmplt(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: float(a<b))
   # MOD isn't tested
 
   # doesn't work in LLVM
-  #def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: a+b, dtypes.int32)
+  def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: a+b, dtypes.int32)
+  def test_mul_bool(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: bool(a) and bool(b), dtypes.bool)
 
   def _test_top_fxn(self, bop, fxn, dt=dtypes.float32):
     for f in [_test_single_value, _test_single_value_const]:
