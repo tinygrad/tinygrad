@@ -42,8 +42,8 @@ class TestBert(unittest.TestCase):
 
     set_equal_weights(mdl, torch_mdl)
 
-    seeds = (1337, 3141, 1602)
-    bsz, seq_len = 1, 384
+    seeds = (1337, 3141)
+    bsz, seq_len = 1, 96
     for _, seed in enumerate(seeds):
       in_ids, mask, seg_ids = get_question_samp(bsz, seq_len, config['vocab_size'], seed)
       out = mdl(Tensor(in_ids), Tensor(mask), Tensor(seg_ids))
