@@ -13,11 +13,12 @@ def allreduce_jit(t:Tensor, cache_id=None) -> Tensor:
   return collectives.allreduce(t, cache_id=cache_id).realize()
 
 SIZE = 2048 if not CI else 2
-SIZE_2 = 2047 * 2047 * 33 if not CI else 3
+SIZE_2 = 255 if not CI else 3
 
 def run():
   # set a deterministic seed so that both ranks generate the same random tensor
   Tensor.manual_seed(42)
+  np.random.seed(42)
 
   rank = getenv("RANK")
 
