@@ -6,7 +6,7 @@ from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 import struct
 import numpy as np
-if CI and getenv('ARM64'): from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, arm64_const
+if CI and getenv('ARM64'): from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, arm64_const, UcError
 args = {
   'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
   'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'exp':''},
@@ -16,7 +16,7 @@ CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define
 ADDRESS = 0x10000
 
 # Unicorn doesn't support external calls 
-def align(addr): return(addr+4095) & ~(4095) 
+def align(addr): return (addr+4095) & ~(4095) 
 mock_lm = {"sinf": np.sin, "sqrtf": np.sqrt, "exp2f": np.exp2, "log2f": np.log2}
 def hook_code(fn, uc, address, size, user_data):
   s_in = struct.unpack('f', struct.pack('I', uc.reg_read(getattr(arm64_const, f'UC_ARM64_REG_S{fn[2][1:]}'))))[0]
@@ -38,7 +38,7 @@ class ClangProgram:
         prg = prg.split('\n') # type: ignore
         self.varsize = align(int(prg[0].split(" ")[1]))
         self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
-        prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n']) 
+        prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n'])
         subprocess.check_output(args=('aarch64-linux-gnu-as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
         subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+fn+ '.o ' + fn +'.bin').split())
         self.prg = open(fn + '.bin', 'rb').read()
@@ -51,19 +51,22 @@ class ClangProgram:
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()
     if CI and getenv('ARM64'):
-      mu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
-      total_mem = align(reduce(lambda total, arg: total + arg.size * arg.dtype.itemsize, args, len(self.prg)+self.varsize)) 
-      mu.mem_map(ADDRESS, total_mem)
-      for addr, fn in self.ext_calls.items(): mu.hook_add(UC_HOOK_CODE, partial(hook_code, fn), begin=addr, end=addr)
-      mu.mem_write(ADDRESS, self.prg + b''.join(bytes(arg._buf) for arg in args))
-      addr = ADDRESS + len(self.prg)
-      for i, arg in enumerate(args):
-        if i<=7: mu.reg_write(getattr(arm64_const, f'UC_ARM64_REG_X{i}'), addr)
-        else: mu.mem_write(ADDRESS + total_mem - (len(args[8:])+1)*8 + 8*(i-8), addr.to_bytes(8, 'little'))
-        addr += arg.size * arg.dtype.itemsize
-      mu.reg_write(arm64_const.UC_ARM64_REG_SP, ADDRESS + total_mem - (len(args[8:])+1)*8)
-      mu.emu_start(ADDRESS, ADDRESS + len(self.prg))
-      args[0]._buf = mu.mem_read(mu.reg_read(arm64_const.UC_ARM64_REG_X0), args[0].size * args[0].dtype.itemsize)
+      try:
+        mu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        total_mem = align(reduce(lambda total, arg: total + arg.size * arg.dtype.itemsize, args, len(self.prg)+self.varsize))
+        mu.mem_map(ADDRESS, total_mem)
+        for k, fn in self.ext_calls.items(): mu.hook_add(UC_HOOK_CODE, partial(hook_code, fn), begin=k, end=k)
+        mu.mem_write(ADDRESS, self.prg + b''.join(bytes(arg._buf) for arg in args))
+        addr = ADDRESS + len(self.prg)
+        for i, arg in enumerate(args):
+          if i<=7: mu.reg_write(getattr(arm64_const, f'UC_ARM64_REG_X{i}'), addr)
+          else: mu.mem_write(ADDRESS + total_mem - (len(args[8:])+1)*8 + 8*(i-8), addr.to_bytes(8, 'little'))
+          addr += arg.size * arg.dtype.itemsize
+        mu.reg_write(arm64_const.UC_ARM64_REG_SP, ADDRESS + total_mem - (len(args[8:])+1)*8)
+        mu.emu_start(ADDRESS, ADDRESS + len(self.prg))
+        args[0]._buf = mu.mem_read(mu.reg_read(arm64_const.UC_ARM64_REG_X0), args[0].size * args[0].dtype.itemsize)
+      except UcError as e:
+        print("ERROR: %s" % e)
     else:
       self.fxn(*[x._buf for x in args])
     if wait: return time.monotonic()-st

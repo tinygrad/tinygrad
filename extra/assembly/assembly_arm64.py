@@ -102,9 +102,9 @@ class ARM64Codegen(AssemblyCodegen):
           ins.append(f"{alu[arg]} {rtor[vin[0].nm]}, s0")
           ins.append(f"fcsel {rtor[out.nm]},{rtor[vin[2].nm]}, {rtor[vin[1].nm]}, eq")
         elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
-          save_regs = [k for k in rtor.keys() if k != out.nm and k not in mem_vars]
           if CI: ins.append(f"{alu[arg]} {rtor[out.nm]} {rtor[vin[0].nm]}")
           else:
+            save_regs = [k for k in rtor.keys() if k != out.nm and k not in mem_vars]
             ins.append(f"sub sp, sp, #{(len(save_regs))*16}")
             # Save the registers before they are cleared by func call  
             for i,k in enumerate(save_regs,1):
