@@ -30,8 +30,6 @@ def allreduce(t:Tensor, cache_id=None) -> Tensor:
     world.recv(recv_buf, prev_rank)
     reduced = chunks[current_chunk_index] + recv_buf
 
-  Device[Device.DEFAULT].synchronize()
-
   # gather
   chunks[current_chunk_index] = reduced
   current_chunk_index = (RANK + 1) % WORLD_SIZE
