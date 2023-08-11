@@ -1,4 +1,4 @@
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import getenv
 
 from extra.dist import world
@@ -24,17 +24,19 @@ def allreduce(t:Tensor, cache_id=None) -> Tensor:
   # scatter reduce
   current_chunk_index = RANK
   for i in range(WORLD_SIZE - 1):
-    world.send(reduced, next_rank, cache_id=f"{cache_id}-{i}-s" if cache_id is not None else None)
+    world.send(reduced, next_rank, cache_id=f"{cache_id}-{i}" if cache_id is not None else None)
     current_chunk_index = ((current_chunk_index - 1) + WORLD_SIZE) % WORLD_SIZE
     recv_buf = Tensor.empty(*reduced.shape)
     world.recv(recv_buf, prev_rank)
     reduced = chunks[current_chunk_index] + recv_buf
 
+  Device[Device.DEFAULT].synchronize()
+
   # gather
   chunks[current_chunk_index] = reduced
   current_chunk_index = (RANK + 1) % WORLD_SIZE
   for i in range(WORLD_SIZE - 1):
-    world.send(reduced, next_rank, cache_id=f"{cache_id}-{i}-g" if cache_id is not None else None)
+    world.send(reduced, next_rank, cache_id=f"{cache_id}-{i}" if cache_id is not None else None)
     current_chunk_index = ((current_chunk_index - 1) + WORLD_SIZE) % WORLD_SIZE
     recv_buf = Tensor.empty(*reduced.shape)
     world.recv(recv_buf, prev_rank)
