@@ -50,7 +50,7 @@ class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
     mapped, event = cl.enqueue_map_buffer(CL.cl_queue[self._buf.device], buf, cl.map_flags.WRITE, 0, self.size, dtype=self.dtype.np, is_blocking=False)
     with mapped.base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped, self._buf, is_blocking=True, wait_for=[event])
   def _transfer(self, x):
-    if "gfx" in CL.cl_ctxs[x._buf.device].devices[0].name and getenv("P2P") >= 1: # TODO: only on amd
+    if "gfx" in CL.cl_ctxs[x._buf.device].devices[0].name: # TODO: only on amd
       cl.enqueue_copy_buffer_p2p_amd(CL.cl_platform, CL.cl_queue[x._buf.device], x._buf, self._buf, x.size * x.dtype.itemsize).wait()
 
 class CLProgram:
