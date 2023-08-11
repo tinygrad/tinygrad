@@ -97,6 +97,8 @@ class dtypes:
   half = float16
   float32: Final[DType] = DType(4, 4, "float", np.float32)
   float = float32
+  float64: Final[DType] = DType(0, 8, "double", np.float64)
+  double = float64
   int8: Final[DType] = DType(0, 1, "char", np.int8)
   int16: Final[DType] = DType(1, 2, "short", np.int16)
   int32: Final[DType] = DType(2, 4, "int", np.int32)
