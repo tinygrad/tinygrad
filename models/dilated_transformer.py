@@ -2,12 +2,13 @@ import math
 import numpy as np
 from tinygrad.tensor import Tensor
 
-import torch.nn.functional as F
+import torch.nn.functional as F # TODO: replace
 import math
 from typing import List, Tuple, Union, Optional
 from tinygrad.helpers import dtypes
 from tinygrad.nn import Embedding
 
+# Helper classes and functions for dilated attention
 def SparsifyIndices(
     x: Tensor, ws: List[int], rs: List[int], head_idx: int
 ) -> Tuple[int, Tensor, Optional[Tensor]]:
@@ -42,7 +43,6 @@ def SparsifyIndices(
         padding_mask = None
 
     return max_subatt_n, sparse_indices, padding_mask
-
 
 class RelativePositionBias():
     def __init__(
@@ -178,6 +178,9 @@ class XPOS():
         x = apply_rotary_pos_emb(x, sin, cos, scale)
         return x
     
+
+# Dilated Attention Block
+    
 class DilatedTransformerBlock:
   def __init__(
       self, 
@@ -274,6 +277,8 @@ class DilatedTransformerBlock:
       x = x + self.act(x.linear(*self.ff1)).linear(*self.ff2).dropout(self.dropout)
       x = x.layernorm().linear(*self.ln2)
     return x
+
+# Dilated Multi Head attention
 
 class DilatedTransformer:
   def __init__(
