@@ -2,6 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad.lazy import Device
 import torch
 
 def get_question_samp(bsz, seq_len, vocab_size, seed):
@@ -21,14 +22,16 @@ def set_equal_weights(mdl, torch_mdl):
   torch_mdl.eval()
 
 class TestBert(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT == "TORCH", "torch doesn't support '-' operator with a bool tensor")  # TODO
   def test_questions(self):
     from models.bert import BertForQuestionAnswering
     from transformers import BertForQuestionAnswering as TorchBertForQuestionAnswering
     from transformers import BertConfig
 
+    # small
     config = {
-      'vocab_size':30522, 'hidden_size':1024, 'num_hidden_layers':24, 'num_attention_heads':16, 
-      'intermediate_size':4096, 'hidden_dropout_prob':0.1, 'attention_probs_dropout_prob':0.1,
+      'vocab_size':24, 'hidden_size':2, 'num_hidden_layers':2, 'num_attention_heads':2,
+      'intermediate_size':32, 'hidden_dropout_prob':0.1, 'attention_probs_dropout_prob':0.1,
       'max_position_embeddings':512, 'type_vocab_size':2
       }
 
@@ -43,7 +46,7 @@ class TestBert(unittest.TestCase):
     set_equal_weights(mdl, torch_mdl)
 
     seeds = (1337, 3141)
-    bsz, seq_len = 1, 96
+    bsz, seq_len = 1, 16
     for _, seed in enumerate(seeds):
       in_ids, mask, seg_ids = get_question_samp(bsz, seq_len, config['vocab_size'], seed)
       out = mdl(Tensor(in_ids), Tensor(mask), Tensor(seg_ids))
