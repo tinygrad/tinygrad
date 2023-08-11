@@ -183,6 +183,11 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
             lreg = lang.newreg((newvar, "fromfakebits16"), dtype=dtypes.float16)
             lang.ins.append(AssemblyInstruction(UOps.LOAD, lreg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', "bits16")))
             lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lreg], (off, 'global' if not args.local else 'shared', dtypes.uint16)))
+          #  NOTE: it seems Token.dtype (and by extension newreg) will always be float32 or one of the packed float types, so we cast
+          elif args.memory_dtype != dtypes.float32:
+            lreg = lang.newreg((newvar, str(args.memory_dtype)), dtype=args.memory_dtype)
+            lang.ins.append(AssemblyInstruction(UOps.LOAD, lreg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
+            lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lreg], (off, 'global' if not args.local else 'shared', dtypes.float32)))
           else:
             lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
         if args.valid.min == 0 and args.valid.max == 1:
@@ -194,6 +199,11 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         reg = lang.newreg((lang.tor[vin[0]], args.memory_dtype), dtype=args.memory_dtype)
         lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lang.tor[vin[0]]], args))
         lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, reg] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
+      if args.memory_dtype != lang.tor[vin[0]].dtype:
+        # FIXME: I think this is too strict and we don't actually need to cast when dtypes neq but same base type and dest is wider?
+        reg = lang.newreg((lang.tor[vin[0]], args.memory_dtype), dtype=args.memory_dtype)
+        lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lang.tor[vin[0]]], args))
+        lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, reg] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype if not args.memory_dtype == dtypes.float16 else "bits16")))
       else:
         lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
   # define registers
