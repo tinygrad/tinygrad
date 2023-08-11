@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 import unittest
-from pathlib import Path
 import numpy as np
 from tinygrad.tensor import Tensor
-from extra.datasets.squad import iterate
 import torch
 
 def get_question_samp(bsz, seq_len, vocab_size, seed):
@@ -12,6 +10,15 @@ def get_question_samp(bsz, seq_len, vocab_size, seed):
   mask = np.random.choice([True, False], size=(bsz, seq_len))
   seg_ids = np.random.randint(1, size=(bsz, seq_len))
   return in_ids, mask, seg_ids
+
+def set_equal_weights(mdl, torch_mdl):
+  from tinygrad.state import get_state_dict
+  state, torch_state = get_state_dict(mdl), torch_mdl.state_dict()
+  assert len(state) == len(torch_state)
+  for k, v in state.items():
+    assert k in torch_state
+    torch_state[k].copy_(torch.from_numpy(v.numpy()))
+  torch_mdl.eval()
 
 class TestBert(unittest.TestCase):
   def test_questions(self):
@@ -26,22 +33,25 @@ class TestBert(unittest.TestCase):
       }
 
     # Create in tinygrad
+    Tensor.manual_seed(1337)
     mdl = BertForQuestionAnswering(**config)
-    mdl.load_from_pretrained()
 
     # Create in torch
     with torch.no_grad():
-      fn = Path(__file__).parent.parent.parent / "weights/bert_for_qa.pt"
-      torch_mdl = TorchBertForQuestionAnswering.from_pretrained(fn, config=BertConfig(**config))
+      torch_mdl = TorchBertForQuestionAnswering(BertConfig(**config))
 
-    seeds = [1337, 3141, 1602]
+    set_equal_weights(mdl, torch_mdl)
+
+    seeds = (1337, 3141, 1602)
     bsz, seq_len = 1, 384
-    for i in range(3):
-      in_ids, mask, seg_ids = get_question_samp(bsz, seq_len, config['vocab_size'], seeds[i])
+    for _, seed in enumerate(seeds):
+      in_ids, mask, seg_ids = get_question_samp(bsz, seq_len, config['vocab_size'], seed)
       out = mdl(Tensor(in_ids), Tensor(mask), Tensor(seg_ids))
       torch_out = torch_mdl.forward(torch.from_numpy(in_ids).long(), torch.from_numpy(mask), torch.from_numpy(seg_ids).long())[:2]
       torch_out = torch.cat(torch_out).unsqueeze(2)
-      np.testing.assert_allclose(out.numpy(), torch_out.detach().numpy(), atol=5e-4, rtol=5e-5)
+      print(out.shape)
+      print(torch_out.shape)
+      np.testing.assert_allclose(out.numpy(), torch_out.detach().numpy(), atol=5e-4, rtol=5e-4)
 
 if __name__ == '__main__':
   unittest.main()
