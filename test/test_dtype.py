@@ -133,12 +133,19 @@ class TestBitCast(unittest.TestCase):
 class TestInt32Dtype(unittest.TestCase):
   def test_int32_to_np(self): _test_to_np(Tensor([1,2,3,4], dtype=dtypes.int32), np.int32, [1,2,3,4])
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu does not support int64")
   def test_casts_to_int32(self): _test_casts_to([1,2,3,4], source_dtypes=[dtypes.float32, dtypes.int64], target_dtype=dtypes.int32)
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu does not support int64")
   def test_casts_from_int32(self): _test_casts_from([1,2,3,4], source_dtype=dtypes.int32, target_dtypes=[dtypes.float32, dtypes.int64])
 
   def test_int32_ops(self): _test_ops(a_dtype=dtypes.int32, b_dtype=dtypes.int32, target_dtype=dtypes.int32)
   def test_int32_upcast_float32(self): _test_ops(a_dtype=dtypes.int32, b_dtype=dtypes.float32, target_dtype=dtypes.float32)
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu does not support int64")
   def test_int32_upcast_int64(self): _test_ops(a_dtype=dtypes.int32, b_dtype=dtypes.int64, target_dtype=dtypes.int64)
+
+class TestBoolDtype(unittest.TestCase):
+  def test_casts_from_bool(self): _test_casts_from([0,1,1,0], source_dtype=dtypes.bool, target_dtypes=[dtypes.float32, dtypes.int32])
+  def test_casts_to_bool(self): _test_casts_to([0,1,1,0], source_dtypes=[dtypes.float32, dtypes.int32], target_dtype=dtypes.bool)
 
 if __name__ == '__main__':
   unittest.main()
