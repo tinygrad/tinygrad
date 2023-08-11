@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# setup for distributed
+from extra import dist
+from tinygrad.helpers import getenv
+if __name__ == "__main__":
+  if getenv("DIST"):
+    dist.preinit()
+
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
@@ -11,10 +18,10 @@ from tinygrad.state import get_state_dict
 from tinygrad.nn import optim
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
 from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
+from extra.dist import collectives
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
@@ -191,6 +198,8 @@ def cutmix(X, Y, mask_size=3, p=0.5):
   return X_cutmix, Y_cutmix
 
 def fetch_batches(X, Y, BS, seed, is_train=False):
+  rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
+  if not is_train: rank, world_size = min(rank, 3), min(world_size, 4)
   while True:
     set_seed(seed)
     order = list(range(0, X.shape[0]))
@@ -201,6 +210,9 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
       # TODO need indexing support for tinygrad Tensor
       x = Tensor(X.numpy()[order[batch_end-BS:batch_end],:])
       y = Tensor(np.eye(10, dtype=np.float32)[Y.numpy()[order[batch_end-BS:batch_end]]])
+      if getenv("DIST"):
+        x = x[BS*rank//world_size:BS*(rank+1)//world_size]
+        y = y[BS*rank//world_size:BS*(rank+1)//world_size]
       x = x.sequential(transform) if is_train else x.sequential(transform_test)
       yield x, y
 
@@ -208,8 +220,11 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     seed += 1
 
 def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
+  # this import needs to be done here because this is running in a subprocess
+  from extra.dist import OOB
   set_seed(seed)
   Tensor.training = True
+  rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
 
   if getenv("FAKEDATA"):
     N = 2048
@@ -256,6 +271,20 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
       optimizer[0].zero_grad()
       optimizer[1].zero_grad()
       loss.backward()
+
+      if getenv("DIST"):
+        # sync gradients across ranks
+        bucket, bucket_meta, offset = [], {}, 0
+        for k, v in params_dict.items():
+          if v.grad is not None:
+            bucket_meta[k] = (v.numel(), v.shape)
+            bucket.append(v.grad.flatten())
+        grads = collectives.allreduce(Tensor.cat(*bucket), cache_id="grads")
+        for k in bucket_meta:
+          size = bucket_meta[k][0]
+          params_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]) / world_size)
+          offset += size
+
       optimizer[0].step()
       optimizer[1].step()
       lr_scheduler[0].step()
@@ -293,10 +322,24 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
         correct = out.numpy().argmax(axis=1) == Yt.numpy().argmax(axis=1)
         losses.append(loss.numpy().tolist())
         corrects.extend(correct.tolist())
-      acc = sum(corrects)/len(corrects)*100.0
-      if acc > best_eval:
-        best_eval = acc
-        print(f"eval {sum(corrects)}/{len(corrects)} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
+
+      # collect accuracy across ranks
+      correct_sum, correct_len = sum(corrects), len(corrects)
+      if getenv("DIST"):
+        if rank == 0:
+          for j in range(1, 4):
+            recv_sum, recv_len = OOB.recv(j)
+            correct_sum += recv_sum
+            correct_len += recv_len
+        elif rank <= 4:
+          OOB.send((correct_sum, correct_len), 0)
+
+      # only rank 0 prints
+      if rank == 0:
+        acc = correct_sum/correct_len*100.0
+        if acc > best_eval:
+          best_eval = acc
+          print(f"eval {correct_sum}/{correct_len} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
     if STEPS == 0 or i==STEPS: break
     GlobalCounters.reset()
     st = time.monotonic()
@@ -308,4 +351,17 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
     i += 1
 
 if __name__ == "__main__":
-  train_cifar()
+  if not getenv("DIST"):
+    train_cifar()
+  else: # distributed
+    devices = ["gpu:0", "gpu:1", "gpu:2", "gpu:3", "gpu:4", "gpu:5"]
+    world_size = len(devices)
+
+    # init out-of-band communication
+    dist.init_oob(world_size)
+
+    # start the processes
+    processes = []
+    for rank, device in enumerate(devices):
+      processes.append(dist.spawn(rank, device, fn=train_cifar, args=()))
+    for p in processes: p.join()
