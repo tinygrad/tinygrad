@@ -17,7 +17,7 @@ class TestBert(unittest.TestCase):
       'intermediate_size' : 4096, 'hidden_dropout_prob' : 0.1, 'attention_probs_dropout_prob' : 0.1,
       'max_position_embeddings' : 512, 'type_vocab_size' : 2
       }
-    
+
     # Create in tinygrad
     mdl = BertForQuestionAnswering(**config)
     mdl.load_from_pretrained()
@@ -26,7 +26,7 @@ class TestBert(unittest.TestCase):
     with torch.no_grad():
       fn = Path(__file__).parent.parent.parent / "weights/bert_for_qa.pt"
       torch_mdl = TorchBertForQuestionAnswering.from_pretrained(fn, config=BertConfig(**config))
-    
+
     # Get samples
     tokenizer = BertTokenizer(str(Path(__file__).parent.parent.parent / "weights/bert_vocab.txt"))
 
