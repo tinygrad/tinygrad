@@ -1,12 +1,13 @@
 from __future__ import annotations
-import pathlib
+import pathlib, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawBufferTransfer
-from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
+from tinygrad.codegen.linearizer import LinearizerOptions
+from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
@@ -88,11 +89,10 @@ class CLProgram:
         return None
     return None
 
-class CLCodegen(CStyleCodegen):
-  lang = CStyleLanguage(
-    kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
-    half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
-    barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
-    gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True)
+renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
+  kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
+  half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
+  barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
+  gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True))
 
-GPUBuffer = Compiled(CLBuffer, fromimport("tinygrad.codegen.assembly_rdna", "RDNACodegen") if getenv("RDNA") else CLCodegen, CLProgram, CL.synchronize)
+GPUBuffer = Compiled(CLBuffer, LinearizerOptions(), renderer, CLProgram, CL.synchronize)

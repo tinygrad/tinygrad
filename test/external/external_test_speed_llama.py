@@ -1,22 +1,31 @@
 # NOTE: this only tests the speed of the LLaMA codegen, it doesn't actually run the net
 import unittest, time
+import numpy as np
 from examples.llama import Transformer, MODEL_PARAMS
 from test.test_net_speed import start_profile, stop_profile
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import Device
 from tinygrad.state import get_state_dict
 from tinygrad.ops import Compiled
+from tinygrad.helpers import dtypes, prod
+from tinygrad.runtime.lib import RawBuffer
+
+class FakeProgram:
+  def __init__(self, name:str, prg:str): pass
+  def __call__(self, global_size, local_size, *bufs, wait=False): pass
+
+class RawFakeBuffer(RawBuffer):
+  @classmethod
+  def fromCPU(cls, x:np.ndarray, **kwargs): return cls(prod(x.shape), dtypes.from_np(x.dtype), **kwargs)
+  def toCPU(self): return np.empty(self.size, dtype=self.dtype.np)
 
 class TestLLaMASpeed(unittest.TestCase):
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
   def test_llama_compile(self):
-    # TODO: with default device
-    old_default = Device.DEFAULT
-    Device.DEFAULT = "FAKE"
-
-    # use the codegen from the real device
-    Device['fake'].codegen = Device[old_default].codegen
-    print("using", Device['fake'].codegen)
+    backup_program = Device[Device.DEFAULT].runtime
+    backup_buffer = Device[Device.DEFAULT].buffer
+    Device[Device.DEFAULT].runtime = FakeProgram
+    Device[Device.DEFAULT].buffer = RawFakeBuffer
 
     print("testing llama python run time")
     model = Transformer(**MODEL_PARAMS[1]["7B"]["args"])
@@ -26,8 +35,7 @@ class TestLLaMASpeed(unittest.TestCase):
     print("assigned empty tensors, doing warmup")
 
     def run_llama(st, empty_method_cache=True):
-      #print(f"clearing {len(Device['fake'].method_cache)} from method cache")
-      if empty_method_cache: Device['fake'].method_cache.clear()
+      if empty_method_cache: Device[Device.DEFAULT].method_cache.clear()
       tms = [time.perf_counter()]
       for i in range(10):
         model(Tensor([[2]]), i).realize()
@@ -42,8 +50,8 @@ class TestLLaMASpeed(unittest.TestCase):
     run_llama("profile")
     stop_profile(pr, sort='time', frac=0.1)
 
-    # reset device
-    Device.DEFAULT = old_default
+    Device[Device.DEFAULT].runtime = backup_program
+    Device[Device.DEFAULT].buffer = backup_buffer
 
 if __name__ == '__main__':
   unittest.main()

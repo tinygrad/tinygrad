@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 import numpy as np
 import unittest
-from tinygrad.lazy import LazyBuffer
+from tinygrad.lazy import LazyBuffer, Device
 from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import Variable
+from tinygrad.ops import GlobalCounters
 
 class TestLazyBuffer(unittest.TestCase):
   def test_fromcpu_buffer_sharing(self):
@@ -25,7 +26,7 @@ class TestLazyBuffer(unittest.TestCase):
           helper(a[(slice(start, None, stride),)*ndims])
 
   def test_shuffle_pad_ops_cmpeq(self):
-    y = Tensor([1]).cat(Tensor([1]).eq(0)).numpy()
+    y = Tensor([1]).cat(Tensor([1]) == 0).numpy()
     z = Tensor([1, 0]).numpy()
     np.testing.assert_allclose(y, z)
 
@@ -43,6 +44,29 @@ class TestLazyBuffer(unittest.TestCase):
     y = Tensor([1]).cat(Tensor([1]).exp()).numpy()
     z = Tensor([1, np.e]).numpy()
     np.testing.assert_allclose(y, z)
+
+  @unittest.skipUnless(Device.DEFAULT in ["METAL", "CUDA", "GPU"], "Only GPU backends supports cache")
+  def test_children_count(self):
+    a = Tensor.rand(8,8,8)
+    d1 = a.sum((0))
+    d2 = a.sum((0)).reshape(32,2)
+    assert len(d1.lazydata.op.src[0].children) == 1
+    in1 = d1.reshape(16,4)
+    d3 = in1.reshape(8,8)
+    assert len(d3.lazydata.op.src[0].children) == 2
+
+    GlobalCounters.cache = []
+    l = Tensor.rand(8,8)
+    r = Tensor.rand(8,8)
+    dd = d1 + l
+    dd.realize()
+    de = d3 + r
+    de.realize()
+    assert len(GlobalCounters.cache) == 3
+    assert GlobalCounters.cache[0][0].name.startswith("r_") # Reduce should not merged 2 times.
+    assert GlobalCounters.cache[1][0].name.startswith("E_")
+    assert GlobalCounters.cache[2][0].name.startswith("E_")
+    GlobalCounters.cache = None
 
 class TestVariableBuffer(unittest.TestCase):
   def test_get_variable_buffers_no_variable(self):

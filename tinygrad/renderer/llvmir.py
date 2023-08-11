@@ -1,9 +1,9 @@
-from typing import Final, Dict, Callable, Any, List, Optional
+from typing import Final, Dict, Callable, Any, List, Optional, Tuple
 import functools
 from llvmlite import ir  # type: ignore
-from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token, MemOp, ConstOp
+from tinygrad.codegen.linearizer import UOps, UOp, Token, MemOp, ConstOp
 from tinygrad.helpers import dtypes
-from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, TernaryOps
+from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
 
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 def int_const(x): return ir.Constant(ir.IntType(64), x)
@@ -26,13 +26,13 @@ code_for_op: Final[Dict[Op, Callable]] = {
   BinaryOps.SUB: lambda builder,x,y: builder.fsub(x,y, flags=('fast',)),
   BinaryOps.MUL: lambda builder,x,y: builder.fmul(x,y, flags=('fast',)),
   BinaryOps.DIV: lambda builder,x,y: builder.fdiv(x,y, flags=('fast',)),
-  BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y, flags=('fast',)), ir.FloatType()),
+  BinaryOps.CMPLT: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("<", x, y, flags=('fast',)), ir.FloatType()),
   BinaryOps.MAX: lambda builder,x,y: builder.select(builder.fcmp_unordered(">", x, y, flags=('fast',)), x, y, flags=('fast',)),
   TernaryOps.MULACC: lambda builder,x,y,z: builder.fadd(builder.fmul(x,y, flags=('fast',)), z, flags=('fast',)),
   TernaryOps.WHERE: lambda builder,x,y,z: builder.select(builder.fcmp_unordered("!=", x, ir.Constant(ir.FloatType(), 0), flags=('fast',)), y, z, flags=('fast',)),
 }
 
-def uops_to_llvm_ir(uops:List[UOp]) -> str:
+def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[List[int]], Optional[List[int]]]:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 
@@ -43,7 +43,7 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
   # create llvm function
   dtype_to_llvm_dtype = {dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32)}
   func_dtypes = [dtype_to_llvm_dtype[dtype] for dtype in buf_to_dtype.values()]
-  func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in func_dtypes]), name='exec')
+  func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in func_dtypes]), name=function_name)
 
   # force llvmlite to allow us to add function attribute then add the attribute
   func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
@@ -95,17 +95,15 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
         reduce_phis.append(newvar)
       else:
         idx = args.idx.render(render_llvm, bb[-1])
-        if args.valid.max == 0:
-          val = ir.Constant(dtype_to_llvm_dtype[args.memory_dtype], args.invalid_value)
-        elif args.valid.min == 0:
+        if args.valid.min == 0:
           aug_idx = bb[-1].select(valid, idx, int_const(0))
           val = bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [aug_idx], inbounds=True)), ir.Constant(dtype_to_llvm_dtype[args.memory_dtype], args.invalid_value))
         else:
           val = bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [idx], inbounds=True))
 
         if args.memory_dtype != newvar.dtype:
-          if dtypes.is_int(args.memory_dtype):
-            val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(args.memory_dtype) else bb[-1].sitofp(val, ir.FloatType())
+          if dtypes.is_int(args.memory_dtype) or args.memory_dtype == dtypes.bool:
+            val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(args.memory_dtype) or args.memory_dtype == dtypes.bool else bb[-1].sitofp(val, ir.FloatType())
           elif args.memory_dtype == dtypes.bfloat16:
             val = bb[-1].sext(val, ir.IntType(32))
             val = bb[-1].shl(val, ir.Constant(ir.IntType(32), 16))
@@ -118,8 +116,8 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
       idx = args.idx.render(render_llvm, bb[-1])
       element = lvars[vin[0]]
       if args.memory_dtype != vin[0].dtype:
-        if dtypes.is_int(args.memory_dtype):
-          element = bb[-1].fptoui(element, dtype_to_llvm_dtype[args.memory_dtype]) if dtypes.is_unsigned(args.memory_dtype) else bb[-1].fptosi(element, dtype_to_llvm_dtype[args.memory_dtype])
+        if dtypes.is_int(args.memory_dtype) or args.memory_dtype == dtypes.bool:
+          element = bb[-1].fptoui(element, dtype_to_llvm_dtype[args.memory_dtype]) if dtypes.is_unsigned(args.memory_dtype) or args.memory_dtype == dtypes.bool else bb[-1].fptosi(element, dtype_to_llvm_dtype[args.memory_dtype])
         elif args.memory_dtype == dtypes.bfloat16:
           element = bb[-1].bitcast(element, ir.IntType(32))
           element = bb[-1].lshr(element, ir.Constant(ir.IntType(32), 16))
@@ -131,11 +129,4 @@ def uops_to_llvm_ir(uops:List[UOp]) -> str:
       lvars[newvar] = code_for_op[args](bb[-1], *[lvars[x] for x in vin])
 
   bb[-1].ret_void()
-  return str(module)
-
-class LLVMIRCodegen(Linearizer):
-  def codegen(self):
-    self.process()
-    # no optimize, this doesn't support local
-    self.linearize()
-    return ASTRunner('exec', uops_to_llvm_ir(self.uops), op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.display_name)
+  return str(module), None, None

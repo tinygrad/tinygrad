@@ -30,10 +30,11 @@ class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
-    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
-    Context.stack.append(self.kwargs)
+    Context.stack[-1] = {k:o.value for k,o in ContextVar._cache.items()} # Store current state.
+    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v # Update to new temporary state.
+    Context.stack.append(self.kwargs) # Store the temporary state so we know what to undo later.
   def __exit__(self, *args):
-    for k in Context.stack.pop(): ContextVar._cache[k].value = Context.stack[-1].get(k, Context.stack[0][k])
+    for k in Context.stack.pop(): ContextVar._cache[k].value = Context.stack[-1].get(k, ContextVar._cache[k].value)
 
 class ContextVar:
   _cache: ClassVar[Dict[str, ContextVar]] = {}
@@ -42,7 +43,7 @@ class ContextVar:
   def __new__(cls, key, default_value):
     if key in ContextVar._cache: return ContextVar._cache[key]
     instance = ContextVar._cache[key] = super().__new__(cls)
-    instance.value = Context.stack[0][key] = getenv(key, default_value)
+    instance.value = getenv(key, default_value)
     return instance
   def __bool__(self): return bool(self.value)
   def __ge__(self, x): return self.value >= x
@@ -97,11 +98,13 @@ class dtypes:
   float32: Final[DType] = DType(4, 4, "float", np.float32)
   float = float32
   int8: Final[DType] = DType(0, 1, "char", np.int8)
-  int32: Final[DType] = DType(1, 4, "int", np.int32)
-  int64: Final[DType] = DType(2, 8, "long", np.int64)
+  int16: Final[DType] = DType(1, 2, "short", np.int16)
+  int32: Final[DType] = DType(2, 4, "int", np.int32)
+  int64: Final[DType] = DType(3, 8, "long", np.int64)
   uint8: Final[DType] = DType(0, 1, "unsigned char", np.uint8)
-  uint32: Final[DType] = DType(1, 4, "unsigned int", np.uint32)
-  uint64: Final[DType] = DType(2, 8, "unsigned long", np.uint64)
+  uint16: Final[DType] = DType(1, 2, "unsigned short", np.uint16)
+  uint32: Final[DType] = DType(2, 4, "unsigned int", np.uint32)
+  uint64: Final[DType] = DType(3, 8, "unsigned long", np.uint64)
 
   # NOTE: bfloat16 isn't supported in numpy
   bfloat16: Final[DType] = DType(0, 2, "__bf16", None)
