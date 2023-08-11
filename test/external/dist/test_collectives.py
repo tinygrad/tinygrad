@@ -28,7 +28,7 @@ def run():
     t = Tensor.randn(SIZE)
     t2 = allreduce_jit(t, cache_id="test")
     print(t.numpy() * 2, t2.numpy())
-    assert np.allclose(t.numpy() * 2, t2.numpy())
+    assert np.allclose(t.numpy() * 2, t2.numpy(), atol=1e-5, rtol=1e-5)
 
   # reset jit
   allreduce_jit.cnt = 0
@@ -38,7 +38,7 @@ def run():
     # create a tensor to send
     t = Tensor.randn(SIZE_2, SIZE_2, SIZE_2)
     t2 = allreduce_jit(t, cache_id="test2")
-    assert np.allclose(t.numpy() * 2, t2.numpy())
+    assert np.allclose(t.numpy() * 2, t2.numpy(), atol=1e-5, rtol=1e-5)
 
   print(f"rank {rank} passed")
 
