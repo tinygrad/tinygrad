@@ -6,7 +6,7 @@ from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 import struct
 import numpy as np
-if CI and getenv('ARM64'): from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, arm64_const, UcError
+if CI and getenv('ARM64'): from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, arm64_const
 args = {
   'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
   'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'exp':''},
