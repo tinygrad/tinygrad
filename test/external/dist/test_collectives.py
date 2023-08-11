@@ -26,7 +26,6 @@ def run():
     # create a tensor to send
     t = Tensor.zeros(SIZE, SIZE) if rank == 0 else Tensor.ones(SIZE, SIZE)
     t2 = allreduce_jit(t.contiguous().realize(), cache_id="test")
-    print(t2.numpy())
     assert np.allclose(np.ones((SIZE, SIZE)), t2.numpy())
 
   # reset jit
