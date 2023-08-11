@@ -49,8 +49,6 @@ class TestBert(unittest.TestCase):
       out = mdl(Tensor(in_ids), Tensor(mask), Tensor(seg_ids))
       torch_out = torch_mdl.forward(torch.from_numpy(in_ids).long(), torch.from_numpy(mask), torch.from_numpy(seg_ids).long())[:2]
       torch_out = torch.cat(torch_out).unsqueeze(2)
-      print(out.shape)
-      print(torch_out.shape)
       np.testing.assert_allclose(out.numpy(), torch_out.detach().numpy(), atol=5e-4, rtol=5e-4)
 
 if __name__ == '__main__':
