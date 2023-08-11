@@ -57,6 +57,7 @@ class Node:
   def __mul__(self, b:Union[Node, int]):
     if b == 0: return NumNode(0)
     if b == 1: return self
+    if self.__class__ is NumNode: return NumNode(self.b*b) if isinstance(b, int) else create_node(MulNode(b, self.b))
     return create_node(MulNode(self, b))
   def __rmul__(self, b:int): return self*b
 
@@ -152,7 +153,7 @@ class NumNode(Node):
 
 def create_node(ret:Node):
   assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {type(ret)} {ret}"
-  if ret.min == ret.max: return NumNode(ret.min) if isinstance(ret.min, int) else ret.min
+  if ret.min == ret.max: return NumNode(ret.min)
   return ret
 
 class OpNode(Node):

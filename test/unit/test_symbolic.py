@@ -336,5 +336,12 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     assert a < 3
     assert a > 3
 
+  def test_num_node_mul_node(self):
+    a = NumNode(2)
+    b = Variable("b", 1, 5)
+    c = a * b
+    assert c == b * 2
+    assert isinstance(c, MulNode)
+
 if __name__ == '__main__':
   unittest.main()
