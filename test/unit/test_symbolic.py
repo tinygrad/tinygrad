@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, sym_vars, sym_render
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, sym_vars, sym_render
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -298,6 +298,9 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     assert NumNode(0) % (Variable("i", 1, 10)*128) == 0
     assert NumNode(127) % (Variable("i", 1, 10)*128) == 127
     assert NumNode(128) % (Variable("i", 1, 10)*128 + 128) == 128
+    assert 0 % (Variable("i", 1, 10)*128) == 0
+    assert 127 % (Variable("i", 1, 10)*128) == 127
+    assert 128 % (Variable("i", 1, 10)*128 + 128) == 128
     assert idx0 % (i*3) == idx0
     assert i % i == 0
 
@@ -316,6 +319,22 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     assert (idx0*(i*4+4)+idx1*(i+1)+idx2) // (i+1) == idx0*4+idx1
     assert (idx0*(i*4+4)+idx1*(i+1)+idx2) % (i+1) == idx2
     assert (i+1) % (i*128+128) == (i+1)
+
+  def test_node_lt_node(self):
+    a = Variable("a", 1, 5)
+    b = Variable("b", 6, 9)
+    c = Variable("c", 1, 10)
+    # if the value is always the same, it folds to num
+    assert (a < b) == 1
+    # if it remains as a LtNode, bool is always true and we need to test against min to test if it always evals to True
+    assert (a < c).__class__ is LtNode and (a < c).min == 0 and (a < c).max == 1
+    assert a < c
+    assert not (a < c).min
+    assert (a > c).__class__ is LtNode and (a > c).min == 0 and (a > c).max == 1
+    assert not (a > c).min
+    # same when comparing with a constant
+    assert a < 3
+    assert a > 3
 
 if __name__ == '__main__':
   unittest.main()
