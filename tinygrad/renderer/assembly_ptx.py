@@ -67,10 +67,10 @@ def specialize_to_ptx(lang, function_name, asm):
       #    All conversions involving .f16x2, .e4m3x2, .e5m2x2,.bf16x2 and .tf32 instruction types.
       # These only differ in rounding modifier
       # FIXME: cleanup, add remaining rounding modifier cases
-      elif dtypes.is_int(out.dtype) and dtypes.is_float(vin[0].dtype):
-        ins.append(f"cvt.rz.{dtype_to_nvtype[vin[0].dtype]}.{dtype_to_nvtype[out.dtype]} {vin[0]}, {out};")
+      elif (dtypes.is_int(out.dtype) and dtypes.is_float(vin[0].dtype)):
+        ins.append(f"cvt.rzi.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
       elif dtypes.is_int(vin[0].dtype) and dtypes.is_float(out.dtype):
-        ins.append(f"cvt.rzi.{dtype_to_nvtype[vin[0].dtype]}.{dtype_to_nvtype[out.dtype]} {vin[0]}, {out};")
+        ins.append(f"cvt.rz.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
       else:
         ins.append(f"cvt.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
     elif uop == UOps.LABEL:

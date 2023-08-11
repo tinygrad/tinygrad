@@ -192,7 +192,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
       idx, treg, off = lang.addr_w_offset(args)
       if (dtypes.is_int(args.memory_dtype) and dtypes.is_float(lang.tor[vin[0]].dtype)) or (dtypes.is_float(args.memory_dtype) and dtypes.is_int(lang.tor[vin[0]].dtype)):
         reg = lang.newreg((lang.tor[vin[0]], args.memory_dtype), dtype=args.memory_dtype)
-        lang.ins.append(AssemblyInstruction(UOps.CAST, lang.tor[vin[0]], [reg], args))
+        lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lang.tor[vin[0]]], args))
         lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, reg] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
       else:
         lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
