@@ -24,8 +24,9 @@ def run():
   # loop 3 times to make sure it works with the jit
   for _ in range(3):
     # create a tensor to send
-    t = Tensor.randn(SIZE, SIZE).realize()
-    t2 = allreduce_jit(t, cache_id="test").realize()
+    t = Tensor.randn(SIZE)
+    t2 = allreduce_jit(t, cache_id="test")
+    print(t.numpy() * 2, t2.numpy())
     assert np.allclose(t.numpy() * 2, t2.numpy())
 
   # reset jit
@@ -34,8 +35,8 @@ def run():
   # test uneven chunk sizes
   for _ in range(3):
     # create a tensor to send
-    t = Tensor.randn(SIZE_2).realize()
-    t2 = allreduce_jit(t, cache_id="test2").realize()
+    t = Tensor.randn(SIZE_2, SIZE_2, SIZE_2)
+    t2 = allreduce_jit(t, cache_id="test2")
     assert np.allclose(t.numpy() * 2, t2.numpy())
 
   print(f"rank {rank} passed")
