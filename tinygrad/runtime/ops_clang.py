@@ -17,9 +17,7 @@ class ClangProgram:
     # /run/shm is a in-mem tmpfs, so this is fast
     fn = f"/run/shm/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
     if not os.path.exists(fn):
-      _, tmp = tempfile.mkstemp()
-      subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+tmp).split(), input=prg.encode('utf-8'))
-      os.rename(tmp, fn)
+      subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+fn).split(), input=prg.encode('utf-8'))
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
 
