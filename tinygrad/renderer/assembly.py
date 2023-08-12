@@ -1,6 +1,6 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
 from tinygrad.codegen.linearizer import Linearizer, UOps, Token, ConstOp, MemOp, UOp
-from tinygrad.ops import BinaryOps, UnaryOps
+from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.helpers import DType, dtypes, DEBUG
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 import functools
@@ -163,6 +163,13 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         tmp = lang.newreg((newvar, "2pi"))
         lang.ins.append(AssemblyInstruction(UOps.ALU, tmp, [lang.tor[vin[0]], 1/(math.pi*2)], BinaryOps.MUL))
         lang.ins.append(AssemblyInstruction(UOps.ALU, out, [tmp], args))
+      elif args == TernaryOps.WHERE:
+        if vin[0].dtype == bool or (vin[0], 'pred') in lang.tor:
+          pred_reg = vin[0] if vin[0].dtype == bool else lang.tor[(vin[0], 'pred')]
+        elif (vin[0], 'pred') not in lang.tor:
+          pred_reg = lang.newreg((vin[0], 'pred'), dtype=dtypes.bool)
+          lang.ins.append(AssemblyInstruction(UOps.CAST, pred_reg, [lang.tor[vin[0]]], args))
+        lang.ins.append(AssemblyInstruction(UOps.ALU, out, [lang.tor[x] for x in vin[1:]] + [pred_reg], args))
       else:
         lang.ins.append(AssemblyInstruction(UOps.ALU, out, [lang.tor[x] for x in vin], args))
     elif uop == UOps.LOAD and newvar is not None:

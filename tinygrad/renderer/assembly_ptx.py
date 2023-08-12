@@ -22,7 +22,7 @@ def specialize_to_ptx(lang, function_name, asm):
   alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
          BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", UnaryOps.SQRT: "sqrt.approx",
          UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
-         TernaryOps.MULACC: "fma.rn"}
+         TernaryOps.MULACC: "fma.rn", TernaryOps.WHERE: "selp"}
 
   for uop, out, vin, arg in asm:
     if uop == UOps.ENDLOOP:
@@ -63,6 +63,8 @@ def specialize_to_ptx(lang, function_name, asm):
     elif uop == UOps.CAST:
       if vin[0].dtype == dtypes.bool:
         ins.append(f"selp.{dtype_to_nvtype[out.dtype]} {out}, 0f3F800000, 0f00000000, {vin[0]};")
+      elif out.dtype == dtypes.bool:
+        ins.append(f"setp.ne.{dtype_to_nvtype[vin[0].dtype]} {out}, {'0f00000000' if dtypes.is_float(vin[0].dtype) else '0'}, {vin[0]};")
       # Rounding modifier is mandatory in all of the following cases:
       #    float-to-float conversions, when destination type is smaller than source type
       #    All float-to-int conversions
