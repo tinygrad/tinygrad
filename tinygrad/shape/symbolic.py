@@ -206,9 +206,10 @@ class SumNode(RedNode):
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     fully_divided: List[Node] = []
     rest: List[Node] = []
+    if b == 1: return self
     if isinstance(b, SumNode):
-      nu_num = sum(node.b for node in self.flat_components if node.__class__ is NumNode)
-      de_num = sum(node.b for node in b.flat_components if node.__class__ is NumNode)
+      nu_num = self.flat_components[-1].b if self.flat_components[-1].__class__ is NumNode else 0  # SumNode groups NumNodes in last element
+      de_num = b.flat_components[-1].b if b.flat_components[-1].__class__ is NumNode else 0
       if de_num and nu_num % de_num == 0 and b * (d := nu_num // de_num) == self: return NumNode(d)
     if isinstance(b, Node):
       for x in self.flat_components:
@@ -216,7 +217,6 @@ class SumNode(RedNode):
         else: rest.append(x)
       if (b > (sum_rest:=create_rednode(SumNode, rest))).min and (sum_rest >= 0).min: return create_rednode(SumNode, fully_divided)
       return Node.__floordiv__(self, b, False)
-    if b == 1: return self
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
     fully_divided, rest = [], []
     _gcd = b
@@ -234,11 +234,10 @@ class SumNode(RedNode):
     if _gcd > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(_gcd) // (b//_gcd)
     if divisor > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(divisor) // (b//divisor)
     return Node.sum(fully_divided) + Node.__floordiv__(Node.sum(rest), b)
-
   def __mod__(self, b: Union[Node, int]):
     if isinstance(b, SumNode):
-      nu_num = sum(node.b for node in self.flat_components if node.__class__ is NumNode)
-      de_num = sum(node.b for node in b.flat_components if node.__class__ is NumNode)
+      nu_num = self.flat_components[-1].b if self.flat_components[-1].__class__ is NumNode else 0  # SumNode groups numnodes in last element
+      de_num = b.flat_components[-1].b if b.flat_components[-1].__class__ is NumNode else 0
       if de_num and nu_num % de_num == 0 and b * (nu_num // de_num) == self: return NumNode(0)
     if isinstance(b, Node) and (b - self).min > 0: return self # b - self simplifies the node
     new_nodes: List[Node] = []
