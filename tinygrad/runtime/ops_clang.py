@@ -14,8 +14,8 @@ CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define
 class ClangProgram:
   def __init__(self, name:str, prg:str):
     prg = CLANG_PROGRAM_HEADER + prg
-    # TODO: is there a way to not write this to disk?
-    fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
+    # /run/shm is a in-mem tmpfs, so this is fast
+    fn = f"/run/shm/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
     if not os.path.exists(fn):
       _, tmp = tempfile.mkstemp()
       subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+tmp).split(), input=prg.encode('utf-8'))
