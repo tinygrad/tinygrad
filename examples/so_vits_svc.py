@@ -545,7 +545,10 @@ def get_encoder(ssl_dim) -> Type[SpeechEncoder]:
 # pip3 install soundfile librosa praat-parselmouth
 #########################################################################################
 # EXAMPLE USAGE:
-# GPU=1 python3 examples/so_vits_svc.py --model tf2spy --file ~/recording.wav
+# python3 examples/so_vits_svc.py --model tf2spy --file ~/recording.wav
+#########################################################################################
+# DEMO USAGE (uses audio sample from LJ-Speech):
+# python3 examples/so_vits_svc.py --model saul_goodman
 #########################################################################################
 SO_VITS_SVC_PATH = Path(__file__).parent.parent / "weights/So-VITS-SVC"
 VITS_MODELS = { # config_path, weights_path, config_url, weights_url
@@ -560,11 +563,12 @@ ENCODER_MODELS = { # weights_path, weights_url
   "contentvec": (SO_VITS_SVC_PATH / "contentvec_checkpoint.pt", "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/hubert_base.pt")
 }
 ENCODER_MODEL = "contentvec"
+DEMO_PATH, DEMO_URL = Path(__file__).parent.parent / "temp/LJ037-0171.wav", "https://keithito.com/LJ-Speech-Dataset/LJ037-0171.wav"
 if __name__=="__main__":
   logging.basicConfig(stream=sys.stdout, level=(logging.INFO if DEBUG < 1 else logging.DEBUG))
   parser = argparse.ArgumentParser()
   parser.add_argument("-m", "--model", default=None, help=f"Specify the model to use. All supported models: {VITS_MODELS.keys()}", required=True)
-  parser.add_argument("-f", "--file", default=None, help=f"Specify the path of the input file", required=True)
+  parser.add_argument("-f", "--file", default=DEMO_PATH, help=f"Specify the path of the input file")
   parser.add_argument("--out_dir", default=str(Path(__file__).parent.parent / "temp"), help="Specify the output path.")
   parser.add_argument("--out_path", default=None, help="Specify the full output path. Overrides the --out_dir and --name parameter.")
   parser.add_argument("--base_name", default="test", help="Specify the base of the output file name. Default is 'test'.")
@@ -595,6 +599,7 @@ if __name__=="__main__":
   speaker = args.speaker if args.speaker is not None else list(hps.spk.__dict__.keys())[0]
 
   ### Loading audio and slicing ###
+  if audio_path == DEMO_PATH: download_if_not_present(DEMO_PATH, DEMO_URL)
   assert os.path.isfile(audio_path) and Path(audio_path).suffix == ".wav"
   chunks = preprocess.cut(audio_path, db_thresh=slice_db)
   audio_data, audio_sr = preprocess.chunks2audio(audio_path, chunks)
