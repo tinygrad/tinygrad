@@ -7,7 +7,7 @@ import operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
-from math import ceil, pi, prod, sqrt, log, cos, copysign
+from math import ceil, pi, prod, sqrt, log, cos, copysign, isinf
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
 
@@ -246,6 +246,7 @@ class Tensor:
   def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
   def pad(self, arg: Tuple[Tuple[int, int], ...], value:float=0) -> Tensor:
     ret = mlops.Pad.apply(self, arg=arg) if any(x != (0, 0) for x in arg) else self
+    if isinf(value): return ret + copysign(1,value)/mlops.Pad.apply(Tensor.full(self.shape, value), arg=arg)
     return ret if 0 == value else ret + (value - mlops.Pad.apply(Tensor.full(self.shape, value), arg=arg))
 
   # ***** movement hlops *****
@@ -495,6 +496,7 @@ class Tensor:
   def dot(self, w:Tensor) -> Tensor:
     n1, n2 = len(self.shape), len(w.shape)
     assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
+    assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"
     x = self.reshape(*self.shape[0:-1], *[1]*min(n1-1, n2-1, 1), self.shape[-1])
     w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
     return (x*w).sum(-1)
@@ -596,9 +598,8 @@ class Tensor:
     return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan)
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
-  def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)
+  def maximum(self, x:Union[Tensor, float]) -> Tensor: return (self<x).detach().where(x, (self>x).detach().where(self, (self+x)/2))
   def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
-  def eq(self, x) -> Tensor: return self._broadcasted(mlops.Equal, x, False)
 
   # ***** broadcasted trinary mlops *****
 
@@ -649,12 +650,12 @@ class Tensor:
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x))
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
 
-  def __ge__(self, x) -> Tensor: return self.maximum(x).eq(self)
-  def __le__(self, x) -> Tensor: return self.maximum(x).eq(x)
-  def __lt__(self, x) -> Tensor: return 1.0-(self>=x)
-  def __gt__(self, x) -> Tensor: return 1.0-(self<=x)
-  def __eq__(self, x) -> Tensor: return self.eq(x)  # type: ignore # mypy things this should be a bool
-  def __ne__(self, x) -> Tensor: return 1.0-self.eq(x)  # type: ignore
+  def __lt__(self, x) -> Tensor: return self._broadcasted(mlops.Less, x, False)
+  def __gt__(self, x) -> Tensor: return self._broadcasted(mlops.Less, x, True)
+  def __ge__(self, x) -> Tensor: return 1.0-(self<x)
+  def __le__(self, x) -> Tensor: return 1.0-(self>x)
+  def __ne__(self, x) -> Tensor: return (self<x) + (self>x)   # type: ignore
+  def __eq__(self, x) -> Tensor: return 1.0-(self != x)       # type: ignore
 
   # ***** functional nn ops *****
 
@@ -679,9 +680,15 @@ class Tensor:
     mask = (Tensor.rand(*self.shape, requires_grad=False) >= p).cast(dtypes.bool)
     return self * mask * (1/(1.0 - p))
 
+  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Optional[Tensor]=None, dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
+    if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False).tril(0).cast(dtypes.bool)
+    if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), attn_mask)
+    return (self @ key.transpose(-2,-1) / sqrt(self.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
+
   # ***** cast ops *****
 
   def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
+  def bitcast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype, bitcast=True) if self.dtype != dtype else self
   def float(self) -> Tensor: return self.cast(dtypes.float32)
   def half(self) -> Tensor: return self.cast(dtypes.float16)
 
