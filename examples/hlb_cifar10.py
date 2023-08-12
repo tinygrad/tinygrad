@@ -198,8 +198,6 @@ def cutmix(X, Y, mask_size=3, p=0.5):
   return X_cutmix, Y_cutmix
 
 def fetch_batches(X, Y, BS, seed, is_train=False):
-  rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
-  if not is_train: rank, world_size = min(rank, 4), min(world_size, 5)
   while True:
     set_seed(seed)
     order = list(range(0, X.shape[0]))
@@ -210,10 +208,6 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
       # TODO need indexing support for tinygrad Tensor
       x = Tensor(X.numpy()[order[batch_end-BS:batch_end],:])
       y = Tensor(np.eye(10, dtype=np.float32)[Y.numpy()[order[batch_end-BS:batch_end]]])
-      # further split batch if distributed
-      if getenv("DIST"):
-        x = x[BS*rank//world_size:BS*(rank+1)//world_size]
-        y = y[BS*rank//world_size:BS*(rank+1)//world_size]
       x = x.sequential(transform) if is_train else x.sequential(transform_test)
       yield x, y
 
@@ -283,7 +277,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
         grads = collectives.allreduce(Tensor.cat(*bucket), cache_id="grads")
         for k in bucket_meta:
           size = bucket_meta[k][0]
-          params_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]) / world_size)
+          params_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]))
           offset += size
 
       optimizer[0].step()
@@ -314,11 +308,21 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   while i <= STEPS:
     X, Y = next(batcher)
     if i >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
+    # further split batch if distributed
+    if getenv("DIST"):
+      X = X[BS*rank//world_size:BS*(rank+1)//world_size]
+      Y = Y[BS*rank//world_size:BS*(rank+1)//world_size]
+
     if i%100 == 0 and i > 1:
       # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
       corrects = []
       losses = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
+        # further split batch if distributed
+        if getenv("DIST"):
+          Xt = Xt[EVAL_BS*min(rank, 4)//min(world_size, 5):EVAL_BS*(min(rank, 4)+1)//min(world_size, 5)]
+          Yt = Yt[EVAL_BS*min(rank, 4)//min(world_size, 5):EVAL_BS*(min(rank, 4)+1)//min(world_size, 5)]
+
         out, loss = eval_step_jitted(model, Xt, Yt)
         correct = out.numpy().argmax(axis=1) == Yt.numpy().argmax(axis=1)
         losses.append(loss.numpy().tolist())
