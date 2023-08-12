@@ -151,7 +151,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
     elif uop == UOps.ALU and newvar is not None:
       out = lang.newreg(newvar) if newvar not in lang.tor else lang.tor[newvar]
       # this is the only thing that can violate SSA
-      if args in [BinaryOps.CMPEQ, BinaryOps.CMPLT]:
+      if args in [BinaryOps.CMPLT]:
         pred_reg = lang.newreg((newvar, 'pred'), dtype=dtypes.bool)
         lang.ins.append(AssemblyInstruction(UOps.ALU, pred_reg, [lang.tor[x] for x in vin], args))
         lang.ins.append(AssemblyInstruction(UOps.CAST, out, [pred_reg], args))

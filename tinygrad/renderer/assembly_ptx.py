@@ -20,7 +20,7 @@ def specialize_to_ptx(lang, function_name, asm):
          f".visible .entry {function_name}({', '.join(f'.param .u64 data{i}' for i in range(lang.bufs_cnt))}) {{"]
 
   alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
-         BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", BinaryOps.CMPEQ: "setp.eq", UnaryOps.SQRT: "sqrt.approx",
+         BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", UnaryOps.SQRT: "sqrt.approx",
          UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
          TernaryOps.MULACC: "fma.rn"}
 
@@ -44,7 +44,7 @@ def specialize_to_ptx(lang, function_name, asm):
       if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
         ins.append(f"and.pred {out}, {', '.join(str(x) for x in vin)};")
       else:
-        otype = vin[0].dtype if arg in [BinaryOps.CMPEQ, BinaryOps.CMPLT] else out.dtype
+        otype = vin[0].dtype if arg in [BinaryOps.CMPLT] else out.dtype
         ins.append(f"{alu[arg]}{'.lo' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''}{'.rn' if arg == BinaryOps.DIV and out.dtype == dtypes.float32 else ''}.{dtype_to_nvtype[otype]} {out}, {', '.join(str(x) for x in vin)};")
     elif uop == UOps.LOAD:
       if isinstance(arg, ConstOp):
