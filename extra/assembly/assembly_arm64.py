@@ -36,9 +36,13 @@ def specialize_to_arm64(self, name, asm):
         ins.append(f"movk w15, #{(value >> 16) & 0xffff}, lsl #16")
         ins.append(f"sxtw {to}, w15")
       elif to[0] == 's':
-        value = struct.unpack('I', struct.pack('f', value))[0]
-        ins.append(f"ldr w15,={value}")
-        ins.append(f"fmov {to}, w15")
+        ins.append(f"movz x15, 0x{float_to_hex(value)[4:]}")
+        ins.append(f"movk x15, 0x{float_to_hex(value)[:4]}, lsl #16")
+        #TODO: push into the stack instead
+        ins.append(f"ldr x10, [sp]")
+        ins.append(f"str x15, [sp]")
+        ins.append(f"ldr {to}, [sp]")
+        ins.append(f"str x10, [sp]")
       else: 
         ins.append(f"mov {to}, #{value}")
 

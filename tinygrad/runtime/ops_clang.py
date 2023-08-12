@@ -22,25 +22,31 @@ ADDRESS = 0x10000
 # Unicorn doesn't support external calls 
 def align(addr): return (addr+4095) & ~(4095) 
 mock_lm = {"sinf": np.sin, "sqrtf": np.sqrt, "exp2f": np.exp2, "log2f": np.log2}
-def hook_code(fn, uc, address, size, user_data):
+def emulate_ext_calls(fn, uc, address, size, user_data):
   s_in = struct.unpack('f', struct.pack('I', uc.reg_read(getattr(arm64_const, f'UC_ARM64_REG_S{fn[2][1:]}'))))[0]
   uc.reg_write(getattr(arm64_const, f'UC_ARM64_REG_S{fn[1][1:]}'), struct.unpack('I', struct.pack('f', mock_lm[fn[0]](s_in)))[0])  # type: ignore
+def emulate_code(uc, address, size, user_data):
+  s_in = struct.unpack('f', struct.pack('I', uc.reg_read(arm64_const.UC_ARM64_REG_S3)))[0]
+  print(s_in)
+#  uc.reg_write(getattr(arm64_const, f'UC_ARM64_REG_S{reg[1:]}'), struct.unpack('I', struct.pack('f', float(val)))[0])
+
 def hook_print(uc, address, size, user_data): print(address)
 class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False, var_size:int=0):
     # TODO: is there a way to not write this to disk?
     fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
-    if not getenv('ARM64'):
+    if not binary:
       prg = CLANG_PROGRAM_HEADER + prg
       if not os.path.exists(fn):
         subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+fn+'.tmp').split(), input=prg.encode('utf-8'))
         os.rename(fn+'.tmp', fn)
     else:
-      #if DEBUG >= 5: print(prg)
+      if DEBUG >= 5: print(prg)
       if CI and getenv('ARM64'):
         prg = prg.split('\n') # type: ignore
         self.varsize = align(int(prg[0].split(" ")[1]))
         self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
+#        self.float_loads = {(i*4+ADDRESS):ins.split("=") for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if '=' in ins}
         prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n'])
         subprocess.check_output(args=('aarch64-linux-gnu-as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
         subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+fn+ '.o ' + fn +'.bin').split())
@@ -57,7 +63,8 @@ class ClangProgram:
       mu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
       total_mem = align(reduce(lambda total, arg: total + arg.size * arg.dtype.itemsize, args, len(self.prg)+self.varsize))
       mu.mem_map(ADDRESS, total_mem)
-      for k, fn in self.ext_calls.items(): mu.hook_add(UC_HOOK_CODE, partial(hook_code, fn), begin=k, end=k)
+      for k, fn in self.ext_calls.items(): mu.hook_add(UC_HOOK_CODE, partial(emulate_ext_calls, fn), begin=k, end=k)
+      mu.hook_add(UC_HOOK_CODE, emulate_code, begin=ADDRESS+51*4, end=ADDRESS+60*4)
       mu.mem_write(ADDRESS, self.prg + b''.join(bytes(arg._buf) for arg in args))
       addr = ADDRESS + len(self.prg)
       for i, arg in enumerate(args):
