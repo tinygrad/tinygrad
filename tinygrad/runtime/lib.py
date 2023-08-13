@@ -2,6 +2,7 @@ import ctypes
 import numpy as np
 from typing import TypeVar, Type, Any
 from tinygrad.helpers import DType, dtypes, prod, GlobalCounters
+from functools import lru_cache
 
 _T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method
@@ -9,14 +10,13 @@ class RawBuffer:  # pylint: disable=abstract-method
     self.size: int = size
     self.dtype: DType = dtype
     self._buf = buf
-    self._memsz: int = size*dtype.itemsize
-    GlobalCounters.mem_used += self._memsz
+    GlobalCounters.mem_used += size*dtype.itemsize
   def __del__(self):  # NOTE: if it fails on init (bad dtype), it won't have a _memsz
-    if hasattr(self, '_memsz'): GlobalCounters.mem_used -= self._memsz
+    if hasattr(self.dtype, 'itemsize'): GlobalCounters.mem_used -= self.size*self.dtype.itemsize
+  @lru_cache(maxsize=20000000)
   def __repr__(self): return f"buffer<{self.size}, {self.dtype}>"
   @property
-  def key(self): return (self.size, self.dtype)
-
+  def key(self): return self.__repr__()
   # NOTE: this interface allows for 0 copy
   @classmethod
   def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
@@ -54,7 +54,7 @@ class RawBufferCopyInOut(RawBufferCopyIn):
 class RawConst(RawBuffer): # pylint: disable=abstract-method
   def __repr__(self): return f"const<{self._buf}, {self.dtype}>"
   @property
-  def key(self): return (str(self._buf), self.dtype)
+  def key(self): return (self._buf, self.dtype)
 
 def buf_is_kernel_arg(x) -> bool:
   return x.realized is not None and x.realized.__class__ is not RawConst
