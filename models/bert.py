@@ -147,13 +147,8 @@ class BertSelfAttention:
     key_layer = self.transpose_for_scores(mixed_key_layer)
     value_layer = self.transpose_for_scores(mixed_value_layer)
 
-    attention_scores = query_layer @ key_layer.transpose(2, 3)
-    attention_scores = attention_scores / self.attention_head_size**0.5
-    attention_scores = attention_scores + attention_mask
-    attention_probs = attention_scores.softmax()
-    attention_probs = attention_probs.dropout(self.dropout)
+    context_layer = Tensor.scaled_dot_product_attention(query_layer, key_layer, value_layer, attention_mask, self.dropout)
 
-    context_layer = attention_probs @ value_layer
     context_layer = context_layer.transpose(1, 2)
     context_layer = context_layer.reshape(context_layer.shape[0], context_layer.shape[1], self.all_head_size)
 

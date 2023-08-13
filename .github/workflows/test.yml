@@ -104,8 +104,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [optimage, openpilot]
-    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'||'openpilot (OpenCL) Tests'}}
+        task: [optimage, openpilot, multigpu]
+    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'|| matrix.task=='openpilot'&&'openpilot (OpenCL) Tests'|| matrix.task=='multigpu'&&'MultiGPU Tests'}}
     runs-on: ubuntu-20.04
     timeout-minutes: 20
 
@@ -154,6 +154,11 @@ jobs:
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test tensor core ops
         run: GPU=1 TC=2 python3 -m pytest -n=auto test/test_ops.py
+      - if: ${{ matrix.task == 'multigpu' }}
+        name: Test multigpu
+        run: |
+          PYTHONPATH="." python test/external/dist/test_world.py
+          PYTHONPATH="." python test/external/dist/test_collectives.py
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests
@@ -177,12 +182,12 @@ jobs:
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python3 test/external/external_test_speed_llama.py
     #- name: Run dtype test
-    #  run: DEBUG=4 METAL=1 python -m pytest test/test_dtype.py
+    #  run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
     # dtype test has issues on test_half_to_int8
     - name: Run metal ops test
-      run: DEBUG=2 METAL=1 python -m pytest test/test_ops.py
+      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
     - name: Run JIT test
-      run: DEBUG=2 METAL=1 python -m pytest test/test_jit.py
+      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_jit.py
     - name: Check Device.DEFAULT
       run: WEBGPU=1 python -c "from tinygrad.lazy import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
     #- name: Run webgpu pytest
@@ -235,10 +240,8 @@ jobs:
         env:
           cache-name: cache-gpuocelot-build
         with:
-          path: ${{ github.workspace }}/gpuocelot/ocelot/
+          path: ${{ github.workspace }}/gpuocelot/ocelot
           key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
-          restore-keys: |
-            ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
       - name: Clone/compile gpuocelot
         if: matrix.backend == 'cuda' && steps.cache-build.outputs.cache-hit != 'true'
         run: |
