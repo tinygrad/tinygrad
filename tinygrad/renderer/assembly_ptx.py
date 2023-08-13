@@ -34,8 +34,8 @@ def specialize_to_ptx(lang, function_name, asm):
     elif uop == UOps.SPECIAL:
       if arg.startswith('data'):
         ins.append(f"ld.param.u64 {out}, [{arg}];")
-        # TODO: is this needed?
-        ins.append(f"cvta.to.global.u64 {out}, {out};")
+        # TODO: we sometimes want this to be local, nvcc converts to global most of the time, not sure when we would need to?
+        # ins.append(f"cvta.to.global.u64 {out}, {out};")
       elif arg.startswith('gid'):
         ins.append(f"mov.u32 {out}, %ctaid.{'xyz'[int(arg[3:])]};")
       elif arg.startswith('lid'):
