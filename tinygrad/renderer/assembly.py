@@ -1,7 +1,7 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
 from tinygrad.codegen.linearizer import UOps, Token, ConstOp, MemOp, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
-from tinygrad.helpers import DType, dtypes, DEBUG
+from tinygrad.helpers import DType, dtypes, DEBUG, getenv
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 import functools
 import math
@@ -120,7 +120,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
       else:
         for var in args[0]:
           if not isinstance(var, NumNode):  # TODO: why is this coming through?
-            lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(var, dtype=dtypes.int32, scalar=True), [], ConstOp(0, var))) #FIXME: what should valid be here?
+            lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(var, dtype=dtypes.int32, scalar=True), [], ConstOp(0, var)))
             lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
     elif uop == UOps.ENDLOOP:
       if args[1] not in ["global", "local", "global+local"]:
@@ -129,13 +129,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
             lang.ins.append(AssemblyInstruction(UOps.ALU, lang.tor[var], [lang.tor[var], 1], BinaryOps.ADD))
             pred = lang.render_alu(BinaryOps.CMPLT, lang.tor[var], var.max+1, dtypes.bool)
             lang.ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], ("$loop_"+var.expr, True)))
-      elif args[1] == "local":
-        lang.ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [], None))
-      elif args[1] == "global+local":
-        lang.ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [], None))
-        #FIXME: doublecheck when we need sync
-      # elif args[1] == "global":
-      #   lang.ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [], None))
+      lang.ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [], args[1]))
     elif uop == UOps.CAST and newvar is not None:
       # TODO: we should reconsider outputting CAST in the linearizer. these are needless copies
       out = lang.newreg(newvar)
@@ -157,11 +151,12 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         lang.ins.append(AssemblyInstruction(UOps.ALU, tmp, [lang.tor[vin[0]], 1/(math.pi*2)], BinaryOps.MUL))
         lang.ins.append(AssemblyInstruction(UOps.ALU, out, [tmp], args))
       elif args == TernaryOps.WHERE:
-        if vin[0].dtype == bool or (vin[0], 'pred') in lang.tor:
-          pred_reg = vin[0] if vin[0].dtype == bool else lang.tor[(vin[0], 'pred')]
-        elif (vin[0], 'pred') not in lang.tor:
-          pred_reg = lang.newreg((vin[0], 'pred'), dtype=dtypes.bool)
-          lang.ins.append(AssemblyInstruction(UOps.CAST, pred_reg, [lang.tor[vin[0]]], args))
+        if getenv("PTX"):
+          if vin[0].dtype == bool or (vin[0], 'pred') in lang.tor:
+            pred_reg = vin[0] if vin[0].dtype == bool else lang.tor[(vin[0], 'pred')]
+          elif (vin[0], 'pred') not in lang.tor:
+            pred_reg = lang.newreg((vin[0], 'pred'), dtype=dtypes.bool)
+            lang.ins.append(AssemblyInstruction(UOps.CAST, pred_reg, [lang.tor[vin[0]]], args))
         lang.ins.append(AssemblyInstruction(UOps.ALU, out, [lang.tor[x] for x in vin[1:]] + [pred_reg], args))
       else:
         lang.ins.append(AssemblyInstruction(UOps.ALU, out, [lang.tor[x] for x in vin], args))
@@ -178,20 +173,23 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         # NOTE: you can't compute the index in here, because it assumes it's all available later
         if isinstance(args, ConstOp):
           lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], args))
+        elif getenv("PTX"):
         # FIXME: combine cases
-        elif args.memory_dtype == dtypes.float16:
-          lreg = lang.newreg((newvar, "fromfakebits16"), dtype=dtypes.float16)
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, lreg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', "bits16")))
-          lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lreg], (off, 'global' if not args.local else 'shared', dtypes.uint16)))
-        #  NOTE: it seems Token.dtype (and by extension newreg) will always be float32 or one of the packed float types, so we cast
-        elif args.memory_dtype == dtypes.bool:
-          lreg = lang.newreg((newvar, "fromuint8"), dtype=dtypes.uint8)
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, lreg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', dtypes.uint8)))
-          lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lreg], (off, 'global' if not args.local else 'shared', dtypes.uint8)))
-        elif args.memory_dtype != dtypes.float32:
-          lreg = lang.newreg((newvar, str(args.memory_dtype)), dtype=args.memory_dtype)
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, lreg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
-          lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lreg], (off, 'global' if not args.local else 'shared', dtypes.float32)))
+          if args.memory_dtype == dtypes.float16:
+            lreg = lang.newreg((newvar, "fromfakebits16"), dtype=dtypes.float16)
+            lang.ins.append(AssemblyInstruction(UOps.LOAD, lreg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', "bits16")))
+            lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lreg], (off, 'global' if not args.local else 'shared', dtypes.uint16)))
+          #  NOTE: it seems Token.dtype (and by extension newreg) will always be float32 or one of the packed float types, so we cast
+          elif args.memory_dtype == dtypes.bool:
+            lreg = lang.newreg((newvar, "fromuint8"), dtype=dtypes.uint8)
+            lang.ins.append(AssemblyInstruction(UOps.LOAD, lreg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', dtypes.uint8)))
+            lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lreg], (off, 'global' if not args.local else 'shared', dtypes.uint8)))
+          elif args.memory_dtype != dtypes.float32:
+            lreg = lang.newreg((newvar, str(args.memory_dtype)), dtype=args.memory_dtype)
+            lang.ins.append(AssemblyInstruction(UOps.LOAD, lreg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
+            lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lreg], (off, 'global' if not args.local else 'shared', dtypes.float32)))
+          else:
+            lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
         else:
           lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
       if args.valid.min == 0 and args.valid.max == 1:
@@ -199,24 +197,25 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         skipload_branch += 1
     elif uop == UOps.STORE:
       idx, treg, off = lang.addr_w_offset(args)
-      if (dtypes.is_int(args.memory_dtype) and dtypes.is_float(lang.tor[vin[0]].dtype)) or (dtypes.is_float(args.memory_dtype) and dtypes.is_int(lang.tor[vin[0]].dtype)):
-        reg = lang.newreg((lang.tor[vin[0]], args.memory_dtype), dtype=args.memory_dtype)
-        lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lang.tor[vin[0]]], args))
-        lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, reg] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
-      elif args.memory_dtype != lang.tor[vin[0]].dtype or args.memory_dtype == dtypes.bool:
-        # FIXME: I think this is too strict and we don't actually need to cast when dtypes neq but same base type and dest is wider?
-        # NOTE: We can't just `st.pred` or even store a .pred register using .b8, hence all these casting shenanigans for bool (input_type -> pred -> uint16, then store as uint8)
-        if args.memory_dtype == dtypes.bool != lang.tor[vin[0]].dtype: # We have to cast to bool first
-          prereg = lang.newreg((lang.tor[vin[0]], dtypes.bool), dtype=dtypes.bool)
-          lang.ins.append(AssemblyInstruction(UOps.CAST, prereg, [lang.tor[vin[0]]], args))
-        else: prereg = lang.tor[vin[0]]
-        reg = lang.newreg((prereg, dtypes.uint16 if args.memory_dtype == dtypes.bool else args.memory_dtype), dtype=dtypes.uint16 if args.memory_dtype == dtypes.bool else args.memory_dtype)
-        lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [prereg], args))
-        lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, reg] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', "bits16" if args.memory_dtype == dtypes.float16 else dtypes.uint8 if args.memory_dtype == dtypes.bool else args.memory_dtype)))
-      else:
-        lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
+      if getenv("PTX"):
+        if (dtypes.is_int(args.memory_dtype) and dtypes.is_float(lang.tor[vin[0]].dtype)) or (dtypes.is_float(args.memory_dtype) and dtypes.is_int(lang.tor[vin[0]].dtype)):
+          reg = lang.newreg((lang.tor[vin[0]], args.memory_dtype), dtype=args.memory_dtype)
+          lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lang.tor[vin[0]]], args))
+          lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, reg] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
+        elif args.memory_dtype != lang.tor[vin[0]].dtype or args.memory_dtype == dtypes.bool:
+          # FIXME: I think this is too strict and we don't actually need to cast when dtypes neq but same base type and dest is wider?
+          # NOTE: We can't just `st.pred` or even store a .pred register using .b8, hence all these casting shenanigans for bool (input_type -> pred -> uint16, then store as uint8)
+          if args.memory_dtype == dtypes.bool != lang.tor[vin[0]].dtype: # We have to cast to bool first
+            prereg = lang.newreg((lang.tor[vin[0]], dtypes.bool), dtype=dtypes.bool)
+            lang.ins.append(AssemblyInstruction(UOps.CAST, prereg, [lang.tor[vin[0]]], args))
+          else: prereg = lang.tor[vin[0]]
+          reg = lang.newreg((prereg, dtypes.uint16 if args.memory_dtype == dtypes.bool else args.memory_dtype), dtype=dtypes.uint16 if args.memory_dtype == dtypes.bool else args.memory_dtype)
+          lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [prereg], args))
+          lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, reg] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', "bits16" if args.memory_dtype == dtypes.float16 else dtypes.uint8 if args.memory_dtype == dtypes.bool else args.memory_dtype)))
+        else: lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
+      else: lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
 
-  lang.ins.insert(0, AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c))) for dtype,c in lang.cnts.items()
+  for dtype,c in lang.cnts.items(): lang.ins.insert(0, AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)))
 
   if DEBUG >= 4:
     for tins in lang.ins: print(tins)

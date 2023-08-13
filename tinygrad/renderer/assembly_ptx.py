@@ -26,7 +26,8 @@ def specialize_to_ptx(lang, function_name, asm):
 
   for uop, out, vin, arg in asm:
     if uop == UOps.ENDLOOP:
-      ins.append("bar.sync 0;")
+      if arg in ["local", "global", "global+local"]: #FIXME: doublecheck when we need sync
+        ins.append("bar.sync 0;")
     elif uop == UOps.DEFINE_REGISTER:
       ins.append(f".reg .{dtype_to_nvtype[arg[0][0]]} %{arg[1]}<{arg[2]}>;",)
     elif uop == UOps.DEFINE_LOCAL:
