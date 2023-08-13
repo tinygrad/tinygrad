@@ -159,6 +159,7 @@ class Compiled:
   def to_program(self, k):
     k.linearize()
     src, global_size, local_size = self.renderer(k.function_name, k.uops)
+    #TODO: I need to find a better way to select ARM64
     return ASTRunner(k.function_name, src, global_size, local_size,
                       op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                       display_name=k.display_name, runtime_args={"binary": True} if getenv("ARM64") else None).build(self.runtime)

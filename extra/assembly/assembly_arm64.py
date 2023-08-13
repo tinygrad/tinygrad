@@ -24,7 +24,7 @@ def specialize_to_arm64(self, name, asm):
   ins = [] 
   x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (10,11,12,13,14,15,16,17,18,19,20)]
   s_regs = ['s' + str(i) for i in reversed(range(3,30))]
-  type_to_reg = {dtypes.half: 'h', dtypes.float32: 's', dtypes.bool: 'x',dtypes.int8:'w', dtypes.int32: 'w', dtypes.int64: 'x', dtypes.uint8:'w', dtypes.uint32: 'w', dtypes.uint64: 'x'}
+  type_to_reg = {dtypes.half: 'h', dtypes.float32: 's', dtypes.bool: 'w', dtypes.int8:'w', dtypes.int32: 'w', dtypes.int64: 'x', dtypes.uint8:'w', dtypes.uint32: 'w', dtypes.uint64: 'x'}
   alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
           BinaryOps.MOD: "", BinaryOps.CMPLT: "subs",
           UnaryOps.SIN:'bl ' + get_name('sinf'), UnaryOps.LOG2: 'bl ' + get_name("log2f"), UnaryOps.EXP2: 'bl ' + get_name("exp2f"), UnaryOps.SQRT: 'bl ' + get_name("sqrtf"),
@@ -94,8 +94,8 @@ def specialize_to_arm64(self, name, asm):
           ins.append(f"mov {rtor[out.nm]}, x15")
     elif uop == UOps.CAST:
       if arg == BinaryOps.CMPLT:
-        ins.append(f"fmov s0, 0.0")
-        ins.append(f"fmov s1, 1.0")
+        mov_imm(0.0, 's0')
+        mov_imm(1.0, 's1')
         ins.append(f"fcsel {rtor[out.nm]}, s1, s0, lt")
       else:
         ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
@@ -105,7 +105,7 @@ def specialize_to_arm64(self, name, asm):
         ins.append(f"ands {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
       elif arg == TernaryOps.WHERE:
         ins.append(f"fcmp {rtor[vin[0].nm]}, #0.0")
-        ins.append(f"fcsel {rtor[out.nm]}, {rtor[vin[1].nm]}, {rtor[vin[2].nm]} , ne")
+        ins.append(f"fcsel {rtor[out.nm]}, {rtor[vin[1].nm]}, {rtor[vin[2].nm]}, ne")
       elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
         #NOTE: Not a real instruction, use to emulate a ext call in unicorn
         if CI: ins.append(f"{alu[arg]} {rtor[out.nm]} {rtor[vin[0].nm]}")
@@ -140,10 +140,10 @@ def specialize_to_arm64(self, name, asm):
         reg_in = type_to_reg[arg[2]] + ('0' if dtypes.is_float(arg[2]) else '12') if arg[2] is not None else rtor[out.nm]
         mov_imm(arg[0], "x15")
         ins.append(f"add x15, {rtor[vin[0].nm]}, x15")
-        ins.append(f"ldr{'sb' if arg[2] is not None and arg[2] in (dtypes.int8, dtypes.uint8) else ''} {reg_in}, [x15]")
+        ins.append(f"ldr{'sb' if arg[2] is not None and arg[2] in (dtypes.int8, dtypes.uint8, dtypes.bool) else ''} {reg_in}, [x15]")
         if arg[2] is not None: ins.append(f"{'fcvt' if arg[2] == dtypes.half else 'scvtf'} {rtor[out.nm]}, {reg_in}")
     elif uop == UOps.STORE:
-      shifts = {dtypes.int64: "#3", dtypes.half: "#1", dtypes.int8:"#2", dtypes.uint8: "#2"}
+      shifts = {dtypes.int64: "#3", dtypes.half: "#1", dtypes.int8:"#2", dtypes.uint8: "#2", dtypes.bool: "#2"}
       #NOTE: if need casting load var in s/h0 or x/w12 temp regs
       reg_out = (type_to_reg[arg[2]] + ('0' if dtypes.is_float(arg[2]) else '12') if arg[2] is not None else rtor[vin[1].nm])
       if arg[2] is not None: ins.append(f"fcvt{'zs' if arg[2] != dtypes.half else '' } {reg_out}, {rtor[vin[1].nm]}")
