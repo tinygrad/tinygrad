@@ -17,7 +17,7 @@ class PTXLanguage(AssemblyLanguage):
 
 def specialize_to_ptx(lang, function_name, asm):
   ins = [".version 8.2", ".target " + arch(), ".address_size 64",
-         f".visible .entry {function_name}({', '.join(f'.param .u64 data{i}' for i in range(len(lang.cnts)))}) {{"]
+         f".visible .entry {function_name}({', '.join(f'.param .u64 data{i}' for i in range(len(lang.bufs)))}) {{"]
 
   alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
          BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", UnaryOps.SQRT: "sqrt.approx",
@@ -26,7 +26,7 @@ def specialize_to_ptx(lang, function_name, asm):
 
   for uop, out, vin, arg in asm:
     if uop == UOps.ENDLOOP:
-      if arg in ["local", "global", "global+local"]: #FIXME: doublecheck when we need sync
+      if arg in ["local", "global+local"]:
         ins.append("bar.sync 0;")
     elif uop == UOps.DEFINE_REGISTER:
       ins.append(f".reg .{dtype_to_nvtype[arg[0][0]]} %{arg[1]}<{arg[2]}>;",)
@@ -96,5 +96,5 @@ def specialize_to_ptx(lang, function_name, asm):
 
 def uops_to_ptx_asm(function_name:str, uops:List[UOp]):
   lang = PTXLanguage()
-  global_size, local_size = uops_to_asmstyle(lang, function_name, uops)
+  global_size, local_size = uops_to_asmstyle(lang, True, function_name, uops)
   return specialize_to_ptx(lang, function_name, lang.ins), global_size[::-1], local_size[::-1]
