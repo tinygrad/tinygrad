@@ -43,6 +43,10 @@ def specialize_to_arm64(self, name, asm):
         ins.append(f"str x15, [sp]")
         ins.append(f"ldr {to}, [sp]")
         ins.append(f"str x10, [sp]")
+        # value = struct.unpack('I', struct.pack('f', value))[0]
+        # ins.append(f"ldr w15,={value}")
+        # ins.append(f"fmov {to}, w15")
+        
       else: 
         ins.append(f"mov {to}, #{value}")
 
@@ -105,8 +109,9 @@ def specialize_to_arm64(self, name, asm):
       elif arg == TernaryOps.WHERE:
         mov_imm(0.0, 's0')
         ins.append(f"{alu[arg]} {rtor[vin[0].nm]}, s0")
-        ins.append(f"fcsel {rtor[out.nm]},{rtor[vin[2].nm]}, {rtor[vin[1].nm]}, eq")
+        ins.append(f"fcsel {rtor[out.nm]}, {rtor[vin[2].nm]}, {rtor[vin[1].nm]}, eq")
       elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
+        #NOTE: Not a real instruction, use to emulate a ext call in unicorn
         if CI: ins.append(f"{alu[arg]} {rtor[out.nm]} {rtor[vin[0].nm]}")
         else:
           save_regs = [k for k in rtor.keys() if k != out.nm and k not in mem_vars]
@@ -124,7 +129,7 @@ def specialize_to_arm64(self, name, asm):
           for i,k in enumerate(save_regs,1):
             ins.append(f"ldr {rtor[k]}, [sp, #{16*i}]")
           ins.append(f"add sp, sp, #{len(save_regs)*16}")
-      elif arg in [BinaryOps.CMPLT]:
+      elif arg == BinaryOps.CMPLT:
         ins.append(f"{alu[arg]} {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}" if not dtypes.is_float(vin[0][1]) else f"fcmp {rtor[vin[0].nm]}, {rtor[vin[1].nm]}")
       elif arg == BinaryOps.MOD:
         ins.append(f"udiv x14, {rtor[vin[0].nm]}, x15")
