@@ -25,10 +25,6 @@ mock_lm = {"sinf": np.sin, "sqrtf": np.sqrt, "exp2f": np.exp2, "log2f": np.log2}
 def emulate_ext_calls(fn, uc, address, size, user_data):
   s_in = struct.unpack('f', struct.pack('I', uc.reg_read(getattr(arm64_const, f'UC_ARM64_REG_S{fn[2][1:]}'))))[0]
   uc.reg_write(getattr(arm64_const, f'UC_ARM64_REG_S{fn[1][1:]}'), struct.unpack('I', struct.pack('f', mock_lm[fn[0]](s_in)))[0])  # type: ignore
-def emulate_code(uc, address, size, user_data):
-  s_in = struct.unpack('f', struct.pack('I', uc.reg_read(arm64_const.UC_ARM64_REG_S13)))[0]
-  print(address, s_in)
-#  uc.reg_write(getattr(arm64_const, f'UC_ARM64_REG_S{reg[1:]}'), struct.unpack('I', struct.pack('f', float(val)))[0])
 
 def hook_print(uc, address, size, user_data): print(address)
 class ClangProgram:
@@ -66,7 +62,6 @@ class ClangProgram:
       total_mem = align(reduce(lambda total, arg: total + arg.size * arg.dtype.itemsize, args, len(self.prg)+self.varsize))
       mu.mem_map(ADDRESS, total_mem)
       for k, fn in self.ext_calls.items(): mu.hook_add(UC_HOOK_CODE, partial(emulate_ext_calls, fn), begin=k, end=k)
-      mu.hook_add(UC_HOOK_CODE, emulate_code)
       mu.mem_write(ADDRESS, self.prg + b''.join(bytes(arg._buf) for arg in args))
       addr = ADDRESS + len(self.prg)
       for i, arg in enumerate(args):

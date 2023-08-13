@@ -271,6 +271,7 @@ jobs:
   testunicorn:
     name: ARM64 unicorn Test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
