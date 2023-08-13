@@ -184,17 +184,15 @@ class Compiled:
     k = Linearizer(ast, output, self.linearizer_opts)
 
     # compilation time
-    def get_program():
+    
+    if (cached:=getenv("ENABLE_METHOD_CACHE", 1) and hasattr(k, 'key')) and (key:=k.key) in self.method_cache:
+      prg = self.method_cache[key]
+    else:
       from tinygrad.codegen.optimizer import kernel_optimize, hand_coded_optimizations
       if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, output, self.linearizer_opts), self.to_program)
       elif not getenv("NOOPT"): hand_coded_optimizations(k)
-      return self.to_program(k)
-
-    if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
-      if k.key not in self.method_cache: self.method_cache[k.key] = get_program()
-      prg = self.method_cache[k.key]
-    else:
-      prg = get_program()
+      prg = self.to_program(k)
+      if cached: self.method_cache[key] = prg
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
