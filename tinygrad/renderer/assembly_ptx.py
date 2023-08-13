@@ -17,7 +17,7 @@ class PTXLanguage(AssemblyLanguage):
 
 def specialize_to_ptx(lang, function_name, asm):
   ins = [".version 8.2", ".target " + arch(), ".address_size 64",
-         f".visible .entry {function_name}({', '.join(f'.param .u64 data{i}' for i in range(lang.bufs_cnt))}) {{"]
+         f".visible .entry {function_name}({', '.join(f'.param .u64 data{i}' for i in range(len(lang.cnts)))}) {{"]
 
   alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
          BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", UnaryOps.SQRT: "sqrt.approx",

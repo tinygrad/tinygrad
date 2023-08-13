@@ -37,7 +37,6 @@ class AssemblyLanguage(NamedTuple):
   # stateful
   cnts:DefaultDict[Tuple[DType, bool], int] = defaultdict(int)
   tor: Dict[Any, Register] = {}
-  bufs_cnt: int = 0
   ins: List[AssemblyInstruction] = []
 
   def newreg(self, tok, dtype=dtypes.float32, scalar=False):
@@ -79,7 +78,6 @@ class AssemblyLanguage(NamedTuple):
 
   def addr_w_offset(self, args):
     assert isinstance(args, MemOp)
-    # idx = args.idx*self.bufs[args.i].dtype.itemsize
     idx = args.idx*args.memory_dtype.itemsize
     off = None
     if isinstance(idx, SumNode):
@@ -93,9 +91,7 @@ class AssemblyLanguage(NamedTuple):
         new_reg = self.newreg((reg.nm, 'vec'), dtype=reg.dtype)
         self.ins.append(AssemblyInstruction(UOps.ALU, new_reg, [reg], UnaryOps.NOOP))
         reg = new_reg
-      # return self.tor[f"buf{args.i}"], reg, off
       return self.tor[args.name], reg, off
-    # reg = self.render_alu(BinaryOps.ADD, self.render_cast(reg, dtypes.uint64), self.tor[f"buf{args.i}"], dtype=dtypes.uint64)
     reg = self.render_alu(BinaryOps.ADD, self.render_cast(reg, dtypes.uint64), self.tor[args.name], dtype=dtypes.uint64)
     return reg, None, off
 
@@ -104,13 +100,10 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
   lang.ins.clear()
   lang.tor.clear()
   lang.cnts.clear()
-  # FIXME: Think this is taken care of by DEFINE_GLOBAL now?
-  # ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64, scalar=True), [], f"buf{i}") for i in range(len(self.bufs))]
   global_size, local_size = [], []
   skipload_branch = 0
   for uop,newvar,vin,args in uops:
     if uop == UOps.DEFINE_GLOBAL:
-      lang.bufs_cnt += 1
       lang.ins.append(AssemblyInstruction(UOps.SPECIAL, lang.newreg(args[0], dtype=dtypes.uint64, scalar=True), [], args[0]))
     elif uop == UOps.DEFINE_LOCAL:
       lang.ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
@@ -222,8 +215,8 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, reg] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', "bits16" if args.memory_dtype == dtypes.float16 else dtypes.uint8 if args.memory_dtype == dtypes.bool else args.memory_dtype)))
       else:
         lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
-  # define registers
-  lang.ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)) for dtype,c in lang.cnts.items()] + lang.ins
+
+  lang.ins.insert(0, AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c))) for dtype,c in lang.cnts.items()
 
   if DEBUG >= 4:
     for tins in lang.ins: print(tins)
