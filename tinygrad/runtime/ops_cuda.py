@@ -80,7 +80,9 @@ class CUDAProgram:
       end.synchronize()
       return start.time_till(end)*1e-3
 
-def PTXProgram(name, prg): CUDAProgram(name, prg, binary=True)
+class PTXProgram(CUDAProgram):
+  def __init__(self, name:str, prg:str, binary=True):
+    super().__init__(name, prg, binary=binary)
 
 renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
   kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
