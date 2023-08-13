@@ -3,6 +3,7 @@ import operator, math
 from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast
 import sys, importlib, inspect, functools, pathlib
 from weakref import ref
+from collections import namedtuple
 
 import numpy as np
 from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, LightWeakSet, LightWeakValueDictionary
@@ -23,38 +24,62 @@ P2P = getenv("P2P", 0)
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
-MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS, SIMPLIFY_SUM_RESHAPE_EXPAND_SUM = OPT>=2, OPT>=2, OPT>=2   # shuffle pad ops is fine now since we only push to merge binops
+MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS, SIMPLIFY_PATTERNS = OPT>=2, OPT>=2, OPT>=2   # shuffle pad ops is fine now since we only push to merge binops
 PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
 
-def _simplify_sum_reshape_expand_sum(self:LazyBuffer, src: Any, prev_src: Any) -> Optional[LazyOp]:
-  if prev_src.op.op == MovementOps.EXPAND:
-    if src.op.op == ReduceOps.SUM:
-      if src.shape == self.shape:
-        dim_difference = [i for i, (a, b) in enumerate(zip(prev_src.shape, self.shape)) if a != b]
-        # NOTE: we can probably also handle the case where more than one dimension is different with more thought
-        if len(dim_difference) == 1:
-          expansion_index = dim_difference[0]
-          expansion_size = prev_src.shape[expansion_index]
-          return LazyOp(BinaryOps.MUL, (src, LazyBuffer.const_like(src, expansion_size)))
-  return None
+def to_lazyop(op: Union[LazyOp, LazyBuffer]) -> LazyOp: return op.op if op.__class__ is LazyBuffer else op # type: ignore
+def _skip_movement_ops(self:Union[LazyOp, LazyBuffer]): return self if (self.__class__ is LazyBuffer and self.realized) or to_lazyop(self).op not in MovementOps else _skip_movement_ops(to_lazyop(self).src[0])
+def _generate_sum_reshape_expand_sum(captures):
+  # When a tensor is reduced, reshaped/expanded back and then reduced again along the same axis, it's equivalent to
+  # performing the initial reduction and multiplying the result by the size of the expanded dimension.
+  if captures[3].__class__ is not LazyBuffer or captures[3].op.src[0].__class__ is not LazyBuffer: return None # TODO: Can this happen at all?
+  dim_difference = [i for i, (a, b) in enumerate(zip(captures[3].op.src[0].shape, captures[3].shape)) if a != b]
+  if len(dim_difference) != 1: return None # NOTE: we can probably also handle the case where more than one dimension is different with more thought
+  return LazyOp(BinaryOps.MUL, (captures[1], LazyBuffer.const_like(captures[1], captures[3].op.src[0].shape[dim_difference[0]])))
+
+OptRule = namedtuple('OptRule', ['opgen', 'tree'])
+OPT_RULES = [
+  OptRule(lambda capt: LazyOp(BinaryOps.MAX, (capt['a'], capt['b'])), [(1, BinaryOps.CMPLT, ['a','b']), (2, BinaryOps.CMPLT, ['b','a']), (3, BinaryOps.ADD, ['b','a']), (4, LoadOps.CONST, [], lambda capt: to_lazyop(capt[4]).arg == 0.5),
+    (5, BinaryOps.MUL, [3, (4, _skip_movement_ops)]), (6, TernaryOps.WHERE, [1,'b',5]), (7, TernaryOps.WHERE, [2,'a',6])]), # (a<b).where(b, (a>b).where(a, (a+b)/2))).op.op => max(a, b)
+  OptRule(_generate_sum_reshape_expand_sum, [(1, ReduceOps.SUM, [], lambda capt: capt[1].shape==capt[3].shape), (2, MovementOps.RESHAPE, [1]), (3, ReduceOps.SUM, [(2, lambda x: to_lazyop(x).src[0] if x.__class__ is LazyBuffer and not x.realized and to_lazyop(x).op == MovementOps.EXPAND else x)])])
+]
+
+def _patch_pattern(self:Union[LazyOp, LazyBuffer], rule: OptRule) -> LazyOp:
+  captures: Dict[Any, Union[LazyOp, LazyBuffer]] = {rule.tree[-1][0] : self}
+  nodeid_to_index: Dict[Any, Union[LazyOp, LazyBuffer]] = {node[0]: i for i,node in enumerate(rule.tree)}
+  def op_matches_rule(op: LazyOp, rule_node: Tuple[Any, ...]): return op.op == rule_node[1] and (len(op.src) == len(rule_node[2]) or len(rule_node[2]) == 0) and (True if len(rule_node) < 4 else rule_node[3](captures))
+  def match_ast(op: Union[LazyOp, LazyBuffer], rule_node):
+    if op.__class__ is LazyBuffer and op.realized: return False # Can't match if realized.
+    if not op_matches_rule(to_lazyop(op), rule_node): return False # LazyOp does not match required node from rule.
+    if len(rule_node[2]) == 0: return True # The case when we do not care about matching children.
+    for i,child in enumerate(to_lazyop(op).src):
+      child_id, mod = rule_node[2][i] if rule_node[2][i].__class__ is tuple else (rule_node[2][i], None)
+      if mod: child = mod(child) # Apply callback function if any.
+      if child_id in captures and captures[child_id] != child: return False # Captures with the same id do not equal, the possible child does not match the rule.
+      captures[child_id] = child
+      if child_id in nodeid_to_index and not match_ast(child, rule.tree[nodeid_to_index[child_id]]): return False
+    return True
+  return (rule.opgen(captures) or to_lazyop(self)) if match_ast(to_lazyop(self), rule.tree[-1]) else to_lazyop(self)
+
+def simplify_ast(root: Union[LazyOp, LazyBuffer], ctx):
+  if ref(root) in ctx or not SIMPLIFY_PATTERNS or (root.__class__ is LazyBuffer and root.realized): return root
+  ctx.add(ref(root))
+  for rule in OPT_RULES:
+    if root.__class__ is LazyBuffer:
+      root.op = _patch_pattern(root, rule)
+      root.op.src = tuple([simplify_ast(chi, ctx) for chi in root.op.src])
+    else:
+      root = _patch_pattern(root, rule)
+      root.src = tuple([simplify_ast(chi, ctx) for chi in root.src])
+  return root
 
 # **** realize functions ****
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
   # NOTE: mypy doesn't know that if not src.realized, then src.op must be a LazyOp so we have to ignore a bunch of warnings
+  if self.op.op not in ReduceOps: return self.op
   src = self.op.src[0]
   if not src.realized:
-    # When a tensor is reduced, reshaped/expanded back and then reduced again along the same axis,
-    # it's equivalent to performing the initial reduction and multiplying the result
-    # by the size of the expanded dimension.
-    if SIMPLIFY_SUM_RESHAPE_EXPAND_SUM and src.op.op == MovementOps.EXPAND: # type: ignore
-      expanded = src.op.src[0] # type: ignore
-      if expanded.op.op == MovementOps.RESHAPE: # type: ignore
-        reshaped = expanded.op.src[0] # type: ignore
-        simplified = _simplify_sum_reshape_expand_sum(self, reshaped, src)
-      else:
-        simplified = _simplify_sum_reshape_expand_sum(self, expanded, src)
-      if simplified: return simplified
     if MERGE_ELEMENTWISE_INTO_REDUCE and src.optype is BinaryOps and len(src.children) <= 1:
       # If we did remove an expand above, we might stumble back into a case where the reduction is not necessary
       if src.shape == self.shape:
@@ -136,7 +161,7 @@ class LazyBuffer:
 
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
 
-  def realize(self:LazyBuffer) -> LazyBuffer:
+  def _realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       # get real ops first
       if self.optype is BinaryOps: self.op = _ast_binaryops(self)
@@ -146,7 +171,7 @@ class LazyBuffer:
       elif self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
       # run the ast if we still have to, and log the op
       if not self.realized:
-        for x in self.op.buffers: x.realize()
+        for x in self.op.buffers: x._realize()
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
         if self.dtype.__class__ is ImageDType and self.optype != MovementOps and (prod(self.shape) != prod(cast(ImageDType, self.dtype).shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
@@ -171,6 +196,7 @@ class LazyBuffer:
       # no need to keep the op after realization
       del self.op
     return self
+  def realize(self:LazyBuffer) -> LazyBuffer: return self if self.realized else simplify_ast(self, set())._realize()
 
   @staticmethod
   def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
