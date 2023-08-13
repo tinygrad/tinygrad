@@ -105,6 +105,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
 
 @functools.lru_cache(maxsize=None)
 def _reshape(view: View, new_shape:Tuple[int, ...]) -> Tuple[View, bool]:
+  if view.shape == new_shape: return view, False
   assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
   # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
   assert not isinstance(sum(view.shape + new_shape), int) or prod(view.shape) == prod(new_shape), f"can't reshape {view.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
@@ -147,6 +148,7 @@ def unsafe_resize(view, arg: Tuple[Tuple[int, int], ...], mask=None):
 
 @functools.lru_cache(maxsize=None)
 def _permute(view: View, axis: Tuple[int, ...]) -> View:
+    if axis == tuple(range(len(axis))): return view
     assert all(isinstance(x, int) and (0 <= x < len(view.shape)) for x in axis), f"invalid permute {axis} for {view.shape}"
     assert len(set(axis)) == len(axis) == len(view.shape), f"can't permute {view.shape} with {axis}"
     shape, strides = zip(*[(view.shape[a], view.strides[a]) for a in axis])
@@ -245,7 +247,6 @@ class ShapeTracker:
     return self
 
   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
-    if self.views[-1].shape == new_shape: return self
     new_view, extra = _reshape(self.views[-1], new_shape)
     if extra: self.views.append(new_view)
     else: self.views[-1] = new_view
