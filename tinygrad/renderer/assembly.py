@@ -1,5 +1,5 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
-from tinygrad.codegen.linearizer import Linearizer, UOps, Token, ConstOp, MemOp, UOp
+from tinygrad.codegen.linearizer import UOps, Token, ConstOp, MemOp, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.helpers import DType, dtypes, DEBUG
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
@@ -37,8 +37,8 @@ class AssemblyLanguage(NamedTuple):
   # stateful
   cnts:DefaultDict[Tuple[DType, bool], int] = defaultdict(int)
   tor: Dict[Any, Register] = {}
-  bufs_cnt = 0
-  ins = []
+  bufs_cnt: int = 0
+  ins: List[AssemblyInstruction] = []
 
   def newreg(self, tok, dtype=dtypes.float32, scalar=False):
     if isinstance(tok, Token): dtype = tok.dtype  # this
@@ -52,7 +52,7 @@ class AssemblyLanguage(NamedTuple):
   def render_numnode(self, b):
     key = ("num", b)
     # if key not in self.tor: self.ins.append(AssemblyInstruction(UOps.CONST, self.newreg(key, scalar=True, dtype=dtypes.int32), [], b))
-    if key not in self.tor: self.ins.append(AssemblyInstruction(UOps.LOAD, self.newreg(key, scalar=True, dtype=dtypes.int32), [], ConstOp(b, None))) # FIXME: what should valid be
+    if key not in self.tor: self.ins.append(AssemblyInstruction(UOps.LOAD, self.newreg(key, scalar=True, dtype=dtypes.int32), [], ConstOp(b, b))) # FIXME: what should valid be
     return self.tor[key]
 
   def render_alu(self, op, a:Register, b:Union[Register, int, float], dtype=dtypes.int32) -> Register:
@@ -69,19 +69,19 @@ class AssemblyLanguage(NamedTuple):
       self.ins.append(AssemblyInstruction(UOps.CAST, self.newreg(key, dtype=new_dtype), [a]))
     return self.tor[key]
 
-  render_ops = { Variable: lambda self, ops, ctx: ctx.tor[self], NumNode: lambda self, ops, ctx: ctx.render_numnode(self.b),
-                 MulNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.MUL, self.a.render(ops, ctx), self.b),
-                 DivNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.DIV, self.a.render(ops, ctx), self.b),
-                 ModNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.MOD, self.a.render(ops, ctx), self.b),
-                 LtNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.CMPLT, self.a.render(ops, ctx), self.b, dtype=dtypes.bool),
-    SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.render_alu(BinaryOps.ADD, a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
-    AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.render_alu(BinaryOps.MUL, a, b.render(ops,ctx), dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
+  render_ops: Dict = { Variable: lambda self, ops, ctx: ctx.tor[self], NumNode: lambda self, ops, ctx: ctx.render_numnode(self.b),
+                      MulNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.MUL, self.a.render(ops, ctx), self.b),
+                      DivNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.DIV, self.a.render(ops, ctx), self.b),
+                      ModNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.MOD, self.a.render(ops, ctx), self.b),
+                      LtNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.CMPLT, self.a.render(ops, ctx), self.b, dtype=dtypes.bool),
+                      SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.render_alu(BinaryOps.ADD, a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
+                      AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.render_alu(BinaryOps.MUL, a, b.render(ops,ctx), dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
   def addr_w_offset(self, args):
     assert isinstance(args, MemOp)
     # idx = args.idx*self.bufs[args.i].dtype.itemsize
     idx = args.idx*args.memory_dtype.itemsize
-    off = 0  # TODO: should this be None?
+    off = None
     if isinstance(idx, SumNode):
       nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
       if len(nums) > 0 and nums[0] < 4096 and (idx-nums[0]).min >= 0:  # TODO: different for each GPU?
@@ -127,7 +127,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
       else:
         for var in args[0]:
           if not isinstance(var, NumNode):  # TODO: why is this coming through?
-            lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(var, dtype=dtypes.int32, scalar=True), [], ConstOp(0, None))) #FIXME: what should valid be here?
+            lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(var, dtype=dtypes.int32, scalar=True), [], ConstOp(0, var))) #FIXME: what should valid be here?
             lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
     elif uop == UOps.ENDLOOP:
       if args[1] not in ["global", "local", "global+local"]:
