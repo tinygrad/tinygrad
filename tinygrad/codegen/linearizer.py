@@ -4,7 +4,7 @@ from collections import defaultdict
 from enum import Enum, auto
 from math import inf
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition
+from tinygrad.helpers import colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
@@ -152,7 +152,7 @@ class Linearizer:
     self.opts = opts
 
     # get the output buffers
-    self.bufs = [output_buffer] + dedup(ast.buffers)
+    self.bufs: List = [output_buffer, *dict.fromkeys(ast.buffers)]
     self.arg_bufs = {x:f"data{i}" for i,x in enumerate(dict.fromkeys([x.realized for x in self.bufs if buf_is_kernel_arg(x)]))}
 
     # key for lookup in cache (can change, str might not be right)
