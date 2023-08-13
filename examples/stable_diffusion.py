@@ -463,7 +463,8 @@ class CLIPTextTransformer:
     self.final_layer_norm = LayerNorm(768)
 
   def __call__(self, input_ids):
-    x = self.embeddings(input_ids, Tensor.arange(input_ids.shape[1]).reshape(1, -1))
+    input_modif = input_ids.reshape(1,77)
+    x = self.embeddings(input_modif, Tensor.arange(input_modif.shape[1]).reshape(1, -1))
     x = self.encoder(x, Tensor.full((1, 1, 77, 77), float("-inf")).triu(1))
     return self.final_layer_norm(x)
 
@@ -585,22 +586,6 @@ class StableDiffusion:
     self.first_stage_model = AutoencoderKL()
     self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = CLIPTextTransformer()))
 
-  # JIT the model in multiple steps to allow dynamic parameter control (feed random latent tensor, and variable timesteps)
-  def run_cond_stage(self, prompt_tensor):
-    return self.cond_stage_model.transformer.text_model(prompt_tensor)
-  
-  def run_diffuser(self, latent):
-    return latent
-  
-  def run_decoder(self, latent):
-    x = self.first_stage_model.post_quant_conv(1/0.18215 * latent)
-    x = self.first_stage_model.decoder(x)
-
-    # make image correct size and scale
-    x = (x + 1.0) / 2.0
-    return (x.reshape(3,512,512).permute(1,2,0).clip(0,1)*255)
-
-
   # TODO: make __call__ run the model
 
 # ** ldm.models.autoencoder.AutoencoderKL (done!)
@@ -643,6 +628,7 @@ if __name__ == "__main__":
   print("got CLIP context", context.shape)
 
   prompt = Tensor([tokenizer.encode("")])
+  print(prompt)
   unconditional_context = model.cond_stage_model.transformer.text_model(prompt).realize()
   print("got unconditional CLIP context", unconditional_context.shape)
 
@@ -651,6 +637,8 @@ if __name__ == "__main__":
 
   def get_model_output(latent, timestep):
     # put into diffuser
+    print(f'timestep shape={timestep.shape}')
+    print(f'uncond shape={unconditional_context.shape}')
     latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep.expand(2, *timestep.shape[1:]), unconditional_context.cat(context, dim=0))
     unconditional_latent, latent = latents[0:1], latents[1:2]
 
@@ -668,18 +656,18 @@ if __name__ == "__main__":
 
   def get_x_prev_and_pred_x0(x, e_t, index):
     temperature = 1
-    a_t, a_prev = alphas[index], alphas_prev[index]
+    a_t, a_prev = Tensor(float(alphas[index])), Tensor(float(alphas_prev[index]))
     sigma_t = 0
-    sqrt_one_minus_at = math.sqrt(1-a_t)
+    sqrt_one_minus_at = Tensor.sqrt(1-a_t)
     #print(a_t, a_prev, sigma_t, sqrt_one_minus_at)
 
-    pred_x0 = (x - sqrt_one_minus_at * e_t) / math.sqrt(a_t)
+    pred_x0 = (x - sqrt_one_minus_at * e_t) / Tensor.sqrt(a_t)
 
     # direction pointing to x_t
-    dir_xt = math.sqrt(1. - a_prev - sigma_t**2) * e_t
+    dir_xt = Tensor.sqrt(1. - a_prev - sigma_t**2) * e_t
     noise = sigma_t * Tensor.randn(*x.shape) * temperature
 
-    x_prev = math.sqrt(a_prev) * pred_x0 + dir_xt #+ noise
+    x_prev = Tensor.sqrt(a_prev) * pred_x0 + dir_xt #+ noise
     print(x_prev)
     print(pred_x0)
     return x_prev, pred_x0

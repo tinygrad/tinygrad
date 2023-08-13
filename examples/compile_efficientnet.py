@@ -23,21 +23,29 @@ def compile_net(run, special_names):
 
   return functions, statements, bufs, bufs_to_save
 
-def jit_model(model, the_input):
+def jit_model(model, *args):
   @TinyJit
-  def run(x): return model.forward(x).realize()
+  def run(*args): return model.forward(*args).realize()
 
-  # twice to run the JIT
-  the_output = run(the_input)
-  the_output = run(the_input)
+  # twice to run the JIT)
+  the_output = run(*args)
+  the_output = run(*args)
 
   # hack to put the inputs back
-  assert len(run.input_replace) == 1, f"didn't get one input to replace {run.input_replace}"
-  for (j,i),idx in run.input_replace.items():
-    run.jit_cache[j][1][i] = the_input.lazydata.realized
+  print(f'inputs to replace={run.input_replace.items()}')
+  print(f'len args={len(args)}')
+  #assert len(set(run.input_replace.items())) == len(args), f"didn't get one input to replace {run.input_replace}"
+
+  special_names = {}
+
+  for (j,i),idx in run.input_replace.items(): 
+    realized_input = args[idx[0]].lazydata.realized
+    run.jit_cache[j][1][i] = realized_input
+    special_names[id(realized_input)] = f'input{idx[0]}'
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
-  special_names = {id(the_input.lazydata.realized): "input", id(the_output.lazydata.realized): "outputs"}
+  special_names[id(the_output.lazydata.realized)] = "outputs"
+
   return run, special_names
 
 if __name__ == "__main__":

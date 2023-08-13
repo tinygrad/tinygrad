@@ -21,6 +21,8 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
     import ClipTokenizer from './clip_tokenizer.js';
     window.clipTokenizer = new ClipTokenizer();
 </script>
+
+<script src="./alphas_cumprod.js"></script>
 <script src="./net.js"></script>
 </head>
 <body>
@@ -126,7 +128,7 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
 
 	const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
 	const resultText = document.getElementById('result');
-	let labels, net;
+	let labels, nets;
 
 	const error = (err) => {
 		resultText.innerHTML = `Error: ${err}`;
@@ -165,17 +167,55 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
 		resultText.innerHTML = "loading..."
 		const safetensorParts = await getSafetensorParts();
 		const device = await getDevice();
-		net = await timer(() => setupNet(device, safetensorParts), "(compilation)");
+
+        nets = await timer(() => Promise.all([
+            text_modelModel().setup(device, safetensorParts),
+            diffusorModel().setup(device, safetensorParts),
+            get_x_prev_and_pred_x0Model().setup(device, safetensorParts),
+            decoderModel().setup(device, safetensorParts)]
+        ), "(compilation)")
+        console.log(nets)
 		resultText.innerHTML = "ready"
 	}
 
+    function tensorRandn(size) {
+
+    }
+
+    function runStableDiffusion(prompt) {
+        let prompt = clipTokenizer.encodeForCLIP("A horse sized cat eating a bagel.");
+        let context = nets[0](prompt);
+
+        prompt = clipTokenizer.encodeForCLIP("");
+        let unconditional_context = nets[0](prompt);
+
+        let timesteps = [];
+        let steps = 5;
+
+        for (let i = 0; i < 1000; i += (1000/steps)) {
+            timesteps.push(i);
+        }
+
+        let alphasCumprod = window.alphas_cumprod;
+        let alphas = [];
+
+        for (t of timesteps) {
+            alphas.push(alphasCumprod[t]);
+        }
+
+        alphas_prev = [1.0];
+
+        for (let i = alphas.length - 2; i >= 0; i--) {
+            alphas_prev.push(alphas[i]);
+        }
+    }
 
     document.getElementById("btnRunNet").addEventListener("click", function(e) {
-            if (!net) error("Net not loaded yet.");
+            if (!nets || nets.length != 4) error("Net not loaded yet.");
 
-            NumpyLoader.ajax("./test_prompt.npy", async (input) => {
+            NumpyLoader.ajax("./latent_tensor.npy", async (input) => {
                 console.log(input.data);
-                const out = await timer(() => net(input.data));
+                const out = await timer(() => nets[3](input.data));
                 
                 let pixels = []
                 let pixelCounter = 0
@@ -195,8 +235,6 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
                 console.log("Success");
             });
         }, false);
-
-	
 
 	    loadLet();
     })
