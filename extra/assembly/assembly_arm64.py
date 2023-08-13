@@ -15,10 +15,11 @@ def compute_offsets(total):
 def get_name(name): return ('_' if system() == 'Darwin' else '') + name
 
 class ARM64Language(AssemblyLanguage):
+  #TODO: do i need this?
   pass
 
 def specialize_to_arm64(self, name, asm):
-  var_size = 0
+  var_size = 16
   prev_uop = None
   ins = [] 
   x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (10,11,12,13,14,15,16,17,18,19,20)]
@@ -39,14 +40,10 @@ def specialize_to_arm64(self, name, asm):
         ins.append(f"movz x15, 0x{float_to_hex(value)[4:]}")
         ins.append(f"movk x15, 0x{float_to_hex(value)[:4]}, lsl #16")
         #TODO: push into the stack instead
-        ins.append(f"ldr x10, [sp]")
-        ins.append(f"str x15, [sp]")
-        ins.append(f"ldr {to}, [sp]")
-        ins.append(f"str x10, [sp]")
-        # value = struct.unpack('I', struct.pack('f', value))[0]
-        # ins.append(f"ldr w15,={value}")
-        # ins.append(f"fmov {to}, w15")
-        
+        #ins.append(f"ldr x10, [sp]")
+        ins.append(f"str x15, [sp, 16]")
+        ins.append(f"ldr {to}, [sp, 16]")
+        #ins.append(f"str x10, [sp]")
       else: 
         ins.append(f"mov {to}, #{value}")
 
@@ -97,9 +94,9 @@ def specialize_to_arm64(self, name, asm):
           ins.append(f"mov {rtor[out.nm]}, x15")
     elif uop == UOps.CAST:
       if arg == BinaryOps.CMPLT:
-        ins.append("mov x15, xzr")
-        ins.append("cset w15, lt")
-        ins.append(f"scvtf {rtor[out.nm]}, w15")
+        ins.append(f"fmov s0, 0.0")
+        ins.append(f"fmov s1, 1.0")
+        ins.append(f"fcsel {rtor[out.nm]}, s1, s0, lt")
       else:
         ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
     elif uop == UOps.ALU:
@@ -107,9 +104,8 @@ def specialize_to_arm64(self, name, asm):
       if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
         ins.append(f"ands {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
       elif arg == TernaryOps.WHERE:
-        mov_imm(0.0, 's0')
-        ins.append(f"{alu[arg]} {rtor[vin[0].nm]}, s0")
-        ins.append(f"fcsel {rtor[out.nm]}, {rtor[vin[2].nm]}, {rtor[vin[1].nm]}, eq")
+        ins.append(f"fcmp {rtor[vin[0].nm]}, #0.0")
+        ins.append(f"fcsel {rtor[out.nm]}, {rtor[vin[1].nm]}, {rtor[vin[2].nm]} , ne")
       elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
         #NOTE: Not a real instruction, use to emulate a ext call in unicorn
         if CI: ins.append(f"{alu[arg]} {rtor[out.nm]} {rtor[vin[0].nm]}")
