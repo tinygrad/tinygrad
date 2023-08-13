@@ -56,13 +56,17 @@ def specialize_to_ptx(lang, function_name, asm):
         else:
           ins.append(f"ld.{arg[1]}.{dtype_to_nvtype[arg[2]]} {out}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
     elif uop == UOps.STORE:
+      # FIXME: move cases to dtype_to_nvtype
       if arg[2] == "bits16":
         ins.append(f"st.{arg[1]}.b16 [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {vin[1]};")
       else:
         ins.append(f"st.{arg[1]}.{dtype_to_nvtype[arg[2]]} [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {vin[1]};")
     elif uop == UOps.CAST:
-      if vin[0].dtype == dtypes.bool:
+      # FIXME: combine cases
+      if vin[0].dtype == dtypes.bool and dtypes.is_float(out.dtype):
         ins.append(f"selp.{dtype_to_nvtype[out.dtype]} {out}, 0f3F800000, 0f00000000, {vin[0]};")
+      elif vin[0].dtype == dtypes.bool and dtypes.is_int(out.dtype):
+        ins.append(f"selp.{dtype_to_nvtype[out.dtype]} {out}, 1, 0, {vin[0]};")
       elif out.dtype == dtypes.bool:
         ins.append(f"setp.ne.{dtype_to_nvtype[vin[0].dtype]} {out}, {'0f00000000' if dtypes.is_float(vin[0].dtype) else '0'}, {vin[0]};")
       # Rounding modifier is mandatory in all of the following cases:

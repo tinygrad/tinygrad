@@ -186,11 +186,16 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
             lang.ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
         if args.valid.max == 1:
           # NOTE: you can't compute the index in here, because it assumes it's all available later
+          # FIXME: combine cases
           if args.memory_dtype == dtypes.float16:
             lreg = lang.newreg((newvar, "fromfakebits16"), dtype=dtypes.float16)
             lang.ins.append(AssemblyInstruction(UOps.LOAD, lreg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', "bits16")))
             lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lreg], (off, 'global' if not args.local else 'shared', dtypes.uint16)))
           #  NOTE: it seems Token.dtype (and by extension newreg) will always be float32 or one of the packed float types, so we cast
+          elif args.memory_dtype == dtypes.bool:
+            lreg = lang.newreg((newvar, "fromuint8"), dtype=dtypes.uint8)
+            lang.ins.append(AssemblyInstruction(UOps.LOAD, lreg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', dtypes.uint8)))
+            lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lreg], (off, 'global' if not args.local else 'shared', dtypes.uint8)))
           elif args.memory_dtype != dtypes.float32:
             lreg = lang.newreg((newvar, str(args.memory_dtype)), dtype=args.memory_dtype)
             lang.ins.append(AssemblyInstruction(UOps.LOAD, lreg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
@@ -206,11 +211,16 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         reg = lang.newreg((lang.tor[vin[0]], args.memory_dtype), dtype=args.memory_dtype)
         lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lang.tor[vin[0]]], args))
         lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, reg] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
-      if args.memory_dtype != lang.tor[vin[0]].dtype:
+      elif args.memory_dtype != lang.tor[vin[0]].dtype or args.memory_dtype == dtypes.bool:
         # FIXME: I think this is too strict and we don't actually need to cast when dtypes neq but same base type and dest is wider?
-        reg = lang.newreg((lang.tor[vin[0]], args.memory_dtype), dtype=args.memory_dtype)
-        lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [lang.tor[vin[0]]], args))
-        lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, reg] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype if not args.memory_dtype == dtypes.float16 else "bits16")))
+        # NOTE: We can't just `st.pred` or even store a .pred register using .b8, hence all these casting shenanigans for bool (input_type -> pred -> uint16, then store as uint8)
+        if args.memory_dtype == dtypes.bool != lang.tor[vin[0]].dtype: # We have to cast to bool first
+          prereg = lang.newreg((lang.tor[vin[0]], dtypes.bool), dtype=dtypes.bool)
+          lang.ins.append(AssemblyInstruction(UOps.CAST, prereg, [lang.tor[vin[0]]], args))
+        else: prereg = lang.tor[vin[0]]
+        reg = lang.newreg((prereg, dtypes.uint16 if args.memory_dtype == dtypes.bool else args.memory_dtype), dtype=dtypes.uint16 if args.memory_dtype == dtypes.bool else args.memory_dtype)
+        lang.ins.append(AssemblyInstruction(UOps.CAST, reg, [prereg], args))
+        lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, reg] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', "bits16" if args.memory_dtype == dtypes.float16 else dtypes.uint8 if args.memory_dtype == dtypes.bool else args.memory_dtype)))
       else:
         lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
   # define registers
