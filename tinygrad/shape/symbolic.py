@@ -2,7 +2,7 @@ from __future__ import annotations
 from abc import abstractmethod
 import functools
 from math import gcd
-from tinygrad.helpers import partition
+from tinygrad.helpers import partition, GlobalCounters
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
 
 # NOTE: Python has different behavior for negative mod and floor div than c
@@ -10,6 +10,12 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
 
 def is_sym_int(x: Any) -> bool: return isinstance(x, (int, Node))
 def sym_vars(x: Union[Node, int]) -> List[Variable]: return [] if isinstance(x, int) else x.vars()
+
+def sym_infer(expr) -> int:
+  if isinstance(expr, int): return expr
+  local_vars = {k.expr: v for k,v in GlobalCounters.var_vals.items()}
+  exec("INFERRED="+render_python[type(expr)](expr, ops=None, ctx=None), None, local_vars)  # pylint: disable=exec-used
+  return local_vars["INFERRED"]
 
 class Node:
   b: Union[Node, int]
@@ -140,8 +146,7 @@ class Variable(Node):
     return super().__new__(cls)
 
   def __init__(self, expr:Optional[str], nmin:int, nmax:int):
-    self.expr, self.min, self.max = expr, nmin, nmax
-    self.val: Optional[int] = None
+    self.expr, self.min, self.max, self.set = expr, nmin, nmax, False
   def vars(self): return [self]
 
 class NumNode(Node):
