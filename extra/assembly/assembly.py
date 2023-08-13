@@ -32,12 +32,9 @@ class AssemblyLanguage(NamedTuple):
   supports_load3: bool = False
   sin_is_sin2pi: bool = False
   no_div: bool = False
-
-  #  FIXME: cleanup?
-  # stateful
+  #TODO: these should be global vars
   cnts:DefaultDict[Tuple[DType, bool], int] = defaultdict(int)
   tor: Dict[Any, Register] = {}
-  bufs_cnt = 0
   buf_to_dtype = {}
   buf_to_index = {}
   ins = []
@@ -80,9 +77,7 @@ class AssemblyLanguage(NamedTuple):
 
   def addr_w_offset(self, args):
     assert isinstance(args, MemOp)
-    # idx = args.idx*self.bufs[args.i].dtype.itemsize
     idx = args.idx*self.buf_to_dtype[args.name].itemsize
-    # idx = args.idx*args.memory_dtype.itemsize
     off = 0  # TODO: should this be None?
     if isinstance(idx, SumNode):
       nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
@@ -95,20 +90,15 @@ class AssemblyLanguage(NamedTuple):
         new_reg = self.newreg((reg.nm, 'vec'), dtype=reg.dtype)
         self.ins.append(AssemblyInstruction(UOps.ALU, new_reg, [reg], UnaryOps.NOOP))
         reg = new_reg
-      # return self.tor[f"buf{args.i}"], reg, off
       return self.tor[f"buf{self.buf_index[args.name]}"], reg, off
-#      return self.tor[args.name], reg, off
-    # reg = self.render_alu(BinaryOps.ADD, self.render_cast(reg, dtypes.uint64), self.tor[f"buf{args.i}"], dtype=dtypes.uint64)
     reg = self.render_alu(BinaryOps.ADD, self.render_cast(reg, dtypes.uint64), self.tor[f"buf{self.buf_index[args.name]}"], dtype=dtypes.uint64)
-#    reg = self.render_alu(BinaryOps.ADD, self.render_cast(reg, dtypes.uint64), self.tor[args.name], dtype=dtypes.uint64)
     return reg, None, off
 
 # s registers are the addresses and non local indexes
 def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
+  #TODO: make ins and tor should be stateless?
   lang.ins.clear()
   lang.tor.clear()
-  lang.cnts.clear()
-  # ins += [AssemblyInstruction(UOps.SPECIAL, newreg(f"buf{i}", dtype=dtypes.uint64, scalar=True), [], f"buf{i}") for i in range(len(self.bufs))]
   lang.buf_to_dtype = {args[0]:args[1] for uop,_,_,args in uops if uop == UOps.DEFINE_GLOBAL}
   lang.buf_index = {x:i for i,x in enumerate(lang.buf_to_dtype.keys())}
   global_size, local_size = [], []
@@ -163,7 +153,15 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         lang.ins.append(AssemblyInstruction(UOps.ALU, out, [lang.tor[x] for x in vin], args))
     elif uop == UOps.LOAD and newvar is not None:
       if isinstance(args, ConstOp):
-        lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(newvar, dtype=newvar.dtype), [], args.value))
+        if args.valid.min == 0 and args.valid.max == 1:
+          lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(newvar, dtype=newvar.dtype), [], args.invalid_value))
+          pred = args.valid.render(lang.render_ops, lang)
+          lang.ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
+          lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(newvar, dtype=newvar.dtype), [], args.value))
+          lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
+          skipload_branch += 1
+        else:
+          lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(newvar, dtype=newvar.dtype), [], args.value if args.valid.min == 1 else args.invalid_value))
       else:
         idx, treg, off = lang.addr_w_offset(args)
         reg = lang.newreg(newvar, dtype=newvar.dtype, scalar=(idx.scalar and (not isinstance(treg, Register) or treg.scalar))) # and not dtypes.is_float(newvar.dtype)))

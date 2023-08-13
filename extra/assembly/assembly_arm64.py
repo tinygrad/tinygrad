@@ -150,9 +150,9 @@ def specialize_to_arm64(self, name, asm):
       ins.append(f"str {reg_out}, [{rtor[vin[0].nm]}, x15, lsl {shifts[arg[2]] if arg[2] is not None and arg[2] in shifts else '#0'}]")
     elif uop == UOps.COND_BRANCH:
       #TODO: this is a hack it shouldn't always be a cmp before a cond branch?
-      #if prev_uop == UOps.LOAD:
-        #ins.append(f"cmp {rtor[vin[0].nm]}, #0")
-      ins.append(f"b.{'lt' if arg[1] == True else 'ge'} {arg[0][1:]}")
+      if prev_uop == UOps.LOAD:
+        ins.append(f"cmp {rtor[vin[0].nm]}, #0")
+      ins.append(f"b.{'lt' if arg[1] else 'ge'} {arg[0][1:]}")
     elif uop == UOps.LABEL:
       ins.append(f"{arg[1:]}:")
     prev_uop=uop
