@@ -38,8 +38,9 @@ class ClangProgram:
     if not binary:
       prg = CLANG_PROGRAM_HEADER + prg
       if not os.path.exists(fn):
-        subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+fn+'.tmp').split(), input=prg.encode('utf-8'))
-        os.rename(fn+'.tmp', fn)
+        _, tmp = tempfile.mkstemp()
+        subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+tmp).split(), input=prg.encode('utf-8'))
+        os.rename(tmp, fn)
     else:
       if DEBUG >= 5: print(prg)
       if CI and getenv('ARM64'):
@@ -54,6 +55,7 @@ class ClangProgram:
         return
       subprocess.check_output(args=('as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
       subprocess.check_output(args=('clang -lm -shared -fPIC '+fn+'.o -o'+fn).split())
+    
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
 
