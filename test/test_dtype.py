@@ -146,6 +146,7 @@ class TestInt32Dtype(unittest.TestCase):
 class TestBoolDtype(unittest.TestCase):
   def test_casts_from_bool(self): _test_casts_from([0,1,1,0], source_dtype=dtypes.bool, target_dtypes=[dtypes.float32, dtypes.int32])
   def test_casts_to_bool(self): _test_casts_to([0,1,1,0], source_dtypes=[dtypes.float32, dtypes.int32], target_dtype=dtypes.bool)
+  def test_casts_to_bool_from_negative(self): _test_casts_to([-1,-128,0,-8], source_dtypes=[dtypes.float32, dtypes.int32, dtypes.int8], target_dtype=dtypes.bool, target_contents=[True, True, False, True])
 
 if __name__ == '__main__':
   unittest.main()
