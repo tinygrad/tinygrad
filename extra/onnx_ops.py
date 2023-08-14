@@ -277,6 +277,7 @@ def EmbedLayerNormalization(input_ids, segment_ids:Optional[Tensor]=None, word_e
   input_shape = input_ids.shape
   bsz, seq_length = input_shape[0], input_shape[1]
 
+
   compute_seg_emb = (segment_embedding is not None and segment_ids is not None)
   vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
 
@@ -303,7 +304,6 @@ def Attention(input:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Opti
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.Attention
   assert num_heads is not None  # required
   assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None)
-  print(past.numpy())
 
   hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.shape[1] // 3,)
 
@@ -316,7 +316,6 @@ def Attention(input:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Opti
   xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], num_heads, -1).transpose(1, 2) for x in (xq, xk, xv)]
   # TODO do_rotary
   assert xq.shape == xk.shape == xv.shape
-  print(xq.shape)
 
   # past and present
   if past is not None:
@@ -328,6 +327,13 @@ def Attention(input:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Opti
   out = Tensor.scaled_dot_product_attention(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
 
   return out, present
+
+def SkipLayerNormalization(input:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=None):
+  if epsilon is None: epsilon=1e-12
+  x = input + skip + bias
+  return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
+
+def FastGelu(x:Tensor, bias:Optional[Tensor]=None): return 0.5 * x * (1 + (x * 0.797885 + 0.035677 * x ** 3).tanh()) + bias
 
 def _type_constraints(*tensors:Tuple[Tensor], dtypes):  # TODO more pythonic way to write this?
   for t in tensors:
