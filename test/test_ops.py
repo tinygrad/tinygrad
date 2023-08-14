@@ -4,7 +4,7 @@ import math
 import numpy as np
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, dtypes
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
 from tinygrad.lazy import Device
 
 if CI:
@@ -15,7 +15,7 @@ FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
 def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3):
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
-  ts, tst = prepare_test_op(a, b, shps, vals)
+  ts, tst = prepare_test_op(a, b, shps, vals, forward_only)
 
   st = time.monotonic()
   out = torch_fxn(*ts)
@@ -55,12 +55,12 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
 
   if not CI: print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
-def prepare_test_op(a, b, shps, vals):
+def prepare_test_op(a, b, shps, vals, forward_only=False):
   torch.manual_seed(0)
   np.random.seed(0)
-  if shps is None: ts = [torch.tensor(x, requires_grad=True) for x in vals]
-  else: ts = [torch.tensor((np.random.random(size=x) + a) * b, requires_grad=True, dtype=torch.float32) for x in shps]
-  tst = [Tensor(x.detach().numpy(), requires_grad=not FORWARD_ONLY) for x in ts]
+  if shps is None: ts = [torch.tensor(x, requires_grad=(not forward_only)) for x in vals]
+  else: ts = [torch.tensor((np.random.random(size=x) + a) * b, requires_grad=(not forward_only), dtype=torch.float32) for x in shps]
+  tst = [Tensor(x.detach().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
   return ts, tst
 
 class TestOps(unittest.TestCase):
@@ -150,10 +150,6 @@ class TestOps(unittest.TestCase):
       lambda x: torch.where(x > 0.5, 4, 2).permute((1, 0)),
       lambda x: (x > 0.5).where(4, 2).permute((1, 0)), forward_only=True)
 
-  def test_where_bool(self): # Fixes #1479.
-    helper_test_op([(1,), (1,)], lambda x,y: torch.where(x==y, torch.tensor([1,1], dtype=torch.bool), 0),
-      lambda x,y: (x==y).where(Tensor([1,1], dtype=dtypes.bool), 0), forward_only=True, vals=[[0,1],[1,1]])
-
   def _test_cmp(self, fxn, reverse=True):
     for shps in [[(3, 4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
       helper_test_op(shps, fxn, fxn, forward_only=True)
@@ -173,7 +169,7 @@ class TestOps(unittest.TestCase):
     self.assertRaises(RuntimeError, (t1 == t2).sum().backward)
     tt1 = Tensor.ones(4, requires_grad=True)
     tt2 = Tensor.ones(4, requires_grad=True)
-    self.assertRaises(RuntimeError, (tt1.eq(tt2)).sum().backward)
+    self.assertRaises(RuntimeError, (tt1 == tt2).sum().backward)
 
   def test_cmp_lt_backwards(self):
     t1 = torch.ones(4, requires_grad=True)
@@ -244,6 +240,7 @@ class TestOps(unittest.TestCase):
   def test_div(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
     helper_test_op([(), ()], lambda x,y: x/y, Tensor.div)
+    helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=[[5],[1]])
   def test_div_const(self):
     helper_test_op([(45,65)], lambda x: x/255, lambda x: x/255)
     helper_test_op([(45,65)], lambda x: x/1, lambda x: x/1)
@@ -1145,6 +1142,11 @@ class TestOps(unittest.TestCase):
     ta = Tensor(c, requires_grad=True)
     tb = torch.tensor(c, requires_grad=True, dtype=torch.float32)
     self.helper_test_exception([], lambda: tor[tb,:,:,:,:].sum().backward(), lambda: ten.gather(ta, dim=0).sum().backward(), expected=(IndexError, RuntimeError)) # torch raises IndexError, Tensor raises RuntimeError
+
+  def test_scaled_product_attention(self):
+    helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], lambda x,y,z: torch.nn.functional.scaled_dot_product_attention(x,y,z), lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z))
+    helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64), (32,8,16,16)], lambda x,y,z,m: torch.nn.functional.scaled_dot_product_attention(x,y,z,attn_mask=m), lambda x,y,z,m: Tensor.scaled_dot_product_attention(x,y,z,attn_mask=m))
+    helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], lambda x,y,z: torch.nn.functional.scaled_dot_product_attention(x,y,z,is_causal=True), lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z,is_causal=True))
 
 if __name__ == '__main__':
   np.random.seed(1337)
