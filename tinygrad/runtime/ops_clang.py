@@ -17,7 +17,7 @@ class ClangProgram:
     # TODO: is there a way to not write this to disk?
     fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
     if not os.path.exists(fn):
-      _, tmp = tempfile.mkstemp()
+      tmp = f"{fn}.{os.getpid()}.tmp"
       subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+tmp).split(), input=prg.encode('utf-8'))
       os.rename(tmp, fn)
     self.lib = ctypes.CDLL(fn)
