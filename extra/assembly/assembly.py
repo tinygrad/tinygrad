@@ -36,9 +36,9 @@ class AssemblyLanguage(NamedTuple):
   #TODO: these should be global vars
   cnts:DefaultDict[Tuple[DType, bool], int] = defaultdict(int)
   tor: Dict[Any, Register] = {}
-  buf_to_dtype: Dict[str, dtypes] = {}
-  buf_to_index: Dict[str, int] = {}
-  ins:[AssemblyInstruction] = []
+  buf_to_dtype = {}
+  buf_to_index = {}
+  ins = []
 
   def newreg(self, tok, dtype=dtypes.float32, scalar=False):
     if isinstance(tok, Token): dtype = tok.dtype  # this
@@ -97,7 +97,7 @@ class AssemblyLanguage(NamedTuple):
 
 # s registers are the addresses and non local indexes
 def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
-  #TODO: make ins and tor should be stateless?
+  #TODO: Do not use clear() 
   lang.ins.clear()
   lang.tor.clear()
   lang.buf_to_dtype = {args[0]:args[1] for uop,_,_,args in uops if uop == UOps.DEFINE_GLOBAL}

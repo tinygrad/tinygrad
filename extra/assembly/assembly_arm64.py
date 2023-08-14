@@ -18,8 +18,7 @@ class ARM64Language(AssemblyLanguage):
   #TODO: do i need this?
   pass
 
-def specialize_to_arm64(self, name, asm, global_size):
-  print(global_size)
+def specialize_to_arm64(fn_nm, asm, global_size):
   var_size = 16
   prev_uop = None
   ins = [] 
@@ -172,9 +171,9 @@ def specialize_to_arm64(self, name, asm, global_size):
     if out is not None and out.nm in mem_vars:
       ins.append(f"mov x15, {mem_vars[out.nm]}")
       ins.append(f"str {rtor[out.nm]}, [sp, x15]")
-  return "\n".join([f"//varsize {var_size}",".arch armv8-a",".text", f".global {get_name(name)}",".p2align 2", f"{get_name(name)}:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret", "\n"])
+  return "\n".join([f"//varsize {var_size}",".arch armv8-a",".text", f".global {get_name(fn_nm)}",".p2align 2", f"{get_name(fn_nm)}:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret", "\n"])
 
-def uops_to_arm64_asm(function_name:str, uops:List[UOp]):
+def uops_to_arm64_asm(fn_nm:str, uops:List[UOp]):
   lang = ARM64Language()
-  global_size, local_size = uops_to_asmstyle(lang, function_name, uops)
-  return specialize_to_arm64(lang, function_name, lang.ins, global_size[::-1]), global_size[::-1], local_size[::-1]
+  global_size, local_size = uops_to_asmstyle(lang, fn_nm, uops)
+  return specialize_to_arm64(fn_nm, lang.ins, global_size[::-1]), global_size[::-1], local_size[::-1], True

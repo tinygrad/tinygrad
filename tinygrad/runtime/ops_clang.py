@@ -43,7 +43,6 @@ class ClangProgram:
         prg = prg.split('\n') # type: ignore
         self.varsize = align(int(prg[0].split(" ")[1]))
         self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
-#        self.float_loads = {(i*4+ADDRESS):ins.split("=") for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if '=' in ins}
         prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n'])
         subprocess.check_output(args=('aarch64-linux-gnu-as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
         subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+fn+ '.o ' + fn +'.bin').split())
