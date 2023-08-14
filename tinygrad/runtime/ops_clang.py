@@ -28,7 +28,7 @@ def emulate_ext_calls(fn, uc, address, size, user_data):
   uc.reg_write(getattr(arm64_const, f'UC_ARM64_REG_S{fn[1][1:]}'), struct.unpack('I', struct.pack('f', mock_lm[fn[0]](s_in)))[0])  # type: ignore
 
 class ClangProgram:
-  def __init__(self, name:str, prg:str, binary:bool=False, var_size:int=0):
+  def __init__(self, name:str, prg:str, binary:bool=False):
     # TODO: is there a way to not write this to disk?
     fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
     if not binary:
