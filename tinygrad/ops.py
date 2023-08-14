@@ -35,7 +35,7 @@ class LazyOp:
     self.op, self.src, self.arg, self.buffers = op, src, arg, ()
     try:
       for x in src:
-        self.buffers += x.buffers
+        self.buffers += x.buffers if isinstance(x, LazyOp) else (x,)
     except AttributeError:
       # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
       pass
