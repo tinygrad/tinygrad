@@ -21,7 +21,9 @@ def safe_numpy(t) -> np.ndarray:
   if t not in numpy_cache:
     if DEBUG >= 1:
       print("numpy cache miss", t)
-    numpy_cache[t] = t.numpy()
+    tmp = t.numpy()
+    numpy_cache[t] = tmp if len(tmp.shape) else tmp.reshape(1)
+  assert len(numpy_cache[t].shape) > 0
   return numpy_cache[t]
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
@@ -92,7 +94,7 @@ def get_run_onnx(onnx_model: ModelProto):
       if inp.name in tensors: continue
       tmp=inp.type.optional_type.elem_type.tensor_type if inp.type.HasField("optional_type") else (inp.type.sequence_type.elem_type.tensor_type if inp.type.HasField("sequence_type") else inp.type.tensor_type)
       shape = shape_to_tuple(tmp.shape)
-      if len(shape) >= 1 and shape[0] == 0: shape = tuple([1]+list(shape[1:]))   # 1 batch size
+      if len(shape) >= 1: shape = tuple([x if x != 0 else 1 for x in shape])  # replace all dynamic dims with 1 for now
       if inp.name in inputs:
         if isinstance(inputs[inp.name], Tensor):
           input_tensors[inp.name] = inputs[inp.name]
@@ -183,6 +185,8 @@ def get_run_onnx(onnx_model: ModelProto):
         steps = safe_numpy(inp[4])[0] if len(inp) > 4 else 1
         starts, ends = safe_numpy(starts.cast(dtypes.int32)).tolist(), safe_numpy(ends.cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
         for i,axis in enumerate(axes.tolist()):
+          assert axis % 1 == 0
+          axis = int(axis)
           arg[axis] = (starts[i] if starts[i] >= 0 else inp[0].shape[axis]+starts[i], ends[i] if ends[i] >= 0 else inp[0].shape[axis]+ends[i])
         ret = inp[0].slice(arg=arg)
       elif n.op_type == "Shrink":
