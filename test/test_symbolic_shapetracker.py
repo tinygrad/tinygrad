@@ -1,5 +1,5 @@
 import unittest
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
 
@@ -99,3 +99,20 @@ class TestSymbolicExpand(unittest.TestCase):
     a = Tensor.rand(3, 4).reshape(3, vi)
     a = a + 1
     assert a.shape == (3, vi)
+
+class TestSymbolicShapeExpr(unittest.TestCase):
+  def test_symbolic_expr_idxs(self):
+    # taken from symbolic shape llama
+    i = Variable("i", 1, 120)
+    gidx0 = Variable("gidx0", 0, i)
+    lidx1 = Variable("lidx1", 0, 7)
+    idx = (gidx0, lidx1, Variable.num(1))
+    shape = (i+1, 8, 4)
+    strides = (1, (i*4)+4, i+1)
+    view = View(shape, strides)
+    st = ShapeTracker(shape, [view])
+    idx, valid = st.expr_idxs(idx)
+    assert idx.render() == "(((1+i)*1)+(lidx1*((i*4)+4))+gidx0)"
+
+if __name__ == '__main__':
+  unittest.main()

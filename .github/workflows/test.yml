@@ -158,6 +158,7 @@ jobs:
         name: Test multigpu
         run: |
           PYTHONPATH="." python test/external/dist/test_world.py
+          PYTHONPATH="." python test/external/dist/test_collectives.py
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests
