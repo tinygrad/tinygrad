@@ -8,7 +8,9 @@ from tinygrad.codegen.linearizer import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 import struct
 import numpy as np
-if CI and getenv('ARM64'): from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, arm64_const
+
+ARM64 = getenv('ARM64', False)
+if CI and ARM64: from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, arm64_const
 
 args = {
   'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
@@ -38,7 +40,7 @@ class ClangProgram:
         os.rename(tmp, fn)
     else:
       if DEBUG >= 5: print(prg)
-      if CI and getenv('ARM64'):
+      if CI and ARM64:
         prg = prg.split('\n') # type: ignore
         self.varsize = align(int(prg[0].split(" ")[1]))
         self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
@@ -55,7 +57,7 @@ class ClangProgram:
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()
-    if CI and getenv('ARM64'):
+    if CI and ARM64:
       mu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
       total_mem = align(reduce(lambda total, arg: total + arg.size * arg.dtype.itemsize, args, len(self.prg)+self.varsize))
       mu.mem_map(ADDRESS, total_mem)
@@ -76,5 +78,5 @@ class ClangProgram:
       self.fxn(*[x._buf for x in args])
     if wait: return time.monotonic()-st
 
-renderer = fromimport("extra.assembly.assembly_arm64", "uops_to_arm64_asm") if getenv("ARM64") else functools.partial(uops_to_cstyle, CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict"))
+renderer = fromimport("extra.assembly.assembly_arm64", "uops_to_arm64_asm") if ARM64 else functools.partial(uops_to_cstyle, CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict"))
 ClangBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False), renderer, ClangProgram)

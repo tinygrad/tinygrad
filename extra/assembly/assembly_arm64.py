@@ -168,7 +168,7 @@ def specialize_to_arm64(fn_nm, asm, global_size):
       ins.append(f"str {rtor[out.nm]}, [sp, x15]")
   return "\n".join([f"//varsize {var_size}",".arch armv8-a",".text", f".global {get_name(fn_nm)}",".p2align 2", f"{get_name(fn_nm)}:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret", "\n"])
 
-def uops_to_arm64_asm(fn_nm:str, uops:List[UOp]):
+def uops_to_arm64_asm(fn_nm:str, uops:List[UOp]) -> Tuple[str, List[int], List[int], bool]:
   lang = ARM64Language()
   global_size, local_size = uops_to_asmstyle(lang, fn_nm, uops)
   return specialize_to_arm64(fn_nm, lang.ins, global_size[::-1]), global_size[::-1], local_size[::-1], True
