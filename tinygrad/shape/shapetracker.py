@@ -148,11 +148,11 @@ def unsafe_resize(view, arg: Tuple[Tuple[int, int], ...], mask=None):
 
 @functools.lru_cache(maxsize=None)
 def _permute(view: View, axis: Tuple[int, ...]) -> View:
-    if axis == tuple(range(len(axis))): return view
-    assert all(isinstance(x, int) and (0 <= x < len(view.shape)) for x in axis), f"invalid permute {axis} for {view.shape}"
-    assert len(set(axis)) == len(axis) == len(view.shape), f"can't permute {view.shape} with {axis}"
-    shape, strides = zip(*[(view.shape[a], view.strides[a]) for a in axis])
-    return View(tuple(shape), tuple(strides), view.offset, tuple([view.mask[a] for a in axis]) if view.mask is not None else None)
+  if axis == sorted(axis): return view
+  assert all(isinstance(x, int) and (0 <= x < len(view.shape)) for x in axis), f"invalid permute {axis} for {view.shape}"
+  assert len(set(axis)) == len(axis) == len(view.shape), f"can't permute {view.shape} with {axis}"
+  shape, strides = zip(*[(view.shape[a], view.strides[a]) for a in axis])
+  return View(tuple(shape), tuple(strides), view.offset, tuple([view.mask[a] for a in axis]) if view.mask is not None else None)
 
 @functools.lru_cache(maxsize=None)
 def _expand(view: View, new_shape: Tuple[Union[Node,int], ...]) -> View:
