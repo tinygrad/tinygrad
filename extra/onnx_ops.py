@@ -577,3 +577,21 @@ def OneHot(indices, depth, values, axis=-1):
   ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
   cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
   return cond.where(values[1], values[0]).cast(values.dtype)
+
+def Erf(x):
+  sign = x.sign()
+  x = x.abs()
+  t = 1.0 / (1.0 + 0.3275911 * x)
+  term1 = 0.254829592 * t
+  term2 = -0.284496736 * t ** 2
+  term3 = 1.421413741 * t ** 3
+  term4 = -1.453152027 * t ** 4
+  term5 = 1.061405429 * t ** 5
+  y = (term1 + term2 + term3 + term4 + term5)
+  """
+  one liner kinda
+    t = 1.0 / (1.0 + 0.3275911 * x)
+    y = ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t
+    return sign * (1.0 - y * math.exp(-x * x))
+  """
+  return sign * (1.0 - y * Tensor.exp(-x * x))
