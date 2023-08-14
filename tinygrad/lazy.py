@@ -244,7 +244,7 @@ class LazyBuffer:
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).expand(arg), MovementOps.EXPAND, arg)
 
   def permute(self: LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
-    if arg == sorted(arg): return self
+    if arg == tuple(sorted(arg)): return self
     if not self.realized:
       if self.op.op == MovementOps.PERMUTE: return self.op.src[0].permute(tuple([self.op.arg[i] for i in arg]))
       if PUSH_PERMUTES and self.optype == ReduceOps:

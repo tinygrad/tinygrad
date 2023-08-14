@@ -148,7 +148,7 @@ def unsafe_resize(view, arg: Tuple[Tuple[int, int], ...], mask=None):
 
 @functools.lru_cache(maxsize=None)
 def _permute(view: View, axis: Tuple[int, ...]) -> View:
-  if axis == sorted(axis): return view
+  if axis == tuple(sorted(axis)): return view
   assert all(isinstance(x, int) and (0 <= x < len(view.shape)) for x in axis), f"invalid permute {axis} for {view.shape}"
   assert len(set(axis)) == len(axis) == len(view.shape), f"can't permute {view.shape} with {axis}"
   shape, strides = zip(*[(view.shape[a], view.strides[a]) for a in axis])
