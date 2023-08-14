@@ -1,19 +1,19 @@
 <div align="center">
 
-[![logo](https://raw.githubusercontent.com/geohot/tinygrad/master/docs/logo.png)](https://tinygrad.org)
+[![logo](https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/logo.png)](https://tinygrad.org)
 
 tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).
 
 <h3>
 
-[Homepage](https://github.com/geohot/tinygrad) | [Documentation](/docs) | [Examples](/examples) | [Showcase](/docs/showcase.md) | [Discord](https://discord.gg/ZjZadyC7PK)
+[Homepage](https://github.com/tinygrad/tinygrad) | [Documentation](/docs) | [Examples](/examples) | [Showcase](/docs/showcase.md) | [Discord](https://discord.gg/ZjZadyC7PK)
 
 </h3>
 
-[![GitHub Repo stars](https://img.shields.io/github/stars/geohot/tinygrad)](https://github.com/geohot/tinygrad/stargazers)
-[![Unit Tests](https://github.com/geohot/tinygrad/actions/workflows/test.yml/badge.svg)](https://github.com/geohot/tinygrad/actions/workflows/test.yml)
+[![GitHub Repo stars](https://img.shields.io/github/stars/tinygrad/tinygrad)](https://github.com/tinygrad/tinygrad/stargazers)
+[![Unit Tests](https://github.com/tinygrad/tinygrad/actions/workflows/test.yml/badge.svg)](https://github.com/tinygrad/tinygrad/actions/workflows/test.yml)
 [![Discord](https://img.shields.io/discord/1068976834382925865)](https://discord.gg/ZjZadyC7PK)
-[![Lines of code](https://img.shields.io/tokei/lines/github/geohot/tinygrad)](https://github.com/geohot/tinygrad)
+[![Lines of code](https://img.shields.io/tokei/lines/github/tinygrad/tinygrad)](https://github.com/tinygrad/tinygrad)
 
 </div>
 
@@ -21,9 +21,9 @@ tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) an
 
 This may not be the best deep learning framework, but it is a deep learning framework.
 
-Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training.
+Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training. If XLA is CISC, tinygrad is RISC.
 
-Eventually, we will have a [tinygrad accelerator](https://geohot.github.io/blog/jekyll/update/2021/06/13/a-breakdown-of-ai-chip-companies.html), then tinygrad will be ***fast***. But, for now, it is slow.
+tinygrad is still alpha software, but we [raised some money](https://geohot.github.io/blog/jekyll/update/2023/05/24/the-tiny-corp-raised-5M.html) to make it good. Someday, we will tape out chips.
 
 ## Features
 
@@ -36,7 +36,7 @@ tinygrad can run [LLaMA](/docs/showcase.md#llama) and [Stable Diffusion](/docs/s
 Try a matmul. See how, despite the style, it is fused into one kernel with the power of laziness.
 
 ```sh
-DEBUG=3 OPTLOCAL=1 python3 -c "from tinygrad.tensor import Tensor;
+DEBUG=3 python3 -c "from tinygrad.tensor import Tensor;
 N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N);
 c = (a.reshape(N, 1, N) * b.permute(1,0).reshape(1, N, N)).sum(axis=2);
 print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
@@ -88,7 +88,7 @@ tinygrad already supports numerous accelerators, including:
 - [x] Triton
 - [x] PyTorch
 
-And it is easy to add more! Your accelerator of choice only needs to support a total of 20 (optionally 21) low level ops.
+And it is easy to add more! Your accelerator of choice only needs to support a total of 26 (optionally 27) low level ops.
 More information can be found in the [documentation for adding new accelerators](/docs/adding_new_accelerators.md).
 
 ## Installation
@@ -98,9 +98,9 @@ The current recommended way to install tinygrad is from source.
 ### From source
 
 ```sh
-git clone https://github.com/geohot/tinygrad.git
+git clone https://github.com/tinygrad/tinygrad.git
 cd tinygrad
-python3 -m pip install -e . # or `py3 -m pip install -e .` if you are on windows
+python3 -m pip install -e .
 ```
 Don't forget the `.` at the end!
 
@@ -139,9 +139,9 @@ print(y.grad.numpy())  # dz/dy
 
 There has been a lot of interest in tinygrad lately. Here are some basic guidelines for contributing:
 
-- Bug fixes are the best and always welcome! Like [this one](https://github.com/geohot/tinygrad/pull/421/files).
+- Bug fixes are the best and always welcome! Like [this one](https://github.com/tinygrad/tinygrad/pull/421/files).
 - If you don't understand the code you are changing, don't change it!
-- All code golf PRs will be closed, but [conceptual cleanups](https://github.com/geohot/tinygrad/pull/372/files) are great.
+- All code golf PRs will be closed, but [conceptual cleanups](https://github.com/tinygrad/tinygrad/pull/372/files) are great.
 - Features are welcome. Though if you are adding a feature, you need to include tests.
 - Improving test coverage is great, with reliable non-brittle tests.
 

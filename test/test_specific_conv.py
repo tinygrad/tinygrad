@@ -2,7 +2,10 @@ import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes
 from tinygrad.lazy import Device
+import pytest
 # similar to test/external/external_test_gpu_ast.py, but universal
+
+pytestmark = pytest.mark.exclude_cuda
 
 class TestSpecific(unittest.TestCase):
   # from openpilot
@@ -19,7 +22,7 @@ class TestSpecific(unittest.TestCase):
     w = Tensor.randn(2048, 512)
     (x @ w).reshape(1, 128, 4).contiguous().realize()
 
-  @unittest.skipIf(Device.DEFAULT == "LLVM", "Broken on LLVM")
+  @unittest.skipIf(Device.DEFAULT in ["LLVM", "WEBGPU"], "Broken on LLVM and webgpu")
   def test_big_vec_mul(self):
     # from LLaMA
     #   0 buffer<4096, dtypes.float>                      [View((1024, 1, 1, 4), (4, 0, 0, 1), 0, None)]

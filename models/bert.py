@@ -1,7 +1,6 @@
-from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear, LayerNorm, Embedding
-from tinygrad.state import torch_load, load_state_dict, get_state_dict, get_parameters
+from tinygrad.state import torch_load, load_state_dict, get_parameters
 from extra.utils import download_file
 import numpy as np
 import functools
@@ -50,9 +49,6 @@ class BertForPreTraining:
       elif n == "kernel":
         v = np.transpose(v)
       cast(Tensor, pointer).assign(v).realize()
-
-    # for _, v in get_state_dict(self).items():
-    #   v.lazydata = v.lazydata.cast(dtypes.float16).realize()
 
     params = get_parameters(self)
     count = 0
@@ -222,7 +218,7 @@ class BertOutput:
     hidden_states = hidden_states.dropout(self.dropout)
     return self.LayerNorm(hidden_states + input_tensor)
 
-# approixmation of the error function
+# approximation of the error function
 def erf(x):
   t = (1 + 0.3275911 * x.abs()).reciprocal()
   return x.sign() * (1 - ((((1.061405429 * t + -1.453152027) * t + 1.421413741) * t + -0.284496736) * t + 0.254829592) * t * (-(x.square())).exp())
@@ -269,13 +265,8 @@ class BertSelfAttention:
     key_layer = self.transpose_for_scores(mixed_key_layer)
     value_layer = self.transpose_for_scores(mixed_value_layer)
 
-    attention_scores = query_layer @ key_layer.transpose(2, 3)
-    attention_scores = attention_scores / self.attention_head_size**0.5
-    attention_scores = attention_scores + attention_mask
-    attention_probs = attention_scores.softmax()
-    attention_probs = attention_probs.dropout(self.dropout)
+    context_layer = Tensor.scaled_dot_product_attention(query_layer, key_layer, value_layer, attention_mask, self.dropout)
 
-    context_layer = attention_probs @ value_layer
     context_layer = context_layer.transpose(1, 2)
     return context_layer.reshape(context_layer.shape[0], context_layer.shape[1], self.all_head_size)
 

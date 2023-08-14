@@ -13,7 +13,7 @@ def sparse_categorical_crossentropy(out, Y):
   y = Tensor(y)
   return out.mul(y).mean()
 
-def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categorical_crossentropy, 
+def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categorical_crossentropy,
         transform=lambda x: x, target_transform=lambda x: x, noloss=False):
   Tensor.training = True
   losses, accuracies = [], []
@@ -40,9 +40,10 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categoric
       losses.append(loss)
       accuracies.append(accuracy)
       t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
-    
+  return [losses, accuracies]
 
-def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=False, transform=lambda x: x, 
+
+def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=False, transform=lambda x: x,
              target_transform=lambda y: y):
   Tensor.training = False
   def numpy_eval(Y_test, num_classes):

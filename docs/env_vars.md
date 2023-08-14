@@ -5,11 +5,26 @@ Most of these are self-explanatory, and are usually used to set an option at run
 
 Example: `GPU=1 DEBUG=4 python3 -m pytest`
 
-The columns are: Variable, Possible Value(s) and Description.
+However you can also decorate a function to set a value only inside that function.
 
-- A `#` means that the variable can take any integer value.
+```python
+# in tensor.py (probably only useful if you are a tinygrad developer)
+@Context(DEBUG=4)
+def numpy(self) -> ...
+```
+
+Or use contextmanager to temporarily set a value inside some scope:
+
+```python
+with Context(DEBUG=0):
+  a = Tensor.ones(10, 10)
+  a *= 2
+```
 
 ## Global Variables
+The columns of this list are are: Variable, Possible Value(s) and Description.
+
+- A `#` means that the variable can take any integer value.
 
 These control the behavior of core tinygrad even when used as a library.
 
@@ -17,6 +32,7 @@ Variable | Possible Value(s) | Description
 ---|---|---
 DEBUG               | [1-4]      | enable debugging output, with 4 you get operations, timings, speed, generated code and more
 GPU                 | [1]        | enable the GPU backend
+CUDA                | [1]        | enable CUDA backend
 CPU                 | [1]        | enable CPU backend
 MPS                 | [1]        | enable MPS device (for Mac M1 and after)
 METAL               | [1]        | enable Metal backend (for Mac M1 and after)
@@ -27,7 +43,6 @@ LLVM                | [1]        | enable LLVM backend
 LLVMOPT             | [1]        | enable slightly more expensive LLVM optimizations
 LAZY                | [1]        | enable lazy operations (this is the default)
 OPT                 | [1-4]      | optimization level
-OPTLOCAL            | [1-2]      | enable local optimization
 GRAPH               | [1]        | create a graph of all operations (requires graphviz)
 GRAPHPATH           | [/path/to] | where to put the generated graph
 PRUNEGRAPH          | [1]        | prune MovementOps and LoadOps from the graph
@@ -37,7 +52,10 @@ FLOAT16             | [1]        | use float16 for images instead of float32
 ENABLE_METHOD_CACHE | [1]        | enable method cache (this is the default)
 EARLY_STOPPING      | [# > 0]  | stop after this many kernels
 DISALLOW_ASSIGN     | [1]        | disallow assignment of tensors
-NATIVE_EXPLOG       | [1]        | enable using native exp and log
+CL_EXCLUDE          | [name0,name1] | comma-separated list of device names to exclude when using OpenCL GPU backend (like `CL_EXCLUDE=gfx1036`)
+CL_PLATFORM         | [# >= 0]   | index of the OpenCL [platform](https://documen.tician.de/pyopencl/runtime_platform.html#pyopencl.Platform) to run on. Defaults to 0.
+RDNA                | [1]        | enable the specialized [RDNA 3](https://en.wikipedia.org/wiki/RDNA_3) assembler for AMD 7000-series GPUs. If not set, defaults to generic OpenCL codegen backend.
+PTX                 | [1]        | enable the specialized [PTX](https://docs.nvidia.com/cuda/parallel-thread-execution/) assembler for Nvidia GPUs. If not set, defaults to generic CUDA codegen backend.
 
 ## File Specific Variables
 
@@ -184,3 +202,9 @@ CI | [1] | disables some tests for CI
 Variable | Possible Value(s) | Description
 ---|---|---
 BS | [8, 16, 32, 64, 128] | batch size to use
+
+### extra/datasets/imagenet_download.py
+
+Variable | Possible Value(s) | Description
+---|---|---
+IMGNET_TRAIN | [1] | download also training data with imagenet

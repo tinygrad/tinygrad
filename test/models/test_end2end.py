@@ -2,19 +2,21 @@ import torch
 from torch import nn
 import unittest
 import numpy as np
+from tinygrad.state import get_parameters, get_state_dict
 from tinygrad.nn import optim, Linear, Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
-from datasets import fetch_mnist
+from extra.datasets import fetch_mnist
+from tinygrad.helpers import CI
 
 def compare_tiny_torch(model, model_torch, X, Y):
   Tensor.training = True
   model_torch.train()
-  model_state_dict = optim.get_state_dict(model)
+  model_state_dict = get_state_dict(model)
   for k,v in model_torch.named_parameters():
-    print(f"initting {k} from torch")
+    if not CI: print(f"initting {k} from torch")
     model_state_dict[k].assign(Tensor(v.detach().numpy())).realize()
 
-  optimizer = optim.SGD(optim.get_parameters(model), lr=0.01)
+  optimizer = optim.SGD(get_parameters(model), lr=0.01)
   optimizer_torch = torch.optim.SGD(model_torch.parameters(), lr=0.01)
 
   Xt = torch.Tensor(X.numpy())
@@ -22,11 +24,11 @@ def compare_tiny_torch(model, model_torch, X, Y):
 
   out = model(X)
   loss = (out * Y).mean()
-  print(loss.realize().numpy())
+  if not CI: print(loss.realize().numpy())
 
   out_torch = model_torch(torch.Tensor(X.numpy()))
   loss_torch = (out_torch * torch.Tensor(Y.numpy())).mean()
-  print(loss_torch.detach().numpy())
+  if not CI: print(loss_torch.detach().numpy())
 
   # assert losses match
   np.testing.assert_allclose(loss.realize().numpy(), loss_torch.detach().numpy(), atol=1e-4)
@@ -40,7 +42,7 @@ def compare_tiny_torch(model, model_torch, X, Y):
   for k,v in list(model_torch.named_parameters())[::-1]:
     g = model_state_dict[k].grad.numpy()
     gt = v.grad.detach().numpy()
-    print("testing grads", k)
+    if not CI: print("testing grads", k)
     np.testing.assert_allclose(g, gt, atol=1e-3, err_msg=f'grad mismatch {k}')
 
   # take the steps
@@ -49,7 +51,7 @@ def compare_tiny_torch(model, model_torch, X, Y):
 
   # assert weights match (they don't!)
   for k,v in model_torch.named_parameters():
-    print("testing weight", k)
+    if not CI: print("testing weight", k)
     np.testing.assert_allclose(model_state_dict[k].numpy(), v.detach().numpy(), atol=1e-3, err_msg=f'weight mismatch {k}')
 
 def get_mnist_data():

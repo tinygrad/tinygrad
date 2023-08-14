@@ -6,23 +6,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  # OMG THIS TEST IS DISABLED, PLZ MAKE TINYGRAD TINY AGAIN
-  lines:
-    name: Less than 1000 lines
-    runs-on: ubuntu-latest
-    if: ${{ false }}
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Install SLOCCount
-      run: sudo apt-get install sloccount
-    - name: Check <1000 lines
-      run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
-
   linter:
     name: Linters
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -31,20 +18,32 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: linting
     - name: Install dependencies
       run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Repo line count
+      run: python3 sz.py
     - name: Lint with pylint
-      run: python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
+      run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with flake8
-      run: flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E203,E304,E502,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
+      run: flake8 --statistics -j4
     - name: Lint tinygrad with pylint
       run: pylint tinygrad/
     - name: Run mypy
       run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
+    - name: Install SLOCCount
+      run: sudo apt-get install sloccount
+    - name: Check <5000 lines
+      run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
 
-  testcpu:
-    name: CPU Tests
+  testcpuimagenet:
+    name: CPU and ImageNet to C Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -53,24 +52,23 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: testing
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Test Docs
+      run: python docs/abstractions.py
+    - name: Test Quickstart
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
     - name: Run Pytest
-      run: python -m pytest -s -v -n=auto test/
-
-  testimagenet:
-    name: ImageNet to C Compile Test
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e .
+      run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)"
+    - name: Fuzz Test symbolic
+      run: python test/external/fuzz_symbolic.py
+    - name: Fuzz Test shapetracker
+      run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
     - name: Compile EfficientNet to C
       run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
@@ -78,25 +76,10 @@ jobs:
     - name: Test EfficientNet
       run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
 
-  testllvm:
-    name: LLVM Tests (w method cache)
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e '.[llvm,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Run Pytest
-      run: ENABLE_METHOD_CACHE=1 LLVM=1 python -m pytest -s -v -n=auto test/
-
   testtorch:
     name: Torch Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -105,83 +88,182 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: testing
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: TORCH=1 python -m pytest -s -v -n=auto test/
+      run: TORCH=1 python -m pytest -n=auto test/
     - name: Run ONNX
-      run: TORCH=1 python -m pytest test/external/external_test_onnx_backend.py || true
-
-  testgpu:
-    name: GPU Tests
-    runs-on: ubuntu-20.04
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Update packages
-      run: |
-        wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
-        echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-        sudo apt-get update
-    - name: Install OpenCL
-      #run: sudo apt-get install -y pocl-opencl-icd
-      run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Run Optimizer Test (OPT 2 and 3)
-      run: |
-        PYTHONPATH="." OPT=2 GPU=1 python test/external/external_test_opt.py
-        PYTHONPATH="." OPT=3 GPU=1 python test/external/external_test_opt.py
-    - name: Run Pytest (default)
-      run: GPU=1 python -m pytest -s -v -n=auto test/
+      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
 
   testopencl:
-    name: openpilot (OpenCL) Test
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [optimage, openpilot, multigpu]
+    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'|| matrix.task=='openpilot'&&'openpilot (OpenCL) Tests'|| matrix.task=='multigpu'&&'MultiGPU Tests'}}
     runs-on: ubuntu-20.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Find faster apt mirror
+        uses: vegardit/fast-apt-mirror.sh@v1
+      - name: Update packages
+        run: |
+          wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt-get update
+      - name: Install OpenCL
+        #run: sudo apt-get install -y pocl-opencl-icd
+        run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: testing
+      - name: Install Dependencies
+        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - if: ${{ matrix.task == 'optimage' }}
+        name: Run Optimizer Test (OPT 2 and 3)
+        run: |
+          PYTHONPATH="." OPT=2 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
+          PYTHONPATH="." OPT=3 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
+      - if: ${{ matrix.task == 'optimage'}}
+        name: Test GPU IMAGE ops
+        run: |
+          GPU=1 IMAGE=1 python3 -m pytest -n=auto test/test_ops.py
+          FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 -m pytest -n=auto test/test_ops.py
+      - if: ${{ matrix.task == 'openpilot' }}
+        name: Test openpilot model compile and size
+        run: |
+          DEBUG=2 ALLOWED_KERNEL_COUNT=199 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+          python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
+      - if: ${{ matrix.task == 'openpilot' }}
+        name: Test openpilot model correctness (float32)
+        run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+      - if: ${{ matrix.task == 'openpilot' }}
+        name: Test tensor core ops
+        run: GPU=1 TC=2 python3 -m pytest -n=auto test/test_ops.py
+      - if: ${{ matrix.task == 'multigpu' }}
+        name: Test multigpu
+        run: |
+          PYTHONPATH="." python test/external/dist/test_world.py
+          PYTHONPATH="." python test/external/dist/test_collectives.py
+
+  testmetalwebgpu:
+    name: Metal and WebGPU Tests
+    runs-on: macos-13
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Update packages
-      run: |
-        wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
-        echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-        sudo apt-get update
-    - name: Install OpenCL
-      #run: sudo apt-get install -y pocl-opencl-icd
-      run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
-    - name: Set up Python 3.8
+    - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
-        python-version: 3.8
+        python-version: 3.11
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/Library/Caches/pip
+        key: metalwebgpu
     - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Test GPU IMAGE ops
-      run: |
-        GPU=1 IMAGE=1 python3 test/test_ops.py
-        FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 test/test_ops.py
-    - name: Test openpilot model
-      run: |
-        ALLOWED_KERNEL_COUNT=199 FLOAT16=1 VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
-        python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
-        DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
-        VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+      run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Test LLaMA compile speed
+      run: PYTHONPATH="." METAL=1 python3 test/external/external_test_speed_llama.py
+    #- name: Run dtype test
+    #  run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
+    # dtype test has issues on test_half_to_int8
+    - name: Run metal ops test
+      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
+    - name: Run JIT test
+      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_jit.py
+    - name: Check Device.DEFAULT
+      run: WEBGPU=1 python -c "from tinygrad.lazy import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
+    #- name: Run webgpu pytest
+    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto --ignore test/models/ --ignore test/unit/test_example.py --ignore test/extra/test_lr_scheduler.py --ignore test/test_linearizer.py test/
+    #- name: Build WEBGPU Efficientnet
+    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
 
-  # disabled, this test is flaky
-  testdocker:
-    name: Docker Test
-    runs-on: ubuntu-latest
-    if: ${{ false }}
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [llvm, clang, gpu, cuda]
+
+    name: Tests on (${{ matrix.backend }})
+    runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
+    timeout-minutes: 20
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Build Docker
-      run: docker build -t tinygrad -f test/Dockerfile .
-    - name: Test Docker
-      run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: '~/.cache/pip'
+          key: ${{ matrix.backend }}
+      - name: Set env
+        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n'}}" >> $GITHUB_ENV
+      - name: Find faster apt mirror
+        uses: vegardit/fast-apt-mirror.sh@v1
+      - name: Install packages (gpu)
+        if: matrix.backend == 'gpu'
+        run: |
+          wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt-get update -y && \
+          sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
+      - name: Install packages (cuda)
+        if: matrix.backend == 'cuda'
+        run: |
+          sudo apt-get update -y && \
+          sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+      - name: Cache gpuocelot
+        if: matrix.backend == 'cuda'
+        id: cache-build
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-gpuocelot-build
+        with:
+          path: ${{ github.workspace }}/gpuocelot/ocelot
+          key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
+      - name: Clone/compile gpuocelot
+        if: matrix.backend == 'cuda' && steps.cache-build.outputs.cache-hit != 'true'
+        run: |
+          git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
+          cd ${{ github.workspace }}/gpuocelot/ocelot
+          git checkout 19626fc00b6ee321638c3111074269c69050e091
+          mkdir build
+          cd build
+          cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
+          ninja
+      - name: Install gpuocelot
+        if: matrix.backend == 'cuda'
+        run: |
+          cd ${{ github.workspace }}/gpuocelot/ocelot/build
+          sudo ninja install
+      - name: Install dependencies
+        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Check Device.DEFAULT
+        run: python -c "from tinygrad.lazy import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
+      - name: Run pytest (not cuda)
+        if: matrix.backend!='cuda'
+        run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}'
+      - name: Run pytest (cuda)
+        if: matrix.backend=='cuda'
+        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models

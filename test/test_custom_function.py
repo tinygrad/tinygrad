@@ -10,6 +10,10 @@ from tinygrad.helpers import prod, dtypes
 # `atan2_gpu` for GPUBuffers and `atan2_cpu` for CPUBuffers
 from tinygrad.lazy import LazyBuffer, create_lazybuffer, Device
 from tinygrad.ops import ASTRunner
+from tinygrad.shape.shapetracker import ShapeTracker
+import pytest
+
+pytestmark = pytest.mark.webgpu
 
 # we don't always have GPU support, so the type signature is the abstract CompiledBuffer instead of GPUBuffer
 def atan2_gpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
@@ -30,7 +34,7 @@ def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
 # NOTE: The derivative of atan2 doesn't need a custom op! https://www.liquisearch.com/atan2/derivative
 # In general, it is also optional to write a backward function, just your backward pass won't work without it
 
-from tinygrad.ops import ASTRunner, LazyOp, LoadOps, BinaryOps, UnaryOps
+from tinygrad.ops import LazyOp, LoadOps, BinaryOps, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.tensor import Function
 
@@ -39,7 +43,7 @@ class ATan2(Function):
     assert prod(a.shape) == prod(b.shape) and a.device == b.device, "shape or device mismatch"
     self.a, self.b = a, b
     ast = LazyOp(LoadOps.CUSTOM, (a.contiguous(), b.contiguous()), {"GPU": atan2_gpu, "CPU": atan2_cpu}[a.device])
-    return create_lazybuffer(a.device, a.shape, LoadOps, ast, max(a.dtype, b.dtype))
+    return create_lazybuffer(a.device, ShapeTracker(a.shape), LoadOps, ast, max(a.dtype, b.dtype))
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     denom = (self.a.binary_op(BinaryOps.MUL, self.a)).binary_op(BinaryOps.ADD, self.b.binary_op(BinaryOps.MUL, self.b))
     return grad_output.binary_op(BinaryOps.MUL, self.b.binary_op(BinaryOps.DIV, denom)) if self.needs_input_grad[0] else None, \
@@ -47,7 +51,7 @@ class ATan2(Function):
 
 # *** third, we use our lovely new mlop in some tests ***
 
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 
 @unittest.skipUnless(Device.DEFAULT in ["CPU", "GPU"], "atan2 is only implemented for CPU and GPU")
 class TestCustomFunction(unittest.TestCase):

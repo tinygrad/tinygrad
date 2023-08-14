@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, dtypes
 from examples.mlperf import helpers
 
 def eval_resnet():
@@ -16,23 +16,33 @@ def eval_resnet():
   input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
   input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
   def input_fixup(x):
-    x = x.permute([0,3,1,2]) / 255.0
+    x = x.permute([0,3,1,2]).cast(dtypes.float32) / 255.0
     x -= input_mean
     x /= input_std
     return x
 
-  mdlrun = TinyJit(lambda x: mdl(input_fixup(x)).realize())
+  mdlrun = lambda x: mdl(input_fixup(x)).realize()
+  mdljit = TinyJit(mdlrun)
 
   # evaluation on the mlperf classes of the validation set from imagenet
-  from datasets.imagenet import iterate
+  from extra.datasets.imagenet import iterate
   from extra.helpers import cross_process
 
+  BS = 64
   n,d = 0,0
   st = time.perf_counter()
-  for x,y in cross_process(iterate):
-    dat = Tensor(x.astype(np.float32))
+  iterator = cross_process(lambda: iterate(BS))
+  x,ny = next(iterator)
+  dat = Tensor(x)
+  while dat is not None:
+    y = ny
     mt = time.perf_counter()
-    outs = mdlrun(dat)
+    outs = mdlrun(dat) if dat.shape[0] != BS else mdljit(dat)
+    try:
+      x,ny = next(iterator)
+      dat = Tensor(x)
+    except StopIteration:
+      dat = None
     t = outs.numpy().argmax(axis=1)
     et = time.perf_counter()
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
@@ -42,11 +52,11 @@ def eval_resnet():
     d += len(t)
     print(f"****** {n}/{d}  {n*100.0/d:.2f}%")
     st = time.perf_counter()
-  
+
 def eval_unet3d():
   # UNet3D
   from models.unet3d import UNet3D
-  from datasets.kits19 import iterate, sliding_window_inference
+  from extra.datasets.kits19 import iterate, sliding_window_inference
   from examples.mlperf.metrics import get_dice_score
   mdl = UNet3D()
   mdl.load_from_pretrained()
@@ -76,7 +86,7 @@ def eval_retinanet():
     x /= input_std
     return x
 
-  from datasets.openimages import openimages, iterate
+  from extra.datasets.openimages import openimages, iterate
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
   from contextlib import redirect_stdout
@@ -103,7 +113,7 @@ def eval_retinanet():
     n += len(targets)
     print(f"[{n}/{len(coco.imgs)}] == {(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model, {(ext-et)*1000:.2f} ms for postprocessing")
     img_ids = [t["image_id"] for t in targets]
-    coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box, "score": score} 
+    coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box, "score": score}
       for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
     with redirect_stdout(None):
       coco_eval.cocoDt = coco.loadRes(coco_results)
@@ -125,7 +135,7 @@ def eval_rnnt():
   mdl = RNNT()
   mdl.load_from_pretrained()
 
-  from datasets.librispeech import iterate
+  from extra.datasets.librispeech import iterate
   from examples.mlperf.metrics import word_error_rate
 
   LABELS = [" ", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "'"]
@@ -158,7 +168,7 @@ def eval_bert():
   def run(input_ids, input_mask, segment_ids):
     return mdl(input_ids, input_mask, segment_ids).realize()
 
-  from datasets.squad import iterate
+  from extra.datasets.squad import iterate
   from examples.mlperf.helpers import get_bert_qa_prediction
   from examples.mlperf.metrics import f1_score
   from transformers import BertTokenizer
@@ -184,12 +194,49 @@ def eval_bert():
 
     st = time.perf_counter()
 
+def eval_mrcnn():
+  from tqdm import tqdm
+  from models.mask_rcnn import MaskRCNN
+  from models.resnet import ResNet
+  from extra.datasets.coco import BASEDIR, images, convert_prediction_to_coco_bbox, convert_prediction_to_coco_mask, accumulate_predictions_for_coco, evaluate_predictions_on_coco, iterate
+  from examples.mask_rcnn import compute_prediction_batched, Image
+  mdl = MaskRCNN(ResNet(50, num_classes=None, stride_in_1x1=True))
+  mdl.load_from_pretrained()
+
+  bbox_output = '/tmp/results_bbox.json'
+  mask_output = '/tmp/results_mask.json'
+
+  accumulate_predictions_for_coco([], bbox_output, rm=True)
+  accumulate_predictions_for_coco([], mask_output, rm=True)
+
+  #TODO: bs > 1 not as accurate
+  bs = 1
+
+  for batch in tqdm(iterate(images, bs=bs), total=len(images)//bs):
+    batch_imgs = []
+    for image_row in batch:
+      image_name = image_row['file_name']
+      img = Image.open(BASEDIR/f'val2017/{image_name}').convert("RGB")
+      batch_imgs.append(img)
+    batch_result = compute_prediction_batched(batch_imgs, mdl)
+    for image_row, result in zip(batch, batch_result):
+      image_name = image_row['file_name']
+      box_pred = convert_prediction_to_coco_bbox(image_name, result)
+      mask_pred = convert_prediction_to_coco_mask(image_name, result)
+      accumulate_predictions_for_coco(box_pred, bbox_output)
+      accumulate_predictions_for_coco(mask_pred, mask_output)
+    del batch_imgs
+    del batch_result
+
+  evaluate_predictions_on_coco(bbox_output, iou_type='bbox')
+  evaluate_predictions_on_coco(mask_output, iou_type='segm')
+
 if __name__ == "__main__":
   # inference only
   Tensor.training = False
   Tensor.no_grad = True
 
-  models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert").split(",")
+  models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,mrcnn").split(",")
   for m in models:
     nm = f"eval_{m}"
     if nm in globals():

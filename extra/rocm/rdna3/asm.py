@@ -9,6 +9,10 @@ from tinygrad.runtime.ops_gpu import CLProgram, CLBuffer, ROCM_LLVM_PATH
 
 ENABLE_NON_ASM = False
 
+WMMA = True
+DUAL_ALU = True
+F32 = True
+
 if ENABLE_NON_ASM:
   buf = CLBuffer.fromCPU(np.zeros(10, np.float32))
   prg_empty = CLProgram("code", "__kernel void code(__global float *a) { a[0] = 1; }")
@@ -24,12 +28,30 @@ code = open(pathlib.Path(__file__).parent / "prog.s", "r").read()
 
 gen = []
 FLOPS = 0
-for j in range(4):
-  for i in range(0, 251, 6):
-    #gen.append(f"v_dual_fmac_f32 v{i+0}, v{i+1}, v{i+2} :: v_dual_fmac_f32 v{i+3}, v{i+4}, v{i+5}")
-    #FLOPS += 4
-    gen.append(f"v_dual_dot2acc_f32_f16 v{i+0}, v{i+1}, v{i+2} :: v_dual_dot2acc_f32_f16 v{i+3}, v{i+4}, v{i+5}")
-    FLOPS += 8
+MAX_REG = 251
+for j in range(1):
+  if WMMA:
+    KY, KX = 4, 4
+    for y in range(KY):
+      for x in range(KX):
+        c = (y*KX+x)*8
+        a = (KY*KX*8) + y*8
+        b = (KY*KX*8) + (KY*8) + x*8
+        gen.append(f"v_wmma_f32_16x16x16_f16 v[{c}:{c+7}], v[{a}:{a+7}], v[{b}:{b+7}], v[{c}:{c+7}]")
+        FLOPS += 16*8*2
+  else:
+    for i in range(0, MAX_REG, 6):
+      if DUAL_ALU:
+        if F32:
+          gen.append(f"v_dual_fmac_f32 v{i+0}, v{i+1}, v{i+2} :: v_dual_fmac_f32 v{i+3}, v{i+4}, v{i+5}")
+          FLOPS += 4
+        else:
+          gen.append(f"v_dual_dot2acc_f32_f16 v{i+0}, v{i+1}, v{i+2} :: v_dual_dot2acc_f32_f16 v{i+3}, v{i+4}, v{i+5}")
+          FLOPS += 8
+      else:
+        assert F32
+        gen.append(f"v_fmac_f32 v{i+0}, v{i+1}, v{i+2}")
+        gen.append(f"v_fmac_f32 v{i+3}, v{i+4}, v{i+5}")
 code = code.replace("// FLOPS", '\n'.join(gen))
 print(code)
 
@@ -48,9 +70,10 @@ print(colored("creating CLProgram", "green"))
 prg = CLProgram("code", asm, binary=True)
 
 print(colored("running program", "green"))
-FLOPS *= 100000*1024*1024  # loop * global_size
+G = 512
+FLOPS *= 100000*G*G  # loop * global_size
 for i in range(3):
-  tm = prg([1024, 1024], [256, 1], buf, wait=True)
+  tm = prg([G//256, G], [256, 1], buf, wait=True)
   print(f"ran in {tm*1e3:.2f} ms, {FLOPS/(tm*1e9):.2f} GFLOPS")
 
 print(colored("transferring buffer", "green"))

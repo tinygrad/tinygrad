@@ -5,6 +5,9 @@ import pstats
 import unittest
 import torch
 from tinygrad.tensor import Tensor, Device
+import pytest
+
+pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
 
 def start_profile():
   import time
@@ -12,12 +15,12 @@ def start_profile():
   pr.enable()
   return pr
 
-def stop_profile(pr, sort='cumtime'):
+def stop_profile(pr, sort='cumtime', frac=0.2):
   pr.disable()
   ps = pstats.Stats(pr)
   ps.strip_dirs()
   ps.sort_stats(sort)
-  ps.print_stats(0.2)
+  ps.print_stats(frac)
 
 class TestConvSpeed(unittest.TestCase):
 

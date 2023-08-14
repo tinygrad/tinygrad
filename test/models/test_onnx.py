@@ -5,9 +5,13 @@ import io
 import unittest
 import numpy as np
 import onnx
-from extra.utils import fetch
+from extra.utils import fetch, temp
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import CI
+import pytest
+
+pytestmark = [pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
 
 def run_onnx_torch(onnx_model, inputs):
   import torch
@@ -48,22 +52,24 @@ class TestOnnxModel(unittest.TestCase):
       mt2 = time.monotonic()
       tinygrad_out = tinygrad_out.numpy()
       et = time.monotonic()
-      print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
+      if not CI: print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
-    import cProfile
-    import pstats
-    inputs = get_inputs()
-    pr = cProfile.Profile(timer=time.perf_counter_ns, timeunit=1e-6)
-    pr.enable()
+    if not CI:
+      import cProfile
+      import pstats
+      inputs = get_inputs()
+      pr = cProfile.Profile(timer=time.perf_counter_ns, timeunit=1e-6)
+      pr.enable()
     tinygrad_out = run_onnx(inputs)['outputs']
     tinygrad_out.realize()
     tinygrad_out = tinygrad_out.numpy()
-    pr.disable()
-    stats = pstats.Stats(pr)
-    stats.dump_stats("/tmp/net.prof")
-    os.system("flameprof /tmp/net.prof > /tmp/prof.svg")
-    ps = stats.sort_stats(pstats.SortKey.TIME)
-    ps.print_stats(30)
+    if not CI:
+      pr.disable()
+      stats = pstats.Stats(pr)
+      stats.dump_stats(temp("net.prof"))
+      os.system(f"flameprof {temp('net.prof')} > {temp('prof.svg')}")
+      ps = stats.sort_stats(pstats.SortKey.TIME)
+      ps.print_stats(30)
 
   def test_openpilot_model(self):
     dat = fetch(OPENPILOT_MODEL)

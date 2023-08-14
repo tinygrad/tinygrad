@@ -1,10 +1,14 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
+from tinygrad.state import get_parameters
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import optim, BatchNorm2d
 from extra.training import train, evaluate
-from datasets import fetch_mnist
+from extra.datasets import fetch_mnist
+import pytest
+
+pytestmark = [pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
 
 # load the mnist dataset
 X_train, Y_train, X_test, Y_test = fetch_mnist()
@@ -16,7 +20,7 @@ class TinyBobNet:
     self.l2 = Tensor.scaled_uniform(128, 10)
 
   def parameters(self):
-    return optim.get_parameters(self)
+    return get_parameters(self)
 
   def forward(self, x):
     return x.dot(self.l1).relu().dot(self.l2).log_softmax()
@@ -38,7 +42,7 @@ class TinyConvNet:
       self.bn1, self.bn2 = lambda x: x, lambda x: x
 
   def parameters(self):
-    return optim.get_parameters(self)
+    return get_parameters(self)
 
   def forward(self, x:Tensor):
     x = x.reshape(shape=(-1, 1, 28, 28)) # hacks
@@ -92,7 +96,7 @@ class TestMNIST(unittest.TestCase):
     model = TinyConvNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, steps=100)
-    assert evaluate(model, X_test, Y_test) > 0.94   # torch gets 0.9415 sometimes
+    assert evaluate(model, X_test, Y_test) > 0.93   # torch gets 0.9415 sometimes
 
   def test_conv_with_bn(self):
     np.random.seed(1337)

@@ -50,7 +50,7 @@ def infer(model, img):
   # if you want to look at the outputs
   """
   import matplotlib.pyplot as plt
-  plt.plot(out.numpy()[0])
+  plt.plot(out[0])
   plt.show()
   """
   return out, retimg
@@ -65,7 +65,7 @@ if __name__ == "__main__":
   lbls = ast.literal_eval(lbls.decode('utf-8'))
 
   # load image and preprocess
-  url = sys.argv[1] if len(sys.argv) >= 2 else "https://raw.githubusercontent.com/geohot/tinygrad/master/docs/stable_diffusion_by_tinygrad.jpg"
+  url = sys.argv[1] if len(sys.argv) >= 2 else "https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/showcase/stable_diffusion_by_tinygrad.jpg"
   if url == 'webcam':
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -85,10 +85,7 @@ if __name__ == "__main__":
     cap.release()
     cv2.destroyAllWindows()
   else:
-    if url.startswith('http'):
-      img = Image.open(io.BytesIO(fetch(url)))
-    else:
-      img = Image.open(url)
+    img = Image.open(io.BytesIO(fetch(url)))
     st = time.time()
     out, _ = infer(model, img)
     print(np.argmax(out), np.max(out), lbls[np.argmax(out)])

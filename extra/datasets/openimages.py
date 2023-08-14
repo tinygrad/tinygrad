@@ -11,7 +11,7 @@ from tqdm import tqdm
 import pandas as pd
 import concurrent.futures
 
-BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/open-images-v6-mlperf"
+BASEDIR = pathlib.Path(__file__).parent / "open-images-v6-mlperf"
 BUCKET_NAME = "open-images-dataset"
 BBOX_ANNOTATIONS_URL = "https://storage.googleapis.com/openimages/v5/validation-annotations-bbox.csv"
 MAP_CLASSES_URL = "https://storage.googleapis.com/openimages/v5/class-descriptions-boxable.csv"
