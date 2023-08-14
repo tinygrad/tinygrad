@@ -14,9 +14,7 @@ def compute_offsets(total):
 #NOTE: Darwin needs names to start with a "_" 
 def get_name(name): return ('_' if system() == 'Darwin' else '') + name
 
-class ARM64Language(AssemblyLanguage):
-  #TODO: do i need this?
-  pass
+class ARM64Language(AssemblyLanguage): pass
 
 def specialize_to_arm64(fn_nm, asm, global_size):
   var_size = 16
@@ -39,12 +37,9 @@ def specialize_to_arm64(fn_nm, asm, global_size):
       elif to[0] == 's':
         ins.append(f"movz x15, 0x{float_to_hex(value)[4:]}")
         ins.append(f"movk x15, 0x{float_to_hex(value)[:4]}, lsl #16")
-        #TODO: push into the stack instead
-        #ins.append(f"ldr x10, [sp]")
         ins.append(f"str x15, [sp, 16]")
         ins.append(f"ldr {to}, [sp, 16]")
-        #ins.append(f"str x10, [sp]")
-      else: 
+      else:
         ins.append(f"mov {to}, #{value}")
 
   # Get variables intervals
@@ -53,9 +48,9 @@ def specialize_to_arm64(fn_nm, asm, global_size):
     for var in ([v for v in [out] + vin if v is not None and v.__class__ is not int]):
       live_range[var.nm] = [i,i] if var.nm not in live_range else [live_range[var.nm][0], i]
 
-  mem_vars:Dict[str, str] = {} 
+  mem_vars:Dict[str, str] = {}
   rtor:Dict[str, str] = {}
-  def allocate_regs(vars): 
+  def allocate_regs(vars):
     nonlocal var_size
     for v in [v for v in vars if v is not None and v.__class__ is not int and v.nm not in rtor]:
       available_regs = s_regs if dtypes.is_float(v[1]) else x_regs
@@ -80,7 +75,7 @@ def specialize_to_arm64(fn_nm, asm, global_size):
     allocate_regs([out] + vin)
     # Assign temp regs to vin and load them before direct use 
     for i, v in enumerate([v for v in vin if v.__class__ is not int and v.nm in mem_vars]):
-      rtor[v.nm] = temp_floats[i] if dtypes.is_float(v[1]) else temp_ints[i] 
+      rtor[v.nm] = temp_floats[i] if dtypes.is_float(v[1]) else temp_ints[i]
       # ARM64 addressing constraints https://devblogs.microsoft.com/oldnewthing/20220728-00/?p=106912
       ins.append(f"mov x15, {mem_vars[v.nm]}")
       ins.append(f"ldr {rtor[v.nm]}, [sp, x15]")
