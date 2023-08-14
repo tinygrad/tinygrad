@@ -202,7 +202,6 @@ def uops_to_asmstyle(lang, is_ptx:bool, function_name:str, uops:List[UOp]):
         lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype)))
 
   for dtype,c in lang.cnts.items(): lang.ins.insert(0, AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)))
-  assert False
 
   if DEBUG >= 4:
     for tins in lang.ins: print(tins)
