@@ -96,7 +96,7 @@ class AssemblyLanguage(NamedTuple):
     return reg, None, off
 
 # s registers are the addresses and non local indexes
-def uops_to_asmstyle(lang, is_ptx:bool, function_name:str, uops:List[UOp]):
+def uops_to_asmstyle(lang, function_name:str, uops:List[UOp], is_ptx=False):
   lang.ins.clear()
   lang.tor.clear()
   lang.cnts.clear()

@@ -72,5 +72,5 @@ def specialize_to_ptx(lang, function_name, asm):
 
 def uops_to_ptx_asm(function_name:str, uops:List[UOp]):
   lang = PTXLanguage()
-  global_size, local_size = uops_to_asmstyle(lang, True, function_name, uops)
+  global_size, local_size = uops_to_asmstyle(lang, function_name, uops, is_ptx=True)
   return specialize_to_ptx(lang, function_name, lang.ins), global_size[::-1], local_size[::-1]
