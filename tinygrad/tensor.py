@@ -34,7 +34,7 @@ import tinygrad.mlops as mlops
 # **** start with two base classes, Tensor and Function ****
 
 class Tensor:
-  __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
+  __slots__ = "lazydata", "requires_grad", "grad", "_ctx", "device", "dtype"
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
@@ -55,10 +55,14 @@ class Tensor:
     if isinstance(data, LazyBuffer):
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
+      self.device = self.lazydata.device
+      self.dtype = self.lazydata.dtype
       return
 
     if isinstance(data, (int, float)):
       self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
+      self.device = self.lazydata.device
+      self.dtype = self.lazydata.dtype
       return
 
     if data.__class__ is list:
@@ -68,8 +72,10 @@ class Tensor:
     if isinstance(data, np.ndarray):
       data = LazyBuffer.fromCPU(data)
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
+      self.device = self.lazydata.device
+      self.dtype = self.lazydata.dtype
       return
-
+    
     raise RuntimeError(f"can't create Tensor from {data}")
 
   def __repr__(self):
@@ -79,13 +85,7 @@ class Tensor:
   def __hash__(self): return id(self)
 
   @property
-  def device(self) -> str: return self.lazydata.device
-
-  @property
   def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
-
-  @property
-  def dtype(self) -> DType: return self.lazydata.dtype
 
   # ***** data handlers ****
 
@@ -392,10 +392,20 @@ class Tensor:
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False):
-    axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if axis.__class__ is int else list(axis)) # type: ignore
-    axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
-    shape = [s for i,s in enumerate(self.shape) if i not in axis_]
-    ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else s for i,s in enumerate(self.shape)]))
+    if not self.shape: 
+      shape : Tuple[int, ...] = ()
+      new_shape: Tuple[int, ...] = ()
+    elif axis is None:
+      shape, new_shape = (), (1,) * len(self.shape)
+    elif isinstance(axis, int):
+      rotated_axis = axis if axis >= 0 else axis+len(self.shape)
+      shape = (*(a:=self.shape[:rotated_axis]), *(b:=self.shape[rotated_axis+1:]))
+      new_shape = (*a, 1, *b)
+    else:
+      axis_ = tuple([x if x >= 0 else x+len(self.shape) for x in axis])
+      shape = tuple([s for i,s in enumerate(self.shape) if i not in axis_])
+      new_shape = tuple([1 if i in axis_ else s for i,s in enumerate(self.shape)])
+    ret = fxn.apply(self, new_shape=new_shape)
     return ret if keepdim else ret.reshape(shape=shape)
 
   def sum(self, axis=None, keepdim=False): return self._reduce(mlops.Sum, axis, keepdim)
@@ -493,7 +503,7 @@ class Tensor:
     return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
 
   def dot(self, w:Tensor) -> Tensor:
-    m1, m2 = [1]*min(len(self.shape)-1, len(w.shape)-1, 1), -min(len(w.shape), 2)
+    m1, m2 = (1,)*min(len(self.shape)-1, len(w.shape)-1, 1), -min(len(w.shape), 2)
     assert len(self.shape) != 0 and len(w.shape) != 0, f"both arguments to matmul need to be at least 1D, but they are {len(self.shape)}D and {len(w.shape)}D"
     assert self.shape[-1] == w.shape[-min(len(w.shape), 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(len(w.shape), 2)]})"
     x = self.reshape(*self.shape[:-1], *m1, self.shape[-1])
