@@ -35,8 +35,6 @@ class AssemblyLanguage(NamedTuple):
   #TODO: these should be global vars
   cnts:DefaultDict[Tuple[DType, bool], int] = defaultdict(int)
   tor: Dict[Any, Register] = {}
-  buf_to_dtype = {}
-  buf_to_index = {}
   ins = []
 
   def newreg(self, tok, dtype=dtypes.float32, scalar=False):
@@ -77,7 +75,7 @@ class AssemblyLanguage(NamedTuple):
 
   def addr_w_offset(self, args):
     assert isinstance(args, MemOp)
-    idx = args.idx*self.buf_to_dtype[args.name].itemsize
+    idx = args.idx*args.memory_dtype.itemsize
     off = 0  # TODO: should this be None?
     if isinstance(idx, SumNode):
       nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
@@ -90,19 +88,19 @@ class AssemblyLanguage(NamedTuple):
         new_reg = self.newreg((reg.nm, 'vec'), dtype=reg.dtype)
         self.ins.append(AssemblyInstruction(UOps.ALU, new_reg, [reg], UnaryOps.NOOP))
         reg = new_reg
-      return self.tor[f"buf{self.buf_index[args.name]}"], reg, off
-    reg = self.render_alu(BinaryOps.ADD, self.render_cast(reg, dtypes.uint64), self.tor[f"buf{self.buf_index[args.name]}"], dtype=dtypes.uint64)
+      return self.tor[args.name], reg, off
+    reg = self.render_alu(BinaryOps.ADD, self.render_cast(reg, dtypes.uint64), self.tor[args.name], dtype=dtypes.uint64)
     return reg, None, off
 
 def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
   #TODO: Do not use clear() 
   lang.ins.clear()
   lang.tor.clear()
-  lang.buf_to_dtype = {args[0]:args[1] for uop,_,_,args in uops if uop == UOps.DEFINE_GLOBAL}
-  lang.buf_index = {x:i for i,x in enumerate(lang.buf_to_dtype.keys())}
+  buf_to_dtype = {args[0]:args[1] for uop,_,_,args in uops if uop == UOps.DEFINE_GLOBAL}
+  buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
   global_size, local_size = [], []
   skipload_branch = 0
-  lang.ins += [AssemblyInstruction(UOps.SPECIAL, lang.newreg(f"buf{i}", dtype=dtypes.uint64, scalar=True), [], f"buf{i}") for i in range(len(lang.buf_index))]
+  lang.ins += [AssemblyInstruction(UOps.SPECIAL, lang.newreg(buf, dtype=dtypes.uint64, scalar=True), [], buf) for buf in buf_to_dtype]
   for uop,newvar,vin,args in uops:
     if uop == UOps.DEFINE_LOCAL:
       lang.ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
@@ -175,13 +173,13 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
             lang.ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
         if args.valid.max == 1:
             # NOTE: you can't compute the index in here, because it assumes it's all available later
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if lang.buf_index[args.name] != -1 else 'shared', args.memory_dtype if lang.buf_to_dtype[args.name] != dtypes.float else None)))
+          lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if buf_index[args.name] != -1 else 'shared', args.memory_dtype if buf_to_dtype[args.name] != dtypes.float else None)))
         if args.valid.min == 0 and args.valid.max == 1:
           lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
           skipload_branch += 1
     elif uop == UOps.STORE:
       idx, treg, off = lang.addr_w_offset(args)
-      lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if lang.buf_index[args.name] != -1 else 'shared', args.memory_dtype if lang.buf_to_dtype['data0'] != dtypes.float else None)))
+      lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if buf_index[args.name] != -1 else 'shared', args.memory_dtype if buf_to_dtype['data0'] != dtypes.float else None)))
   # define registers
   lang.ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, type_to_letter(dtype), c)) for dtype,c in lang.cnts.items()] + lang.ins
 

@@ -26,7 +26,7 @@ def specialize_to_arm64(fn_nm, asm):
   alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
           BinaryOps.MOD: "", BinaryOps.CMPLT: "subs",
           UnaryOps.SIN:'bl ' + get_name('sinf'), UnaryOps.LOG2: 'bl ' + get_name("log2f"), UnaryOps.EXP2: 'bl ' + get_name("exp2f"), UnaryOps.SQRT: 'bl ' + get_name("sqrtf"),
-          TernaryOps.MULACC: "madd", TernaryOps.WHERE: "fcmp"}
+          TernaryOps.MULACC: "madd", TernaryOps.WHERE: "fcsel"}
 
   def mov_imm(value, reg):
     # Manually move value into reg if value can't fit
@@ -80,10 +80,10 @@ def specialize_to_arm64(fn_nm, asm):
       ins.append(f"ldr {rtor[v.nm]}, [sp, x15]")
 
     if uop == UOps.SPECIAL:
-      if arg.startswith('buf'):
+      if arg.startswith('data'):
         # data 8 to n into the stack 
-        if int(arg[3:]) >= 8:
-          ins.append(f"ldr x15, [x19, #{(int(arg[3:]) - 8) * 8}]")
+        if int(arg[4:]) >= 8:
+          ins.append(f"ldr x15, [x19, #{(int(arg[4:]) - 8) * 8}]")
           ins.append(f"mov {rtor[out.nm]}, x15")
       else:
         ins.append(f"mov {rtor[out.nm]}, #0")
@@ -101,7 +101,7 @@ def specialize_to_arm64(fn_nm, asm):
         ins.append(f"ands {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
       elif arg == TernaryOps.WHERE:
         ins.append(f"fcmp {rtor[vin[0].nm]}, #0.0")
-        ins.append(f"fcsel {rtor[out.nm]}, {rtor[vin[1].nm]}, {rtor[vin[2].nm]}, ne")
+        ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[1].nm]}, {rtor[vin[2].nm]}, ne")
       elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
         #NOTE: Not a real instruction, use to emulate a ext call in unicorn
         if CI: ins.append(f"{alu[arg]} {rtor[out.nm]} {rtor[vin[0].nm]}")
