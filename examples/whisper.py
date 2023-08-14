@@ -287,11 +287,8 @@ def decode_segment(segment, initial_tokens, model, sample_len=224, n_audio=1, n_
   audio_features = model.encoder(Tensor(segment)).realize()
   tokens = Tensor([initial_tokens], dtype=dtypes.int64).repeat((segment.shape[0], 1))
   sum_logprobs = Tensor.zeros(audio_features.shape[0])
-  [np.nan] * tokens.shape[0]
   for _ in range(sample_len):
     logits = model.decoder(tokens, audio_features)
-    probs_at_sot = logits[:, initial_tokens.index(model.tokenizer._special_tokens["<|startoftranscript|>"])].softmax(axis=-1)
-    probs_at_sot[:, model.tokenizer._special_tokens["<|nospeech|>"]].numpy().tolist()
     logits = logits[:, -1]
     tokens, completed = decoder.update(tokens, logits, sum_logprobs)
     if completed: break
