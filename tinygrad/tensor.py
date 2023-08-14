@@ -555,9 +555,8 @@ class Tensor:
   # ***** broadcasted binary mlops *****
 
   def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
-    dtype = self.dtype if self.dtype is not dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
     x: Tensor = self
-    y: Tensor = Tensor(other, device=self.device, requires_grad=False, dtype=dtype, canonical=True) if not isinstance(other, Tensor) else other
+    y: Tensor = other if isinstance(other, Tensor) else Tensor(other, device=self.device, requires_grad=False, dtype=self.dtype if self.dtype is not dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32, canonical=True)
     if reverse: x, y = y, x
     if x.shape == y.shape: return fxn.apply(x, y)
 
