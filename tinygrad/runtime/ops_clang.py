@@ -31,12 +31,12 @@ class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False):
     # TODO: is there a way to not write this to disk?
     fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
+    if not os.path.exists(fn):
+      _, tmp = tempfile.mkstemp()
     if not binary:
       prg = CLANG_PROGRAM_HEADER + prg
-      if not os.path.exists(fn):
-        _, tmp = tempfile.mkstemp()
-        subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+tmp).split(), input=prg.encode('utf-8'))
-        os.rename(tmp, fn)
+      subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+tmp).split(), input=prg.encode('utf-8'))
+      os.rename(tmp, fn)
     else:
       if DEBUG >= 5: print(prg)
       if CI and ARM64:
@@ -44,12 +44,13 @@ class ClangProgram:
         self.varsize = align(int(prg[0].split(" ")[1]))
         self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
         prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n'])
-        subprocess.check_output(args=('aarch64-linux-gnu-as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
-        subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+fn+ '.o ' + fn +'.bin').split())
+        subprocess.check_output(args=('aarch64-linux-gnu-as -o '+tmp).split(), input=prg.encode('utf-8'))
+        subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+tmp+' '+fn+'.bin').split())
         self.prg = open(fn + '.bin', 'rb').read()
         return
-      subprocess.check_output(args=('as -o '+fn+'.o').split(), input=prg.encode('utf-8'))
-      subprocess.check_output(args=('clang -lm -shared -fPIC '+fn+'.o -o'+fn).split())
+      subprocess.check_output(args=('as -o' + tmp).split(), input=prg.encode('utf-8'))
+      subprocess.check_output(args=('clang -lm -shared '+tmp+' -o'+fn).split())
+
     
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
