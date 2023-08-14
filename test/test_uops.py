@@ -7,6 +7,8 @@ from tinygrad.codegen.linearizer import UOps, Token, ConstOp, MemOp
 from tinygrad.shape.symbolic import Variable
 
 def _uops_to_prg(uops):
+  ret = Device[Device.DEFAULT].renderer("test", uops)
+  src, global_size, local_size, binary = ret if len(ret) == 4 else ret + (False,)
   src, global_size, local_size, binary = Device[Device.DEFAULT].renderer("test", uops)
   #TODO: I need to find a better way to select ARM64
   return ASTRunner("test", src, global_size, local_size, runtime_args={"binary": binary}).build(Device[Device.DEFAULT].runtime)

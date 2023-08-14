@@ -158,7 +158,8 @@ class Compiled:
 
   def to_program(self, k):
     k.linearize()
-    src, global_size, local_size, binary = self.renderer(k.function_name, k.uops)
+    ret = self.renderer(k.function_name, k.uops)
+    src, global_size, local_size, binary = ret if len(ret) == 4 else ret + (False,)
     #TODO: I need to find a better way to select ARM64
     return ASTRunner(k.function_name, src, global_size, local_size,
                       op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
