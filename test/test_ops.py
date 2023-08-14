@@ -1129,11 +1129,11 @@ class TestOps(unittest.TestCase):
 
   def test_slice_fancy_indexing(self):
     # indices cannot have gradient
-    a = torch.randint(low=-1, high=1, size=(10,1,1,1,1,1), requires_grad=False)
-    b = torch.randint(high=1, size=(1,16,1,1,1,1), requires_grad=False)
-    c = torch.randint(low=-5, high=5, size=(10,1,14,1,1,1), requires_grad=False)
-    d = torch.randint(high=4, size=(10,1,1,14,1,1), requires_grad=False)
-    e = torch.randint(high=1, size=(10,1,1,1,13,1), requires_grad=False)
+    a = torch.randint(low=-1, high=1, size=(10,1,1,1,1,1), dtype=torch.int64, requires_grad=False)
+    b = torch.randint(high=1, size=(1,16,1,1,1,1), dtype=torch.int64, requires_grad=False)
+    c = torch.randint(low=-5, high=5, size=(10,1,14,1,1,1), dtype=torch.int64, requires_grad=False)
+    d = torch.randint(high=4, size=(10,1,1,14,1,1), dtype=torch.int64, requires_grad=False)
+    e = torch.randint(high=1, size=(10,1,1,1,13,1), dtype=torch.int64, requires_grad=False)
     i, j, k, o, p = [Tensor(tor.detach().numpy(), requires_grad=False) for tor in [a,b,c,d,e]]
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,e], lambda x: x[:,j,k,o,p])
