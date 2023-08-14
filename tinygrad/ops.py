@@ -1,6 +1,7 @@
 from __future__ import annotations
 from time import perf_counter
 from functools import partial
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
@@ -23,25 +24,20 @@ class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps]]
 
+@dataclass(slots=True, weakref_slot=True)
 class LazyOp:
-  # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
-  __slots__ = "op", "src", "arg", "buffers", "__weakref__"
+   # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
-  arg: Any
-  buffers: Tuple[LazyBuffer, ...]
+  arg: Any = None
+  buffers: Tuple[LazyBuffer, ...] = field(init=False)
 
-  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None):
-    self.op, self.src, self.arg, self.buffers = op, src, arg, ()
+  def __post_init__(self):
+    self.buffers = ()
     try:
-      for x in src:
-        self.buffers += x.buffers if isinstance(x, LazyOp) else (x,)
-    except AttributeError:
-      # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
-      pass
-
-  def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
-  def __eq__(self, __value: object) -> bool: return isinstance(__value, LazyOp) and self.op == __value.op and self.src == __value.src and self.arg == __value.arg
+      for x in self.src: self.buffers += x.buffers if isinstance(x, LazyOp) else (x,)
+    except AttributeError: pass
+    # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
   def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
   @property
   def key(self): return (self.op, tuple([getattr(x, "key", x) for x in self.src]), getattr(self.arg, "key", self.arg))
