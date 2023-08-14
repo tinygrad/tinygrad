@@ -16,7 +16,7 @@ def get_name(name): return ('_' if system() == 'Darwin' else '') + name
 
 class ARM64Language(AssemblyLanguage): pass
 
-def specialize_to_arm64(fn_nm, asm, global_size):
+def specialize_to_arm64(fn_nm, asm):
   var_size = 16
   prev_uop = None
   ins = [] 
@@ -28,19 +28,19 @@ def specialize_to_arm64(fn_nm, asm, global_size):
           UnaryOps.SIN:'bl ' + get_name('sinf'), UnaryOps.LOG2: 'bl ' + get_name("log2f"), UnaryOps.EXP2: 'bl ' + get_name("exp2f"), UnaryOps.SQRT: 'bl ' + get_name("sqrtf"),
           TernaryOps.MULACC: "madd", TernaryOps.WHERE: "fcmp"}
 
-  def mov_imm(value, to):
-      # Manually move value into reg if value can't fit
-      if value.__class__ is not float and abs(value) > abs(65535):
-        ins.append(f"movz w15, #{value & 0xffff}")
-        ins.append(f"movk w15, #{(value >> 16) & 0xffff}, lsl #16")
-        ins.append(f"sxtw {to}, w15")
-      elif to[0] == 's':
-        ins.append(f"movz x15, 0x{float_to_hex(value)[4:]}")
-        ins.append(f"movk x15, 0x{float_to_hex(value)[:4]}, lsl #16")
-        ins.append(f"str x15, [sp, 16]")
-        ins.append(f"ldr {to}, [sp, 16]")
-      else:
-        ins.append(f"mov {to}, #{value}")
+  def mov_imm(value, reg):
+    # Manually move value into reg if value can't fit
+    if value.__class__ is not float and abs(value) > abs(65535):
+      ins.append(f"movz w15, #{value & 0xffff}")
+      ins.append(f"movk w15, #{(value >> 16) & 0xffff}, lsl #16")
+      ins.append(f"sxtw {reg}, w15")
+    elif reg[0] == 's':
+      ins.append(f"movz x15, 0x{float_to_hex(value)[4:]}")
+      ins.append(f"movk x15, 0x{float_to_hex(value)[:4]}, lsl #16")
+      ins.append(f"str x15, [sp, 16]")
+      ins.append(f"ldr {reg}, [sp, 16]")
+    else:
+      ins.append(f"mov {reg}, #{value}")
 
   # Get variables intervals
   live_range:Dict[str, str] = {}
@@ -64,12 +64,11 @@ def specialize_to_arm64(fn_nm, asm, global_size):
 
   temp_floats = ['s0', 's1', 's2']
   temp_ints = ['x11', 'x12', 'x13']
-  loop_blocks = []
   for i, (uop, out, vin, arg) in enumerate(asm):
     # Clear regs out of interval
     for var, reg in list(rtor.items()):
       available_regs = s_regs if reg[0] == 's' else x_regs
-      if var[1] not in ('B', 'i') and var not in mem_vars and i > live_range[var][1]:
+      if var[1] not in 'B' and var not in mem_vars and i > live_range[var][1]:
         available_regs.append(rtor.pop(var))
     # Assign a registers to the variables using live ranges.
     allocate_regs([out] + vin)
@@ -87,7 +86,6 @@ def specialize_to_arm64(fn_nm, asm, global_size):
           ins.append(f"ldr x15, [x19, #{(int(arg[3:]) - 8) * 8}]")
           ins.append(f"mov {rtor[out.nm]}, x15")
       else:
-        loop_blocks.append((arg, out.nm, global_size.pop()))
         ins.append(f"mov {rtor[out.nm]}, #0")
         ins.append(f"loop_{arg}:")
     elif uop == UOps.CAST:
@@ -155,11 +153,10 @@ def specialize_to_arm64(fn_nm, asm, global_size):
     elif uop == UOps.LABEL:
       ins.append(f"{arg[1:]}:")
     elif uop == UOps.ENDLOOP:
-      label, reg, pred = loop_blocks.pop()
-      mov_imm(pred, "x15")
-      ins.append(f"add {rtor[reg]}, {rtor[reg]}, #1")
-      ins.append(f"cmp {rtor[reg]}, x15")
-      ins.append(f"b.lt loop_{label}")
+      mov_imm(arg[0], "x15")
+      ins.append(f"add {rtor[vin[0].nm]}, {rtor[vin[0].nm]}, #1")
+      ins.append(f"cmp {rtor[vin[0].nm]}, x15")
+      ins.append(f"b.lt loop_{arg[1]}")
 
     prev_uop=uop
     # store regs into memory if needed 
@@ -171,4 +168,4 @@ def specialize_to_arm64(fn_nm, asm, global_size):
 def uops_to_arm64_asm(fn_nm:str, uops:List[UOp]) -> Tuple[str, List[int], List[int], bool]:
   lang = ARM64Language()
   global_size, local_size = uops_to_asmstyle(lang, fn_nm, uops)
-  return specialize_to_arm64(fn_nm, lang.ins, global_size[::-1]), global_size[::-1], local_size[::-1], True
+  return specialize_to_arm64(fn_nm, lang.ins), global_size[::-1], local_size[::-1], True
