@@ -11,6 +11,8 @@ _type_to_letter = {dtypes.int8: 'c', dtypes.float16: 'h', dtypes.float32: 'f', d
                    dtypes.uint16: 's', dtypes.uint8: 'uc'}
 def type_to_letter(x): return _type_to_letter[x[0]].upper() if x[1] else _type_to_letter[x[0]]
 
+def ptx_needs_cast(dest_dtype, src_dtype): return dtypes.is_float(dest_dtype) and dtypes.is_int(src_dtype) or dtypes.is_int(dest_dtype) and dtypes.is_float(src_dtype) or (dtypes.is_float(src_dtype) and dtypes.is_float(dest_dtype) and dest_dtype.itemsize < src_dtype.itemsize)
+
 class Register(NamedTuple):
   nm:str
   dtype:DType
@@ -187,9 +189,8 @@ def uops_to_asmstyle(lang, is_ptx:bool, function_name:str, uops:List[UOp]):
         skipload_branch += 1
     elif uop == UOps.STORE:
       idx, treg, off = lang.addr_w_offset(args)
-      if is_ptx and (args.memory_dtype != lang.tor[vin[0]].dtype or args.memory_dtype == dtypes.bool):
-        # FIXME: I think this is too strict and we don't actually need to cast when dtypes neq but same base type and dest is wider?
-        # NOTE: We can't just `st.pred` or even store a .pred register using .b8, hence all these casting shenanigans for bool (input_type -> pred -> uint16, then store as uint8)
+      if is_ptx and ptx_needs_cast(args.memory_dtype, lang.tor[vin[0]].dtype) or args.memory_dtype == dtypes.bool:
+        # NOTE: We can't just `st.pred` or even store a .pred register using .b8, hence all the casting shenanigans for bool (input_type -> pred -> uint16, then store as uint8)
         if args.memory_dtype == dtypes.bool != lang.tor[vin[0]].dtype: # We have to cast to bool first
           prereg = lang.newreg((lang.tor[vin[0]], dtypes.bool), dtype=dtypes.bool)
           lang.ins.append(AssemblyInstruction(UOps.CAST, prereg, [lang.tor[vin[0]]], args))
