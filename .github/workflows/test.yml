@@ -269,4 +269,4 @@ jobs:
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
       - name: Run pytest (ptx)
         if: matrix.backend=='ptx'
-        run: python -m pytest -n=auto test/ -k 'not test_uops' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
+        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
