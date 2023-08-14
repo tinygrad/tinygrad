@@ -21,6 +21,7 @@ class Register(NamedTuple):
     if self.dtype == dtypes._float4:
       return [Register(self.nm, dtypes.float, False, off=off) for off in range(4)]
     return []
+
 class AssemblyInstruction(NamedTuple):
   op: UOps
   out: Optional[Register]
@@ -35,9 +36,9 @@ class AssemblyLanguage(NamedTuple):
   #TODO: these should be global vars
   cnts:DefaultDict[Tuple[DType, bool], int] = defaultdict(int)
   tor: Dict[Any, Register] = {}
-  buf_to_dtype = {}
-  buf_to_index = {}
-  ins = []
+  buf_to_dtype: Dict[str, dtypes] = {}
+  buf_to_index: Dict[str, int] = {}
+  ins:[AssemblyInstruction] = []
 
   def newreg(self, tok, dtype=dtypes.float32, scalar=False):
     if isinstance(tok, Token): dtype = tok.dtype  # this
@@ -109,11 +110,11 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
       lang.ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
       lang.ins.append(AssemblyInstruction(UOps.ALU, lang.newreg(args[0], dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
     elif uop == UOps.LOOP:
-      if args[1] == "global" and not getenv("ARM64"):
+      if args[1] == "global":
         for i,var in enumerate(args[0]):
           global_size.append(var.max+1)
           lang.ins.append(AssemblyInstruction(UOps.SPECIAL, lang.newreg(var, dtype=dtypes.int32), [], f"gid{len(args[0])-1-i}"))
-      elif args[1] == "local" and not getenv("ARM64"):
+      elif args[1] == "local":
         for i,var in enumerate(args[0]):
           local_size.append(var.max+1)
           lang.ins.append(AssemblyInstruction(UOps.SPECIAL, lang.newreg(var, dtype=dtypes.int32), [], f"lid{len(args[0])-1-i}"))
@@ -123,12 +124,16 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
             lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(var, dtype=dtypes.int32, scalar=True), [], 0)) #FIXME: what should valid be here?
             lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
     elif uop == UOps.ENDLOOP:
-      if args[1] not in ["global", "local", "global+local"] or getenv("ARM64"):
+      if args[1] not in ["global", "local", "global+local"]:
         for var in reversed(args[0]):
           if not isinstance(var, NumNode):  # TODO: why is this coming through?
             lang.ins.append(AssemblyInstruction(UOps.ALU, lang.tor[var], [lang.tor[var], 1], BinaryOps.ADD))
             pred = lang.render_alu(BinaryOps.CMPLT, lang.tor[var], var.max+1, dtypes.bool)
             lang.ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], ("$loop_"+var.expr, True)))
+      elif args[1] == "global+local":
+        for var in reversed(args[0]):
+          lang.ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [], ()))
+
     elif uop == UOps.CAST and newvar is not None:
       # TODO: we should reconsider outputting CAST in the linearizer. these are needless copies
       out = lang.newreg(newvar)

@@ -18,7 +18,8 @@ class ARM64Language(AssemblyLanguage):
   #TODO: do i need this?
   pass
 
-def specialize_to_arm64(self, name, asm):
+def specialize_to_arm64(self, name, asm, global_size):
+  print(global_size)
   var_size = 16
   prev_uop = None
   ins = [] 
@@ -69,16 +70,15 @@ def specialize_to_arm64(self, name, asm):
 
   temp_floats = ['s0', 's1', 's2']
   temp_ints = ['x11', 'x12', 'x13']
+  loop_blocks = []
   for i, (uop, out, vin, arg) in enumerate(asm):
     # Clear regs out of interval
     for var, reg in list(rtor.items()):
       available_regs = s_regs if reg[0] == 's' else x_regs
-      if var[1] != 'B' and var not in mem_vars and i > live_range[var][1]:
+      if var[1] not in ('B', 'i') and var not in mem_vars and i > live_range[var][1]:
         available_regs.append(rtor.pop(var))
-
     # Assign a registers to the variables using live ranges.
     allocate_regs([out] + vin)
-
     # Assign temp regs to vin and load them before direct use 
     for i, v in enumerate([v for v in vin if v.__class__ is not int and v.nm in mem_vars]):
       rtor[v.nm] = temp_floats[i] if dtypes.is_float(v[1]) else temp_ints[i] 
@@ -92,6 +92,10 @@ def specialize_to_arm64(self, name, asm):
         if int(arg[3:]) >= 8:
           ins.append(f"ldr x15, [x19, #{(int(arg[3:]) - 8) * 8}]")
           ins.append(f"mov {rtor[out.nm]}, x15")
+      else:
+        loop_blocks.append((arg, out.nm, global_size.pop()))
+        ins.append(f"mov {rtor[out.nm]}, #0")
+        ins.append(f"loop_{arg}:")
     elif uop == UOps.CAST:
       if arg == BinaryOps.CMPLT:
         mov_imm(0.0, 's0')
@@ -156,6 +160,13 @@ def specialize_to_arm64(self, name, asm):
       ins.append(f"b.{'lt' if arg[1] else 'ge'} {arg[0][1:]}")
     elif uop == UOps.LABEL:
       ins.append(f"{arg[1:]}:")
+    elif uop == UOps.ENDLOOP:
+      label, reg, pred = loop_blocks.pop()
+      mov_imm(pred, "x15")
+      ins.append(f"add {rtor[reg]}, {rtor[reg]}, #1")
+      ins.append(f"cmp {rtor[reg]}, x15")
+      ins.append(f"b.lt loop_{label}")
+
     prev_uop=uop
     # store regs into memory if needed 
     if out is not None and out.nm in mem_vars:
@@ -166,4 +177,4 @@ def specialize_to_arm64(self, name, asm):
 def uops_to_arm64_asm(function_name:str, uops:List[UOp]):
   lang = ARM64Language()
   global_size, local_size = uops_to_asmstyle(lang, function_name, uops)
-  return specialize_to_arm64(lang, function_name, lang.ins), global_size[::-1], local_size[::-1]
+  return specialize_to_arm64(lang, function_name, lang.ins, global_size[::-1]), global_size[::-1], local_size[::-1]
