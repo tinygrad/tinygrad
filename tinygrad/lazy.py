@@ -206,13 +206,12 @@ class LazyBuffer:
   def shuffle_and_prune_movement_ops(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> LazyBuffer:
     if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and (op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and self.op.op in UnaryOps)) and not self.children:
       return self.op.replace_with_movement_ops([(op, arg)])
-    ret = create_lazybuffer(self.device, st, MovementOps, LazyOp(op, (self,), arg), self.dtype)
-    if REMOVE_MOVEMENT_NOPS and not self.realized and not ret.realized and ret.st.contiguous:
+    if REMOVE_MOVEMENT_NOPS and not self.realized and st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
       root = get_movementroot(self)
-      if root != self and root.st.contiguous and prod(ret.st.shape) == prod(root.shape):
-        return root.reshape(ret.st.shape)
-    return ret
+      if root != self and root.st.contiguous and prod(st.shape) == prod(root.shape):
+        return root.reshape(st.shape)
+    return create_lazybuffer(self.device, st, MovementOps, LazyOp(op, (self,), arg), self.dtype)
 
   def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
