@@ -6,7 +6,7 @@ from tqdm import tqdm
 import random
 import unicodedata
 
-BASEDIR = Path(__file__).parent.parent / "datasets/wikipedia"
+BASEDIR = Path(__file__).parent.parent.parent / "extra" / "datasets" / "wikipedia"
 
 def _is_punctuation(char):
   if (cp := ord(char)) in range(33, 48) or cp in range(58, 65) or cp in range(91, 97) or cp in range(123, 127):
@@ -289,7 +289,6 @@ def get_instances(rng, tokenizer, documents):
   rng.shuffle(instances)
   return instances
 
-
 def instance_to_features(instance, tokenizer):
   input_ids = tokenizer.convert_tokens_to_ids(instance["tokens"])
   input_mask = [1] * len(input_ids)
@@ -347,10 +346,10 @@ def process_iterate(tokenizer, val=False, part=0):
       yield features, instance
 
 def get_val_files():
-  return sorted(list((BASEDIR / "eval").glob("*.pkl")))
+  return sorted(list((BASEDIR / "eval/").glob("*.pkl")))
 
 def get_train_files():
-  return sorted(list((BASEDIR / "train").glob("*.pkl")))
+  return sorted(list((BASEDIR / "train/").glob("*.pkl")))
 
 def iterate(bs=1, start=0, val=False):
   if val:
@@ -387,7 +386,7 @@ def iterate(bs=1, start=0, val=False):
     }, instances
 
 if __name__ == "__main__":
-  tokenizer = Tokenizer(Path(__file__).parent.parent / "weights/bert_vocab.txt")
+  tokenizer = Tokenizer(Path(__file__).parent.parent.parent / "weights/bert_vocab.txt")
 
   if len(sys.argv) <= 1:
     X, Y = next(iterate(val=False))
