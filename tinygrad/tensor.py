@@ -358,7 +358,7 @@ class Tensor:
     if dim < 0: dim += self.ndim
     self_dim = list(range(self.ndim))
     sum_dim = [dim] + [i-n if n < dim else idx.ndim+i-n-1 for n,i in enumerate(self_dim[:dim] + self_dim[dim+1:])]
-    idx_arange = [idx] + [Tensor.arange(idx.shape[i], dtype=dtypes.int32, requires_grad=False) for i in self_dim[:dim]] + [Tensor.arange(idx.shape[i], requires_grad=False).reshape(*[1]*(n+1), idx.shape[i]) for n,i in enumerate(self_dim[dim+1:])]
+    idx_arange = [idx] + [Tensor.arange(idx.shape[i], dtype=dtypes.int32, requires_grad=False) for i in self_dim[:dim]] + [Tensor.arange(idx.shape[i], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(n+1), idx.shape[i]) for n,i in enumerate(self_dim[dim+1:])]
     return self._gather(idx_arange, sum_dim)
 
   def cat(self, *args, dim=0):
