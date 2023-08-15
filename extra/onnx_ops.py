@@ -627,4 +627,6 @@ def Asinh(x): return Tensor.log(x + Tensor.sqrt(x * x + 1))
 def Acosh(x): return Tensor.log(x + Tensor.sqrt(x * x - 1))
 def Atanh(x): return 0.5 * Tensor.log((1 + x)/(1 - x))
 
-
+def IsInf(x,detect_negative=1,detect_positive=1):
+  ret = (x == float("inf"))*detect_positive + (x == float("-inf"))*detect_negative + Tensor.zeros(*x.shape)
+  return ret.cast(dtypes.bool)

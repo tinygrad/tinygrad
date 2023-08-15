@@ -73,7 +73,6 @@ backend_test.exclude('test_argmin_*')
 backend_test.exclude('test_nonzero_*')
 
 # no support for nan or inf
-backend_test.exclude('test_isinf_*')
 backend_test.exclude('test_isnan_*')
 
 # no support for mod
