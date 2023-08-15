@@ -33,26 +33,25 @@ class ClangProgram:
     # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
     #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
     fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
-    if not binary:
-      prg = CLANG_PROGRAM_HEADER + prg
-      if not os.path.exists(fn):
-        tmp = f"{fn}.{os.getpid()}.tmp"
+    if not os.path.exists(fn):
+      tmp = f"{fn}.{os.getpid()}.tmp"
+      if not binary:
+        prg = CLANG_PROGRAM_HEADER + prg
         subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+tmp).split(), input=prg.encode('utf-8'))
         os.rename(tmp, fn)
-    else:
-      if DEBUG >= 5: print(prg)
-      tmp = f"{fn}.{os.getpid()}.tmp"
-      if CI and ARM64:
-        prg = prg.split('\n') # type: ignore
-        self.varsize = align(int(prg[0].split(" ")[1]))
-        self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
-        prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n'])
-        subprocess.check_output(args=('aarch64-linux-gnu-as -o '+tmp).split(), input=prg.encode('utf-8'))
-        subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+tmp+' '+fn+'.bin').split())
-        self.prg = open(fn + '.bin', 'rb').read()
-        return
-      subprocess.check_output(args=('as -o' + tmp).split(), input=prg.encode('utf-8'))
-      subprocess.check_output(args=('clang -lm -shared '+tmp+' -o'+fn).split())
+      else:
+        if DEBUG >= 5: print(prg)
+        if CI and ARM64:
+          prg = prg.split('\n') # type: ignore
+          self.varsize = align(int(prg[0].split(" ")[1]))
+          self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
+          prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n'])
+          subprocess.check_output(args=('aarch64-linux-gnu-as -o '+tmp).split(), input=prg.encode('utf-8'))
+          subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+tmp+' '+fn+'.bin').split())
+          self.prg = open(fn + '.bin', 'rb').read()
+          return
+        subprocess.check_output(args=('as -o' + tmp).split(), input=prg.encode('utf-8'))
+        subprocess.check_output(args=('clang -lm -shared '+tmp+' -o'+fn).split())
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
   def __call__(self, global_size, local_size, *args, wait=False):
