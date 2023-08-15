@@ -1,7 +1,9 @@
 import csv
 import pathlib
 import time
+from os import getenv
 import onnx
+import numpy as np
 import torch
 torch.set_num_threads(1)
 from onnx2torch import convert
@@ -48,7 +50,7 @@ def benchmark(mnm, nm, fxn):
 
 #BASE = pathlib.Path(__file__).parent.parent.parent / "weights" / "onnx"
 BASE = pathlib.Path("/tmp/")
-def benchmark_model(m):
+def benchmark_model(m, validate_outs=False):
   global open_csv, CSV
   CSV = {"model": m}
 
@@ -56,9 +58,11 @@ def benchmark_model(m):
   download_file(MODELS[m], fn)
   onnx_model = onnx.load(fn)
 
+  torch.manual_seed(1)
   excluded = {inp.name for inp in onnx_model.graph.initializer}
   input_shapes = {inp.name:tuple(x.dim_value if x.dim_value != 0 else 1 for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input if inp.name not in excluded}
   input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input if inp.name not in excluded}
+  input_types = {k:v if v!=np.float16 else np.float32 for k,v in input_types.items()}  # cast
   np_inputs = {k:torch.randn(shp).numpy().astype(input_types[k]) for k,shp in input_shapes.items()}
   assert len(input_shapes) < 30, f"too many input shapes {len(input_shapes)}"
 
@@ -91,6 +95,18 @@ def benchmark_model(m):
   torch_mps_inputs = prepare_torch_inputs(m, torch_inputs, torch_device)
   benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs))
 
+  if validate_outs:
+    rtol, atol = (6e-4, 83e-4) if m in TORCH_MODELS else (1e-4, 1e-4)  # higher tols for torch_models, since onnx is (often) quantized
+    inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
+    tinygrad_model = get_run_onnx(onnx_model)
+    tinygrad_out = tinygrad_model(inputs)
+
+    torch_model = torch_model.to("cpu")
+    torch_out = unpack_torch_outputs(m, torch_model(*prepped_torch_inputs))
+
+    assert_allclose(tinygrad_out, torch_out, rtol=rtol, atol=atol)
+    print(f"{m:16s}outputs validated with rtol={rtol:.1e}, atol={atol:.1e}")
+
   if open_csv is None:
     open_csv = csv.DictWriter(open('onnx_inference_speed.csv', 'w', newline=''), fieldnames=list(CSV.keys()))
     open_csv.writeheader()
@@ -110,5 +126,18 @@ def prepare_torch_inputs(m, torch_inputs, device=None):
     return torch_inputs[0], tuple(torch_inputs[1:])
   return torch_inputs
 
+def unpack_torch_outputs(m, torch_out):
+  if m == "commavq":
+    return dict([("logits", torch_out["logits"]), *[(f"present_{i}",torch.cat((v[0].unsqueeze(0), v[1].unsqueeze(0)), dim=0)) for i,v in enumerate(torch_out["past_key_values"])]])
+  return torch_out
+
+def assert_allclose(tiny_out:dict, torch_out:dict, rtol=1e-5, atol=1e-5):
+  assert len(tiny_out) == len(torch_out)
+  assert tiny_out.keys() == torch_out.keys()
+  for k in tiny_out.keys():
+    tiny_v, torch_v = tiny_out[k], torch_out[k]
+    if tiny_v is None: assert tiny_v == torch_v
+    else: np.testing.assert_allclose(tiny_v.numpy(), torch_v.detach().numpy(), rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
+
 if __name__ == "__main__":
-  for m in MODELS: benchmark_model(m)
+  for m in MODELS: benchmark_model(m, getenv("VAL", False))
