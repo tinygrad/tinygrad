@@ -622,6 +622,7 @@ def Atan(y):
   t3 = (y.abs() > x.abs()).where(1.570796327 - t3, t3)
   return (y < 0).where(-t3, t3)
 
+def Asin(x): return Atan(x / Tensor.sqrt(1 - x * x))
 
 def Asinh(x): return Tensor.log(x + Tensor.sqrt(x * x + 1))
 def Acosh(x): return Tensor.log(x + Tensor.sqrt(x * x - 1))
@@ -630,3 +631,26 @@ def Atanh(x): return 0.5 * Tensor.log((1 + x)/(1 - x))
 def IsInf(x,detect_negative=1,detect_positive=1):
   ret = (x == float("inf"))*detect_positive + (x == float("-inf"))*detect_negative + Tensor.zeros(*x.shape)
   return ret.cast(dtypes.bool)
+
+def Det(x):
+  def _det(x):
+    if x.shape[-1] == 2:
+      return x[...,0,0] * x[..., 1,1] - x[...,1,0] * x[..., 0,1]
+    else:
+      sum = 0
+      for i in range(x.shape[-1]):
+        sgn = 1 if i % 2 == 0 else -1 # (-1)**n
+        sum += sgn * x[...,0,i]*_det(x[...,1:,:i].cat(x[...,1:,i+1:]))
+
+  return _det(x)
+
+# Needs work
+def DequantizeLinear(x, x_scale, x_zero_point=0, axis=1):
+  axis = axis + x.ndim if axis < 0 else axis
+  x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
+  x_zer = x_zero_point.reshape(*[1] * axis, *x_scale.shape, *[1] * (x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
+  return ((x - x_zer) * x_sc)
+
+# Needs work
+def IsNaN(x):
+  return (x < float("-inf")).cast(dtypes.bool)
