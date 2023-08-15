@@ -1,9 +1,8 @@
 from __future__ import annotations
-import operator, math
+import operator, math, collections
 from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast
 import sys, importlib, inspect, functools, pathlib
 from weakref import ref
-from collections import namedtuple
 
 import numpy as np
 from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, LightWeakSet, LightWeakValueDictionary
@@ -31,7 +30,7 @@ def to_lazyop(op: Union[LazyOp, LazyBuffer]) -> LazyOp: return op.op if op.__cla
 def _capture_is_lb(captid) -> Callable[[Any], bool]: return lambda capt: capt[captid].__class__ is LazyBuffer
 def _skip_movement_ops(self:Union[LazyOp, LazyBuffer]): return self if (self.__class__ is LazyBuffer and self.realized) or to_lazyop(self).op not in MovementOps else _skip_movement_ops(to_lazyop(self).src[0])
 
-OptRule = namedtuple('OptRule', ['opgen', 'tree'])
+OptRule = collections.namedtuple('OptRule', ['opgen', 'tree'])
 OPT_RULES = [
   OptRule(lambda capt: LazyOp(BinaryOps.MAX, (capt['a'], capt['b'])), [(1, BinaryOps.CMPLT, ['a','b']), (2, BinaryOps.CMPLT, ['b','a']), (3, BinaryOps.ADD, ['b','a']), (4, LoadOps.CONST, [], lambda capt: to_lazyop(capt[4]).arg == 0.5),
     (5, BinaryOps.MUL, [3, (4, _skip_movement_ops)]), (6, TernaryOps.WHERE, [1,'b',5]), (7, TernaryOps.WHERE, [2,'a',6])]), # (a<b).where(b, (a>b).where(a, (a+b)/2))).op.op => max(a, b)
@@ -43,10 +42,10 @@ OPT_RULES = [
 def _patch_pattern(self: Union[LazyOp, LazyBuffer], rule: OptRule) -> LazyOp:
   captures: Dict[Any, Union[LazyOp, LazyBuffer]] = {rule.tree[-1][0]: self}
   nodeid_to_index: Dict[Any, int] = {node[0]: i for i,node in enumerate(rule.tree)}
-  def op_matches_rule(op: LazyOp, rule_node: Tuple[Any, ...]): return (op.op == rule_node[1] or rule_node[1] is None) and (len(op.src) == len(rule_node[2]) or len(rule_node[2]) == 0) and (True if len(rule_node) < 4 else rule_node[3](captures))
+  def op_matches_rule(op, rule_node: Tuple[Any, ...]): return (rule_node[1] is None or op.op == rule_node[1]) and (len(rule_node[2]) == 0 or len(op.src) == len(rule_node[2])) and (True if len(rule_node) < 4 else rule_node[3](captures))
   def match_ast(op: Union[LazyOp, LazyBuffer], rule_node: Tuple[Any, ...]):
     if rule_node[1] is not None and op.__class__ is LazyBuffer and op.realized: return False # Can't match if realized.
-    if not op_matches_rule(to_lazyop(op), rule_node): return False # LazyOp does not match required node from rule.
+    if not op_matches_rule(to_lazyop(op) if rule_node[1] else op, rule_node): return False # LazyOp does not match required node from rule.
     if len(rule_node[2]) == 0: return True # The case when we do not care about matching children.
     for i,child in enumerate(to_lazyop(op).src):
       child_id, mod = rule_node[2][i] if rule_node[2][i].__class__ is tuple else (rule_node[2][i], None)

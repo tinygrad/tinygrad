@@ -1,19 +1,9 @@
 #!/usr/bin/env python
 import numpy as np
 import unittest
-from tinygrad.lazy import LazyBuffer, Device, simplify_ast
+from tinygrad.lazy import LazyBuffer, Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters
-from tinygrad.ops import BinaryOps
-
-def helper_test_patterns(clb):
-  N = 8
-  a = Tensor.rand(N, N)
-  b = Tensor.rand(N, N)
-  c = Tensor.rand(N, N)
-  z = clb(a, b, c).lazydata
-  simplify_ast(z)
-  return z
 
 class TestLazyBuffer(unittest.TestCase):
   def test_fromcpu_buffer_sharing(self):
@@ -76,21 +66,6 @@ class TestLazyBuffer(unittest.TestCase):
     assert GlobalCounters.cache[1][0].name.startswith("E_")
     assert GlobalCounters.cache[2][0].name.startswith("E_")
     GlobalCounters.cache = None
-
-  def test_simplification_patterns(self):
-    assert helper_test_patterns(lambda a,b,_: a.maximum(b)).op.op == BinaryOps.MAX
-    assert helper_test_patterns(lambda a,b,_: (a<b).detach().where(b, (a>b).detach().where(a, (a+b)/2))).op.op == BinaryOps.MAX
-    assert helper_test_patterns(lambda a,b,_: (a<b).where(b, (a>b).detach().where(a, (a+b)/2))).op.op == BinaryOps.MAX
-    assert helper_test_patterns(lambda a,b,_: (a<b).where(b, (a>b).where(a, (a+b)/2))).op.op == BinaryOps.MAX
-    assert helper_test_patterns(lambda a,b,_: (a<b).detach().where(b, (a>b).detach().where(a, (a+b)/3))).op.op != BinaryOps.MAX
-    assert helper_test_patterns(lambda a,b,_: (a<b).detach().where(b, (a>b).detach().where(b, (a+b)/2))).op.op != BinaryOps.MAX
-    assert helper_test_patterns(lambda a,b,_: (a<b).detach().where(b, a)).op.op != BinaryOps.MAX
-    assert helper_test_patterns(lambda a,b,_: (a<b).detach().where(b, (b>b).detach().where(a, (a+b)/2))).op.op != BinaryOps.MAX
-    assert helper_test_patterns(lambda a,b,_: (b<b).detach().where(b, (a>b).detach().where(a, (a+b)/2))).op.op != BinaryOps.MAX
-    assert helper_test_patterns(lambda a,b,c: (a<c).where(c, (a>b).detach().where(a, (a+b)/2))).op.op != BinaryOps.MAX
-    assert helper_test_patterns(lambda a,b,c: (c<b).detach().where(b, (a>b).detach().where(a, (a+b)/2))).op.op != BinaryOps.MAX
-    assert helper_test_patterns(lambda a,b,c: (a<b).where(b, (a>b).detach().where(a, (c+b)/2))).op.op != BinaryOps.MAX
-    assert helper_test_patterns(lambda a,b,c: (a<b).detach().where(b, (a>b).detach().where(c, (a+b)/2))).op.op != BinaryOps.MAX
 
 if __name__ == "__main__":
   unittest.main()

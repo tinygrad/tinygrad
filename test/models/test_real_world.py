@@ -10,6 +10,7 @@ from tinygrad.helpers import CI, dtypes
 from examples.hlb_cifar10 import SpeedyResNet
 from examples.llama import Transformer, MODEL_PARAMS
 from examples.stable_diffusion import UNetModel
+import gc
 
 def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed):
   tms = []
@@ -22,6 +23,7 @@ def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed):
     tms.append(time.perf_counter_ns() - st)
 
   kernels_used = len(train.jit_cache) if hasattr(train, "jit_cache") else None
+  gc.collect() # Collect everything to get correct memory usage.
   print(f"{nm}: used {GlobalCounters.mem_used/1e9:.2f} GB and {kernels_used} kernels in {min(tms)/1e6:.2f} ms")
   assert GlobalCounters.mem_used/1e9 < max_memory_allowed, f"{nm} used more than {max_memory_allowed:.2f} GB"
   assert not kernels_used or kernels_used <= max_kernels_allowed, f"{nm} used more than {max_kernels_allowed} kernels"
@@ -30,7 +32,7 @@ def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed):
 def derandomize(x):
   if isinstance(x, LazyOp):
     if x.op == LoadOps.RAND: x.op = LoadOps.EMPTY
-    x.src = tuple([derandomize(s) for s in x.src])
+    x.src = tuple(derandomize(s) for s in x.src)
   elif hasattr(x, "op"):
     x.op = derandomize(x.op)
   return x

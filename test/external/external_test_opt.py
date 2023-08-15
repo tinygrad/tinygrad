@@ -13,8 +13,8 @@ from tinygrad.tensor import Tensor, Device
 from tinygrad import nn
 from tinygrad.helpers import getenv
 from tinygrad.nn import optim
-from tinygrad.ops import GlobalCounters, MovementOps, ReduceOps
-from tinygrad.lazy import PUSH_PERMUTES
+from tinygrad.ops import GlobalCounters, MovementOps, ReduceOps, BinaryOps
+from tinygrad.lazy import PUSH_PERMUTES, simplify_ast
 
 class CLCache():
   def __init__(self, allowed=None, strict=False, preclear=True): self.allowed, self.strict, self.preclear = allowed, strict, preclear
@@ -390,6 +390,48 @@ class TestOpt(unittest.TestCase):
         cache_len = len(GlobalCounters.cache)
       np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
       return cache_len
+
+def helper_simplify_ast(clb):
+  N = 8
+  a = Tensor.rand(N, N)
+  b = Tensor.rand(N, N)
+  c = Tensor.rand(N, N)
+  z = clb(a, b, c).lazydata
+  return simplify_ast(z)
+
+def helper_check_simplified_correctness(clb):
+  N = 8
+  a = Tensor.rand(N, N)
+  b = Tensor.rand(N, N)
+  c = Tensor.rand(N, N)
+  z1 = clb(a, b, c)
+  z1.lazydata._realize()
+  z2 = clb(a, b, c)
+  np.testing.assert_allclose(z1.numpy(), z2.numpy(), rtol=1e-3, atol=1e-5)
+
+class TestOptPatterns(unittest.TestCase):
+  def test_simplification_max_pattern(self):
+    helper_check_simplified_correctness(lambda a,b,_: a.maximum(b))
+    assert helper_simplify_ast(lambda a,b,_: a.maximum(b)).op.op == BinaryOps.MAX
+    assert helper_simplify_ast(lambda a,b,_: (a<b).detach().where(b, (a>b).detach().where(a, (a+b)/2))).op.op == BinaryOps.MAX
+    assert helper_simplify_ast(lambda a,b,_: (a<b).where(b, (a>b).detach().where(a, (a+b)/2))).op.op == BinaryOps.MAX
+    assert helper_simplify_ast(lambda a,b,_: (a<b).where(b, (a>b).where(a, (a+b)/2))).op.op == BinaryOps.MAX
+    assert helper_simplify_ast(lambda a,b,_: (a<b).detach().where(b, (a>b).detach().where(a, (a+b)/3))).op.op != BinaryOps.MAX
+    assert helper_simplify_ast(lambda a,b,_: (a<b).detach().where(b, (a>b).detach().where(b, (a+b)/2))).op.op != BinaryOps.MAX
+    assert helper_simplify_ast(lambda a,b,_: (a<b).detach().where(b, a)).op.op != BinaryOps.MAX
+    assert helper_simplify_ast(lambda a,b,_: (a<b).detach().where(b, (b>b).detach().where(a, (a+b)/2))).op.op != BinaryOps.MAX
+    assert helper_simplify_ast(lambda a,b,_: (b<b).detach().where(b, (a>b).detach().where(a, (a+b)/2))).op.op != BinaryOps.MAX
+    assert helper_simplify_ast(lambda a,b,c: (a<c).where(c, (a>b).detach().where(a, (a+b)/2))).op.op != BinaryOps.MAX
+    assert helper_simplify_ast(lambda a,b,c: (c<b).detach().where(b, (a>b).detach().where(a, (a+b)/2))).op.op != BinaryOps.MAX
+    assert helper_simplify_ast(lambda a,b,c: (a<b).where(b, (a>b).detach().where(a, (c+b)/2))).op.op != BinaryOps.MAX
+    assert helper_simplify_ast(lambda a,b,c: (a<b).detach().where(b, (a>b).detach().where(c, (a+b)/2))).op.op != BinaryOps.MAX
+
+  def test_simplification_propogate_minus_pattern(self):
+    helper_check_simplified_correctness(lambda a,b,_: -a*44)
+    helper_check_simplified_correctness(lambda a,b,_: -a*-22)
+    helper_check_simplified_correctness(lambda a,b,_: -(a+b)*-22)
+    helper_check_simplified_correctness(lambda a,b,_: -(a+b)*-22 + -a*-22 + b*-22)
+    assert helper_simplify_ast(lambda a,b,_: -a*11).op.src[1].op.src[0].op.src[0].op.arg == -11
 
 if __name__ == '__main__':
   unittest.main()
