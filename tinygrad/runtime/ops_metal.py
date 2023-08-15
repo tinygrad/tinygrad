@@ -4,7 +4,7 @@ import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.linearizer import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType
+from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferMapped
 
@@ -78,4 +78,5 @@ renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);", float4 = "float4", uses_ptr_arithmetic=True,
   gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']))
-MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(), renderer, MetalProgram, METAL.synchronize)
+MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(supported_vector_sizes = {dtypes.float: [2,4]},
+                                                         supported_vector_sizes_alu = {dtypes.float: [2,4]}), renderer, MetalProgram, METAL.synchronize)

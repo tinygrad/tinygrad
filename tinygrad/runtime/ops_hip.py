@@ -1,7 +1,7 @@
 import numpy as np
 import ctypes, functools
 import extra.hip_wrapper as hip
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.linearizer import LinearizerOptions
@@ -72,4 +72,6 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset
   """,
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]))
-HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(), renderer, HIPProgram, hip.hipDeviceSynchronize)
+HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(supported_vector_sizes={dtypes.float: [2,4], dtypes.half: [2]},
+                                                     supported_vector_sizes_alu = {dtypes.float: [2,4], dtypes.half: [2]},
+                                                     uses_float32_calculations = False), renderer, HIPProgram, hip.hipDeviceSynchronize)

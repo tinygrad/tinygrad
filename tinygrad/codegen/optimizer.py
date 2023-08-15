@@ -164,7 +164,7 @@ def hand_coded_optimizations(k:Linearizer):
 
   if k.opts.has_local:
     # are we grouping? (requires local shape support)
-    if not k.float4_axis(0) and k.first_reduce <= 2 and k.first_reduce + 1 <= k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
+    if not k.vector_axis(0) and k.first_reduce <= 2 and k.first_reduce + 1 <= k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(k.sts[0].shape[:k.first_reduce]) <= 32 else [16]):
         if all(st.shape[k.first_reduce] % sz == 0 or st.shape[k.first_reduce] == 1 for st in k.sts):
@@ -173,7 +173,7 @@ def hand_coded_optimizations(k:Linearizer):
           break
 
     # are we upcasting in mid reduce? (only for images)
-    if k.bufs[0].dtype.name.startswith('image') and not k.float4_axis(0) and k.group_for_reduce and k.first_reduce <= 2 and prod(k.sts[0].shape) > 1:
+    if k.bufs[0].dtype.name.startswith('image') and not k.vector_axis(0) and k.group_for_reduce and k.first_reduce <= 2 and prod(k.sts[0].shape) > 1:
       axes = k.sts[0].unit_stride_axes()
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
       if k.sts[0].shape[axes[0]]%4 == 0:

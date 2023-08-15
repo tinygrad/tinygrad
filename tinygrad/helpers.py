@@ -68,6 +68,7 @@ class DType(NamedTuple):
   name: str
   np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
   sz: int = 1
+  is_vector_type: Optional[bool] = False
   def __repr__(self): return f"dtypes.{self.name}"
   @property
   def key(self): return (self.name)
@@ -83,11 +84,11 @@ class ImageDType(DType):
 
 class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
-  def is_int(x: DType)-> bool: return x in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64)
+  def is_int(x: DType)-> bool: return dtypes.get_normal_type(x) in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64)
   @staticmethod
-  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes._half4, dtypes._float4)
+  def is_float(x: DType) -> bool: return dtypes.get_normal_type(x) in (dtypes.float16, dtypes.float32)
   @staticmethod
-  def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint32, dtypes.uint64)
+  def is_unsigned(x: DType) -> bool: return dtypes.get_normal_type(x) in (dtypes.uint8, dtypes.uint32, dtypes.uint64)
   @staticmethod
   def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
@@ -97,12 +98,14 @@ class dtypes:
   half = float16
   float32: Final[DType] = DType(4, 4, "float", np.float32)
   float = float32
-  float64: Final[DType] = DType(0, 8, "double", np.float64)
-  double = float64
   int8: Final[DType] = DType(0, 1, "char", np.int8)
+  char = int8
   int16: Final[DType] = DType(1, 2, "short", np.int16)
+  short = int16
   int32: Final[DType] = DType(2, 4, "int", np.int32)
+  int = int32
   int64: Final[DType] = DType(3, 8, "long", np.int64)
+  long = int64
   uint8: Final[DType] = DType(0, 1, "unsigned char", np.uint8)
   uint16: Final[DType] = DType(1, 2, "unsigned short", np.uint16)
   uint32: Final[DType] = DType(2, 4, "unsigned int", np.uint32)
@@ -110,11 +113,17 @@ class dtypes:
 
   # NOTE: bfloat16 isn't supported in numpy
   bfloat16: Final[DType] = DType(0, 2, "__bf16", None)
+  @staticmethod
+  def get_vector_type(x:DType, amt=4):
+    return dtypes.__dict__.get(f"_{x.name}{amt}", x if x.is_vector_type else dtypes._float4)
+  @staticmethod
+  def get_normal_type(x: DType):
+    return dtypes.__dict__.get(f"{''.join([c for c in x.name if c.isalpha()])}", x if not x.is_vector_type else dtypes._float4)
 
-  # NOTE: these are internal dtypes, should probably check for that
-  _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
-  _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
-  _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
+# create vector types
+for attr in list(dtypes.__dict__.values()):
+  for amt in [2,4,8]:
+    if isinstance(attr, DType): setattr(dtypes, f"_{attr.name}{amt}",  DType(attr.priority, attr.itemsize*amt, f"{attr.name}{amt}", None, amt, True))
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}

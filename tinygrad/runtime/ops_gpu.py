@@ -3,7 +3,7 @@ import pathlib, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
-from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
+from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.linearizer import LinearizerOptions
@@ -90,6 +90,8 @@ renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
   kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
   half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
-  gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True))
+  gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=False))
 
-GPUBuffer = Compiled(CLBuffer, LinearizerOptions(), renderer, CLProgram, CL.synchronize)
+GPUBuffer = Compiled(CLBuffer, LinearizerOptions(supported_vector_sizes={dtypes.float: [2,4,8]},
+                                                 supported_vector_sizes_alu = {dtypes.float: [2,4,8]},
+                                                 uses_float32_calculations=False, is_nvidia=CL.cl_ctxs[0].devices[0].name.startswith('NVIDIA')), renderer, CLProgram, CL.synchronize)

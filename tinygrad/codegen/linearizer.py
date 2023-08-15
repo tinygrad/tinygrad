@@ -3,7 +3,7 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition
+from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition, getenv
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
@@ -52,12 +52,13 @@ class Token(NamedTuple):
       assert self.offset is None
       return f"{self.dtype.name} {self.name}"
     if self.offset is None: return self.name
-    assert self.dtype in [dtypes._float4, dtypes._float2], f"{self.dtype} isn't okay with offset {self.offset}"
-    return self.name+"."+"xyzw"[int(self.offset)]
+    assert self.dtype.is_vector_type, f"{self.dtype} isn't okay with offset {self.offset}"
+    selector = f".{'xyzw'[int(self.offset)]}" if self.offset < 4 else f".s{'0123456789aAbBcCdDeEfF'[int(self.offset)]}"
+    return self.name + selector
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
 # TODO: the next three functions are poorly written
-def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
+def get_grouped_vector_idxs(acc:List[Token]) -> Optional[List[int]]:
   idxs: Optional[List[int]] = []
   for i,a in enumerate(acc):
     if idxs is None: break
@@ -76,21 +77,21 @@ def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
       idxs = None
   return idxs
 
-def to_float4(x:List[Token]) -> Optional[Token]:
+def to_vector(x:List[Token]) -> Optional[Token]:
   if all_same(x): return x[0]
-  if all_same([y.name for y in x]) and all(y.dtype == dtypes._float4 and y.offset == i for i,y in enumerate(x)):
-    return Token(x[0].name, dtypes._float4)
+  if all_same([y.name for y in x]) and all(y.dtype.is_vector_type and y.offset == i for i,y in enumerate(x)):
+    return Token(x[0].name, dtypes.get_vector_type(x[0].dtype, amt=4))
   return None
 
-def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
+def get_grouped_maybe_vector(*values:List[Token], grouping_allowed=True):
   assert all_same([len(x) for x in values]), f"all values are not the same length {values}"
-  # these use accumulators, we can only fold if the acc is a float4
-  idxs = get_grouped_float4_idxs(values[-1]) if grouping_allowed else None
+  # these use accumulators, we can only fold if the acc is a vector
+  idxs = get_grouped_vector_idxs(values[-1]) if grouping_allowed else None
   if idxs is not None:
     new_idxs = []
     new_values = []
     for i in range(0, len(idxs), 4):
-      nv = [to_float4([v[j] for j in idxs[i:i+4]]) for v in values]
+      nv = [to_vector([v[j] for j in idxs[i:i+4]]) for v in values]
       if any(x is None for x in nv): break
       new_idxs.append(idxs[i:i+4])
       new_values.append(nv)
@@ -136,12 +137,14 @@ class UOp(NamedTuple):
 
 class LinearizerOptions(NamedTuple):
   # TODO: make this generic with a list of supported types
-  supports_float4: bool = True
-  supports_float4_alu: bool = True
+  supported_vector_sizes: Dict[DType, List[int]] = {dtypes.float: []}
+  supported_vector_sizes_alu: Dict[DType, List[int]] = {dtypes.float: []}
+  uses_float32_calculations: bool = True
   has_local: bool = True
   # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
   global_max: Optional[List[int]] = None
   local_max: Optional[List[int]] = None
+  is_nvidia: Optional[bool] = None
 
 class Linearizer:
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, opts:LinearizerOptions):
@@ -207,7 +210,7 @@ class Linearizer:
     if DEBUG >= 5: self.printbufs("early")
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
-  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]
+  def vector_axis(self, i, amt=4): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%amt == 0]
 
   def upcasted_axis(self, i):
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
@@ -222,7 +225,8 @@ class Linearizer:
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
   def get_upcast_dim(self, i) -> List[int]:
-    should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
+    vector_types = [dtypes.float32,] if self.opts.uses_float32_calculations else [dtypes.float32, dtypes.float16, dtypes.int8, dtypes.int32, dtypes.int64, ]
+    should_upcast = len(self.opts.supported_vector_sizes.get(self.bufs[i].dtype, self.opts.supported_vector_sizes[dtypes.float])) > 0 and (self.bufs[i].dtype in vector_types or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], const=None) -> List[Token]:
@@ -233,7 +237,7 @@ class Linearizer:
     upcast_dim = self.get_upcast_dim(i)
 
     amt = 1
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in self.opts.supported_vector_sizes.get(self.bufs[i].dtype, self.opts.supported_vector_sizes[dtypes.float]):
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     cache: Dict[str, Token] = {}
@@ -242,19 +246,22 @@ class Linearizer:
     for _idx in _idxs:
       if amt > 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
-        localtype = dtypes._float4 if amt == 4 else dtypes._float2
+        localtype = dtypes.get_vector_type(dtypes.float if self.opts.uses_float32_calculations else self.bufs[i].dtype, amt)
+        accumtype = dtypes.get_vector_type(dtypes.float, amt) if getenv('ACCUM_FLOAT', 1) else localtype
         if idx.render() != ((idx//amt)*amt).render():
           idx, valid = self.sts[i].expr_idxs(_idx)
-          localtype = dtypes.float32
+          localtype = dtypes.float if self.opts.uses_float32_calculations else self.bufs[i].dtype 
+          accumtype = dtypes.float if getenv('ACCUM_FLOAT', 1) else localtype
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
-        localtype = dtypes.float32
+        localtype = dtypes.float if self.opts.uses_float32_calculations else self.bufs[i].dtype 
+        accumtype = dtypes.float if getenv('ACCUM_FLOAT', 1) else localtype
       this_const, valid, key = (invalid_value, cast(Variable, Variable.num(1)), f"{localtype}INVALID") if valid.max == 0 else (const, valid, f"{localtype}{idx.render()}{valid.render()}")
       if key not in cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value)) if this_const is None else \
-                     self.uop(UOps.LOAD, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], ConstOp(this_const, valid))
-      ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else cache[key])
+                     self.uop(UOps.LOAD, Token(f"acc{mnum(i)}_{len(cache)}", accumtype), [], ConstOp(this_const, valid))
+      ret.append(Token(cache[key].name, cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype.is_vector_type else cache[key])
     return ret
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
@@ -265,7 +272,7 @@ class Linearizer:
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4]:
+    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in self.opts.supported_vector_sizes.get(self.bufs[i].dtype, self.opts.supported_vector_sizes[dtypes.float]):
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (expanded_nodes[upcast_dim[0]][0],) + k[upcast_dim[0]+1:]
@@ -276,10 +283,11 @@ class Linearizer:
         idx, valid = self.sts[i].expr_idxs(k)
         assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
         assert valid.min == 1, "stores are always valid"
-        if all_same([x.name for x in out_tokens]) and tuple(range(amt)) == tuple(x.offset for x in out_tokens):
-          store_offset_new[k] = Token(out_tokens[0].name, dtypes._float4 if amt == 4 else dtypes._float2)
+        dt = dtypes.get_vector_type(dtypes.get_normal_type(dtypes.float if self.opts.uses_float32_calculations else self.bufs[i].dtype), amt=amt) 
+        if all_same([x.name for x in out_tokens]) and tuple(range(amt)) == tuple(x.offset for x in out_tokens) and out_tokens[0].dtype == self.bufs[i].dtype:
+          store_offset_new[k] = Token(out_tokens[0].name, dt)
         else:
-          store_offset_new[k] = self.uop(UOps.CAST, ssa("alu", dtypes._float4 if amt == 4 else dtypes._float2), out_tokens)
+          store_offset_new[k] = self.uop(UOps.CAST, ssa("alu", dt), out_tokens)
       store_offset = store_offset_new
 
     for idx, var in store_offset.items():
@@ -297,6 +305,7 @@ class Linearizer:
     # uops
     self.uops: List[UOp] = []
     self.saved_exprs: Dict[LazyOp, List[Token]] = dict()
+    self.casts = {}
 
     # add global buffers
     for buf,name in self.arg_bufs.items():
@@ -306,12 +315,12 @@ class Linearizer:
     if len(self.group_for_reduce):
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
-      self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
-      self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size(), dtype=dtypes.float if (getenv('ACCUM_FLOAT', 1) or self.opts.uses_float32_calculations) else self.bufs[-1].dtype))
+      self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size(), dtypes.float if (getenv('ACCUM_FLOAT', 1) or self.opts.uses_float32_calculations) else self.bufs[-1].dtype))
 
     # define local buffers
     for lb in self.local_alias.values():
-      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size()))
+      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size(), dtypes.float if (getenv('ACCUM_FLOAT', 1) or self.opts.uses_float32_calculations) else self.bufs[-1].dtype))
 
     # print
     if DEBUG >= 3: self.printbufs()
@@ -326,9 +335,10 @@ class Linearizer:
 
     # ssa
     _ssa:DefaultDict[str,int] = defaultdict(int)
-    def ssa(name, ltype=dtypes.float) -> Token:
+    def ssa(name, ltype=dtypes.float, add_idx=True) -> Token:
       _ssa[name] += 1
-      return Token(f"{name}{_ssa[name]-1}", ltype)
+      name = f"{name}{_ssa[name]-1}" if add_idx else name
+      return Token(name, ltype)
 
     # global loop
     global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
@@ -476,6 +486,17 @@ class Linearizer:
     self.uops.append(UOp(uop, cast(Optional[Token], out), vin, arg))
     if DEBUG >= 4: print(self.uops[-1])
     return out
+  
+  @staticmethod
+  def ungroup(token):
+    assert token.dtype.is_vector_type
+    assert token.offset is None
+    if isinstance(token, Token):
+      new_tokens = []
+      for idx in range(token.dtype.sz):
+        new_tokens.append(Token(token.name, token.dtype, idx if token.dtype.is_vector_type else None))
+      return new_tokens
+    return token
 
   def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
     if x.__class__ is not LazyOp: return loaded_buffers[x]
@@ -492,16 +513,42 @@ class Linearizer:
       x.src = tuple(srcs)
     if x not in self.saved_exprs:
       values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
+
+      # Cast all to highest priority dtype
       ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
-      if x.op in ops:
-        ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), ops[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.opts.supports_float4_alu)]
-      else:
-        ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.opts.supports_float4_alu and x.op not in {BinaryOps.CMPLT, TernaryOps.WHERE})]
+      use_accum = x.op in ops
+      cast_dtype = dtypes.float if use_accum and getenv('ACCUM_FLOAT', 1) else dtypes.float16
+      highest_priority = max([v.dtype.priority for val in values for v in val] + [cast_dtype.priority])
+      buf_cast_dtype = [v.dtype if v.offset is None else dtypes.get_normal_type(v.dtype) for val in values for v in val if v.dtype.priority == highest_priority]
+      if len(buf_cast_dtype) > 0: cast_dtype = buf_cast_dtype[0]
+      # Special case for NVIDIA
+      is_nvidia = self.opts.is_nvidia if self.opts.is_nvidia is not None else False
+      if x.op in [UnaryOps.SQRT, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.LOG2, ReduceOps.MAX, BinaryOps.MAX] and is_nvidia: cast_dtype = dtypes.float
+      # Group values
+      grouping_allowed = 4 in self.opts.supported_vector_sizes_alu.get(cast_dtype, self.opts.supported_vector_sizes_alu[dtypes.float])
+      grouped = list(get_grouped_maybe_vector(*values, acc, grouping_allowed=grouping_allowed) if use_accum else 
+                 get_grouped_maybe_vector(*values, grouping_allowed=grouping_allowed and x.op not in {BinaryOps.CMPLT, TernaryOps.WHERE}))
+      # Cast grouped values if required
+      for idx, val in grouped:
+        for v in val:
+          if v.dtype.is_vector_type and v.offset is None and v.dtype != dtypes.get_vector_type(cast_dtype, 4) and v not in self.casts:
+            self.casts[v] = self.uop(UOps.CAST, ssa(f"casted_{v.name}", dtypes.get_vector_type(cast_dtype, 4), False), self.ungroup(v))
+          elif dtypes.get_normal_type(v.dtype) != cast_dtype and v not in self.casts:
+            offset = f"_{v.offset}" if v.offset is not None else ''
+            self.casts[v] = self.uop(UOps.CAST, ssa(f"casted_{v.name}{offset}", cast_dtype, False), [v])
+      # ALU with casted grouped values
+      ret = []
+      for idx, val in grouped:
+        val = [self.casts.get(v, v) for v in val] # cast if needed
+        val_dtype = dtypes.get_vector_type(val[0].dtype, 4) if any(x.dtype.is_vector_type and x.offset is None for x in val) else dtypes.get_normal_type(val[0].dtype)
+        val_dtype = (dtypes._float4 if any(x.dtype.is_vector_type and x.offset is None for x in val) else dtypes.float) if self.opts.uses_float32_calculations else val_dtype
+        ret.append((idx, self.uop(UOps.ALU, val[-1] if use_accum else ssa('alu', val_dtype),
+                    list(val), ops.get(x.op, x.op))))
       ordered_ret: List[Optional[Token]] = [None]*len(values[0])
       # scatter
       for i,j in ret:
         for o,k in enumerate(i):
-          ordered_ret[k] = Token(j.name, j.dtype, o) if j.dtype == dtypes._float4 else j
+          ordered_ret[k] = Token(j.name, j.dtype, o) if j.dtype.is_vector_type else j
       assert all(isinstance(x, Token) for x in ordered_ret), "some tokens didn't get scattered?"
       self.saved_exprs[x] = cast(List[Token], ordered_ret)
     return self.saved_exprs[x]
@@ -662,6 +709,6 @@ class Linearizer:
           bst *= shp[j]
 
     self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
-    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
+    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size(), dtype=dtypes.float if self.opts.uses_float32_calculations else self.bufs[-1].dtype))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
