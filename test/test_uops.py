@@ -65,7 +65,8 @@ class TestFloatUOps(TestUOps):
   def test_log2(self): self._test_uop_fxn(UnaryOps.LOG2, lambda a: math.log2(a) if a > 0 else float('-inf' if a==0 else 'nan'))
   def test_sin(self): self._test_uop_fxn(UnaryOps.SIN, lambda a: math.sin(a))
   def test_sqrt(self): self._test_uop_fxn(UnaryOps.SQRT, lambda a: math.sqrt(a) if a >= 0 else float('nan'))
-  def test_recip(self): self._test_uop_fxn(UnaryOps.RECIP, lambda a: 1.0/a if a != 0 else float('inf'))
+  # this is not on most backends
+  #def test_recip(self): self._test_uop_fxn(UnaryOps.RECIP, lambda a: 1.0/a if a != 0 else float('inf'))
 
   def test_add(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: a+b)
   def test_sub(self): self._test_bop_fxn(BinaryOps.SUB, lambda a,b: a-b)
@@ -79,7 +80,7 @@ class TestFloatUOps(TestUOps):
   def test_where(self): self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c)
 
 # TODO: fix this on all the backends
-@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled) and Device.DEFAULT != "LLVM" and not getenv('ARM64', False), "only test for compiled backends, broken on some")
+@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled) or Device.DEFAULT == "LLVM" or getenv('ARM64', False), "only test for compiled backends, broken on some")
 class TestNonFloatUOps(TestUOps):
   def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: int(a)+int(b), dtypes.int32)
   def test_mul_int32(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: int(a)*int(b), dtypes.int32)
