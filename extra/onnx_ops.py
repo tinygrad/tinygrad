@@ -595,3 +595,59 @@ def Erf(x):
     return sign * (1.0 - y * math.exp(-x * x))
   """
   return sign * (1.0 - y * Tensor.exp(-x * x))
+
+def Compress(inp, condition, axis=None):
+  if axis == None:
+    inp = inp.flatten()
+    axis = 0
+
+  axis = axis + inp.ndim if axis < 0 else axis
+
+  con_np = condition.numpy()
+  con = Tensor(np.arange(condition.shape[0])[con_np]) # no boolean indexing in Tensor
+  return inp.gather(con, axis)
+
+def Acos(x):
+  sgn = (x < 0)
+  x = x.abs()
+  ret = -0.0187293
+  ret = ret * x
+  ret = ret + 0.0742610
+  ret = ret * x
+  ret = ret - 0.2121144
+  ret = ret * x
+  ret = ret + 1.5707288
+  ret = ret * Tensor.sqrt(1.0 - x)
+  ret = ret - 2 * sgn * ret
+  return sgn * 3.14159265358979 + ret
+
+
+def Atan(y):
+  x = Tensor.ones(y.shape)
+  t3 = Tensor.ones(y.shape)
+  t1 = y.abs()
+  t0 = (t3 > t1).where(t3, t1)
+  t1 = (t3 < t1).where(t3, t1)
+  t3 = 1.0 / t0
+  t3 = t1 * t3
+
+  t4 = t3 * t3
+  t0 = -0.013480470
+  t0 = t0 * t4 + 0.057477314
+  t0 = t0 * t4 - 0.121239071
+  t0 = t0 * t4 + 0.195635925
+  t0 = t0 * t4 - 0.332994597
+  t0 = t0 * t4 + 0.999995630
+  t3 = t0 * t3
+
+  t3 = (y.abs() > x.abs()).where(1.570796327 - t3, t3)
+  t3 = (y < 0).where(-t3, t3)
+
+  return t3
+
+
+def Asinh(x): return Tensor.log(x + Tensor.sqrt(x * x + 1))
+def Acosh(x): return Tensor.log(x + Tensor.sqrt(x * x - 1))
+def Atanh(x): return 0.5 * Tensor.log((1 + x)/(1 - x))
+
+
