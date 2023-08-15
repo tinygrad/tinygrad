@@ -81,11 +81,8 @@ class LazyOp:
 
 class Interpreted:
   def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_lazybuffer=lambda x: x.realized, to_underlying=lambda x: x._buf, from_underlying=None):
-    self.buffer = buffer
-    self.fxn_for_op = fxn_for_op
-    self.from_lazybuffer = from_lazybuffer
+    self.buffer, self.fxn_for_op, self.from_lazybuffer, self.to_underlying = buffer, fxn_for_op, from_lazybuffer, to_underlying
     self.from_underlying = buffer if from_underlying is None else from_underlying
-    self.to_underlying = to_underlying
     self.synchronize = lambda: None
     self.codegen = None
 
@@ -98,6 +95,7 @@ class Interpreted:
     srcs = [self.exec_ast(cast(LazyOp, x), context=context, **kwargs) if x.__class__ is LazyOp else self.from_lazybuffer(x) for x in ast.src]
     if DEBUG >= 3: st = time.perf_counter()
     ret = self.from_underlying(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
+    if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op: ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.to_underlying(ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
     if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(time.perf_counter()-st)*1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape) if hasattr(ret._buf, 'shape') else str(len(ret._buf)):30s} in({len(srcs)}):", list(set(x._buf.shape if hasattr(x._buf, 'shape') else len(x._buf) for x in srcs)), ast.arg if ast.arg is not None else "")
     if not created_context: context[ast] = ret
     if output is not None and output.output_buffer is not None:
@@ -126,7 +124,7 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
-    if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args): print(prg)
+    if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args or not runtime_args['binary']): print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
   def build(self, runtime):
@@ -158,10 +156,12 @@ class Compiled:
 
   def to_program(self, k):
     k.linearize()
-    src, global_size, local_size = self.renderer(k.function_name, k.uops)
+    ret = self.renderer(k.function_name, k.uops)
+    src, global_size, local_size, binary = ret if len(ret) == 4 else ret + (False,)
+    #TODO: I need to find a better way to select ARM64
     return ASTRunner(k.function_name, src, global_size, local_size,
-                     op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
-                     display_name=k.display_name, runtime_args={"binary": True} if self.runtime.__name__ == "PTXProgram" else None).build(self.runtime)
+                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
+                      display_name=k.display_name, runtime_args={"binary": binary}).build(self.runtime)
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):
     # all movementops do nothing in a Compiled buffer!
