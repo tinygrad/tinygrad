@@ -31,6 +31,7 @@ MODELS = {
 
 CSV = {}
 open_csv = None
+torch.manual_seed(1)
 
 def benchmark(mnm, nm, fxn):
   tms = []
@@ -38,7 +39,7 @@ def benchmark(mnm, nm, fxn):
     st = time.perf_counter_ns()
     ret = fxn()
     tms.append(time.perf_counter_ns() - st)
-  print(f"{m:15s} {nm:45s} {min(tms)*1e-6:7.2f} ms")
+  print(f"{m:15s} {nm:25s} {min(tms)*1e-6:7.2f} ms")
   CSV[nm] = min(tms)*1e-6
   return min(tms), ret
 
@@ -52,7 +53,6 @@ def benchmark_model(m, validate_outs=False):
   download_file(MODELS[m], fn)
   onnx_model = onnx.load(fn)
 
-  torch.manual_seed(1)
   output_names = [out.name for out in onnx_model.graph.output]
   excluded = {inp.name for inp in onnx_model.graph.initializer}
   input_shapes = {inp.name:tuple(x.dim_value if x.dim_value != 0 else 1 for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input if inp.name not in excluded}
@@ -88,12 +88,15 @@ def benchmark_model(m, validate_outs=False):
   except NotImplementedError:
     print(f"{m:16s}onnx2torch doesn't support this model")
 
-  for backend in ["CPU", "CUDA" if not OSX else None]:  # https://onnxruntime.ai/docs/execution-providers/
-    if backend is None: continue
-    options = ort.SessionOptions()
-    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    ort_sess = ort.InferenceSession(fn, options, [backend+"ExecutionProvider"])
-    benchmark(m, f"onnxruntime_{backend}", lambda: ort_sess.run(None, np_inputs))
+  # bench onnxruntime
+  ort_options = ort.SessionOptions()
+  ort_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+  ort_options.log_severity_level = 3  # no warnings
+  for backend in ["CPU", "CUDA" if not OSX else "CoreML"]:  # https://onnxruntime.ai/docs/execution-providers/
+    provider = backend+"ExecutionProvider"
+    if provider not in ort.get_available_providers(): continue
+    ort_sess = ort.InferenceSession(fn, ort_options, [provider])
+    benchmark(m, f"onnxruntime_{backend}", lambda: ort_sess.run(output_names, np_inputs))
     del ort_sess
 
   if validate_outs:
@@ -102,7 +105,7 @@ def benchmark_model(m, validate_outs=False):
     tinygrad_model = get_run_onnx(onnx_model)
     tinygrad_out = tinygrad_model(inputs)
 
-    ort_sess = ort.InferenceSession(fn, providers=["CPUExecutionProvider"])
+    ort_sess = ort.InferenceSession(fn, ort_options, ["CPUExecutionProvider"])
     onnx_out = ort_sess.run(output_names, np_inputs)
     onnx_out = dict([*[(name,x) for name, x in zip(output_names, onnx_out)]])
 
@@ -115,8 +118,7 @@ def benchmark_model(m, validate_outs=False):
   open_csv.writerow(CSV)
 
 def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
-  assert len(tiny_out) == len(onnx_out)
-  assert tiny_out.keys() == onnx_out.keys()
+  assert len(tiny_out) == len(onnx_out) and tiny_out.keys() == onnx_out.keys()
   for k in tiny_out.keys():
     tiny_v, onnx_v = tiny_out[k], onnx_out[k]
     if tiny_v is None: assert tiny_v == onnx_v
