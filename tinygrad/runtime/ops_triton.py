@@ -24,16 +24,21 @@ from tinygrad.shape.symbolic import NumNode
 class TritonProgram:
 
   def __init__(self, name:str, prg:str):
+    signature = ','.join(["*fp32" for _ in range(prg.splitlines()[1].count("data"))])
+
+    prg = "import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n" + prg
+    
     hash = hashlib.md5(prg.encode('utf-8')).hexdigest()
     fn = f"/tmp/{hash}.py"
     with open(fn, "w") as f: f.write(prg)
     codeObject = compile(prg, fn, "exec")
     exec(codeObject, globals())
-    self.program = globals()["fxn"]
-    
+    self.program = triton_compile(globals()["fxn"], signature=signature, device_type="cuda", debug=True).asm["ptx"]
+    if DEBUG>=4: print(self.program)
+    self.program = cuda.module_from_buffer(self.program.encode('utf-8')).get_function(self.program.split(".visible .entry ")[1].split("(")[0])
 
   def __call__(self, global_size, local_size, *args, wait=False) -> Any:
-    self.program(*[x._buf for x in args])
+    self.program(*[x for x in args], block = tuple(local_size), grid = tuple(global_size))
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
     kernel = []
@@ -84,7 +89,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
           kk(f"{newvar.render()} = {code_for_op[args](*[x.render() for x in vin])}")
         elif uop == UOps.LOAD:
           assert newvar is not None
-          val = f"{args.name} + {args.idx.render()}" # defaults to render_python
+          val = f"{args.name}" # defaults to render_python
           triton_dtype = {dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64"}[newvar.dtype]
           if args.valid.min == 1: kk(f"{newvar.render()} = tl.load({val}).to({triton_dtype})")
           else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({val}, mask={args.valid.render()}), 0.0).to({triton_dtype})")
@@ -99,9 +104,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
         else:
           raise NotImplementedError(f"unimplemented: {uop}")
 
-    prg = "import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n"
-    # TODO @triton.jit \n
-    prg += "def fxn("+','.join(f"data{i}" for i in range(len(bufs)))+"):\n"
+    prg = "@triton.jit\ndef fxn("+','.join(f"data{i}" for i in range(len(bufs)))+"):\n"
     prg += '\n'.join(kernel)
     if DEBUG >= 4: print(prg)
     return prg, global_size, local_size
