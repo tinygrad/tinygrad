@@ -70,7 +70,7 @@ def train_resnet():
   for e in range(epochs):
     # train loop
     Tensor.training = True
-    for X, Y in (t := tqdm(iterate(bs=BS, val=False), total=steps_in_train_epoch)):
+    for X, Y in (t := tqdm(iterate(bs=BS, val=False, num_workers=16), total=steps_in_train_epoch)):
       X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
       st = time.time()
       loss, out = train_step(X, Y)
@@ -89,7 +89,7 @@ def train_resnet():
       eval_top_1_acc = []
       eval_top_5_acc = []
       Tensor.training = False
-      for X, Y in (t := tqdm(iterate(bs=BS, val=True), total=steps_in_val_epoch)):
+      for X, Y in (t := tqdm(iterate(bs=BS, val=True, num_workers=16), total=steps_in_val_epoch)):
         X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
         st = time.time()
         loss, out = eval_step(X, Y)
