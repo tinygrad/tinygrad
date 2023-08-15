@@ -202,9 +202,7 @@ def Tile(input, repeats):
   final_shape = [r*s for r,s in zip(repeats_, input.shape)]
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
-def Range(start, limit, delta):
-  start, limit, step = [int(safe_numpy(x)[0]) for x in (start, limit, delta)]
-  return Tensor.arange(start, limit, step)
+def Range(start, limit, delta): return Tensor.arange(*[int(safe_numpy(x)[0]) for x in (start, limit, delta)])
 
 def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
 
@@ -267,14 +265,12 @@ def Ceil(x:Tensor): return x.ceil()
 
 def EmbedLayerNormalization(input_ids, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None, segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
-  # _type_constraints(input_ids, segment_ids, mask, position_ids, dtypes=[dtypes.int32])  # T1
-  # _type_constraints(word_embedding, position_embedding, segment_embedding, gamma, beta, dtypes=[dtypes.float, dtypes.float16])  # T
-  assert (segment_ids is None and segment_embedding is None) or (segment_ids is not None and segment_embedding is not None)
-  assert (mask is None and mask_index_type is None) or (mask is not None and mask_index_type is not None)
+  assert (segment_ids is None) is (segment_embedding is None)
+  assert (mask is None) is (mask_index_type is None)
+  assert mask is None, "mask not supported yet"  # TODO
 
   input_shape = input_ids.shape
   bsz, seq_length = input_shape[0], input_shape[1]
-
 
   compute_seg_emb = (segment_embedding is not None and segment_ids is not None)
   vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
@@ -293,8 +289,6 @@ def EmbedLayerNormalization(input_ids, segment_ids:Optional[Tensor]=None, word_e
 
   embedding_sum = wrd_embedding_res + pos_embedding_res + seg_embedding_res
   out = embedding_sum.layernorm(eps=epsilon) * gamma + beta
-
-  # TODO: what to do with mask? (Not used for commavq)
   return out, None, embedding_sum
 
 # TODO still need to verify uni- and bidirectional
@@ -305,8 +299,7 @@ def Attention(input:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Opti
 
   hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.shape[1] // 3,)
 
-  # unpack
-  if unidirectional:  # gpt2-style
+  if unidirectional:  # gpt-style
     assert hidden_size == v_hidden_size
     xqkv = input.linear(weights, bias)
     xq, xk, xv = [xqkv.slice([None, None, (i*hidden_size, (i+1)*hidden_size)]) for i in range(3)]
@@ -318,15 +311,12 @@ def Attention(input:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Opti
   xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], num_heads, -1).transpose(1, 2) for x in (xq, xk, xv)]
   assert not do_rotary, "do_rotary not supported yet"  # TODO
 
-  # past and present
   if past is not None:
     xk, xv = Tensor.cat(past[0], xk, dim=-2), Tensor.cat(past[1], xv, dim=-2)
     present = Tensor.cat(xk.unsqueeze(0), xv.unsqueeze(0))
 
-  # inner attn
   bsz, _, seq_len, _ = xq.shape
   out = Tensor.scaled_dot_product_attention(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
-
   return out, present
 
 def SkipLayerNormalization(input:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=None):
@@ -337,7 +327,3 @@ def SkipLayerNormalization(input:Tensor, skip:Tensor, gamma, beta:Optional[Tenso
 def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
   x = x + bias
   return 0.5 * x * (1 + (x * 0.797885 + 0.035677 * x ** 3).tanh())
-
-def _type_constraints(*tensors:Tuple[Tensor], dtypes):  # TODO more pythonic way to write this?
-  for t in tensors:
-    if t is not None and t.dtype not in dtypes: raise TypeError(f"t.dtype={t.dtype}, but should be in {dtypes}")
