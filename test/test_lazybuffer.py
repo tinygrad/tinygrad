@@ -12,7 +12,7 @@ def helper_test_patterns(clb):
   b = Tensor.rand(N, N)
   c = Tensor.rand(N, N)
   z = clb(a, b, c).lazydata
-  simplify_ast(z, set())
+  simplify_ast(z)
   return z
 
 class TestLazyBuffer(unittest.TestCase):

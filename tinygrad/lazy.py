@@ -28,28 +28,24 @@ MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS, SIMPLIFY_PATTERNS = OPT>=2, 
 PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
 
 def to_lazyop(op: Union[LazyOp, LazyBuffer]) -> LazyOp: return op.op if op.__class__ is LazyBuffer else op # type: ignore
+def _capture_is_lb(captid) -> Callable[[Any], bool]: return lambda capt: capt[captid].__class__ is LazyBuffer
 def _skip_movement_ops(self:Union[LazyOp, LazyBuffer]): return self if (self.__class__ is LazyBuffer and self.realized) or to_lazyop(self).op not in MovementOps else _skip_movement_ops(to_lazyop(self).src[0])
-def _generate_sum_reshape_expand_sum(captures):
-  # When a tensor is reduced, reshaped/expanded back and then reduced again along the same axis, it's equivalent to
-  # performing the initial reduction and multiplying the result by the size of the expanded dimension.
-  if captures[3].__class__ is not LazyBuffer or captures[3].op.src[0].__class__ is not LazyBuffer: return None # TODO: Can this happen at all?
-  dim_difference = [i for i, (a, b) in enumerate(zip(captures[3].op.src[0].shape, captures[3].shape)) if a != b]
-  if len(dim_difference) != 1: return None # NOTE: we can probably also handle the case where more than one dimension is different with more thought
-  return LazyOp(BinaryOps.MUL, (captures[1], LazyBuffer.const_like(captures[1], captures[3].op.src[0].shape[dim_difference[0]])))
 
 OptRule = namedtuple('OptRule', ['opgen', 'tree'])
 OPT_RULES = [
   OptRule(lambda capt: LazyOp(BinaryOps.MAX, (capt['a'], capt['b'])), [(1, BinaryOps.CMPLT, ['a','b']), (2, BinaryOps.CMPLT, ['b','a']), (3, BinaryOps.ADD, ['b','a']), (4, LoadOps.CONST, [], lambda capt: to_lazyop(capt[4]).arg == 0.5),
     (5, BinaryOps.MUL, [3, (4, _skip_movement_ops)]), (6, TernaryOps.WHERE, [1,'b',5]), (7, TernaryOps.WHERE, [2,'a',6])]), # (a<b).where(b, (a>b).where(a, (a+b)/2))).op.op => max(a, b)
-  OptRule(_generate_sum_reshape_expand_sum, [(1, ReduceOps.SUM, [], lambda capt: capt[1].shape==capt[3].shape), (2, MovementOps.RESHAPE, [1]), (3, ReduceOps.SUM, [(2, lambda x: to_lazyop(x).src[0] if x.__class__ is LazyBuffer and not x.realized and to_lazyop(x).op == MovementOps.EXPAND else x)])])
+  OptRule(lambda c: LazyOp(BinaryOps.MUL, (c['x'], LazyBuffer.const_like(c['x'], -c[3].op.arg))), [('x', None, [], _capture_is_lb('x')), (1, LoadOps.CONST, [], lambda c:to_lazyop(c[1]).arg==0.0), (2, BinaryOps.SUB, [(1,_skip_movement_ops),'x']), (3, LoadOps.CONST, []), (4, BinaryOps.MUL, [2,(3,_skip_movement_ops)])]), # (0-x)*const => x * -const
+  OptRule(lambda c: None if len(dim_diff := [i for i, (a, b) in enumerate(zip(c[3].op.src[0].shape, c[3].shape)) if a != b]) != 1 else LazyOp(BinaryOps.MUL, (c[1], LazyBuffer.const_like(c[1], c[3].op.src[0].shape[dim_diff[0]]))), # reduce()->reshape()/expand()->reduced => initial reduce() multiplying by the size of the expanded dimension.
+    [(1, ReduceOps.SUM, [], lambda capt: capt[1].shape==capt[3].shape), (2, MovementOps.RESHAPE, [1], _capture_is_lb(2)), (3, ReduceOps.SUM, [(2, lambda x: x.op.src[0] if x.__class__ is LazyBuffer and not x.realized and x.op.op == MovementOps.EXPAND else x)], _capture_is_lb(3))]),
 ]
 
-def _patch_pattern(self:Union[LazyOp, LazyBuffer], rule: OptRule) -> LazyOp:
-  captures: Dict[Any, Union[LazyOp, LazyBuffer]] = {rule.tree[-1][0] : self}
-  nodeid_to_index: Dict[Any, Union[LazyOp, LazyBuffer]] = {node[0]: i for i,node in enumerate(rule.tree)}
-  def op_matches_rule(op: LazyOp, rule_node: Tuple[Any, ...]): return op.op == rule_node[1] and (len(op.src) == len(rule_node[2]) or len(rule_node[2]) == 0) and (True if len(rule_node) < 4 else rule_node[3](captures))
-  def match_ast(op: Union[LazyOp, LazyBuffer], rule_node):
-    if op.__class__ is LazyBuffer and op.realized: return False # Can't match if realized.
+def _patch_pattern(self: Union[LazyOp, LazyBuffer], rule: OptRule) -> LazyOp:
+  captures: Dict[Any, Union[LazyOp, LazyBuffer]] = {rule.tree[-1][0]: self}
+  nodeid_to_index: Dict[Any, int] = {node[0]: i for i,node in enumerate(rule.tree)}
+  def op_matches_rule(op: LazyOp, rule_node: Tuple[Any, ...]): return (op.op == rule_node[1] or rule_node[1] is None) and (len(op.src) == len(rule_node[2]) or len(rule_node[2]) == 0) and (True if len(rule_node) < 4 else rule_node[3](captures))
+  def match_ast(op: Union[LazyOp, LazyBuffer], rule_node: Tuple[Any, ...]):
+    if rule_node[1] is not None and op.__class__ is LazyBuffer and op.realized: return False # Can't match if realized.
     if not op_matches_rule(to_lazyop(op), rule_node): return False # LazyOp does not match required node from rule.
     if len(rule_node[2]) == 0: return True # The case when we do not care about matching children.
     for i,child in enumerate(to_lazyop(op).src):
@@ -61,8 +57,9 @@ def _patch_pattern(self:Union[LazyOp, LazyBuffer], rule: OptRule) -> LazyOp:
     return True
   return (rule.opgen(captures) or to_lazyop(self)) if match_ast(to_lazyop(self), rule.tree[-1]) else to_lazyop(self)
 
-def simplify_ast(root: Union[LazyOp, LazyBuffer], ctx):
-  if ref(root) in ctx or not SIMPLIFY_PATTERNS or (root.__class__ is LazyBuffer and root.realized): return root
+def simplify_ast(root: Union[LazyOp, LazyBuffer], ctx=None):
+  if ctx is None: ctx = set()
+  if not SIMPLIFY_PATTERNS or ref(root) in ctx or (root.__class__ is LazyBuffer and root.realized): return root
   ctx.add(ref(root))
   for rule in OPT_RULES:
     if root.__class__ is LazyBuffer:
@@ -196,7 +193,7 @@ class LazyBuffer:
       # no need to keep the op after realization
       del self.op
     return self
-  def realize(self:LazyBuffer) -> LazyBuffer: return self if self.realized else simplify_ast(self, set())._realize()
+  def realize(self:LazyBuffer) -> LazyBuffer: return self if self.realized else simplify_ast(self)._realize()
 
   @staticmethod
   def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
