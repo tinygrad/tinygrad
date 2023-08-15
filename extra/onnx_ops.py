@@ -602,42 +602,25 @@ def Compress(inp, condition, axis=None):
   return inp.gather(con, axis)
 
 def Acos(x):
-  sgn = (x < 0)
+  negate = (x < 0)
   x = x.abs()
-  ret = -0.0187293
-  ret = ret * x
-  ret = ret + 0.0742610
-  ret = ret * x
-  ret = ret - 0.2121144
-  ret = ret * x
-  ret = ret + 1.5707288
-  ret = ret * Tensor.sqrt(1.0 - x)
-  ret = ret - 2 * sgn * ret
-  return sgn * 3.14159265358979 + ret
+  ret = ((((-0.0187293 * x) + 0.0742610)*x - 0.2121144) * x + 1.5707288) * Tensor.sqrt(1.0 - x)
+  ret = ret - 2 * negate * ret
+  return negate * 3.14159265358979 + ret
 
 
 def Atan(y):
   x = Tensor.ones(y.shape)
-  t3 = Tensor.ones(y.shape)
+  t3 = x
   t1 = y.abs()
   t0 = (t3 > t1).where(t3, t1)
   t1 = (t3 < t1).where(t3, t1)
-  t3 = 1.0 / t0
-  t3 = t1 * t3
-
+  t3 = t1 / t0
   t4 = t3 * t3
-  t0 = -0.013480470
-  t0 = t0 * t4 + 0.057477314
-  t0 = t0 * t4 - 0.121239071
-  t0 = t0 * t4 + 0.195635925
-  t0 = t0 * t4 - 0.332994597
-  t0 = t0 * t4 + 0.999995630
+  t0 = ((((-0.013480470 * t4 + 0.057477314) * t4 - 0.121239071) * t4 + 0.195635925) * t4 - 0.332994597) * t4 + 0.999995630
   t3 = t0 * t3
-
   t3 = (y.abs() > x.abs()).where(1.570796327 - t3, t3)
-  t3 = (y < 0).where(-t3, t3)
-
-  return t3
+  return (y < 0).where(-t3, t3)
 
 
 def Asinh(x): return Tensor.log(x + Tensor.sqrt(x * x + 1))
