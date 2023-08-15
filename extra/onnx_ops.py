@@ -1,6 +1,7 @@
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, dtypes
 from extra.onnx import safe_numpy
+from onnx.helper import tensor_dtype_to_np_dtype
 import numpy as np
 import functools
 from typing import Union, Tuple, Optional
@@ -221,10 +222,7 @@ def ConstantOfShape(input, value:Tensor=None):
   shape = [int(x) for x in safe_numpy(input)]
   return Tensor.ones(*shape, dtype=value.dtype) * (value if shape[0]!=0 else 1)
 
-# this is obviously wrong, but since we don't have types, it's better than nothing
-def Cast(input, to):
-  print(f"WARNING: attempting to cast to {to}")
-  return input
+def Cast(input, to): return input.cast(dtypes.from_np(tensor_dtype_to_np_dtype(to)))
 
 # NOTE: since we only have one type, this is valid!
 def CastLike(input, target_type):
@@ -308,18 +306,21 @@ def Attention(input:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Opti
   hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.shape[1] // 3,)
 
   # unpack
-  wq, wk, wv = weights[:,:hidden_size], weights[:,hidden_size:hidden_size+v_hidden_size], weights[:,hidden_size+v_hidden_size:]
-  bq, bk, bv = (bias[:hidden_size], bias[hidden_size:hidden_size+v_hidden_size], bias[hidden_size+v_hidden_size]) if bias is not None else None
+  if unidirectional:  # gpt2-style
+    assert hidden_size == v_hidden_size
+    xqkv = input.linear(weights, bias)
+    xq, xk, xv = [xqkv.slice([None, None, (i*hidden_size, (i+1)*hidden_size)]) for i in range(3)]
+  else:  # bert-style
+    wq, wk, wv = weights[:,:hidden_size], weights[:,hidden_size:hidden_size+v_hidden_size], weights[:,hidden_size+v_hidden_size:]
+    bq, bk, bv = (bias[:hidden_size], bias[hidden_size:hidden_size+v_hidden_size], bias[hidden_size+v_hidden_size]) if bias is not None else None
+    xq, xk, xv = [input.linear(w, b) for w, b in zip((wq, wk, wv), (bq, bk, bv))]
 
-  # prepare attn
-  xq, xk, xv = [input.linear(w, b) for w, b in zip((wq, wk, wv), (bq, bk, bv))]
   xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], num_heads, -1).transpose(1, 2) for x in (xq, xk, xv)]
-  # TODO do_rotary
-  assert xq.shape == xk.shape == xv.shape
+  assert not do_rotary, "do_rotary not supported yet"  # TODO
 
   # past and present
   if past is not None:
-    xk, xv = xk * past[0], xv * past[1]
+    xk, xv = Tensor.cat(past[0], xk, dim=-2), Tensor.cat(past[1], xv, dim=-2)
     present = Tensor.cat(xk.unsqueeze(0), xv.unsqueeze(0))
 
   # inner attn
@@ -333,7 +334,9 @@ def SkipLayerNormalization(input:Tensor, skip:Tensor, gamma, beta:Optional[Tenso
   x = input + skip + bias
   return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
 
-def FastGelu(x:Tensor, bias:Optional[Tensor]=None): return 0.5 * x * (1 + (x * 0.797885 + 0.035677 * x ** 3).tanh()) + bias
+def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
+  x = x + bias
+  return 0.5 * x * (1 + (x * 0.797885 + 0.035677 * x ** 3).tanh())
 
 def _type_constraints(*tensors:Tuple[Tensor], dtypes):  # TODO more pythonic way to write this?
   for t in tensors:
