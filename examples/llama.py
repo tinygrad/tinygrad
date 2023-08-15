@@ -112,9 +112,8 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]):
     # if mask is not None, x's shape is dymanic based on user input and pre/post can't be jitted
-    xq, xk, xv = self._pre(x, freqs_cis) if mask is None else self.pre(x, freqs_cis)
     # inner_attention can't be jitted because it's dynamic based on start_pos
-    output = self.attention.inner_attention(xq, xk, xv, start_pos, mask)
+    output = self.attention.inner_attention(*(self._pre(x, freqs_cis) if mask is None else self.pre(x, freqs_cis)), start_pos, mask)
     return self._post(x, output) if mask is None else self.post(x, output)
 
 class Transformer:
