@@ -5,7 +5,7 @@ import pyopencl as cl  # type: ignore
 from typing import Optional, List
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferCopyInOut
+from tinygrad.runtime.lib import RawBufferCopyInOut, RawBufferTransfer
 from tinygrad.codegen.linearizer import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
@@ -29,7 +29,7 @@ class _CL:
 CL = _CL()
 CL.post_init() if not getenv("DELAYED_RUNTIME_INIT", False) else None
 
-class CLBuffer(RawBufferCopyInOut):
+class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device='0'):
     if isinstance(dtype, ImageDType):
       fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
@@ -49,6 +49,10 @@ class CLBuffer(RawBufferCopyInOut):
     buf = cl.Buffer(CL.cl_ctxs[self._buf.device], cl.mem_flags.WRITE_ONLY | cl.mem_flags.USE_HOST_PTR, 0, hostbuf=x.data)
     mapped, event = cl.enqueue_map_buffer(CL.cl_queue[self._buf.device], buf, cl.map_flags.WRITE, 0, self.size, dtype=self.dtype.np, is_blocking=False)
     with mapped.base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped, self._buf, is_blocking=True, wait_for=[event] + ([self.event] if hasattr(self, "event") else []))
+  def _transfer(self, x):
+    if "gfx" in CL.cl_ctxs[x._buf.device].devices[0].name:
+      cl.enqueue_copy_buffer_p2p_amd(CL.cl_platform, CL.cl_queue[x._buf.device], x._buf, self._buf, x.size * x.dtype.itemsize).wait()
+    else: raise NotImplementedError("p2p transfer between devices not implemented on non-amd")
 
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
