@@ -267,11 +267,9 @@ def EmbedLayerNormalization(input_ids, segment_ids:Optional[Tensor]=None, word_e
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
   assert (segment_ids is None) is (segment_embedding is None)
   assert (mask is None) is (mask_index_type is None)
-  assert mask is None, "mask not supported yet"  # TODO
-
+  assert mask is None, "functionality not supported yet"  # TODO
   input_shape = input_ids.shape
   bsz, seq_length = input_shape[0], input_shape[1]
-
   compute_seg_emb = (segment_embedding is not None and segment_ids is not None)
   vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
 
@@ -279,10 +277,9 @@ def EmbedLayerNormalization(input_ids, segment_ids:Optional[Tensor]=None, word_e
     vocab_counter = Tensor.arange(vocab_size, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
     return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
 
-  # Bert embedding layer
+  # bert embedding layer
   if epsilon is None: epsilon = 1e-12
   if position_ids is None: position_ids = Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
-
   wrd_embedding_res = embedding(input_ids, vocab_size, word_embedding)
   pos_embedding_res = embedding(position_ids, max_position_embeddings, position_embedding)
   seg_embedding_res = embedding(segment_ids, type_vocab_size, segment_embedding) if compute_seg_emb else None
@@ -291,12 +288,11 @@ def EmbedLayerNormalization(input_ids, segment_ids:Optional[Tensor]=None, word_e
   out = embedding_sum.layernorm(eps=epsilon) * gamma + beta
   return out, None, embedding_sum
 
-# TODO still need to verify uni- and bidirectional
 def Attention(input:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional[Tensor]=None, past:Optional[Tensor]=None, relative_position_bias:Optional[Tensor]=None, past_sequence_length:Optional[Tensor]=None, do_rotary=None, mask_filter_value=None, num_heads=None, past_present_share_buffer=None, qkv_hidden_sizes=None, scale=None, unidirectional=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.Attention
   assert num_heads is not None  # required
   assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None)
-
+  assert relative_position_bias==do_rotary==past_sequence_length==mask_filter_value==past_present_share_buffer==scale==None, "functionality not supported yet"  # TODO strange params
   hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.shape[1] // 3,)
 
   if unidirectional:  # gpt-style
@@ -307,9 +303,7 @@ def Attention(input:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Opti
     wq, wk, wv = weights[:,:hidden_size], weights[:,hidden_size:hidden_size+v_hidden_size], weights[:,hidden_size+v_hidden_size:]
     bq, bk, bv = (bias[:hidden_size], bias[hidden_size:hidden_size+v_hidden_size], bias[hidden_size+v_hidden_size]) if bias is not None else None
     xq, xk, xv = [input.linear(w, b) for w, b in zip((wq, wk, wv), (bq, bk, bv))]
-
   xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], num_heads, -1).transpose(1, 2) for x in (xq, xk, xv)]
-  assert not do_rotary, "do_rotary not supported yet"  # TODO
 
   if past is not None:
     xk, xv = Tensor.cat(past[0], xk, dim=-2), Tensor.cat(past[1], xv, dim=-2)
