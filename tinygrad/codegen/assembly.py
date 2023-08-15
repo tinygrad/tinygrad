@@ -28,7 +28,7 @@ class AssemblyInstruction(NamedTuple):
   arg: Any = None
 
 # warp size of 32, s registers are shared across the warp, v are 32-wide vectors
-class AssemblyLanguage(NamedTuple):
+class AssemblyLanguage:
   supports_load3: bool = False
   sin_is_sin2pi: bool = False
   no_div: bool = False

@@ -1,6 +1,6 @@
 import struct
 from platform import system
-from typing import Tuple, Dict, List
+from typing import Tuple, Dict, List, Optional
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.helpers import dtypes, CI
@@ -18,7 +18,7 @@ class ARM64Language(AssemblyLanguage): pass
 
 def specialize_to_arm64(fn_nm, asm):
   var_size = 16
-  prev_uop = None
+  prev_uop:Optional[UOps] = None
   ins = []
   x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (10,11,12,13,14,15,16,17,18,19,20)]
   s_regs = ['s' + str(i) for i in reversed(range(3,30))]
@@ -157,8 +157,7 @@ def specialize_to_arm64(fn_nm, asm):
       ins.append(f"add {rtor[vin[0].nm]}, {rtor[vin[0].nm]}, #1")
       ins.append(f"cmp {rtor[vin[0].nm]}, x15")
       ins.append(f"b.lt loop_{arg[1]}")
-
-    prev_uop=uop
+    prev_uop = uop
     # store regs into memory if needed
     if out is not None and out.nm in mem_vars:
       ins.append(f"mov x15, {mem_vars[out.nm]}")
