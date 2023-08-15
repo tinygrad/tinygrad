@@ -10,20 +10,25 @@ import triton # type: ignore # noqa: F401
 import triton.language as tl  # type: ignore # noqa: F401
 
 from typing import Union, Tuple, Optional, Dict
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, GlobalCounters
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.runtime.cuda import CLBuffer
-from tinygrad.compiler.ast import ASTKernel
+from tinygrad.runtime.ops_gpu import CLBuffer
 
 stream = cuda.Stream()
 
-class TritonASTKernel(ASTKernel):
+class TritonASTKernel():
   code_for_op : Dict[Op, str] = {
-    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "tl.maximum(A, 0.0)", UnaryOps.GT0: "tl.where(A>0,1,0)",
-    UnaryOps.EXP: "tl.exp(A)", UnaryOps.LOG: "tl.log(A)", UnaryOps.RECIPROCAL: "(1.0/A)", UnaryOps.SQRT: "tl.sqrt(A)",
+    UnaryOps.NOOP: "(A)",
+    # NOTE: Triton doesn't support exp2 and log2
+    UnaryOps.EXP2: "2**A", UnaryOps.LOG2: "tl.log(A)",
+    UnaryOps.RECIP: "(1.0/A)", UnaryOps.SQRT: "tl.sqrt(A)",
+    UnaryOps.SIN: "tl.sin(A)", 
+    UnaryOps.CAST: "TODO",
+    
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
-    BinaryOps.DIV: "(A/B)", BinaryOps.CMPEQ: "(A==B)",
+    BinaryOps.DIV: "(A/B)", BinaryOps.CMPLT: "(A<B)", BinaryOps.MAX: "tl.maximum(A,B)",
+
     ReduceOps.SUM: "A += B", ReduceOps.MAX: "A = tl.maximum(A,B)"
   }
   start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "float('-inf')"}
@@ -102,7 +107,7 @@ class TritonASTKernel(ASTKernel):
     self.func_cache[self.key] = runner
     return runner
 
-class TritonBuffer(ExplicitExecAST):
+class TritonBuffer():
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[TritonBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
     super().__init__(shape, hostbuf)
     self._buf : Optional[TritonDeviceAllocation] = hostbuf._buf if hostbuf is not None else None
