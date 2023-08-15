@@ -15,97 +15,9 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.runtime.ops_gpu import CLBuffer
 
-stream = cuda.Stream()
 
-class TritonASTKernel():
-  code_for_op : Dict[Op, str] = {
-    UnaryOps.NOOP: "(A)",
-    # NOTE: Triton doesn't support exp2 and log2
-    UnaryOps.EXP2: "2**A", UnaryOps.LOG2: "tl.log(A)",
-    UnaryOps.RECIP: "(1.0/A)", UnaryOps.SQRT: "tl.sqrt(A)",
-    UnaryOps.SIN: "tl.sin(A)", 
-    UnaryOps.CAST: "TODO",
-    
-    BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
-    BinaryOps.DIV: "(A/B)", BinaryOps.CMPLT: "(A<B)", BinaryOps.MAX: "tl.maximum(A,B)",
-
-    ReduceOps.SUM: "A += B", ReduceOps.MAX: "A = tl.maximum(A,B)"
-  }
-  start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "float('-inf')"}
-
-  def ast_parse(self, x:Union[TritonBuffer, LazyOp], acc:str, do_reduce=False) -> str:
-    if not isinstance(x, LazyOp):
-      # this is a load
-      buf_index = self.bufs.index(x)
-      if buf_index not in self.loaded:
-        idx, valid = self.sts[buf_index].expr_idxs()
-        valid_expr = valid.render().replace("&&", "*1*")
-        self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.where({valid_expr}, tl.load(data{buf_index} + {idx.render()}, mask={valid_expr}), 0.0)")
-        self.loaded.add(buf_index)
-      return f"val{buf_index}"
-    if isinstance(x.op, ReduceOps) and not do_reduce: return acc
-
-    values = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
-
-    code = TritonASTKernel.code_for_op[x.op]  # TODO: replace this with a function
-    code = code.replace("A", values[0])
-    if len(values) == 2: code = code.replace("B", values[1])
-    return code
-
-  func_cache: WeakValueDictionary = WeakValueDictionary()
-  def codegen(self):
-    if self.key in self.func_cache: return self.func_cache[self.key]
-
-    self.process()
-    self.kernel_prefix = ""
-    self.loaded = set()
-    self.kernel = ["@triton.jit"]
-    self.kernel.append("def fxn("+','.join(f"data{i}" for i in range(len(self.bufs)))+"):")
-
-    self.output_shape = list(self.sts[0].shape[:self.first_reduce])
-
-    # copied from ops_gpu
-    # TODO CUDA only supports a grid of (2^31-1, 65535, 65535), that results in invalid kernel launches for some shapes, so flattern the grid for now.
-    MAX_OUTPUT_SHAPE = 1
-    self.kernel += [f"  idx{len(self.output_shape)-1-i} = tl.program_id({i})" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape)))]
-    if len(self.output_shape) > MAX_OUTPUT_SHAPE:
-      final_dimension = len(self.output_shape)-MAX_OUTPUT_SHAPE
-      for i in range(final_dimension-1, -1, -1):
-        self.kernel += [f"  idx{i} = idx{final_dimension} % {self.output_shape[i]}", f"  idx{final_dimension} = idx{final_dimension} // {self.output_shape[i]}"]
-      self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
-      if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
-    elif len(self.output_shape) == 0: self.output_shape = [1]
-
-    if self.reduceop:
-      full_shape = [st.shape for st in self.sts if st.shape != self.sts[0].shape]
-      full_shape = self.sts[0].shape if len(full_shape) == 0 else full_shape[0]
-      self.kernel += [f"  acc = {TritonASTKernel.start_for_op[self.reduceop.op]}"]
-      self.kernel += [("  "*(i-self.first_reduce)+f"  for idx{i} in range(0, {full_shape[i]}):") for i in range(self.first_reduce, self.shape_len)]
-      self.kernel_prefix =  "  "*(self.shape_len - self.first_reduce)
-      self.kernel.append("  "+self.kernel_prefix+self.ast_parse(self.reduceop, "acc", True))
-      self.kernel_prefix =  ""
-
-    code = self.ast_parse(self.ast, "acc")
-
-    # store
-    idx, valid = self.sts[0].expr_idxs()
-    self.kernel.append(f"  tl.store(data0 + {idx.render()}, {code})")
-
-    # Torch inductor seems to write out files too!
-    hash = hashlib.md5(self.key.encode('utf-8')).hexdigest()
     fn = f"/tmp/{hash}.py"
-    kernel = '\n'.join(self.kernel)
-    if DEBUG >= 4: print(kernel)
-    with open(fn, "w") as f: f.write(kernel)
-    codeObject = compile(kernel, fn, "exec")
     exec(codeObject, globals())
-    program = globals()['fxn']
-    mem_estimate = sum(prod(x._base_shape) for x in self.bufs)
-    def runner(*bufs):
-      GlobalCounters.log_kernel(self.info.flops, mem_estimate)
-      return program[tuple(self.output_shape[::-1])](*[x.cuda for x in bufs], stream=stream.handle)
-    self.func_cache[self.key] = runner
-    return runner
 
 class TritonBuffer():
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[TritonBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
