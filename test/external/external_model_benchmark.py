@@ -5,6 +5,7 @@ import onnx
 import torch
 torch.set_num_threads(1)
 from onnx2torch import convert
+from onnx.helper import tensor_dtype_to_np_dtype
 from extra.utils import download_file
 from extra.onnx import get_run_onnx
 from tinygrad.helpers import OSX, DEBUG
@@ -28,6 +29,10 @@ MODELS = {
   #"resnet18": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet18-v2-7.onnx",
 }
 
+TORCH_MODELS = {
+  "commavq": ("https://github.com/commaai/commavq/raw/master/models/gpt2m.pt", "https://huggingface.co/commaai/commavq-gpt2m/raw/main/config.json"),
+}
+
 CSV = {}
 open_csv = None
 
@@ -42,18 +47,19 @@ def benchmark(mnm, nm, fxn):
   return min(tms), ret
 
 #BASE = pathlib.Path(__file__).parent.parent.parent / "weights" / "onnx"
-BASE = pathlib.Path("/tmp/onnx")
+BASE = pathlib.Path("/tmp/")
 def benchmark_model(m):
   global open_csv, CSV
   CSV = {"model": m}
 
-  fn = BASE / MODELS[m].split("/")[-1]
+  fn = BASE / "onnx" / m / MODELS[m].split("/")[-1]
   download_file(MODELS[m], fn)
   onnx_model = onnx.load(fn)
 
   excluded = {inp.name for inp in onnx_model.graph.initializer}
   input_shapes = {inp.name:tuple(x.dim_value if x.dim_value != 0 else 1 for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input if inp.name not in excluded}
-  np_inputs = {k:torch.randn(shp).numpy() for k,shp in input_shapes.items()}
+  input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input if inp.name not in excluded}
+  np_inputs = {k:torch.randn(shp).numpy().astype(input_types[k]) for k,shp in input_shapes.items()}
   assert len(input_shapes) < 30, f"too many input shapes {len(input_shapes)}"
 
   # print input names
@@ -71,19 +77,38 @@ def benchmark_model(m):
     benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()})
     del inputs, tinygrad_model, tinygrad_jitted_model
 
-  torch_model = convert(onnx_model)
+  try:
+    torch_model = convert(onnx_model)
+  except NotImplementedError:
+    torch_model = get_torch_model(m)
+
   torch_inputs = [torch.tensor(x) for x in np_inputs.values()]
-  benchmark(m, "torch_cpu", lambda: torch_model(*torch_inputs))
+  prepped_torch_inputs = prepare_torch_inputs(m, torch_inputs)
+  benchmark(m, "torch_cpu", lambda: torch_model(*prepped_torch_inputs))
 
   torch_device = "mps" if OSX else "cuda"
   torch_mps_model = torch_model.to(torch_device)
-  torch_mps_inputs = [x.to(torch_device) for x in torch_inputs]
+  torch_mps_inputs = prepare_torch_inputs(m, torch_inputs, torch_device)
   benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs))
 
   if open_csv is None:
     open_csv = csv.DictWriter(open('onnx_inference_speed.csv', 'w', newline=''), fieldnames=list(CSV.keys()))
     open_csv.writeheader()
   open_csv.writerow(CSV)
+
+def get_torch_model(m):
+  mdl, cnfg = (BASE / "torch" / m / TORCH_MODELS[m][i].split("/")[-1] for i in range(2))
+  download_file(TORCH_MODELS[m][0], mdl)
+  download_file(TORCH_MODELS[m][1], cnfg)
+  if m == "commavq":
+    from transformers import GPT2LMHeadModel
+    return GPT2LMHeadModel.from_pretrained(mdl, config=cnfg)
+
+def prepare_torch_inputs(m, torch_inputs, device=None):
+  if device is not None: torch_inputs = [x.to(device) for x in torch_inputs]
+  if m == "commavq":
+    return torch_inputs[0], tuple(torch_inputs[1:])
+  return torch_inputs
 
 if __name__ == "__main__":
   for m in MODELS: benchmark_model(m)
