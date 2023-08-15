@@ -50,6 +50,15 @@ class RawBufferCopyInOut(RawBufferCopyIn):
     self._copyout(x)
     return x
 
+class RawBufferTransfer(RawBuffer):
+  def _transfer(self, x) -> None: raise NotImplementedError("must be implemented")
+
+  @classmethod
+  def transfer(cls, x, shape, dtype, **kwargs):
+    ret = cls(prod(shape), dtype, **kwargs)
+    ret._transfer(x)
+    return ret
+
 class RawConst(RawBuffer): # pylint: disable=abstract-method
   def __repr__(self): return f"const<{self._buf}, {self.dtype}>"
   @property

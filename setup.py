@@ -24,6 +24,7 @@ setup(name='tinygrad',
       extras_require={
         'llvm': ["llvmlite"],
         'cuda': ["pycuda"],
+        'arm': ["unicorn"],
         'triton': ["triton>=2.0.0.dev20221202"],
         'webgpu': ["wgpu"],
         'metal': ["pyobjc-framework-Metal", "pyobjc-framework-Cocoa", "pyobjc-framework-libdispatch"],
