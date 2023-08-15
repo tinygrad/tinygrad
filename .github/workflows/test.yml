@@ -267,3 +267,28 @@ jobs:
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
+
+  testunicorn:
+    name: ARM64 unicorn Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: '~/.cache/pip'
+          key: unicorn 
+      - name: Install cross-assembler
+        run: |
+          sudo apt-get update -y && \
+          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+      - name: Install dependencies
+        run: pip install -e '.[testing,arm]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Test arm
+        run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=auto test/ -k 'not (test_nn.py and (test_conv_transpose2d or test_conv2d))' --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/test_specific_conv.py  --ignore=test/unit/test_disk_tensor.py

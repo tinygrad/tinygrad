@@ -124,7 +124,7 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
-    if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args): print(prg)
+    if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args or not runtime_args['binary']): print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
   def build(self, runtime):
@@ -156,10 +156,12 @@ class Compiled:
 
   def to_program(self, k):
     k.linearize()
-    src, global_size, local_size = self.renderer(k.function_name, k.uops)
+    ret = self.renderer(k.function_name, k.uops)
+    src, global_size, local_size, binary = ret if len(ret) == 4 else ret + (False,)
+    #TODO: I need to find a better way to select ARM64
     return ASTRunner(k.function_name, src, global_size, local_size,
                       op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
-                      display_name=k.display_name).build(self.runtime)
+                      display_name=k.display_name, runtime_args={"binary": binary}).build(self.runtime)
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):
     # all movementops do nothing in a Compiled buffer!
