@@ -4,7 +4,7 @@ import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.linearizer import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType
+from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferMapped
 
@@ -23,6 +23,7 @@ METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):
   def __init__(self, size:int, dtype:DType):
+    assert dtype != dtypes.double, f"METAL does not support {dtype.name}"
     super().__init__(size, dtype, METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared))
   def __del__(self):
     self._buf.release()
