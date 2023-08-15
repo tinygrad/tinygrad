@@ -88,8 +88,8 @@ def benchmark_model(m, validate_outs=False):
   except NotImplementedError:
     print(f"{m:16s}onnx2torch doesn't support this model")
 
-  # pip install onnxruntime-silicon to get CoreML on M1+. https://github.com/cansik/onnxruntime-silicon
-  for backend in ["CPU", "CUDA" if not OSX else "CoreML"]:  # https://onnxruntime.ai/docs/execution-providers/
+  for backend in ["CPU", "CUDA" if not OSX else None]:  # https://onnxruntime.ai/docs/execution-providers/
+    if backend is None: continue
     options = ort.SessionOptions()
     options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     ort_sess = ort.InferenceSession(fn, options, [backend+"ExecutionProvider"])
