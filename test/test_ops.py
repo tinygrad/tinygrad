@@ -1129,20 +1129,21 @@ class TestOps(unittest.TestCase):
 
   def test_slice_fancy_indexing(self):
     # indices cannot have gradient
-    a = torch.randint(low=-1, high=1, size=(2,1,1,1,1), dtype=torch.int64, requires_grad=False)
-    b = torch.randint(high=1, size=(1,3,1,1,1), dtype=torch.int64, requires_grad=False)
-    c = torch.randint(low=-5, high=5, size=(1,1,4,1,1), dtype=torch.int64, requires_grad=False)
-    d = torch.randint(high=4, size=(2,1,1,5,1), dtype=torch.int64, requires_grad=False)
-    i, j, k, o = [Tensor(tor.detach().numpy(), dtype=dtypes.int32, requires_grad=False) for tor in [a,b,c,d]]
-    helper_test_op([(2,5,7,5,3)], lambda x: x[a,b,c,d], lambda x: x[i,j,k,o])
-    helper_test_op([(2,5,7,5,3)], lambda x: x[:,b,c,d], lambda x: x[:,j,k,o])
-    helper_test_op([(2,5,7,5,3)], lambda x: x[:,b,c,:], lambda x: x[:,j,k,:])
-    helper_test_op([(2,5,7,5,3)], lambda x: x[a,b,...], lambda x: x[i,j,...])
-    helper_test_op([(2,5,7,5,3)], lambda x: x[a,...,d], lambda x: x[i,...,o])
-    helper_test_op([(2,5,7,5,3)], lambda x: x[...,d], lambda x: x[...,o])
-    helper_test_op([(2,5,7,5,3)], lambda x: x[a,:,None,d], lambda x: x[i,:,None,o])
-    helper_test_op([(2,5,7,5,3)], lambda x: x[1,:,10:11,d], lambda x: x[1,:,10:11,o])
-    helper_test_op([(2,5,7,5,3)], lambda x: x[1,4,c,2], lambda x: x[1,4,k,2])
+    a = torch.randint(low=-1, high=1, size=(2,1,1,1,1,1), dtype=torch.int64, requires_grad=False)
+    b = torch.randint(high=1, size=(1,3,1,1,1,1), dtype=torch.int64, requires_grad=False)
+    c = torch.randint(low=-5, high=5, size=(1,1,4,1,1,1), dtype=torch.int64, requires_grad=False)
+    d = torch.randint(high=4, size=(2,1,1,5,1,1), dtype=torch.int64, requires_grad=False)
+    e = torch.randint(high=1, size=(1,1,1,1,6,1), dtype=torch.int64, requires_grad=False)
+    i, j, k, o, p = [Tensor(tor.detach().numpy(), dtype=dtypes.int32, requires_grad=False) for tor in [a,b,c,d,e]]
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,e], lambda x: x[:,j,k,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,:], lambda x: x[:,j,k,o,:])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,...], lambda x: x[i,j,...])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,...,e], lambda x: x[i,...,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[...,c,:,e], lambda x: x[...,k,:,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,:,10:11,d,0:2], lambda x: x[1,:,10:11,o,0:2])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,4,c,d,2], lambda x: x[1,4,k,o,2])
     helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)], lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor(1)])
     helper_test_op([(2,3)], lambda x: x[torch.tensor([1]), torch.tensor([[0,0,0],[0,0,0]])], lambda x: x[Tensor([1]), Tensor([[0,0,0],[0,0,0]])])
 
