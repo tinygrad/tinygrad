@@ -4,6 +4,7 @@ import torch
 torch.set_num_threads(1)
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
+import onnxruntime as ort
 from onnx2torch import convert
 from extra.utils import download_file
 from extra.onnx import get_run_onnx
@@ -28,10 +29,6 @@ MODELS = {
   #"resnet18": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet18-v2-7.onnx",
 }
 
-TORCH_MODELS = {
-  "commavq": ("https://github.com/commaai/commavq/raw/master/models/gpt2m.pt", "https://huggingface.co/commaai/commavq-gpt2m/raw/main/config.json"),
-}
-
 CSV = {}
 open_csv = None
 
@@ -41,25 +38,26 @@ def benchmark(mnm, nm, fxn):
     st = time.perf_counter_ns()
     ret = fxn()
     tms.append(time.perf_counter_ns() - st)
-  print(f"{m:15s} {nm:25s} {min(tms)*1e-6:7.2f} ms")
+  print(f"{m:15s} {nm:45s} {min(tms)*1e-6:7.2f} ms")
   CSV[nm] = min(tms)*1e-6
   return min(tms), ret
 
 #BASE = pathlib.Path(__file__).parent.parent.parent / "weights" / "onnx"
-BASE = pathlib.Path("/tmp/")
+BASE = pathlib.Path("/tmp/onnx")
 def benchmark_model(m, validate_outs=False):
   global open_csv, CSV
   CSV = {"model": m}
 
-  fn = BASE / "onnx" / m / MODELS[m].split("/")[-1]
+  fn = BASE / MODELS[m].split("/")[-1]
   download_file(MODELS[m], fn)
   onnx_model = onnx.load(fn)
 
   torch.manual_seed(1)
+  output_names = [out.name for out in onnx_model.graph.output]
   excluded = {inp.name for inp in onnx_model.graph.initializer}
   input_shapes = {inp.name:tuple(x.dim_value if x.dim_value != 0 else 1 for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input if inp.name not in excluded}
   input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input if inp.name not in excluded}
-  input_types = {k:v if v!=np.float16 else np.float32 for k,v in input_types.items()}  # cast
+  #input_types = {k:v if v!=np.float16 else np.float32 for k,v in input_types.items()}  # cast
   np_inputs = {k:torch.randn(shp).numpy().astype(input_types[k]) for k,shp in input_shapes.items()}
   assert len(input_shapes) < 30, f"too many input shapes {len(input_shapes)}"
 
@@ -80,28 +78,35 @@ def benchmark_model(m, validate_outs=False):
 
   try:
     torch_model = convert(onnx_model)
+    torch_inputs = [torch.tensor(x) for x in np_inputs.values()]
+    benchmark(m, "torch_cpu", lambda: torch_model(*torch_inputs))
+
+    torch_device = "mps" if OSX else "cuda"
+    torch_mps_model = torch_model.to(torch_device)
+    torch_mps_inputs = [x.to(torch_device) for x in torch_inputs]
+    benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs))
   except NotImplementedError:
-    torch_model = get_torch_model(m)
+    print(f"{m:16s}onnx2torch doesn't support this model")
 
-  torch_inputs = [torch.tensor(x) for x in np_inputs.values()]
-  prepped_torch_inputs = prepare_torch_inputs(m, torch_inputs)
-  benchmark(m, "torch_cpu", lambda: torch_model(*prepped_torch_inputs))
-
-  torch_device = "mps" if OSX else "cuda"
-  torch_mps_model = torch_model.to(torch_device)
-  torch_mps_inputs = prepare_torch_inputs(m, torch_inputs, torch_device)
-  benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs))
+  # pip install onnxruntime-silicon to get CoreML on M1+. https://github.com/cansik/onnxruntime-silicon
+  for backend in ["CPU", "CUDA" if not OSX else "CoreML"]:  # https://onnxruntime.ai/docs/execution-providers/
+    options = ort.SessionOptions()
+    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    ort_sess = ort.InferenceSession(fn, options, [backend+"ExecutionProvider"])
+    benchmark(m, f"onnxruntime_{backend}", lambda: ort_sess.run(None, np_inputs))
+    del ort_sess
 
   if validate_outs:
-    rtol, atol = (6e-4, 83e-4) if m in TORCH_MODELS else (1e-4, 1e-4)  # higher tols for torch_models, since onnx is (often) quantized
+    rtol, atol = 8e-4, 8e-4  # tolerance for fp16 models
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
     tinygrad_model = get_run_onnx(onnx_model)
     tinygrad_out = tinygrad_model(inputs)
 
-    torch_model = torch_model.to("cpu")
-    torch_out = unpack_torch_outputs(m, torch_model(*prepped_torch_inputs))
+    ort_sess = ort.InferenceSession(fn, providers=["CPUExecutionProvider"])
+    onnx_out = ort_sess.run(output_names, np_inputs)
+    onnx_out = dict([*[(name,x) for name, x in zip(output_names, onnx_out)]])
 
-    assert_allclose(tinygrad_out, torch_out, rtol=rtol, atol=atol)
+    assert_allclose(tinygrad_out, onnx_out, rtol=rtol, atol=atol)
     print(f"{m:16s}outputs validated with rtol={rtol:.1e}, atol={atol:.1e}")
 
   if open_csv is None:
@@ -109,32 +114,13 @@ def benchmark_model(m, validate_outs=False):
     open_csv.writeheader()
   open_csv.writerow(CSV)
 
-def get_torch_model(m):
-  mdl, cnfg = (BASE / "torch" / m / TORCH_MODELS[m][i].split("/")[-1] for i in range(2))
-  download_file(TORCH_MODELS[m][0], mdl)
-  download_file(TORCH_MODELS[m][1], cnfg)
-  if m == "commavq" and m in TORCH_MODELS:
-    from transformers import GPT2LMHeadModel
-    return GPT2LMHeadModel.from_pretrained(mdl, config=cnfg)
-
-def prepare_torch_inputs(m, torch_inputs, device=None):
-  if device is not None: torch_inputs = [x.to(device) for x in torch_inputs]
-  if m == "commavq" and m in TORCH_MODELS:
-    return torch_inputs[0], tuple(torch_inputs[1:])
-  return torch_inputs
-
-def unpack_torch_outputs(m, torch_out):
-  if m == "commavq" and m in TORCH_MODELS:
-    return dict([("logits", torch_out["logits"]), *[(f"present_{i}",torch.cat((v[0].unsqueeze(0), v[1].unsqueeze(0)), dim=0)) for i,v in enumerate(torch_out["past_key_values"])]])
-  return torch_out
-
-def assert_allclose(tiny_out:dict, torch_out:dict, rtol=1e-5, atol=1e-5):
-  assert len(tiny_out) == len(torch_out)
-  assert tiny_out.keys() == torch_out.keys()
+def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
+  assert len(tiny_out) == len(onnx_out)
+  assert tiny_out.keys() == onnx_out.keys()
   for k in tiny_out.keys():
-    tiny_v, torch_v = tiny_out[k], torch_out[k]
-    if tiny_v is None: assert tiny_v == torch_v
-    else: np.testing.assert_allclose(tiny_v.numpy(), torch_v.detach().numpy(), rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
+    tiny_v, onnx_v = tiny_out[k], onnx_out[k]
+    if tiny_v is None: assert tiny_v == onnx_v
+    else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
 
 if __name__ == "__main__":
   for m in MODELS: benchmark_model(m, getenv("VAL", False))
