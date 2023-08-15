@@ -1,17 +1,17 @@
 import struct
 from platform import system
-from extra.assembly.assembly import uops_to_asmstyle, AssemblyLanguage, Register 
-from typing import Tuple, Set, Dict, List
+from typing import Tuple, Dict, List
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
-from tinygrad.codegen.linearizer import UOps, ConstOp, UOp
+from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.helpers import dtypes, CI
+from tinygrad.codegen.assembly import uops_to_asmstyle, AssemblyLanguage
 
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 def compute_offsets(total):
   quotient, remainder = divmod(total, 4096)
   return [4096]*quotient + [remainder] if remainder else [4096]*quotient
 
-#NOTE: Darwin needs names to start with a "_" 
+#NOTE: Darwin needs names to start with a "_"
 def get_name(name): return ('_' if system() == 'Darwin' else '') + name
 
 class ARM64Language(AssemblyLanguage): pass
@@ -19,7 +19,7 @@ class ARM64Language(AssemblyLanguage): pass
 def specialize_to_arm64(fn_nm, asm):
   var_size = 16
   prev_uop = None
-  ins = [] 
+  ins = []
   x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (10,11,12,13,14,15,16,17,18,19,20)]
   s_regs = ['s' + str(i) for i in reversed(range(3,30))]
   type_to_reg = {dtypes.half: 'h', dtypes.float32: 's', dtypes.bool: 'w', dtypes.int8:'w', dtypes.int32: 'w', dtypes.int64: 'x', dtypes.uint8:'w', dtypes.uint32: 'w', dtypes.uint64: 'x'}
@@ -37,22 +37,22 @@ def specialize_to_arm64(fn_nm, asm):
     elif reg[0] == 's':
       ins.append(f"movz x15, 0x{float_to_hex(value)[4:]}")
       ins.append(f"movk x15, 0x{float_to_hex(value)[:4]}, lsl #16")
-      ins.append(f"str x15, [sp, 16]")
+      ins.append("str x15, [sp, 16]")
       ins.append(f"ldr {reg}, [sp, 16]")
     else:
       ins.append(f"mov {reg}, #{value}")
 
   # Get variables intervals
-  live_range:Dict[str, str] = {}
+  live_range:Dict[str, List[int]] = {}
   for i, (uop, out, vin, arg) in enumerate(asm):
     for var in ([v for v in [out] + vin if v is not None and v.__class__ is not int]):
       live_range[var.nm] = [i,i] if var.nm not in live_range else [live_range[var.nm][0], i]
 
-  mem_vars:Dict[str, str] = {}
+  mem_vars:Dict[str, int] = {}
   rtor:Dict[str, str] = {}
-  def allocate_regs(vars):
+  def allocate_regs(mvars):
     nonlocal var_size
-    for v in [v for v in vars if v is not None and v.__class__ is not int and v.nm not in rtor]:
+    for v in [v for v in mvars if v is not None and v.__class__ is not int and v.nm not in rtor]:
       available_regs = s_regs if dtypes.is_float(v[1]) else x_regs
       #NOTE: Very simple spill, everything that don't fit in regs goes to mem
       if len(available_regs) == 0:
@@ -72,7 +72,7 @@ def specialize_to_arm64(fn_nm, asm):
         available_regs.append(rtor.pop(var))
     # Assign a registers to the variables using live ranges.
     allocate_regs([out] + vin)
-    # Assign temp regs to vin and load them before direct use 
+    # Assign temp regs to vin and load them before direct use
     for i, v in enumerate([v for v in vin if v.__class__ is not int and v.nm in mem_vars]):
       rtor[v.nm] = temp_floats[i] if dtypes.is_float(v[1]) else temp_ints[i]
       # ARM64 addressing constraints https://devblogs.microsoft.com/oldnewthing/20220728-00/?p=106912
@@ -81,7 +81,7 @@ def specialize_to_arm64(fn_nm, asm):
 
     if uop == UOps.SPECIAL:
       if arg.startswith('data'):
-        # data 8 to n into the stack 
+        # data 8 to n into the stack
         if int(arg[4:]) >= 8:
           ins.append(f"ldr x15, [x19, #{(int(arg[4:]) - 8) * 8}]")
           ins.append(f"mov {rtor[out.nm]}, x15")
@@ -108,7 +108,7 @@ def specialize_to_arm64(fn_nm, asm):
         else:
           save_regs = [k for k in rtor.keys() if k != out.nm and k not in mem_vars]
           ins.append(f"sub sp, sp, #{(len(save_regs))*16}")
-          # Save the registers before they are cleared by func call  
+          # Save the registers before they are cleared by func call
           for i,k in enumerate(save_regs,1):
             ins.append(f"str {rtor[k]}, [sp, #{16*i}]")
           ins.append("stp x29, x30, [sp, #0]!")
@@ -159,7 +159,7 @@ def specialize_to_arm64(fn_nm, asm):
       ins.append(f"b.lt loop_{arg[1]}")
 
     prev_uop=uop
-    # store regs into memory if needed 
+    # store regs into memory if needed
     if out is not None and out.nm in mem_vars:
       ins.append(f"mov x15, {mem_vars[out.nm]}")
       ins.append(f"str {rtor[out.nm]}, [sp, x15]")

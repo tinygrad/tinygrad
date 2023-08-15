@@ -1,7 +1,7 @@
-from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
-from tinygrad.codegen.linearizer import Linearizer, UOps, Token, ConstOp, MemOp, UOp
+from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict, cast
+from tinygrad.codegen.linearizer import UOps, Token, ConstOp, MemOp, UOp
 from tinygrad.ops import BinaryOps, UnaryOps
-from tinygrad.helpers import DType, dtypes, DEBUG, getenv
+from tinygrad.helpers import DType, dtypes, DEBUG
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 import functools
 import math
@@ -35,7 +35,7 @@ class AssemblyLanguage(NamedTuple):
   #TODO: these should be global vars
   cnts:DefaultDict[Tuple[DType, bool], int] = defaultdict(int)
   tor: Dict[Any, Register] = {}
-  ins = []
+  ins: List[AssemblyInstruction] = []
 
   def newreg(self, tok, dtype=dtypes.float32, scalar=False):
     if isinstance(tok, Token): dtype = tok.dtype  # this
@@ -65,7 +65,7 @@ class AssemblyLanguage(NamedTuple):
       self.ins.append(AssemblyInstruction(UOps.CAST, self.newreg(key, dtype=new_dtype), [a]))
     return self.tor[key]
 
-  render_ops = { Variable: lambda self, ops, ctx: ctx.tor[self], NumNode: lambda self, ops, ctx: ctx.render_numnode(self.b),
+  render_ops: Any = { Variable: lambda self, ops, ctx: ctx.tor[self], NumNode: lambda self, ops, ctx: ctx.render_numnode(self.b),
                  MulNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.MUL, self.a.render(ops, ctx), self.b),
                  DivNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.DIV, self.a.render(ops, ctx), self.b),
                  ModNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.MOD, self.a.render(ops, ctx), self.b),
@@ -81,7 +81,7 @@ class AssemblyLanguage(NamedTuple):
       nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
       if len(nums) > 0 and nums[0] < 4096 and (idx-nums[0]).min >= 0:  # TODO: different for each GPU?
         idx -= nums[0]
-        off = nums[0]
+        off = cast(int, nums[0])
     reg = idx.render(self.render_ops, self)
     if self.supports_load3:
       if reg.scalar:
@@ -93,7 +93,7 @@ class AssemblyLanguage(NamedTuple):
     return reg, None, off
 
 def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
-  #TODO: Do not use clear() 
+  #TODO: Do not use clear()
   lang.ins.clear()
   lang.tor.clear()
   buf_to_dtype = {args[0]:args[1] for uop,_,_,args in uops if uop == UOps.DEFINE_GLOBAL}
