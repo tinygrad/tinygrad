@@ -248,8 +248,12 @@ class ShapeTracker:
     return self
 
   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
-    new_ints, new_nodes = partition(new_shape, lambda s: isinstance(s, int))
-    if new_nodes and all(isinstance(s, int) for s in self.shape):
+    new_ints: Tuple[int, ...] = ()
+    new_nodes: Tuple[Node, ...] = ()
+    for x in new_shape: 
+      if isinstance(x, int): new_ints += (x,) 
+      else: new_nodes += (x,)
+    if new_nodes and all(s.__class__ is int for s in self.shape):
       # reshape from all int shape into shape with a variable, update the variable value
       assert len(new_nodes) == 1 and isinstance(new_nodes[0], Variable), "only support adding one Variable to the int shape"
       new_var, new_val = new_nodes[0], prod(self.shape) // prod(new_ints)
@@ -261,8 +265,7 @@ class ShapeTracker:
     if self.views[-1].shape == new_shape: return self
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
-    if all(isinstance(s, int) for s in self.shape) and all(isinstance(s, int) for s in new_shape):
-      assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
+    assert not all(s.__class__ is int for s in self.shape + new_shape) or prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
     new_view, extra = _reshape(self.views[-1], new_shape)
     if extra: self.views.append(new_view)
     else: self.views[-1] = new_view
