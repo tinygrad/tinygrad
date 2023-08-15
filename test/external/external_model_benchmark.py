@@ -113,18 +113,18 @@ def get_torch_model(m):
   mdl, cnfg = (BASE / "torch" / m / TORCH_MODELS[m][i].split("/")[-1] for i in range(2))
   download_file(TORCH_MODELS[m][0], mdl)
   download_file(TORCH_MODELS[m][1], cnfg)
-  if m == "commavq":
+  if m == "commavq" and m in TORCH_MODELS:
     from transformers import GPT2LMHeadModel
     return GPT2LMHeadModel.from_pretrained(mdl, config=cnfg)
 
 def prepare_torch_inputs(m, torch_inputs, device=None):
   if device is not None: torch_inputs = [x.to(device) for x in torch_inputs]
-  if m == "commavq":
+  if m == "commavq" and m in TORCH_MODELS:
     return torch_inputs[0], tuple(torch_inputs[1:])
   return torch_inputs
 
 def unpack_torch_outputs(m, torch_out):
-  if m == "commavq":
+  if m == "commavq" and m in TORCH_MODELS:
     return dict([("logits", torch_out["logits"]), *[(f"present_{i}",torch.cat((v[0].unsqueeze(0), v[1].unsqueeze(0)), dim=0)) for i,v in enumerate(torch_out["past_key_values"])]])
   return torch_out
 
