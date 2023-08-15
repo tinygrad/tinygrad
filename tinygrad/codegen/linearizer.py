@@ -531,15 +531,15 @@ class Linearizer:
       # Cast grouped values if required
       for idx, val in grouped:
         for v in val:
-          if v.dtype.is_vector_type and v.offset is None and v.dtype != dtypes.get_vector_type(cast_dtype, 4) and v not in self.casts:
-            self.casts[v] = self.uop(UOps.CAST, ssa(f"casted_{v.name}", dtypes.get_vector_type(cast_dtype, 4), False), self.ungroup(v))
-          elif dtypes.get_normal_type(v.dtype) != cast_dtype and v not in self.casts:
+          if v.dtype.is_vector_type and v.offset is None and v.dtype != dtypes.get_vector_type(cast_dtype, 4) and (v, cast_dtype) not in self.casts:
+            self.casts[v, cast_dtype] = self.uop(UOps.CAST, ssa(f"casted_{cast_dtype.name}_{v.name}", dtypes.get_vector_type(cast_dtype, 4), False), self.ungroup(v))
+          elif dtypes.get_normal_type(v.dtype) != cast_dtype and (v, cast_dtype) not in self.casts:
             offset = f"_{v.offset}" if v.offset is not None else ''
-            self.casts[v] = self.uop(UOps.CAST, ssa(f"casted_{v.name}{offset}", cast_dtype, False), [v])
+            self.casts[v, cast_dtype] = self.uop(UOps.CAST, ssa(f"casted_{cast_dtype.name}_{v.name}{offset}", cast_dtype, False), [v])
       # ALU with casted grouped values
       ret = []
       for idx, val in grouped:
-        val = [self.casts.get(v, v) for v in val] # cast if needed
+        val = [self.casts.get((v, cast_dtype), v) for v in val] # cast if needed
         val_dtype = dtypes.get_vector_type(val[0].dtype, 4) if any(x.dtype.is_vector_type and x.offset is None for x in val) else dtypes.get_normal_type(val[0].dtype)
         val_dtype = (dtypes._float4 if any(x.dtype.is_vector_type and x.offset is None for x in val) else dtypes.float) if self.opts.uses_float32_calculations else val_dtype
         ret.append((idx, self.uop(UOps.ALU, val[-1] if use_accum else ssa('alu', val_dtype),

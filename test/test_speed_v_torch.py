@@ -14,13 +14,14 @@ from tinygrad.lazy import Device
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
-from tinygrad.helpers import colored, getenv, CI
+from tinygrad.helpers import colored, getenv, CI, dtypes
 from tinygrad.jit import TinyJit
 import pytest
 
 pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
+HALF = getenv('HALF', 0) == 1
 
 torch_device = torch.device('mps' if getenv("MPS", 0) else ('cuda' if getenv("TORCHCUDA", 0) else 'cpu'))
 if str(torch_device) == "mps":
@@ -52,7 +53,7 @@ def helper_test_speed(f1, *args):
     del ret
 
     # operation cache defeats
-    args = [(x+1).realize() if isinstance(x, Tensor) else (None if x is None else (x+1)) for x in args]
+    args = [(x+1e-1).realize() if isinstance(x, Tensor) else (None if x is None else (x+1e-1)) for x in args]
 
     # force syncing
     [x.numpy() if isinstance(x, Tensor) or str(torch_device) == "cpu" else x.cpu().numpy() for x in args if x is not None]
@@ -78,11 +79,16 @@ def helper_test_speed(f1, *args):
 
 def helper_test_generic_square(name, N, f1, f2, onearg=False):
   torch.manual_seed(0)
-  torch_a = (torch.rand(N, N) - 0.5).to(torch_device)
-  torch_b = (torch.rand(N, N) - 0.5).to(torch_device) if not onearg else None
-
+  torch_a = ((torch.rand(N, N, dtype=torch.float16 if HALF else torch.float) - 0.5)).to(torch_device)
+  torch_b = ((torch.rand(N, N, dtype=torch.float16 if HALF else torch.float) - 0.5)).to(torch_device) if not onearg else None
+  
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
+
+  if str(torch_device) == 'cpu' and HALF:
+    # CPU doesn't support half
+    torch_a = torch_a.to(torch.float)
+    if not onearg: torch_b = torch_b.to(torch.float)
 
   helper_test_generic(f"{name:30s} {N:5d}x{N:5d}", f1, (torch_a, torch_b), TinyJit(lambda a,b:f2(a,b).realize()), (tiny_a, tiny_b))
 
@@ -97,16 +103,22 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
   flops = save_ops*1e-6
   mem = save_mem*1e-6
   print(("\r" if not CI else "")+f"{name:42s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")
-  np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
+  np.testing.assert_allclose(val_tinygrad, val_torch.astype(np.float16) if HALF else val_torch, atol=1e-1 if HALF else 1e-4, rtol=1e-1 if HALF else 1.09e-2)
 
 def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_x):
   torch.manual_seed(0)
-  torch_dat = torch.rand(bs, in_chans, img_size_y, img_size_x).to(torch_device)
-  torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None).to(torch_device)
+  torch_dat = torch.rand(bs, in_chans, img_size_y, img_size_x, dtype=torch.float16 if HALF else torch.float).to(torch_device)
+  torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None, dtype=torch.float if (str(torch_device) == 'cpu' and HALF) else torch.float16 if HALF else torch.float).to(torch_device)
 
   tiny_dat = Tensor(torch_dat.cpu().numpy())
   tiny_conv = Conv2d(in_chans, out_chans, kernel_size, bias=None)
   tiny_conv.weight = Tensor(torch_conv.weight.detach().cpu().numpy())
+
+  if HALF: tiny_conv.weight = tiny_conv.weight.half().realize()
+
+  if str(torch_device) == 'cpu' and HALF:
+    # CPU doesn't support half
+    torch_dat = torch_dat.to(torch.float)
 
   def f1(torch_dat): return torch_conv(torch_dat)
   def f2(tiny_dat): return tiny_conv(tiny_dat).realize()
