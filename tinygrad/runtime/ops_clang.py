@@ -30,16 +30,18 @@ def emulate_ext_calls(fn, uc, address, size, user_data):
 class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False):
     # TODO: is there a way to not write this to disk?
+    # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
+    #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
     fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
     if not binary:
       prg = CLANG_PROGRAM_HEADER + prg
       if not os.path.exists(fn):
-        _, tmp = tempfile.mkstemp()
+        tmp = f"{fn}.{os.getpid()}.tmp"
         subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+tmp).split(), input=prg.encode('utf-8'))
         os.rename(tmp, fn)
     else:
       if DEBUG >= 5: print(prg)
-      _, tmp = tempfile.mkstemp()
+      tmp = f"{fn}.{os.getpid()}.tmp"
       if CI and ARM64:
         prg = prg.split('\n') # type: ignore
         self.varsize = align(int(prg[0].split(" ")[1]))
