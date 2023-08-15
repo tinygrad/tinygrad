@@ -10,6 +10,7 @@ jobs:
   testmacbenchmark:
     name: Mac Benchmark
     runs-on: [self-hosted, macOS]
+    if: github.repository_owner == 'tinygrad'
     env:
       PYTHONPATH: .
     steps:
@@ -29,6 +30,10 @@ jobs:
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
         JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+    - name: Run GPT2
+      run: |
+        python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
+        JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run 10 CIFAR training steps
       run: |
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
@@ -42,10 +47,13 @@ jobs:
           train_cifar.txt
           llama_unjitted.txt
           llama_jitted.txt
+          gpt2_unjitted.txt
+          gpt2_jitted.txt
 
   testamdbenchmark:
     name: AMD Benchmark
     runs-on: [self-hosted, Linux]
+    if: github.repository_owner == 'tinygrad'
     env:
       PYTHONPATH: .
     steps:
@@ -65,6 +73,10 @@ jobs:
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
         JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+    - name: Run GPT2
+      run: |
+        python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
+        JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run 10 CIFAR training steps
       run: |
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
@@ -78,3 +90,5 @@ jobs:
           train_cifar.txt
           llama_unjitted.txt
           llama_jitted.txt
+          gpt2_unjitted.txt
+          gpt2_jitted.txt

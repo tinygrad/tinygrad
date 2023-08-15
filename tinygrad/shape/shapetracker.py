@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum, auto
 import functools
 from typing import Dict, Tuple, Union, List, Optional, Callable, NamedTuple
-from tinygrad.helpers import prod, DEBUG
+from tinygrad.helpers import prod, DEBUG, partition
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, is_sym_int
 
 # these ops live here
@@ -163,17 +163,18 @@ def _expand(view: View, new_shape: Tuple[Union[Node,int], ...]) -> View:
   return View(new_shape, view.strides, view.offset, mask)
 
 class ShapeTracker:
-  __slots__ = "views"
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[View]]=None):
-    self.views: List[View] = views if views is not None else [*shape.views] if isinstance(shape, ShapeTracker) else [View(shape)]
-  def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
+  __slots__ = "views", "var_vals"
+  def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node,int], ...]], views:Optional[List[View]]=None):
+    self.views: List[View] = views if views is not None else ([*shape.views] if isinstance(shape, ShapeTracker) else [View(shape)])
+    self.var_vals: Dict[Variable, int] = shape.var_vals if isinstance(shape, ShapeTracker) else {}
+  def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views}, var_vals={self.var_vals})"
   def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
 
   @property
   def contiguous(self) -> bool: return self.views[-1].contiguous and len(self.views) == 1
 
   @property
-  def shape(self) -> Tuple[int, ...]: return self.views[-1].shape
+  def shape(self) -> Tuple[int, ...]: return self.views[-1].shape # NOTE: real type is Tuple[Union[Node, int], ...] but mypy complains about prod(shape)
 
   @property
   def key(self) -> Tuple[View, ...]: return tuple(self.views)
@@ -247,6 +248,21 @@ class ShapeTracker:
     return self
 
   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
+    new_ints, new_nodes = partition(new_shape, lambda s: isinstance(s, int))
+    if new_nodes and all(isinstance(s, int) for s in self.shape):
+      # reshape from all int shape into shape with a variable, update the variable value
+      assert len(new_nodes) == 1 and isinstance(new_nodes[0], Variable), "only support adding one Variable to the int shape"
+      new_var, new_val = new_nodes[0], prod(self.shape) // prod(new_ints)
+      if new_var not in self.var_vals:
+        assert new_var.min <= new_val <= new_var.max, f"variable value {new_val} out of range [{new_var.min}, {new_var.max}]"
+        self.var_vals[new_var] = new_val
+      else: assert self.var_vals[new_var] == new_val, f"value conflicts, was {self.var_vals[new_var]}, set to {new_val}"
+    elif not new_nodes: self.var_vals = {}
+    if self.views[-1].shape == new_shape: return self
+    assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
+    # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
+    if all(isinstance(s, int) for s in self.shape) and all(isinstance(s, int) for s in new_shape):
+      assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
     new_view, extra = _reshape(self.views[-1], new_shape)
     if extra: self.views.append(new_view)
     else: self.views[-1] = new_view

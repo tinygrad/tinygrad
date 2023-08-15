@@ -35,8 +35,8 @@ class CStyleLanguage(NamedTuple):
     UnaryOps.SQRT: lambda x: f"sqrt({x})",
     BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
     BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
-    BinaryOps.MAX: lambda a,b: f"max({a},{b})",
-    BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", TernaryOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})",
+    BinaryOps.MAX: lambda a,b: f"max({a},{b})", BinaryOps.MOD: lambda a,b: f"({a}%{b})",
+    BinaryOps.CMPLT: lambda a,b: f"({a}<{b})", TernaryOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})",
     TernaryOps.WHERE: lambda a,b,c: f"({a}!=0?{b}:{c})"
   }
 
@@ -158,9 +158,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     elif uop == UOps.LOAD:
       assert newvar is not None and isinstance(args, (MemOp, ConstOp))
       # valids are handled here
-      if args.valid.max == 0:
-        val = lang.render_const(args.invalid_value, newvar.dtype)
-      elif isinstance(args, ConstOp):
+      if isinstance(args, ConstOp):
         val = lang.render_const(args.value, newvar.dtype)
       else:
         val = lang.render_load(newvar.dtype, args.name, args.memory_dtype, args.idx, args.local)

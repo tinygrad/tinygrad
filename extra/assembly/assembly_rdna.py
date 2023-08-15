@@ -46,7 +46,7 @@ class RDNACodegen(AssemblyCodegen):
     alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", TernaryOps.MULACC: "fma",
            BinaryOps.MAX: "max", UnaryOps.RECIP: "rcp",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin", UnaryOps.LOG2: "log", UnaryOps.EXP2: "exp",
-           BinaryOps.CMPEQ: "cmp_eq", BinaryOps.CMPLT: "cmp_lt"}
+           BinaryOps.CMPLT: "cmp_lt"}
 
     pend_regs:Set[Register] = set()
     rtor:Dict[Register, str] = {}
@@ -115,7 +115,7 @@ class RDNACodegen(AssemblyCodegen):
         else:
           ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, {arg}")
       elif uop == UOps.ALU:
-        if arg in [BinaryOps.CMPLT, BinaryOps.CMPEQ]:
+        if arg in [BinaryOps.CMPLT]:
           ins.append(f"{'s' if out.scalar else 'v'}_{alu[arg]}_{dtype_to_rdnatype[out.dtype]} {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
         else:
           alu_arg = alu[arg]
