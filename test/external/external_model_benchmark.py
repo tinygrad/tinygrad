@@ -1,13 +1,10 @@
-import csv
-import pathlib
-import time
+import csv, pathlib, time, numpy as np
 from os import getenv
-import onnx
-import numpy as np
 import torch
 torch.set_num_threads(1)
-from onnx2torch import convert
+import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
+from onnx2torch import convert
 from extra.utils import download_file
 from extra.onnx import get_run_onnx
 from tinygrad.helpers import OSX, DEBUG
