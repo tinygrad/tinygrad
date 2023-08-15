@@ -15,8 +15,9 @@ from tinygrad.ops import LoadOps
 class Function:
   def __init__(self, device:str, *tensors:Tensor):
     self.device, self.parents, self.needs_input_grad, self.requires_grad = device, tensors, [tensors[0].requires_grad], tensors[0].requires_grad
-    for t in tensors[1:]: self.needs_input_grad += [t.requires_grad,]
-    self.requires_grad = True if True in self.needs_input_grad else None if None in self.needs_input_grad else False
+    for t in tensors[1:]: 
+      self.needs_input_grad += [t.requires_grad]
+      self.requires_grad = True if True in self.needs_input_grad else None if None in self.needs_input_grad else False  # intentionally here, does not happen if n_tensors = 1
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
   def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
