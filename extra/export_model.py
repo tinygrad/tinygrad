@@ -7,7 +7,7 @@ import json
 
 def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
-  for fxn,args in run.jit_cache:
+  for fxn,args,_ in run.jit_cache:
     functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
     cargs = []
     for i,arg in enumerate(args):
