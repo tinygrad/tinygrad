@@ -6,7 +6,6 @@
 from pathlib import Path
 import sys, argparse
 from functools import partial
-from math import sqrt
 import numpy as np
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple
