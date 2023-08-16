@@ -45,14 +45,14 @@ class UNet3D:
     x = self.output["conv"](x)
     return x
 
-  def load_from_pretrained(self):
+  def load_from_pretrained(self, dtype="float32"):
     fn = Path(__file__).parent.parent / "weights" / "unet-3d.ckpt"
     download_file("https://zenodo.org/record/5597155/files/3dunet_kits19_pytorch.ptc?download=1", fn)
     state_dict = torch.jit.load(fn, map_location=torch.device("cpu")).state_dict()
     for k, v in state_dict.items():
       obj = get_child(self, k)
       assert obj.shape == v.shape, (k, obj.shape, v.shape)
-      obj.assign(v.numpy())
+      obj.assign(v.numpy().astype(dtype))
 
 if __name__ == "__main__":
   mdl = UNet3D()

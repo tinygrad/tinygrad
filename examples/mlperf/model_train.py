@@ -1,5 +1,5 @@
 from tqdm import tqdm
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, dtypes
 from tinygrad.nn import optim
 from tinygrad.state import get_parameters
 from tinygrad.tensor import Tensor
@@ -12,30 +12,34 @@ def train_retinanet():
   # TODO: Retinanet
   pass
 
-def train_unet3d(target=0.908, roi_shape=(128,128,128)):
+def train_unet3d(target=0.908, roi_shape=(64,64,128)):
   from examples.mlperf.metrics import dice_ce_loss, get_dice_score, one_hot
   from extra.datasets.kits19 import (get_train_files, get_val_files, iterate,
                                      sliding_window_inference)
   from extra.training import lr_warmup
   from models.unet3d import UNet3D
   Tensor.training = True
-  in_channels, n_class, BS = 1, 3, 2
+  in_channels, n_class, BS = 1, 3, 1, # original: 1, 3, 2
   mdl = UNet3D(in_channels, n_class)
-  lr_warmup_epochs = 200
+  mdl.load_from_pretrained(dtype="float16")
+  lr_warmup_epochs = 1 # original: 200
   init_lr, lr = 1e-4, 0.8
-  max_epochs = 4000
+  max_epochs = 4 # original: 4000
+  evaluate_every_epochs = 2
   opt = optim.SGD(get_parameters(mdl), lr=init_lr)
   for epoch in range(max_epochs):
     if epoch <= lr_warmup_epochs and lr_warmup_epochs > 0:
       lr_warmup(opt, init_lr, lr, epoch, lr_warmup_epochs)
     for image, label in (t := tqdm(iterate(BS=BS, val=False, roi_shape=roi_shape), total=len(get_train_files())//BS)):
+      image = image.astype("float16")
+      print(image.shape, image.dtype)
       opt.zero_grad()
-      out = mdl(Tensor(image).half())
+      out = mdl(Tensor(image))
       loss = dice_ce_loss(out, label, n_class)
       loss.backward()
       opt.step()
       t.set_description(f"loss {loss.numpy().item()}")
-    if (epoch + 1) % 20 == 0:
+    if (epoch + 1) % evaluate_every_epochs == 0:
       Tensor.training = False
       s = 0
       for image, label in iterate(BS=BS, val=True):
