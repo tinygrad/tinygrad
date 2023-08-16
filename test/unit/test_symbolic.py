@@ -283,6 +283,7 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     assert NumNode(0) // (Variable("i", 1, 10)*128) == 0
     assert NumNode(127) // (Variable("i", 1, 10)*128) == 0
     assert idx0 // (i*3) == 0
+    assert i // i == 1
 
   def test_node_mod_node(self):
     i = Variable("i", 1, 10)
