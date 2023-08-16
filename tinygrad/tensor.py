@@ -280,8 +280,8 @@ class Tensor:
   #        - The first iteration will expand the dim of self while consecutive iterations will reduce the dim
   #        - The dims are reduced at sum_dim for each Tensor passed in
   #    - There's a special case where a permute is needed at the end:
-  #        - if first Tensor passed in (expand dims) is not at dim 0 
-  #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims 
+  #        - if first Tensor passed in (expand dims) is not at dim 0
+  #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
   def __getitem__(self, val):
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
