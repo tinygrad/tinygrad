@@ -310,8 +310,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
     if i >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
     # further split batch if distributed
     if getenv("DIST"):
-      X = X[BS*rank//world_size:BS*(rank+1)//world_size]
-      Y = Y[BS*rank//world_size:BS*(rank+1)//world_size]
+      X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
 
     if i%100 == 0 and i > 1:
       # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
@@ -320,8 +319,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
         # further split batch if distributed
         if getenv("DIST"):
-          Xt = Xt[EVAL_BS*min(rank, 4)//min(world_size, 5):EVAL_BS*(min(rank, 4)+1)//min(world_size, 5)]
-          Yt = Yt[EVAL_BS*min(rank, 4)//min(world_size, 5):EVAL_BS*(min(rank, 4)+1)//min(world_size, 5)]
+          Xt, Yt = Xt.chunk(min(world_size, 5), 0)[min(rank, 4)], Yt.chunk(min(world_size, 5), 0)[min(rank, 4)]
 
         out, loss = eval_step_jitted(model, Xt, Yt)
         correct = out.numpy().argmax(axis=1) == Yt.numpy().argmax(axis=1)
