@@ -3,20 +3,17 @@ from tinygrad.jit import TinyJit
 if __name__ == "__main__":
   dist.preinit()
 
-from extra.dist import world
+from extra.dist import collectives
 from tinygrad.helpers import CI, getenv
 from tinygrad.tensor import Tensor
 import numpy as np
 
 @TinyJit
-def send_jit(t, target_rank, cache_id=None) -> Tensor:
-  return world.send(t, target_rank, cache_id=cache_id).realize()
-
-@TinyJit
-def recv_jit(t, target_rank, cache_id=None) -> Tensor:
-  return world.recv(t, target_rank, cache_id=cache_id).realize()
+def allreduce_jit(t:Tensor, cache_id=None) -> Tensor:
+  return collectives.allreduce(t, cache_id=cache_id).realize()
 
 SIZE = 2048 if not CI else 2
+SIZE_2 = 255 if not CI else 3
 
 def run():
   # set a deterministic seed so that both ranks generate the same random tensor
@@ -27,25 +24,19 @@ def run():
   # loop 3 times to make sure it works with the jit
   for _ in range(3):
     # create a tensor to send
-    t = Tensor.randn(SIZE, SIZE)
+    t = Tensor.zeros(SIZE, SIZE) if rank == 0 else Tensor.ones(SIZE, SIZE)
+    t2 = allreduce_jit(t.contiguous().realize(), cache_id="test")
+    assert np.allclose(np.ones((SIZE, SIZE)), t2.numpy())
 
-    # send to rank 1
-    if rank == 0:
-      send_jit(t, 1, cache_id="test")
-    elif rank == 1:
-      t2 = Tensor.empty(SIZE, SIZE)
-      recv_jit(t2, 0, cache_id="test")
+  # reset jit
+  allreduce_jit.cnt = 0
 
-    # recv from rank 1
-    if rank == 0:
-      t2 = Tensor.empty(SIZE, SIZE)
-      recv_jit(t2, 1, cache_id="test2")
-    elif rank == 1:
-      send_jit(t2, 0, cache_id="test2")
-
-    # check that the received tensor is the same as the sent tensor
-    if rank == 0:
-      assert np.allclose(t.numpy(), t2.numpy())
+  # test uneven chunk sizes
+  for _ in range(3):
+    # create a tensor to send
+    t = Tensor.ones(SIZE_2, SIZE_2, SIZE_2) if rank == 0 else Tensor.zeros(SIZE_2, SIZE_2, SIZE_2)
+    t2 = allreduce_jit(t.contiguous().realize(), cache_id="test2")
+    assert np.allclose(np.ones((SIZE_2, SIZE_2, SIZE_2)), t2.numpy())
 
   print(f"rank {rank} passed")
 

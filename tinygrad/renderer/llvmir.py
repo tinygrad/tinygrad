@@ -32,6 +32,35 @@ code_for_op: Final[Dict[Op, Callable]] = {
   TernaryOps.WHERE: lambda builder,x,y,z: builder.select(builder.fcmp_unordered("!=", x, ir.Constant(ir.FloatType(), 0), flags=('fast',)), y, z, flags=('fast',)),
 }
 
+dtype_to_llvm_dtype = {dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32)}
+
+def cast(bb, val, input_type, output_type):
+  if input_type == output_type: return val
+
+  if output_type == dtypes.float32:
+    if dtypes.is_int(input_type) or input_type == dtypes.bool:
+      val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(input_type) or input_type == dtypes.bool else bb[-1].sitofp(val, ir.FloatType())
+    elif input_type == dtypes.bfloat16:
+      val = bb[-1].sext(val, ir.IntType(32))
+      val = bb[-1].shl(val, ir.Constant(ir.IntType(32), 16))
+      val = bb[-1].bitcast(val, ir.FloatType())
+    else:
+      val = bb[-1].fpext(val, ir.FloatType())
+    return val
+
+  if input_type == dtypes.float32:
+    if dtypes.is_int(output_type) or output_type == dtypes.bool:
+      val = bb[-1].fptoui(val, dtype_to_llvm_dtype[output_type]) if dtypes.is_unsigned(output_type) or output_type == dtypes.bool else bb[-1].fptosi(val, dtype_to_llvm_dtype[output_type])
+    elif output_type == dtypes.bfloat16:
+      val = bb[-1].bitcast(val, ir.IntType(32))
+      val = bb[-1].lshr(val, ir.Constant(ir.IntType(32), 16))
+      val = bb[-1].trunc(val, ir.IntType(16))
+    else:
+      val = bb[-1].fptrunc(val, dtype_to_llvm_dtype[output_type])
+    return val
+
+  raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
+
 def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[List[int]], Optional[List[int]]]:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
@@ -41,7 +70,6 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
   buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
 
   # create llvm function
-  dtype_to_llvm_dtype = {dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32)}
   func_dtypes = [dtype_to_llvm_dtype[dtype] for dtype in buf_to_dtype.values()]
   func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in func_dtypes]), name=function_name)
 
@@ -84,9 +112,9 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
         bb[-2].cbranch(bb[-2].icmp_unsigned("==", idx_p1, int_const(var.max+1)), bb[-1]._block, block._block)
     if uop == UOps.LOAD:
       assert newvar is not None and isinstance(args, (MemOp, ConstOp))
-      assert newvar.dtype == dtypes.float, "newvar must be float"
       valid = args.valid.render(render_llvm, bb[-1])
       if isinstance(args, ConstOp):
+        assert newvar.dtype == dtypes.float, "newvar must be float"
         if args.valid.min == 0 and args.valid.max == 1:
           val = bb[-1].select(valid, ir.Constant(ir.FloatType(), args.value), ir.Constant(ir.FloatType(), args.invalid_value))
         else:
@@ -100,30 +128,12 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
           val = bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [aug_idx], inbounds=True)), ir.Constant(dtype_to_llvm_dtype[args.memory_dtype], args.invalid_value))
         else:
           val = bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [idx], inbounds=True))
-
-        if args.memory_dtype != newvar.dtype:
-          if dtypes.is_int(args.memory_dtype) or args.memory_dtype == dtypes.bool:
-            val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(args.memory_dtype) or args.memory_dtype == dtypes.bool else bb[-1].sitofp(val, ir.FloatType())
-          elif args.memory_dtype == dtypes.bfloat16:
-            val = bb[-1].sext(val, ir.IntType(32))
-            val = bb[-1].shl(val, ir.Constant(ir.IntType(32), 16))
-            val = bb[-1].bitcast(val, ir.FloatType())
-          else:
-            val = bb[-1].fpext(val, ir.FloatType())
+        val = cast(bb, val, args.memory_dtype, newvar.dtype)
       lvars[newvar] = val
     if uop == UOps.STORE:
       assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
       idx = args.idx.render(render_llvm, bb[-1])
-      element = lvars[vin[0]]
-      if args.memory_dtype != vin[0].dtype:
-        if dtypes.is_int(args.memory_dtype) or args.memory_dtype == dtypes.bool:
-          element = bb[-1].fptoui(element, dtype_to_llvm_dtype[args.memory_dtype]) if dtypes.is_unsigned(args.memory_dtype) or args.memory_dtype == dtypes.bool else bb[-1].fptosi(element, dtype_to_llvm_dtype[args.memory_dtype])
-        elif args.memory_dtype == dtypes.bfloat16:
-          element = bb[-1].bitcast(element, ir.IntType(32))
-          element = bb[-1].lshr(element, ir.Constant(ir.IntType(32), 16))
-          element = bb[-1].trunc(element, ir.IntType(16))
-        else:
-          element = bb[-1].fptrunc(element, dtype_to_llvm_dtype[args.memory_dtype])
+      element = cast(bb, lvars[vin[0]], vin[0].dtype, args.memory_dtype)
       bb[-1].store(element, bb[-1].gep(func.args[buf_index[args.name]], [idx], inbounds=True))
     if uop == UOps.ALU:
       lvars[newvar] = code_for_op[args](bb[-1], *[lvars[x] for x in vin])

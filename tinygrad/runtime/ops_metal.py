@@ -37,7 +37,7 @@ def unwrap(x):
   return ret
 
 class MetalProgram:
-  def __init__(self, name:str, prg:str):
+  def __init__(self, name:str, prg:str, binary:bool=False):
     if METAL_XCODE:
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
