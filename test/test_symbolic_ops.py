@@ -36,6 +36,14 @@ class TestSymbolicOps(unittest.TestCase):
       expected = f(a, b).cpu().numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  def test_matmul_same_var_different_val(self):
+    def f(a, b): return (a@b).realize()
+    vi = Variable("i", 1, 10)
+    a = Tensor.rand(3, 4)
+    b = Tensor.rand(7, 5)
+    with self.assertRaises(AssertionError):
+      f(a.reshape(3, vi), b.reshape(vi, 5)).cpu().numpy()
+
   @unittest.skipIf(Device.DEFAULT == "CLANG" and CI, "broken on CLANG CI")
   def test_attention(self):
     def f(q, k, v): return Tensor.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)).realize()

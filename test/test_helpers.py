@@ -106,7 +106,7 @@ with Context(VARIABLE=1):
       ...
     assert D.value == 2, f"Expected D to be 2, but was {D.value}. Indicates that Context.__exit__ did not restore to the correct value."
 
-class TestMergeDcits(unittest.TestCase):
+class TestMergeDicts(unittest.TestCase):
   def test_merge_dicts(self):
     a = {"a": 1, "b": 2}
     b = {"a": 1, "c": 3}
