@@ -336,22 +336,18 @@ class Tensor:
       max_dim = max(idx, key=lambda i: i.ndim).ndim
       idx = [i if i.ndim == max_dim else i.reshape(*[1]*(max_dim-i.ndim), *i.shape) for i in idx]
       sum_dim = [d if n==0 else d+i.ndim-n for n,(d,i) in enumerate(zip(dim,idx))]
-      ret = ret._gather(idx, sum_dim)
+      new_idx = idx[0].reshape(*[1]*sum_dim[0], 1, *idx[0].shape, *[1]*(ret.ndim-sum_dim[0]-1))
+      arange = Tensor.arange(ret.shape[sum_dim[0]], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*sum_dim[0], ret.shape[sum_dim[0]], *[1]*idx[0].ndim, *[1]*(ret.ndim-sum_dim[0]-1))
+      ret = (ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*idx[0].ndim, *ret.shape[sum_dim[0]+1:]) * (arange == new_idx)).sum(sum_dim[0])
+      for i,d in zip(idx[1:],sum_dim[1:]):
+        new_idx = i.reshape(*[1]*sum_dim[0], *i.shape, *[1]*(ret.ndim-sum_dim[0]-i.ndim))
+        arange = Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(d), ret.shape[d], *[1]*(ret.ndim-d-1))
+        ret = ((new_idx == arange) * ret).sum(d)
       if dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1:
         order = list(range(ret.ndim))
         order = order[dim[0]:dim[0]+idx[0].ndim] + order[:dim[0]] + order[dim[0]+idx[0].ndim:]
         ret = ret.permute(order=order)
     return ret
-
-  def _gather(self, idx, dim):
-    new_idx = idx[0].reshape(*[1]*dim[0], 1, *idx[0].shape, *[1]*(self.ndim-dim[0]-1))
-    arange = Tensor.arange(self.shape[dim[0]], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim[0], self.shape[dim[0]], *[1]*idx[0].ndim, *[1]*(self.ndim-dim[0]-1))
-    new_ret = (self.reshape(*self.shape[:dim[0]+1], *[1]*idx[0].ndim, *self.shape[dim[0]+1:]) * (arange == new_idx)).sum(dim[0])
-    for i,d in zip(idx[1:],dim[1:]):
-      new_idx = i.reshape(*[1]*dim[0], *i.shape, *[1]*(new_ret.ndim-dim[0]-i.ndim))
-      arange = Tensor.arange(new_ret.shape[d], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(d), new_ret.shape[d], *[1]*(new_ret.ndim-d-1))
-      new_ret = ((new_idx == arange) * new_ret).sum(d)
-    return new_ret
 
   def gather(self: Tensor, idx: Tensor, dim: int):
     assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
@@ -360,9 +356,7 @@ class Tensor:
     idx = idx.transpose(ax1=dim, ax2=0).unsqueeze(-1)
     permarg = list(range(self.ndim))
     permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
-    self = self.permute(*permarg).unsqueeze(0)
-    self = self.shrink(tuple([(0,sh) if i==0 or i==(self.ndim-1) else (0,idx.shape[i]) for i,sh in enumerate(self.shape)]))
-    return ((idx == Tensor.arange(self.shape[-1]))*self).sum(-1).transpose(ax1=0, ax2=dim)
+    return ((idx == Tensor.arange(self.shape[dim])) * self.permute(*permarg).shrink(tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
