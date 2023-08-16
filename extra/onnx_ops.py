@@ -308,8 +308,16 @@ def Attention(input:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Opti
     xk, xv = Tensor.cat(past[0], xk, dim=-2), Tensor.cat(past[1], xv, dim=-2)
     present = Tensor.cat(xk.unsqueeze(0), xv.unsqueeze(0))
 
+  def attn(query, key, value, attn_mask):
+    query_length, key_length = query.shape[-2], key.shape[-2]
+    cdim = max(query_length, key_length) + 1
+    attn_weights = query @ key.transpose(-1, -2) / math.sqrt(value.shape[-1])
+    # This is where Tensor.scaled_dot_product_attention differs:
+    causal_mask = Tensor.ones((cdim, cdim), requires_grad=False).cast(dtypes.bool).tril(0)[key_length - query_length : key_length, :key_length].cast(dtypes.bool)
+    return (Tensor.where(causal_mask, attn_weights, -float("inf")) + attn_mask).softmax(-1) @ value
+
   bsz, _, seq_len, _ = xq.shape
-  out = Tensor.scaled_dot_product_attention(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
+  out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
   return out, present
 
 def SkipLayerNormalization(input:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=None):
