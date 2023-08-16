@@ -85,7 +85,7 @@ def specialize_to_ptx(lang, function_name):
     elif uop == UOps.COND_BRANCH:
       ins.append(f"@{'!' if not arg[1] else ''}{vin[0]} bra {arg[0]};")
 
-  ins_prefix = [".version 8.2", ".target " + arch(), ".address_size 64",
+  ins_prefix = [".version 7.8", ".target " + arch(), ".address_size 64",
                 f".visible .entry {function_name}({', '.join(f'.param .u64 data{i}' for i in range(param_cnt))}) {{"]
   for arg in [(dtype, lang.type_to_letter(dtype), c) for dtype,c in lang.cnts.items()]: ins_prefix.append(f".reg .{dtype_to_nvtype[arg[0][0]]} %{arg[1]}<{arg[2]}>;",)
   ins = ins_prefix + ins
