@@ -355,11 +355,14 @@ class Tensor:
 
   def gather(self: Tensor, idx: Tensor, dim: int):
     assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
+    assert all(s > i for s,i in zip(self.shape, idx.shape)), "all dim of idx.shape must be smaller than self.shape"
     if dim < 0: dim += self.ndim
-    self_dim = list(range(self.ndim))
-    sum_dim = [dim] + [i-n if n < dim else idx.ndim+i-n-1 for n,i in enumerate(self_dim[:dim] + self_dim[dim+1:])]
-    idx_arange = [idx] + [Tensor.arange(idx.shape[i], dtype=dtypes.int32, requires_grad=False) for i in self_dim[:dim]] + [Tensor.arange(idx.shape[i], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(n+1), idx.shape[i]) for n,i in enumerate(self_dim[dim+1:])]
-    return self._gather(idx_arange, sum_dim)
+    idx = idx.transpose(ax1=dim, ax2=0).unsqueeze(-1)
+    permarg = list(range(self.ndim))
+    permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
+    self = self.permute(*permarg).unsqueeze(0)
+    self = self.shrink(tuple([(0,sh) if i==0 or i==(self.ndim-1) else (0,idx.shape[i]) for i,sh in enumerate(self.shape)]))
+    return ((idx == Tensor.arange(self.shape[-1]))*self).sum(-1).transpose(ax1=0, ax2=dim)
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
