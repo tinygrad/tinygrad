@@ -1,24 +1,16 @@
 from __future__ import annotations
 import hashlib
-from weakref import WeakValueDictionary
-from torch import float32
-import numpy as np
-import pycuda.autoprimaryctx # type: ignore # noqa: F401
 import pycuda.driver as cuda # type: ignore
 
-import triton # type: ignore # noqa: F401
-import triton.language as tl  # type: ignore # noqa: F401
 from triton.compiler import compile as triton_compile
 
-from typing import Any, Union, Tuple, Optional, Dict, List, Final, Callable
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, GlobalCounters, Compiled
-from tinygrad.shape.shapetracker import ShapeTracker
+from typing import Any, Tuple, Dict, List, Final, Callable
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, Op, Compiled
 from tinygrad.helpers import prod, DEBUG, dtypes, ImageDType
-from tinygrad.runtime.ops_gpu import RawBufferCopyInOut
 from tinygrad.runtime.ops_cuda import RawCUDABuffer
-from tinygrad.runtime.lib import RawBuffer
-from tinygrad.codegen.linearizer import LinearizerOptions, UOp, UOps, LocalBuffer
+from tinygrad.codegen.linearizer import LinearizerOptions, UOp, UOps
 from tinygrad.shape.symbolic import NumNode
+
 
 class TritonProgram:
 
