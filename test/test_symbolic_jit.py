@@ -1,10 +1,9 @@
-import math, unittest
+import unittest
 from tinygrad.jit import TinyJit
 from tinygrad.helpers import getenv
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor, Device
 import numpy as np
-import torch
 
 @unittest.skipIf(getenv("ARM64"), "ARM64 is not supported")
 @unittest.skipUnless(Device.DEFAULT in ["GPU", "METAL", "CLANG"], f"{Device.DEFAULT} is not supported")

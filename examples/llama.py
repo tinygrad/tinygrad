@@ -67,7 +67,7 @@ class Attention:
     self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
-    if getenv("JIT_ATTN"):
+    if getenv("JIT"):
       self._cat_k = TinyJit(self.cat_k)
       self._cat_v = TinyJit(self.cat_v)
       self._attn = TinyJit(self.attn)
@@ -100,8 +100,8 @@ class Attention:
       assert start_pos == self.cache_k.shape[1] and start_pos == self.cache_v.shape[1], "cache is wrong shape"
       assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
 
-      if getenv("JIT_ATTN") and mask is None:
-        pos = Variable("pos", 1, 120) # TODO: double max and recompile if max is hit?
+      if getenv("JIT") and mask is None:
+        pos = Variable("pos", 1, 1024)
         self.cache_k = self.cache_k.reshape(self.cache_k.shape[0], pos, self.cache_k.shape[2], self.cache_k.shape[3])
         self.cache_v = self.cache_v.reshape(self.cache_v.shape[0], pos, self.cache_v.shape[2], self.cache_v.shape[3])
       keys, values = self._cat_k(self.cache_k, xk), self._cat_v(self.cache_v, xv)
@@ -177,7 +177,7 @@ class Transformer:
 
   def __call__(self, tokens:Tensor, start_pos:int):
     _bsz, seqlen = tokens.shape
-    do_jit = seqlen == 1 and getenv("JIT_ATTN")
+    do_jit = seqlen == 1 and getenv("JIT")
     h = self.jitted_tok_embeddings(tokens) if do_jit else self.tok_embeddings(tokens)
 
     # get only the part we are using. TODO: removing contiguous resulted in a bug?
