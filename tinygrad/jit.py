@@ -29,8 +29,8 @@ class TinyJit:
       for (j,i),(input_name, expected_size, expected_type) in self.input_replace.items():
         assert input_rawbuffers[input_name].size == expected_size and input_rawbuffers[input_name].dtype == expected_type, f"size or type mismatch in JIT, {input_rawbuffers[input_name]} != <{expected_size}, {expected_type}>"
         self.jit_cache[j][1][i] = input_rawbuffers[input_name]
-      for prg, args in self.jit_cache: # type: Callable, List[Optional[RawBuffer]] # type: ignore[no-redef]
-        prg(args, jit=True)
+      for prg, pargs in self.jit_cache: # type: Callable, List[Optional[RawBuffer]]
+        prg(pargs, jit=True)
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 1:
       GlobalCounters.cache = []
@@ -41,8 +41,8 @@ class TinyJit:
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
       # get the inputs for replacement
-      for j,(prg,args) in enumerate(self.jit_cache): # type: Tuple[int, Tuple[Callable, List[Optional[RawBuffer]]]] # type: ignore[no-redef]
-        for i,a in enumerate(args):
+      for j,(prg,pargs) in enumerate(self.jit_cache): # type: Tuple[int, Tuple[Callable, List[Optional[RawBuffer]]]] # type: ignore[no-redef]
+        for i,a in enumerate(pargs):
           if a in input_rawbuffers.values():
             self.input_replace[(j,i)] = [(k, v.size, v.dtype) for k,v in input_rawbuffers.items() if v == a][0]
         #if prg.local_size is None: prg.local_size = prg.optimize_local_size(args, preserve_output=True)  # the JIT can optimize local
