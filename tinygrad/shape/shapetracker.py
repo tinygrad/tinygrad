@@ -162,7 +162,7 @@ class ShapeTracker:
     idx, valid = self.expr_idxs(idxs)
     ret: List[Optional[Union[Node, int]]] = [None] * len(self.views[-1].shape)
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
-      if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable) and str(this_dim.a.expr).startswith("idx"):
+      if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable) and this_dim.a in idxs:
         ret[idxs.index(this_dim.a)] = this_dim.b
       elif isinstance(this_dim, Variable):
         ret[idxs.index(this_dim)] = 1
