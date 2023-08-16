@@ -26,17 +26,18 @@ class TestSymbolic(unittest.TestCase):
     i = Variable("i", 1, 5)
     j = Variable("j", 1, 5)
     k = Variable("k", 1, 5)
-    t1 = Tensor.rand(3, 4).reshape(i, 4).cat(Tensor.rand(3, 4).reshape(j, 4), dim=0).cat(Tensor.rand(3, 4).reshape(k, 4), dim=0)
-    st = t1.lazydata.st
+    t = Tensor.rand(3, 4).reshape(i, 4).cat(Tensor.rand(3, 4).reshape(j, 4), dim=0).cat(Tensor.rand(3, 4).reshape(k, 4), dim=0)
+    st = t.lazydata.st
     assert st.shape == (i+j+k, 4)
     assert st.real_strides() == (4, 1)
-    i = Variable("i", 1, 5)
-    j = Variable("j", 1, 5)
-    k = Variable("k", 1, 5)
-    t1 = Tensor.rand(3, 4).reshape(3, i).cat(Tensor.rand(3, 4).reshape(3, j), dim=1).cat(Tensor.rand(3, 4).reshape(3, k), dim=1)
-    st = t1.lazydata.st
+    t = Tensor.rand(3, 4).reshape(3, i).cat(Tensor.rand(3, 4).reshape(3, j), dim=1).cat(Tensor.rand(3, 4).reshape(3, k), dim=1)
+    st = t.lazydata.st
     assert st.shape == (3, i+j+k)
     assert st.real_strides() == (i+j+k, 1)
+    t = Tensor.rand(i, 3).reshape(i, 3).cat(Tensor.rand(3, 3).reshape(i, 3), dim=0).cat(Tensor.rand(3, 3), dim=0)
+    st = t.lazydata.st
+    assert st.shape == (2*i+3, 3)
+    assert st.real_strides() == (3, 1)
 
 class TestSymbolicReshape(unittest.TestCase):
   def test_reshape_into_symbols_simple(self):

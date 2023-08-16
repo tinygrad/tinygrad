@@ -3,7 +3,7 @@ import math
 from tinygrad.codegen.linearizer import UOps, UOp, MemOp, ConstOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, getenv, prod, DType
-from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
+from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, sym_render
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -17,6 +17,7 @@ class CStyleLanguage(NamedTuple):
   buffer_prefix: str = ""
   buffer_suffix: str = ""
   smem_prefix: str = ""
+  arg_int_prefix: str = ""
   barrier: str = ""
   gid: List[str] = []
   lid: List[str] = []
@@ -52,7 +53,7 @@ class CStyleLanguage(NamedTuple):
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    else: val = f"{x}" + ("f" if isinstance(x, float) else "")
+    else: val = f"{x}f" if dtypes.is_float(var_dtype) and isinstance(x, float) else f"{int(x)}"
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
 
   # returns a str expression of the loaded value with the output type
@@ -69,7 +70,7 @@ class CStyleLanguage(NamedTuple):
   def render_local(self, name:str, size:int):
     return self.smem_prefix + f"float {name}[{size}];"
 
-  def render_for(self, expr: str, _min:int, _max:int) -> str:
+  def render_for(self, expr: str, _min:int, _max:Union[int,str]) -> str:
     return f"for (int {expr} = {_min}; {expr} <= {_max}; ++{expr}) {{"
 
   def render_conditional(self, cond: str, x:str, y:str) -> str:
@@ -78,6 +79,7 @@ class CStyleLanguage(NamedTuple):
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str,List[int],List[int]]:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
+                self.arg_int_prefix if dtype == dtypes._arg_int32 else
                 ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix) for i,(name,dtype) in enumerate(bufs)]
     prg = ''.join([f"{self.kernel_prefix} void {function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
@@ -128,7 +130,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
           kk(add_gl_dimension(lang.size_prefix, args, i, var, local_size, lang.lid))
         else:
           if getenv("NOUNROLL") and not isinstance(var, NumNode): kk("#pragma unroll(1)")   # prevent loop unrolling
-          kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, var.min, var.max))
+          kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, var.min, sym_render(var.max)))
       depth += 1
     elif uop == UOps.BARRIER:
       kk(lang.barrier)

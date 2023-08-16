@@ -112,8 +112,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
-      - name: Find faster apt mirror
-        uses: vegardit/fast-apt-mirror.sh@v1
+      # - name: Find faster apt mirror
+      #   uses: vegardit/fast-apt-mirror.sh@v1
       - name: Update packages
         run: |
           wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
@@ -188,6 +188,8 @@ jobs:
       run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
     - name: Run JIT test
       run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_jit.py
+    - name: Run symbolic shapetracker test
+      run: METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py test/test_symbolic_ops.py
     - name: Check Device.DEFAULT
       run: WEBGPU=1 python -c "from tinygrad.lazy import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
     #- name: Run webgpu pytest
@@ -220,8 +222,8 @@ jobs:
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' }}" >> $GITHUB_ENV
       - name: Find faster apt mirror
-        uses: vegardit/fast-apt-mirror.sh@v1
-      - name: Install packages (gpu)
+      #   uses: vegardit/fast-apt-mirror.sh@v1
+      # - name: Install packages (gpu)
         if: matrix.backend == 'gpu'
         run: |
           wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
