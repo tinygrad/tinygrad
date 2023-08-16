@@ -96,6 +96,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
   #TODO: Do not use clear()
   lang.ins.clear()
   lang.tor.clear()
+  lang.cnts.clear()
   buf_to_dtype = {args[0]:args[1] for uop,_,_,args in uops if uop == UOps.DEFINE_GLOBAL}
   buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
   global_size, local_size = [], []
@@ -117,7 +118,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
       else:
         for var in args[0]:
           if not isinstance(var, NumNode):  # TODO: why is this coming through?
-            lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(var, dtype=dtypes.int32, scalar=True), [], 0)) #FIXME: what should valid be here?
+            lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(var, dtype=dtypes.int32, scalar=True), [], 0))
             lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], "$loop_"+var.expr))
     elif uop == UOps.ENDLOOP:
       if args[1] not in ["global", "local", "global+local"]:
@@ -155,10 +156,11 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
     elif uop == UOps.LOAD and newvar is not None:
       if isinstance(args, ConstOp):
         if args.valid.min == 0 and args.valid.max == 1:
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(newvar, dtype=newvar.dtype), [], args.invalid_value))
+          reg = lang.newreg(newvar, dtype=newvar.dtype)
+          lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], args.invalid_value))
           pred = args.valid.render(lang.render_ops, lang)
           lang.ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(newvar, dtype=newvar.dtype), [], args.value))
+          lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], args.value))
           lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
           skipload_branch += 1
         else:
