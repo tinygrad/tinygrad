@@ -8,7 +8,7 @@ import math
 from collections import defaultdict
 
 _type_to_letter = {dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a', dtypes.uint32: 'u', dtypes.uint64: 'b', dtypes._float4: 'x', dtypes.uint8: 'uc', dtypes.float16: 'h',
-                   dtypes.int8: 'c', dtypes.uint16: 'us'}
+                   dtypes.int8: 'c', dtypes.uint16: 'us', dtypes.float64: 'd'}
 
 class Register(NamedTuple):
   nm:str
@@ -99,7 +99,6 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
   lang.tor.clear()
   lang.cnts.clear()
   buf_to_dtype = {args[0]:args[1] for uop,_,_,args in uops if uop == UOps.DEFINE_GLOBAL}
-  buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
   global_size, local_size = [], []
   skipload_branch = 0
   lang.ins += [AssemblyInstruction(UOps.SPECIAL, lang.newreg(buf, dtype=dtypes.uint64, scalar=True), [], buf) for buf in buf_to_dtype]
@@ -134,8 +133,6 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
       elif args[1] == 'local':
         for i, var in enumerate(reversed(args[0])):
           lang.ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [lang.tor[var]], (var.max+1, f"lid{i}")))
-
-
     elif uop == UOps.CAST and newvar is not None:
       # TODO: we should reconsider outputting CAST in the linearizer. these are needless copies
       out = lang.newreg(newvar)

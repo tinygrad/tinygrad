@@ -1,13 +1,13 @@
 from typing import List
 import struct
 from tinygrad.codegen.assembly import uops_to_asmstyle, AssemblyLanguage
-from tinygrad.codegen.linearizer import UOps, UOp, ConstOp
+from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.helpers import dtypes
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.runtime.ops_cuda import arch
 
 dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "f16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.int8: "s8", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32",
-                   dtypes.uint16: "u16", dtypes.uint8: "u8", "bits16": "b16"}
+                   dtypes.uint16: "u16", dtypes.uint8: "u8", "bits16": "b16", dtypes.float64: "f64"}
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 
 def ptx_needs_cast(dest_dtype, src_dtype): return dtypes.is_float(dest_dtype) and dtypes.is_int(src_dtype) or dtypes.is_int(dest_dtype) and dtypes.is_float(src_dtype) or (dtypes.is_float(src_dtype) and dtypes.is_float(dest_dtype) and dest_dtype.itemsize < src_dtype.itemsize)
@@ -20,7 +20,6 @@ def render_cast(ins, inp, out):
   else:
     round_mod = ".rzi" if dtypes.is_int(out.dtype) and dtypes.is_float(inp.dtype) else '.rz' if dtypes.is_float(out.dtype) and (dtypes.is_int(inp.dtype) or dtypes.is_float(inp.dtype) and inp.dtype.itemsize > out.dtype.itemsize) else ''
     ins.append(f"cvt{round_mod}.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[inp.dtype]} {out}, {inp};")
-
 
 # https://docs.nvidia.com/cuda/parallel-thread-execution/#
 
@@ -87,18 +86,19 @@ def specialize_to_ptx(lang, function_name):
       else:
         ins.append(f"ld.{arg[1]}.{dtype_to_nvtype[dtypes.float if arg[2] is None else arg[2]]} {out}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
     elif uop == UOps.STORE:
-      if arg[2] != None and arg[2] != vin[1].dtype:
+      if arg[2] is not None and arg[2] != vin[1].dtype:
+        # FIXME: combine
         if arg[2] == dtypes.bool:
           reg = lang.newreg((out, 'u32'), dtype=dtypes.uint32)
           ins.append(f"set.ne.u32.{dtype_to_nvtype[vin[1].dtype]} {reg}, {'0f00000000' if dtypes.is_float(vin[1].dtype) else '0'}, {vin[1]};")
           ins.append(f"st.{arg[1]}.b8 [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {reg};")
         elif arg[2] == dtypes.half:
           reg = lang.newreg((out, 'st'), dtype=dtypes.float16)
-          ins.append(f"cvt.rz.{dtype_to_nvtype[arg[2]]}.{dtype_to_nvtype[vin[1].dtype]} {reg}, {vin[1]};")
+          render_cast(ins, vin[1], reg)
           ins.append(f"st.{arg[1]}.b16 [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {reg};")
         else:
           reg = lang.newreg((out, 'st'), dtype=arg[2])
-          ins.append(f"cvt.rzi.{dtype_to_nvtype[arg[2]]}.{dtype_to_nvtype[vin[1].dtype]} {reg}, {vin[1]};")
+          render_cast(ins, vin[1], reg)
           ins.append(f"st.{arg[1]}.{dtype_to_nvtype[arg[2]]} [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {reg};")
       elif arg[2] == dtypes.bool:
         reg = lang.newreg((out, 'st'), dtype=dtypes.uint16)
