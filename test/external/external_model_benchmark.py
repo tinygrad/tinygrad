@@ -52,7 +52,6 @@ def benchmark_model(m, validate_outs=False):
   fn = BASE / MODELS[m].split("/")[-1]
   download_file(MODELS[m], fn)
   onnx_model = onnx.load(fn)
-
   output_names = [out.name for out in onnx_model.graph.output]
   excluded = {inp.name for inp in onnx_model.graph.initializer}
   input_shapes = {inp.name:tuple(x.dim_value if x.dim_value != 0 else 1 for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input if inp.name not in excluded}
@@ -95,7 +94,7 @@ def benchmark_model(m, validate_outs=False):
   for backend in ["CPU", "CUDA" if not OSX else "CoreML"]:  # https://onnxruntime.ai/docs/execution-providers/
     provider = backend+"ExecutionProvider"
     if provider not in ort.get_available_providers(): continue
-    ort_sess = ort.InferenceSession(fn, ort_options, [provider])
+    ort_sess = ort.InferenceSession(str(fn), ort_options, [provider])
     benchmark(m, f"onnxruntime_{backend}", lambda: ort_sess.run(output_names, np_inputs))
     del ort_sess
 
@@ -105,7 +104,7 @@ def benchmark_model(m, validate_outs=False):
     tinygrad_model = get_run_onnx(onnx_model)
     tinygrad_out = tinygrad_model(inputs)
 
-    ort_sess = ort.InferenceSession(fn, ort_options, ["CPUExecutionProvider"])
+    ort_sess = ort.InferenceSession(str(fn), ort_options, ["CPUExecutionProvider"])
     onnx_out = ort_sess.run(output_names, np_inputs)
     onnx_out = dict([*[(name,x) for name, x in zip(output_names, onnx_out)]])
 
@@ -125,4 +124,4 @@ def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
     else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
 
 if __name__ == "__main__":
-  for m in MODELS: benchmark_model(m, getenv("VAL", False))
+  for m in MODELS: benchmark_model(m, True)
