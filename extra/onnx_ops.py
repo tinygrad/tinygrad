@@ -1,9 +1,10 @@
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, dtypes
 from extra.onnx import safe_numpy
+from onnx.helper import tensor_dtype_to_np_dtype
 import numpy as np
 import functools
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional
 import math
 
 def Unsqueeze(data, axes):
@@ -201,7 +202,7 @@ def Tile(input, repeats):
   final_shape = [r*s for r,s in zip(repeats_, input.shape)]
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
-def Range(start, limit, delta): return Tensor.arange(safe_numpy(start)[0], safe_numpy(limit)[0], step=safe_numpy(delta)[0])
+def Range(start, limit, delta): return Tensor.arange(*[safe_numpy(x)[0].item() for x in (start, limit, delta)])
 def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
 
 def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
@@ -218,10 +219,7 @@ def ConstantOfShape(input, value:Tensor=None):
   shape = [int(x) for x in safe_numpy(input)]
   return Tensor.ones(*shape, dtype=value.dtype) * (value if shape[0]!=0 else 1)
 
-# this is obviously wrong, but since we don't have types, it's better than nothing
-def Cast(input, to):
-  print(f"WARNING: attempting to cast to {to}")
-  return input
+def Cast(input, to): return input.cast(dtypes.from_np(tensor_dtype_to_np_dtype(to)))
 
 # NOTE: since we only have one type, this is valid!
 def CastLike(input, target_type):
@@ -263,3 +261,70 @@ def OneHot(indices, depth, values, axis=-1):
 
 def Floor(x:Tensor): return x.floor()
 def Ceil(x:Tensor): return x.ceil()
+
+def EmbedLayerNormalization(input_ids, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None, segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
+  # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
+  assert (segment_ids is None) is (segment_embedding is None)
+  assert (mask is None) is (mask_index_type is None)
+  assert mask is None, "functionality not supported yet"  # TODO
+  input_shape = input_ids.shape
+  bsz, seq_length = input_shape[0], input_shape[1]
+  compute_seg_emb = (segment_embedding is not None and segment_ids is not None)
+  vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
+
+  def embedding(x:Tensor, vocab_size, weight:Tensor)->Tensor:  # TODO from nn.Embedding. Could probably upstream this to Tensor
+    vocab_counter = Tensor.arange(vocab_size, dtype=x.dtype, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
+    return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
+
+  # bert embedding layer
+  if epsilon is None: epsilon = 1e-12
+  if position_ids is None: position_ids = Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
+  wrd_embedding_res = embedding(input_ids, vocab_size, word_embedding)
+  pos_embedding_res = embedding(position_ids, max_position_embeddings, position_embedding)
+  seg_embedding_res = embedding(segment_ids, type_vocab_size, segment_embedding) if compute_seg_emb else None
+
+  embedding_sum = wrd_embedding_res + pos_embedding_res + seg_embedding_res
+  out = embedding_sum.layernorm(eps=epsilon) * gamma + beta
+  return out, None, embedding_sum
+
+def Attention(input:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional[Tensor]=None, past:Optional[Tensor]=None, relative_position_bias:Optional[Tensor]=None, past_sequence_length:Optional[Tensor]=None, do_rotary=None, mask_filter_value=None, num_heads=None, past_present_share_buffer=None, qkv_hidden_sizes=None, scale=None, unidirectional=None):
+  # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.Attention
+  assert num_heads is not None  # required
+  assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None)
+  assert relative_position_bias==do_rotary==past_sequence_length==mask_filter_value==past_present_share_buffer==scale==None, "functionality not supported yet"  # TODO strange params
+  hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.shape[1] // 3,)
+
+  if unidirectional:  # gpt-style
+    assert hidden_size == v_hidden_size
+    xqkv = input.linear(weights, bias)
+    xq, xk, xv = [xqkv.slice([None, None, (i*hidden_size, (i+1)*hidden_size)]) for i in range(3)]
+  else:  # bert-style
+    wq, wk, wv = weights[:,:hidden_size], weights[:,hidden_size:hidden_size+v_hidden_size], weights[:,hidden_size+v_hidden_size:]
+    bq, bk, bv = (bias[:hidden_size], bias[hidden_size:hidden_size+v_hidden_size], bias[hidden_size+v_hidden_size]) if bias is not None else None
+    xq, xk, xv = [input.linear(w, b) for w, b in zip((wq, wk, wv), (bq, bk, bv))]
+  xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], num_heads, -1).transpose(1, 2) for x in (xq, xk, xv)]
+
+  if past is not None:
+    xk, xv = Tensor.cat(past[0], xk, dim=-2), Tensor.cat(past[1], xv, dim=-2)
+    present = Tensor.cat(xk.unsqueeze(0), xv.unsqueeze(0))
+
+  def attn(query, key, value, attn_mask):
+    query_length, key_length = query.shape[-2], key.shape[-2]
+    cdim = max(query_length, key_length) + 1
+    attn_weights = query @ key.transpose(-1, -2) / math.sqrt(value.shape[-1])
+    # This is where Tensor.scaled_dot_product_attention differs:
+    causal_mask = Tensor.ones((cdim, cdim), requires_grad=False).cast(dtypes.bool).tril(0)[key_length - query_length : key_length, :key_length].cast(dtypes.bool)
+    return (Tensor.where(causal_mask, attn_weights, -float("inf")) + attn_mask).softmax(-1) @ value
+
+  bsz, _, seq_len, _ = xq.shape
+  out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
+  return out, present
+
+def SkipLayerNormalization(input:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=None):
+  if epsilon is None: epsilon=1e-12
+  x = input + skip + bias
+  return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
+
+def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
+  x = x + bias
+  return 0.5 * x * (1 + (x * 0.797885 + 0.035677 * x ** 3).tanh())

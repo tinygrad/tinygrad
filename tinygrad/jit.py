@@ -1,4 +1,4 @@
-from typing import Callable, List, Tuple, Any, Dict, cast, Union
+from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
 import functools, itertools
 from tinygrad.helpers import DEBUG, DType
 
@@ -12,7 +12,7 @@ class TinyJit:
   def __init__(self, fxn:Callable):
     self.fxn: Callable = fxn
     self.cnt: int = 0
-    self.jit_cache: List[Tuple[Callable, Any]] = []  # TODO: Any should be List[RawBuffer], but this fails
+    self.jit_cache: List[Tuple[Callable, List[Optional[RawBuffer]]]] = []
     self.ret: Any = None
     self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], int, DType]]= {}   # (kernel_number, buffer_number) -> (input_name, expected_size, expected_type)
 
@@ -29,7 +29,8 @@ class TinyJit:
       for (j,i),(input_name, expected_size, expected_type) in self.input_replace.items():
         assert input_rawbuffers[input_name].size == expected_size and input_rawbuffers[input_name].dtype == expected_type, f"size or type mismatch in JIT, {input_rawbuffers[input_name]} != <{expected_size}, {expected_type}>"
         self.jit_cache[j][1][i] = input_rawbuffers[input_name]
-      for prg, args in self.jit_cache: prg(args, jit=True)
+      for prg, pargs in self.jit_cache: # type: Callable, List[Optional[RawBuffer]]
+        prg(pargs, jit=True)
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 1:
       GlobalCounters.cache = []
@@ -40,10 +41,10 @@ class TinyJit:
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
       # get the inputs for replacement
-      for j,(prg,args) in enumerate(self.jit_cache):  # pylint: disable=E1133
-        for i,a in enumerate(args):
+      for j_,(_,pargs_) in enumerate(self.jit_cache): # type: Tuple[int, Tuple[Callable, List[Optional[RawBuffer]]]]
+        for i,a in enumerate(pargs_):
           if a in input_rawbuffers.values():
-            self.input_replace[(j,i)] = [(k, v.size, v.dtype) for k,v in input_rawbuffers.items() if v == a][0]
+            self.input_replace[(j_,i)] = [(k, v.size, v.dtype) for k,v in input_rawbuffers.items() if v == a][0]
         #if prg.local_size is None: prg.local_size = prg.optimize_local_size(args, preserve_output=True)  # the JIT can optimize local
       assert set([x[0] for x in self.input_replace.values()]) == set(input_rawbuffers.keys()), "some input tensors not found"
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None

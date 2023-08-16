@@ -40,6 +40,11 @@ def apply_rotary_emb(xq, xk, freqs_cis) -> Tuple[Tensor, Tensor]:
   xk_out = complex_mult(xk, c, d)
   return xq_out.flatten(3), xk_out.flatten(3)
 
+def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
+  bs, seqlen, n_kv_heads, head_dim = x.shape
+  if n_rep == 1: return x
+  return x[:, :, :, None, :].expand(bs, seqlen, n_kv_heads, n_rep, head_dim).reshape(bs, seqlen, n_kv_heads * n_rep, head_dim)
+
 class RMSNorm:
   def __init__(self, dim, eps=1e-6):
     self.eps = eps
@@ -50,14 +55,22 @@ class RMSNorm:
     return (x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()) * self.weight
 
 class Attention:
-  def __init__(self, dim, n_heads, linear=Linear):
-    self.wq, self.wk, self.wv, self.wo = [linear(dim, dim, bias=False) for _ in range(4)]
+  def __init__(self, dim, n_heads, n_kv_heads, linear=Linear):
     self.n_heads = n_heads
+    self.n_kv_heads = n_kv_heads if n_kv_heads is not None else n_heads
     self.head_dim = dim // n_heads
+    self.n_rep = self.n_heads // self.n_kv_heads
+
+    self.wq = linear(dim, self.n_heads * self.head_dim, bias=False)
+    self.wk = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
+    self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
+    self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
   def prepare_attention(self, x:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-    xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], self.n_heads, self.head_dim) for x in (xq, xk, xv)]
+    xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
+    xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
+    xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
     return xq, xk, xv
 
@@ -74,6 +87,8 @@ class Attention:
 
     # save the cache
     self.cache_k, self.cache_v = keys.realize(), values.realize()
+
+    keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     return Tensor.scaled_dot_product_attention(xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2), mask).transpose(1, 2).reshape(bsz, seqlen, -1)
 
   # NOTE: this is not called
@@ -98,8 +113,8 @@ class FeedForward:
     return self.w2(self.w1(x).silu() * self.w3(x))
 
 class TransformerBlock:
-  def __init__(self, dim, multiple_of, n_heads, norm_eps, linear=Linear, ffn_dim_multiplier=None):
-    self.attention = Attention(dim, n_heads, linear)
+  def __init__(self, dim, multiple_of, n_heads, n_kv_heads, norm_eps, linear=Linear, ffn_dim_multiplier=None):
+    self.attention = Attention(dim, n_heads, n_kv_heads, linear)
     self.feed_forward = FeedForward(dim, 4*dim, multiple_of, linear, ffn_dim_multiplier)
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
@@ -125,8 +140,8 @@ class TransformerBlock:
     return self._post(x, output) if mask is None else self.post(x, output)
 
 class Transformer:
-  def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None):
-    self.layers = [TransformerBlock(dim, multiple_of, n_heads, norm_eps, linear, ffn_dim_multiplier) for _ in range(n_layers)]
+  def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None, n_kv_heads=None):
+    self.layers = [TransformerBlock(dim, multiple_of, n_heads, n_kv_heads, norm_eps, linear, ffn_dim_multiplier) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = Embedding(vocab_size, dim)
     self.output = linear(dim, vocab_size, bias=False)
@@ -173,11 +188,10 @@ MODEL_PARAMS = {
       "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
       "files": 2,
     },
-#     # 70B is disabled because we do not yet implement n_kv_heads argument
-#     "70B": {
-#       "args": {"dim": 8192, "multiple_of": 4096, "ffn_dim_multiplier": 1.3, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
-#       "files": 8,
-#     },
+    "70B": {
+      "args": {"dim": 8192, "multiple_of": 4096, "ffn_dim_multiplier": 1.3, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+      "files": 8,
+    },
   },
 }
 
@@ -277,7 +291,7 @@ if __name__ == "__main__":
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
   parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
-  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B] for Gen 2")
+  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B, 70B] for Gen 2")
   parser.add_argument('--gen', type=int, default="1", help="Generation of the model to use [1, 2]")
   parser.add_argument('--quantize', action='store_true', help="Quantize the weights to int8 in memory")
 
