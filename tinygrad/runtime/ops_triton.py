@@ -98,7 +98,6 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
 
     prg = "@triton.jit\ndef fxn("+','.join(f"data{i}" for i in range(len(bufs)))+"):\n"
     prg += '\n'.join(kernel)
-    if DEBUG >= 4: print(prg)
     return prg, global_size, local_size
 
 TritonBuffer = Compiled(RawCUDABuffer, LinearizerOptions(), uops_to_triton, TritonProgram)
