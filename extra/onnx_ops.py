@@ -273,7 +273,7 @@ def EmbedLayerNormalization(input_ids, segment_ids:Optional[Tensor]=None, word_e
   vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
 
   def embedding(x:Tensor, vocab_size, weight:Tensor)->Tensor:  # TODO from nn.Embedding. Could probably upstream this to Tensor
-    vocab_counter = Tensor.arange(vocab_size, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
+    vocab_counter = Tensor.arange(vocab_size, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size).cast(x.dtype)
     return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
 
   # bert embedding layer
