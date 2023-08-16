@@ -1,6 +1,5 @@
 from __future__ import annotations
 import hashlib
-import math
 from weakref import WeakValueDictionary
 from torch import float32
 import numpy as np
