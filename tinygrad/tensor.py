@@ -339,8 +339,8 @@ class Tensor:
       new_idx = idx[0].reshape(*[1]*sum_dim[0], 1, *idx[0].shape, *[1]*(ret.ndim-sum_dim[0]-1))
       arange = Tensor.arange(ret.shape[sum_dim[0]], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*sum_dim[0], ret.shape[sum_dim[0]], *[1]*idx[0].ndim, *[1]*(ret.ndim-sum_dim[0]-1))
       ret = (ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*idx[0].ndim, *ret.shape[sum_dim[0]+1:]) * (arange == new_idx)).sum(sum_dim[0])
-      for i,d in zip(idx[1:],sum_dim[1:]):
-        new_idx = i.reshape(*[1]*sum_dim[0], *i.shape, *[1]*(ret.ndim-sum_dim[0]-i.ndim))
+      for idx_,d in zip(idx[1:],sum_dim[1:]):
+        new_idx = idx_.reshape(*[1]*sum_dim[0], *idx_.shape, *[1]*(ret.ndim-sum_dim[0]-idx_.ndim))
         arange = Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(d), ret.shape[d], *[1]*(ret.ndim-d-1))
         ret = ((new_idx == arange) * ret).sum(d)
       if dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1:
