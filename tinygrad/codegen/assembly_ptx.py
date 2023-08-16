@@ -10,7 +10,7 @@ dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "f16", dtypes.int64: "
                    dtypes.uint16: "u16", dtypes.uint8: "u8", "bits16": "b16", dtypes.float64: "f64"}
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 
-def ptx_needs_cast(dest_dtype, src_dtype): return dtypes.is_float(dest_dtype) and dtypes.is_int(src_dtype) or dtypes.is_int(dest_dtype) and dtypes.is_float(src_dtype) or (dtypes.is_float(src_dtype) and dtypes.is_float(dest_dtype) and dest_dtype.itemsize < src_dtype.itemsize)
+def ptx_needs_cast(dest_dtype, src_dtype): return dtypes.is_float(dest_dtype) and dtypes.is_int(src_dtype) or dtypes.is_int(dest_dtype) and dtypes.is_float(src_dtype) or (dtypes.is_float(src_dtype) and dtypes.is_float(dest_dtype) and dest_dtype.itemsize != src_dtype.itemsize)
 
 def render_cast(ins, inp, out):
   if inp.dtype == dtypes.bool and (dtypes.is_float(out.dtype) or dtypes.is_int(out.dtype)):
@@ -28,7 +28,6 @@ class PTXLanguage(AssemblyLanguage):
 
 def specialize_to_ptx(lang, function_name):
   param_cnt = 0
-  registers = []
   ins = []
   alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
          BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", UnaryOps.SQRT: "sqrt.approx",
@@ -37,9 +36,6 @@ def specialize_to_ptx(lang, function_name):
   for uop, out, vin, arg in lang.ins:
     if uop == UOps.ENDLOOP:
       ins.append("bar.sync 0;")
-    elif uop == UOps.DEFINE_REGISTER:
-      registers += [arg]
-      # ins.append(f".reg .{dtype_to_nvtype[arg[0][0]]} %{arg[1]}<{arg[2]}>;",)
     elif uop == UOps.DEFINE_LOCAL:
       ins.append(f".shared .align 4 .b8 {arg[0]}[{arg[1]*4}];")
     elif uop == UOps.SPECIAL:
@@ -63,55 +59,25 @@ def specialize_to_ptx(lang, function_name):
           vin = vin[1:] + [reg]
         ins.append(f"{alu[arg]}{'.lo' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''}{'.rn' if arg == BinaryOps.DIV and out.dtype == dtypes.float32 else ''}.{dtype_to_nvtype[otype]} {out}, {', '.join(str(x) for x in vin)};")
     elif uop == UOps.LOAD:
+
       if arg.__class__ in (int, float):
         ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {'0f'+float_to_hex(arg) if dtypes.is_float(out.dtype) else int(arg)};")
       elif arg[2] is not None and (arg[2] == dtypes.bool or arg[2] != out.dtype):
-        # FIXME: combine
-        if arg[2] == dtypes.bool == out.dtype:
-          reg = lang.newreg((out, 'u16'), dtype=dtypes.uint16)
-          ins.append(f"ld.{arg[1]}.u16 {reg}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
-          ins.append(f"setp.ne.u16 {out}, 0, {reg};")
-        elif arg[2] == dtypes.bool:
-          reg = lang.newreg((out, 'b8'), dtype=dtypes.uint8)
-          ins.append(f"ld.{arg[1]}.u8 {reg}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
-          ins.append(f"cvt.rz.f32.u8 {out}, {reg};")
-        elif arg[2] == dtypes.half:
-          reg = lang.newreg((out, 'ld'), dtype=arg[2])
-          ins.append(f"ld.{arg[1]}.b16 {reg}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
-          ins.append(f"cvt.f32.{dtype_to_nvtype[arg[2]]} {out}, {reg};")
-        else:
-          reg = lang.newreg((out, 'ld'), dtype=arg[2])
-          ins.append(f"ld.{arg[1]}.{dtype_to_nvtype[arg[2]]} {reg}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
-          ins.append(f"cvt.rz.f32.{dtype_to_nvtype[arg[2]]} {out}, {reg};")
+        dt = ('u16', dtypes.uint16) if arg[2] == dtypes.bool == out.dtype else ('u8', dtypes.uint8) if arg[2] == dtypes.bool else ('b16', dtypes.float16) if arg[2] == dtypes.half else (dtype_to_nvtype[arg[2]], arg[2])
+        reg = lang.newreg((out, dt[0]), dtype=dt[1])
+        ins.append(f"ld.{arg[1]}.{dt[0]} {reg}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
+        render_cast(ins, reg, out)
       else:
         ins.append(f"ld.{arg[1]}.{dtype_to_nvtype[dtypes.float if arg[2] is None else arg[2]]} {out}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
     elif uop == UOps.STORE:
-      if arg[2] is not None and arg[2] != vin[1].dtype:
-        # FIXME: combine
-        if arg[2] == dtypes.bool:
-          reg = lang.newreg((out, 'u32'), dtype=dtypes.uint32)
-          ins.append(f"set.ne.u32.{dtype_to_nvtype[vin[1].dtype]} {reg}, {'0f00000000' if dtypes.is_float(vin[1].dtype) else '0'}, {vin[1]};")
-          ins.append(f"st.{arg[1]}.b8 [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {reg};")
-        elif arg[2] == dtypes.half:
-          reg = lang.newreg((out, 'st'), dtype=dtypes.float16)
-          render_cast(ins, vin[1], reg)
-          ins.append(f"st.{arg[1]}.b16 [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {reg};")
-        else:
-          reg = lang.newreg((out, 'st'), dtype=arg[2])
-          render_cast(ins, vin[1], reg)
-          ins.append(f"st.{arg[1]}.{dtype_to_nvtype[arg[2]]} [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {reg};")
-      elif arg[2] == dtypes.bool:
-        reg = lang.newreg((out, 'st'), dtype=dtypes.uint16)
-        ins.append(f"selp.u16 {reg}, 1, 0, {vin[1]};")
-        ins.append(f"st.{arg[1]}.b8 [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {reg};")
-      # if ptx_needs_cast(dtypes.float if arg[2] is None else arg[2], vin[1].dtype) or arg[2] == dtypes.bool:
-      #   if arg[2] == dtypes.bool != vin[1].dtype:
-      #     prereg = lang.newreg((vin[1],'bool'), dtype=dtypes.bool)
-      #     render_cast(ins, vin[1], prereg)
-      #   else: prereg = vin[1]
-      #   reg = lang.newreg((prereg, dtypes.uint16 if arg[2] == dtypes.bool else arg[2]), dtype=dtypes.uint16 if arg[2] == dtypes.bool else dtypes.float if arg[2] is None else arg[2])
-      #   render_cast(ins, reg, prereg)
-      #   ins.append(f"st.{arg[1]}.{dtype_to_nvtype['bits16' if arg[2] == dtypes.float16 else dtypes.uint8 if arg[2] == dtypes.bool else dtypes.float if arg[2] is None else arg[2]]} [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {reg};")
+      if ptx_needs_cast(dtypes.float if arg[2] is None else arg[2], vin[1].dtype) or arg[2] == dtypes.bool:
+        if arg[2] == dtypes.bool != vin[1].dtype:
+          prereg = lang.newreg((vin[1],'bool'), dtype=dtypes.bool)
+          render_cast(ins, vin[1], prereg)
+        else: prereg = vin[1]
+        reg = lang.newreg((prereg, dtypes.uint16 if arg[2] == dtypes.bool else arg[2]), dtype=dtypes.uint16 if arg[2] == dtypes.bool else dtypes.float if arg[2] is None else arg[2])
+        render_cast(ins, prereg, reg)
+        ins.append(f"st.{arg[1]}.{dtype_to_nvtype['bits16' if arg[2] == dtypes.float16 else dtypes.uint8 if arg[2] == dtypes.bool else dtypes.float if arg[2] is None else arg[2]]} [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {reg};")
       else:
         ins.append(f"st.{arg[1]}.{dtype_to_nvtype[dtypes.float if arg[2] is None else arg[2]]} [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {vin[1]};")
     elif uop == UOps.CAST:
