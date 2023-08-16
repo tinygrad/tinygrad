@@ -274,6 +274,13 @@ class Tensor:
   #        - So pad dim_sz with as many zeros as needed (dim_sz -> dim_sz_padded) so that reshape to [dim_sz_padded // s, s]
   #          is possible.
   #        - Apply Shrink to do the slice [:, 0] on axes of shapes [dim_sz_padded // s, s].
+  # - Fancy indexing and combined indexing is supported
+  #    - Any Tensors passed in __getitem__ will perform (CMPEQ with arange -> MUL with self -> SUM_REDUCE) iteratively
+  #        - The first iteration will expand the dim of self while consecutive iterations will reduce the dim
+  #        - The dims are reduced at sum_dim for each Tensor passed in
+  #    - There's a special case where a permute is needed at the end:
+  #        - First Tensor passed in (expand dims) is not at dim 0
+  #        - Following Tensors is not follow consecutively to the end of fancy indexing's dims 
   def __getitem__(self, val):
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
@@ -343,7 +350,7 @@ class Tensor:
         new_idx = idx_.reshape(*[1]*sum_dim[0], *idx_.shape, *[1]*(ret.ndim-sum_dim[0]-idx_.ndim))
         arange = Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(d), ret.shape[d], *[1]*(ret.ndim-d-1))
         ret = ((new_idx == arange) * ret).sum(d)
-      if dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1:
+      if dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1: # special permute case
         order = list(range(ret.ndim))
         order = order[dim[0]:dim[0]+idx[0].ndim] + order[:dim[0]] + order[dim[0]+idx[0].ndim:]
         ret = ret.permute(order=order)
