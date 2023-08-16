@@ -23,7 +23,7 @@ from tinygrad.shape.symbolic import NumNode
 
 class TritonProgram:
 
-  def __init__(self, name:str, prg:str):
+  def __init__(self, name:str, prg:str, binary:bool=False):
     signature = ','.join(["*fp32" for _ in range(prg.splitlines()[1].count("data"))])
 
     prg = "import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n" + prg
