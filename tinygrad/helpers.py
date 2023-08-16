@@ -3,7 +3,7 @@ import os, functools, platform, time, re, contextlib
 from weakref import KeyedRef, ref
 from _weakref import _remove_dead_weakref # type: ignore
 import numpy as np
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any, Iterable
 from math import prod # noqa: F401 # pylint:disable=unused-import
 
 ShapeType = Tuple[int, ...]
@@ -22,7 +22,7 @@ def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (
 def flatten(l:Iterator): return [item for sublist in l for item in sublist]
 def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
-def merge_dicts(ds):
+def merge_dicts(ds:Iterable[Dict]) -> Dict:
   kvs = set([(k,v) for d in ds for k,v in d.items()])
   assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for k,v in kvs}
