@@ -55,7 +55,8 @@ class LLVMProgram:
     LLVM.engine.finalize_object()
     self.fxn = LLVM.engine.get_function_address(name)
 
-  def __del__(self): LLVM.engine.remove_module(self.mod)
+  def __del__(self):
+    if hasattr(self, 'mod'): LLVM.engine.remove_module(self.mod)
 
   def __call__(self, unused_global_size, unused_local_size, *bufs, wait=False):
     cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_void_p for _ in bufs])(self.fxn)

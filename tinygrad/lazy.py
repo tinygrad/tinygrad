@@ -11,7 +11,7 @@ from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.shape.shapetracker import MovementOps, ShapeTracker, View, get_contraction
 from tinygrad.shape.symbolic import Node
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, TernaryOps, ReduceOps, LoadOps, OpType, LazyOp
-from tinygrad.runtime.lib import RawBufferMapped, RawConst, RawBuffer
+from tinygrad.runtime.lib import RawBufferMapped, RawConst, RawBuffer, RawBufferTransfer
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -19,6 +19,7 @@ sys.setrecursionlimit(10000)
 OPT = getenv("OPT", 2)
 LAZY = getenv("LAZY", 1)
 LAZYCACHE = getenv("LAZYCACHE", 1)
+P2P = getenv("P2P", 0)
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
@@ -380,6 +381,8 @@ def _realize_from(buffer: LazyBuffer) -> None:
   if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
     buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
     rawbuf.realized.readinto(cast(RawBufferMapped, buffer.realized)._buffer())
+  elif isinstance(rawbuf.realized, RawBufferTransfer) and issubclass(Device[buffer.device].buffer, RawBufferTransfer) and P2P >= 1:
+    buffer.realized = cast(RawBufferTransfer, Device[buffer.device].buffer).transfer(rawbuf.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
   else:
     buffer.realized = Device[buffer.device].buffer.fromCPU(rawbuf.toCPU(), **buffer._device_extra_args())
 

@@ -9,7 +9,7 @@ import struct
 import numpy as np
 
 ARM64 = getenv('ARM64', False)
-if CI and ARM64: from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, arm64_const
+if CI and ARM64: from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, arm64_const   # type: ignore
 
 args = {
   'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
@@ -20,8 +20,8 @@ args = {
 CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n'
 ADDRESS = 0x10000
 
-# Unicorn doesn't support external calls 
-def align(addr): return (addr+4095) & ~(4095) 
+# Unicorn doesn't support external calls
+def align(addr): return (addr+4095) & ~(4095)
 mock_lm = {"sinf": np.sin, "sqrtf": np.sqrt, "exp2f": np.exp2, "log2f": np.log2}
 def emulate_ext_calls(fn, uc, address, size, user_data):
   s_in = struct.unpack('f', struct.pack('I', uc.reg_read(getattr(arm64_const, f'UC_ARM64_REG_S{fn[2][1:]}'))))[0]
@@ -33,6 +33,7 @@ class ClangProgram:
     # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
     #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
     fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
+    if binary and DEBUG >= 5: print(prg)
     if not os.path.exists(fn):
       tmp = f"{fn}.{os.getpid()}.tmp"
       if not binary:
@@ -40,7 +41,6 @@ class ClangProgram:
         subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+tmp).split(), input=prg.encode('utf-8'))
         os.rename(tmp, fn)
       else:
-        if DEBUG >= 5: print(prg)
         if CI and ARM64:
           prg = prg.split('\n') # type: ignore
           self.varsize = align(int(prg[0].split(" ")[1]))
@@ -77,6 +77,6 @@ class ClangProgram:
       self.fxn(*[x._buf for x in args])
     if wait: return time.monotonic()-st
 
-renderer = fromimport("extra.assembly.assembly_arm64", "uops_to_arm64_asm") if ARM64 else functools.partial(uops_to_cstyle, CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict"))
+renderer = fromimport("tinygrad.codegen.assembly_arm64", "uops_to_arm64_asm") if ARM64 else functools.partial(uops_to_cstyle, CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict"))
 ClangBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supported_vector_sizes={dtypes.float: []}, has_local=False,
                                                           supported_vector_sizes_alu={dtypes.float: []}, uses_float32_calculations=False), renderer, ClangProgram)
