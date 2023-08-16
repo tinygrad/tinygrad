@@ -21,7 +21,9 @@ def safe_numpy(t) -> np.ndarray:
   if t not in numpy_cache:
     if DEBUG >= 1:
       print("numpy cache miss", t)
-    numpy_cache[t] = t.numpy()
+    tmp = t.numpy()
+    numpy_cache[t] = tmp if len(tmp.shape) else tmp.reshape(1)
+  assert len(numpy_cache[t].shape) > 0
   return numpy_cache[t]
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
@@ -109,7 +111,8 @@ def get_run_onnx(onnx_model: ModelProto):
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
       shape = type_parse(inp.type)
-      if len(shape) >= 1 and shape[0] == 0 and shape != (0,): shape = tuple([1]+list(shape[1:]))   # 1 batch size
+      # if len(shape) >= 1 and shape[0] == 0 and shape != (0,): shape = tuple([1]+list(shape[1:]))   # 1 batch size
+      if len(shape) >= 1: shape = tuple([x if x != 0 else 1 for x in shape])  # replace all dynamic dims with 1 for now
       if inp.name in inputs:
         if isinstance(inputs[inp.name], Tensor):
           input_tensors[inp.name] = inputs[inp.name]
