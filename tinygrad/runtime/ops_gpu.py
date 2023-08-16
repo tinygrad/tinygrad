@@ -5,7 +5,7 @@ import pyopencl as cl  # type: ignore
 from typing import Optional, List
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator
+from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.linearizer import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
@@ -42,7 +42,7 @@ class _CL:
 CL = _CL()
 CL.post_init() if not getenv("DELAYED_RUNTIME_INIT", False) else None
 
-class CLBuffer(RawBufferCopyInOut):
+class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device='0'): super().__init__(size, dtype, allocator=CL.cl_allocator, **{'device': device})
   def _copyin(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
@@ -51,7 +51,11 @@ class CLBuffer(RawBufferCopyInOut):
     assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
     buf = cl.Buffer(CL.cl_ctxs[self._buf.device], cl.mem_flags.WRITE_ONLY | cl.mem_flags.USE_HOST_PTR, 0, hostbuf=x.data)
     mapped, event = cl.enqueue_map_buffer(CL.cl_queue[self._buf.device], buf, cl.map_flags.WRITE, 0, self.size, dtype=self.dtype.np, is_blocking=False)
-    with mapped.base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped, self._buf, is_blocking=True, wait_for=[event])
+    with mapped.base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped, self._buf, is_blocking=True, wait_for=[event] + ([self.event] if hasattr(self, "event") else []))
+  def _transfer(self, x):
+    if "gfx" in CL.cl_ctxs[x._buf.device].devices[0].name:
+      cl.enqueue_copy_buffer_p2p_amd(CL.cl_platform, CL.cl_queue[x._buf.device], x._buf, self._buf, x.size * x.dtype.itemsize).wait()
+    else: raise NotImplementedError("p2p transfer between devices not implemented on non-amd")
 
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
@@ -79,7 +83,7 @@ class CLProgram:
   def max_work_group_size(): return CL.cl_ctxs[0].devices[0].max_work_group_size
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
-    cl_bufs = [x._buf if isinstance(x, CLBuffer) else x for x in bufs]
+    cl_bufs = [x._buf if isinstance(x, CLBuffer) else np.int32(x) if isinstance(x, int) else x for x in bufs]
     e = self.clprgs[cl_bufs[0].device](CL.cl_queue[cl_bufs[0].device], [g*l for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *cl_bufs, wait_for=[x.event for x in bufs if isinstance(x, CLBuffer) and hasattr(x, "event")])
     if wait:
       e.wait()
@@ -90,7 +94,7 @@ class CLProgram:
     return None
 
 renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
-  kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
+  kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ", arg_int_prefix = "const int",
   half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
   gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True))

@@ -14,7 +14,7 @@ setup(name='tinygrad',
       license='MIT',
       long_description=long_description,
       long_description_content_type='text/markdown',
-      packages = ['tinygrad', 'tinygrad.codegen', 'tinygrad.nn', 'tinygrad.runtime', 'tinygrad.shape'],
+      packages = ['tinygrad', 'tinygrad.codegen', 'tinygrad.nn', 'tinygrad.renderer', 'tinygrad.runtime', 'tinygrad.shape'],
       classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
@@ -24,6 +24,7 @@ setup(name='tinygrad',
       extras_require={
         'llvm': ["llvmlite"],
         'cuda': ["pycuda"],
+        'arm': ["unicorn"],
         'triton': ["triton>=2.0.0.dev20221202"],
         'webgpu': ["wgpu"],
         'metal': ["pyobjc-framework-Metal", "pyobjc-framework-Cocoa", "pyobjc-framework-libdispatch"],
@@ -44,6 +45,7 @@ setup(name='tinygrad',
             "safetensors",
             "types-PyYAML",
             "cloudpickle",
+            "transformers"
         ],
       },
       include_package_data=True)

@@ -162,7 +162,7 @@ def hand_coded_optimizations(k:Linearizer):
       # early exit
       return
 
-  if k.opts.has_local:
+  if k.opts.has_local and all(isinstance(s, int) for s in k.sts[0].shape[:k.first_reduce]):
     # are we grouping? (requires local shape support)
     if not k.float4_axis(0) and k.first_reduce <= 2 and k.first_reduce + 1 <= k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
@@ -204,8 +204,8 @@ def hand_coded_optimizations(k:Linearizer):
   while prod(k.sts[0].shape[:k.first_reduce]) >= 1024:
     xb_choices = []
     for axis, upcast_amount in itertools.product(range(k.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
-      # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
-      if axis not in upcasted_axis and k.full_shape[axis]%upcast_amount == 0 and any(k.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in k.upcasted_axis(buf_index)) for buf_index in range(len(k.sts))):
+      # if we haven't upcasted it, it's not symbolic, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
+      if axis not in upcasted_axis and isinstance(k.full_shape[axis], int) and k.full_shape[axis]%upcast_amount == 0 and any(k.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in k.upcasted_axis(buf_index)) for buf_index in range(len(k.sts))):
         xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in k.sts), sum(st.views[-1].strides[axis] for st in k.sts), axis, upcast_amount))
     if len(xb_choices):
       xb_choices = sorted(xb_choices)
@@ -219,7 +219,7 @@ def hand_coded_optimizations(k:Linearizer):
 
   # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
   if k.first_reduce < (k.shape_len-k.upcasted) and (len(list(k.shape_offsets(k.full_buf_index))) <= 4 or not any(r for _,_,r in k.upcasted_axis(k.full_buf_index))):
-    if (s:=k.full_unupcasted_shape[-1]) <= 32:
+    if (s:=k.full_unupcasted_shape[-1]) <= 32 and isinstance(s, int):  # NOTE: cannot loop unroll symbolic axis
       k.upcast()
       # if it's small, upcast a second reduce dimension too
       if k.first_reduce < (k.shape_len-k.upcasted) and s <= 3 and k.full_unupcasted_shape[-1] <= 3: k.upcast()

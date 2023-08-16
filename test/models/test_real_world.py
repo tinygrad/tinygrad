@@ -73,8 +73,7 @@ class TestRealWorld(unittest.TestCase):
     # TODO: with train
     old_training = Tensor.training
     Tensor.training = True
-
-    model = SpeedyResNet()
+    model = SpeedyResNet(Tensor.ones((12,3,2,2)))
     optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=0.8, nesterov=True, weight_decay=0.15)
 
     BS = 32 if CI else 512
@@ -87,7 +86,7 @@ class TestRealWorld(unittest.TestCase):
       loss.backward()
       optimizer.step()
 
-    helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/32)*BS, 267)
+    helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 153)
 
     # reset device
     Tensor.training = old_training

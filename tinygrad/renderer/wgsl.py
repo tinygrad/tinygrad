@@ -17,7 +17,7 @@ class WGSLLanguage(CStyleLanguage):
   code_for_op = {
     UnaryOps.EXP2: lambda x: f"exp2({x})", UnaryOps.LOG2: lambda x: f"log2({x})", UnaryOps.SIN: lambda x: f"sin({x})", UnaryOps.SQRT: lambda x: f"sqrt({x})",
     BinaryOps.ADD: lambda x,y: f"({x}+{y})", BinaryOps.SUB: lambda x,y: f"({x}-{y})", BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})",
-    BinaryOps.MAX: lambda x,y: f"max({x},{y})", BinaryOps.CMPEQ: lambda x,y: f"f32({x}=={y})",
+    BinaryOps.MAX: lambda x,y: f"max({x},{y})", BinaryOps.CMPLT: lambda x,y: f"f32({x}<{y})",
     TernaryOps.MULACC: lambda x,y,z: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c: f"select({c},{b},{a}!=0.)"
   }
 
@@ -38,7 +38,7 @@ class WGSLLanguage(CStyleLanguage):
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
     return prg, global_size[::-1] if len(global_size) else [1], local_size
 
-  def render_for(self, expr:str, _min:int, _max:int) -> str:
+  def render_for(self, expr:str, _min:int, _max:Union[int,str]) -> str:
     return f"for(var {expr} = {_min}; {expr} <= {_max}; {expr}++) {{"
 
   def render_conditional(self, cond:str, x:str, y:str) -> str:

@@ -12,7 +12,7 @@ import wgpu  # type: ignore
 wgpu_device = get_default_device()
 
 class WebGPUProgram:
-  def __init__(self, name: str, prg: str): self.name,self.prg = name,wgpu_device.create_shader_module(code=prg)
+  def __init__(self, name: str, prg: str, binary=False): self.name,self.prg = name,device.create_shader_module(code=prg)
   def __call__(self, global_size, local_size, *bufs, wait=False):
     assert len(bufs) <= 8, "WEBGPU only supports 8 buffers"
     binding_layouts = [{"binding": i, "visibility": wgpu.ShaderStage.COMPUTE, "buffer": {"type": wgpu.BufferBindingType.storage}} for i in range(len(bufs))]
@@ -36,7 +36,7 @@ WebGPUAlloc = RawWebGPUAllocator(wgpu_device.limits['max_buffer_size'])
 
 class RawWebGPUBuffer(RawBufferCopyIn):
   def __init__(self, size:int, dtype:DType):
-    assert dtype not in [dtypes.int8,dtypes.uint8,dtypes.int64,dtypes.uint64], f"dtype {dtype} not supported on WEBGPU"
+    assert dtype not in [dtypes.int8,dtypes.uint8,dtypes.int64,dtypes.uint64,dtypes.double], f"dtype {dtype} not supported on WEBGPU"
     super().__init__(size, dtype, allocator=WebGPUAlloc)
   def _copyin(self, x:np.ndarray): wgpu_device.queue.write_buffer(self._buf, 0, np.ascontiguousarray(x))
   def toCPU(self) -> np.ndarray: return np.frombuffer(wgpu_device.queue.read_buffer(self._buf, 0), dtype=np.dtype(self.dtype.np, metadata={"backing": self})) # type: ignore
