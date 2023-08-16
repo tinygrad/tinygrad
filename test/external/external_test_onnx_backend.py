@@ -72,20 +72,8 @@ backend_test.exclude('test_argmax_*')
 backend_test.exclude('test_argmin_*')
 backend_test.exclude('test_nonzero_*')
 
-# no support for nan or inf
-backend_test.exclude('test_isinf_*')
-backend_test.exclude('test_isnan_*')
-
 # no support for mod
 backend_test.exclude('test_mod_*')
-
-# no trig ops
-backend_test.exclude('test_acos_*')
-backend_test.exclude('test_acosh_*')
-backend_test.exclude('test_asin_*')
-backend_test.exclude('test_asinh_*')
-backend_test.exclude('test_atan_*')
-backend_test.exclude('test_atanh_*')
 
 # no boolean ops (2d, 3d, 4d)
 backend_test.exclude('test_bitshift_*')
@@ -95,7 +83,6 @@ backend_test.exclude('test_gathernd_*')
 backend_test.exclude('test_scatternd_*')
 
 # no quantize
-backend_test.exclude('test_dequantizelinear_*')
 backend_test.exclude('test_dynamicquantizelinear_*')
 backend_test.exclude('test_qlinearmatmul_*')
 backend_test.exclude('test_qlinearconv_*')
@@ -126,11 +113,8 @@ backend_test.exclude('test_hammingwindow_*')
 backend_test.exclude('test_hannwindow_*')
 backend_test.exclude('test_hardmax_*')
 backend_test.exclude('test_gridsample_*')
-backend_test.exclude('test_compress_*')
-backend_test.exclude('test_det_*')
 backend_test.exclude('test_dft_*')
 backend_test.exclude('test_einsum_*')
-backend_test.exclude('test_erf_*')
 backend_test.exclude('test_strnorm_*')
 backend_test.exclude('test_unique_*')
 backend_test.exclude('test_sequence_*')

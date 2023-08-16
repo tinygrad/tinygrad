@@ -577,3 +577,80 @@ def OneHot(indices, depth, values, axis=-1):
   ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
   cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
   return cond.where(values[1], values[0]).cast(values.dtype)
+
+def Erf(x):
+  sign = x.sign()
+  x = x.abs()
+  t = 1.0 / (1.0 + 0.3275911 * x)
+  term1 = 0.254829592 * t
+  term2 = -0.284496736 * t ** 2
+  term3 = 1.421413741 * t ** 3
+  term4 = -1.453152027 * t ** 4
+  term5 = 1.061405429 * t ** 5
+  y = (term1 + term2 + term3 + term4 + term5)
+  return sign * (1.0 - y * Tensor.exp(-x * x))
+
+def Compress(inp, condition, axis=None):
+  if axis == None:
+    inp = inp.flatten()
+    axis = 0
+
+  axis = axis + inp.ndim if axis < 0 else axis
+
+  con_np = condition.numpy()
+  con = Tensor(np.arange(condition.shape[0])[con_np]) # no boolean indexing in Tensor
+  return inp.gather(con, axis)
+
+def Acos(x):
+  negate = (x < 0)
+  x = x.abs()
+  ret = ((((-0.0187293 * x) + 0.0742610)*x - 0.2121144) * x + 1.5707288) * Tensor.sqrt(1.0 - x)
+  ret = ret - 2 * negate * ret
+  return negate * 3.14159265358979 + ret
+
+
+def Atan(y):
+  x = Tensor.ones(y.shape)
+  t3 = x
+  t1 = y.abs()
+  t0 = (t3 > t1).where(t3, t1)
+  t1 = (t3 < t1).where(t3, t1)
+  t3 = t1 / t0
+  t4 = t3 * t3
+  t0 = ((((-0.013480470 * t4 + 0.057477314) * t4 - 0.121239071) * t4 + 0.195635925) * t4 - 0.332994597) * t4 + 0.999995630
+  t3 = t0 * t3
+  t3 = (y.abs() > x.abs()).where(1.570796327 - t3, t3)
+  return (y < 0).where(-t3, t3)
+
+def Asin(x): return Atan(x / Tensor.sqrt(1 - x * x))
+
+def Asinh(x): return Tensor.log(x + Tensor.sqrt(x * x + 1))
+def Acosh(x): return Tensor.log(x + Tensor.sqrt(x * x - 1))
+def Atanh(x): return 0.5 * Tensor.log((1 + x)/(1 - x))
+
+def IsInf(x,detect_negative=1,detect_positive=1):
+  ret = (x == float("inf"))*detect_positive + (x == float("-inf"))*detect_negative + Tensor.zeros(*x.shape)
+  return ret.cast(dtypes.bool)
+
+def Det(x):
+  def _det(x):
+    if x.shape[-1] == 2:
+      return x[...,0,0] * x[..., 1,1] - x[...,1,0] * x[..., 0,1]
+    else:
+      sum = 0
+      for i in range(x.shape[-1]):
+        sgn = 1 if i % 2 == 0 else -1 # (-1)**n
+        sum += sgn * x[...,0,i]*_det(x[...,1:,:i].cat(x[...,1:,i+1:]))
+
+  return _det(x)
+
+# Needs work
+def DequantizeLinear(x, x_scale, x_zero_point=0, axis=1):
+  axis = axis + x.ndim if axis < 0 else axis
+  x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
+  x_zer = x_zero_point.reshape(*[1] * axis, *x_scale.shape, *[1] * (x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
+  return ((x - x_zer) * x_sc)
+
+# Needs work
+def IsNaN(x):
+  return (x < float("-inf")).cast(dtypes.bool)
