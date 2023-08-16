@@ -61,10 +61,10 @@ class Attention:
     self.head_dim = dim // n_heads
     self.n_rep = self.n_heads // self.n_kv_heads
 
-    self.wq = linear(dim, n_heads * self.head_dim, bias=False)
-    self.wk = linear(dim, n_kv_heads * self.head_dim, bias=False)
-    self.wv = linear(dim, n_kv_heads * self.head_dim, bias=False)
-    self.wo = linear(n_heads * self.head_dim, dim, bias=False)
+    self.wq = linear(dim, self.n_heads * self.head_dim, bias=False)
+    self.wk = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
+    self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
+    self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
   def prepare_attention(self, x:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
@@ -141,45 +141,20 @@ class TransformerBlock:
 
 class Transformer:
   def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None, n_kv_heads=None):
-    self.n_layers, self.layers = n_layers, []
-    self.freqs_cis = []
-
-    # scuffed
-    for _ in range(n_layers % 6):
-      Device.DEFAULT = Device.canonicalize("gpu:0")
-      self.layers.append(TransformerBlock(dim, multiple_of, n_heads, n_kv_heads, norm_eps, linear, ffn_dim_multiplier))
-    for gpu in range(6):
-      Device.DEFAULT = Device.canonicalize(f"gpu:{gpu}")
-      for _ in range(n_layers // 6):
-        self.layers.append(TransformerBlock(dim, multiple_of, n_heads, n_kv_heads, norm_eps, linear, ffn_dim_multiplier))
-      self.freqs_cis.append(Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2)))
-
+    self.layers = [TransformerBlock(dim, multiple_of, n_heads, n_kv_heads, norm_eps, linear, ffn_dim_multiplier) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
-    self.output = linear(dim, vocab_size, bias=False)
-
-    Device.DEFAULT = Device.canonicalize("clang")
     self.tok_embeddings = Embedding(vocab_size, dim)
+    self.output = linear(dim, vocab_size, bias=False)
+    self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2))
 
   def __call__(self, tokens:Tensor, start_pos:int):
     _bsz, seqlen = tokens.shape
-    Device.DEFAULT = Device.canonicalize("clang")
-    h = self.tok_embeddings(tokens.to(Device.DEFAULT)).realize()
+    h = self.tok_embeddings(tokens)
 
-    Device.DEFAULT = Device.canonicalize("gpu:0")
     # get only the part we are using. making it contiguous avoids more kernel calls
-    freqs_cis = [fc[:, start_pos:start_pos+seqlen].contiguous().realize() for fc in self.freqs_cis]
-
-    h = h.to(Device.DEFAULT)
-    for i in range(self.n_layers % 6):
-      mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
-      h = self.layers[i](h, start_pos=start_pos, freqs_cis=freqs_cis[0], mask=mask)
-    for gpu in range(6):
-      Device.DEFAULT = Device.canonicalize(f"gpu:{gpu}")
-      h = h.to(Device.DEFAULT)
-      mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
-      for i in range(self.n_layers // 6):
-        h = self.layers[i + (gpu * (self.n_layers // 6)) + (self.n_layers % 6)](h, start_pos=start_pos, freqs_cis=freqs_cis[gpu], mask=mask)
-
+    freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen].contiguous().realize()
+    mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
+    h = h.sequential([functools.partial(layer, start_pos=start_pos, freqs_cis=freqs_cis, mask=mask) for layer in self.layers])
     return self.output(self.norm(h))
 
 # **** files and arguments ****
@@ -234,13 +209,11 @@ def concat_weights(models):
   def convert(name) -> Tensor:
     disk_tensors = [model[name] for model in models]
     if len(disk_tensors) == 1 or len(disk_tensors[0].shape) == 1:
-      return disk_tensors[0].to(device="clang")
+      return disk_tensors[0].to(device=Device.DEFAULT)
     axis = 1 if name.startswith('tok_embeddings.') or name.endswith('.attention.wo.weight') or name.endswith('.feed_forward.w2.weight') else 0
-    lazy_tensors = [data.to(device="clang") for data in disk_tensors]
+    lazy_tensors = [data.to(device=Device.DEFAULT) for data in disk_tensors]
     return lazy_tensors[0].cat(*lazy_tensors[1:], dim=axis)
-  names = [name for model in models for name in model]
-  print(f"concatenating {len(names)} weights")
-  return {name: convert(name) for name in names}
+  return {name: convert(name) for name in {name: None for model in models for name in model}}
 
 class AbsmaxQuantizedLinear:
   def __init__(self, in_features, out_features, bias=False):
