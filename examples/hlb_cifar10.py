@@ -269,16 +269,14 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
 
       if getenv("DIST"):
         # sync gradients across ranks
-        bucket, bucket_meta, offset = [], {}, 0
-        for k, v in params_dict.items():
-          if v.grad is not None:
-            bucket_meta[k] = (v.numel(), v.shape)
-            bucket.append(v.grad.flatten())
+        bucket, offset = [], 0
+        for _, v in params_dict.items():
+          if v.grad is not None: bucket.append(v.grad.flatten())
         grads = collectives.allreduce(Tensor.cat(*bucket), cache_id="grads")
-        for k in bucket_meta:
-          size = bucket_meta[k][0]
-          params_dict[k].grad.assign(grads[offset:offset+size].reshape(*bucket_meta[k][1]))
-          offset += size
+        for _, v in params_dict.items():
+          if v.grad is not None:
+            v.grad.assign(grads[offset:offset+v.grad.numel()].reshape(*v.grad.shape))
+            offset += v.grad.numel()
 
       optimizer[0].step()
       optimizer[1].step()
