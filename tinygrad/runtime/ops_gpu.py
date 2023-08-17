@@ -3,7 +3,7 @@ import pathlib, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
-from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
+from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, Timing
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.linearizer import LinearizerOptions
@@ -31,6 +31,7 @@ class CLAllocator(LRUAllocator):
 
 class _CL:
   def post_init(self, device=None):
+    # TODO: the first cl.get_platforms() takes 4 seconds on a tinybox
     platforms: List[List[cl.Device]] = [y for y in ([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()] + [x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()]) if len(y)]
     self.cl_platform = cl.get_platforms()[getenv('CL_PLATFORM', 0)]
     self.cl_ctxs: List[cl.Context] = [cl.Context(devices=[x]) for x in platforms[getenv('CL_PLATFORM', 0)] if x.name not in getenv('CL_EXCLUDE', "").split(",")] if device is None else [cl.Context(devices=[platforms[getenv('CL_PLATFORM', 0)][device]])]
@@ -40,7 +41,7 @@ class _CL:
   def synchronize(self):
     for q in self.cl_queue: q.finish()
 CL = _CL()
-CL.post_init() if not getenv("DELAYED_RUNTIME_INIT", False) else None
+if not getenv("DELAYED_RUNTIME_INIT", False): CL.post_init()
 
 class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device='0'): super().__init__(size, dtype, allocator=CL.cl_allocator, **{'device': device})
