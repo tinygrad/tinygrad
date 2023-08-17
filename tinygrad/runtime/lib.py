@@ -89,6 +89,7 @@ class LRUAllocator:
       bucket, epoch = self.aging_order[device].popleft()
       if self.cached_buffers[bucket] and self.cached_buffers[bucket][-1][1] == epoch: self._free_buffer(self.cached_buffers[bucket].pop()[0]) # Free cached buffer if it is still in cache.
     newbuf = self._do_alloc(size, dtype, device, **kwargs)
+    print(newbuf, type(newbuf))
     self.buffer_info[newbuf] = (size, dtype, device)
     return newbuf
   def _free_buffer(self, buf_to_free):
