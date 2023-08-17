@@ -2,6 +2,7 @@ import re
 import string
 from collections import Counter
 import numpy as np
+from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
 
 
@@ -34,7 +35,6 @@ def word_error_rate(x, y):
 def one_hot(arr, num_classes=3):
   res = np.eye(num_classes)[np.array(arr.astype(int)).reshape(-1)]
   arr = res.reshape([arr.shape[0]] + [num_classes] + list(arr.shape[2:]))
-  arr = arr.astype(np.float32)
   return arr
 
 def get_dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6):
@@ -49,9 +49,9 @@ def get_dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr
   return (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
 
 def dice_ce_loss(y_pred, y_true, n_classes):
-  y_true = one_hot(y_true, n_classes)
+  y_true = one_hot(y_true, n_classes).astype("float32") # we cant compute the dice_score with float16 because of overflows
   y_true = Tensor(y_true, requires_grad=False)
-  cross_entropy = -y_true.mul(y_pred.clip(1e-10, 1).log()).mean()
+  cross_entropy = -y_true.mul(y_pred.softmax(1).clip(1e-8, 1).log()).mean()
   dice_score = get_dice_score(y_pred, y_true)
   dice_loss = (Tensor.ones_like(dice_score) - dice_score).mean()
   loss = (dice_loss + cross_entropy) / 2
