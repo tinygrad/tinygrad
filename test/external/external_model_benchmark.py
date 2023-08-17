@@ -20,13 +20,13 @@ MODELS = {
   "commavq": "https://github.com/commaai/commavq/raw/master/models/gpt2m.onnx",
 
   # broken in torch MPS
-  #"zfnet": "https://github.com/onnx/models/raw/main/vision/classification/zfnet-512/model/zfnet512-9.onnx",
+  "zfnet": "https://github.com/onnx/models/raw/main/vision/classification/zfnet-512/model/zfnet512-9.onnx",
   # TypeError: BatchNormalization() got an unexpected keyword argument 'is_test'
-  #"densenet": "https://github.com/onnx/models/raw/main/vision/classification/densenet-121/model/densenet-3.onnx",
+  "densenet": "https://github.com/onnx/models/raw/main/vision/classification/densenet-121/model/densenet-3.onnx",
   # AssertionError: only onnx version >= 10 supported for slice
-  #"bert": "https://github.com/onnx/models/raw/main/text/machine_comprehension/bert-squad/model/bertsquad-8.onnx",
+  "bert": "https://github.com/onnx/models/raw/main/text/machine_comprehension/bert-squad/model/bertsquad-8.onnx",
   # really slow
-  #"resnet18": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet18-v2-7.onnx",
+  "resnet18": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet18-v2-7.onnx",
 }
 
 CSV = {}
@@ -66,13 +66,22 @@ def benchmark_model(m, validate_outs=False):
   for device in ["METAL" if OSX else "GPU", "CLANG"]: # + (["CUDA"] if torch.cuda.is_available() else []):
     Device.DEFAULT = device
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-    tinygrad_model = get_run_onnx(onnx_model)
-    benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
+    try:
+      tinygrad_model = get_run_onnx(onnx_model)
+      _, ret = benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
+      model_ret[f"tinygrad_{device.lower()}_jitless"] = list(ret.values())[0]
+    except Exception as e:
+      CSV[f"tinygrad_{device.lower()}_jitless"] = "error"
 
     from tinygrad.jit import TinyJit
     tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model(kwargs).items()})
-    for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
-    benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()})
+    try:
+      for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
+      _, ret = benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()})
+      model_ret[f"tinygrad_{device.lower()}_jit"] = list(ret.values())[0]
+    except Exception as e:
+      print(e)
+      CSV[f"tinygrad_{device.lower()}_jit"] = "error"
     del inputs, tinygrad_model, tinygrad_jitted_model
 
   try:
