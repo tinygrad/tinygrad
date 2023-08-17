@@ -2,9 +2,9 @@ import subprocess, time, re, hashlib, tempfile, os, functools
 from typing import Optional
 import numpy as np
 from pycuda.compiler import compile as cuda_compile # type: ignore
-from tinygrad.helpers import DEBUG, getenv, colored
+from tinygrad.helpers import DEBUG, getenv, colored, fromimport
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer
+from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
 from tinygrad.codegen.linearizer import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
@@ -47,8 +47,12 @@ if getenv("CUDACPU", 0) == 1:
 else:
   import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
   import pycuda.driver as cuda # type: ignore
+  class CUDAAllocator(LRUAllocator):
+    def _do_alloc(self, size, dtype, device, **kwargs): return cuda.mem_alloc(size * dtype.itemsize) # type: ignore
+    def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
+  CUDAAlloc = CUDAAllocator(pycuda.driver.Context.get_device().total_memory())
   class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
-    def __init__(self, size, dtype): super().__init__(size, dtype, cuda.mem_alloc(size * dtype.itemsize)) # type: ignore
+    def __init__(self, size, dtype): super().__init__(size, dtype, allocator=CUDAAlloc)
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore
     def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) # type: ignore
 
@@ -91,5 +95,5 @@ renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
       __device__ __forceinline__ explicit half4(const float4& a): x(make_half2(__float2half(a.x), __float2half(a.y))), y(make_half2(__float2half(a.z),__float2half(a.w))) {}
       __device__ __forceinline__ explicit operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
     };
-  """))
-CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]), renderer, CUDAProgram, cuda.Context.synchronize)
+  """)) if not getenv("PTX") else fromimport("tinygrad.codegen.assembly_ptx", "uops_to_ptx_asm")
+CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False if getenv("PTX") else True, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]), renderer, CUDAProgram, cuda.Context.synchronize)
