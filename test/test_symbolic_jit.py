@@ -137,3 +137,16 @@ class TestSymbolicJit(unittest.TestCase):
         expected = f(a, b).cpu().numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert len(jf.jit_cache) == 1
+
+  def test_jit_symbolic_shape_mismatch(self):
+    @TinyJit
+    def add(a, b): return (a+b).realize()
+    vi = Variable("i", 1, 10)
+    for i in range(1, 5):
+      a = Tensor.rand(3, i).reshape(3, vi)
+      b = Tensor.rand(3, i).reshape(3, vi)
+      c = add(a, b)
+    a = Tensor.rand(3, 7).reshape(3, vi)
+    bad = Tensor.rand(4, 7).reshape(4, vi)
+    with self.assertRaises(AssertionError):
+      add(a, bad)
