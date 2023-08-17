@@ -141,6 +141,7 @@ def _padding(X, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., stri
   if pads is None: return X
   pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
   zero_padded = X.pad(tuple(pads))
+  print(X)
   constant_padder = Tensor.zeros_like(X).pad(tuple(pads), value=constant_value)
   return zero_padded + constant_padder
 
@@ -337,7 +338,7 @@ def Tile(input, repeats):
   final_shape = [r*s for r,s in zip(repeats_, input.shape)]
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
-def Range(start, limit, delta): return Tensor.arange(*[safe_numpy(x)[0].item() for x in (start, limit, delta)])
+def Range(start, limit, delta): return Tensor.arange(start=int(safe_numpy(start)), stop=int(safe_numpy(limit)), step=int(safe_numpy(delta))).cast(dtype=start.dtype)
 def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
 
 def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
@@ -394,13 +395,13 @@ def SoftmaxCrossEntropyLoss(scores, labels, weights=None, ignore_index=None, red
   if ignore_index is not None: labels = (labels == ignore_index).where(C+1, labels)
   mask = labels.unsqueeze(1) == Tensor.arange(C).reshape(1, C, *[1]*len(s_dimensions))
   y = scores.log_softmax(axis=1)
-  if weights is not None: weights = weights.gather(labels, 0)
+  if weights is not None: weights = weights.__getitem__(tuple([labels, *[slice(None,None,None)]*(weights.ndim-1)]))
   loss = (mask * -y).sum(1) if weights is None else (mask * -y).sum(1) * weights
   if reduction == "mean": loss = loss.sum() / (loss == 0).where(0, 1).sum() if weights is None else loss.sum() / weights.sum()
   elif reduction == "sum": loss = loss.sum()
   return loss, y
 
-def ArrayFeatureExtractor(input, indices): return input.gather(indices, input.ndim-1)
+def ArrayFeatureExtractor(input, indices): return input.__getitem__(tuple([slice(None,None,None) if i != (input.ndim-1) else indices for i in range(input.ndim)]))
 def Gather(input, indices, axis=0):
   if indices.numel() < 9: # TODO not sure the exact number, need to run performance tests
     # NOTE faster gather and lessor kernels for smaller indices SOMETHING SOMETHING O(?) IDK I DIDN'T GO TO SCHOOL FOR THIS but kernel number increases depending on size of indices
@@ -411,32 +412,12 @@ def Gather(input, indices, axis=0):
     args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(input_sh)] for i in indices]
     return input.shrink(arg=tuple(args[0])).cat(*[input.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
   else: # NOTE faster gather with larger indices probably, fixed number of kernels, but exceeds 199 kernels for openpilot
-    return input.gather(indices, axis)
+    return input.__getitem__(tuple([slice(None,None,None) if i != axis else indices for i in range(input.ndim)]))
 
 def GatherElements(input, indices, axis):
-  idx = indices
-  if axis < 0: axis += input.ndim
-  ret = input.gather(indices, dim=axis)
-  input_extra = input.shape[:axis] + input.shape[axis+1:]
-  indices_extra = idx.shape[:axis] + idx.shape[axis+1:]
-  indices_extra = [[axis+n,i] if n < axis else (axis+1+n, i) for n,i in enumerate(indices_extra)][::-1]
-  input_extra = [(n,i) if n < axis else(n+indices.ndim, i) for n,i in enumerate(input_extra)][::-1]
-  for n, ((dim_indices, indices), (dim_input, input)) in enumerate(zip(indices_extra, input_extra)):
-    if dim_input < dim_indices and n < len(indices_extra)-1: indices_extra[n+1][0] -= 1
-    arange_indices = Tensor.arange(indices).reshape(*[1]*dim_indices, indices, *[1]*(ret.ndim-dim_indices-1))
-    arange_input = Tensor.arange(input).reshape(*[1]*dim_input, input, *[1]*(ret.ndim-dim_input-1))
-    ret = ((arange_indices == arange_input) * ret).sum(dim_input)
-  return ret
-  '''
-  # hacked gather
-  indices = (indices < 0).where(indices+input.shape[axis], indices)
-  indices = indices.transpose(ax1=axis, ax2=0)
-  permute_args = list(range(input.ndim))
-  permute_args[0], permute_args[axis] = permute_args[axis], permute_args[0]
-  permute_args.append(permute_args.pop(0))
-  input = input.permute(*permute_args)
-  return _gather(input, indices).transpose(ax1=0, ax2=axis)
-  '''
+  indices = indices.sign().contiguous().__neg__().contiguous().relu() * input.shape[axis] + indices
+  return input.gather(indices, axis)
+
 def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
   def _and(cond1, cond2): return ((cond1 + cond2) == 2).where(1, 0)
   assert n <= 1, f"n:{n} shouldn't be larger than 1"
@@ -457,7 +438,7 @@ def Round(X:Tensor):
   return _round(X, 0.5, "round_to_even")
 
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
-  def _nearest_gather(X: Tensor, indices: Tensor, output_shape): return X.flatten().gather(indices, dim=0).reshape(output_shape)
+  def _nearest_gather(X: Tensor, x_out, y_out): return X[:,:,y_out,:][:,:,:,x_out]
   def _nearest_mode(x_resized: Tensor, nearest_mode: str, x_len):
     if nearest_mode == "round_prefer_floor": ret = _round(x_resized, 0.5, "round_down")
     elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, 0.5, "round_up")
@@ -527,13 +508,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol, roi)
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
     y_out = _nearest_mode(y_out, nearest_mode, X.shape[-1])
-    # for multiple channels:
-    # X[:, :, x_out, y_out] x_out.ndim == 1 and y_out.ndim == 1
-    # TODO NEED TO SUPPORT COMBINED INDEXING ASAP
-    y_out = [int(i) for i in safe_numpy(y_out)]
-    stack_args = [x_out + y * X.shape[-1] for y in y_out]
-    indices_out = Tensor.stack(stack_args).flatten()
-    return _nearest_gather(X, indices_out, output_shape)
+    return _nearest_gather(X, x_out, y_out)
   elif mode == "linear":
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape_, scales, roi)
     ret = []
@@ -562,10 +537,13 @@ def CenterCropPad(input, shape, axes=None):
   shrink_arg = [(0,i) for i in input.shape]
   pad_arg = [(0,0) for _ in range(input.ndim)]
   shape = safe_numpy(shape).tolist()
+  print(shape)
+  print(input.shape)
   for s, x in zip(shape, axes):
     if s < input.shape[x]: shrink_arg[x] = (input.shape[x]//2 - s//2, input.shape[x]//2 + s//2) if s%2 == 0 else (input.shape[x]//2 - s//2 - 1, input.shape[x]//2 + s//2)
     elif s > input.shape[x]: pad_arg[x] = ((s - input.shape[x])//2, (s - input.shape[x])//2)  if (s - input.shape[x])% 2 == 0 else ((s - input.shape[x])//2, (s - input.shape[x])//2 + 1)
     else: pass
+  print(pad_arg)
   return input.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
 def OneHot(indices, depth, values, axis=-1):
@@ -652,8 +630,6 @@ def DequantizeLinear(x, x_scale, x_zero_point=0, axis=1):
 # Needs work
 def IsNaN(x):
   return (x < float("-inf")).cast(dtypes.bool)
-def Floor(x:Tensor): return x.floor()
-def Ceil(x:Tensor): return x.ceil()
 
 def EmbedLayerNormalization(input_ids, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None, segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
