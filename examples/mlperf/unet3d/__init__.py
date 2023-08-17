@@ -1,15 +1,26 @@
+from dataclasses import dataclass
 from models.unet3d import UNet3D
+from .losses import DiceCELoss, DiceScore
+from math import ceil
 
 DATASET_SIZE = 168
 
 @dataclass
 class Flags:
+    data_dir: str = "./extra/dataset/kits19/data"
+    input_shape: tuple[int, int, int] = (128, 128, 128)
+    oversampling: float = 0.4
+    seed: int = 42
+    shuffling_seed: int = 42
     batch_size: int = 2
+    benchmark: bool =False
+    num_workers: int = 1
+    
 
 def main(flags):
     model = UNet3D(1, 3, normalization=flags.normalization, activation=flags.activation)
     
-    train_dataloader, val_dataloader = get_data_loaders(flags, num_shards=world_size, global_rank=local_rank)
+    train_dataloader, val_dataloader = get_data_loaders(flags) # todo: multi-gpu
     samples_per_epoch = len(train_dataloader) * flags.batch_size
     
     flags.evaluate_every = flags.evaluate_every or ceil(20*DATASET_SIZE/samples_per_epoch)
