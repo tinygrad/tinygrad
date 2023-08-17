@@ -1,6 +1,3 @@
-
-
-
 from scipy import signal
 from tqdm import tqdm
 import numpy as np
@@ -55,7 +52,7 @@ def evaluate(flags, model, loader, loss_fn, score_fn, device, epoch=0, is_distri
     return eval_metrics
 
 
-def pad_input(volume, roi_shape, strides, padding_mode, padding_val, dim=3):
+def pad_input(volume, roi_shape, strides, padding_val, dim=3):
     """
     mode: constant, reflect, replicate, circular
     """
@@ -81,8 +78,7 @@ def gaussian_kernel(n, std):
     return Tensor(gaussian3D)
 
 
-def sliding_window_inference(inputs, labels, roi_shape, model, overlap=0.5, mode="gaussian",
-                             padding_mode="constant", padding_val=0.0, **kwargs):
+def sliding_window_inference(inputs, labels, roi_shape, model, overlap=0.5, mode="gaussian", padding_val=0.0, **kwargs):
     image_shape = list(inputs.shape[2:])
     dim = len(image_shape)
     strides = [int(roi_shape[i] * (1 - overlap)) for i in range(dim)]
@@ -98,7 +94,7 @@ def sliding_window_inference(inputs, labels, roi_shape, model, overlap=0.5, mode
              bounds[1] // 2: image_shape[1] - (bounds[1] - bounds[1] // 2),
              bounds[2] // 2: image_shape[2] - (bounds[2] - bounds[2] // 2)]
 
-    inputs, paddings = pad_input(inputs, roi_shape, strides, padding_mode, padding_val)
+    inputs, paddings = pad_input(inputs, roi_shape, strides, padding_val)
 
     padded_shape = inputs.shape[2:]
     size = [(inputs.shape[2:][i] - roi_shape[i]) // strides[i] + 1 for i in range(dim)]
@@ -142,3 +138,4 @@ def sliding_window_inference(inputs, labels, roi_shape, model, overlap=0.5, mode
            paddings[2]: image_shape[1] + paddings[2],
            paddings[0]: image_shape[2] + paddings[0]
            ], labels
+    
