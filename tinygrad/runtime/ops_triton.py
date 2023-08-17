@@ -100,4 +100,3 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     prg += '\n'.join(kernel)
     return prg, global_size, local_size
 
-TritonBuffer = Compiled(RawCUDABuffer, LinearizerOptions(), uops_to_triton, TritonProgram)
