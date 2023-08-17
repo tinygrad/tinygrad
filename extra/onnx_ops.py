@@ -617,7 +617,7 @@ def Det(x):
       for i in range(x.shape[-1]):
         sgn = 1 if i % 2 == 0 else -1 # (-1)**n
         sum += sgn * x[...,0,i]*_det(x[...,1:,:i].cat(x[...,1:,i+1:]))
-
+      return sum
   return _det(x)
 
 # Needs work
