@@ -608,18 +608,6 @@ def IsInf(x,detect_negative=1,detect_positive=1):
   ret = (x == float("inf"))*detect_positive + (x == float("-inf"))*detect_negative + Tensor.zeros(*x.shape)
   return ret.cast(dtypes.bool)
 
-def Det(x):
-  def _det(x):
-    if x.shape[-1] == 2:
-      return x[...,0,0] * x[..., 1,1] - x[...,1,0] * x[..., 0,1]
-    else:
-      sum = 0
-      for i in range(x.shape[-1]):
-        sgn = 1 if i % 2 == 0 else -1 # (-1)**n
-        sum += sgn * x[...,0,i]*_det(x[...,1:,:i].cat(x[...,1:,i+1:]))
-      return sum
-  return _det(x)
-
 # Needs work
 def DequantizeLinear(x, x_scale, x_zero_point=0, axis=1):
   axis = axis + x.ndim if axis < 0 else axis
