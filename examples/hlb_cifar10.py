@@ -332,11 +332,11 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
       correct_sum, correct_len = sum(corrects), len(corrects)
       if getenv("DIST"):
         if rank == 0:
-          for j in range(1, 5):
+          for j in range(1, min(world_size, 5)):
             recv_sum, recv_len = OOB.recv(j)
             correct_sum += recv_sum
             correct_len += recv_len
-        elif rank < 5:
+        elif rank < min(world_size, 5):
           OOB.send((correct_sum, correct_len), 0)
 
       # only rank 0 prints
