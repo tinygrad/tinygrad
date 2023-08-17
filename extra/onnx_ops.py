@@ -13,14 +13,13 @@ import math
 def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
   groups = len(inputs) // 3
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R = safe_numpy(T), safe_numpy(R)
+  T, R = safe_numpy(T)[0], safe_numpy(R)[0]
   r = R / (1 + T * decay_factor)
   ret = []
   for input in grouped_inputs:
     X, G, H = input
     X.grad = norm_coefficient * X + G
-    X.grad.requires_grad = False # TODO manually turning off requires_grad, see onnx.py:119
-    H.requires_grad = False
+    X.grad.requires_grad, H.requires_grad = False, False # TODO manually turning off requires_grad, see onnx.py:119
     H.assign(H.detach() + X.grad * X.grad).realize()
     H_adaptive = H.sqrt() + epsilon
     X.assign(X.detach() - r * X.grad / H_adaptive)
@@ -31,14 +30,13 @@ def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
 def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
   groups = len(inputs) // 3
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R = safe_numpy(T), safe_numpy(R)
+  T, R = safe_numpy(T)[0], safe_numpy(R)[0]
   beta_adjusted = beta if T > 0 else 1
   ret = []
   for input in grouped_inputs:
     X, G, V = input
     X.grad = (norm_coefficient * X + G).realize()
-    X.grad.requires_grad = False
-    V.requires_grad = False
+    X.grad.requires_grad, V.requires_grad = False, False
     V.assign(alpha * V + beta_adjusted * X.grad).realize()
     if mode == "standard": X.assign(X.detach() - R * V).realize()
     elif mode == "nesterov": X.assign(X.detach() - R * (X.grad + alpha + V)).realize()
@@ -50,14 +48,12 @@ def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
 def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
   groups = len(inputs) // 4
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R = safe_numpy(T), safe_numpy(R)
+  T, R = safe_numpy(T)[0], safe_numpy(R)[0]
   ret = []
   for input in grouped_inputs:
     X, G, V, H = input
     X.grad = (norm_coefficient * X + G).realize()
-    V.requires_grad = False
-    H.requires_grad = False
-    X.grad.requires_grad = False
+    V.requires_grad, H.requires_grad, X.grad.requires_grad = False, False, False
     V.assign(alpha * V + (1.0 - alpha) * X.grad).realize()
     H.assign(beta * H + (1.0 - beta) * (X.grad * X.grad)).realize()
     up = (V / (1.0 - alpha**T)) / ((H / (1.0 - beta**T)).sqrt() + epsilon) if T > 0 else V / (H.sqrt() + epsilon)
@@ -141,7 +137,6 @@ def _padding(X, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., stri
   if pads is None: return X
   pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
   zero_padded = X.pad(tuple(pads))
-  print(X)
   constant_padder = Tensor.zeros_like(X).pad(tuple(pads), value=constant_value)
   return zero_padded + constant_padder
 
@@ -154,7 +149,7 @@ def _auto_pad(X, auto_pad, strides, kernel_shape, dilations):
   else: raise NotImplementedError(f"auto_pad={auto_pad} not implemented, yet")
 
 def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.): # BUG: OUTPUT HAS WRONG SHAPE BUT CHECK DIDNT PICK UP
-  constant_value = value if constant_value is None else safe_numpy(constant_value)
+  constant_value = value if constant_value is None else float(safe_numpy(constant_value)[0])
   seq_pads = list(pads) if isinstance(pads, tuple) else safe_numpy(pads)
   seq_pads = [math.ceil(i) for i in seq_pads]
   seq_axes = safe_numpy(axes).astype(np.int32).tolist() if axes is not None else None
