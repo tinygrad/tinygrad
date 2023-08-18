@@ -5,7 +5,7 @@ from extra.utils import WINDOWS
 from tinygrad.helpers import getenv
 from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor, Device
-from tinygrad.nn import BatchNorm2d, Conv1d, Conv3d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm
+from tinygrad.nn import BatchNorm2d, Conv1d, Conv2d, Conv3d, ConvTranspose1d, ConvTranspose2d, ConvTranspose3d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm
 import torch
 import pytest
 
@@ -178,6 +178,27 @@ class TestNN(unittest.TestCase):
     torch_x = torch.tensor(x.cpu().numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+  
+  @unittest.skipIf(getenv("CI", "") != "" and (WINDOWS or Device.DEFAULT == "WEBGPU"), "runs out of memory in CI")  
+  def test_conv_transpose3d(self):
+    BS, C1, D, H, W = 4, 4, 16, 32, 32
+    C2, K, S, P = 8, 7, 2, 1
+    
+    layer = ConvTranspose3d(C1, C2, kernel_size=K, stride=S, padding=P)
+    
+    with torch.no_grad():
+      torch_layer = torch.nn.ConvTranspose3d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
+      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
+      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
+      
+    # tinygrad
+    x = Tensor.uniform(BS, C1, D, H, W)
+    z = layer(x)
+    # torch
+    torch_x = torch.tensor(x.cpu().numpy())
+    torch_z = torch_layer(torch_x)
+    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+    
 
   def test_groupnorm(self):
     BS, H, W, C, G = 20, 10, 10, 6, 3

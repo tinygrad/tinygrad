@@ -506,6 +506,18 @@ class Tensor:
     x = x.reshape(bs, groups, cin, 1, *ozyx, *DHW).expand(bs, groups, cin, rcout, *ozyx, *DHW).permute(0,1,3,*[4+i for i in range(len(ozyx))],2,*[4+len(ozyx)+i for i in range(len(DHW))])
     ret = (x * weight.reshape(1, groups, rcout, *[1] * len(ozyx), cin, *DHW)).sum([-1-i for i in range(1+len(ozyx))], keepdim=True).reshape(bs, cout, *ozyx)
     return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(DHW)))
+  
+  def conv_transpose3d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0) -> Tensor:
+    HWD, trailing = weight.shape[2:], list(range(3, len(weight.shape)+1))
+    x, w = self, weight.reshape(groups, weight.shape[0]//groups, weight.shape[1], *weight.shape[2:]).permute(0,2,1,*trailing).flip(trailing)
+    stride = make_pair(stride, len(HWD))
+    if any(s>1 for s in stride):
+      x = x.reshape(*x.shape[:2], *flatten((k,1) for k in x.shape[2:]))
+      x = x.pad(((0,0), (0,0), *flatten(((0,0),(0,s-1)) for s in stride)))
+      x = x.reshape(*x.shape[:2], *[k*s for k,s in zip(x.shape[2::2], stride)])
+      x = x.shrink(((0,x.shape[0]), (0,x.shape[1]), *[(0,k-(s-1)) for k,s in zip(x.shape[2:], stride)]))
+    padding = flatten((((k-1)*d-p,(k-1)*d-p+op) for k,d,p,op in reversed(list(zip(HWD, make_pair(dilation, len(HWD)), make_pair(padding, len(HWD)), make_pair(output_padding, len(HWD)))))))
+    return x.conv2d(w.reshape(w.shape[0]*w.shape[1],*w.shape[2:]), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
   def dot(self, w:Tensor) -> Tensor:
     n1, n2 = len(self.shape), len(w.shape)
