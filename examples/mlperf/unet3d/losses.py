@@ -83,7 +83,7 @@ def cross_entropy(y_pred, y_true_onehot):
     return -((y_true_onehot * y_pred.log()).sum(axis=1)).mean()
 
 class DiceCELoss:
-    def __init__(self, to_onehot_y, use_softmax, layout, include_background):
+    def __init__(self, to_onehot_y=True, use_softmax=True, layout="NCDHW", include_background=False):
         self.dice = Dice(to_onehot_y=to_onehot_y, use_softmax=use_softmax, layout=layout,
                          include_background=include_background)
 

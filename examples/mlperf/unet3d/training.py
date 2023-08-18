@@ -1,22 +1,26 @@
-import tqdm
+from tqdm import tqdm
+from examples.mlperf.unet3d import Flags
+from examples.mlperf.unet3d.inference import evaluate
 
+from tinygrad.nn import optim
+from tinygrad.state import get_parameters
+from tinygrad.tensor import Tensor
 
 def lr_warmup(optimizer, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = init_lr + (lr - init_lr) * scale
+    optimizer.lr = init_lr + (lr - init_lr) * scale
         
-def train(flags, model, train_loader, val_loader, loss_fn, score_fn):
-    optimizer = ...
-    # scaler = GradScaler()
+def train(flags: Flags, model, train_loader, val_loader, loss_fn, score_fn):
+    optimizer = optim.SGD(get_parameters(model), lr=flags.learning_rate, momentum=flags.momentum, weight_decay=flags.weight_decay)
+    # scaler = GradScaler() # TODO: add grad scaler
     
     next_eval_at = flags.start_eval_at
     
     if flags.lr_decay_epochs:
         raise NotImplementedError("TODO: lr decay")
     
-    model.train()
-    for epoch in range(1, flags.epochs + 1):
+    Tensor.training = True
+    for epoch in range(1, flags.max_epochs + 1):
         cumulative_loss = []
         if epoch <= flags.lr_warmup_epochs and flags.lr_warmup_epochs > 0:
             lr_warmup(optimizer, flags.init_learning_rate, flags.learning_rate, epoch, flags.lr_warmup_epochs)
@@ -25,6 +29,8 @@ def train(flags, model, train_loader, val_loader, loss_fn, score_fn):
             optimizer.zero_grad()
             for iteration, batch in enumerate(tqdm(train_loader, disable=not flags.verbose)):
                 image, label = batch
+                image = Tensor(image.numpy())
+                label = Tensor(label.numpy())
                 
                 output = model(image)
                 loss_value = loss_fn(output, label)
@@ -45,7 +51,7 @@ def train(flags, model, train_loader, val_loader, loss_fn, score_fn):
             next_eval_at += flags.evaluate_every
             del output
             
-            eval_metrics = evaluate(flags, model, val_loader, loss_fn, score_fn, device, epoch)
+            eval_metrics = evaluate(flags, model, val_loader, loss_fn, score_fn, epoch)
             eval_metrics["train_loss"] = sum(cumulative_loss) / len(cumulative_loss)
             
             model.train()
@@ -58,3 +64,4 @@ def train(flags, model, train_loader, val_loader, loss_fn, score_fn):
         
         if is_successful or diverged:
             break
+   

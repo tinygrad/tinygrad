@@ -110,6 +110,7 @@ class Unet3D:
       return x
 
 def load_from_pretrained(model, dtype="float32"):
+  raise NotImplementedError("TODO: load pretrained weights")
   fn = Path(__file__).parent.parent / "weights" / "unet-3d.ckpt"
   download_file("https://zenodo.org/record/5597155/files/3dunet_kits19_pytorch.ptc?download=1", fn)
   state_dict = torch.jit.load(fn, map_location=torch.device("cpu")).state_dict()
