@@ -18,7 +18,6 @@ from tinygrad.state import get_state_dict
 from tinygrad.nn import optim
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
-from tinygrad.runtime.ops_gpu import CL
 from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
@@ -360,6 +359,7 @@ if __name__ == "__main__":
   if not getenv("DIST"):
     train_cifar()
   else: # distributed
+    from tinygrad.runtime.ops_gpu import CL
     devices = [f"gpu:{i}" for i in range(len(CL.devices))]
     world_size = len(devices)
 
