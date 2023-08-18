@@ -5,10 +5,10 @@ import pycuda.driver as cuda # type: ignore
 from triton.compiler import compile as triton_compile
 
 from typing import Any, Tuple, Dict, List, Final, Callable
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, Op, Compiled
-from tinygrad.helpers import prod, DEBUG, dtypes, ImageDType
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op, Compiled
+from tinygrad.helpers import dtypes, ImageDType
 from tinygrad.runtime.ops_cuda import RawCUDABuffer
-from tinygrad.codegen.linearizer import LinearizerOptions, UOp, UOps
+from tinygrad.codegen.linearizer import LinearizerOptions, UOp, UOps, ConstOp
 from tinygrad.shape.symbolic import NumNode
 
 
@@ -86,10 +86,10 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
           kk(f"{newvar.render()} = {code_for_op[args](*[x.render() for x in vin])}")
         elif uop == UOps.LOAD:
           assert newvar is not None
-          val = f"{args.name}" # defaults to render_python
           triton_dtype = {dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64"}[newvar.dtype]
-          if args.valid.min == 1: kk(f"{newvar.render()} = tl.load({val} + {args.idx.render()}, mask = {args.idx.render()}<{args.idx.max+1}).to({triton_dtype})")
-          else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({val}, mask={args.valid.render()}), 0.0).to({triton_dtype})")
+          if isinstance(args, ConstOp): kk(f"{newvar.render()} = {args.value}")
+          elif args.valid.min == 1: kk(f"{newvar.render()} = tl.load({args.name} + {args.idx.render()}, mask = {args.idx.render()}<{args.idx.max+1}).to({triton_dtype})")
+          else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({args.name}), 0.0).to({triton_dtype})")
         elif uop == UOps.STORE:
           assert vin[0].dtype == dtypes.float, "unimplemented: float4 store"
           assert not isinstance(args.memory_dtype, ImageDType), "unimplemented: image store"
