@@ -139,7 +139,7 @@ class TestSymbolicShapeExpr(unittest.TestCase):
     view = View(shape, strides)
     st = ShapeTracker(shape, [view])
     idx, valid = st.expr_idxs(idx)
-    assert idx.render() == "(((1+i)*1)+(lidx1*((i*4)+4))+gidx0)"
+    assert idx.render() == "((lidx1*((i*4)+4))+1+gidx0+i)"
 
 class TestShapeTrackerVarVals(unittest.TestCase):
   def test_reshape_reshape_updates_var_vals(self):
