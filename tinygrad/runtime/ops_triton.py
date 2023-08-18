@@ -69,6 +69,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
                 assert var.min == 0, "local loop must start at 0"
                 kk(f"{var.expr} = tl.arange({0}, {var.max+1})[{', '.join([':' if i == j else 'None' for j in range(len(args[0]))])}]")
                 acc_local_shape *= var.max+1
+                local_size.append(var.max+1)
               else:
                 kk(f"for {var.expr} in range({var.min}, {var.max+1}):")
                 depth += 1
