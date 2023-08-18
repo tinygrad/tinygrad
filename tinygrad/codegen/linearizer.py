@@ -9,7 +9,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst, buf_is_kernel_arg
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
-from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode
+from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, sym_rename
 VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
@@ -301,6 +301,9 @@ class Linearizer:
     # add global buffers
     for buf,name in self.arg_bufs.items():
       self.uop(UOps.DEFINE_GLOBAL, None, [], (name, buf.dtype))
+    # add variables from symbolic shapes
+    for var in sorted(set(v for buf in self.ast.buffers for v in buf.st.var_vals), key=lambda k: k.key):
+      self.uop(UOps.DEFINE_GLOBAL, None, [], (var.expr, dtypes._arg_int32))
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
@@ -317,7 +320,7 @@ class Linearizer:
     if DEBUG >= 3: self.printbufs()
 
     # kernel name (before late upcast)
-    self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) for x in self.full_shape])
+    self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) if isinstance(x, int) else sym_rename(x) for x in self.full_shape])
     self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
     # parse AST
@@ -548,7 +551,7 @@ class Linearizer:
     assert len(colors) == self.shape_len, "colors size mismatch"
     return colors
 
-  def colored_shape(self) -> str: return ' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors()))
+  def colored_shape(self) -> str: return ' '.join(colored(s, color) for s,color in zip([f"{s:4d}" if isinstance(s, int) else s for s in self.full_shape], self.colors()))
   def printbufs(self, prefix=""):
     for i in range(len(self.sts)):
       print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i].realized is not None else str(self.bufs[i]):47s}", self.sts[i].views)

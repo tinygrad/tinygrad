@@ -31,7 +31,7 @@ def derandomize(x):
   if isinstance(x, LazyOp):
     if x.op == LoadOps.RAND: x.op = LoadOps.EMPTY
     x.src = [derandomize(s) for s in x.src]
-  else:
+  elif hasattr(x, "op"):
     x.op = derandomize(x.op)
   return x
 
