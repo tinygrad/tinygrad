@@ -57,7 +57,7 @@ class Node:
     if b == 0: return NumNode(0)
     if b == 1: return self
     if self.__class__ is NumNode: return NumNode(self.b*b) if isinstance(b, int) else b*self.b
-    return create_node(MulNode(self, b))
+    return create_node(MulNode(self, b.b)) if isinstance(b, NumNode) else create_node(MulNode(self, b))
   def __rmul__(self, b:int): return self*b
 
   # *** complex ops ***
@@ -231,7 +231,7 @@ class SumNode(RedNode):
         if x.b%b == 0: fully_divided.append(x//b)
         else:
           rest.append(x)
-          _gcd = gcd(_gcd, int(x.b))
+          _gcd = gcd(_gcd, x.b)
           if x.__class__ == MulNode and divisor == 1 and b%x.b == 0: divisor = x.b
       else:
         rest.append(x)
