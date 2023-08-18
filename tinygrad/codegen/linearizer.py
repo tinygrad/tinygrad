@@ -112,19 +112,19 @@ def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
 
 class MemOp(NamedTuple):
   name: str
-  idx: Variable
+  idx: Node
   local: bool
   memory_dtype: DType
 
   # shared
-  valid: Variable
+  valid: Node
   invalid_value: Union[float, int] = 0.0
 
 class ConstOp(NamedTuple):
   value: Union[float, int]
 
   # shared
-  valid: Variable
+  valid: Node
   invalid_value: Union[float, int] = 0.0
 
 class UOp(NamedTuple):
@@ -248,8 +248,8 @@ class Linearizer:
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
         localtype = dtypes.float32
-      this_const, valid = (invalid_value, cast(Variable, Variable.num(1))) if valid.max == 0 else (const, valid)
-      key = f"{acc}{localtype}{this_const if acc is None and this_const is not None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
+      this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
+      key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         self.load_cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{load_i}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value)) if this_const is None else \
