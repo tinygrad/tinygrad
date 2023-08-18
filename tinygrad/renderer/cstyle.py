@@ -147,6 +147,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         depth -= 1
         kk("}"*len(args[0]) + f" /* {args[1]} */")
     elif uop == UOps.WMMA:
+      """
       # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
       kk("{ simdgroup_float8x8 a,b,c;")
       kk(f"a.thread_elements()[0] = {vin[0].render()}; a.thread_elements()[1] = {vin[1].render()};")
@@ -154,6 +155,14 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       kk(f"c.thread_elements()[0] = {vin[4].render()}; c.thread_elements()[1] = {vin[5].render()};")
       kk("simdgroup_multiply_accumulate(c, a, b, c);")
       kk(f"{vin[4].render()} = c.thread_elements()[0]; {vin[5].render()} = c.thread_elements()[1]; }}")
+      """
+      kk("{")
+      kk(f"half16 a_frag = {{ {','.join(['(half)'+x.render() for x in vin[8:8+16]])} }};")
+      kk(f"half16 b_frag = {{ {','.join(['(half)'+x.render() for x in vin[8+16:8+32]])} }};")
+      kk(f"float8 c_frag = {{ {','.join([x.render() for x in vin[:8]])} }};")
+      kk("c_frag = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(a_frag, b_frag, c_frag);")
+      for i in range(8): kk(f"{vin[i].render()} = c_frag[{i}];")
+      kk("}")
     elif uop == UOps.ALU:
       assert newvar is not None
       kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")

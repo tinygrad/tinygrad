@@ -120,7 +120,7 @@ def hand_coded_optimizations(k:Linearizer):
     axis_buf1 = [(i,k.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and k.full_shape[i]%16 == 0]
     if len(axis_buf0) and len(axis_buf1) and k.full_shape[k.first_reduce]%8 == 0 and (k.shape_len-k.first_reduce) == 1:
       if DEBUG >= 3: print("HIP TENSOR CORES", axis_buf0, axis_buf1)
-      #k.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
+      k.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
 
       # TODO: select axis in smart way
       s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
@@ -133,17 +133,24 @@ def hand_coded_optimizations(k:Linearizer):
       # 2 locals
       k.shift_to(s1, 16, insert_before=k.first_reduce)  # axis 2
       k.shift_to(s0, 16, insert_before=k.first_reduce)  # axis 3
-      k.local_dims += 2
+      k.local_dims += 1
 
       # output shape
-      k.shift_to(k.first_reduce-2, 16)
+      k.shift_to(k.first_reduce-2, 8)
       k.upcast()
 
+      # split local dim
+      k.shift_to(k.first_reduce-1, 8, insert_before=k.first_reduce)  # axis 3
+
       # alias buffer
-      #k.local_dims = k.first_reduce - global_count
-      #alias_pattern = [0]*global_count + [3]*k.local_dims + [0] * (k.shape_len-k.upcasted-k.first_reduce) + [2,1]
-      #k.alias_buffer(buf0, alias_pattern)
-      #k.alias_buffer(buf1, alias_pattern)
+      alias_pattern = [0]*global_count + [0,0,1] + [0] * (k.shape_len-k.upcasted-k.first_reduce) + [2,3]
+      k.alias_buffer(buf0, alias_pattern)
+      k.alias_buffer(buf1, alias_pattern)
+
+      # two fake locals
+      if k.use_tensor_cores:
+        k.local_dims += 2
+        k.exclude_local_upcast += 2
 
       # early exit
       return
