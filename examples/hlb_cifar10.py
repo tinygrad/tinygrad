@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# setup for distributed
+from extra import dist
+from tinygrad.helpers import getenv
+if __name__ == "__main__":
+  if getenv("DIST"):
+    dist.preinit()
+
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
@@ -11,10 +18,10 @@ from tinygrad.state import get_state_dict
 from tinygrad.nn import optim
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
 from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
+from extra.dist import collectives
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
@@ -190,6 +197,10 @@ def cutmix(X, Y, mask_size=3, p=0.5):
   Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
   return X_cutmix, Y_cutmix
 
+def argmax(x:Tensor, axis:int=-1) -> Tensor:
+  m = x == x.max(axis=axis, keepdim=True)
+  return (Tensor.arange(x.shape[axis]) * m).sum(axis=axis)
+
 def fetch_batches(X, Y, BS, seed, is_train=False):
   while True:
     set_seed(seed)
@@ -208,8 +219,11 @@ def fetch_batches(X, Y, BS, seed, is_train=False):
     seed += 1
 
 def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
+  # this import needs to be done here because this is running in a subprocess
+  from extra.dist import OOB
   set_seed(seed)
   Tensor.training = True
+  rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
 
   if getenv("FAKEDATA"):
     N = 2048
@@ -256,6 +270,18 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
       optimizer[0].zero_grad()
       optimizer[1].zero_grad()
       loss.backward()
+
+      if getenv("DIST"):
+        # sync gradients across ranks
+        bucket, offset = [], 0
+        for _, v in params_dict.items():
+          if v.grad is not None: bucket.append(v.grad.flatten())
+        grads = collectives.allreduce(Tensor.cat(*bucket), cache_id="grads")
+        for _, v in params_dict.items():
+          if v.grad is not None:
+            v.grad.assign(grads[offset:offset+v.grad.numel()].reshape(*v.grad.shape))
+            offset += v.grad.numel()
+
       optimizer[0].step()
       optimizer[1].step()
       lr_scheduler[0].step()
@@ -266,7 +292,8 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   def eval_step_jitted(model, X, Y):
     out = model(X, training=False)
     loss = cross_entropy(out, Y, reduction='mean')
-    return out.realize(), loss.realize()
+    correct = argmax(out, axis=1) == argmax(Y, axis=1)
+    return correct.realize(), loss.realize()
 
   # 97 steps in 2 seconds = 20ms / step  Tensor.training = True
 
@@ -284,19 +311,40 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   while i <= STEPS:
     X, Y = next(batcher)
     if i >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
+    # further split batch if distributed
+    if getenv("DIST"):
+      X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
+
     if i%100 == 0 and i > 1:
       # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
       corrects = []
       losses = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
-        out, loss = eval_step_jitted(model, Xt, Yt)
-        correct = out.numpy().argmax(axis=1) == Yt.numpy().argmax(axis=1)
+        # further split batch if distributed
+        if getenv("DIST"):
+          Xt, Yt = Xt.chunk(min(world_size, 5), 0)[min(rank, 4)], Yt.chunk(min(world_size, 5), 0)[min(rank, 4)]
+
+        correct, loss = eval_step_jitted(model, Xt, Yt)
         losses.append(loss.numpy().tolist())
-        corrects.extend(correct.tolist())
-      acc = sum(corrects)/len(corrects)*100.0
-      if acc > best_eval:
-        best_eval = acc
-        print(f"eval {sum(corrects)}/{len(corrects)} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
+        corrects.extend(correct.numpy().tolist())
+
+      # collect accuracy across ranks
+      correct_sum, correct_len = sum(corrects), len(corrects)
+      if getenv("DIST"):
+        if rank == 0:
+          for j in range(1, min(world_size, 5)):
+            recv_sum, recv_len = OOB.recv(j)
+            correct_sum += recv_sum
+            correct_len += recv_len
+        elif rank < min(world_size, 5):
+          OOB.send((correct_sum, correct_len), 0)
+
+      # only rank 0 prints
+      if rank == 0:
+        acc = correct_sum/correct_len*100.0
+        if acc > best_eval:
+          best_eval = acc
+          print(f"eval {correct_sum}/{correct_len} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
     if STEPS == 0 or i==STEPS: break
     GlobalCounters.reset()
     st = time.monotonic()
@@ -308,4 +356,24 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
     i += 1
 
 if __name__ == "__main__":
-  train_cifar()
+  if not getenv("DIST"):
+    train_cifar()
+  else: # distributed
+    from tinygrad.runtime.ops_gpu import CL
+    devices = [f"gpu:{i}" for i in range(len(CL.devices))]
+    world_size = len(devices)
+
+    # ensure that the batch size is divisible by the number of devices
+    assert BS % world_size == 0, f"batch size {BS} is not divisible by world size {world_size}"
+
+    # ensure that the evaluation batch size is divisible by the number of devices
+    assert EVAL_BS % min(world_size, 5) == 0, f"evaluation batch size {EVAL_BS} is not divisible by world size {min(world_size, 5)}"
+
+    # init out-of-band communication
+    dist.init_oob(world_size)
+
+    # start the processes
+    processes = []
+    for rank, device in enumerate(devices):
+      processes.append(dist.spawn(rank, device, fn=train_cifar, args=()))
+    for p in processes: p.join()
