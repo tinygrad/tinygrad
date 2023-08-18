@@ -56,7 +56,8 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})",
       BinaryOps.MAX: lambda x,y: f"tl.maximum({x},{y})", # axis?
       BinaryOps.CMPLT: lambda x,y: f"({x}<{y})",
-      ReduceOps.SUM: lambda x: f"tl.expand_dims(tl.sum({x}, axis={len(full_local_shape)-len(self.group_for_reduce)}), axis={len(full_local_shape)-len(self.group_for_reduce)})" if len(self.group_for_reduce) != len(full_local_shape) else f"tl.sum({x}, axis={len(full_local_shape)-len(self.group_for_reduce)})",
+      TernaryOps.MULACC: lambda x,y,z: f"(({x}*{y})+{z})",
+      TernaryOps.WHERE: lambda x,y,z: f"tl.where({x},{y},{z})",
     }
    
     for uop,newvar,vin,args in uops:
