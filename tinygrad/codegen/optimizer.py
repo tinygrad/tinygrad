@@ -142,8 +142,16 @@ def hand_coded_optimizations(k:Linearizer):
       # split local dim
       k.shift_to(k.first_reduce-1, 8, insert_before=k.first_reduce)  # axis 3
 
+      # final global upcast
+      for ax in [s1, s0]:
+        for upc in [2]:
+          if k.full_shape[ax]%upc == 0:
+            k.shift_to(ax, upc)
+            k.upcast()
+            break
+
       # alias buffer
-      alias_pattern = [0]*global_count + [0,0,1] + [0] * (k.shape_len-k.upcasted-k.first_reduce) + [2,3]
+      alias_pattern = [0]*global_count + [0,0,1] + [0] * (k.shape_len-k.upcasted-k.first_reduce) + [2,3] + [0]*(k.upcasted-2)
       k.alias_buffer(buf0, alias_pattern)
       k.alias_buffer(buf1, alias_pattern)
 

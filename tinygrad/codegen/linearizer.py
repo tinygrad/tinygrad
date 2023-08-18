@@ -403,7 +403,11 @@ class Linearizer:
               self.uop(UOps.WMMA, None, [x0, x1, y0, y1, acc[i], acc[i+1]], ())
               i += 2
         elif self.bufs[0].device == "HIP":
-          self.uop(UOps.WMMA, None, acc+locals_to_store[0][2]+locals_to_store[1][2], ())
+          i = 0
+          for y in range(0, len(locals_to_store[1][2]), 0x10):
+            for x in range(0, len(locals_to_store[0][2]), 0x10):
+              self.uop(UOps.WMMA, None, acc[i:i+8]+locals_to_store[0][2][x:x+0x10]+locals_to_store[1][2][y:y+0x10], ())
+              i += 8
       else:
         if locals_to_store:
           self.uop(UOps.BARRIER, None, [], ())
