@@ -144,7 +144,7 @@ def hand_coded_optimizations(k:Linearizer):
 
       # final global upcast
       for ax in [s1, s0]:
-        for upc in [2]:
+        for upc in [4,3,2]:
           if k.full_shape[ax]%upc == 0:
             k.shift_to(ax, upc)
             k.upcast()

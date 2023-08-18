@@ -14,6 +14,7 @@ class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
   generic_var_prefix: str = ""
   kernel_prefix: str = ""
+  kernel_modifier: str = ""
   buffer_prefix: str = ""
   buffer_suffix: str = ""
   smem_prefix: str = ""
@@ -81,7 +82,7 @@ class CStyleLanguage(NamedTuple):
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 self.arg_int_prefix if dtype == dtypes._arg_int32 else
                 ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix) for i,(name,dtype) in enumerate(bufs)]
-    prg = ''.join([f"{self.kernel_prefix} void {function_name}(",] +
+    prg = ''.join([f"{self.kernel_prefix} void {self.kernel_modifier} {function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
