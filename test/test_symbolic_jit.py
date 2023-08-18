@@ -5,8 +5,8 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor, Device
 import numpy as np
 
-@unittest.skipIf(getenv("ARM64"), "ARM64 is not supported")
-@unittest.skipUnless(Device.DEFAULT in ["GPU", "METAL", "CLANG"], f"{Device.DEFAULT} is not supported")
+@unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
+@unittest.skipUnless(Device.DEFAULT in ["GPU", "METAL", "CLANG", "CUDA"], f"{Device.DEFAULT} is not supported")
 class TestSymbolicJit(unittest.TestCase):
   def test_plus1(self):
     def f(a): return (a+1).realize()
