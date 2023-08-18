@@ -18,6 +18,7 @@ from tinygrad.state import get_state_dict
 from tinygrad.nn import optim
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
+from tinygrad.runtime.ops_gpu import CL
 from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
@@ -359,8 +360,14 @@ if __name__ == "__main__":
   if not getenv("DIST"):
     train_cifar()
   else: # distributed
-    devices = ["gpu:0", "gpu:1", "gpu:2", "gpu:3", "gpu:4", "gpu:5"]
+    devices = [f"gpu:{i}" for i in range(len(CL.devices))]
     world_size = len(devices)
+
+    # ensure that the batch size is divisible by the number of devices
+    assert BS % world_size == 0, f"batch size {BS} is not divisible by world size {world_size}"
+
+    # ensure that the evaluation batch size is divisible by the number of devices
+    assert EVAL_BS % min(world_size, 5) == 0, f"evaluation batch size {EVAL_BS} is not divisible by world size {min(world_size, 5)}"
 
     # init out-of-band communication
     dist.init_oob(world_size)
