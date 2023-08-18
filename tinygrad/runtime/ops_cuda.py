@@ -78,7 +78,7 @@ class CUDAProgram:
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
-    self.prg(*[x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) if isinstance(x, int) else x for x in args], block=tuple(local_size), grid=tuple(global_size))
+    self.prg(*[x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) if (isinstance(x, int) and not getenv("CUDACPU")) else x for x in args], block=tuple(local_size), grid=tuple(global_size))
     if wait:
       end.record()
       end.synchronize()
