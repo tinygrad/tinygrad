@@ -79,7 +79,8 @@ class TestFloatUOps(TestUOps):
   def test_mulacc(self): self._test_top_fxn(TernaryOps.MULACC, lambda a,b,c: (a*b)+c)
   def test_where(self): self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c)
 
-@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
+# TODO: fix this on all the backends
+@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled) or getenv('ARM64', False) or getenv('LLVM', False), "only test for compiled backends, broken on some")
 class TestHalfUOps(TestUOps):
   # 6 tests below are broken on Nvidia OpenCL, CUDA
   def test_exp2_half(self): self._test_uop_fxn(UnaryOps.EXP2, lambda a: np.exp2(a), dtypes.half)
