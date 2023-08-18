@@ -22,17 +22,18 @@ code_for_op: Final[Dict[Op, Callable]] = {
   UnaryOps.LOG2: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.log2', [ir.FloatType()]), [x], fastmath=('fast',)),
   UnaryOps.SIN: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.sin', [ir.FloatType()]), [x], fastmath=('fast',)),
   UnaryOps.SQRT: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.sqrt', [ir.FloatType()]), [x], fastmath=('fast',)),
-  BinaryOps.ADD: lambda builder,x,y: builder.fadd(x,y, flags=('fast',)),
-  BinaryOps.SUB: lambda builder,x,y: builder.fsub(x,y, flags=('fast',)),
-  BinaryOps.MUL: lambda builder,x,y: builder.fmul(x,y, flags=('fast',)),
-  BinaryOps.DIV: lambda builder,x,y: builder.fdiv(x,y, flags=('fast',)),
-  BinaryOps.CMPLT: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("<", x, y, flags=('fast',)), ir.FloatType()),
+  BinaryOps.ADD: lambda builder,x,y: builder.add(x,y) if isinstance(x.type, ir.IntType) else builder.fadd(x,y, flags=('fast',)),
+  BinaryOps.SUB: lambda builder,x,y: builder.sub(x,y) if isinstance(x.type, ir.IntType) else builder.fsub(x,y, flags=('fast',)),
+  BinaryOps.MUL: lambda builder,x,y: builder.mul(x,y) if isinstance(x.type, ir.IntType) else builder.fmul(x,y, flags=('fast',)),
+  BinaryOps.DIV: lambda builder,x,y: builder.sdiv(x,y) if isinstance(x.type, ir.IntType) else builder.fdiv(x,y, flags=('fast',)),
+  BinaryOps.CMPLT: lambda builder,x,y: builder.zext(builder.icmp_signed("<", x, y),ir.IntType(32)) if isinstance(x.type, ir.IntType) else builder.uitofp(builder.fcmp_ordered("<", x, y, flags=('fast',)), ir.FloatType()),
   BinaryOps.MAX: lambda builder,x,y: builder.select(builder.fcmp_unordered(">", x, y, flags=('fast',)), x, y, flags=('fast',)),
+  BinaryOps.MOD: lambda builder,x,y: builder.srem(x,y),
   TernaryOps.MULACC: lambda builder,x,y,z: builder.fadd(builder.fmul(x,y, flags=('fast',)), z, flags=('fast',)),
   TernaryOps.WHERE: lambda builder,x,y,z: builder.select(builder.fcmp_unordered("!=", x, ir.Constant(ir.FloatType(), 0), flags=('fast',)), y, z, flags=('fast',)),
 }
 
-dtype_to_llvm_dtype = {dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32)}
+dtype_to_llvm_dtype = {dtypes.float64:ir.DoubleType(), dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32)}
 
 def cast(bb, val, input_type, output_type):
   if input_type == output_type: return val
@@ -44,6 +45,8 @@ def cast(bb, val, input_type, output_type):
       val = bb[-1].sext(val, ir.IntType(32))
       val = bb[-1].shl(val, ir.Constant(ir.IntType(32), 16))
       val = bb[-1].bitcast(val, ir.FloatType())
+    elif input_type == dtypes.float64:
+      val = bb[-1].fptrunc(val, ir.FloatType())
     else:
       val = bb[-1].fpext(val, ir.FloatType())
     return val
@@ -55,6 +58,8 @@ def cast(bb, val, input_type, output_type):
       val = bb[-1].bitcast(val, ir.IntType(32))
       val = bb[-1].lshr(val, ir.Constant(ir.IntType(32), 16))
       val = bb[-1].trunc(val, ir.IntType(16))
+    elif output_type == dtypes.float64:
+      val = bb[-1].fpext(val, ir.DoubleType())
     else:
       val = bb[-1].fptrunc(val, dtype_to_llvm_dtype[output_type])
     return val
@@ -114,11 +119,11 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
       assert newvar is not None and isinstance(args, (MemOp, ConstOp))
       valid = args.valid.render(render_llvm, bb[-1])
       if isinstance(args, ConstOp):
-        assert newvar.dtype == dtypes.float, "newvar must be float"
+        value, invalid_value = [int(args.value), int(args.invalid_value)] if dtypes.is_int(newvar.dtype) else ([bool(args.value), bool(args.invalid_value)] if newvar.dtype == dtypes.bool else [args.value, args.invalid_value]) # type: ignore
         if args.valid.min == 0 and args.valid.max == 1:
-          val = bb[-1].select(valid, ir.Constant(ir.FloatType(), args.value), ir.Constant(ir.FloatType(), args.invalid_value))
+          val = bb[-1].select(valid, ir.Constant(dtype_to_llvm_dtype[newvar.dtype], value), ir.Constant(dtype_to_llvm_dtype[newvar.dtype], invalid_value))
         else:
-          val = ir.Constant(ir.FloatType(), args.value if args.valid.min == 1 else args.invalid_value)
+          val = ir.Constant(dtype_to_llvm_dtype[newvar.dtype], value if args.valid.min == 1 else invalid_value)
         # TODO: this is a hack. it shouldn't be const that signals this
         reduce_phis.append(newvar)
       else:

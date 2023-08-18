@@ -65,6 +65,7 @@ class Node:
   def __rfloordiv__(self, b:int): raise RuntimeError(f"not supported: {b} // {self}")
   def __floordiv__(self, b:Union[Node,int], factoring_allowed=True):
     if isinstance(b, Node):
+      if self == b: return NumNode(1)
       if (b > self).min > 0 and self.min >= 0: return NumNode(0)
       raise RuntimeError(f"not supported: {self} // {b}")
     assert b != 0
@@ -262,6 +263,14 @@ def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   elif typ == AndNode: ret.min, ret.max = (min([x.min for x in nodes]), max([x.max for x in nodes]))
   return create_node(ret)
 
+def sym_infer(n:Union[Node,int], var_vals: Dict[Variable, int]) -> int:
+  if isinstance(n, (int, NumNode)): return int(n)
+  if isinstance(n, Variable): return var_vals[n]
+  if isinstance(n, MulNode): return sym_infer(n.a, var_vals) * sym_infer(n.b, var_vals)
+  if isinstance(n, SumNode): return sum(sym_infer(s, var_vals) for s in n.nodes)
+  raise NotImplementedError(n)
+@functools.lru_cache(maxsize=None)
+def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
 
 render_python: Dict[Type, Callable] = {

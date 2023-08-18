@@ -74,9 +74,14 @@ class ClangProgram:
       mu.emu_start(ADDRESS, ADDRESS + len(self.prg))
       args[0]._buf = mu.mem_read(mu.reg_read(arm64_const.UC_ARM64_REG_X0), args[0].size * args[0].dtype.itemsize)
     else:
-      self.fxn(*[x._buf for x in args])
+      self.fxn(*[x._buf if isinstance(x, RawMallocBuffer) else x for x in args])
     if wait: return time.monotonic()-st
 
+<<<<<<< HEAD
 renderer = fromimport("tinygrad.codegen.assembly_arm64", "uops_to_arm64_asm") if ARM64 else functools.partial(uops_to_cstyle, CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict"))
 ClangBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supported_vector_sizes={dtypes.float: []}, has_local=False,
                                                           supported_vector_sizes_alu={dtypes.float: []}, uses_float32_calculations=False), renderer, ClangProgram)
+=======
+renderer = fromimport("tinygrad.codegen.assembly_arm64", "uops_to_arm64_asm") if ARM64 else functools.partial(uops_to_cstyle, CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict", arg_int_prefix="const int"))
+ClangBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False), renderer, ClangProgram)
+>>>>>>> bd111411bf50b7bdad07b44407ee990574a86c90

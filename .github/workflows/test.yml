@@ -112,8 +112,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
-      - name: Find faster apt mirror
-        uses: vegardit/fast-apt-mirror.sh@v1
+      # - name: Find faster apt mirror
+      #   uses: vegardit/fast-apt-mirror.sh@v1
       - name: Update packages
         run: |
           wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
@@ -188,6 +188,8 @@ jobs:
       run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
     - name: Run JIT test
       run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_jit.py
+    - name: Run symbolic shapetracker test
+      run: METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py test/test_symbolic_ops.py
     - name: Check Device.DEFAULT
       run: WEBGPU=1 python -c "from tinygrad.lazy import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
     #- name: Run webgpu pytest
@@ -199,7 +201,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda]
+        backend: [llvm, clang, gpu, cuda, ptx]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
@@ -218,10 +220,10 @@ jobs:
           path: '~/.cache/pip'
           key: ${{ matrix.backend }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n'}}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' }}" >> $GITHUB_ENV
       - name: Find faster apt mirror
-        uses: vegardit/fast-apt-mirror.sh@v1
-      - name: Install packages (gpu)
+      #   uses: vegardit/fast-apt-mirror.sh@v1
+      # - name: Install packages (gpu)
         if: matrix.backend == 'gpu'
         run: |
           wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
@@ -229,12 +231,12 @@ jobs:
           sudo apt-get update -y && \
           sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
       - name: Install packages (cuda)
-        if: matrix.backend == 'cuda'
+        if: matrix.backend == 'cuda' || matrix.backend == 'ptx'
         run: |
           sudo apt-get update -y && \
           sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
       - name: Cache gpuocelot
-        if: matrix.backend == 'cuda'
+        if: matrix.backend == 'cuda' || matrix.backend == 'ptx'
         id: cache-build
         uses: actions/cache@v3
         env:
@@ -243,7 +245,7 @@ jobs:
           path: ${{ github.workspace }}/gpuocelot/ocelot
           key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
       - name: Clone/compile gpuocelot
-        if: matrix.backend == 'cuda' && steps.cache-build.outputs.cache-hit != 'true'
+        if: (matrix.backend == 'cuda' || matrix.backend == 'ptx') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
           git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
           cd ${{ github.workspace }}/gpuocelot/ocelot
@@ -253,19 +255,22 @@ jobs:
           cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
           ninja
       - name: Install gpuocelot
-        if: matrix.backend == 'cuda'
+        if: matrix.backend == 'cuda' || matrix.backend == 'ptx'
         run: |
           cd ${{ github.workspace }}/gpuocelot/ocelot/build
           sudo ninja install
       - name: Install dependencies
-        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Check Device.DEFAULT
         run: python -c "from tinygrad.lazy import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
       - name: Run pytest (not cuda)
-        if: matrix.backend!='cuda'
+        if: matrix.backend!='cuda' && matrix.backend!='ptx'
         run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}'
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'
+        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
+      - name: Run pytest (ptx)
+        if: matrix.backend=='ptx'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
 
   testunicorn:
@@ -283,7 +288,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: '~/.cache/pip'
-          key: unicorn 
+          key: unicorn
       - name: Install cross-assembler
         run: |
           sudo apt-get update -y && \

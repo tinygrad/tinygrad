@@ -3,7 +3,7 @@ import os, functools, platform, time, re, contextlib
 from weakref import KeyedRef, ref
 from _weakref import _remove_dead_weakref # type: ignore
 import numpy as np
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any, Iterable
 from math import prod # noqa: F401 # pylint:disable=unused-import
 
 ShapeType = Tuple[int, ...]
@@ -22,6 +22,10 @@ def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (
 def flatten(l:Iterator): return [item for sublist in l for item in sublist]
 def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
+def merge_dicts(ds:Iterable[Dict]) -> Dict:
+  kvs = set([(k,v) for d in ds for k,v in d.items()])
+  assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
+  return {k:v for k,v in kvs}
 
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
@@ -84,11 +88,11 @@ class ImageDType(DType):
 
 class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
-  def is_int(x: DType)-> bool: return dtypes.get_normal_type(x) in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64)
+  def is_int(x: DType)-> bool: return dtypes.get_normal_type(x) in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
-  def is_float(x: DType) -> bool: return dtypes.get_normal_type(x) in (dtypes.float16, dtypes.float32)
+  def is_float(x: DType) -> bool: return dtypes.get_normal_type(x) in (dtypes.float16, dtypes.float32, dtypes.float64, dtypes._half4, dtypes._float2, dtypes._float4)
   @staticmethod
-  def is_unsigned(x: DType) -> bool: return dtypes.get_normal_type(x) in (dtypes.uint8, dtypes.uint32, dtypes.uint64)
+  def is_unsigned(x: DType) -> bool: return dtypes.get_normal_type(x) in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
   def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
@@ -98,6 +102,8 @@ class dtypes:
   half = float16
   float32: Final[DType] = DType(4, 4, "float", np.float32)
   float = float32
+  float64: Final[DType] = DType(0, 8, "double", np.float64)
+  double = float64
   int8: Final[DType] = DType(0, 1, "char", np.int8)
   char = int8
   int16: Final[DType] = DType(1, 2, "short", np.int16)
@@ -110,9 +116,11 @@ class dtypes:
   uint16: Final[DType] = DType(1, 2, "unsigned short", np.uint16)
   uint32: Final[DType] = DType(2, 4, "unsigned int", np.uint32)
   uint64: Final[DType] = DType(3, 8, "unsigned long", np.uint64)
-
   # NOTE: bfloat16 isn't supported in numpy
   bfloat16: Final[DType] = DType(0, 2, "__bf16", None)
+  # NOTE: these are internal dtypes, should probably check for that
+  _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
+
   @staticmethod
   def get_vector_type(x:DType, amt=4):
     return dtypes.__dict__.get(f"_{x.name}{amt}", x if x.is_vector_type else dtypes._float4)
@@ -134,6 +142,7 @@ class GlobalCounters:
   time_sum_s: ClassVar[float] = 0.0
   kernel_count: ClassVar[int] = 0
   mem_used: ClassVar[int] = 0   # NOTE: this is not reset
+  mem_cached: ClassVar[int] = 0 # NOTE: this is not reset
   cache: ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
