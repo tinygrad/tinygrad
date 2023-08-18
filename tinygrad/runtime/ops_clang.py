@@ -79,4 +79,4 @@ class ClangProgram:
 
 renderer = fromimport("tinygrad.codegen.assembly_arm64", "uops_to_arm64_asm") if ARM64 else functools.partial(uops_to_cstyle, CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict", arg_int_prefix="const int"))
 ClangBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supported_vector_sizes={dtypes.float: []}, has_local=False,
-                                                          supported_vector_sizes_alu={dtypes.float: []}, uses_float32_calculations=False), renderer, ClangProgram)
+                                                          supported_vector_sizes_alu={dtypes.float: []}, uses_float32_calculations=True if ARM64 else False), renderer, ClangProgram)
