@@ -144,7 +144,7 @@ def specialize_to_arm64(fn_nm, asm):
       reg_out = (type_to_reg[arg[2]] + ('0' if dtypes.is_float(arg[2]) else '12') if arg[2] is not None else rtor[vin[1].nm])
       if arg[2] is not None: ins.append(f"fcvt{'zs' if arg[2] not in [dtypes.half, dtypes.double] else '' } {reg_out}, {rtor[vin[1].nm]}")
       ins.append(f"mov x15, #{arg[0]}")
-      ins.append(f"str {reg_out}, [{rtor[vin[0].nm]}, x15, lsl {shifts[arg[2]] if arg[2] is not None and arg[2] in shifts else '#0'}]")
+      ins.append(f"str {reg_out}, [{rtor[vin[0].nm]}, x15, lsl #0]")
     elif uop == UOps.COND_BRANCH:
       #TODO: this is a hack it shouldn't always be a cmp before a cond branch?
       if prev_uop == UOps.LOAD:
