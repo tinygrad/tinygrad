@@ -83,7 +83,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
           assert newvar is not None
           val = f"{args.name}" # defaults to render_python
           triton_dtype = {dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64"}[newvar.dtype]
-          if args.valid.min == 1: kk(f"{newvar.render()} = tl.load({val}).to({triton_dtype})")
+          if args.valid.min == 1: kk(f"{newvar.render()} = tl.load({val} + {args.idx.render()}).to({triton_dtype})")
           else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({val}, mask={args.valid.render()}), 0.0).to({triton_dtype})")
         elif uop == UOps.STORE:
           assert vin[0].dtype == dtypes.float, "unimplemented: float4 store"
