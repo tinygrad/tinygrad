@@ -493,6 +493,19 @@ class Tensor:
     # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
     ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
     return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
+  
+  def conv3d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
+    (bs, cin_), (cout, cin), DHW = self.shape[:2], weight.shape[:2], weight.shape[2:]
+    assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
+    if isinstance(padding, (tuple,list)): assert len(padding) == 2*len(DHW) or len(padding) == len(DHW), f"Expected padding of length {3*len(DHW)} or {len(DHW)}, but got {len(padding)} for tensor of shape {self.shape}"
+    padding_ = [(padding, padding)]*len(DHW) if isinstance(padding, int) else (padding if len(padding) == len(DHW) else [(p,p) for p in padding])
+    padding_ = tuple([(0, 0)] * (len(self.shape)-3) + padding_)
+    
+    x = self.pad(padding_)._pool(DHW, stride, dilation)   # (bs, groups*cin, oz, oy, ox, D, H, W)
+    rcout, ozyx = cout//groups, x.shape[2:-len(DHW)]
+    x = x.reshape(bs, groups, cin, 1, *ozyx, *DHW).expand(bs, groups, cin, rcout, *ozyx, *DHW).permute(0,1,3,*[4+i for i in range(len(ozyx))],2,*[4+len(ozyx)+i for i in range(len(DHW))])
+    ret = (x * weight.reshape(1, groups, rcout, *[1] * len(ozyx), cin, *DHW)).sum([-1-i for i in range(1+len(ozyx))], keepdim=True).reshape(bs, cout, *ozyx)
+    return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(DHW)))
 
   def dot(self, w:Tensor) -> Tensor:
     n1, n2 = len(self.shape), len(w.shape)
