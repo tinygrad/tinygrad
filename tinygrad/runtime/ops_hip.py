@@ -3,7 +3,7 @@ import ctypes, functools
 import extra.hip_wrapper as hip
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferCopyInOut
+from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator
 from tinygrad.codegen.linearizer import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
@@ -14,9 +14,14 @@ if DEBUG >= 5:
 
 # The default HIP stream is used for everything.
 
+class HIPAllocator(LRUAllocator):
+  def _do_alloc(self, size, dtype, device, **kwargs): return hip.hipMalloc(size * dtype.itemsize)
+  def _do_free(self, buf): hip.hipFree(buf)
+  def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
+HIPAlloc = HIPAllocator(hip.hipGetDeviceProperties(hip.hipGetDevice()).totalGlobalMem)
+
 class RawHIPBuffer(RawBufferCopyInOut):
-  def __init__(self, size, dtype): super().__init__(size, dtype, hip.hipMalloc(size * dtype.itemsize))
-  def __del__(self): hip.hipFree(self._buf)
+  def __init__(self, size, dtype): super().__init__(size, dtype, allocator=HIPAlloc)
   def _copyin(self, x:np.ndarray): hip.hipMemcpyAsync_htod(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, 0)
   def _copyout(self, x:np.ndarray): hip.hipMemcpy_dtoh(x.ctypes.data, self._buf, self.size * self.dtype.itemsize)
 
