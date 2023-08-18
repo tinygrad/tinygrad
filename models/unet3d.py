@@ -30,7 +30,7 @@ class DownsampleBlock:
         self.conv1 = ConvBlock(in_channels, out_channels, stride=2)
         self.conv2 = ConvBlock(out_channels, out_channels)
 
-    def forward(self, x):
+    def __call__(self, x):
         x = self.conv1(x)
         x = self.conv2(x)
         return x
@@ -45,9 +45,9 @@ class UpsampleBlock:
         self.conv1 = ConvBlock(2 * out_channels, out_channels)
         self.conv2 = ConvBlock(out_channels, out_channels,)
 
-    def forward(self, x, skip):
+    def __call__(self, x, skip):
         x = self.upsample_conv(x)
-        x = torch.cat((x, skip), dim=1)
+        x = Tensor.cat(x, skip, dim=1)
         x = self.conv1(x)
         x = self.conv2(x)
         return x
@@ -66,7 +66,6 @@ class OutputLayer:
     def __init__(self, in_channels, n_class):
         super(OutputLayer, self).__init__()
         self.conv = nn.Conv3d(in_channels, n_class, kernel_size=1, stride=1, padding=0, bias=True)
-
 
     def __call__(self, x):
         return self.conv(x)
@@ -90,6 +89,7 @@ class Unet3D:
       upsample = [UpsampleBlock(filters[-1], filters[-1])]
       upsample.extend([UpsampleBlock(i, o)
                         for idx, (i, o) in enumerate(zip(reversed(self.out), reversed(self.inp)))])
+      self.upsample = upsample
       self.output = OutputLayer(input_dim, n_class)
 
   def __call__(self, x):
