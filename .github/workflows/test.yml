@@ -297,6 +297,7 @@ jobs:
         run: pip install -e '.[testing,arm]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Test arm
         run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=auto test/ -k 'not (test_nn.py and (test_conv_transpose2d or test_conv2d))' --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/test_specific_conv.py  --ignore=test/unit/test_disk_tensor.py
+  
   testtriton:
     name: (emulated) Triton tests
     runs-on: ubuntu-22.04
@@ -307,6 +308,10 @@ jobs:
       run: |
         export DEBIAN_FRONTEND=noninteractive
         sudo apt-get update -y
+    - name: Install packages (cuda)
+      run: |
+        sudo apt-get update -y && \
+        sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
     - name: Install packages
       run: sudo apt-get install -y git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
     - name: Cache gpuocelot
