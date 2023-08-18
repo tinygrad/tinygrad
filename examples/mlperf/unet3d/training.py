@@ -65,3 +65,19 @@ def train(flags: Flags, model, train_loader, val_loader, loss_fn, score_fn):
         if is_successful or diverged:
             break
    
+if __name__ == "__main__":
+    from examples.mlperf.unet3d.data_loader import get_data_loaders
+    from examples.mlperf.unet3d.losses import DiceCELoss, DiceScore
+    from examples.mlperf.unet3d import Flags
+    from models.unet3d import Unet3D
+    import os
+    
+    flags = Flags(batch_size=1, verbose=True, data_dir=os.environ["KITS19_DATA_DIR"])
+    model = Unet3D(1, 3)
+    
+    print("Model params: {:,.0f}".format(sum([p.numel() for p in get_parameters(model)])))
+    
+    train_loader, val_loader = get_data_loaders(flags, 1, 0)
+    loss_fn = DiceCELoss()
+    score_fn = DiceScore()
+    train(flags, model, train_loader, val_loader, loss_fn, score_fn)

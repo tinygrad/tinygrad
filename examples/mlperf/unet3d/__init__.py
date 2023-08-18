@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Optional
 from examples.mlperf.unet3d.data_loader import get_data_loaders
+from examples.mlperf.unet3d.inference import evaluate
+from examples.mlperf.unet3d.training import train
 from models.unet3d import Unet3D
 from .losses import DiceCELoss, DiceScore
 from math import ceil
@@ -28,7 +30,6 @@ class Flags:
     lr_warmup_epochs: int = 200
     lr_decay_epochs: Optional[int] = None
     gradient_accumulation_steps: int = 1
-    normalization: str = "instancenorm" # "batchnorm"
     include_background: bool = False
     overlap: float = 0.5 # inference
     val_input_shape: tuple[int, int, int] = (128, 128, 128)
@@ -36,7 +37,7 @@ class Flags:
     
 
 def main(flags):
-    model = Unet3D(1, 3, normalization=flags.normalization, activation=flags.activation)
+    model = Unet3D(1, 3)
     
     train_dataloader, val_dataloader = get_data_loaders(flags, 1, 0) # todo: multi-gpu
     samples_per_epoch = len(train_dataloader) * flags.batch_size
@@ -54,3 +55,5 @@ def main(flags):
 
     elif flags.exec_mode == 'evaluate':
         eval_metrics = evaluate(flags, model, val_dataloader, loss_fn, score_fn)
+        for key in eval_metrics.keys():
+                print(key, eval_metrics[key])
