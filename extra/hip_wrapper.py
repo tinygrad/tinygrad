@@ -14,7 +14,16 @@ except:
 
 def hipCheckStatus(status):
   if status != 0:
-    raise RuntimeError('HIP error %s' % status)
+    raise RuntimeError('HIP error %s: %s' % (status, hipGetErrorString(status)))
+
+
+_libhip.hipGetErrorString.restype = ctypes.c_char_p
+_libhip.hipGetErrorString.argtypes = [ctypes.c_int]
+
+
+def hipGetErrorString(status):
+  return _libhip.hipGetErrorString(status).decode('utf-8')
+
 
 _libhip.hipDeviceSynchronize.restype = int
 _libhip.hipDeviceSynchronize.argtypes = []
@@ -84,7 +93,7 @@ def hipMalloc(count):
   ptr = ctypes.c_void_p()
   status = _libhip.hipMalloc(ctypes.byref(ptr), count)
   hipCheckStatus(status)
-  return ptr
+  return ptr.value
 
 
 _libhip.hipFree.restype = int
