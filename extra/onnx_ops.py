@@ -570,7 +570,7 @@ def Compress(inp, condition, axis=None):
 
   con_np = condition.numpy()
   con = Tensor(np.arange(condition.shape[0])[con_np]) # no boolean indexing in Tensor
-  return inp.gather(con, axis)
+  return inp.__getitem__(tuple([slice(None,None,None) if i != axis else con for i in range(inp.ndim)]))
 
 def Acos(x):
   negate = (x < 0)
@@ -619,7 +619,7 @@ def Det(x):
 def DequantizeLinear(x, x_scale, x_zero_point=0, axis=1):
   axis = axis + x.ndim if axis < 0 else axis
   x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
-  x_zer = x_zero_point.reshape(*[1] * axis, *x_scale.shape, *[1] * (x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
+  x_zer = x_zero_point.reshape(*[1]*(axis), *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
   return ((x - x_zer) * x_sc)
 
 # Needs work
