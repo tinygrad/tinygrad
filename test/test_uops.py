@@ -81,7 +81,7 @@ class TestFloatUOps(TestUOps):
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
 class TestHalfUOps(TestUOps):
-  # 6 tests below are broken on Nvidia OpenCL, CUDA 
+  # 6 tests below are broken on Nvidia OpenCL, CUDA
   def test_exp2_half(self): self._test_uop_fxn(UnaryOps.EXP2, lambda a: np.exp2(a), dtypes.half)
   def test_log2_half(self): self._test_uop_fxn(UnaryOps.LOG2, lambda a: math.log2(a) if a > 0 else float('-inf' if a==0 else 'nan'), dtypes.half)
   def test_sin_half(self): self._test_uop_fxn(UnaryOps.SIN, lambda a: math.sin(a), dtypes.half)
