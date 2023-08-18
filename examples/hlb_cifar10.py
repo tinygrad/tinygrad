@@ -143,14 +143,14 @@ def pad_reflect(X, size=2) -> Tensor:
   return X
 
 # return a binary mask in the format of BS x C x H x W where H x W contains a random square mask
-def make_square_mask(X, mask_size):
+def make_square_mask(shape, mask_size):
   is_even = int(mask_size % 2 == 0)
-  center_max = X.shape[-2]-mask_size//2-is_even
+  center_max = shape[-2]-mask_size//2-is_even
   center_min = mask_size//2-is_even
-  center = Tensor.rand(X.shape[0])*(center_max-center_min)+center_min
+  center = Tensor.rand(shape[0])*(center_max-center_min)+center_min
 
-  d_y = Tensor.arange(0, X.shape[-2]).reshape((1,1,X.shape[-2],1))
-  d_x = Tensor.arange(0, X.shape[-1]).reshape((1,1,1,X.shape[-1]))
+  d_y = Tensor.arange(0, shape[-2]).reshape((1,1,shape[-2],1))
+  d_x = Tensor.arange(0, shape[-1]).reshape((1,1,1,shape[-1]))
   d_y = d_y - center.reshape((-1,1,1,1))
   d_x = d_x - center.reshape((-1,1,1,1))
   d_y =(d_y >= -(mask_size / 2)) * (d_y <= mask_size / 2)
@@ -160,7 +160,7 @@ def make_square_mask(X, mask_size):
   return mask
 
 def random_crop(X, crop_size=32):
-  mask = make_square_mask(X, crop_size)
+  mask = make_square_mask(X.shape, crop_size)
   mask = mask.repeat((1,3,1,1))
   X_cropped = Tensor(X.flatten().numpy()[mask.flatten().numpy().astype(bool)])
 
@@ -187,7 +187,7 @@ def cutmix(X, Y, mask_size=3, p=0.5):
   if Tensor.rand(1) > p: return X, Y
 
   # fill the square with randomly selected images from the same batch
-  mask = make_square_mask(X, mask_size)
+  mask = make_square_mask(X.shape, mask_size)
   order = list(range(0, X.shape[0]))
   random.shuffle(order)
   X_patch = Tensor(X.numpy()[order,...])
