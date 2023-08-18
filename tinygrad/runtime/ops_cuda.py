@@ -2,11 +2,7 @@ import subprocess, time, re, hashlib, tempfile, os, functools
 from typing import Optional
 import numpy as np
 from pycuda.compiler import compile as cuda_compile # type: ignore
-<<<<<<< HEAD
-from tinygrad.helpers import DEBUG, getenv, colored, dtypes
-=======
-from tinygrad.helpers import DEBUG, getenv, colored, fromimport
->>>>>>> bd111411bf50b7bdad07b44407ee990574a86c90
+from tinygrad.helpers import DEBUG, getenv, colored, fromimport, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
 from tinygrad.codegen.linearizer import LinearizerOptions
@@ -99,12 +95,7 @@ renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
       __device__ __forceinline__ explicit half4(const float4& a): x(make_half2(__float2half(a.x), __float2half(a.y))), y(make_half2(__float2half(a.z),__float2half(a.w))) {}
       __device__ __forceinline__ explicit operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
     };
-<<<<<<< HEAD
-  """))
-CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supported_vector_sizes={dtypes.float: [2,4]}, 
+  """)) if not getenv("PTX") else fromimport("tinygrad.codegen.assembly_ptx", "uops_to_ptx_asm")
+CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supported_vector_sizes={dtypes.float: [] if getenv("PTX") else [2,4]}, 
                                                        supported_vector_sizes_alu = {dtypes.float: []},
                                                        global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]), renderer, CUDAProgram, cuda.Context.synchronize)
-=======
-  """)) if not getenv("PTX") else fromimport("tinygrad.codegen.assembly_ptx", "uops_to_ptx_asm")
-CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False if getenv("PTX") else True, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]), renderer, CUDAProgram, cuda.Context.synchronize)
->>>>>>> bd111411bf50b7bdad07b44407ee990574a86c90
