@@ -63,7 +63,7 @@ typedef float float8 __attribute__((ext_vector_type(8)));
 typedef _Float16 half16 __attribute__((ext_vector_type(16)));
 extern "C" __global__
   """, kernel_modifier="__launch_bounds__ (128, 1)",  # TODO: is this okay all the time?
-  smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4", uses_vload=True,
+  smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4", uses_vload=True, uses_ptr_arithmetic=True,
   half_prekernel = "#include <hip/hip_fp16.h>\nusing half4 = HIP_vector_type<half, 4>;" + """
 __device__ float vload_half(size_t offset, const half *p) { return (float)*(p + offset); }
 __device__ float2 vload_half2(size_t offset, const half *p) { return make_float2((float)*(p + offset*2), (float)*(p + offset*2 + 1)); }
