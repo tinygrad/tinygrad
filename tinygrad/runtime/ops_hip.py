@@ -2,6 +2,7 @@ import numpy as np
 import ctypes, functools
 import os
 import hashlib
+from typing import Union
 import extra.hip_wrapper as hip
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import Compiled
@@ -30,9 +31,9 @@ class RawHIPBuffer(RawBufferCopyInOut):
   def _copyout(self, x:np.ndarray): hip.hipMemcpy_dtoh(x.ctypes.data, self._buf, self.size * self.dtype.itemsize)
 
 class HIPProgram:
-  def __init__(self, name:str, prg:str, binary=False):
+  def __init__(self, name:str, prg:Union[str, bytes]):
     try:
-      if not binary:
+      if isinstance(prg, str):
         prg_hash = str(hashlib.sha256(prg.encode()).digest())
         prg_cache_path = os.path.join(HIP_CACHE_DIR, prg_hash)
         if os.path.exists(prg_cache_path):

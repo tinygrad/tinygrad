@@ -596,7 +596,7 @@ _libhiprtc.hiprtcGetCode.argtypes = [ctypes.c_void_p,               # hiprtcProg
                                      ctypes.POINTER(ctypes.c_char)]  # log
 
 
-def hiprtcGetCode(prog):
+def hiprtcGetCode(prog) -> bytes:
   code_size = ctypes.c_size_t()
   status = _libhiprtc.hiprtcGetCodeSize(prog, ctypes.byref(code_size))
   hipCheckStatus(status)
