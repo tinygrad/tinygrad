@@ -457,6 +457,14 @@ class Tensor:
     m, _, ss = self._softmax(axis)
     return m - ss.log()
 
+  def argmax(self, axis=None, keepdim=False): # Selects last index in case of duplicate element, torch returns first
+    if axis is None: return ((self == self.max(axis)).flatten() * Tensor.arange(prod(self.shape))).max()
+    axis = axis + self.ndim if axis < 0 else axis
+    m = self == (self.max(axis=axis, keepdim=keepdim) if keepdim else self.max(axis=axis, keepdim=keepdim).unsqueeze(axis))
+    idx = m * Tensor.arange(self.shape[axis]).reshape(*[1]*axis, self.shape[axis], *[1]*(self.ndim-(axis+1)))
+    return idx.max(axis=axis, keepdim=keepdim)
+  def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
+
   # ***** processing ops *****
 
   def _pool(self, k_:Tuple[int, ...], stride:Union[Tuple[int, ...], int]=1, dilation:Union[Tuple[int, ...], int]=1, _insert_dims=tuple()) -> Tensor:
