@@ -198,6 +198,7 @@ class Linearizer:
     self.local_alias: Dict[int, LocalBuffer] = {}
     self.use_tensor_cores: bool = False
     self.exclude_local_upcast: int = 0
+    self.reverse_upcast_dir: bool = False
 
     # group simplifies
     self.simplify_ones()
@@ -367,39 +368,47 @@ class Linearizer:
         strides = self.sts[i].real_strides()
         extra_locals = [lidx for lidx,st in zip(local_idxs[self.exclude_local_upcast:], strides[len(global_idxs)+self.exclude_local_upcast:self.first_reduce]) if st == 0]
         this_upcast_idxs: List[Node] = []
-        for j,v in enumerate(full_upcast_idxs):
+        # TODO: just flipping the order here is likely not generic at all
+        for j,v in list(enumerate(full_upcast_idxs))[::-1] if self.reverse_upcast_dir else list(enumerate(full_upcast_idxs)):
           if strides[len(global_idxs)+len(local_idxs)+len(reduce_idxs)+j] == 0:
-            if DEBUG >= 4: print("upcasting stride 0")
+            if DEBUG >= 4: print(f"upcasting@{j} stride 0")
             this_upcast_idxs.append(Variable.num(0))
           elif (elc:=[el for el in extra_locals if v.min == el.min and v.max == el.max]):
-            if DEBUG >= 4: print(f"upcasting matched stride {elc[0]}")
+            if DEBUG >= 4: print(f"upcasting@{j} matched stride {elc[0]}")
             this_upcast_idxs.append(elc[0])
             extra_locals.remove(elc[0])
           elif (elc:=[el for el in extra_locals if v.min == el.min and (v.max+1)%(el.max+1) == 0]):
             tacc = Variable.num(0)
             rem = v.max+1
             while len(elc) and rem%(elc[0].max+1) == 0:
-              if DEBUG >= 4: print(f"upcasting partial stride {rem} {elc[0]} left: {elc[1:]}")
+              if DEBUG >= 4: print(f"upcasting@{j} partial stride {rem} {elc[0]} left: {elc[1:]}")
               rem = rem//(elc[0].max+1)
               tacc += (elc[0] * rem)
               extra_locals.remove(elc[0])
               elc = [el for el in extra_locals if v.min == el.min and rem%(el.max+1) == 0]
-            if DEBUG >= 4 and rem > 1: print(f"failed upcasting partial stride {rem} extra locals {extra_locals}")
+            if DEBUG >= 4 and rem > 1: print(f"failed upcasting@{j} partial stride {rem} extra locals {extra_locals}")
             this_upcast_idxs.append(tacc + Variable(None, 0, rem-1))
           else:
-            if DEBUG >= 4: print(f"failed upcasting stride {v} extra locals {extra_locals}")
+            if DEBUG >= 4: print(f"failed upcasting@{j} stride {v} extra locals {extra_locals}")
             this_upcast_idxs.append(v)
-        idxs = global_idxs+local_idxs+reduce_idxs+this_upcast_idxs
+        idxs = global_idxs+local_idxs+reduce_idxs+(this_upcast_idxs[::-1] if self.reverse_upcast_dir else this_upcast_idxs)
         ll = self.global_load(i, idxs)
         locals_to_store.append((self.bufs.index(self.local_alias[i]), idxs, ll))
 
       # copy in any global buffers
       if self.use_tensor_cores:
-        i = 0
-        for y0,y1 in zip(locals_to_store[1][2][::2], locals_to_store[1][2][1::2]):
-          for x0,x1 in zip(locals_to_store[0][2][::2], locals_to_store[0][2][1::2]):
-            self.uop(UOps.WMMA, None, [x0, x1, y0, y1, acc[i], acc[i+1]], ())
-            i += 2
+        if self.bufs[0].device == "METAL":
+          i = 0
+          for y0,y1 in zip(locals_to_store[1][2][::2], locals_to_store[1][2][1::2]):
+            for x0,x1 in zip(locals_to_store[0][2][::2], locals_to_store[0][2][1::2]):
+              self.uop(UOps.WMMA, None, [x0, x1, y0, y1, acc[i], acc[i+1]], "METAL")
+              i += 2
+        elif self.bufs[0].device == "HIP":
+          i = 0
+          for y in range(0, len(locals_to_store[1][2]), 0x10):
+            for x in range(0, len(locals_to_store[0][2]), 0x10):
+              self.uop(UOps.WMMA, None, acc[i:i+8]+locals_to_store[0][2][x:x+0x10]+locals_to_store[1][2][y:y+0x10], "HIP")
+              i += 8
       else:
         if locals_to_store:
           self.uop(UOps.BARRIER, None, [], ())

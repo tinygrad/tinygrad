@@ -64,9 +64,11 @@ __device__ float4 pow(float4 x, float4 y) { return float4(pow(x.x, y.x), pow(x.y
 __device__ float4 log2(float4 x) { return float4(log2(x.x), log2(x.y), log2(x.z), log2(x.w)); }
 __device__ float4 exp2(float4 x) { return float4(exp2(x.x), exp2(x.y), exp2(x.z), exp2(x.w)); }
 __device__ float4 sin(float4 x) { return float4(sin(x.x), sin(x.y), sin(x.z), sin(x.w)); }
+typedef float float8 __attribute__((ext_vector_type(8)));
+typedef _Float16 half16 __attribute__((ext_vector_type(16)));
 extern "C" __global__
-  """,
-  smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4", uses_vload=True,
+  """, kernel_modifier="__launch_bounds__ (128, 1)",  # TODO: is this okay all the time?
+  smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4", uses_vload=True, uses_ptr_arithmetic=True,
   half_prekernel = "#include <hip/hip_fp16.h>\nusing half4 = HIP_vector_type<half, 4>;" + """
 __device__ float vload_half(size_t offset, const half *p) { return (float)*(p + offset); }
 __device__ float2 vload_half2(size_t offset, const half *p) { return make_float2((float)*(p + offset*2), (float)*(p + offset*2 + 1)); }
