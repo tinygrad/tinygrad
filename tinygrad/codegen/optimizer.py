@@ -121,6 +121,7 @@ def hand_coded_optimizations(k:Linearizer):
     if len(axis_buf0) and len(axis_buf1) and k.full_shape[k.first_reduce]%8 == 0 and (k.shape_len-k.first_reduce) == 1:
       if DEBUG >= 3: print("HIP TENSOR CORES", axis_buf0, axis_buf1)
       k.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
+      k.reverse_upcast_dir = True
 
       # TODO: select axis in smart way
       s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
