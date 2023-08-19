@@ -458,11 +458,11 @@ class Tensor:
     return m - ss.log()
 
   def argmax(self, axis=None, keepdim=False): # Selects last index in case of duplicate element, torch returns first
-    if axis is None: return ((self == self.max(axis)).flatten() * Tensor.arange(prod(self.shape))).max()
+    if axis is None: return prod(self.shape) - ((self == self.max(axis)).flatten() * Tensor.arange(prod(self.shape)).flip(0)).max() - 1
     axis = axis + self.ndim if axis < 0 else axis
     m = self == (self.max(axis=axis, keepdim=keepdim) if keepdim else self.max(axis=axis, keepdim=keepdim).unsqueeze(axis))
-    idx = m * Tensor.arange(self.shape[axis]).reshape(*[1]*axis, self.shape[axis], *[1]*(self.ndim-(axis+1)))
-    return idx.max(axis=axis, keepdim=keepdim)
+    idx = m * Tensor.arange(self.shape[axis]).flip(0).reshape(*[1]*axis, self.shape[axis], *[1]*(self.ndim-(axis+1)))
+    return self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1
   def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
 
   # ***** processing ops *****
