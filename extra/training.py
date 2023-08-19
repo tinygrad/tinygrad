@@ -1,7 +1,7 @@
 import numpy as np
 from tqdm import trange
 from tinygrad.tensor import Tensor, Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, dtypes
 
 def sparse_categorical_crossentropy(out, Y):
   num_classes = out.shape[-1]
@@ -12,6 +12,24 @@ def sparse_categorical_crossentropy(out, Y):
   y = y.reshape(list(Y.shape)+[num_classes])
   y = Tensor(y)
   return out.mul(y).mean()
+
+def focal_loss(p : Tensor, y_train : Tensor, 
+               alpha: Tensor = Tensor(0.25, dtype=dtypes.float32), 
+               gamma: Tensor = Tensor(2, dtype=dtypes.float32), 
+               reduction: str = "mean") -> Tensor:
+    p_t = p * y_train + ((Tensor.ones_like(p) - p) * (Tensor.ones_like(y_train) - y_train))
+    ce_loss = -(p_t + 1e-10).log()
+    loss = ce_loss.mul((Tensor.ones_like(p_t) - p_t) ** (gamma))
+    if alpha >= 0:
+            alpha_t = alpha * y_train + ((Tensor(1 - alpha)) * (Tensor.ones_like(y_train) - y_train))
+            loss = alpha_t * loss
+    if reduction == "none":
+        pass
+    elif reduction == "mean":
+        loss = loss.mean()
+    elif reduction == "sum":
+        loss = loss.sum()
+    return loss
 
 def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categorical_crossentropy,
         transform=lambda x: x, target_transform=lambda x: x, noloss=False):

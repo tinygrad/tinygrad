@@ -1,5 +1,6 @@
 import math
 from tinygrad.helpers import flatten
+from tinygrad.tensor import Tensor
 import tinygrad.nn as nn
 from models.resnet import ResNet
 from extra.utils import get_child
@@ -144,6 +145,11 @@ class RetinaNet:
 
       detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
     return detections
+  
+  def loss(self, head_outputs : Tensor, targets : Tensor):
+    #TODO: sum focal loss over image anchors
+    #TODO: sparse-L1 for box regression loss
+    raise NotImplementedError
 
 class ClassificationHead:
   def __init__(self, in_channels, num_anchors, num_classes):
