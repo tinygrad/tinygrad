@@ -404,7 +404,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,20,30)], lambda x: x.argmin(1, False), lambda x: x.argmin(1, False), forward_only=True)
     helper_test_op([(10,20,30)], lambda x: x.argmin(1, True), lambda x: x.argmin(1, True), forward_only=True)
 
-
   def test_matmul_simple(self):
     helper_test_op([(4), (4,4)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_matmul(self):
