@@ -1,5 +1,6 @@
 import ctypes
 import sys
+from typing import Tuple
 
 try:
   _libhip = ctypes.cdll.LoadLibrary('libamdhip64.so')
@@ -605,3 +606,14 @@ def hiprtcGetCode(prog) -> bytes:
   status = _libhiprtc.hiprtcGetCode(prog, e_code)
   hipCheckStatus(status)
   return e_code
+
+_libhiprtc.hiprtcVersion.restype = int
+_libhiprtc.hiprtcVersion.argtypes = [ctypes.POINTER(ctypes.c_int),   # major
+                                     ctypes.POINTER(ctypes.c_int)]  # minor
+
+def hiprtcVersion() -> Tuple[int, int]:
+  major = ctypes.c_int()
+  minor = ctypes.c_int()
+  status = _libhiprtc.hiprtcVersion(ctypes.byref(major), ctypes.byref(minor))
+  hipCheckStatus(status)
+  return (major.value, minor.value)

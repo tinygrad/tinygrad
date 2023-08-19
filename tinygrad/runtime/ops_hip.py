@@ -17,7 +17,11 @@ if DEBUG >= 5:
 
 # The default HIP stream is used for everything.
 
-HIP_CACHE_DIR = os.path.expanduser("~/.cache/tinygrad-hip")
+@functools.cache
+def hip_cache_dir():
+  version = hip.hiprtcVersion()
+  cache_dir_base = os.path.expanduser("~/.cache/tinygrad-hip")
+  return os.path.join(cache_dir_base, f"{version[0]}-{version[1]}")
 
 class HIPAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs): return hip.hipMalloc(size * dtype.itemsize)
@@ -31,11 +35,12 @@ class RawHIPBuffer(RawBufferCopyInOut):
   def _copyout(self, x:np.ndarray): hip.hipMemcpy_dtoh(x.ctypes.data, self._buf, self.size * self.dtype.itemsize)
 
 class HIPProgram:
-  def __init__(self, name:str, prg:Union[str, bytes]):
+  def __init__(self, name:str, prg:Union[str, bytes], binary=False):
     try:
-      if isinstance(prg, str):
-        prg_hash = str(hashlib.sha256(prg.encode()).digest())
-        prg_cache_path = os.path.join(HIP_CACHE_DIR, prg_hash)
+      if not binary:
+        assert isinstance(prg, str)
+        prg_hash = hashlib.sha256(prg.encode()).digest().hex()
+        prg_cache_path = os.path.join(hip_cache_dir(), prg_hash)
         if os.path.exists(prg_cache_path):
           with open(prg_cache_path, "rb") as f:
             prg = f.read()
@@ -44,7 +49,7 @@ class HIPProgram:
           device_properties = hip.hipGetDeviceProperties(hip.hipGetDevice())
           hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
           prg = hip.hiprtcGetCode(prog)
-          os.makedirs(HIP_CACHE_DIR, exist_ok=True)
+          os.makedirs(hip_cache_dir(), exist_ok=True)
           with open(prg_cache_path, "wb") as f:
             f.write(prg)
     except Exception as e:
