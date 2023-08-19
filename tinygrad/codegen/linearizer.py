@@ -298,7 +298,7 @@ class Linearizer:
     # uops
     self.uops: List[UOp] = []
     self.load_cache: Dict[str, Token] = {}
-    self.saved_exprs: Dict[Any, Token] = dict()
+    self.saved_exprs: Dict[Tuple[Op, Tuple[Token, ...]], Token] = dict()
 
     # add global buffers
     for buf,name in self.arg_bufs.items():
@@ -494,10 +494,7 @@ class Linearizer:
 
   def uop_alu(self, out: Token, vin: List[Token], op: Op) -> Token:
     key = (op, tuple(vin))
-    if key not in self.saved_exprs:
-      self.saved_exprs[key] = self.uop(UOps.ALU, out, vin, op)
-    else:
-      if DEBUG >= 5: print(f"    cached alu op: {self.saved_exprs[key]} <- {vin} {op}")
+    if key not in self.saved_exprs: self.saved_exprs[key] = self.uop(UOps.ALU, out, vin, op)
     return self.saved_exprs[key]
 
   def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
