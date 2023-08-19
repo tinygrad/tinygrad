@@ -3,7 +3,7 @@ import functools, itertools
 from tinygrad.helpers import DEBUG, DType, merge_dicts
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
-from tinygrad.ops import GlobalCounters, RawBuffer
+from tinygrad.ops import RawBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.cache_collector import CacheCollector

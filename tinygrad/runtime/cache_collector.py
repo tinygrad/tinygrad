@@ -4,11 +4,9 @@ from tinygrad.runtime.lib import RawBuffer
 
 class _CacheCollector:
   class _Placeholder:
-    def __init__(self, buf):
-      self.alloc_clb = type(buf) # Get allocator if this is a AllocatedBufferWrapper or the buftype.
-      self.size, self.dtype, self.ref = buf.size, buf.dtype, ref(buf)
+    def __init__(self, buf): self.size, self.dtype, self.ref, self.buftype = buf.size, buf.dtype, ref(buf), type(buf)
     def alive(self): return self.ref() is not None
-    def alloc_rawbuf(self): return self.alloc_clb(self.size, self.dtype)
+    def alloc_rawbuf(self): return self.buftype(self.size, self.dtype)
     def get_rawbuf(self): # NOTE: If ref is valid, it means the actual buffer is still in use (not even reused from the cache). To keep it valid, we use this buffer directly.
       return self.ref() if self.alive() else self.alloc_rawbuf()
 
@@ -23,11 +21,11 @@ class _CacheCollector:
     if self.cache is None: return
     # self.cache.append((prg,rawbufs,var_vals))
     # return
-    def get_ref(buf): return buf._buf
-    self.last_buftype.update({self._buftype_key(buf): len(self.cache) for buf in rawbufs[1:] if get_ref(buf) not in self.placeholders})
-    self.placeholders.setdefault(get_ref(rawbufs[0]), _CacheCollector._Placeholder(rawbufs[0])).ref = ref(rawbufs[0]) # Updating placeholder ref to point to reallocated buffer(or wrapper).
-    self.last_placeholder_index[self.placeholders[get_ref(rawbufs[0])]] = len(self.cache)
-    self.cache.append((prg,[(self.placeholders[get_ref(x)] if get_ref(x) in self.placeholders else x) for x in rawbufs],var_vals))
+    def get_signature(buf): return buf._buf if getattr(buf, '_allocator', None) is not None else ref(buf)
+    self.last_buftype.update({self._buftype_key(buf): len(self.cache) for buf in rawbufs[1:] if get_signature(buf) not in self.placeholders})
+    self.placeholders.setdefault(get_signature(rawbufs[0]), _CacheCollector._Placeholder(rawbufs[0])).ref = ref(rawbufs[0]) # Updating placeholder ref to point to reallocated buffer(or wrapper).
+    self.last_placeholder_index[self.placeholders[get_signature(rawbufs[0])]] = len(self.cache)
+    self.cache.append((prg,[self.placeholders.get(get_signature(x), x) for x in rawbufs],var_vals))
   def finish(self):
     if self.cache is None: return []
     # cache_result = self.cache
@@ -36,8 +34,7 @@ class _CacheCollector:
     placeholder_mapper, cache_result = {}, []
     for j,(p,cached_bufs,var_vals) in enumerate(self.cache):
       if cached_bufs[0].__class__ is _CacheCollector._Placeholder and cached_bufs[0].alive():
-        # NOTE: To avoid hazards when output could be used as input (e.g., LSTM), we use a backing buffer to handle ambiguous situations
-        # where a single buffer may not be safe. Need to track this only for alive placeholders (buffers still held by someone outside).
+        # NOTE: To avoid hazards when output could be used as input (e.g., LSTM), we use a backing buffer to handle ambiguous situations where a single buffer may not be safe. Need to track this only for alive placeholders.
         if self.last_buftype.get(self._buftype_key(cached_bufs[0]), -1) < j or self.last_placeholder_index[cached_bufs[0]] == j: placeholder_mapper[cached_bufs[0]] = cached_bufs[0].get_rawbuf()
         elif cached_bufs[0] not in placeholder_mapper: placeholder_mapper[cached_bufs[0]] = cached_bufs[0].alloc_rawbuf() # Allocate a backing buffer and use it until the penultimate entry.
       placeholder_mapper.update({buf: buf.get_rawbuf() for buf in cached_bufs if buf.__class__ is _CacheCollector._Placeholder and buf not in placeholder_mapper})
