@@ -1,5 +1,7 @@
 import numpy as np
 import ctypes, functools
+import os
+import hashlib
 import extra.hip_wrapper as hip
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import Compiled
@@ -13,6 +15,8 @@ if DEBUG >= 5:
   early_exec = enable_early_exec()
 
 # The default HIP stream is used for everything.
+
+HIP_CACHE_DIR = os.path.expanduser("~/.cache/tinygrad-hip")
 
 class HIPAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs): return hip.hipMalloc(size * dtype.itemsize)
@@ -29,10 +33,19 @@ class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
     try:
       if not binary:
-        prog = hip.hiprtcCreateProgram(prg, name, [], [])
-        device_properties = hip.hipGetDeviceProperties(hip.hipGetDevice())
-        hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
-        prg = hip.hiprtcGetCode(prog)
+        prg_hash = str(hashlib.sha256(prg.encode()).digest())
+        prg_cache_path = os.path.join(HIP_CACHE_DIR, prg_hash)
+        if os.path.exists(prg_cache_path):
+          with open(prg_cache_path, "rb") as f:
+            prg = f.read()
+        else:
+          prog = hip.hiprtcCreateProgram(prg, name, [], [])
+          device_properties = hip.hipGetDeviceProperties(hip.hipGetDevice())
+          hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
+          prg = hip.hiprtcGetCode(prog)
+          os.makedirs(HIP_CACHE_DIR, exist_ok=True)
+          with open(prg_cache_path, "wb") as f:
+            f.write(prg)
     except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
