@@ -17,7 +17,7 @@ if DEBUG >= 5:
 
 # The default HIP stream is used for everything.
 
-@functools.cache
+@functools.lru_cache
 def hip_cache_dir():
   version = hip.hiprtcVersion()
   cache_dir_base = os.path.expanduser("~/.cache/tinygrad-hip")
