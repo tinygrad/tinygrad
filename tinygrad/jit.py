@@ -6,6 +6,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters, RawBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
+from tinygrad.runtime.cache_collector import CacheCollector
 
 JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU"]
 
@@ -36,10 +37,9 @@ class TinyJit:
         prg(pargs, variables, jit=True)
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 1:
-      GlobalCounters.cache = []
+      CacheCollector.start()
       self.ret = self.fxn(*args, **kwargs)
-      self.jit_cache = GlobalCounters.cache
-      GlobalCounters.cache = None
+      self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
