@@ -24,8 +24,7 @@ class TritonProgram:
     with open(fn, "w") as f: f.write(prg)
     codeObject = compile(prg, fn, "exec")
     exec(codeObject, globals())
-    self.program = triton_compile(globals()["fxn"], signature=signature, device_type="cuda", debug=True).asm["ptx"]
-    if DEBUG>=4: print(self.program)
+    self.program = triton_compile(globals()[name], signature=signature, device_type="cuda", debug=True).asm["ptx"]
     self.program = cuda.module_from_buffer(self.program.encode('utf-8')).get_function(self.program.split(".visible .entry ")[1].split("(")[0])
 
   def __call__(self, global_size, local_size, *args, wait=False) -> Any:
