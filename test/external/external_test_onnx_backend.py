@@ -68,8 +68,8 @@ backend_test.exclude('test_reduce_log_sum_exp*') # dependent on float64
 backend_test.exclude('test_operator_add*') # dependent on float64
 
 # we don't support indexes
-backend_test.exclude('test_argmax_*')
-backend_test.exclude('test_argmin_*')
+#backend_test.exclude('test_argmax_*') # Needs more work #select_last_index
+# backend_test.exclude('test_argmin_*') # Needs more work #select_last_index
 backend_test.exclude('test_nonzero_*')
 
 # no support for mod
