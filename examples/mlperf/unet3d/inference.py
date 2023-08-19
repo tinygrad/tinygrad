@@ -138,22 +138,3 @@ def sliding_window_inference(inputs, labels, roi_shape, model, overlap=0.5, mode
            paddings[2]: image_shape[1] + paddings[2],
            paddings[0]: image_shape[2] + paddings[0]
            ], labels
-    
-    
-if __name__ == "__main__":
-    from examples.mlperf.unet3d import Flags
-    from examples.mlperf.unet3d.data_loader import get_data_loaders
-    flags = Flags(data_dir="/home/stud/steiger/ext-repos/training/image_segmentation/pytorch/data")
-    _, val_dataloader = get_data_loaders(flags, 1, 0)
-    for i, (input, label) in enumerate(val_dataloader):
-        print(input.shape)
-        output, label = sliding_window_inference(
-                    inputs=input,
-                    labels=label,
-                    roi_shape=flags.val_input_shape,
-                    model=model,
-                    overlap=flags.overlap,
-                    mode="gaussian",
-                    padding_val=-2.2
-                )
-        break
