@@ -101,7 +101,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
         else:
           raise NotImplementedError(f"unimplemented: {uop}")
 
-    prg = "@triton.jit\ndef fxn("+','.join(f"data{i}" for i in range(len(bufs)))+"):\n"
+    prg = f"@triton.jit\ndef {function_name}("+','.join(f"data{i}" for i in range(len(bufs)))+"):\n"
     prg += '\n'.join(kernel)
     return prg, global_size, local_size
 
