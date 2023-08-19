@@ -56,17 +56,21 @@ class Node:
   def __mul__(self, b:Union[Node, int]):
     if b == 0: return NumNode(0)
     if b == 1: return self
-    if self.__class__ is NumNode: return NumNode(self.b*b) if isinstance(b, int) else create_node(MulNode(b, self.b))
-    return create_node(MulNode(self, b))
+    if self.__class__ is NumNode: return NumNode(self.b*b) if isinstance(b, int) else b*self.b
+    return create_node(MulNode(self, b.b)) if isinstance(b, NumNode) else create_node(MulNode(self, b))
   def __rmul__(self, b:int): return self*b
 
   # *** complex ops ***
 
-  def __rfloordiv__(self, b:int): raise RuntimeError(f"not supported: {b} // {self}")
+  def __rfloordiv__(self, b:int):
+    if self.min > b >= 0: return NumNode(0)
+    if isinstance(self, NumNode): return NumNode(b // self.b)
+    raise RuntimeError(f"not supported: {b} // {self}")
   def __floordiv__(self, b:Union[Node,int], factoring_allowed=True):
     if isinstance(b, Node):
+      if b.__class__ is NumNode: return self // b.b
       if self == b: return NumNode(1)
-      if (b > self).min > 0 and self.min >= 0: return NumNode(0)
+      if (b - self).min > 0 and self.min >= 0: return NumNode(0) # b - self simplifies the node
       raise RuntimeError(f"not supported: {self} // {b}")
     assert b != 0
     if b < 0: return (self//-b)*-1
@@ -81,9 +85,11 @@ class Node:
 
   def __rmod__(self, b:int):
     if self.min > b >= 0: return NumNode(b)
+    if isinstance(self, NumNode): return NumNode(b % self.b)
     raise RuntimeError(f"not supported: {b} % {self}")
   def __mod__(self, b:Union[Node,int]):
     if isinstance(b, Node):
+      if b.__class__ is NumNode: return self % b.b
       if self == b: return NumNode(0)
       if (b - self).min > 0 and self.min >= 0: return self # b - self simplifies the node
       raise RuntimeError(f"not supported: {self} % {b}")
@@ -208,12 +214,12 @@ class SumNode(RedNode):
     if isinstance(b, SumNode):
       nu_num = sum(node.b for node in self.flat_components if node.__class__ is NumNode)
       de_num = sum(node.b for node in b.flat_components if node.__class__ is NumNode)
-      if de_num and nu_num % de_num == 0 and b * (d := nu_num // de_num) == self: return NumNode(d)
+      if nu_num > 0 and de_num and (d:=nu_num//de_num) > 0: return NumNode(d) + (self-b*d) // b
     if isinstance(b, Node):
       for x in self.flat_components:
         if x % b == 0: fully_divided.append(x // b)
         else: rest.append(x)
-      if (b > (sum_rest:=create_rednode(SumNode, rest))).min and (sum_rest >= 0).min: return create_rednode(SumNode, fully_divided)
+      if (sum_fully_divided:=create_rednode(SumNode, fully_divided)) != 0: return sum_fully_divided + create_rednode(SumNode, rest) // b
       return Node.__floordiv__(self, b, False)
     if b == 1: return self
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
@@ -238,7 +244,7 @@ class SumNode(RedNode):
     if isinstance(b, SumNode):
       nu_num = sum(node.b for node in self.flat_components if node.__class__ is NumNode)
       de_num = sum(node.b for node in b.flat_components if node.__class__ is NumNode)
-      if de_num and nu_num % de_num == 0 and b * (nu_num // de_num) == self: return NumNode(0)
+      if nu_num > 0 and de_num and (d:=nu_num//de_num) > 0: return (self-b*d) % b
     if isinstance(b, Node) and (b - self).min > 0: return self # b - self simplifies the node
     new_nodes: List[Node] = []
     for x in self.nodes:
