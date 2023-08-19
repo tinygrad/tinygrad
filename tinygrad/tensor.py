@@ -457,7 +457,7 @@ class Tensor:
     m, _, ss = self._softmax(axis)
     return m - ss.log()
 
-  def argmax(self, axis=None, keepdim=False): # Selects last index in case of duplicate element, torch returns first
+  def argmax(self, axis=None, keepdim=False):
     if axis is None: return prod(self.shape) - ((self == self.max(axis)).flatten() * Tensor.arange(prod(self.shape)).flip(0)).max() - 1
     axis = axis + self.ndim if axis < 0 else axis
     m = self == (self.max(axis=axis, keepdim=keepdim) if keepdim else self.max(axis=axis, keepdim=keepdim).unsqueeze(axis))
