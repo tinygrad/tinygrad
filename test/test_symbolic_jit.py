@@ -8,6 +8,49 @@ import numpy as np
 @unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
 @unittest.skipUnless(Device.DEFAULT in ["GPU", "METAL", "CLANG", "CUDA"], f"{Device.DEFAULT} is not supported")
 class TestSymbolicJit(unittest.TestCase):
+
+  def test_cat_dim0_two_vars(self):
+    def f(a, b): return a.cat(b, dim=0).realize()
+    jf = TinyJit(f)
+    vi = Variable("i", 1, 10)
+    vj = Variable("j", 1, 10)
+    for i in range(1, 5):
+      for j in range(1, 5):
+        a = Tensor.rand(i, 3)
+        b = Tensor.rand(j, 3)
+        symbolic = jf(a.reshape(vi, 3), b.reshape(vj, 3)).reshape(i+j, 3).cpu().numpy()
+        expected = f(a, b).cpu().numpy()
+        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+    assert len(jf.jit_cache) == 1
+
+  def test_cat_dim1_two_vars(self):
+    def f(a, b): return a.cat(b, dim=1).realize()
+    jf = TinyJit(f)
+    vi = Variable("i", 1, 10)
+    vj = Variable("j", 1, 10)
+    for i in range(1, 5):
+      for j in range(1, 5):
+        a = Tensor.rand(3, i)
+        b = Tensor.rand(3, j)
+        symbolic = jf(a.reshape(3, vi), b.reshape(3, vj)).reshape(3, i+j).cpu().numpy()
+        expected = f(a, b).cpu().numpy()
+        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+    assert len(jf.jit_cache) == 1
+
+  def test_two_vars_plus1(self):
+    def f(a, b): return (a@b+1).realize()
+    jf = TinyJit(f)
+    vi = Variable("i", 1, 10)
+    vj = Variable("j", 1, 10)
+    for i in range(1, 5):
+      for j in range(1, 5):
+        a = Tensor.rand(i, 3)
+        b = Tensor.rand(3, j)
+        symbolic = jf(a.reshape(vi, 3), b.reshape(3, vj)).reshape(i, j).cpu().numpy()
+        expected = f(a, b).cpu().numpy()
+        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+    assert len(jf.jit_cache) == 1
+
   def test_plus1(self):
     def f(a): return (a+1).realize()
     jf = TinyJit(f)
@@ -94,48 +137,6 @@ class TestSymbolicJit(unittest.TestCase):
       symbolic = jf(a.reshape(3, vi), b).reshape(3, i+2).cpu().numpy()
       expected = f(a, b).cpu().numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
-
-  def test_cat_dim0_two_vars(self):
-    def f(a, b): return a.cat(b, dim=0).realize()
-    jf = TinyJit(f)
-    vi = Variable("i", 1, 10)
-    vj = Variable("j", 1, 10)
-    for i in range(1, 5):
-      for j in range(1, 5):
-        a = Tensor.rand(i, 3)
-        b = Tensor.rand(j, 3)
-        symbolic = jf(a.reshape(vi, 3), b.reshape(vj, 3)).reshape(i+j, 3).cpu().numpy()
-        expected = f(a, b).cpu().numpy()
-        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
-
-  def test_cat_dim1_two_vars(self):
-    def f(a, b): return a.cat(b, dim=1).realize()
-    jf = TinyJit(f)
-    vi = Variable("i", 1, 10)
-    vj = Variable("j", 1, 10)
-    for i in range(1, 5):
-      for j in range(1, 5):
-        a = Tensor.rand(3, i)
-        b = Tensor.rand(3, j)
-        symbolic = jf(a.reshape(3, vi), b.reshape(3, vj)).reshape(3, i+j).cpu().numpy()
-        expected = f(a, b).cpu().numpy()
-        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
-
-  def test_two_vars_plus1(self):
-    def f(a, b): return (a@b+1).realize()
-    jf = TinyJit(f)
-    vi = Variable("i", 1, 10)
-    vj = Variable("j", 1, 10)
-    for i in range(1, 5):
-      for j in range(1, 5):
-        a = Tensor.rand(i, 3)
-        b = Tensor.rand(3, j)
-        symbolic = jf(a.reshape(vi, 3), b.reshape(3, vj)).reshape(i, j).cpu().numpy()
-        expected = f(a, b).cpu().numpy()
-        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert len(jf.jit_cache) == 1
 
   def test_jit_symbolic_shape_mismatch(self):

@@ -27,6 +27,38 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8
 np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
+  def test_openpilot_model(self):
+    dat = fetch(OPENPILOT_MODEL)
+    onnx_model = onnx.load(io.BytesIO(dat))
+    run_onnx = get_run_onnx(onnx_model)
+    print("got run_onnx")
+    inputs = {
+      "input_imgs": np.random.randn(*(1, 12, 128, 256)),
+      "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
+      "desire": np.zeros((1, 8)),
+      "traffic_convention": np.array([[1., 0.]]),
+      "initial_state": np.zeros((1, 512))
+      #"initial_state": np.zeros((1, 768))
+    }
+    inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
+
+    st = time.monotonic()
+    print("****** run onnx ******")
+    tinygrad_out = run_onnx(inputs)['outputs']
+    mt = time.monotonic()
+    print("****** realize ******")
+    tinygrad_out.realize()
+    mt2 = time.monotonic()
+    tinygrad_out = tinygrad_out.numpy()
+    et = time.monotonic()
+    print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
+
+    Tensor.no_grad = True
+    torch_out = run_onnx_torch(onnx_model, inputs).numpy()
+    Tensor.no_grad = False
+    print(tinygrad_out, torch_out)
+    np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
+    
   def test_benchmark_openpilot_model(self):
     dat = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(io.BytesIO(dat))
@@ -70,38 +102,6 @@ class TestOnnxModel(unittest.TestCase):
       os.system(f"flameprof {temp('net.prof')} > {temp('prof.svg')}")
       ps = stats.sort_stats(pstats.SortKey.TIME)
       ps.print_stats(30)
-
-  def test_openpilot_model(self):
-    dat = fetch(OPENPILOT_MODEL)
-    onnx_model = onnx.load(io.BytesIO(dat))
-    run_onnx = get_run_onnx(onnx_model)
-    print("got run_onnx")
-    inputs = {
-      "input_imgs": np.random.randn(*(1, 12, 128, 256)),
-      "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
-      "desire": np.zeros((1, 8)),
-      "traffic_convention": np.array([[1., 0.]]),
-      "initial_state": np.zeros((1, 512))
-      #"initial_state": np.zeros((1, 768))
-    }
-    inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
-
-    st = time.monotonic()
-    print("****** run onnx ******")
-    tinygrad_out = run_onnx(inputs)['outputs']
-    mt = time.monotonic()
-    print("****** realize ******")
-    tinygrad_out.realize()
-    mt2 = time.monotonic()
-    tinygrad_out = tinygrad_out.numpy()
-    et = time.monotonic()
-    print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
-
-    Tensor.no_grad = True
-    torch_out = run_onnx_torch(onnx_model, inputs).numpy()
-    Tensor.no_grad = False
-    print(tinygrad_out, torch_out)
-    np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
 
   def test_efficientnet(self):
     dat = fetch("https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx")

@@ -35,15 +35,24 @@ def check_gc():
     assert print_objects() == 0
 
 class TestTrain(unittest.TestCase):
-  def test_convnext(self):
-    model = ConvNeXt(depths=[1], dims=[16])
+  def test_efficientnet(self):
+    model = EfficientNet(0)
     X = np.zeros((BS,3,224,224), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)
     train_one_step(model,X,Y)
     check_gc()
 
-  def test_efficientnet(self):
-    model = EfficientNet(0)
+  def test_resnet(self):
+    X = np.zeros((BS, 3, 224, 224), dtype=np.float32)
+    Y = np.zeros((BS), dtype=np.int32)
+    for resnet_v in [ResNet18]:
+      model = resnet_v()
+      model.load_from_pretrained()
+      train_one_step(model, X, Y)
+    check_gc()  
+
+  def test_convnext(self):
+    model = ConvNeXt(depths=[1], dims=[16])
     X = np.zeros((BS,3,224,224), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)
     train_one_step(model,X,Y)
@@ -64,15 +73,6 @@ class TestTrain(unittest.TestCase):
     X = np.zeros((BS,6), dtype=np.float32)
     Y = np.zeros((BS,6), dtype=np.int32)
     train_one_step(model,X,Y)
-    check_gc()
-
-  def test_resnet(self):
-    X = np.zeros((BS, 3, 224, 224), dtype=np.float32)
-    Y = np.zeros((BS), dtype=np.int32)
-    for resnet_v in [ResNet18]:
-      model = resnet_v()
-      model.load_from_pretrained()
-      train_one_step(model, X, Y)
     check_gc()
 
   def test_bert(self):

@@ -74,6 +74,96 @@ class TestOps(unittest.TestCase):
     if exact: self.assertEqual(str(torch_cm.exception), str(tinygrad_cm.exception))
     if not CI: print("\ntesting %40r   torch/tinygrad exception: %s / %s" % (shps, torch_cm.exception, tinygrad_cm.exception), end="")
 
+  @unittest.skipIf((IMAGE>0), "no conv1d on images")
+  def test_conv1d(self):
+    for bs in [1,8]:
+      for cin in [1,3]:
+        for groups in [1,3] if cin == 3 else [1]:
+          for H in [1,2,5]:
+            with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H):
+              helper_test_op([(bs,cin,11), (6,cin//groups,H)],
+                lambda x,w: torch.nn.functional.conv1d(x,w,groups=groups).relu(),
+                lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  def test_conv2d(self):
+    for bs in [1,8]:
+      for cin in [1,3]:
+        for groups in [1,3] if cin == 3 else [1]:
+          for H in [1,2,5]:
+            for W in [1,2,3,5]:
+              with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H, width=W):
+                helper_test_op([(bs,cin,11,28), (6,cin//groups,H,W)],
+                  lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
+                  lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)            
+  
+  def test_slice_fancy_indexing(self):
+    # indices cannot have gradient
+    a = torch.randint(low=-1, high=1, size=(2,1,1,1,1,1), dtype=torch.int64, requires_grad=False)
+    b = torch.randint(high=1, size=(1,3,1,1,1,1), dtype=torch.int64, requires_grad=False)
+    c = torch.randint(low=-5, high=5, size=(1,1,4,1,1,1), dtype=torch.int64, requires_grad=False)
+    d = torch.randint(high=4, size=(2,1,1,5,1,1), dtype=torch.int64, requires_grad=False)
+    e = torch.randint(high=1, size=(1,1,1,1,6,1), dtype=torch.int64, requires_grad=False)
+    i, j, k, o, p = [Tensor(tor.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False) for tor in [a,b,c,d,e]]
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,e], lambda x: x[:,j,k,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,:], lambda x: x[:,j,k,o,:])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,...], lambda x: x[i,j,...])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,...,e], lambda x: x[i,...,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[...,c,:,e], lambda x: x[...,k,:,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,:,10:11,d,0:2], lambda x: x[1,:,10:11,o,0:2])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,4,c,d,2], lambda x: x[1,4,k,o,2])
+    helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)], lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor(1)])
+    helper_test_op([(2,3)], lambda x: x[torch.tensor([1]), torch.tensor([[0,0,0],[0,0,0]])], lambda x: x[Tensor([1]), Tensor([[0,0,0],[0,0,0]])])
+  
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "this test uses more than 8 bufs passing the WEBGPU limit") #TODO: remove after #1461
+  def test_broadcast_full(self):
+    for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
+                                  (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
+      for shapes in [((5,13,24,16), (5,1,24,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
+        with self.subTest(op=torch_op.__name__, shapes=shapes):
+          helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
+
+  def test_broadcast_simple(self):
+    helper_test_op([(45,65), (45,1)], lambda x,y: x/y, lambda x,y: x/y)
+    helper_test_op([(45,65), ()], lambda x,y: x/y, lambda x,y: x/y)
+
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "this test uses more than 8 bufs passing the WEBGPU limit") #TODO: remove after #1461
+  def test_broadcast_partial(self):
+    for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
+                                  (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
+      for shapes in [((1,32,32,32), (1,32,1,1)), ((5,13,24,16,2), (1,13,24,1,1)),
+                     ((4,1), (4,5)), ((1,4), (5,4))]:
+        with self.subTest(op=torch_op.__name__, shapes=shapes):
+          # NOTE: ANE backwards?
+          helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
+  
+  def test_pow(self):
+    # TODO: why is a=0 for these tests?
+    helper_test_op([(45,65)], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
+    helper_test_op([(45,65)], lambda x: x**3, lambda x: Tensor.pow(x,3), a=0)
+    helper_test_op([(45,65)], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, a=0)
+    helper_test_op([()], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
+    helper_test_op([()], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
+    # Regression tests for https://github.com/tinygrad/tinygrad/issues/1151
+    helper_test_op([(45,65)], lambda x: x**3, lambda x: Tensor.pow(x,3), a=-10)
+    helper_test_op([()], lambda x: x**3, lambda x: Tensor.pow(x,3), a=-10)
+    # Regression tests for https://github.com/tinygrad/tinygrad/issues/1251
+    helper_test_op([(45,65)], lambda x: x**0.2, lambda x: Tensor.pow(x,0.2), a=-10)
+    helper_test_op([(45,65)], lambda x: x**1.2, lambda x: Tensor.pow(x,1.2), a=-10)
+    helper_test_op([()], lambda x: x**0.2, lambda x: Tensor.pow(x,0.2), a=-10)
+    helper_test_op([()], lambda x: x**1.2, lambda x: Tensor.pow(x,1.2), a=-10)
+    a, b = Tensor([0.0], requires_grad=True), torch.tensor([0.0], requires_grad=True)
+    helper_test_op([], lambda: b**1.1, lambda: a**1.1, )
+  def test_pow_const(self):
+    helper_test_op([(45,65)], lambda x: x**1.0, lambda x: x**1.0)
+    helper_test_op([(45,65)], lambda x: x**-1.0, lambda x: x**-1.0)
+    helper_test_op([(45,65)], lambda x: 1.0**x, lambda x: 1.0**x)
+    helper_test_op([(45,65)], lambda x: x**2.0, lambda x: x**2.0)
+    helper_test_op([(45,65)], lambda x: 2.0**x, lambda x: 2.0**x)
+    helper_test_op([()], lambda x: x**2.0, lambda x: x**2.0)
+    helper_test_op([()], lambda x: 2.0**x, lambda x: 2.0**x)
   def test_full_like(self):
     a = Tensor([[1,2,3],[4,5,6]])
     b = torch.tensor([[1,2,3],[4,5,6]])
@@ -262,32 +352,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: float("inf")/x, lambda x: float("inf")/x)
     helper_test_op([(45,65)], lambda x: (-float("inf"))/x, lambda x: (-float("inf"))/x)
     helper_test_op([(45,65)], lambda x: float("nan")/x, lambda x: float("nan")/x)
-  def test_pow(self):
-    # TODO: why is a=0 for these tests?
-    helper_test_op([(45,65)], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
-    helper_test_op([(45,65)], lambda x: x**3, lambda x: Tensor.pow(x,3), a=0)
-    helper_test_op([(45,65)], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
-    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, a=0)
-    helper_test_op([()], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
-    helper_test_op([()], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
-    # Regression tests for https://github.com/tinygrad/tinygrad/issues/1151
-    helper_test_op([(45,65)], lambda x: x**3, lambda x: Tensor.pow(x,3), a=-10)
-    helper_test_op([()], lambda x: x**3, lambda x: Tensor.pow(x,3), a=-10)
-    # Regression tests for https://github.com/tinygrad/tinygrad/issues/1251
-    helper_test_op([(45,65)], lambda x: x**0.2, lambda x: Tensor.pow(x,0.2), a=-10)
-    helper_test_op([(45,65)], lambda x: x**1.2, lambda x: Tensor.pow(x,1.2), a=-10)
-    helper_test_op([()], lambda x: x**0.2, lambda x: Tensor.pow(x,0.2), a=-10)
-    helper_test_op([()], lambda x: x**1.2, lambda x: Tensor.pow(x,1.2), a=-10)
-    a, b = Tensor([0.0], requires_grad=True), torch.tensor([0.0], requires_grad=True)
-    helper_test_op([], lambda: b**1.1, lambda: a**1.1, )
-  def test_pow_const(self):
-    helper_test_op([(45,65)], lambda x: x**1.0, lambda x: x**1.0)
-    helper_test_op([(45,65)], lambda x: x**-1.0, lambda x: x**-1.0)
-    helper_test_op([(45,65)], lambda x: 1.0**x, lambda x: 1.0**x)
-    helper_test_op([(45,65)], lambda x: x**2.0, lambda x: x**2.0)
-    helper_test_op([(45,65)], lambda x: 2.0**x, lambda x: 2.0**x)
-    helper_test_op([()], lambda x: x**2.0, lambda x: x**2.0)
-    helper_test_op([()], lambda x: 2.0**x, lambda x: 2.0**x)
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, a=0)
     helper_test_op([()], lambda x: x.sqrt(), Tensor.sqrt, a=0)
@@ -506,28 +570,6 @@ class TestOps(unittest.TestCase):
   def test_flip_eye_crash(self):
     helper_test_op([], lambda: (torch.eye(10)@torch.eye(10).flip(0)),
                        lambda: (Tensor.eye(10)@Tensor.eye(10).flip(0)), forward_only=True)
-
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "this test uses more than 8 bufs passing the WEBGPU limit") #TODO: remove after #1461
-  def test_broadcast_full(self):
-    for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
-                                  (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
-      for shapes in [((5,13,24,16), (5,1,24,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
-        with self.subTest(op=torch_op.__name__, shapes=shapes):
-          helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
-
-  def test_broadcast_simple(self):
-    helper_test_op([(45,65), (45,1)], lambda x,y: x/y, lambda x,y: x/y)
-    helper_test_op([(45,65), ()], lambda x,y: x/y, lambda x,y: x/y)
-
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "this test uses more than 8 bufs passing the WEBGPU limit") #TODO: remove after #1461
-  def test_broadcast_partial(self):
-    for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
-                                  (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
-      for shapes in [((1,32,32,32), (1,32,1,1)), ((5,13,24,16,2), (1,13,24,1,1)),
-                     ((4,1), (4,5)), ((1,4), (5,4))]:
-        with self.subTest(op=torch_op.__name__, shapes=shapes):
-          # NOTE: ANE backwards?
-          helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
 
   def test_slice_in_bounds_1dim(self):
     helper_test_op([(3)], lambda x: x[1:3], lambda x: x[1:3])
@@ -816,17 +858,6 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv_transpose3d(x,w).relu(),
       lambda x,w: Tensor.conv_transpose2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
-  @unittest.skipIf((IMAGE>0), "no conv1d on images")
-  def test_conv1d(self):
-    for bs in [1,8]:
-      for cin in [1,3]:
-        for groups in [1,3] if cin == 3 else [1]:
-          for H in [1,2,5]:
-            with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H):
-              helper_test_op([(bs,cin,11), (6,cin//groups,H)],
-                lambda x,w: torch.nn.functional.conv1d(x,w,groups=groups).relu(),
-                lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
-
   @unittest.skipIf(IMAGE>0, "no conv1d on images")
   def test_simple_padding_conv1d(self):
     bs = 6
@@ -857,17 +888,6 @@ class TestOps(unittest.TestCase):
             helper_test_op([(1,1,n), (1,1,k)],
               lambda x,w: torch.nn.functional.conv1d(torch.nn.functional.pad(x, p),w).relu(),
               lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), atol=1e-4)
-
-  def test_conv2d(self):
-    for bs in [1,8]:
-      for cin in [1,3]:
-        for groups in [1,3] if cin == 3 else [1]:
-          for H in [1,2,5]:
-            for W in [1,2,3,5]:
-              with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H, width=W):
-                helper_test_op([(bs,cin,11,28), (6,cin//groups,H,W)],
-                  lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-                  lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_large_input_conv2d(self):
     bs = 4
@@ -1126,26 +1146,6 @@ class TestOps(unittest.TestCase):
     x = Tensor.full((3, 3), float("inf"))
     n = (x < 0).where(x, 1).numpy()
     assert np.all(n == 1.)
-
-  def test_slice_fancy_indexing(self):
-    # indices cannot have gradient
-    a = torch.randint(low=-1, high=1, size=(2,1,1,1,1,1), dtype=torch.int64, requires_grad=False)
-    b = torch.randint(high=1, size=(1,3,1,1,1,1), dtype=torch.int64, requires_grad=False)
-    c = torch.randint(low=-5, high=5, size=(1,1,4,1,1,1), dtype=torch.int64, requires_grad=False)
-    d = torch.randint(high=4, size=(2,1,1,5,1,1), dtype=torch.int64, requires_grad=False)
-    e = torch.randint(high=1, size=(1,1,1,1,6,1), dtype=torch.int64, requires_grad=False)
-    i, j, k, o, p = [Tensor(tor.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False) for tor in [a,b,c,d,e]]
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,e], lambda x: x[:,j,k,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,:], lambda x: x[:,j,k,o,:])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,...], lambda x: x[i,j,...])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,...,e], lambda x: x[i,...,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[...,c,:,e], lambda x: x[...,k,:,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,:,10:11,d,0:2], lambda x: x[1,:,10:11,o,0:2])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,4,c,d,2], lambda x: x[1,4,k,o,2])
-    helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)], lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor(1)])
-    helper_test_op([(2,3)], lambda x: x[torch.tensor([1]), torch.tensor([[0,0,0],[0,0,0]])], lambda x: x[Tensor([1]), Tensor([[0,0,0],[0,0,0]])])
 
   def test_gather(self):
     # indices cannot have gradient
