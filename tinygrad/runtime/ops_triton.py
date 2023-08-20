@@ -4,7 +4,7 @@ import pycuda.driver as cuda # type: ignore
 
 from triton.compiler import compile as triton_compile
 
-from typing import Any, Tuple, Dict, List, Final, Callable
+from typing import Any, Dict, List, Final, Callable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op, Compiled
 from tinygrad.helpers import dtypes, ImageDType
 from tinygrad.runtime.ops_cuda import RawCUDABuffer
@@ -103,4 +103,4 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     prg += '\n'.join(kernel)
     return prg, global_size, local_size
 
-TritonBuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False ,supports_float4_alu=False), uops_to_triton, TritonProgram)
+TritonBuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False ,supports_float4_alu=False), uops_to_triton, TritonProgram)TritonBuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False, supports_float4_alu=False), uops_to_triton, TritonProgram)
