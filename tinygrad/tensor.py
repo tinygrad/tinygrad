@@ -281,13 +281,10 @@ class Tensor:
     if (num_slices := sum(isinstance(v, (slice, int, Tensor)) for v in orig_slices)) > len(self.shape):
       raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     ellipses_found = [i for i, v in enumerate(orig_slices) if v is Ellipsis]
-    if len(ellipses_found) > 0:
-      if len(ellipses_found) != 1:
-        raise IndexError("an index can only have a single ellipsis ('...')")
-      ellipsis_idx = ellipses_found[0]
-      orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
-    else:
-      orig_slices += [slice(None)] * (len(self.shape) - num_slices)
+    if len(ellipses_found) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
+    ellipsis_idx = len(orig_slices) if len(ellipses_found) == 0 else ellipses_found[0]
+    orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
+
     tensor_found = [(i,v) for i, v in enumerate(orig_slices) if isinstance(v, Tensor)]
     orig_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices]
     valid_slices = [s for s in orig_slices if s is not None]
@@ -314,9 +311,8 @@ class Tensor:
       new_shape = new_shape[::2]
       final_slice = tuple(flatten(((0, sh), (0, 1)) for sh in new_shape))
       sliced_tensor = reshaped_tensor.shrink(final_slice)
-    final_shape = []
+    final_shape, it_shape = [], iter(new_shape)
     sub = [0] * len(tensor_found)
-    it_shape = iter(new_shape)
     for i,s in enumerate(orig_slices):
       if isinstance(s, (int, slice)):
         dim_shape = next(it_shape)
