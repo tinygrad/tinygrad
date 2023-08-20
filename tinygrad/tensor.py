@@ -222,9 +222,6 @@ class Tensor:
     self.grad = Tensor(1, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
-      if not t0.requires_grad:
-        del t0._ctx # TODO: does it help to delete this here ever?
-        continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
