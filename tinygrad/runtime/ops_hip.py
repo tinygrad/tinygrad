@@ -1,12 +1,9 @@
 import numpy as np
 import ctypes, functools
-import os
-import hashlib
-from typing import Union
 import extra.hip_wrapper as hip
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator
+from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, CachedProgram
 from tinygrad.codegen.linearizer import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
@@ -16,12 +13,6 @@ if DEBUG >= 5:
   early_exec = enable_early_exec()
 
 # The default HIP stream is used for everything.
-
-@functools.lru_cache
-def hip_cache_dir():
-  version = hip.hiprtcVersion()
-  cache_dir_base = os.path.expanduser("~/.cache/tinygrad-hip")
-  return os.path.join(cache_dir_base, f"{version[0]}-{version[1]}")
 
 class HIPAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs): return hip.hipMalloc(size * dtype.itemsize)
@@ -34,36 +25,30 @@ class RawHIPBuffer(RawBufferCopyInOut):
   def _copyin(self, x:np.ndarray): hip.hipMemcpyAsync_htod(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, 0)
   def _copyout(self, x:np.ndarray): hip.hipMemcpy_dtoh(x.ctypes.data, self._buf, self.size * self.dtype.itemsize)
 
-class HIPProgram:
-  def __init__(self, name:str, prg:Union[str, bytes], binary=False):
+class HIPProgram(CachedProgram):
+  def __init__(self, name:str, prg:str, binary=False):
+    CachedProgram.__init__(self, name, prg, binary=binary)
+    bin = self.bin()
+    if DEBUG >= 5:
+      asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], bin))
+      print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
+    module = hip.hipModuleLoadData(bin)
+    self.prg = hip.hipModuleGetFunction(module, name)
+  def compile(self, name:str, prg:str, binary=False):
     try:
       if not binary:
-        assert isinstance(prg, str)
-        prg_hash = hashlib.sha256(prg.encode()).digest().hex()
-        prg_cache_path = os.path.join(hip_cache_dir(), prg_hash)
-        if os.path.exists(prg_cache_path):
-          with open(prg_cache_path, "rb") as f:
-            prg = f.read()
-        else:
-          prog = hip.hiprtcCreateProgram(prg, name, [], [])
-          device_properties = hip.hipGetDeviceProperties(hip.hipGetDevice())
-          hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
-          prg = hip.hiprtcGetCode(prog)
-          os.makedirs(hip_cache_dir(), exist_ok=True)
-          prg_cache_path_tmp = prg_cache_path + f".tmp.{os.getpid()}"
-          with open(prg_cache_path_tmp, "wb") as f:
-            f.write(prg)
-          os.rename(prg_cache_path_tmp, prg_cache_path)
+        prog = hip.hiprtcCreateProgram(prg, name, [], [])
+        device_properties = hip.hipGetDeviceProperties(hip.hipGetDevice())
+        hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
+        return hip.hiprtcGetCode(prog)
     except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
-    if DEBUG >= 5:
-      asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
-      print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
-
-    module = hip.hipModuleLoadData(prg)
-    self.prg = hip.hipModuleGetFunction(module, name)
-
+  @staticmethod
+  @functools.lru_cache
+  def toolchain_hash():
+    version = hip.hiprtcVersion()
+    return f"hip-{version[0]}-{version[1]}"
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait:
       start, end = hip.hipEventCreate(), hip.hipEventCreate()
