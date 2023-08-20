@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time
 from functools import partialmethod, reduce
-from itertools import accumulate, filterfalse 
+from itertools import accumulate, filterfalse
 from operator import add
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
@@ -15,7 +15,7 @@ from tinygrad.ops import LoadOps
 class Function:
   def __init__(self, device:str, *tensors:Tensor):
     self.device, self.parents, self.needs_input_grad, self.requires_grad = device, tensors, [tensors[0].requires_grad], tensors[0].requires_grad
-    for t in tensors[1:]: 
+    for t in tensors[1:]:
       self.needs_input_grad += [t.requires_grad]
       self.requires_grad = True if True in self.needs_input_grad else None if None in self.needs_input_grad else False  # intentionally here, does not happen if n_tensors = 1
 
@@ -76,7 +76,7 @@ class Tensor:
       self.device = self.lazydata.device
       self.dtype = self.lazydata.dtype
       return
-    
+  
     raise RuntimeError(f"can't create Tensor from {data}")
 
   def __repr__(self):
@@ -428,7 +428,7 @@ class Tensor:
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False):
-    if not self.shape: 
+    if not self.shape:
       shape: Tuple[int, ...] = ()
       new_shape: Tuple[int, ...] = ()
     elif axis is None:

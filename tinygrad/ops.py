@@ -25,7 +25,7 @@ class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps]]
 
-@dataclass(slots=True, weakref_slot=True)
+@dataclass
 class LazyOp:
    # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
   op: Op
@@ -186,7 +186,7 @@ class Compiled:
     k = Linearizer(ast, output, self.linearizer_opts)
 
     # compilation time
-    
+
     if (cached:=getenv("ENABLE_METHOD_CACHE", 1) and hasattr(k, 'key')) and (key:=k.key) in self.method_cache:
       prg = self.method_cache[key]
     else:
