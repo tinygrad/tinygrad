@@ -550,6 +550,7 @@ class Linearizer:
       x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
     if x.op in {BinaryOps.ADD, BinaryOps.MUL}:
       # Reorder sources to put constants first so get_grouped_maybe_float4 can fold the op
+      # todo: reorder by consts in values?
       srcs = sorted(x.src, key=lambda x: (x.realized.__class__ != RawConst) if x.__class__ == LazyBuffer else 0)
       x.src = tuple(srcs)
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
