@@ -23,7 +23,7 @@ def render_cast(ins, inp, out):
 # https://docs.nvidia.com/cuda/parallel-thread-execution/#
 
 class PTXLanguage(AssemblyLanguage):
-  supports_constant_folding: bool = True
+  pass
 
 def specialize_to_ptx(lang, function_name):
   param_cnt = 0

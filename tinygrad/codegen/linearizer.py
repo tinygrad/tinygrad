@@ -2,12 +2,14 @@ from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, Ty
 import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
+import numpy as np
 
 from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same, partition
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, Op
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst, buf_is_kernel_arg
+from tinygrad.runtime.ops_cpu import numpy_fxn_for_op
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, sym_rename
 VariableOrNum = Union[Variable, NumNode, Node]
@@ -50,15 +52,16 @@ class LocalBuffer(NamedTuple):
   def __str__(self): return f"localbuffer<{self.name}[{self.size}]>"
 
 class Token(NamedTuple):
-  name: str
+  name: Union[str, Union[float, int]]
   dtype: DType
   offset: Optional[int] = None
-  const_zero: bool = False
+  @property
+  def is_const(self): return self.name.__class__ is not str
   def render(self, with_type=False):
     if with_type:
       assert self.offset is None
       return f"{self.dtype.name} {self.name}"
-    if self.offset is None: return self.name
+    if self.offset is None or self.is_const: return str(self.name)
     assert self.dtype in [dtypes._float4, dtypes._float2], f"{self.dtype} isn't okay with offset {self.offset}"
     return self.name+"."+"xyzw"[int(self.offset)]
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
@@ -256,12 +259,13 @@ class Linearizer:
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
         localtype = dtypes.float32
-      this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
+      this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 or (acc is None and const == invalid_value) else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        self.load_cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{load_i}", localtype, const_zero=valid.max == 0), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value)) if this_const is None else \
-                               self.uop(UOps.LOAD, Token(f"{'const' if acc is None else 'acc'}{mnum(i)}_{load_i}", localtype, const_zero=valid.max == 0), [], ConstOp(this_const, valid))
+        self.load_cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{load_i}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value)) if this_const is None else \
+                               self.uop(UOps.LOAD, Token(f"{'const' if acc is None else 'acc'}{mnum(i)}_{load_i}", localtype), [], ConstOp(this_const, valid)) if acc is not None or valid.min == 0 else \
+                               Token(this_const, localtype)
       ret.append(Token(self.load_cache[key].name, self.load_cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
 
@@ -499,19 +503,40 @@ class Linearizer:
     if DEBUG >= 4: print(self.uops[-1])
     return out
 
-  def uop_alu(self, out: Token, vin: List[Token], op: Op) -> Token:
+  def uop_alu(self, out: Token, vin: List[Token], op: Op, cache=True) -> Token:
     fold_result = None
-    if any(v.const_zero for v in vin):
-      if op in [UnaryOps.NOOP, UnaryOps.SIN, UnaryOps.SQRT]: fold_result = vin[0]
-      elif op == BinaryOps.ADD: fold_result = vin[1] if vin[0].const_zero else vin[0]
-      elif op == BinaryOps.SUB: fold_result = vin[0] if vin[1].const_zero else None
-      elif op == BinaryOps.MUL: fold_result = vin[0] if vin[0].const_zero else vin[1]
+    # todo: update abstractions.py with constant folding stuff
+    if all(v.is_const for v in vin):
+      # constant fold
+      fold_result = Token(numpy_fxn_for_op[op](*[np.array(v.name, dtype=v.dtype.np) for v in vin]), out.dtype)
+    # break down mulacc
+    if op == TernaryOps.MULACC:
+      if 0 in [vin[0].name, vin[1].name]: fold_result = vin[2]
+      elif vin[2].name == 0: op, vin = BinaryOps.MUL, vin[:2]
+      elif 1 in [vin[0].name, vin[1].name]: op, vin = BinaryOps.ADD, [vin[0], vin[2]] if vin[1].name == 1 else [vin[1], vin[2]]
+      if op != TernaryOps.MULACC: print(f"    MULACC decomposition")
+    if any(v.name == 0 for v in vin):
+      # identity/absorber fold zeroes
+      if   op == BinaryOps.ADD: fold_result = vin[1] if vin[0].name == 0 else vin[0]
+      elif op == BinaryOps.SUB: fold_result = vin[0] if vin[1].name == 0 else fold_result
+      elif op == BinaryOps.MUL: fold_result = vin[0] if vin[0].name == 0 else vin[1]
+    if any(v.name == 1 for v in vin):
+      # identity fold ones
+      if   op == BinaryOps.MUL: fold_result = vin[1] if vin[0].name == 1 else vin[0]
+      elif op == BinaryOps.DIV: fold_result = vin[0] if vin[1].name == 1 else fold_result
+      elif op == BinaryOps.MOD: fold_result = Token(0 if dtypes.is_int(out.dtype) else 0.0, out.dtype) if vin[1].name == 1 else fold_result
+    # todo: identity/absorber folding for where
+
     if fold_result is not None:
-      if DEBUG >= 5: print(f"    zero fold alu op: {fold_result} <- {vin} {op}")
+      if fold_result.is_const: fold_result = Token(fold_result.name, out.dtype, out.offset)
+      if DEBUG >= 5: print(f"    constant fold alu op: {fold_result} <- {vin} {op}")
       return fold_result
+
+    if not cache: return self.uop(UOps.ALU, out, vin, op)
 
     key = (op, tuple(vin))
     if key not in self.saved_exprs: self.saved_exprs[key] = self.uop(UOps.ALU, out, vin, op)
+    elif DEBUG >= 5: print(f"    alu op from cache: {self.saved_exprs[key]} <- {vin} {op}")
     return self.saved_exprs[key]
 
   def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
@@ -530,14 +555,14 @@ class Linearizer:
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:
-      ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), ops[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.opts.supports_float4_alu)]
+      ret = [(idx, self.uop_alu(val[-1], list(val), ops[x.op], cache=False)) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.opts.supports_float4_alu)]
     else:
       ret = [(idx, self.uop_alu(ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.opts.supports_float4_alu and x.op not in {BinaryOps.CMPLT, TernaryOps.WHERE})]
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
       for o,k in enumerate(i):
-        ordered_ret[k] = Token(j.name, j.dtype, o) if j.dtype == dtypes._float4 else j
+        ordered_ret[k] = Token(j.name, j.dtype, o+j.offset) if j.dtype == dtypes._float4 else j
     assert all(isinstance(x, Token) for x in ordered_ret), "some tokens didn't get scattered?"
     return cast(List[Token], ordered_ret)
 
