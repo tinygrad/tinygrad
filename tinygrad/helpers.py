@@ -4,7 +4,6 @@ import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any, Iterable
 from math import prod # noqa: F401 # pylint:disable=unused-import
 
-ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
 CI = os.getenv("CI", "") != ""
@@ -93,7 +92,7 @@ class dtypes:
   def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
-  bool: Final[DType] = DType(0, 1, "bool", bool)
+  bool: Final[DType] = DType(0, 1, "bool", np.bool_)
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   half = float16
   float32: Final[DType] = DType(4, 4, "float", np.float32)
