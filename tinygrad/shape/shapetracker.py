@@ -129,7 +129,6 @@ def get_unsafe_resize_offset(strides, arg):
   return sum([s * x[0] for s, x in zip(strides,arg)])
 
 class ShapeTracker:
-  __slots__ = "views", "var_vals"
   def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node,int], ...]], views:Optional[List[View]]=None):
     self.views: List[View] = views if views is not None else ([*cast(ShapeTracker, shape).views] if shape.__class__ is ShapeTracker else [View(shape)])
     self.var_vals: Dict[Variable, int] = shape.var_vals if isinstance(shape, ShapeTracker) else {}

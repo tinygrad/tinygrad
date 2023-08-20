@@ -24,7 +24,6 @@ OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOp
 
 class LazyOp:
   # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
-  __slots__ = "op", "src", "arg", "buffers", "__weakref__"
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Any
