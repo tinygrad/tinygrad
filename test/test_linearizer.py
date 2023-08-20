@@ -39,5 +39,22 @@ class TestLinearizer(unittest.TestCase):
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
 
+  def test_upcast_cse(self):
+    # when upcasting, within a subtree, there may be common expressions.
+
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
+    r = a.expand([2]) + b.expand([2])
+    ast = r.lazydata.op
+    r = r.realize()  # realize an output buffer
+    k = Linearizer(ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts)
+    k.process()
+    k.upcast()
+    k.linearize()
+    num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
+    assert num_ops <= 1, "more alu uops than needed"
+
 if __name__ == '__main__':
   unittest.main()

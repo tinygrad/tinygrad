@@ -12,8 +12,8 @@ class TestSymbolicOps(unittest.TestCase):
     vi = Variable("i", 1, 10)
     for i in range(1, 5):
       a = Tensor.rand(3, i)
-      symbolic = f(a.reshape(3, vi)).reshape(3, i).cpu().numpy()
-      expected = f(a).cpu().numpy()
+      symbolic = f(a.reshape(3, vi)).reshape(3, i).numpy()
+      expected = f(a).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_add(self):
@@ -22,8 +22,8 @@ class TestSymbolicOps(unittest.TestCase):
     for i in range(1, 5):
       a = Tensor.rand(3, i)
       b = Tensor.rand(3, i)
-      symbolic = f(a.reshape(3, vi), b.reshape(3, vi)).reshape(3, i).cpu().numpy()
-      expected = f(a, b).cpu().numpy()
+      symbolic = f(a.reshape(3, vi), b.reshape(3, vi)).reshape(3, i).numpy()
+      expected = f(a, b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_matmul(self):
@@ -32,8 +32,8 @@ class TestSymbolicOps(unittest.TestCase):
     for i in range(1, 5):
       a = Tensor.rand(3, i)
       b = Tensor.rand(i, 5)
-      symbolic = f(a.reshape(3, vi), b.reshape(vi, 5)).cpu().numpy()
-      expected = f(a, b).cpu().numpy()
+      symbolic = f(a.reshape(3, vi), b.reshape(vi, 5)).numpy()
+      expected = f(a, b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_matmul_same_var_different_val(self):
@@ -42,7 +42,7 @@ class TestSymbolicOps(unittest.TestCase):
     a = Tensor.rand(3, 4)
     b = Tensor.rand(7, 5)
     with self.assertRaises(AssertionError):
-      f(a.reshape(3, vi), b.reshape(vi, 5)).cpu().numpy()
+      f(a.reshape(3, vi), b.reshape(vi, 5)).numpy()
 
   @unittest.skipIf(Device.DEFAULT == "CLANG" and CI, "broken on CLANG CI")
   def test_attention(self):
@@ -52,8 +52,8 @@ class TestSymbolicOps(unittest.TestCase):
       q = Tensor.rand(2, 1, 4, 8)
       k = Tensor.rand(2, i, 4, 8)
       v = Tensor.rand(2, i, 4, 8)
-      symbolic = f(q, k.reshape(2, vi, 4, 8), v.reshape(2, vi, 4, 8)).reshape(2, 4, 1, 8).cpu().numpy()
-      expected = f(q, k, v).cpu().numpy()
+      symbolic = f(q, k.reshape(2, vi, 4, 8), v.reshape(2, vi, 4, 8)).reshape(2, 4, 1, 8).numpy()
+      expected = f(q, k, v).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_cat_dim0(self):
@@ -62,8 +62,8 @@ class TestSymbolicOps(unittest.TestCase):
     for i in range(1, 5):
       a = Tensor.rand(i, 3)
       b = Tensor.rand(2, 3)
-      symbolic = f(a.reshape(vi, 3), b).reshape(i+2, 3).cpu().numpy()
-      expected = f(a, b).cpu().numpy()
+      symbolic = f(a.reshape(vi, 3), b).reshape(i+2, 3).numpy()
+      expected = f(a, b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_cat_dim1(self):
@@ -72,8 +72,8 @@ class TestSymbolicOps(unittest.TestCase):
     for i in range(1, 5):
       a = Tensor.rand(3, i)
       b = Tensor.rand(3, 2)
-      symbolic = f(a.reshape(3, vi), b).reshape(3, i+2).cpu().numpy()
-      expected = f(a, b).cpu().numpy()
+      symbolic = f(a.reshape(3, vi), b).reshape(3, i+2).numpy()
+      expected = f(a, b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_cat_dim0_two_vars(self):
@@ -84,8 +84,8 @@ class TestSymbolicOps(unittest.TestCase):
       for j in range(1, 5):
         a = Tensor.rand(i, 3)
         b = Tensor.rand(j, 3)
-        symbolic = f(a.reshape(vi, 3), b.reshape(vj, 3)).reshape(i+j, 3).cpu().numpy()
-        expected = f(a, b).cpu().numpy()
+        symbolic = f(a.reshape(vi, 3), b.reshape(vj, 3)).reshape(i+j, 3).numpy()
+        expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_cat_dim1_two_vars(self):
@@ -96,8 +96,8 @@ class TestSymbolicOps(unittest.TestCase):
       for j in range(1, 5):
         a = Tensor.rand(3, i)
         b = Tensor.rand(3, j)
-        symbolic = f(a.reshape(3, vi), b.reshape(3, vj)).reshape(3, i+j).cpu().numpy()
-        expected = f(a, b).cpu().numpy()
+        symbolic = f(a.reshape(3, vi), b.reshape(3, vj)).reshape(3, i+j).numpy()
+        expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_two_vars_plus1(self):
@@ -108,6 +108,9 @@ class TestSymbolicOps(unittest.TestCase):
       for j in range(1, 5):
         a = Tensor.rand(i, 3)
         b = Tensor.rand(3, j)
-        symbolic = f(a.reshape(vi, 3), b.reshape(3, vj)).reshape(i, j).cpu().numpy()
-        expected = f(a, b).cpu().numpy()
+        symbolic = f(a.reshape(vi, 3), b.reshape(3, vj)).reshape(i, j).numpy()
+        expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+if __name__ == '__main__':
+  unittest.main()

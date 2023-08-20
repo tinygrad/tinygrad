@@ -33,10 +33,10 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categoric
 
     # printing
     if not noloss:
-      cat = np.argmax(out.cpu().numpy(), axis=-1)
+      cat = np.argmax(out.numpy(), axis=-1)
       accuracy = (cat == y).mean()
 
-      loss = loss.detach().cpu().numpy()
+      loss = loss.detach().numpy()
       losses.append(loss)
       accuracies.append(accuracy)
       t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
@@ -51,7 +51,7 @@ def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=Fal
     for i in trange((len(Y_test)-1)//BS+1, disable=getenv('CI', False)):
       x = Tensor(transform(X_test[i*BS:(i+1)*BS]))
       out = model.forward(x) if hasattr(model, 'forward') else model(x)
-      Y_test_preds_out[i*BS:(i+1)*BS] = out.cpu().numpy()
+      Y_test_preds_out[i*BS:(i+1)*BS] = out.numpy()
     Y_test_preds = np.argmax(Y_test_preds_out, axis=-1)
     Y_test = target_transform(Y_test)
     return (Y_test == Y_test_preds).mean(), Y_test_preds
