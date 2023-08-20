@@ -1,12 +1,12 @@
 import ctypes
 import numpy as np
 from collections import defaultdict, deque
-from typing import TypeVar, Type, Any, Dict, Deque, Tuple, Optional
-import abc
+from typing import TypeVar, Type, Any, Dict, Deque, Tuple
 import hashlib
 import os
+from contextlib import contextmanager
+import tempfile
 from tinygrad.helpers import DType, dtypes, prod, GlobalCounters, ImageDType
-from tinygrad.helpers import DEBUG
 
 _T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method
@@ -114,35 +114,28 @@ class LRUAllocator:
   def _do_alloc(self, size, dtype, device, **kwargs): raise NotImplementedError("must be implemented")
   def _do_free(self, buf): pass
 
-class CachedProgram(abc.ABC):
-  def __init__(self, name:str, prg:str, binary:bool=False,extension:str=""):
-    prg_hash = hashlib.sha256(prg.encode()).digest().hex()
-    cache_dir_base = os.path.expanduser("~/.cache/tinygrad-programs")
-    cache_dir = os.path.join(cache_dir_base, self.toolchain_hash())
-    self.bin_cache_path = os.path.join(cache_dir, prg_hash)
-    if extension != "":
-      self.bin_cache_path = f"{self.bin_cache_path}.{extension}"
-    if os.path.exists(self.bin_cache_path):
-      if DEBUG >= 5: print(f"loading {name} from cache")
-    else:
-      self.bin_cache_path_tmp = self.bin_cache_path + f".tmp.{os.getpid()}"
-      # temporary file for programs that need to run an assembler
-      self.bin_cache_path_tmp_as = self.bin_cache_path + f".tmp.{os.getpid()}.1"
-      os.makedirs(cache_dir, exist_ok=True)
-      bin = self.compile(name, prg, binary=binary)
-      if bin:  
-        with open(self.bin_cache_path_tmp, "wb") as f:
-          f.write(bin)
-      os.rename(self.bin_cache_path_tmp, self.bin_cache_path)
-      if os.path.exists(self.bin_cache_path_tmp_as):
-        os.remove(self.bin_cache_path_tmp_as)
-  def bin(self) -> bytes:
-    with open(self.bin_cache_path, "rb") as f:
-      return f.read()
-  @abc.abstractmethod
-  def compile(self, name: str, prg: str, binary:bool=False) -> Optional[bytes]:
-    ...
-  @staticmethod
-  @abc.abstractmethod
-  def toolchain_hash() -> str:
-    ...
+def compile_cache(prefix:str, toolchain_hash:str):
+  cache_dir_base = os.path.expanduser("~/.cache/tinygrad-programs")
+  cache_dir = os.path.join(cache_dir_base, f"{prefix}-{toolchain_hash}")
+  def compile_cache_1(func):
+    def compile_cache_2(self, name:str, prg:str, binary:bool=False, extension:str="") -> str:
+      prg_hash = hashlib.sha256(prg.encode()).digest().hex()
+      bin_cache_path = os.path.join(cache_dir, prg_hash)
+      if extension:
+        bin_cache_path = f"{bin_cache_path}.{extension}"
+      if not os.path.exists(bin_cache_path):
+        bin_cache_path_tmp = bin_cache_path + f".tmp.{os.getpid()}"
+        os.makedirs(cache_dir, exist_ok=True)
+        res = func(self, name, prg, binary=binary)
+        with open(bin_cache_path_tmp, "wb") as f:
+          f.write(res)
+        os.rename(bin_cache_path_tmp, bin_cache_path)
+      return bin_cache_path
+    return compile_cache_2
+  return compile_cache_1
+
+@contextmanager
+def mktemp_clean():
+  path = tempfile.mktemp()
+  yield path
+  os.remove(path)

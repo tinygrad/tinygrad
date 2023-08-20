@@ -1,8 +1,8 @@
 import time, ctypes, hashlib, subprocess, platform, functools
-from functools import partial, reduce, lru_cache
+from functools import partial, reduce
 from tinygrad.ops import Compiled
 from tinygrad.helpers import fromimport, getenv, DEBUG, CI
-from tinygrad.runtime.lib import CachedProgram, RawMallocBuffer
+from tinygrad.runtime.lib import RawMallocBuffer, compile_cache, mktemp_clean
 from tinygrad.codegen.linearizer import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 import struct
@@ -20,6 +20,13 @@ args = {
 CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n'
 ADDRESS = 0x10000
 
+def toolchain_hash():
+  version_cmd = "clang --version"
+  if ARM64:
+    version_cmd = "aarch64-linux-gnu-as --version"
+  version_hash = hashlib.sha256(subprocess.check_output(args=(version_cmd).split())).digest().hex()
+  return f"clang-{version_hash}"
+
 # Unicorn doesn't support external calls
 def align(addr): return (addr+4095) & ~(4095)
 mock_lm = {"sinf": np.sin, "sqrtf": np.sqrt, "exp2f": np.exp2, "log2f": np.log2}
@@ -27,44 +34,43 @@ def emulate_ext_calls(fn, uc, address, size, user_data):
   s_in = struct.unpack('f', struct.pack('I', uc.reg_read(getattr(arm64_const, f'UC_ARM64_REG_S{fn[2][1:]}'))))[0]
   uc.reg_write(getattr(arm64_const, f'UC_ARM64_REG_S{fn[1][1:]}'), struct.unpack('I', struct.pack('f', mock_lm[fn[0]](s_in)))[0])  # type: ignore
 
-class ClangProgram(CachedProgram):
+class ClangProgram():
   def __init__(self, name:str, prg:str, binary:bool=False):
     if binary and DEBUG >= 5: print(prg)
     extension = args['ext'] if not binary else 'bin'
-    CachedProgram.__init__(self, name, prg, binary=binary, extension=extension)
+    bin_path = self.compile(name, prg, binary=binary, extension=extension)
     if binary and CI and ARM64:
       prg_lines = prg.split('\n')
       self.varsize = align(int(prg_lines[0].split(" ")[1]))
       self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg_lines[6:-3])) if ins[:2] == 'bl'}
-      with open(self.bin_cache_path, "rb") as f:
+      with open(bin_path, "rb") as f:
         self.prg = f.read()
     else:
-      self.lib = ctypes.CDLL(self.bin_cache_path)
+      self.lib = ctypes.CDLL(bin_path)
       self.fxn = self.lib[name]
-  def compile(self, name:str, prg:str, binary:bool=False):
+  @compile_cache("hip",toolchain_hash())
+  def compile(self, name:str, prg:str, binary:bool=False, extension:str=""):
     # TODO: is there a way to not write this to disk?
     # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
     #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
     if not binary:
       prg = CLANG_PROGRAM_HEADER + prg
-      subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+self.bin_cache_path_tmp).split(), input=prg.encode('utf-8'))
+      with mktemp_clean() as path:
+        subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+path).split(), input=prg.encode('utf-8'))
+        with open(path, "rb") as f:
+          return f.read()
     else:
-      if CI and ARM64:
-        prg_lines = prg.split('\n')
-        prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg_lines[6:-3]] + ['\n'])
-        subprocess.check_output(args=(f'aarch64-linux-gnu-as -o {self.bin_cache_path_tmp_as}').split(), input=prg.encode('utf-8'))
-        subprocess.check_output(args=(f'aarch64-linux-gnu-objcopy -O binary --only-section=.text {self.bin_cache_path_tmp_as} {self.bin_cache_path_tmp}').split())
-      else:
-        subprocess.check_output(args=(f'as -o {self.bin_cache_path_tmp_as}').split(), input=prg.encode('utf-8'))
-        subprocess.check_output(args=(f'clang -lm -shared {self.bin_cache_path_tmp_as} {self.bin_cache_path}').split())
-  @staticmethod
-  @lru_cache
-  def toolchain_hash():
-    version_cmd = "clang --version"
-    if ARM64:
-      version_cmd = "aarch64-linux-gnu-as --version"
-    version_hash = hashlib.sha256(subprocess.check_output(args=(version_cmd).split())).digest().hex()
-    return f"clang-{version_hash}"
+      with mktemp_clean() as as_path, mktemp_clean() as final_path:
+        if CI and ARM64:
+          prg_lines = prg.split('\n')
+          prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg_lines[6:-3]] + ['\n'])
+          subprocess.check_output(args=(f'aarch64-linux-gnu-as -o {as_path}').split(), input=prg.encode('utf-8'))
+          subprocess.check_output(args=(f'aarch64-linux-gnu-objcopy -O binary --only-section=.text {as_path} {final_path}').split())
+        else:
+          subprocess.check_output(args=(f'as -o {as_path}').split(), input=prg.encode('utf-8'))
+          subprocess.check_output(args=(f'clang -lm -shared {as_path} {final_path}').split())
+        with open(final_path, "rb") as f:
+          return f.read()
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()
     if CI and ARM64:
