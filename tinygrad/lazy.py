@@ -37,6 +37,8 @@ OPT_RULES = [
   OptRule(lambda c: LazyOp(BinaryOps.MUL, (c['x'], LazyBuffer.const_like(c['x'], -c[3].op.arg))), [('x', None, [], _capture_is_lb('x')), (1, LoadOps.CONST, [], lambda c:to_lazyop(c[1]).arg==0.0), (2, BinaryOps.SUB, [(1,_skip_movement_ops),'x']), (3, LoadOps.CONST, []), (4, BinaryOps.MUL, [2,(3,_skip_movement_ops)])]), # (0-x)*const => x * -const
   OptRule(lambda c: None if len(dim_diff := [i for i, (a, b) in enumerate(zip(c[3].op.src[0].shape, c[3].shape)) if a != b]) != 1 else LazyOp(BinaryOps.MUL, (c[1], LazyBuffer.const_like(c[1], c[3].op.src[0].shape[dim_diff[0]]))), # reduce()->reshape()/expand()->reduced => initial reduce() multiplying by the size of the expanded dimension.
     [(1, ReduceOps.SUM, [], lambda capt: capt[1].shape==capt[3].shape), (2, MovementOps.RESHAPE, [1], _capture_is_lb(2)), (3, ReduceOps.SUM, [(2, lambda x: x.op.src[0] if x.__class__ is LazyBuffer and not x.realized and x.op.op == MovementOps.EXPAND else x)], _capture_is_lb(3))]),
+  OptRule(lambda capt: LazyOp(BinaryOps.MAX, (capt['a'], capt['b'])), [(1, BinaryOps.CMPLT, ['a','b']), (2, BinaryOps.CMPLT, ['b','a']), (3, BinaryOps.ADD, ['b','a']), (4, LoadOps.CONST, [], lambda capt: to_lazyop(capt[4]).arg == 0.5),
+    (5, BinaryOps.MUL, [3, (4, _skip_movement_ops)]), (6, TernaryOps.WHERE, [1,'b',5]), (7, BinaryOps.MUL, [2,'a',6])]), # 1/(1+x) * x/(1+x) => 1/(1+x) * (1-(1/(1+x))). makes sigmoid stable + optimize div to minus.
 ]
 
 def _patch_pattern(self: Union[LazyOp, LazyBuffer], rule: OptRule) -> LazyOp:
@@ -57,7 +59,10 @@ def _patch_pattern(self: Union[LazyOp, LazyBuffer], rule: OptRule) -> LazyOp:
   return (rule.opgen(captures) or to_lazyop(self)) if match_ast(to_lazyop(self), rule.tree[-1]) else to_lazyop(self)
 
 def simplify_ast(root: Union[LazyOp, LazyBuffer], ctx=None):
-  if ctx is None: ctx = set()
+  if ctx is None:
+    from tinygrad.graph import __log_lazyops
+    __log_lazyops(to_lazyop(root))
+    ctx = set()
   if not SIMPLIFY_PATTERNS or ref(root) in ctx or (root.__class__ is LazyBuffer and root.realized): return root
   ctx.add(ref(root))
   for rule in OPT_RULES:
@@ -185,14 +190,18 @@ class LazyBuffer:
       self.dtype = self.realized.dtype
 
       # log to the graph
-      if (DEBUG or GRAPH) and (self.realized.__class__ is not RawConst or GRAPH >= 2):
-        from tinygrad.graph import log_op
-        log_op(self, self.op)
+      # if (DEBUG or GRAPH) and (self.realized.__class__ is not RawConst or GRAPH >= 2):
+      #   from tinygrad.graph import log_op
+      #   log_op(self, self.op)
 
       # no need to keep the op after realization
       del self.op
     return self
-  def realize(self:LazyBuffer) -> LazyBuffer: return self if self.realized else simplify_ast(self)._realize()
+  def realize(self:LazyBuffer) -> LazyBuffer: 
+    if self.realized: return self
+    from tinygrad.graph import log_op
+    log_op(self, self.op)
+    return self if self.realized else simplify_ast(self)._realize()
 
   @staticmethod
   def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:

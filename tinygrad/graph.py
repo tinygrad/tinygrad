@@ -47,6 +47,36 @@ def str_dtype(dtyp):
   ret = str(dtyp)[7:]
   return "" if ret == 'float' else f"\n{ret}"
 
+top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#ff8080"}
+
+def __log_const(ret):
+  op = ret.op
+  if nm(ret) not in G.nodes: G.add_node(nm(ret))
+  G.nodes[nm(ret)]['label'] = (str(ret.op.arg))
+  G.nodes[nm(ret)]['fillcolor'] = "#ee8888"
+  G.nodes[nm(ret)]['color'] = 'white'
+  G.nodes[nm(ret)]['style'] = ('filled')
+  G.nodes[nm(ret)]['prunable'] = False
+def __log_lazyops(ret):
+  if nm(ret) not in G.nodes: G.add_node(nm(ret))
+  if ret.__class__ is LazyBuffer and not ret.realized and ret.op.op == LoadOps.CONST: return __log_const(ret)
+  if ret.__class__ is LazyBuffer and ret.realized: return
+  phantom = True
+  dashed = False
+  srcs = ret.op.src if ret.__class__ is LazyBuffer else ret.src
+  op = ret.op.op if ret.__class__ is LazyBuffer else ret.op
+  optype = op.__class__
+  if nm(ret) not in G.nodes: G.add_node(nm(ret))
+  G.nodes[nm(ret)]['label'] = (str(op))
+  G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('60' if phantom else ('80' if dashed else str()))) if optype in top_colors else "#ffffff"
+  G.nodes[nm(ret)]['color'] = 'white' if phantom else 'black'
+  G.nodes[nm(ret)]['style'] = ('filled')
+  G.nodes[nm(ret)]['prunable'] = False
+  for i,chi in enumerate(srcs):
+    __log_lazyops(chi)
+    # print(nm(chi), nm(ret), str(i))
+    G.add_edge(nm(chi), nm(ret), label=str(i), color='#00000060' if phantom else 'black')
+
 def log_op(ret: LazyBuffer, ast: LazyOp, show_graph: Optional[bool] = None, phantom=False):
   if show_graph is None: show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
@@ -57,13 +87,13 @@ def log_op(ret: LazyBuffer, ast: LazyOp, show_graph: Optional[bool] = None, phan
   cnts[optype] += 1
   if DEBUG >= 6: print(f"{op} : {', '.join([f'{x.shape}-<{nm(x)}>' for x in inp])} -> {ret.shape}-<{nm(ret)}>")
   if show_graph:
-    top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#ff8080"}
     dashed = (optype == LoadOps and hasattr(ret, "_backing")) or (hasattr(ret, "st") and not ret.st.contiguous)  # type: ignore
-
-    for x in inp:
-      G.add_edge(nm(x), nm(ret), label=get_sop(op), color='#00000060' if phantom else 'black')
-      if 'label' not in G.nodes[nm(x)]:
-        G.nodes[nm(x)]['label'] = str(x.shape)+str_dtype(ret.dtype)
+    # __log_lazyops(ast)
+    G.add_edge(nm(ast), nm(ret), label="realized", color='#00000060' if phantom else 'black')
+    # for x in inp:
+    #   G.add_edge(nm(x), nm(ret), label=get_sop(op), color='#00000060' if phantom else 'black')
+    #   if 'label' not in G.nodes[nm(x)]:
+    #     G.nodes[nm(x)]['label'] = str(x.shape)+str_dtype(ret.dtype)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
 
     G.nodes[nm(ret)]['label'] = (str(set(x.shape for x in inp))+"\n"+str(ret.shape) if optype == ReduceOps else str(ret.shape))+str_dtype(ret.dtype)
