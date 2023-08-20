@@ -14,9 +14,6 @@ if DEBUG >= 5:
 
 # The default HIP stream is used for everything.
 
-def toolchain_hash():
-  version = hip.hiprtcVersion()
-  return f"hip-{version[0]}-{version[1]}"
 class HIPAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs): return hip.hipMalloc(size * dtype.itemsize)
   def _do_free(self, buf): hip.hipFree(buf)
@@ -28,7 +25,7 @@ class RawHIPBuffer(RawBufferCopyInOut):
   def _copyin(self, x:np.ndarray): hip.hipMemcpyAsync_htod(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, 0)
   def _copyout(self, x:np.ndarray): hip.hipMemcpy_dtoh(x.ctypes.data, self._buf, self.size * self.dtype.itemsize)
 
-class HIPProgram():
+class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
     bin_path = self.compile(name, prg, binary=binary)
     with open(bin_path, "rb") as f:
@@ -38,7 +35,7 @@ class HIPProgram():
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
     module = hip.hipModuleLoadData(prg_bin)
     self.prg = hip.hipModuleGetFunction(module, name)
-  @compile_cache("hip",toolchain_hash())
+  @compile_cache("hip", '-'.join(map(str,hip.hiprtcVersion())))
   def compile(self, name:str, prg:str, binary=False):
     try:
       if not binary:

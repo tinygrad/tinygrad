@@ -117,15 +117,13 @@ class LRUAllocator:
 def compile_cache(prefix:str, toolchain_hash:str):
   cache_dir_base = os.path.expanduser("~/.cache/tinygrad-programs")
   cache_dir = os.path.join(cache_dir_base, f"{prefix}-{toolchain_hash}")
+  os.makedirs(cache_dir, exist_ok=True)
   def compile_cache_1(func):
     def compile_cache_2(self, name:str, prg:str, binary:bool=False, extension:str="") -> str:
       prg_hash = hashlib.sha256(prg.encode()).digest().hex()
-      bin_cache_path = os.path.join(cache_dir, prg_hash)
-      if extension:
-        bin_cache_path = f"{bin_cache_path}.{extension}"
+      bin_cache_path = os.path.join(cache_dir, prg_hash + extension)
       if not os.path.exists(bin_cache_path):
         bin_cache_path_tmp = bin_cache_path + f".tmp.{os.getpid()}"
-        os.makedirs(cache_dir, exist_ok=True)
         res = func(self, name, prg, binary=binary)
         with open(bin_cache_path_tmp, "wb") as f:
           f.write(res)
