@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time
 from functools import partialmethod, reduce
-from itertools import accumulate, filterfalse
+from itertools import accumulate
 import operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
@@ -294,9 +294,9 @@ class Tensor:
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     new_slice = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
-    new_shape = tuple(e - s for s, e in new_slice)
     # Shrink
     sliced_tensor = self.shrink(new_slice)
+    new_shape = sliced_tensor.shape
     # Flip
     if (flip_axes := tuple(i for i, s in enumerate(strides) if s < 0)):
       sliced_tensor = sliced_tensor.flip(axis=flip_axes)
