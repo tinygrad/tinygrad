@@ -64,7 +64,7 @@ class CUDAProgram:
             subprocess.run([f"{getenv('CUDA_PATH','/opt/cuda')}/nvvm/bin/cicc","-arch",f"compute_{arch()[3:]}", "-m64", "-prec_div=1", "-prec_sqrt=1", "-fmad=1", fn, "-o",fn], check=True)
             f.seek(0);prg = f.read()
         else: # load cached
-          prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8')
+          with open(fn, 'r') as f: prg = f.read()
       except Exception as e:
         if DEBUG >= 3: print("FAILED TO BUILD", prg)
         os.remove(fn)
