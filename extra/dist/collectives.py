@@ -16,7 +16,6 @@ def allreduce(t:Tensor, cache_id=None) -> Tensor:
 
   # chunk
   chunks = flattened.chunk(WORLD_SIZE, dim=0)
-  reduced = chunks[RANK]
 
   next_rank = (RANK + 1) % WORLD_SIZE
   prev_rank = ((RANK - 1) + WORLD_SIZE) % WORLD_SIZE
@@ -24,20 +23,19 @@ def allreduce(t:Tensor, cache_id=None) -> Tensor:
   # scatter reduce
   current_chunk_index = RANK
   for i in range(WORLD_SIZE - 1):
-    world.send(reduced, next_rank, cache_id=f"{cache_id}-{i}-s" if cache_id is not None else None)
+    world.send(chunks[current_chunk_index], next_rank, cache_id=f"{cache_id}-{i}-s" if cache_id is not None else None)
     current_chunk_index = ((current_chunk_index - 1) + WORLD_SIZE) % WORLD_SIZE
-    recv_buf = Tensor.empty(*reduced.shape)
+    recv_buf = Tensor.empty(*chunks[current_chunk_index].shape)
     world.recv(recv_buf, prev_rank)
-    reduced = chunks[current_chunk_index] + recv_buf
+    chunks[current_chunk_index] += recv_buf
 
   # gather
-  chunks[current_chunk_index] = reduced
   current_chunk_index = (RANK + 1) % WORLD_SIZE
   for i in range(WORLD_SIZE - 1):
-    world.send(reduced, next_rank, cache_id=f"{cache_id}-{i}-g" if cache_id is not None else None)
+    world.send(chunks[current_chunk_index], next_rank, cache_id=f"{cache_id}-{i}-g" if cache_id is not None else None)
     current_chunk_index = ((current_chunk_index - 1) + WORLD_SIZE) % WORLD_SIZE
-    recv_buf = Tensor.empty(*reduced.shape)
+    recv_buf = Tensor.empty(*chunks[current_chunk_index].shape)
     world.recv(recv_buf, prev_rank)
-    reduced = chunks[current_chunk_index] = recv_buf
+    chunks[current_chunk_index].assign(recv_buf)
 
   return Tensor.cat(*chunks, dim=0).shrink(((0, t.numel()),)).reshape(*t.shape)

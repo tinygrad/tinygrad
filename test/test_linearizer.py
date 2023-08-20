@@ -1,6 +1,7 @@
 import numpy as np
 import unittest
 
+from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.lazy import Device
 from tinygrad.ops import GlobalCounters, Compiled
 from tinygrad.tensor import Tensor
@@ -18,6 +19,25 @@ class TestLinearizer(unittest.TestCase):
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.realized, b.lazydata.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy())
+
+  def test_load_dedup(self):
+    # for different leaves in the AST, the same loads may occur.
+
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    a = Tensor.randn(4).realize()
+    # these are of size 3 to avoid float4 coalesce
+    r = a[:-1] + a[1:]
+    ast = r.lazydata.op
+    r = r.realize()  # realize an output buffer
+    k = Linearizer(ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts)
+    k.process()
+    k.upcast()
+    k.linearize()
+    num_loads = len([uop for uop in k.uops if uop.uop == UOps.LOAD])
+    assert num_loads <= 4, "more load uops than needed"
+    assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
 
 if __name__ == '__main__':
   unittest.main()

@@ -1,11 +1,11 @@
-from typing import Callable, List, Tuple, Any, Dict, cast, Union
+from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
 from functools import partial
 from itertools import chain
-from tinygrad.helpers import DEBUG, DType
-
+from tinygrad.helpers import DEBUG, DType, merge_dicts
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters, RawBuffer
+from tinygrad.shape.symbolic import Variable, Node
 
 JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU"]
 
@@ -13,24 +13,27 @@ class TinyJit:
   def __init__(self, fxn:Callable):
     self.fxn: Callable = fxn
     self.cnt: int = 0
-    self.jit_cache: List[Tuple[Callable, Any]] = []  # TODO: Any should be List[RawBuffer], but this fails
+    self.jit_cache: List[Tuple[Callable, List[Optional[RawBuffer]], Dict[Variable, int]]] = []
     self.ret: Any = None
-    self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], int, DType]]= {}   # (kernel_number, buffer_number) -> (input_name, expected_size, expected_type)
+    self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], Tuple[Union[Node, int],...], DType]]= {}   # (kernel_number, buffer_number) -> (input_name, expected_shape, expected_type)
 
   # add support for instance methods
   def __get__(self, obj, objtype): return partial(self.__call__, obj)
 
   def __call__(self, *args, **kwargs) -> Any:
     if Device.DEFAULT not in JIT_SUPPORTED_DEVICE: return self.fxn(*args, **kwargs)  # only jit on supported device
-    # NOTE: this cast is needed since although we know realize will create a ".realized" DeviceBuffer, the type checker doesn't
-    input_rawbuffers: Dict[Union[int, str], RawBuffer] = {cast(Union[int, str], k):cast(RawBuffer, v.realize().lazydata.realized) for k,v in chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
+    # NOTE: this cast is needed since although we know realize will create a ".realized" RawBuffer, the type checker doesn't
+    input_rawbuffers: Dict[Union[int, str], Tuple[RawBuffer, Tuple[Union[Node, int],...]]] = {cast(Union[int, str], k):(cast(RawBuffer, v.realize().lazydata.realized), v.shape) for k,v in chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
     if self.cnt >= 2:
-      for (j,i),(input_name, expected_size, expected_type) in self.input_replace.items():
-        assert input_rawbuffers[input_name].size == expected_size and input_rawbuffers[input_name].dtype == expected_type, f"size or type mismatch in JIT, {input_rawbuffers[input_name]} != <{expected_size}, {expected_type}>"
-        self.jit_cache[j][1][i] = input_rawbuffers[input_name]
-      for prg, args in self.jit_cache: prg(args, jit=True)
+      var_vals = dict(sorted(merge_dicts([arg.lazydata.st.var_vals for arg in args if isinstance(arg, Tensor)]).items(), key=lambda kv: kv[0].key))
+      for (j,i),(input_name, expected_shape, expected_type) in self.input_replace.items():
+        assert input_rawbuffers[input_name][1] == expected_shape and input_rawbuffers[input_name][0].dtype == expected_type, f"shape or type mismatch in JIT, <{input_rawbuffers[input_name][1]}, {input_rawbuffers[input_name][0].dtype}> != <{expected_shape}, {expected_type}>"
+        self.jit_cache[j][1][i] = input_rawbuffers[input_name][0]
+      for prg, pargs, variables in self.jit_cache: # type: Callable, List[Optional[RawBuffer]], Dict[Variable, int]
+        for v in (var_vals.keys() & variables.keys()): variables[v] = var_vals[v]
+        prg(pargs, variables, jit=True)
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 1:
       GlobalCounters.cache = []
@@ -41,10 +44,10 @@ class TinyJit:
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
       # get the inputs for replacement
-      for j,(prg,args) in enumerate(self.jit_cache):  # pylint: disable=E1133
-        for i,a in enumerate(args):
-          if a in input_rawbuffers.values():
-            self.input_replace[(j,i)] = [(k, v.size, v.dtype) for k,v in input_rawbuffers.items() if v == a][0]
+      for j_,cache in enumerate(self.jit_cache): # type: Tuple[int, Tuple[Callable, List[Optional[RawBuffer]], Dict[Variable, int]]]
+        for i,a in enumerate(cache[1]):
+          if a in [v[0] for v in input_rawbuffers.values()]:
+            self.input_replace[(j_,i)] = [(k, v[1], v[0].dtype) for k,v in input_rawbuffers.items() if v[0] == a][0]
         #if prg.local_size is None: prg.local_size = prg.optimize_local_size(args, preserve_output=True)  # the JIT can optimize local
       assert set([x[0] for x in self.input_replace.values()]) == set(input_rawbuffers.keys()), "some input tensors not found"
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None

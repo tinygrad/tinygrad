@@ -38,7 +38,7 @@ class WGSLLanguage(CStyleLanguage):
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
     return prg, global_size[::-1] if len(global_size) else [1], local_size
 
-  def render_for(self, expr:str, _min:int, _max:int) -> str:
+  def render_for(self, expr:str, _min:int, _max:Union[int,str]) -> str:
     return f"for(var {expr} = {_min}; {expr} <= {_max}; {expr}++) {{"
 
   def render_conditional(self, cond:str, x:str, y:str) -> str:

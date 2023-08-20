@@ -11,7 +11,7 @@ class TestCopy(unittest.TestCase):
       t = Tensor.randn(i).realize()
       GlobalCounters.cache = []
       t.assign(t+1).realize()
-      fxn, args = GlobalCounters.cache[0]
+      fxn, args, _ = GlobalCounters.cache[0]
       GlobalCounters.reset()
       def run(): return fxn(args, force_wait=True)
       ct = min([run() for _ in range(10)])
