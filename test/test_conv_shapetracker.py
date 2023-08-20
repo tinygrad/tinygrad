@@ -2,7 +2,7 @@
 import unittest
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import Conv2d
-from tinygrad.ops import GlobalCounters
+from tinygrad.runtime.cache_collector import CacheCollector
 import pytest
 
 pytestmark = pytest.mark.webgpu
@@ -14,10 +14,9 @@ class TestConvShapetracker(unittest.TestCase):
     inp = Tensor.randn(1,16,10,10).realize()
     conv = Conv2d(16, 32, (3,3))
     conv(inp).realize()
-    GlobalCounters.cache = []
+    CacheCollector.start()
     conv(inp).realize()
-    test = GlobalCounters.cache
-    GlobalCounters.cache = None
+    test = CacheCollector.finish()
     assert len(test) == 1, f"conv should only have one kernel {[x[0].name for x in test]}"
     print(test[0][0].prg)
     for arg in test[0][1]:

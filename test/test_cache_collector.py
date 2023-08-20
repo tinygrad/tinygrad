@@ -3,6 +3,7 @@ import unittest
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes
 from tinygrad.runtime.cache_collector import CacheCollector
+from weakref import ref
 
 class FakeDeviceBuffer():
   def __init__(self, sz, dt, device):
@@ -34,6 +35,10 @@ def anybuf(size, dtype):
 def add_to_cache(bufs):
   CacheCollector.add(None, bufs, None)
   return bufs[0]
+
+def add_to_cache_refed(bufs):
+  CacheCollector.add(None, bufs, None)
+  return bufs[0], [ref(buf) for buf in bufs]
 
 def get_bufs_count(cache):
   ss = set()
@@ -96,6 +101,67 @@ class TestCacheCollector(unittest.TestCase):
     assert cache[3][1][0] == outs[3], "Output3 should be on its place."
     assert cache[-1][1][0] == out, "Output does not match."
     assert get_bufs_count(cache) == len(outs) + len(inps), "Nothing to optimize, since buffers are alive and might be used as outputs"
+    FAKE_GLOBAL_ALLOCATOR = None
+
+  def test_cache_collector_middle_input(self):
+    global FAKE_GLOBAL_ALLOCATOR
+    FAKE_GLOBAL_ALLOCATOR = FakeAllocator(256 << 30)
+    inps = [FakeBuffer(64, dtypes.float32) for _ in range(2)]
+    outs = [FakeBuffer(32, dtypes.float32) for _ in range(1)]
+    CacheCollector.start()
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), inps[0]])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), out, inps[1]])
+    out,refs2 = add_to_cache_refed([outs[0], out, FakeBuffer(32, dtypes.float32)])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), out])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), out])
+    cache = CacheCollector.finish()
+    assert cache[0][1][1] == inps[0], "Input should be on its place."
+    assert cache[1][1][2] == inps[1], "Input should be on its place."
+    assert cache[2][1][2] == refs2[2](), "Input should be captured."
+    assert cache[0][1][0] != cache[2][1][2], "None of outputs buffer should reuse new_input."
+    assert cache[1][1][0] != cache[2][1][2], "None of outputs buffer should reuse new_input."
+    assert cache[3][1][0] != cache[2][1][2], "None of outputs buffer should reuse new_input."
+    assert cache[4][1][0] != cache[2][1][2], "None of outputs buffer should reuse new_input."
+    assert cache[-1][1][0] == out, "Output does not match."
+    assert get_bufs_count(cache) == 7
+    FAKE_GLOBAL_ALLOCATOR = None
+
+  def test_cache_collector_multidev(self):
+    global FAKE_GLOBAL_ALLOCATOR
+    FAKE_GLOBAL_ALLOCATOR = FakeAllocator(256 << 30)
+    inps = [FakeBuffer(64, dtypes.float32, '1') for _ in range(2)]
+    CacheCollector.start()
+    out = add_to_cache([FakeBuffer(32, dtypes.float32, '1'), inps[0]])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32, '1'), out, inps[1]])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32, '1'), out])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32, '2'), out])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32, '2'), out])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32, '2'), out])
+    cache = CacheCollector.finish()
+    assert cache[0][1][1] == inps[0], "Input should be on its place."
+    assert cache[1][1][2] == inps[1], "Input should be on its place."
+    for i in range(3):
+      assert cache[i][1][0]._device == '1', f"Device does not match {i}, has {cache[i][1][0]._device}."
+    for i in range(3, 6):
+      assert cache[i][1][0]._device == '2', f"Device does not match {i}, has {cache[i][1][0]._device}."
+    assert get_bufs_count(cache) == 6
+    FAKE_GLOBAL_ALLOCATOR = None
+
+  def test_cache_collector_anybufs_inputs(self):
+    global FAKE_GLOBAL_ALLOCATOR
+    FAKE_GLOBAL_ALLOCATOR = FakeAllocator(256 << 30)
+    inps = [FakeBuffer(64, dtypes.float32, '1') for _ in range(2)]
+    CacheCollector.start()
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), inps[0]])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), out, inps[1]])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), 32, None])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), out, 58, None])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), out])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), out])
+    cache = CacheCollector.finish()
+    assert cache[0][1][1] == inps[0], "Input should be on its place."
+    assert cache[1][1][2] == inps[1], "Input should be on its place."
+    assert get_bufs_count(cache) == 7
     FAKE_GLOBAL_ALLOCATOR = None
 
 if __name__ == "__main__":
