@@ -1,5 +1,5 @@
 import unittest
-from tinygrad.helpers import Context, ContextVar
+from tinygrad.helpers import Context, ContextVar, merge_dicts
 
 VARIABLE = ContextVar("VARIABLE", 0)
 
@@ -105,6 +105,18 @@ with Context(VARIABLE=1):
     with Context(D=3):
       ...
     assert D.value == 2, f"Expected D to be 2, but was {D.value}. Indicates that Context.__exit__ did not restore to the correct value."
+
+class TestMergeDicts(unittest.TestCase):
+  def test_merge_dicts(self):
+    a = {"a": 1, "b": 2}
+    b = {"a": 1, "c": 3}
+    c = {}
+    d = {"a": 2, "b": 2}
+    assert merge_dicts([a, b]) == {"a": 1, "b": 2, "c": 3}
+    assert merge_dicts([a, c]) == a
+    assert merge_dicts([a, b, c]) == {"a": 1, "b": 2, "c": 3}
+    with self.assertRaises(AssertionError):
+      merge_dicts([a, d])
 
 if __name__ == '__main__':
   unittest.main()

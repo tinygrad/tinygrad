@@ -213,5 +213,12 @@ class TestTinygrad(unittest.TestCase):
     for _, dtype in dtypes.fields().items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
 
+  def test_deepwalk_ctx_check(self):
+    layer = Tensor.uniform(1, 1, requires_grad=True)
+    x = Tensor.randn(1, 1, 1)
+    x.dot(layer).mean().backward()
+    x = Tensor.randn(1, 1, 1)
+    x.dot(layer).mean().backward()
+
 if __name__ == '__main__':
   unittest.main()
