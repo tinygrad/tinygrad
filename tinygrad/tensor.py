@@ -275,7 +275,7 @@ class Tensor:
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
   def __getitem__(self, val):
     def normalize_int(e, i, dim_sz):
-      if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
+      if -dim_sz <= e < dim_sz: return dim_sz + e if e < 0 else e
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
     orig_slices = list(val) if isinstance(val, tuple) else [val]
     if (num_slices := sum(isinstance(v, (slice, int, Tensor)) for v in orig_slices)) > len(self.shape):
