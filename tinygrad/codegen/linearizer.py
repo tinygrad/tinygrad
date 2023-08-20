@@ -13,8 +13,14 @@ from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, s
 VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); DEFINE_GLOBAL = auto(); LOAD = auto(); ALU = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); BARRIER = auto(); WMMA = auto(); \
-                  SPECIAL = auto(); DEFINE_REGISTER = auto(); LABEL = auto(); COND_BRANCH = auto() # noqa: E702
+class UOps(Enum):
+  LOOP = auto(); ENDLOOP = auto() # loops can be global, local, or other # noqa: E702
+  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto() # this defines buffers # noqa: E702
+  LOAD = auto(); STORE = auto(); BARRIER = auto() # noqa: E702
+  ALU = auto(); WMMA = auto(); CAST = auto() # noqa: E702
+  # TODO: add CONST. use ALU WHERE for gated load
+  # *** assembly only UOps ***
+  SPECIAL = auto(); LABEL = auto(); COND_BRANCH = auto() # TODO: replace these with LOOP and ENDLOOP # noqa: E702
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
