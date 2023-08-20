@@ -2,10 +2,10 @@ from __future__ import annotations
 import operator, math
 from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast
 import sys, importlib, inspect, functools, pathlib
-from weakref import ref
+from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
-from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, LightWeakSet, LightWeakValueDictionary
+from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.shape.shapetracker import MovementOps, ShapeTracker, View, get_contraction
@@ -94,7 +94,7 @@ def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(cast(
 def get_movementroot(root:LazyBuffer, allow_contiguous=False) -> LazyBuffer: return get_movementroot(cast(LazyBuffer, root.op.src[0]), allow_contiguous) if not root.realized and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and allow_contiguous and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot_contiguous(cast(LazyBuffer, x.op.src[0])) if not x.realized and x.op.op == LoadOps.CONTIGUOUS else (get_movementroot(x, True) if x.optype == MovementOps and x.st.contiguous else x)
 
-lazycache: LightWeakValueDictionary = LightWeakValueDictionary()
+lazycache: WeakValueDictionary = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType):
   # fromcpu aren't cached
   if not LAZYCACHE or (optype is LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}): return LazyBuffer(device, st, optype, op, dtype)
@@ -109,7 +109,6 @@ def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dty
   return ret
 
 class LazyBuffer:
-  __slots__ = 'st', 'device', 'shape', 'optype', 'dtype', 'op', 'realized', 'output_buffer', 'children', 'node_id', '__weakref__'
   __deletable__ = ('op',)
   def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, src:Optional[RawBuffer]=None):
     self.st: ShapeTracker = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
@@ -117,7 +116,7 @@ class LazyBuffer:
     self.realized: Optional[RawBuffer] = src
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
-    self.children: LightWeakSet = LightWeakSet()
+    self.children: WeakSet = WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
     self.op: LazyOp = op
     for x in op.buffers: x.children.add(self)
@@ -196,20 +195,20 @@ class LazyBuffer:
     assert not arg[1] or self.dtype.itemsize == arg[0].itemsize, "can't bitcast mismatched dtype itemsizes"
     return elementwise_op(UnaryOps.CAST, self, arg=arg) if self.dtype != arg[0] else self
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
-  def binary_op(self:LazyBuffer, op:BinaryOps, y:Union[LazyBuffer, float, int]) -> LazyBuffer: return elementwise_op(op, self, y)
-  def ternary_op(self:LazyBuffer, op:TernaryOps, y:Union[LazyBuffer, float, int], z:Union[LazyBuffer, float, int]) -> LazyBuffer: return elementwise_op(op, self, y, z)
+  def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
+  def ternary_op(self:LazyBuffer, op:TernaryOps, y:LazyBuffer, z:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y, z)
 
-  def __add__(self, y:Union[LazyBuffer, float, int]) -> LazyBuffer: return elementwise_op(BinaryOps.ADD, self, y)
-  def __radd__(self, y:Union[LazyBuffer, float, int]) -> LazyBuffer: return elementwise_op(BinaryOps.ADD, y, self)
-  def __mul__(self, y:Union[LazyBuffer, float, int]) -> LazyBuffer: return elementwise_op(BinaryOps.MUL, self, y)
-  def __rmul__(self, y:Union[LazyBuffer, float, int]) -> LazyBuffer: return elementwise_op(BinaryOps.MUL, y, self)
-  def __truediv__(self, y:Union[LazyBuffer, float, int]) -> LazyBuffer: return elementwise_op(BinaryOps.DIV, self, y)
-  def __rtruediv__(self, y:Union[LazyBuffer, float, int]) -> LazyBuffer: return elementwise_op(BinaryOps.DIV, y, self)
-  def __sub__(self, y:Union[LazyBuffer, float, int]) -> LazyBuffer: return elementwise_op(BinaryOps.SUB, self, y)
-  def __rsub__(self, y:Union[LazyBuffer, float, int]) -> LazyBuffer: return elementwise_op(BinaryOps.SUB, y, self)
-  def __lt__(self, y:Union[LazyBuffer, float, int]) -> LazyBuffer: return elementwise_op(BinaryOps.CMPLT, self, y)
-  def __gt__(self, y:Union[LazyBuffer, float, int]) -> LazyBuffer: return elementwise_op(BinaryOps.CMPLT, y, self)
-  def __neg__(self) -> LazyBuffer: return 0.0-self
+  def __add__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.ADD, self, y)
+  def __radd__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.ADD, y, self)
+  def __mul__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.MUL, self, y)
+  def __rmul__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.MUL, y, self)
+  def __truediv__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.DIV, self, y)
+  def __rtruediv__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.DIV, y, self)
+  def __sub__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.SUB, self, y)
+  def __rsub__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.SUB, y, self)
+  def __lt__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.CMPLT, self, y)
+  def __gt__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.CMPLT, y, self)
+  def __neg__(self) -> LazyBuffer: return self.const_like(0.0)-self
 
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
@@ -317,11 +316,7 @@ def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
       new_srcs.append(x)
   return tuple(new_srcs)
 
-def elementwise_op(op:Union[UnaryOps, BinaryOps, TernaryOps], *_srcs:Union[LazyBuffer, float, int], arg:Optional[Any]=None) -> LazyBuffer:
-  # make them all LazyBuffers
-  first_src = [x for x in _srcs if isinstance(x, LazyBuffer)][0]
-  srcs:Tuple[LazyBuffer, ...] = tuple(x if isinstance(x, LazyBuffer) else first_src.const_like(x) for x in _srcs)
-
+def elementwise_op(op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
   # if we are separated from other binary ops by movement ops, we push those movement ops above those binaryops
   if SHUFFLE_MOVEMENT_OPS: srcs = _push_movement_ops(srcs)
 
