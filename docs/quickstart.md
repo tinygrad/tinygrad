@@ -137,18 +137,18 @@ First we need to set the training flag in `Tensor`:
 Tensor.training = True
 ```
 
-For our loss function we will be using cross entropy loss.
+For our loss function we will be using sparse categorical cross entropy loss.
 
 ```python
-# from extra.training import sparse_categorical_crossentropy
-def cross_entropy(out, Y):
+# from tinygrad.tensor import sparse_categorical_crossentropy
+def sparse_categorical_crossentropy(out, Y, ignore_index=-1):
+  loss_mask = Y != ignore_index
   num_classes = out.shape[-1]
-  YY = Y.flatten().astype(np.int32)
-  y = np.zeros((YY.shape[0], num_classes), np.float32)
-  y[range(y.shape[0]),YY] = -1.0*num_classes
-  y = y.reshape(list(Y.shape)+[num_classes])
-  y = Tensor(y)
-  return out.mul(y).mean()
+  y_counter = Tensor.arange(num_classes, requires_grad=False).unsqueeze(0).expand(Y.numel(), num_classes)
+  y = (y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) 
+  y = y * loss_mask.reshape(-1, 1)
+  y = y.reshape(*Y.shape, num_classes)
+  return out.mul(y).sum() / loss_mask.sum()
 ```
 
 As we can see in this implementation of cross entropy loss, there are certain operations that tinygrad does not support.
@@ -187,13 +187,13 @@ for step in range(1000):
   samp = np.random.randint(0, X_train.shape[0], size=(64))
   batch = Tensor(X_train[samp], requires_grad=False)
   # get the corresponding labels
-  labels = Y_train[samp]
+  labels = Tensor(Y_train[samp])
 
   # forward pass
   out = net(batch)
 
   # compute loss
-  loss = cross_entropy(out, labels)
+  loss = sparse_categorical_crossentropy(out, labels)
 
   # zero gradients
   opt.zero_grad()
