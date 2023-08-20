@@ -12,7 +12,7 @@ import pytest
 pytestmark = [pytest.mark.exclude_cuda]
 
 class TestNN(unittest.TestCase):
- 
+
   @unittest.skipIf(getenv("CI", "") != "" and (WINDOWS or Device.DEFAULT == "WEBGPU"), "runs out of memory in CI")
   def test_conv_transpose2d(self):
     BS, C1, H, W = 4, 16, 224, 224
