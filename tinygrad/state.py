@@ -65,10 +65,10 @@ def torch_load(fn:str):
     return {k: Tensor(loader.get_tensor(k).float().numpy()) for k in loader.keys()}
 
   if fn.endswith('.index.json'):
-    with open(fn) as f: map = json.load(f)['weight_map']
-    fns = [os.path.basename(f) for f in set(map.values())] # basename to sanitize paths
+    with open(fn) as fp: weight_map = json.load(fp)['weight_map']
+    fns = [os.path.basename(f) for f in set(weight_map.values())] # basename to sanitize paths
     parts = {n: torch_load(os.path.join(os.path.dirname(fn), n)) for n in fns}
-    return {k: parts[v][k] for k, v in map.items()}
+    return {k: parts[v][k] for k, v in weight_map.items()}
 
   t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
 
