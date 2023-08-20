@@ -50,7 +50,7 @@ class HIPProgram:
           hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
           prg = hip.hiprtcGetCode(prog)
           os.makedirs(hip_cache_dir(), exist_ok=True)
-          prg_cache_path_tmp = prg_cache_path + ".tmp"
+          prg_cache_path_tmp = prg_cache_path + f".tmp.{os.getpid()}"
           with open(prg_cache_path_tmp, "wb") as f:
             f.write(prg)
           os.rename(prg_cache_path_tmp, prg_cache_path)
