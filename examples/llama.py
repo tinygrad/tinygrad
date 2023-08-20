@@ -219,7 +219,11 @@ def concat_weights(models):
   return {name: convert(name) for name in {name: None for model in models for name in model}}
 
 def load(fn:str):
-  if fn.endswith('.safetensors'):
+  if fn.endswith('.index.json'):
+    with open(fn) as fp: weight_map = json.load(fp)['weight_map']
+    parts = {n: load(f'{os.path.dirname(fn)}/{os.path.basename(n)}') for n in set(weight_map.values())}
+    return {k: parts[n][k] for k, n in weight_map.items()}
+  elif fn.endswith('.safetensors'):
     from tinygrad.state import safe_load
     return safe_load(fn)
   else:
@@ -273,14 +277,8 @@ class LLaMa:
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
-    elif model_path.name.endswith('.index.json'):
-      with model_path.open() as fp: weight_map = json.load(fp)['weight_map']
-      parts = {n: load(f'{model_path.parent}/{os.path.basename(n)}') for n in set(weight_map.values())}
-      weights = {k: parts[n][k] for k, n in weight_map.items()}
-    elif re.search(r'.*?\.(bin|safetensors)$', model_path.name):
-      weights = load(str(model_path))
     else:
-      raise Exception(f"Unsupported llama model file: {model_path}")
+      weights = load(str(model_path))
     if 'model.embed_tokens.weight' in weights:
       weights = convert_from_huggingface(weights, model)
 
