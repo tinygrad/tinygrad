@@ -334,12 +334,12 @@ class Tensor:
       idx = [i[1].sign().contiguous().__neg__().contiguous().relu() * ret.shape[i[0]] + i[1] for i in tensor_found] # TODO first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
       max_dim = max(i.ndim for i in idx)
       idx = [i.reshape(*[1]*(max_dim-i.ndim), *i.shape) for i in idx]
-      sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(dim)]
-      new_idx = idx[0].reshape(*idx[0].shape, *[1]*(ret.ndim-sum_dim[0]-1))
-      arange = Tensor.arange(ret.shape[sum_dim[0]], dtype=dtypes.int32, requires_grad=False).reshape(ret.shape[sum_dim[0]], *[1]*(idx[0].ndim + ret.ndim-sum_dim[0]-1))
-      ret = (ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*idx[0].ndim, *ret.shape[sum_dim[0]+1:]) * (arange == new_idx)).sum(sum_dim[0])
+      sum_dim = [d+max_dim-n for n,d in enumerate(dim)]
+      new_idx = idx[0].reshape(*idx[0].shape, *[1]*(ret.ndim-dim[0]-1))
+      arange = Tensor.arange(ret.shape[dim[0]], dtype=dtypes.int32, requires_grad=False).reshape(ret.shape[dim[0]], *[1]*(idx[0].ndim + ret.ndim-dim[0]-1))
+      ret = (ret.reshape(*ret.shape[:dim[0]+1], *[1]*idx[0].ndim, *ret.shape[dim[0]+1:]) * (arange == new_idx)).sum(dim[0])
       for idx_,d in zip(idx[1:],sum_dim[1:]):
-        new_idx = idx_.reshape(*idx_.shape, *[1]*(ret.ndim-sum_dim[0]-idx_.ndim))
+        new_idx = idx_.reshape(*idx_.shape, *[1]*(ret.ndim-dim[0]-idx_.ndim))
         arange = Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False).reshape(ret.shape[d], *[1]*(ret.ndim-d-1))
         ret = ((new_idx == arange) * ret).sum(d)
       if dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1: # special permute case
