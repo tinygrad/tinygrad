@@ -34,7 +34,6 @@ import tinygrad.mlops as mlops
 # **** start with two base classes, Tensor and Function ****
 
 class Tensor:
-  __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False

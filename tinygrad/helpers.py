@@ -1,7 +1,5 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib
-from weakref import KeyedRef, ref
-from _weakref import _remove_dead_weakref # type: ignore
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any, Iterable
 from math import prod # noqa: F401 # pylint:disable=unused-import
@@ -42,7 +40,6 @@ class Context(contextlib.ContextDecorator):
 
 class ContextVar:
   _cache: ClassVar[Dict[str, ContextVar]] = {}
-  __slots__ = "value"
   value: int
   def __new__(cls, key, default_value):
     if key in ContextVar._cache: return ContextVar._cache[key]
@@ -134,37 +131,3 @@ class GlobalCounters:
   cache: ClassVar[Optional[List[Tuple[Callable, Any, Dict[Any, int]]]]] = None  # List[Tuple[Callable, List[RawBuffer], Dict[Variable, int]]]
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
-
-# Stripped down version of a WeakSet
-class LightWeakSet:
-  __slots__ = 'data', '_remove', '__weakref__'
-  def __init__(self):
-    self.data = set()
-    def _remove(item, selfref=ref(self)):
-      self = selfref()
-      if self: self.data.discard(item)
-    self._remove = _remove
-
-  def __len__(self): return len(self.data)
-  def add(self, item): self.data.add(ref(item, self._remove))
-  def discard(self, item): self.data.discard(ref(item))
-
-# Stripped down version of a WeakValueDictionary
-class LightWeakValueDictionary:
-  __slots__ = 'data', '_remove', '__weakref__'
-  def __init__(self):
-    def remove(wr, selfref=ref(self), _atomic_removal=_remove_dead_weakref):
-      self = selfref()
-      if self: _atomic_removal(self.data, wr.key)
-    self._remove = remove
-    self.data = {}
-
-  def __getitem__(self, key):
-    o = self.data[key]()
-    if o is None: raise KeyError(key)
-    else: return o
-
-  def __len__(self): return len(self.data)
-  def __delitem__(self, key): del self.data[key]
-  def __setitem__(self, key, value): self.data[key] = KeyedRef(value, self._remove, key)
-  def __contains__(self, key): return key in self.data
