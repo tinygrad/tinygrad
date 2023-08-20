@@ -52,24 +52,22 @@ else:
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore
     def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) # type: ignore
 
-CUDA_PROGRAM_HEADER = 'struct __attribute__((device_builtin)) uint3{unsigned int x, y, z;};struct __attribute__((device_builtin)) dim3{unsigned int x, y, z;__attribute__((host)) __attribute__((device)) constexpr dim3(unsigned int vx=1,unsigned int vy=1, unsigned int vz=1):x(vx),y(vy),z(vz){} __attribute__((host)) __attribute__((device)) constexpr dim3(uint3 v):x(v.x),y(v.y),z(v.z){} __attribute__((host)) __attribute__((device)) constexpr operator uint3(void) const {return uint3{x,y,z};}};uint3 __attribute__((device_builtin)) extern const threadIdx;uint3 __attribute__((device_builtin)) extern const blockIdx;dim3 __attribute__((device_builtin)) extern const blockDim;dim3 __attribute__((device_builtin)) extern const gridDim;int __attribute__((device_builtin)) extern const warpSize;'
+CUDA_PROGRAM_HEADER = 'struct __attribute__((device_builtin)) uint3{unsigned int x, y, z;};struct __attribute__((device_builtin)) dim3{unsigned int x, y, z;__attribute__((host)) __attribute__((device)) constexpr dim3(unsigned int vx=1,unsigned int vy=1, unsigned int vz=1):x(vx),y(vy),z(vz){} __attribute__((host)) __attribute__((device)) constexpr dim3(uint3 v):x(v.x),y(v.y),z(v.z){} __attribute__((host)) __attribute__((device)) constexpr operator uint3(void) const {return uint3{x,y,z};}};uint3 __attribute__((device_builtin)) extern const threadIdx;uint3 __attribute__((device_builtin)) extern const blockIdx;dim3 __attribute__((device_builtin)) extern const blockDim;dim3 __attribute__((device_builtin)) extern const gridDim;int __attribute__((device_builtin)) extern const warpSize;struct __attribute__((device_builtin)) float1{float x;};struct __attribute__((device_builtin)) __attribute__((aligned(8))) float2 { float x; float y; };struct __attribute__((device_builtin)) float3{float x, y, z;};struct __attribute__((device_builtin)) __attribute__((aligned(16))) float4{float x, y, z, w;};static __inline__ __attribute__((host)) __attribute__((device)) float1 make_float1(float x){float1 t; t.x = x; return t;}static __inline__ __attribute__((host)) __attribute__((device)) float2 make_float2(float x, float y){float2 t; t.x = x; t.y = y; return t;}static __inline__ __attribute__((host)) __attribute__((device)) float3 make_float3(float x, float y, float z){float3 t; t.x = x; t.y = y; t.z = z; return t;}static __inline__ __attribute__((host)) __attribute__((device)) float4 make_float4(float x, float y, float z, float w){float4 t; t.x = x; t.y = y; t.z = z; t.w = w; return t;}'
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
     if not binary:
+      fn = os.path.join(tempfile.gettempdir(), f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.ii")
       try: 
-        if True:
-          fn = os.path.join(tempfile.gettempdir(), f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.ii")
-          if not os.path.exists(fn): 
-            with open(fn, 'w+') as f:
-              f.write(CUDA_PROGRAM_HEADER + prg);f.flush()
-              subprocess.run([f"{getenv('CUDA_PATH','/opt/cuda')}/nvvm/bin/cicc","-arch",f"compute_{arch()[3:]}", "-m64", "-prec_div=1", "-prec_sqrt=1", "-fmad=1", fn, "-o",fn], check=True)
-              f.seek(0);prg = f.read()
-          else:
-            with open(fn, 'r') as f: prg = f.read()
-        else:
+        if not os.path.exists(fn):
+          with open(fn, 'w+') as f:
+            f.write(CUDA_PROGRAM_HEADER + prg);f.flush()
+            subprocess.run([f"{getenv('CUDA_PATH','/opt/cuda')}/nvvm/bin/cicc","-arch",f"compute_{arch()[3:]}", "-m64", "-prec_div=1", "-prec_sqrt=1", "-fmad=1", fn, "-o",fn], check=True)
+            f.seek(0);prg = f.read()
+        else: # load cached
           prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8')
       except Exception as e:
         if DEBUG >= 3: print("FAILED TO BUILD", prg)
+        os.remove(fn)
         raise e
     if DEBUG >= 5: print(pretty_ptx(prg))
     if DEBUG >= 6:
