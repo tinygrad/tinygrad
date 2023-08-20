@@ -4,7 +4,7 @@
 #typeguard.importhook.install_import_hook('tinygrad')
 
 from pathlib import Path
-import functools, sys, argparse, math, platform
+import functools, sys, argparse, math, platform, re
 import numpy as np
 from tqdm import tqdm
 np.set_printoptions(linewidth=200)
@@ -250,7 +250,11 @@ class LLaMa:
     from tinygrad.state import torch_load, load_state_dict
     params = MODEL_PARAMS[model_gen][model_size]
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
-    weights = concat_weights([torch_load(filename) for filename in [f"{model_path}/{model_size}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
+
+    if re.search(r'.*?\.(bin|safetensors|index\.json)$', model_path.name):
+      weights = torch_load(model_path.as_posix())
+    else:
+      weights = concat_weights([torch_load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
     load_state_dict(model, weights, strict=False)
@@ -297,6 +301,7 @@ if __name__ == "__main__":
   parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B, 70B] for Gen 2")
   parser.add_argument('--gen', type=int, default="1", help="Generation of the model to use [1, 2]")
   parser.add_argument('--quantize', action='store_true', help="Quantize the weights to int8 in memory")
+  parser.add_argument('--model', type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
 
   args = parser.parse_args()
   chatbot = args.prompt == None
@@ -392,10 +397,10 @@ After you are done speaking, output [EOS]. You are not Chad.
 
 
   LLAMA_SUFFIX = {1: "", 2: "-2"}[args.gen]
-  WEIGHTS_DIR = Path(__file__).parent.parent / f"weights/LLaMA{LLAMA_SUFFIX}/"
-  TOKENIZER_FILENAME = WEIGHTS_DIR / "tokenizer.model"
+  MODEL_PATH = args.model or Path(__file__).parent.parent / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
+  TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
-  llama = LLaMa.build(WEIGHTS_DIR, TOKENIZER_FILENAME, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
+  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
 
   if chatbot:
     # encode pre prompt
