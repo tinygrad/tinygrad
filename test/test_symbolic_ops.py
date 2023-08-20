@@ -111,3 +111,6 @@ class TestSymbolicOps(unittest.TestCase):
         symbolic = f(a.reshape(vi, 3), b.reshape(3, vj)).reshape(i, j).cpu().numpy()
         expected = f(a, b).cpu().numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+if __name__ == '__main__':
+  unittest.main()
