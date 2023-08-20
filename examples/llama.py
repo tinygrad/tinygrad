@@ -220,9 +220,8 @@ def concat_weights(models):
 
 def load(fn:str):
   if fn.endswith('.safetensors'):
-    from safetensors import safe_open
-    loader = safe_open(fn, framework="pt", device="cpu")
-    return {k: Tensor(loader.get_tensor(k).float().numpy()) for k in loader.keys()}
+    from tinygrad.state import safe_load
+    return safe_load(fn)
   else:
     from tinygrad.state import torch_load
     return torch_load(fn)
