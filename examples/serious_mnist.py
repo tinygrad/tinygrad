@@ -8,7 +8,7 @@ from tinygrad.nn import BatchNorm2d, optim
 from tinygrad.helpers import getenv
 from extra.datasets import fetch_mnist
 from extra.augment import augment_img
-from extra.training import train, evaluate, sparse_categorical_crossentropy
+from extra.training import train, evaluate
 GPU = getenv("GPU")
 QUICK = getenv("QUICK")
 DEBUG = getenv("DEBUG")
@@ -102,7 +102,7 @@ if __name__ == "__main__":
   BS = 32
 
   lmbd = 0.00025
-  lossfn = lambda out,y: sparse_categorical_crossentropy(out, y) + lmbd*(model.weight1.abs() + model.weight2.abs()).sum()
+  lossfn = lambda out,y: out.sparse_categorical_crossentropy(y) + lmbd*(model.weight1.abs() + model.weight2.abs()).sum()
   X_train, Y_train, X_test, Y_test = fetch_mnist()
   X_train = X_train.reshape(-1, 28, 28).astype(np.uint8)
   X_test = X_test.reshape(-1, 28, 28).astype(np.uint8)

@@ -1,8 +1,8 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time
+import time, operator
 from functools import partialmethod, reduce
-from itertools import accumulate
+from itertools import accumulate, filterfalse
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
 from math import ceil, pi, prod, sqrt, log, cos, copysign, isinf
@@ -707,6 +707,12 @@ class Tensor:
     if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False).tril(0).cast(dtypes.bool)
     if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), attn_mask)
     return (self @ key.transpose(-2,-1) / sqrt(self.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
+
+  def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
+    loss_mask = Y != ignore_index
+    y_counter = Tensor.arange(self.shape[-1], requires_grad=False).unsqueeze(0).expand(Y.numel(), self.shape[-1])
+    y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
+    return self.mul(y).sum() / loss_mask.sum()
 
   # ***** cast ops *****
 
