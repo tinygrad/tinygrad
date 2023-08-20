@@ -52,11 +52,23 @@ else:
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore
     def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) # type: ignore
 
+CUDA_PROGRAM_HEADER = 'struct __attribute__((device_builtin)) uint3{unsigned int x, y, z;};struct __attribute__((device_builtin)) dim3{unsigned int x, y, z;__attribute__((host)) __attribute__((device)) constexpr dim3(unsigned int vx=1,unsigned int vy=1, unsigned int vz=1):x(vx),y(vy),z(vz){} __attribute__((host)) __attribute__((device)) constexpr dim3(uint3 v):x(v.x),y(v.y),z(v.z){} __attribute__((host)) __attribute__((device)) constexpr operator uint3(void) const {return uint3{x,y,z};}};uint3 __attribute__((device_builtin)) extern const threadIdx;uint3 __attribute__((device_builtin)) extern const blockIdx;dim3 __attribute__((device_builtin)) extern const blockDim;dim3 __attribute__((device_builtin)) extern const gridDim;int __attribute__((device_builtin)) extern const warpSize;'
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
     if not binary:
-      try: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8')
-      except cuda.CompileError as e:
+      try: 
+        if True:
+          fn = os.path.join(tempfile.gettempdir(), f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.ii")
+          if not os.path.exists(fn): 
+            with open(fn, 'w+') as f:
+              f.write(CUDA_PROGRAM_HEADER + prg);f.flush()
+              subprocess.run([f"{getenv('CUDA_PATH','/opt/cuda')}/nvvm/bin/cicc","-arch",f"compute_{arch()[3:]}", "-m64", "-prec_div=1", "-prec_sqrt=1", "-fmad=1", fn, "-o",fn], check=True)
+              f.seek(0);prg = f.read()
+          else:
+            with open(fn, 'r') as f: prg = f.read()
+        else:
+          prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8')
+      except Exception as e:
         if DEBUG >= 3: print("FAILED TO BUILD", prg)
         raise e
     if DEBUG >= 5: print(pretty_ptx(prg))
@@ -81,7 +93,7 @@ class CUDAProgram:
       return start.time_till(end)*1e-3
 
 renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
-  kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
+  kernel_prefix = "__attribute__((global))", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
   half_prekernel = """
