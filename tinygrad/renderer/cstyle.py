@@ -168,7 +168,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         raise NotImplementedError(f"WMMA not implemented for {args}")
     elif uop == UOps.ALU:
       assert newvar is not None
-      kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")
+      kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[lang.render_const(x.name, x.dtype) if x.is_const else x.render() for x in vin])};")
     elif uop == UOps.LOAD:
       assert newvar is not None and isinstance(args, (MemOp, ConstOp))
       # valids are handled here
@@ -182,7 +182,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     elif uop == UOps.STORE:
       assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
       # TODO: instead of dtypes.float, a base type
-      kk(lang.render_store(args.name, args.memory_dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, args.local))
+      kk(lang.render_store(args.name, args.memory_dtype, lang.render_const(vin[0].name, vin[0].dtype) if vin[0].is_const else vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, args.local))
     elif uop == UOps.CAST and newvar is not None and newvar.dtype.sz > 1:
       kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
     elif uop == UOps.DEFINE_LOCAL:
