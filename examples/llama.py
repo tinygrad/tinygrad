@@ -255,6 +255,19 @@ class LLaMa:
       weights = torch_load(model_path.as_posix())
     else:
       weights = concat_weights([torch_load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
+
+    if 'model.embed_tokens.weight' in weights: # HuggingFace transformers format
+      hf_keymap = {
+        'model.embed_tokens.weight': 'tok_embeddings.weight',
+        **{f'model.layers.{l}.input_layernorm.weight': f'layers.{l}.attention_norm.weight' for l in range(len(model.layers))},
+        **{f'model.layers.{l}.self_attn.{x}_proj.weight': f'layers.{l}.attention.w{x}.weight' for x in ['q', 'k', 'v', 'o'] for l in range(len(model.layers))},
+        **{f'model.layers.{l}.post_attention_layernorm.weight': f'layers.{l}.ffn_norm.weight' for l in range(len(model.layers))},
+        **{f'model.layers.{l}.mlp.{x}_proj.weight': f'layers.{l}.feed_forward.w{y}.weight' for x, y in {'gate': '1', 'down': '2', 'up': '3'}.items() for l in range(len(model.layers))},
+        'model.norm.weight': 'norm.weight',
+        'lm_head.weight': 'output.weight',
+      }
+      weights = {hf_keymap[k]: v for k,v in weights.items() if '.rotary_emb.' not in k}
+
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
     load_state_dict(model, weights, strict=False)
