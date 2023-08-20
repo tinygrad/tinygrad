@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 from functools import partialmethod, reduce
 from itertools import accumulate
-import operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
