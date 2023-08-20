@@ -150,3 +150,6 @@ class TestSymbolicJit(unittest.TestCase):
     bad = Tensor.rand(4, 7).reshape(4, vi)
     with self.assertRaises(AssertionError):
       add(a, bad)
+
+if __name__ == '__main__':
+  unittest.main()
