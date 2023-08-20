@@ -4,7 +4,7 @@
 #typeguard.importhook.install_import_hook('tinygrad')
 
 from pathlib import Path
-import functools, sys, argparse, math, platform, re
+import functools, sys, argparse, math, platform, json, os, re
 import numpy as np
 from tqdm import tqdm
 np.set_printoptions(linewidth=200)
@@ -218,6 +218,27 @@ def concat_weights(models):
     return lazy_tensors[0].cat(*lazy_tensors[1:], dim=axis)
   return {name: convert(name) for name in {name: None for model in models for name in model}}
 
+def load(fn:str):
+  if fn.endswith('.safetensors'):
+    from safetensors import safe_open
+    loader = safe_open(fn, framework="pt", device="cpu")
+    return {k: Tensor(loader.get_tensor(k).float().numpy()) for k in loader.keys()}
+  else:
+    from tinygrad.state import torch_load
+    return torch_load(fn)
+
+def convert_from_huggingface(weights, model):
+  keymap = {
+    'model.embed_tokens.weight': 'tok_embeddings.weight',
+    **{f'model.layers.{l}.input_layernorm.weight': f'layers.{l}.attention_norm.weight' for l in range(len(model.layers))},
+    **{f'model.layers.{l}.self_attn.{x}_proj.weight': f'layers.{l}.attention.w{x}.weight' for x in ['q', 'k', 'v', 'o'] for l in range(len(model.layers))},
+    **{f'model.layers.{l}.post_attention_layernorm.weight': f'layers.{l}.ffn_norm.weight' for l in range(len(model.layers))},
+    **{f'model.layers.{l}.mlp.{x}_proj.weight': f'layers.{l}.feed_forward.w{y}.weight' for x, y in {'gate': '1', 'down': '2', 'up': '3'}.items() for l in range(len(model.layers))},
+    'model.norm.weight': 'norm.weight',
+    'lm_head.weight': 'output.weight',
+  }
+  return {keymap[k]: v for k,v in weights.items() if '.rotary_emb.' not in k}
+
 class AbsmaxQuantizedLinear:
   def __init__(self, in_features, out_features, bias=False):
     assert bias == False
@@ -247,26 +268,22 @@ class LLaMa:
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == VOCAB_SIZE
 
-    from tinygrad.state import torch_load, load_state_dict
+    from tinygrad.state import load_state_dict
     params = MODEL_PARAMS[model_gen][model_size]
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
 
-    if re.search(r'.*?\.(bin|safetensors|index\.json)$', model_path.name):
-      weights = torch_load(model_path.as_posix())
+    if model_path.is_dir():
+      weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
+    elif model_path.name.endswith('.index.json'):
+      with model_path.open() as fp: weight_map = json.load(fp)['weight_map']
+      parts = {n: load(f'{model_path.parent}/{os.path.basename(n)}') for n in set(weight_map.values())}
+      weights = {k: parts[n][k] for k, n in weight_map.items()}
+    elif re.search(r'.*?\.(bin|safetensors)$', model_path.name):
+      weights = load(str(model_path))
     else:
-      weights = concat_weights([torch_load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
-
-    if 'model.embed_tokens.weight' in weights: # HuggingFace transformers format
-      hf_keymap = {
-        'model.embed_tokens.weight': 'tok_embeddings.weight',
-        **{f'model.layers.{l}.input_layernorm.weight': f'layers.{l}.attention_norm.weight' for l in range(len(model.layers))},
-        **{f'model.layers.{l}.self_attn.{x}_proj.weight': f'layers.{l}.attention.w{x}.weight' for x in ['q', 'k', 'v', 'o'] for l in range(len(model.layers))},
-        **{f'model.layers.{l}.post_attention_layernorm.weight': f'layers.{l}.ffn_norm.weight' for l in range(len(model.layers))},
-        **{f'model.layers.{l}.mlp.{x}_proj.weight': f'layers.{l}.feed_forward.w{y}.weight' for x, y in {'gate': '1', 'down': '2', 'up': '3'}.items() for l in range(len(model.layers))},
-        'model.norm.weight': 'norm.weight',
-        'lm_head.weight': 'output.weight',
-      }
-      weights = {hf_keymap[k]: v for k,v in weights.items() if '.rotary_emb.' not in k}
+      raise Exception(f"Unsupported llama model file: {model_path}")
+    if 'model.embed_tokens.weight' in weights:
+      weights = convert_from_huggingface(weights, model)
 
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
