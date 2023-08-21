@@ -182,7 +182,8 @@ class Tensor:
   def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
 
   @staticmethod
-  def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor: return ((high-low) * Tensor.rand(*shape, **kwargs)) + low
+  def uniform(*shape, low=-1.0, high=1.0, dtype:Optional[DType]=None, **kwargs) -> Tensor:
+    return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(Tensor.default_type if dtype is None else dtype) + low
 
   @staticmethod
   def scaled_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul(prod(shape)**-0.5)
