@@ -45,7 +45,7 @@ def kstest(l1, l2):
 def normal_test(func, shape=(20, 23), alpha=0.05):
   Tensor.manual_seed(1337)
   np.random.seed(1337)
-  x = func(*shape).cpu().numpy().flatten()
+  x = func(*shape).numpy().flatten()
   y = np.random.randn(*shape).flatten()
   return kstest(x, y) >= alpha
 
@@ -53,7 +53,7 @@ def equal_distribution(tiny_func, torch_func, numpy_func=None, shape=(20, 23), a
   Tensor.manual_seed(1337)
   torch.manual_seed(1337)
   np.random.seed(1337)
-  x = tiny_func(*shape).cpu().numpy().flatten()
+  x = tiny_func(*shape).numpy().flatten()
   if numpy_func is not None: y = numpy_func(shape).flatten()
   z = torch_func(shape).numpy().flatten()
   return (numpy_func is None or kstest(x, y) >= alpha) and kstest(x, z) >= alpha
