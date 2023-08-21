@@ -23,8 +23,8 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=lambda out,y: ou
 
     # printing
     if not noloss:
-      cat = out.argmax(axis=-1).numpy()
-      accuracy = (cat == y.numpy()).mean()
+      cat = out.argmax(axis=-1)
+      accuracy = (cat == y).mean().numpy()
 
       loss = loss.detach().numpy()
       losses.append(loss)
