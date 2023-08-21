@@ -248,7 +248,7 @@ class Linearizer:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     ret = []
-    invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
+    invalid_value = 0.0  # we only support loading float types right now
     for load_i, _idx in enumerate(_idxs):
       if amt > 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
@@ -528,7 +528,7 @@ class Linearizer:
     # todo: identity/absorber folding for where
 
     if fold_result is not None:
-      if fold_result.is_const: fold_result = Token(fold_result.name, out.dtype, out.offset)
+      if fold_result.is_const: fold_result = Token(fold_result.name, out.dtype, out.offset)  # copy float4 typing if we are folding
       if DEBUG >= 5: print(f"    constant fold alu op: {fold_result} <- {vin} {op}")
       return fold_result
 
