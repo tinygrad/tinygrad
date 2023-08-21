@@ -16,6 +16,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
 from tinygrad.ops import GlobalCounters
 from tinygrad.jit import TinyJit
+from tinygrad.shape.symbolic import Variable, sym_infer
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
@@ -66,36 +67,27 @@ class Attention:
     self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
-  def prepare_attention(self, x:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+  def __call__(self, x:Tensor, cache_k:Tensor, cache_v:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]:
+    bsz, seqlen, _ = x.shape
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
-    return xq, xk, xv
 
-  def inner_attention(self, xq:Tensor, xk:Tensor, xv:Tensor, start_pos:int, mask:Optional[Tensor]) -> Tensor:
-    bsz, seqlen, _, _ = xq.shape
     # kv caching!
     if start_pos == 0:
       keys, values = xk, xv
     else:
-      assert hasattr(self, 'cache_k'), "no cache"
-      assert start_pos == self.cache_k.shape[1] and start_pos == self.cache_v.shape[1], "cache is wrong shape"
+      assert cache_k.shape[0] > 0, "no cache"
+      assert start_pos == sym_infer(cache_k.shape[1], cache_k.lazydata.st.var_vals) == sym_infer(cache_v.shape[1], cache_v.lazydata.st.var_vals), f"cache has wrong shape, not ({start_pos} == {sym_infer(cache_k.shape[1], cache_k.lazydata.st.var_vals)} == {sym_infer(cache_v.shape[1], cache_v.lazydata.st.var_vals)})"
       assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
-      keys, values = self.cache_k.cat(xk, dim=1), self.cache_v.cat(xv, dim=1)
+      keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
 
-    # save the cache
-    self.cache_k, self.cache_v = keys.realize(), values.realize()
-
-    keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
-    return Tensor.scaled_dot_product_attention(xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2), mask).transpose(1, 2).reshape(bsz, seqlen, -1)
-
-  # NOTE: this is not called
-  def __call__(self, x:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
-    xq, xk, xv = self.prepare_attention(x, freqs_cis)
-    output = self.inner_attention(xq, xk, xv, start_pos, mask)
-    return self.wo(output)
+    cache_k, cache_v = keys, values
+    keys, values = repeat_kv(keys, self.n_rep).realize(), repeat_kv(values, self.n_rep).realize()
+    attn = Tensor.scaled_dot_product_attention(xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2), mask).transpose(1, 2).reshape(bsz, seqlen, -1)
+    return self.wo(attn).realize(), cache_k.realize(), cache_v.realize()
 
 class FeedForward:
   def __init__(self, dim, hidden_dim, multiple_of, linear=Linear, ffn_dim_multiplier=None):
@@ -118,26 +110,32 @@ class TransformerBlock:
     self.feed_forward = FeedForward(dim, 4*dim, multiple_of, linear, ffn_dim_multiplier)
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
-    if getenv("JIT"):
-      self._pre = TinyJit(self.pre)
-      self._post = TinyJit(self.post)
-    else:
-      self._pre, self._post = self.pre, self.post
+    self.cache_k, self.cache_v = None, None
 
-  def pre(self, x:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
-    xq, xk, xv = self.attention.prepare_attention(self.attention_norm(x), freqs_cis)
-    return xq.realize(), xk.realize(), xv.realize()
+    self.jitted_attention_norm = TinyJit(lambda x: self.attention_norm(x).realize())
+    self.jitted_attn = TinyJit(self.attention.__call__)
+    self.jitted_norm_output = TinyJit(self.norm_output)
 
-  def post(self, x:Tensor, output:Tensor) -> Tensor:
-    h = x + self.attention.wo(output)
+  def norm_output(self, x:Tensor, output:Tensor) -> Tensor:
+    h = x + output
     return (h + self.feed_forward(self.ffn_norm(h))).realize()
 
   def __call__(self, x:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]):
-    # if mask is not None, x's shape is dymanic based on user input and pre/post can't be jitted
-    xq, xk, xv = self._pre(x, freqs_cis) if mask is None else self.pre(x, freqs_cis)
-    # inner_attention can't be jitted because it's dynamic based on start_pos
-    output = self.attention.inner_attention(xq, xk, xv, start_pos, mask)
-    return self._post(x, output) if mask is None else self.post(x, output)
+    bsz, seqlen, _ = x.shape
+    do_jit = getenv("JIT") and mask is None
+    if do_jit:
+      pos = Variable("pos", 1, 1024)
+      self.cache_k = self.cache_k.reshape(self.cache_k.shape[0], pos, self.cache_k.shape[2], self.cache_k.shape[3])
+      self.cache_v = self.cache_v.reshape(self.cache_v.shape[0], pos, self.cache_v.shape[2], self.cache_v.shape[3])
+      output, cache_k, cache_v = self.jitted_attn(self.jitted_attention_norm(x), self.cache_k, self.cache_v, start_pos, freqs_cis, mask)
+    else:
+      output, cache_k, cache_v = self.attention(self.attention_norm(x), self.cache_k, self.cache_v, start_pos, freqs_cis, mask)
+
+    # save the cache. with symbolic shape, cast it back to int shape so we have int shape in cache
+    self.cache_k = cache_k.reshape(cache_k.shape[0], start_pos+seqlen, cache_k.shape[2], cache_k.shape[3]).realize()
+    self.cache_v = cache_v.reshape(cache_v.shape[0], start_pos+seqlen, cache_v.shape[2], cache_v.shape[3]).realize()
+
+    return self.jitted_norm_output(x, output) if do_jit else self.norm_output(x, output)
 
 class Transformer:
   def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None, n_kv_heads=None):
@@ -146,16 +144,21 @@ class Transformer:
     self.tok_embeddings = Embedding(vocab_size, dim)
     self.output = linear(dim, vocab_size, bias=False)
     self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2))
+    self.norm_output = lambda x: self.output(self.norm(x))
+
+    self.jitted_tok_embeddings = TinyJit(lambda x: self.tok_embeddings(x).realize())
+    self.jitted_norm_output = TinyJit(lambda x: self.norm_output(x).realize())
 
   def __call__(self, tokens:Tensor, start_pos:int):
     _bsz, seqlen = tokens.shape
-    h = self.tok_embeddings(tokens)
-
-    # get only the part we are using. making it contiguous avoids more kernel calls
+    # get only the part we are using. TODO: removing contiguous resulted in a bug?
     freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen].contiguous().realize()
     mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
+
+    do_jit = getenv("JIT") and mask is None
+    h = self.jitted_tok_embeddings(tokens) if do_jit else self.tok_embeddings(tokens)
     h = h.sequential([functools.partial(layer, start_pos=start_pos, freqs_cis=freqs_cis, mask=mask) for layer in self.layers])
-    return self.output(self.norm(h))
+    return self.jitted_norm_output(h) if do_jit else self.norm_output(h)
 
 # **** files and arguments ****
 

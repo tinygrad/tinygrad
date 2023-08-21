@@ -23,7 +23,6 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps]]
 
 class LazyOp:
-  # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
   __slots__ = "op", "src", "arg", "buffers", "__weakref__"
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
@@ -134,7 +133,7 @@ class ASTRunner:
 
   def exec(self, bufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False, optimizing=False) -> Optional[float]:
     rawbufs = dedup([x.realized for x in bufs if buf_is_kernel_arg(x)])
-    if GlobalCounters.cache is not None and not optimizing: GlobalCounters.cache.append((self, rawbufs))
+    if GlobalCounters.cache is not None and not optimizing: GlobalCounters.cache.append((self, rawbufs, var_vals if var_vals is not None else {}))
     return self(rawbufs, var_vals, force_wait=force_wait)
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
