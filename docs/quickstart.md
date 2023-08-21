@@ -115,13 +115,13 @@ class TinyNet:
     x = self.l1(x)
     x = x.leakyrelu()
     x = self.l2(x)
-    return x.log_softmax()
+    return x
 
 net = TinyNet()
 ```
 
 We can see that the forward pass of our neural network is just the sequence of operations performed on the input tensor `x`.
-We can also see that functional operations like `leakyrelu` and `log_softmax` are not defined as classes and instead are just methods we can just call.
+We can also see that functional operation like `leakyrelu` is not defined as a class and instead is just a method we can just call.
 Finally, we just initialize an instance of our neural network, and we are ready to start training it.
 
 ## Training
@@ -148,7 +148,7 @@ def sparse_categorical_crossentropy(out, Y, ignore_index=-1):
   y = (y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) 
   y = y * loss_mask.reshape(-1, 1)
   y = y.reshape(*Y.shape, num_classes)
-  return out.mul(y).sum() / loss_mask.sum()
+  return out.log_softmax().mul(y).sum() / loss_mask.sum()
 ```
 
 As we can see in this implementation of cross entropy loss, there are certain operations that tinygrad does not support.
