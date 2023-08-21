@@ -355,8 +355,9 @@ if __name__ == "__main__":
   if not getenv("DIST"):
     train_cifar()
   else: # distributed
-    from tinygrad.runtime.ops_gpu import CL
-    devices = [f"gpu:{i}" for i in range(len(CL.devices))]
+    # from tinygrad.runtime.ops_gpu import CL
+    # devices = [f"gpu:{i}" for i in range(len(CL.devices))]
+    devices = [f"hip:{i}" for i in range(6)]
     world_size = len(devices)
 
     # ensure that the batch size is divisible by the number of devices
