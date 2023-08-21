@@ -504,23 +504,41 @@ class Linearizer:
       if all(v.is_const for v in vin):
         # constant fold
         fold_result = Token(numpy_fxn_for_op[op](*[np.array(v.name, dtype=v.dtype.np) for v in vin]), out.dtype)
-      # break down mulacc
-      if op == TernaryOps.MULACC:
-        if 0 in [vin[0].name, vin[1].name]: fold_result = vin[2]
-        elif vin[2].name == 0: op, vin = BinaryOps.MUL, vin[:2]
-        elif 1 in [vin[0].name, vin[1].name]: op, vin = BinaryOps.ADD, [vin[0], vin[2]] if vin[1].name == 1 else [vin[1], vin[2]]
-        if op != TernaryOps.MULACC: print(f"    MULACC decomposition")
-      if any(v.name == 0 for v in vin):
-        # identity/absorber fold zeroes
-        if   op == BinaryOps.ADD: fold_result = vin[1] if vin[0].name == 0 else vin[0]
-        elif op == BinaryOps.SUB: fold_result = vin[0] if vin[1].name == 0 else fold_result
-        elif op == BinaryOps.MUL: fold_result = vin[0] if vin[0].name == 0 else vin[1]
-      if any(v.name == 1 for v in vin):
-        # identity fold ones
-        if   op == BinaryOps.MUL: fold_result = vin[1] if vin[0].name == 1 else vin[0]
-        elif op == BinaryOps.DIV: fold_result = vin[0] if vin[1].name == 1 else fold_result
-        elif op == BinaryOps.MOD: fold_result = Token(0 if dtypes.is_int(out.dtype) else 0.0, out.dtype) if vin[1].name == 1 else fold_result
-      # todo: identity/absorber folding for where
+      elif False:
+        vars = [Variable.num(v.name) if v.is_const else Variable(v, 0, 1) for v in vin]
+        sym_out = None
+        if op == TernaryOps.MULACC: sym_out = vars[0] * vars[1] + vars[2]
+        if op == BinaryOps.ADD: sym_out = vars[0] + vars[1]
+        # if op == BinaryOps.SUB: sym_out = vars[0] + vars[1]
+        if op == BinaryOps.MUL: sym_out = vars[0] * vars[1]
+        render_ops = {
+          NumNode: lambda self, ops, ctx: (None, None, Token(self.b, out.dtype, out.offset)),
+          Variable: lambda self, ops, ctx: (None, None, self.expr),
+          SumNode: lambda self, ops, ctx: (BinaryOps.ADD, [self.nodes[0].render(ops, ctx)[2], self.nodes[1].render(ops, ctx)[2]], None) \
+                                            if self.nodes[0].__class__ is not MulNode else \
+                                            (TernaryOps.MULACC, [self.nodes[0].a.render(ops, ctx)[2], self.nodes[0].b.render(ops, ctx)[2], self.nodes[1].render(ops, ctx)[2]], None),
+          MulNode: lambda self, ops, ctx: (BinaryOps.MUL, [self.a.render(ops, ctx)[2], self.b.render(ops, ctx)[2] if isinstance(self.b, Node) else Token(self.b, out.dtype, out.offset)], None)
+        }
+        if sym_out is not None:
+          op, vin, fold_result = sym_out.render(render_ops)
+      else:
+        # break down mulacc
+        if op == TernaryOps.MULACC:
+          if 0 in [vin[0].name, vin[1].name]: fold_result = vin[2]
+          elif vin[2].name == 0: op, vin = BinaryOps.MUL, vin[:2]
+          elif 1 in [vin[0].name, vin[1].name]: op, vin = BinaryOps.ADD, [vin[0], vin[2]] if vin[1].name == 1 else [vin[1], vin[2]]
+          if op != TernaryOps.MULACC: print(f"    MULACC decomposition")
+        if any(v.name == 0 for v in vin):
+          # identity/absorber fold zeroes
+          if   op == BinaryOps.ADD: fold_result = vin[1] if vin[0].name == 0 else vin[0]
+          elif op == BinaryOps.SUB: fold_result = vin[0] if vin[1].name == 0 else fold_result
+          elif op == BinaryOps.MUL: fold_result = vin[0] if vin[0].name == 0 else vin[1]
+        if any(v.name == 1 for v in vin):
+          # identity fold ones
+          if   op == BinaryOps.MUL: fold_result = vin[1] if vin[0].name == 1 else vin[0]
+          elif op == BinaryOps.DIV: fold_result = vin[0] if vin[1].name == 1 else fold_result
+          elif op == BinaryOps.MOD: fold_result = Token(0 if dtypes.is_int(out.dtype) else 0.0, out.dtype) if vin[1].name == 1 else fold_result
+        # todo: identity/absorber folding for where
 
       if fold_result is not None:
         if fold_result.is_const: fold_result = Token(fold_result.name, out.dtype, out.offset)  # copy float4 typing if we are folding
