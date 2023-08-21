@@ -1,8 +1,8 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, operator
+import time
 from functools import partialmethod, reduce
-from itertools import accumulate, filterfalse
+from itertools import accumulate
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
 from math import ceil, pi, prod, sqrt, log, cos, copysign, isinf
