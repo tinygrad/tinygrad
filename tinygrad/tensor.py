@@ -1,6 +1,5 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import os
 import time
 from functools import partialmethod, reduce
 from itertools import accumulate, filterfalse
