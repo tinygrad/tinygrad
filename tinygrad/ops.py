@@ -25,7 +25,7 @@ class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps]]
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class LazyOp:
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
