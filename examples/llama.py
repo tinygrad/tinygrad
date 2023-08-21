@@ -206,7 +206,7 @@ MODEL_PARAMS = {
 def sample(logits, temperature):
   if temperature < 1e-6:
     # so close to 0 we use argmax
-    return int(logits.numpy().argmax())
+    return int(logits.argmax().numpy())
   else:
     probs = (logits / temperature).softmax()
     probs = probs.numpy().flatten()
