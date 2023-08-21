@@ -242,7 +242,7 @@ class Linearizer:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     ret = []
-    invalid_value = 0.0  # we only support loading float types right now
+    invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
     for load_i, _idx in enumerate(_idxs):
       if amt > 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
@@ -253,12 +253,12 @@ class Linearizer:
       else:
         idx, valid = self.sts[i].expr_idxs(_idx)
         localtype = dtypes.float32
-      this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 or (acc is None and const == invalid_value) else (const, idx, valid)
+      this_const, idx, valid = (float(invalid_value), Variable.num(0), Variable.num(1)) if valid.max == 0 or (acc is None and const == invalid_value) else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         self.load_cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{load_i}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value)) if this_const is None else \
-                               self.uop(UOps.LOAD, Token(f"{'const' if acc is None else 'acc'}{mnum(i)}_{load_i}", localtype), [], ConstOp(this_const, valid)) if acc is not None or valid.min == 0 or not self.opts.supports_constant_folding else \
+                               self.uop(UOps.LOAD, Token(f"{'const' if acc is None else 'acc'}{mnum(i)}_{load_i}", localtype), [], ConstOp(this_const, valid, float(invalid_value))) if acc is not None or valid.min == 0 or not self.opts.supports_constant_folding else \
                                Token(this_const, localtype)
       ret.append(Token(self.load_cache[key].name, self.load_cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
