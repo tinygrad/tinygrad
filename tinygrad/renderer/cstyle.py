@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, NamedTuple, Tuple, Union
+from typing import Dict, List, Optional, NamedTuple, Tuple, Union, cast
 import math
 from tinygrad.codegen.linearizer import UOps, UOp, MemOp, ConstOp, Token
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
@@ -62,10 +62,10 @@ class CStyleLanguage(NamedTuple):
     if with_type:
       assert x.offset is None
       return f"{x.dtype.name} {x.name}"
-    if x.is_const: return self.render_const(x.name, x.dtype)
+    if x.is_const: return self.render_const(cast(Union[float, int], x.name), x.dtype)
     if x.offset is None: return str(x.name)
     assert x.dtype in [dtypes._float4, dtypes._float2], f"{x.dtype} isn't okay with offset {x.offset}"
-    return x.name + "." + "xyzw"[int(x.offset)]
+    return cast(str, x.name) + "." + "xyzw"[int(x.offset)]
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:

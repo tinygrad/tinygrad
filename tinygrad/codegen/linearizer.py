@@ -510,7 +510,7 @@ class Linearizer:
           if 0 in [vin[0].name, vin[1].name]: fold_result = vin[2]
           elif vin[2].name == 0: op, vin = BinaryOps.MUL, vin[:2]
           elif 1 in [vin[0].name, vin[1].name]: op, vin = BinaryOps.ADD, [vin[0], vin[2]] if vin[1].name == 1 else [vin[1], vin[2]]
-          if DEBUG >= 5 and op != TernaryOps.MULACC: print(f"    MULACC decomposition")
+          if DEBUG >= 5 and op != TernaryOps.MULACC: print("    MULACC decomposition")
         if any(v.name == 0 for v in vin):
           # identity/absorber fold zeroes
           if   op == BinaryOps.ADD: fold_result = vin[1] if vin[0].name == 0 else vin[0]
@@ -551,7 +551,7 @@ class Linearizer:
       srcs = sorted(x.src, key=lambda x: (x.realized.__class__ != RawConst) if x.__class__ == LazyBuffer else 0)
       x.src = tuple(srcs)
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
-    ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
+    ops: Dict[Op, Op] = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:
       ret = [(idx, self.uop_alu(val[-1], list(val), ops[x.op], cache=False)) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.opts.supports_float4_alu)]
     else:
