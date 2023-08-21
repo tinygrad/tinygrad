@@ -8,7 +8,7 @@ from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, i
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
   assert len(shape) == len(strides)
-  ret = [(shape[0], strides[0])] if len(shape) > 0 else []
+  ret = [(shape[0], strides[0])] if shape else []
   for i in range(1, len(shape)):
     if ret[-1][1] == shape[i]*strides[i] or ret[-1][0] == 1:
       ret[-1] = (ret[-1][0] * shape[i], strides[i])

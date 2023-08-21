@@ -282,7 +282,7 @@ class Tensor:
       raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     ellipses_found = [i for i, v in enumerate(orig_slices) if v is Ellipsis]
     if len(ellipses_found) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
-    ellipsis_idx = len(orig_slices) if len(ellipses_found) == 0 else ellipses_found[0]
+    ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices)
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
 
     tensor_found = [(i,v) for i, v in enumerate(orig_slices) if isinstance(v, Tensor)]

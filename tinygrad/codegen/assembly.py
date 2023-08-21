@@ -80,7 +80,7 @@ class AssemblyLanguage:
     off = 0  # TODO: should this be None?
     if isinstance(idx, SumNode):
       nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
-      if len(nums) > 0 and nums[0] < 4096 and (idx-nums[0]).min >= 0:  # TODO: different for each GPU?
+      if nums and nums[0] < 4096 and (idx-nums[0]).min >= 0:  # TODO: different for each GPU?
         idx -= nums[0]
         off = cast(int, nums[0])
     reg = idx.render(self.render_ops, self)
