@@ -197,10 +197,6 @@ def cutmix(X, Y, mask_size=3, p=0.5):
   Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
   return X_cutmix, Y_cutmix
 
-def argmax(x:Tensor, axis:int=-1) -> Tensor:
-  m = x == x.max(axis=axis, keepdim=True)
-  return (Tensor.arange(x.shape[axis]) * m).sum(axis=axis)
-
 def fetch_batches(X, Y, BS, seed, is_train=False):
   while True:
     set_seed(seed)
@@ -292,7 +288,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   def eval_step_jitted(model, X, Y):
     out = model(X, training=False)
     loss = cross_entropy(out, Y, reduction='mean')
-    correct = argmax(out, axis=1) == argmax(Y, axis=1)
+    correct = out.argmax(axis=1, keepdim=True) == Y.argmax(axis=1, keepdim=True)
     return correct.realize(), loss.realize()
 
   # 97 steps in 2 seconds = 20ms / step  Tensor.training = True

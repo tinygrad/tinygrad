@@ -43,7 +43,7 @@ class RNNT:
           mask = (mask + 1).clip(0, 1)
           label = Tensor([[labels[-1] if labels[-1] <= 28 else labels[-1] - 1]], requires_grad=False) + 1 - 1
         jhc = self._pred_joint(Tensor(logit.numpy()), label, hc, mask)
-        k = np.argmax(jhc[0, 0, :29].numpy(), axis=0)
+        k = jhc[0, 0, :29].argmax(axis=0).numpy()
         not_blank = k != 28
         if not_blank:
           labels.append(k)

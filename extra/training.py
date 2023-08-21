@@ -33,7 +33,7 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categoric
 
     # printing
     if not noloss:
-      cat = np.argmax(out.numpy(), axis=-1)
+      cat = out.argmax(axis=-1).numpy()
       accuracy = (cat == y).mean()
 
       loss = loss.detach().numpy()

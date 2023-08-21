@@ -90,7 +90,7 @@ if __name__ == "__main__":
 
     st = time.time()
     loss = loss.numpy()
-    cat = np.argmax(out.numpy(), axis=1)
+    cat = out.argmax(axis=1).numpy()
     accuracy = (cat == Y).mean()
     finish_time = (time.time()-st)*1000.0
 

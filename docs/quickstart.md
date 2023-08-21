@@ -205,7 +205,7 @@ for step in range(1000):
   opt.step()
 
   # calculate accuracy
-  pred = np.argmax(out.numpy(), axis=-1)
+  pred = out.argmax(axis=-1).numpy()
   acc = (pred == labels).mean()
 
   if step % 100 == 0:
@@ -234,7 +234,7 @@ with Timing("Time: "):
     out = net(batch)
 
     # calculate accuracy
-    pred = np.argmax(out.numpy(), axis=-1)
+    pred = out.argmax(axis=-1).numpy()
     avg_acc += (pred == labels).mean()
   print(f"Test Accuracy: {avg_acc / 1000}")
 ```
@@ -278,7 +278,7 @@ with Timing("Time: "):
     out = jit(batch)
 
     # calculate accuracy
-    pred = np.argmax(out.numpy(), axis=-1)
+    pred = out.argmax(axis=-1).numpy()
     avg_acc += (pred == labels).mean()
   print(f"Test Accuracy: {avg_acc / 1000}")
 ```
