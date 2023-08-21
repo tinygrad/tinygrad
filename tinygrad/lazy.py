@@ -69,7 +69,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
   psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and not x.realized and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape: Tuple[int, ...] = self.shape
-  if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and len(psrcs) >= 1:
+  if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and psrcs:
     psrc = psrcs[0] # NOTE: right now we can't handle multiple, as we'd have to check for loop
     if psrc[1].optype == ReduceOps:
       top = _ast_reduceops(psrc[1])
@@ -215,7 +215,7 @@ class LazyBuffer:
     return create_lazybuffer(self.device, ShapeTracker(self.shape), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype)
 
   def shuffle_and_prune_movement_ops(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[Union[Node,int], ...], Tuple[Tuple[int, int], ...]]) -> LazyBuffer:
-    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and (op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and self.op.op in UnaryOps)) and len(self.children) == 0:
+    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and (op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and self.op.op in UnaryOps)) and not self.children:
       return self.op.replace_with_movement_ops([(op, arg)])
     ret = create_lazybuffer(self.device, st, MovementOps, LazyOp(op, (self,), arg), self.dtype)
     if REMOVE_MOVEMENT_NOPS and not self.realized and not ret.realized and ret.st.contiguous:
@@ -336,7 +336,7 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, 
 
   if MERGE_ELEMENTWISE_OPS:
     # remove the buffers from any (childless) BinaryOps that feed into this
-    srcs = tuple([x.op if x.optype == BinaryOps and len(x.children) == 0 and not x.realized else x for x in srcs])  # type: ignore
+    srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
 
   return create_lazybuffer(out_device, ShapeTracker(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype)
 
