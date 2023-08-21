@@ -712,7 +712,7 @@ class Tensor:
     loss_mask = Y != ignore_index
     y_counter = Tensor.arange(self.shape[-1], requires_grad=False).unsqueeze(0).expand(Y.numel(), self.shape[-1])
     y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
-    return self.mul(y).sum() / loss_mask.sum()
+    return self.log_softmax().mul(y).sum() / loss_mask.sum()
 
   # ***** cast ops *****
 
