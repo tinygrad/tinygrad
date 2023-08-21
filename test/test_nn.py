@@ -44,7 +44,7 @@ class TestNN(unittest.TestCase):
       outt = bn(inn)
 
       # in torch
-      toutt = tbn(torch.tensor(inn.cpu().numpy()))
+      toutt = tbn(torch.tensor(inn.numpy()))
 
       # close
       np.testing.assert_allclose(outt.numpy(), toutt.detach().numpy(), rtol=5e-4, atol=1e-6)
@@ -68,7 +68,7 @@ class TestNN(unittest.TestCase):
         torch_layer = torch.nn.Linear(in_dim, out_dim).eval()
         torch_layer.weight[:] = torch.tensor(model.weight.numpy(), dtype=torch.float32)
         torch_layer.bias[:] = torch.tensor(model.bias.numpy(), dtype=torch.float32)
-        torch_x = torch.tensor(x.cpu().numpy(), dtype=torch.float32)
+        torch_x = torch.tensor(x.numpy(), dtype=torch.float32)
         torch_z = torch_layer(torch_x)
 
       # test
@@ -94,7 +94,7 @@ class TestNN(unittest.TestCase):
     # test
     x = Tensor.uniform(BS, C1, W)
     z = layer(x)
-    torch_x = torch.tensor(x.cpu().numpy())
+    torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
@@ -114,7 +114,7 @@ class TestNN(unittest.TestCase):
     # test
     x = Tensor.uniform(BS, C1, H, W)
     z = layer(x)
-    torch_x = torch.tensor(x.cpu().numpy())
+    torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
@@ -135,7 +135,7 @@ class TestNN(unittest.TestCase):
     # test
     x = Tensor.uniform(BS, C1, W)
     z = layer(x)
-    torch_x = torch.tensor(x.cpu().numpy())
+    torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
@@ -156,7 +156,7 @@ class TestNN(unittest.TestCase):
     # test
     x = Tensor.uniform(BS, C1, H, W)
     z = layer(x)
-    torch_x = torch.tensor(x.cpu().numpy())
+    torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
@@ -175,7 +175,7 @@ class TestNN(unittest.TestCase):
     # test
     x = Tensor.randn(BS, C, H, W)
     z = layer(x)
-    torch_x = torch.tensor(x.cpu().numpy())
+    torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
@@ -194,7 +194,7 @@ class TestNN(unittest.TestCase):
     # test
     x = Tensor.randn(N, C, H, W)
     z = layer(x)
-    torch_x = torch.tensor(x.cpu().numpy())
+    torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
@@ -213,7 +213,7 @@ class TestNN(unittest.TestCase):
     # test
     x = Tensor.randn(N, C, H, W)
     z = layer(x)
-    torch_x = torch.tensor(x.cpu().numpy())
+    torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x.permute(0,2,3,1)).permute(0,3,1,2)
 
   def test_instancenorm_2d(self):
@@ -231,7 +231,7 @@ class TestNN(unittest.TestCase):
     # test
     x = Tensor.randn(N, C, H, W)
     z = layer(x)
-    torch_x = torch.tensor(x.cpu().numpy())
+    torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
@@ -251,7 +251,7 @@ class TestNN(unittest.TestCase):
     # test
     x = Tensor.randn(N, C, D, H, W)
     z = layer(x)
-    torch_x = torch.tensor(x.cpu().numpy())
+    torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
@@ -269,7 +269,7 @@ class TestNN(unittest.TestCase):
     # test
     x = Tensor(np.random.randint(0, VS, (B, T)).astype(np.float32))
     z = layer(x)
-    torch_x = torch.tensor(x.cpu().numpy().astype(np.int32))
+    torch_x = torch.tensor(x.numpy().astype(np.int32))
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
@@ -281,7 +281,7 @@ class TestNN(unittest.TestCase):
     for _ in range(3):
       x = Tensor(np.random.randint(0, VS, (B, T)).astype(np.float32))
       z = layer_jit(x)
-      torch_x = torch.tensor(x.cpu().numpy().astype(np.int32))
+      torch_x = torch.tensor(x.numpy().astype(np.int32))
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
