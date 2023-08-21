@@ -220,7 +220,7 @@ class Tensor:
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
     # this is "implicit gradient creation"
-    self.grad = Tensor(1, device=self.device, requires_grad=False, dtype=self.dtype)
+    self.grad = Tensor(1, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
       if not t0.requires_grad:
@@ -493,20 +493,20 @@ class Tensor:
     # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
     ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
     return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
-  
+
   def conv3d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     (bs, cin_), (cout, cin), DHW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
     if isinstance(padding, (tuple,list)): assert len(padding) == 2*len(DHW) or len(padding) == len(DHW), f"Expected padding of length {3*len(DHW)} or {len(DHW)}, but got {len(padding)} for tensor of shape {self.shape}"
     padding_ = [(padding, padding)]*len(DHW) if isinstance(padding, int) else (padding if len(padding) == len(DHW) else [(p,p) for p in padding])
     padding_ = tuple([(0, 0)] * (len(self.shape)-3) + padding_)
-    
+
     x = self.pad(padding_)._pool(DHW, stride, dilation)   # (bs, groups*cin, oz, oy, ox, D, H, W)
     rcout, ozyx = cout//groups, x.shape[2:-len(DHW)]
     x = x.reshape(bs, groups, cin, 1, *ozyx, *DHW).expand(bs, groups, cin, rcout, *ozyx, *DHW).permute(0,1,3,*[4+i for i in range(len(ozyx))],2,*[4+len(ozyx)+i for i in range(len(DHW))])
     ret = (x * weight.reshape(1, groups, rcout, *[1] * len(ozyx), cin, *DHW)).sum([-1-i for i in range(1+len(ozyx))], keepdim=True).reshape(bs, cout, *ozyx)
     return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(DHW)))
-  
+
   def conv_transpose3d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0) -> Tensor:
     HWD, trailing = weight.shape[2:], list(range(3, len(weight.shape)+1))
     x, w = self, weight.reshape(groups, weight.shape[0]//groups, weight.shape[1], *weight.shape[2:]).permute(0,2,1,*trailing).flip(trailing)
