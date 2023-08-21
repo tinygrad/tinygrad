@@ -1,5 +1,6 @@
+from __future__ import annotations
 from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict, Iterator, Union, Sequence, Final
-import itertools, math
+import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
@@ -9,7 +10,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst, buf_is_kernel_arg
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape, View
-from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, sym_rename
+from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
@@ -18,7 +19,6 @@ class UOps(Enum):
   DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto() # this defines buffers # noqa: E702
   CONST = auto(); LOAD = auto(); STORE = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto() # noqa: E702
-  # TODO: add CONST. use ALU WHERE for gated load
   # *** assembly only UOps ***
   SPECIAL = auto(); LABEL = auto(); COND_BRANCH = auto() # TODO: replace these with LOOP and ENDLOOP # noqa: E702
 
@@ -60,7 +60,7 @@ class Token(NamedTuple):
     if self.offset is None: return self.name
     assert self.dtype in [dtypes._float4, dtypes._float2], f"{self.dtype} isn't okay with offset {self.offset}"
     return self.name+"."+"xyzw"[int(self.offset)]
-  def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
+  def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else (f"<{self.name}:{self.dtype.name}:{self.offset}>" if self.offset is not None else f"<{self.name}:{self.dtype.name}>")
 
 # TODO: the next three functions are poorly written
 def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
@@ -237,6 +237,23 @@ class Linearizer:
     should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
+  idx_count = 0
+  def ssa_idx(self, dtype):
+    self.idx_count += 1
+    return Token(f"idx_{self.idx_count-1}", dtype)
+  @functools.lru_cache(None)
+  def uop_const(self, num, dtype):
+    return self.uop(UOps.CONST, Token(f"const_{dtype.name}_{str(mnum(num)).replace('.', '_')}", dtype), [], num)
+  def uop_alu_idx(self, a, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
+    return self.uop_alu(self.ssa_idx(dtype), [a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx)], op)
+  render_ops: Any = { Variable: lambda self, ops, ctx: Token(self.expr, dtypes.int32), NumNode: lambda self, ops, ctx: ctx.uop_const(self.b, dtypes.int32),
+                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
+                 DivNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.DIV),
+                 ModNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MOD),
+                 LtNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.CMPLT, dtype=dtypes.bool),
+    SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops,ctx)),
+    AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[0].render(ops,ctx)) }
+
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[Token]:
     const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
 
@@ -265,15 +282,19 @@ class Linearizer:
       if key not in self.load_cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         if this_const is None:
+          idx_rendered = idx.render(self.render_ops, self)
+          valid_rendered = valid.render(self.render_ops, self) if valid.min == 0 else None
           token = Token(f"val{mnum(i)}_{load_i}", localtype)
-          self.load_cache[key] = self.uop(UOps.LOAD, token, [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value))
+          self.load_cache[key] = self.uop(UOps.LOAD, token, [idx_rendered] + ([valid_rendered] if valid_rendered is not None else []), MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value))
         else:
           token = Token(f"{'const' if acc is None else 'acc'}{mnum(i)}_{load_i}", localtype)
           if valid.min == 0:
             assert valid.max == 1
-            self.load_cache[key] = self.uop(UOps.LOAD, token, [], ConstOp(this_const, valid))
+            self.load_cache[key] = self.uop_alu(token,
+              [valid.render(self.render_ops, self), self.uop_const(this_const, localtype), self.uop_const(0.0, localtype)],
+              TernaryOps.WHERE)
           else:
-            self.load_cache[key] = self.uop(UOps.CONST, token, [], this_const)
+            self.load_cache[key] = self.uop(UOps.CONST, token, [], this_const) if acc is not None else self.uop_const(this_const, localtype)
       ret.append(Token(self.load_cache[key].name, self.load_cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
 
