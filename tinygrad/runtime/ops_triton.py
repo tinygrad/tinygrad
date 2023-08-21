@@ -25,13 +25,14 @@ class TritonProgram:
     codeObject = compile(prg, fn, "exec")
     exec(codeObject, globals())
     self.program = triton_compile(globals()[name], signature=signature, device_type="cuda", debug=True).asm["ptx"]
+    self.local_size_override = [int(x) for x in self.program.split(".maxntid ")[1].split("\n")[0].split(", ")]
     self.program = cuda.module_from_buffer(self.program.encode('utf-8')).get_function(self.program.split(".visible .entry ")[1].split("(")[0])
 
   def __call__(self, global_size, local_size, *args, wait=False) -> Any:
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
-    self.program(*[x._buf for x in args], block = tuple(local_size), grid = tuple(global_size))
+    self.program(*[x._buf for x in args], block = tuple(self.local_size_override), grid = tuple(global_size))
     if wait:
       end.record()
       end.synchronize()
