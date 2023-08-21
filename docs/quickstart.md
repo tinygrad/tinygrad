@@ -121,7 +121,7 @@ net = TinyNet()
 ```
 
 We can see that the forward pass of our neural network is just the sequence of operations performed on the input tensor `x`.
-We can also see that functional operation like `leakyrelu` is not defined as a class and instead is just a method we can just call.
+We can also see that functional operations like `leakyrelu` are not defined as classes and instead are just methods we can just call.
 Finally, we just initialize an instance of our neural network, and we are ready to start training it.
 
 ## Training
