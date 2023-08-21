@@ -16,7 +16,7 @@ VariableOrNum = Union[Variable, NumNode, Node]
 class UOps(Enum):
   LOOP = auto(); ENDLOOP = auto() # loops can be global, local, or other # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto() # this defines buffers # noqa: E702
-  LOAD = auto(); STORE = auto(); BARRIER = auto() # noqa: E702
+  CONST = auto(); LOAD = auto(); STORE = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto() # noqa: E702
   # TODO: add CONST. use ALU WHERE for gated load
   # *** assembly only UOps ***
@@ -264,8 +264,16 @@ class Linearizer:
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
         if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-        self.load_cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{load_i}", localtype), [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value)) if this_const is None else \
-                               self.uop(UOps.LOAD, Token(f"{'const' if acc is None else 'acc'}{mnum(i)}_{load_i}", localtype), [], ConstOp(this_const, valid))
+        if this_const is None:
+          token = Token(f"val{mnum(i)}_{load_i}", localtype)
+          self.load_cache[key] = self.uop(UOps.LOAD, token, [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value))
+        else:
+          token = Token(f"{'const' if acc is None else 'acc'}{mnum(i)}_{load_i}", localtype)
+          if valid.min == 0:
+            assert valid.max == 1
+            self.load_cache[key] = self.uop(UOps.LOAD, token, [], ConstOp(this_const, valid))
+          else:
+            self.load_cache[key] = self.uop(UOps.CONST, token, [], this_const)
       ret.append(Token(self.load_cache[key].name, self.load_cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
 
