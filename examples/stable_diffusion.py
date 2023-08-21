@@ -13,6 +13,7 @@ from tinygrad.helpers import dtypes, GlobalCounters
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from extra.utils import download_file
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
+from tinygrad.jit import TinyJit
 
 class AttnBlock:
   def __init__(self, in_channels):
@@ -621,6 +622,15 @@ if __name__ == "__main__":
     x_prev = math.sqrt(a_prev) * pred_x0 + dir_xt #+ noise
     return x_prev, pred_x0
 
+  @TinyJit
+  def do_step(latent, timestep):
+    e_t = get_model_output(latent, timestep)
+    x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t, index)
+    #e_t_next = get_model_output(x_prev)
+    #e_t_prime = (e_t + e_t_next) / 2
+    #x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t_prime, index)
+    return x_prev.realize(), pred_x0
+
   # start with random noise
   latent = Tensor.randn(1,4,64,64)
 
@@ -628,13 +638,7 @@ if __name__ == "__main__":
   for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
     GlobalCounters.reset()
     t.set_description("%3d %3d" % (index, timestep))
-    e_t = get_model_output(latent, Tensor([timestep]))
-    x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t, index)
-    #e_t_next = get_model_output(x_prev)
-    #e_t_prime = (e_t + e_t_next) / 2
-    #x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t_prime, index)
-    latent = x_prev
-    latent.realize()
+    latent, pred_x0 = do_step(latent, Tensor([timestep]))
 
   # upsample latent space to image with autoencoder
   x = model.first_stage_model.post_quant_conv(1/0.18215 * latent)
