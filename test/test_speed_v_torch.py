@@ -74,7 +74,7 @@ def helper_test_speed(f1, *args):
     if i >= 1: ets.append(et)
     if GlobalCounters.global_ops:
       save_ops, save_mem = GlobalCounters.global_ops, GlobalCounters.global_mem
-  return ret.numpy(), np.min(ets)
+  return ret.numpy() if isinstance(ret, Tensor) else ret.cpu().numpy(), np.min(ets)
 
 def helper_test_generic_square(name, N, f1, f2, onearg=False):
   torch.manual_seed(0)
