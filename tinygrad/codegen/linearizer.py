@@ -503,7 +503,7 @@ class Linearizer:
       # todo: update abstractions.py with constant folding stuff
       if all(v.is_const for v in vin):
         # constant fold
-        fold_result = Token(numpy_fxn_for_op[op](*[np.array(v.name, dtype=v.dtype.np) for v in vin]), out.dtype)
+        fold_result = Token(numpy_fxn_for_op[op](*[np.array(v.name, dtype=v.dtype.np) for v in vin]).item(), out.dtype)
       else:
         # break down mulacc
         if op == TernaryOps.MULACC:
