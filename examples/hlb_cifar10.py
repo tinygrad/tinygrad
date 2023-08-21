@@ -288,7 +288,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   def eval_step_jitted(model, X, Y):
     out = model(X, training=False)
     loss = cross_entropy(out, Y, reduction='mean')
-    correct = out.argmax(axis=1, keepdim=True) == Y.argmax(axis=1, keepdim=True)
+    correct = out.argmax(axis=1) == Y.argmax(axis=1)
     return correct.realize(), loss.realize()
 
   # 97 steps in 2 seconds = 20ms / step  Tensor.training = True
