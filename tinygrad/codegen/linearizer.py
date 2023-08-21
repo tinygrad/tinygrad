@@ -264,7 +264,8 @@ class Linearizer:
     return ret
 
   def const_load(self, v: Token):
-    if v not in self.const_cache: self.const_cache[v] = self.uop(UOps.LOAD, Token(f"const{len(self.const_cache)}", v.dtype, v.offset), [], ConstOp(v.name, Variable.num(1)))
+    assert v.is_const
+    if v not in self.const_cache: self.const_cache[v] = self.uop(UOps.LOAD, Token(f"const{len(self.const_cache)}", v.dtype, v.offset), [], ConstOp(cast(Union[float, int], v.name), Variable.num(1)))
     return self.const_cache[v]
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
