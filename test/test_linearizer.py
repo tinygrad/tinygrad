@@ -59,8 +59,6 @@ class TestLinearizer(unittest.TestCase):
   def test_zero_fold(self):
     if not isinstance(Device[Device.DEFAULT], Compiled):
       self.skipTest("Only Compiled uses linearizer")
-    if not Device[Device.DEFAULT].linearizer_opts.supports_constant_folding:
-      self.skipTest("Device does not support constant folding")
 
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack([a, b])
@@ -76,8 +74,6 @@ class TestLinearizer(unittest.TestCase):
   def test_constant_fold(self):
     if not isinstance(Device[Device.DEFAULT], Compiled):
       self.skipTest("Only Compiled uses linearizer")
-    if not Device[Device.DEFAULT].linearizer_opts.supports_constant_folding:
-      self.skipTest("Device does not support constant folding")
 
     a, b = Tensor(2), Tensor(3)
     r = a * b
@@ -87,7 +83,11 @@ class TestLinearizer(unittest.TestCase):
     k.process()
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
-    assert num_ops == 0, "more load or alu uops than needed"
+    if not Device[Device.DEFAULT].linearizer_opts.supports_inline_constants:
+      expected_ops = 1 # if the langauge does not support in-line constants, we will have 1 load
+    else:
+      expected_ops = 0
+    assert num_ops <= expected_ops, "more load or alu uops than needed"
 
 if __name__ == '__main__':
   unittest.main()
