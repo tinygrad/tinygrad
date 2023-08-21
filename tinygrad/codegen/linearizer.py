@@ -560,7 +560,7 @@ class Linearizer:
     # scatter
     for i,j in ret:
       for o,k in enumerate(i):
-        ordered_ret[k] = Token(j.name, j.dtype, o+j.offset) if j.dtype == dtypes._float4 else j
+        ordered_ret[k] = Token(j.name, j.dtype, o+(0 if j.offset is None else j.offset)) if j.dtype == dtypes._float4 else j
     assert all(isinstance(x, Token) for x in ordered_ret), "some tokens didn't get scattered?"
     return cast(List[Token], ordered_ret)
 
