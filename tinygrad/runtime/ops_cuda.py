@@ -1,12 +1,12 @@
 import subprocess, time, re, hashlib, tempfile, os, functools
 from typing import Optional
 import numpy as np
-from pycuda.compiler import compile as cuda_compile # type: ignore
 from tinygrad.helpers import DEBUG, getenv, colored
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer
 from tinygrad.codegen.linearizer import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
+from functools import lru_cache
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
@@ -52,7 +52,24 @@ else:
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore
     def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) # type: ignore
 
-CUDA_PROGRAM_HEADER = 'struct __attribute__((device_builtin)) uint3{unsigned int x, y, z;};struct __attribute__((device_builtin)) dim3{unsigned int x, y, z;__attribute__((host)) __attribute__((device)) constexpr dim3(unsigned int vx=1,unsigned int vy=1, unsigned int vz=1):x(vx),y(vy),z(vz){} __attribute__((host)) __attribute__((device)) constexpr dim3(uint3 v):x(v.x),y(v.y),z(v.z){} __attribute__((host)) __attribute__((device)) constexpr operator uint3(void) const {return uint3{x,y,z};}};uint3 __attribute__((device_builtin)) extern const threadIdx;uint3 __attribute__((device_builtin)) extern const blockIdx;dim3 __attribute__((device_builtin)) extern const blockDim;dim3 __attribute__((device_builtin)) extern const gridDim;int __attribute__((device_builtin)) extern const warpSize;struct __attribute__((device_builtin)) float1{float x;};struct __attribute__((device_builtin)) __attribute__((aligned(8))) float2 { float x; float y; };struct __attribute__((device_builtin)) float3{float x, y, z;};struct __attribute__((device_builtin)) __attribute__((aligned(16))) float4{float x, y, z, w;};static __inline__ __attribute__((host)) __attribute__((device)) float1 make_float1(float x){float1 t; t.x = x; return t;}static __inline__ __attribute__((host)) __attribute__((device)) float2 make_float2(float x, float y){float2 t; t.x = x; t.y = y; return t;}static __inline__ __attribute__((host)) __attribute__((device)) float3 make_float3(float x, float y, float z){float3 t; t.x = x; t.y = y; t.z = z; return t;}static __inline__ __attribute__((host)) __attribute__((device)) float4 make_float4(float x, float y, float z, float w){float4 t; t.x = x; t.y = y; t.z = z; t.w = w; return t;}'
+@lru_cache
+def find_cicc_path():
+  nvcc_path = subprocess.check_output(f"{'which' if os.name != 'nt' else 'where'} nvcc", shell=True).decode().split()[0]
+  
+  if os.path.getsize(nvcc_path) < 200: # get path from bin alias
+    nvcc_dir = open(nvcc_path, "r").read().split('\n')[2][:-4]
+  else:
+    nvcc_dir = nvcc_path[:-4]
+
+  tmp = nvcc_dir + "cicc"
+  if os.path.exists(tmp): return tmp
+  tmp = nvcc_dir + "../nvvm/bin/cicc"
+  if os.path.exists(tmp): return tmp
+
+  raise Exception("cicc not found")
+
+CUDA_PROGRAM_HEADER = 'struct __attribute__((device_builtin)) uint3{unsigned int x, y, z;};struct __attribute__((device_builtin)) dim3{unsigned int x, y, z;__attribute__((host)) __attribute__((device)) constexpr operator uint3(void) const {return uint3{x,y,z};}};uint3 __attribute__((device_builtin)) extern const threadIdx;uint3 __attribute__((device_builtin)) extern const blockIdx;struct __attribute__((device_builtin)) __attribute__((aligned(16))) float4{float x, y, z, w;};struct __attribute__((device_builtin)) __attribute__((aligned(8))) float2 { float x; float y; };static __inline__ __attribute__((device)) float4 make_float4(float x, float y, float z, float w){float4 t; t.x = x; t.y = y; t.z = z; t.w = w; return t;}extern __attribute__((host)) __attribute__((device)) __attribute__((device_builtin)) float fmaxf(float x, float y) noexcept (true);static inline __attribute__((host)) __attribute__((device)) float max(const float a, const float b){return fmaxf(a, b);}extern __attribute__((host)) __attribute__((device)) __attribute__((device_builtin)) double sqrt(double x) noexcept (true);extern __attribute__((host)) __attribute__((device)) __attribute__((device_builtin)) double log2(double x) noexcept (true);extern __attribute__((host)) __attribute__((device)) __attribute__((device_builtin)) double exp2(double x) noexcept (true);extern __attribute__((host)) __attribute__((device)) __attribute__((device_builtin)) double sin(double x) noexcept (true);const float INFINITY = __builtin_inff(); const float NAN = __builtin_nanf ("");'
+
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
     if not binary:
@@ -61,7 +78,7 @@ class CUDAProgram:
         if not os.path.exists(fn):
           with open(fn, 'w+') as f:
             f.write(CUDA_PROGRAM_HEADER + prg);f.flush()
-            subprocess.run([f"{getenv('CUDA_PATH','/opt/cuda')}/nvvm/bin/cicc","-arch",f"compute_{arch()[3:]}", "-m64", "-prec_div=1", "-prec_sqrt=1", "-fmad=1", fn, "-o",fn], check=True)
+            subprocess.run([find_cicc_path(),"-arch",f"compute_{arch()[3:]}","--allow_managed", "-m64","-ftz=0", "-prec_div=1", "-prec_sqrt=1", "-fmad=1", "-tused", fn, "-o",fn], check=True, stderr=subprocess.DEVNULL if DEBUG < 3 else None)
             f.seek(0);prg = f.read()
         else: # load cached
           with open(fn, 'r') as f: prg = f.read()
@@ -91,7 +108,7 @@ class CUDAProgram:
       return start.time_till(end)*1e-3
 
 renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
-  kernel_prefix = "__attribute__((global))", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
+  kernel_prefix = "__attribute__((global))", smem_prefix = "__attribute__((shared)) ", barrier = "__syncthreads();", float4 = "make_float4",
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
   half_prekernel = """
