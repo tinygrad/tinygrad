@@ -188,8 +188,7 @@ class LazyBuffer:
   def toCPU(self):
     assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
     realized = self.cast((dtypes.from_np(self.dtype.np), False)).contiguous().realize().realized
-    ret = cast(RawBuffer, realized).toCPU().reshape(self.shape)
-    return ret
+    return cast(RawBuffer, realized).toCPU().reshape(self.shape)
 
   def cast(self:LazyBuffer, arg:Tuple[DType, bool]) -> LazyBuffer:
     assert not arg[1] or self.dtype.itemsize == arg[0].itemsize, "can't bitcast mismatched dtype itemsizes"
