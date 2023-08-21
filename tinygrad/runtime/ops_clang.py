@@ -38,7 +38,7 @@ class ClangProgram:
       tmp = f"{fn}.{os.getpid()}.tmp"
       if not binary:
         prg = CLANG_PROGRAM_HEADER + prg
-        subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+tmp).split(), input=prg.encode('utf-8'))
+        subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -Wno-unused-variable -x c '+args['cflags']+' - -o '+tmp).split(), input=prg.encode('utf-8'))
         os.rename(tmp, fn)
       else:
         if CI and ARM64:
