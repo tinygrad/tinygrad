@@ -55,7 +55,7 @@ def helper_test_speed(f1, *args):
     args = [(x+1).realize() if isinstance(x, Tensor) else (None if x is None else (x+1)) for x in args]
 
     # force syncing
-    [x.numpy() if isinstance(x, Tensor) or str(torch_device) == "cpu" else x.numpy() for x in args if x is not None]
+    [x.numpy() if isinstance(x, Tensor) or str(torch_device) == "cpu" else x.cpu().numpy() for x in args if x is not None]
 
     # clear 32MB global memory cache (CPU and global memory only)
     cache_defeat += 1
@@ -81,8 +81,8 @@ def helper_test_generic_square(name, N, f1, f2, onearg=False):
   torch_a = (torch.rand(N, N) - 0.5).to(torch_device)
   torch_b = (torch.rand(N, N) - 0.5).to(torch_device) if not onearg else None
 
-  tiny_a = Tensor(torch_a.numpy())
-  tiny_b = Tensor(torch_b.numpy()) if not onearg else None
+  tiny_a = Tensor(torch_a.cpu().numpy())
+  tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
 
   helper_test_generic(f"{name:30s} {N:5d}x{N:5d}", f1, (torch_a, torch_b), TinyJit(lambda a,b:f2(a,b).realize()), (tiny_a, tiny_b))
 
@@ -104,9 +104,9 @@ def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_
   torch_dat = torch.rand(bs, in_chans, img_size_y, img_size_x).to(torch_device)
   torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None).to(torch_device)
 
-  tiny_dat = Tensor(torch_dat.numpy())
+  tiny_dat = Tensor(torch_dat.cpu().numpy())
   tiny_conv = Conv2d(in_chans, out_chans, kernel_size, bias=None)
-  tiny_conv.weight = Tensor(torch_conv.weight.detach().numpy())
+  tiny_conv.weight = Tensor(torch_conv.weight.detach().cpu().numpy())
 
   def f1(torch_dat): return torch_conv(torch_dat)
   def f2(tiny_dat): return tiny_conv(tiny_dat).realize()
@@ -178,7 +178,7 @@ class TestSpeed(unittest.TestCase):
     N = 64
     torch.manual_seed(0)
     torch_a = (torch.rand(N, N, N, N) - 0.5).to(torch_device)
-    tiny_a = Tensor(torch_a.numpy())
+    tiny_a = Tensor(torch_a.cpu().numpy())
     def f(a): return a.permute(1,0,3,2).contiguous()
     helper_test_generic(f"double_permute {tiny_a.shape}", f, (torch_a,), TinyJit(lambda a: f(a).realize()), (tiny_a,))
 
@@ -253,9 +253,9 @@ class TestSpeed(unittest.TestCase):
     torch_dat = torch.rand(bs, 64, 128, 12).to(torch_device)
     torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None, padding=1).to(torch_device)
 
-    tiny_dat = Tensor(torch_dat.numpy())
+    tiny_dat = Tensor(torch_dat.cpu().numpy())
     tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=1)
-    tiny_conv.weight = Tensor(torch_conv.weight.detach().numpy())
+    tiny_conv.weight = Tensor(torch_conv.weight.detach().cpu().numpy())
 
     def f1(torch_dat): return torch_conv(torch_dat.permute(0,3,1,2))
     def f2(tiny_dat): return tiny_conv(tiny_dat.permute(0,3,1,2)).realize()
