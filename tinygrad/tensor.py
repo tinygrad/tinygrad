@@ -593,8 +593,10 @@ class Tensor:
     if reverse: x, y = y, x
     if x.shape == y.shape: return fxn.apply(x, y)
 
-    if (len_y_shape:=len(y.shape)) < (len_x_shape:=len(x.shape)): y = y.reshape((1,) * (len_x_shape - len_y_shape) + y.shape)
-    else: x = x.reshape((1,) * (len_y_shape - len_x_shape) + x.shape)
+    if (len_y_shape:=len(y.shape)) < (len_x_shape:=len(x.shape)): 
+      y = y.reshape((1,) * (len_x_shape - len_y_shape) + y.shape)
+    else: 
+      x = x.reshape((1,) * (len_y_shape - len_x_shape) + x.shape)
 
     shape_ret = tuple([max(x, y) for x, y in zip(x.shape, y.shape)])
     if x.shape != shape_ret: x = x.expand(shape_ret)
