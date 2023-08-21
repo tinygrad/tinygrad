@@ -510,18 +510,19 @@ class Linearizer:
           if 0 in [vin[0].name, vin[1].name]: fold_result = vin[2]
           elif vin[2].name == 0: op, vin = BinaryOps.MUL, vin[:2]
           elif 1 in [vin[0].name, vin[1].name]: op, vin = BinaryOps.ADD, [vin[0], vin[2]] if vin[1].name == 1 else [vin[1], vin[2]]
-          if op != TernaryOps.MULACC: print(f"    MULACC decomposition")
+          if DEBUG >= 5 and op != TernaryOps.MULACC: print(f"    MULACC decomposition")
         if any(v.name == 0 for v in vin):
           # identity/absorber fold zeroes
           if   op == BinaryOps.ADD: fold_result = vin[1] if vin[0].name == 0 else vin[0]
           elif op == BinaryOps.SUB: fold_result = vin[0] if vin[1].name == 0 else fold_result
           elif op == BinaryOps.MUL: fold_result = vin[0] if vin[0].name == 0 else vin[1]
+          elif op == TernaryOps.WHERE: fold_result = vin[2] if vin[0].name == 0 else fold_result
         if any(v.name == 1 for v in vin):
           # identity fold ones
           if   op == BinaryOps.MUL: fold_result = vin[1] if vin[0].name == 1 else vin[0]
           elif op == BinaryOps.DIV: fold_result = vin[0] if vin[1].name == 1 else fold_result
           elif op == BinaryOps.MOD: fold_result = Token(0 if dtypes.is_int(out.dtype) else 0.0, out.dtype) if vin[1].name == 1 else fold_result
-        # todo: identity/absorber folding for where
+        if op == TernaryOps.WHERE and vin[0].is_const and vin[0].name != 0: fold_result = vin[1]
 
       if fold_result is not None:
         if fold_result.is_const: fold_result = Token(fold_result.name, out.dtype, out.offset)  # copy float4 typing if we are folding
