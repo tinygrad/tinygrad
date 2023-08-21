@@ -28,8 +28,14 @@ class TritonProgram:
     self.program = cuda.module_from_buffer(self.program.encode('utf-8')).get_function(self.program.split(".visible .entry ")[1].split("(")[0])
 
   def __call__(self, global_size, local_size, *args, wait=False) -> Any:
-    
+    if wait:
+      start, end = cuda.Event(), cuda.Event()
+      start.record()
     self.program(*[x._buf for x in args], block = tuple(local_size), grid = tuple(global_size))
+    if wait:
+      end.record()
+      end.synchronize()
+      return start.time_till(end)*1e-3
 
 def next_power_of_2(x):
   return 1 << (x - 1).bit_length()
