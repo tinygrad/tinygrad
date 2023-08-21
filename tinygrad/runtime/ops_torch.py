@@ -26,5 +26,5 @@ class RawTorchBuffer(RawBuffer):
   def fromCPU(cls, x):
     buf = torch.from_numpy(x).requires_grad_(False).to(device)
     return cls(prod(x.shape), type_map[buf.dtype], buf)
-  def toCPU(self): return self._buf.numpy()
+  def toCPU(self): return self._buf.cpu().numpy()
 TorchBuffer = Interpreted(RawTorchBuffer, torch_fxn_for_op, from_underlying=lambda x: RawTorchBuffer(prod(x.shape), type_map[x.dtype], x))
