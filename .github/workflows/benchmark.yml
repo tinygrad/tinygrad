@@ -20,6 +20,8 @@ jobs:
       run: python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+    - name: Run Tensor Core GEMM
+      run: DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run Stable Diffusion
       run: |
         ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
@@ -49,6 +51,7 @@ jobs:
           llama_jitted.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
+          matmul.txt
 
   testamdbenchmark:
     name: AMD Benchmark
@@ -63,6 +66,8 @@ jobs:
       run: python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+    - name: Run Tensor Core GEMM
+      run: HIP=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run Stable Diffusion
       run: |
         ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
@@ -92,3 +97,4 @@ jobs:
           llama_jitted.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
+          matmul.txt

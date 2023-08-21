@@ -1,6 +1,6 @@
 import itertools
-from tinygrad.helpers import DEBUG, prod, getenv, ImageDType
-from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
+from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
+from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.lazy import LazyBuffer
 
@@ -105,20 +105,80 @@ def hand_coded_optimizations(k:Linearizer):
   # simplify
   k.simplify_ones()
 
-  # should use tensor cores?
+  # should use HIP tensor cores?
+  if getenv("TC", 1) != 0 and k.bufs[0].device == "HIP" and k.reduceop and k.reduceop.op == ReduceOps.SUM and \
+      isinstance(k.reduceop.src[0], LazyOp) and k.reduceop.src[0].op == UnaryOps.CAST and \
+      isinstance(k.reduceop.src[0].src[0], LazyOp) and k.reduceop.src[0].src[0].op == BinaryOps.MUL and \
+      isinstance(k.reduceop.src[0].src[0].src[0], LazyBuffer) and isinstance(k.reduceop.src[0].src[0].src[1], LazyBuffer) and k.opts.has_local and \
+      k.reduceop.src[0].src[0].src[0].dtype == dtypes.half and k.reduceop.src[0].src[0].src[1].dtype == dtypes.half:
+    # HIP tensor cores are 16x16x16
+    buf0 = k.bufs.index(k.reduceop.src[0].src[0].src[0])
+    buf1 = k.bufs.index(k.reduceop.src[0].src[0].src[1])
+    buf0_strides = k.sts[buf0].real_strides()
+    buf1_strides = k.sts[buf1].real_strides()
+    axis_buf0 = [(i,k.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and k.full_shape[i]%16 == 0 and i < k.first_reduce]
+    axis_buf1 = [(i,k.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and k.full_shape[i]%16 == 0 and i < k.first_reduce]
+    if len(axis_buf0) and len(axis_buf1) and k.full_shape[k.first_reduce]%8 == 0 and (k.shape_len-k.first_reduce) == 1:
+      if DEBUG >= 3: print("HIP TENSOR CORES", axis_buf0, axis_buf1)
+      k.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
+      k.reverse_upcast_dir = True
+
+      # TODO: select axis in smart way
+      s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
+      global_count = k.first_reduce
+
+      # upcast first
+      if k.full_shape[k.first_reduce] > 16: k.shift_to(k.first_reduce, 16)
+      k.upcast()
+
+      # 2 locals
+      k.shift_to(s1, 16, insert_before=k.first_reduce)  # axis 2
+      k.shift_to(s0, 16, insert_before=k.first_reduce)  # axis 3
+      k.local_dims += 1
+
+      # output shape
+      k.shift_to(k.first_reduce-2, 8)
+      k.upcast()
+
+      # split local dim
+      k.shift_to(k.first_reduce-1, 8, insert_before=k.first_reduce)  # axis 3
+
+      # final global upcast
+      for ax in [s1, s0]:
+        for upc in [4,3,2]:
+          if k.full_shape[ax]%upc == 0:
+            k.shift_to(ax, upc)
+            k.upcast()
+            break
+
+      # alias buffer
+      alias_pattern = [0]*global_count + [0,0,1] + [0] * (k.shape_len-k.upcasted-k.first_reduce) + [2,3] + [0]*(k.upcasted-2)
+      k.alias_buffer(buf0, alias_pattern)
+      k.alias_buffer(buf1, alias_pattern)
+
+      # two fake locals
+      if k.use_tensor_cores:
+        k.local_dims += 2
+        k.exclude_local_upcast += 2
+
+      # early exit
+      return
+
+  # should use METAL tensor cores?
   # first, confirm it's a straightforward mulacc on a device with real locals
   tensor_cores_allowed = getenv("TC", 1) != 0 and (getenv("TC", 1) == 2 or (k.bufs[0].device == "METAL" and getenv("CI", "") != "true"))
   if tensor_cores_allowed and k.reduceop and k.reduceop.op == ReduceOps.SUM and \
       isinstance(k.reduceop.src[0], LazyOp) and k.reduceop.src[0].op == BinaryOps.MUL and \
       isinstance(k.reduceop.src[0].src[0], LazyBuffer) and isinstance(k.reduceop.src[0].src[1], LazyBuffer) and k.opts.has_local:
+    # METAL tensor cores are 8x8x8, with 2 elements per thread in the 32 thread warp
     buf0 = k.bufs.index(k.reduceop.src[0].src[0])
     buf1 = k.bufs.index(k.reduceop.src[0].src[1])
     buf0_strides = k.sts[buf0].real_strides()
     buf1_strides = k.sts[buf1].real_strides()
-    axis_buf0 = [(i,k.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and k.full_shape[i]%8 == 0]
-    axis_buf1 = [(i,k.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and k.full_shape[i]%8 == 0]
+    axis_buf0 = [(i,k.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and k.full_shape[i]%8 == 0 and i < k.first_reduce]
+    axis_buf1 = [(i,k.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and k.full_shape[i]%8 == 0 and i < k.first_reduce]
     if len(axis_buf0) and len(axis_buf1) and k.full_shape[k.first_reduce]%8 == 0 and (k.shape_len-k.first_reduce) == 1:
-      if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1)
+      if DEBUG >= 3: print("METAL TENSOR CORES", axis_buf0, axis_buf1)
       k.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
 
       # TODO: select axis in smart way
@@ -162,7 +222,7 @@ def hand_coded_optimizations(k:Linearizer):
       # early exit
       return
 
-  if k.opts.has_local:
+  if k.opts.has_local and all(isinstance(s, int) for s in k.sts[0].shape[:k.first_reduce]):
     # are we grouping? (requires local shape support)
     if not k.float4_axis(0) and k.first_reduce <= 2 and k.first_reduce + 1 <= k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
@@ -204,8 +264,8 @@ def hand_coded_optimizations(k:Linearizer):
   while prod(k.sts[0].shape[:k.first_reduce]) >= 1024:
     xb_choices = []
     for axis, upcast_amount in itertools.product(range(k.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
-      # if we haven't upcasted it, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
-      if axis not in upcasted_axis and k.full_shape[axis]%upcast_amount == 0 and any(k.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in k.upcasted_axis(buf_index)) for buf_index in range(len(k.sts))):
+      # if we haven't upcasted it, it's not symbolic, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
+      if axis not in upcasted_axis and isinstance(k.full_shape[axis], int) and k.full_shape[axis]%upcast_amount == 0 and any(k.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in k.upcasted_axis(buf_index)) for buf_index in range(len(k.sts))):
         xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in k.sts), sum(st.views[-1].strides[axis] for st in k.sts), axis, upcast_amount))
     if len(xb_choices):
       xb_choices = sorted(xb_choices)
@@ -219,7 +279,7 @@ def hand_coded_optimizations(k:Linearizer):
 
   # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
   if k.first_reduce < (k.shape_len-k.upcasted) and (len(list(k.shape_offsets(k.full_buf_index))) <= 4 or not any(r for _,_,r in k.upcasted_axis(k.full_buf_index))):
-    if (s:=k.full_unupcasted_shape[-1]) <= 32:
+    if (s:=k.full_unupcasted_shape[-1]) <= 32 and isinstance(s, int):  # NOTE: cannot loop unroll symbolic axis
       k.upcast()
       # if it's small, upcast a second reduce dimension too
       if k.first_reduce < (k.shape_len-k.upcasted) and s <= 3 and k.full_unupcasted_shape[-1] <= 3: k.upcast()
