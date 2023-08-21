@@ -57,13 +57,6 @@ class Token(NamedTuple):
   offset: Optional[int] = None
   @property
   def is_const(self): return self.name.__class__ is not str
-  def render(self, with_type=False):
-    if with_type:
-      assert self.offset is None
-      return f"{self.dtype.name} {self.name}"
-    if self.offset is None or self.is_const: return str(self.name)
-    assert self.dtype in [dtypes._float4, dtypes._float2], f"{self.dtype} isn't okay with offset {self.offset}"
-    return self.name+"."+"xyzw"[int(self.offset)]
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.dtype == dtypes.float32 else f"<{self.name}:{self.dtype.name}:{self.offset}>"
 
 # TODO: the next three functions are poorly written
@@ -149,6 +142,7 @@ class LinearizerOptions(NamedTuple):
   supports_float4: bool = True
   supports_float4_alu: bool = True
   has_local: bool = True
+  supports_constant_folding: bool = True
   # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
   global_max: Optional[List[int]] = None
   local_max: Optional[List[int]] = None
@@ -504,33 +498,34 @@ class Linearizer:
     return out
 
   def uop_alu(self, out: Token, vin: List[Token], op: Op, cache=True) -> Token:
-    fold_result = None
-    # todo: update abstractions.py with constant folding stuff
-    if all(v.is_const for v in vin):
-      # constant fold
-      fold_result = Token(numpy_fxn_for_op[op](*[np.array(v.name, dtype=v.dtype.np) for v in vin]), out.dtype)
-    # break down mulacc
-    if op == TernaryOps.MULACC:
-      if 0 in [vin[0].name, vin[1].name]: fold_result = vin[2]
-      elif vin[2].name == 0: op, vin = BinaryOps.MUL, vin[:2]
-      elif 1 in [vin[0].name, vin[1].name]: op, vin = BinaryOps.ADD, [vin[0], vin[2]] if vin[1].name == 1 else [vin[1], vin[2]]
-      if op != TernaryOps.MULACC: print(f"    MULACC decomposition")
-    if any(v.name == 0 for v in vin):
-      # identity/absorber fold zeroes
-      if   op == BinaryOps.ADD: fold_result = vin[1] if vin[0].name == 0 else vin[0]
-      elif op == BinaryOps.SUB: fold_result = vin[0] if vin[1].name == 0 else fold_result
-      elif op == BinaryOps.MUL: fold_result = vin[0] if vin[0].name == 0 else vin[1]
-    if any(v.name == 1 for v in vin):
-      # identity fold ones
-      if   op == BinaryOps.MUL: fold_result = vin[1] if vin[0].name == 1 else vin[0]
-      elif op == BinaryOps.DIV: fold_result = vin[0] if vin[1].name == 1 else fold_result
-      elif op == BinaryOps.MOD: fold_result = Token(0 if dtypes.is_int(out.dtype) else 0.0, out.dtype) if vin[1].name == 1 else fold_result
-    # todo: identity/absorber folding for where
+    if self.opts.supports_constant_folding:
+      fold_result = None
+      # todo: update abstractions.py with constant folding stuff
+      if all(v.is_const for v in vin):
+        # constant fold
+        fold_result = Token(numpy_fxn_for_op[op](*[np.array(v.name, dtype=v.dtype.np) for v in vin]), out.dtype)
+      # break down mulacc
+      if op == TernaryOps.MULACC:
+        if 0 in [vin[0].name, vin[1].name]: fold_result = vin[2]
+        elif vin[2].name == 0: op, vin = BinaryOps.MUL, vin[:2]
+        elif 1 in [vin[0].name, vin[1].name]: op, vin = BinaryOps.ADD, [vin[0], vin[2]] if vin[1].name == 1 else [vin[1], vin[2]]
+        if op != TernaryOps.MULACC: print(f"    MULACC decomposition")
+      if any(v.name == 0 for v in vin):
+        # identity/absorber fold zeroes
+        if   op == BinaryOps.ADD: fold_result = vin[1] if vin[0].name == 0 else vin[0]
+        elif op == BinaryOps.SUB: fold_result = vin[0] if vin[1].name == 0 else fold_result
+        elif op == BinaryOps.MUL: fold_result = vin[0] if vin[0].name == 0 else vin[1]
+      if any(v.name == 1 for v in vin):
+        # identity fold ones
+        if   op == BinaryOps.MUL: fold_result = vin[1] if vin[0].name == 1 else vin[0]
+        elif op == BinaryOps.DIV: fold_result = vin[0] if vin[1].name == 1 else fold_result
+        elif op == BinaryOps.MOD: fold_result = Token(0 if dtypes.is_int(out.dtype) else 0.0, out.dtype) if vin[1].name == 1 else fold_result
+      # todo: identity/absorber folding for where
 
-    if fold_result is not None:
-      if fold_result.is_const: fold_result = Token(fold_result.name, out.dtype, out.offset)  # copy float4 typing if we are folding
-      if DEBUG >= 5: print(f"    constant fold alu op: {fold_result} <- {vin} {op}")
-      return fold_result
+      if fold_result is not None:
+        if fold_result.is_const: fold_result = Token(fold_result.name, out.dtype, out.offset)  # copy float4 typing if we are folding
+        if DEBUG >= 5: print(f"    constant fold alu op: {fold_result} <- {vin} {op}")
+        return fold_result
 
     if not cache: return self.uop(UOps.ALU, out, vin, op)
 

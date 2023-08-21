@@ -96,4 +96,5 @@ renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
       __device__ __forceinline__ explicit operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
     };
   """)) if not getenv("PTX") else fromimport("tinygrad.codegen.assembly_ptx", "uops_to_ptx_asm")
-CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False if getenv("PTX") else True, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]), renderer, CUDAProgram, cuda.Context.synchronize)
+CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=not getenv("PTX"), supports_float4_alu=False, supports_constant_folding=not getenv("PTX"),
+                                                       global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]), renderer, CUDAProgram, cuda.Context.synchronize)

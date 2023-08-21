@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union
 import math
-from tinygrad.codegen.linearizer import UOps, UOp, MemOp, ConstOp
+from tinygrad.codegen.linearizer import UOps, UOp, MemOp, ConstOp, Token
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, getenv, prod, DType
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, sym_render
@@ -56,6 +56,16 @@ class CStyleLanguage(NamedTuple):
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     else: val = f"{x}f" if dtypes.is_float(var_dtype) and isinstance(x, float) else f"{int(x)}"
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
+
+  # returns a str expression of the token
+  def render_token(self, x: Token, with_type=False):
+    if with_type:
+      assert x.offset is None
+      return f"{x.dtype.name} {x.name}"
+    if x.is_const: return self.render_const(x.name, x.dtype)
+    if x.offset is None: return str(x.name)
+    assert x.dtype in [dtypes._float4, dtypes._float2], f"{x.dtype} isn't okay with offset {x.offset}"
+    return x.name + "." + "xyzw"[int(x.offset)]
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
@@ -151,24 +161,24 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       if args == "METAL":
         # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
         kk("{ simdgroup_float8x8 a,b,c;")
-        kk(f"a.thread_elements()[0] = {vin[0].render()}; a.thread_elements()[1] = {vin[1].render()};")
-        kk(f"b.thread_elements()[0] = {vin[2].render()}; b.thread_elements()[1] = {vin[3].render()};")
-        kk(f"c.thread_elements()[0] = {vin[4].render()}; c.thread_elements()[1] = {vin[5].render()};")
+        kk(f"a.thread_elements()[0] = {lang.render_token(vin[0])}; a.thread_elements()[1] = {lang.render_token(vin[1])};")
+        kk(f"b.thread_elements()[0] = {lang.render_token(vin[2])}; b.thread_elements()[1] = {lang.render_token(vin[3])};")
+        kk(f"c.thread_elements()[0] = {lang.render_token(vin[4])}; c.thread_elements()[1] = {lang.render_token(vin[5])};")
         kk("simdgroup_multiply_accumulate(c, a, b, c);")
-        kk(f"{vin[4].render()} = c.thread_elements()[0]; {vin[5].render()} = c.thread_elements()[1]; }}")
+        kk(f"{lang.render_token(vin[4])} = c.thread_elements()[0]; {lang.render_token(vin[5])} = c.thread_elements()[1]; }}")
       elif args == "HIP":
         kk("{")
-        kk(f"half16 a_frag = {{ {','.join(['(half)'+x.render() for x in vin[8:8+16]])} }};")
-        kk(f"half16 b_frag = {{ {','.join(['(half)'+x.render() for x in vin[8+16:8+32]])} }};")
-        kk(f"float8 c_frag = {{ {','.join([x.render() for x in vin[:8]])} }};")
+        kk(f"half16 a_frag = {{ {','.join(['(half)'+lang.render_token(x) for x in vin[8:8+16]])} }};")
+        kk(f"half16 b_frag = {{ {','.join(['(half)'+lang.render_token(x) for x in vin[8+16:8+32]])} }};")
+        kk(f"float8 c_frag = {{ {','.join([lang.render_token(x) for x in vin[:8]])} }};")
         kk("c_frag = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(a_frag, b_frag, c_frag);")
-        for i in range(8): kk(f"{vin[i].render()} = c_frag[{i}];")
+        for i in range(8): kk(f"{lang.render_token(vin[i])} = c_frag[{i}];")
         kk("}")
       else:
         raise NotImplementedError(f"WMMA not implemented for {args}")
     elif uop == UOps.ALU:
       assert newvar is not None
-      kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[lang.render_const(x.name, x.dtype) if x.is_const else x.render() for x in vin])};")
+      kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{lang.render_token(newvar, newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[lang.render_token(x) for x in vin])};")
     elif uop == UOps.LOAD:
       assert newvar is not None and isinstance(args, (MemOp, ConstOp))
       # valids are handled here
@@ -177,14 +187,14 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       else:
         val = lang.render_load(newvar.dtype, args.name, args.memory_dtype, args.idx, args.local)
       if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(args.invalid_value, newvar.dtype))
-      kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = {val};")
-      if args.valid.max == 0: kk(f"(void) {newvar.render()};")  # Don't warn unused if var is masked out
+      kk(f"{lang.generic_var_prefix}{lang.render_token(newvar, lang.generic_var_prefix == '')} = {val};")
+      if args.valid.max == 0: kk(f"(void) {lang.render_token(newvar)};")  # Don't warn unused if var is masked out
     elif uop == UOps.STORE:
       assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
       # TODO: instead of dtypes.float, a base type
-      kk(lang.render_store(args.name, args.memory_dtype, lang.render_const(vin[0].name, vin[0].dtype) if vin[0].is_const else vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, args.local))
+      kk(lang.render_store(args.name, args.memory_dtype, lang.render_token(vin[0]), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, args.local))
     elif uop == UOps.CAST and newvar is not None and newvar.dtype.sz > 1:
-      kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
+      kk(f"{lang.render_token(newvar, True)} = {lang.render_cast([lang.render_token(x) for x in vin], newvar.dtype)};")
     elif uop == UOps.DEFINE_LOCAL:
       if lang.external_local_bufs:
         prekernel.append(lang.render_local(args[0], args[1]))
