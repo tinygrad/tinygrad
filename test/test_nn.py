@@ -12,6 +12,17 @@ import pytest
 pytestmark = [pytest.mark.exclude_cuda]
 
 class TestNN(unittest.TestCase):
+  def test_sparse_cat_cross_entropy(self):
+    input = torch.randn(3, 5)
+    target = torch.empty(3, dtype=torch.long).random_(5)
+    loss_fun = torch.nn.CrossEntropyLoss(reduction='mean')
+    loss = loss_fun(input, target)
+
+    input_tiny = Tensor(input.detach().numpy())
+    taret_tiny = Tensor(target.detach().numpy())
+    loss_tiny = input_tiny.sparse_categorical_crossentropy(taret_tiny)
+
+    np.testing.assert_allclose(loss_tiny.numpy(), loss.detach().numpy(), atol=1e-5, rtol=1e-6)
 
   def test_batchnorm2d(self, training=False):
     szs = [4, 8, 16, 32]
