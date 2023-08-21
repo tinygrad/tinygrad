@@ -71,6 +71,7 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
     assert num_ops == 0, "more alu uops than needed"
 
+  @unittest.skipIf(Device.DEFAULT in ["LLVM"], "No RawConsts in LLVM")
   def test_constant_fold(self):
     if not isinstance(Device[Device.DEFAULT], Compiled):
       self.skipTest("Only Compiled uses linearizer")
