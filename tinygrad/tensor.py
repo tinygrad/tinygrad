@@ -282,7 +282,7 @@ class Tensor:
       raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     ellipses_found = [i for i, v in enumerate(orig_slices) if v is Ellipsis]
     if len(ellipses_found) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
-    ellipsis_idx = len(orig_slices) if len(ellipses_found) == 0 else ellipses_found[0]
+    ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices)
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
 
     tensor_found = [(i,v) for i, v in enumerate(orig_slices) if isinstance(v, Tensor)]
@@ -577,23 +577,21 @@ class Tensor:
 
   # ***** broadcasted binary mlops *****
 
-  def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
-    dtype = self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
+  def _broadcasted(self, fxn:Type[Function], y:Union[Tensor, float], reverse:bool=False) -> Tensor:
     x: Tensor = self
-    y: Tensor = Tensor(cast(float, other), device=self.device, requires_grad=False, dtype=dtype) if other.__class__ is not Tensor else cast(Tensor, other)
+    if not isinstance(y, Tensor):
+      y = Tensor(y, device=self.device, requires_grad=False, dtype=self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32)
     if reverse: x, y = y, x
-    if x.shape == y.shape: return fxn.apply(x, y)
+    if (xshape:=x.shape) == (yshape:=y.shape): return fxn.apply(x, y)
 
-    len_x_shape, len_y_shape = len(x.shape), len(y.shape)
-    max_shape = max(len_x_shape, len_y_shape)
+    shape_delta = len(xshape) - len(yshape)
+    if shape_delta > 0: y = y.reshape((1,) * shape_delta + yshape)
+    elif shape_delta < 0: x = x.reshape((1,) * -shape_delta + xshape)
+    if (xshape:=x.shape) == (yshape:=y.shape): return fxn.apply(x, y)
 
-    if len_x_shape != max_shape: x = x.reshape((1,) * (max_shape - len_x_shape) + x.shape)
-    if len_y_shape != max_shape: y = y.reshape((1,) * (max_shape - len_y_shape) + y.shape)
-
-    shape_ret = tuple([max(x, y) for x, y in zip(x.shape, y.shape)])
-    if x.shape != shape_ret: x = x.expand(shape_ret)
-    if y.shape != shape_ret: y = y.expand(shape_ret)
-
+    shape_ret = tuple([max(x, y) for x, y in zip(xshape, yshape)])
+    if xshape != shape_ret: x = x.expand(shape_ret)
+    if yshape != shape_ret: y = y.expand(shape_ret)
     return fxn.apply(x, y)
 
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ is Tensor or x else self
@@ -707,6 +705,12 @@ class Tensor:
     if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False).tril(0).cast(dtypes.bool)
     if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), attn_mask)
     return (self @ key.transpose(-2,-1) / sqrt(self.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
+
+  def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
+    loss_mask = Y != ignore_index
+    y_counter = Tensor.arange(self.shape[-1], requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
+    y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
+    return self.log_softmax().mul(y).sum() / loss_mask.sum()
 
   # ***** cast ops *****
 
