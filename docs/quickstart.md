@@ -115,13 +115,13 @@ class TinyNet:
     x = self.l1(x)
     x = x.leakyrelu()
     x = self.l2(x)
-    return x.log_softmax()
+    return x
 
 net = TinyNet()
 ```
 
 We can see that the forward pass of our neural network is just the sequence of operations performed on the input tensor `x`.
-We can also see that functional operations like `leakyrelu` and `log_softmax` are not defined as classes and instead are just methods we can just call.
+We can also see that functional operations like `leakyrelu` are not defined as classes and instead are just methods we can just call.
 Finally, we just initialize an instance of our neural network, and we are ready to start training it.
 
 ## Training
@@ -137,18 +137,18 @@ First we need to set the training flag in `Tensor`:
 Tensor.training = True
 ```
 
-For our loss function we will be using cross entropy loss.
+For our loss function we will be using sparse categorical cross entropy loss.
 
 ```python
-# from extra.training import sparse_categorical_crossentropy
-def cross_entropy(out, Y):
+# from tinygrad.tensor import sparse_categorical_crossentropy
+def sparse_categorical_crossentropy(out, Y, ignore_index=-1):
+  loss_mask = Y != ignore_index
   num_classes = out.shape[-1]
-  YY = Y.flatten().astype(np.int32)
-  y = np.zeros((YY.shape[0], num_classes), np.float32)
-  y[range(y.shape[0]),YY] = -1.0*num_classes
-  y = y.reshape(list(Y.shape)+[num_classes])
-  y = Tensor(y)
-  return out.mul(y).mean()
+  y_counter = Tensor.arange(num_classes, requires_grad=False).unsqueeze(0).expand(Y.numel(), num_classes)
+  y = (y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0)
+  y = y * loss_mask.reshape(-1, 1)
+  y = y.reshape(*Y.shape, num_classes)
+  return out.log_softmax().mul(y).sum() / loss_mask.sum()
 ```
 
 As we can see in this implementation of cross entropy loss, there are certain operations that tinygrad does not support.
@@ -165,7 +165,7 @@ opt = SGD([net.l1.weight, net.l2.weight], lr=3e-4)
 
 We can see that we are passing in the parameters of our neural network to the optimizer.
 This is due to the fact that the optimizer needs to know which parameters to update.
-There is a simpler way to do this just by using `get_parameters(net)` from `tinygrad.state` which will return a list of all the parameters in the neural network.
+There is a simpler way to do this just by using `get_parameters(net)` from `tinygrad.nn.state` which will return a list of all the parameters in the neural network.
 The parameters are just listed out explicitly here for clarity.
 
 Now that we have our network, loss function, and optimizer defined all we are missing is the data to train on!
@@ -187,13 +187,13 @@ for step in range(1000):
   samp = np.random.randint(0, X_train.shape[0], size=(64))
   batch = Tensor(X_train[samp], requires_grad=False)
   # get the corresponding labels
-  labels = Y_train[samp]
+  labels = Tensor(Y_train[samp])
 
   # forward pass
   out = net(batch)
 
   # compute loss
-  loss = cross_entropy(out, labels)
+  loss = sparse_categorical_crossentropy(out, labels)
 
   # zero gradients
   opt.zero_grad()
@@ -205,7 +205,7 @@ for step in range(1000):
   opt.step()
 
   # calculate accuracy
-  pred = np.argmax(out.numpy(), axis=-1)
+  pred = out.argmax(axis=-1).numpy()
   acc = (pred == labels).mean()
 
   if step % 100 == 0:
@@ -234,7 +234,7 @@ with Timing("Time: "):
     out = net(batch)
 
     # calculate accuracy
-    pred = np.argmax(out.numpy(), axis=-1)
+    pred = out.argmax(axis=-1).numpy()
     avg_acc += (pred == labels).mean()
   print(f"Test Accuracy: {avg_acc / 1000}")
 ```
@@ -278,7 +278,7 @@ with Timing("Time: "):
     out = jit(batch)
 
     # calculate accuracy
-    pred = np.argmax(out.numpy(), axis=-1)
+    pred = out.argmax(axis=-1).numpy()
     avg_acc += (pred == labels).mean()
   print(f"Test Accuracy: {avg_acc / 1000}")
 ```
@@ -291,7 +291,7 @@ The standard weight format for tinygrad is [safetensors](https://github.com/hugg
 There are functions in [state.py](/tinygrad/state.py) to save and load models to and from this format.
 
 ```python
-from tinygrad.state import safe_save, safe_load, get_state_dict, load_state_dict
+from tinygrad.nn.state import safe_save, safe_load, get_state_dict, load_state_dict
 
 # first we need the state dict of our model
 state_dict = get_state_dict(net)

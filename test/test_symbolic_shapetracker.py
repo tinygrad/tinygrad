@@ -127,6 +127,12 @@ class TestSymbolicExpand(unittest.TestCase):
       a = a + 1
       assert a.shape == (3, vi)
 
+class TestSymbolicShrink(unittest.TestCase):
+  def test_shrink_symbols(self):
+    vi = Variable("i", 1, 5)
+    t = Tensor.rand(3, 5).shrink(((0, 2), (vi, vi+1)))
+    assert t.shape == (2, 1)
+
 class TestSymbolicShapeExpr(unittest.TestCase):
   def test_symbolic_expr_idxs(self):
     # taken from symbolic shape llama
@@ -139,7 +145,7 @@ class TestSymbolicShapeExpr(unittest.TestCase):
     view = View(shape, strides)
     st = ShapeTracker(shape, [view])
     idx, valid = st.expr_idxs(idx)
-    assert idx.render() == "(((1+i)*1)+(lidx1*((i*4)+4))+gidx0)"
+    assert idx.render() == "((lidx1*((i*4)+4))+1+gidx0+i)"
 
 class TestShapeTrackerVarVals(unittest.TestCase):
   def test_reshape_reshape_updates_var_vals(self):

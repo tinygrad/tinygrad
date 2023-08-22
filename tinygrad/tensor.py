@@ -2,12 +2,12 @@
 from __future__ import annotations
 import time
 from functools import partialmethod, reduce
-from itertools import accumulate, filterfalse
-import operator
+from itertools import accumulate
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
+from math import ceil, pi, prod, sqrt, log, cos, copysign
+
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
-from math import ceil, pi, prod, sqrt, log, cos, copysign, isinf
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
 
@@ -109,7 +109,7 @@ class Tensor:
     return self
 
   def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
-  def numpy(self) -> np.ndarray: return self.lazydata.toCPU()
+  def numpy(self) -> np.ndarray: return self.to('CPU').lazydata.toCPU()
 
   # TODO: if things are realized this won't work
   def to_(self, device:str):
@@ -117,7 +117,7 @@ class Tensor:
     self.lazydata.device = device
     if self.grad: self.grad.to_(device)
 
-  def to(self, device:str):
+  def to(self, device:str) -> Tensor:
     ret = Tensor(self.lazydata, device)
     if self.grad: ret.grad = self.grad.to(device)
     return ret
@@ -167,8 +167,7 @@ class Tensor:
   def ones_like(tensor, **kwargs): return Tensor.full_like(tensor, 1, **kwargs)
 
   @staticmethod
-  def eye(dim:int, **kwargs):
-    return Tensor([1], **kwargs).pad(((0,dim),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
+  def eye(dim:int, **kwargs): return Tensor.full((dim,1),1,**kwargs).pad(((0,0),(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
 
   # ***** rng hlops *****
 
@@ -222,9 +221,6 @@ class Tensor:
     self.grad = Tensor(1, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
-      if not t0.requires_grad:
-        del t0._ctx # TODO: does it help to delete this here ever?
-        continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
@@ -246,16 +242,9 @@ class Tensor:
   def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
   def pad(self, arg: Tuple[Tuple[int, int], ...], value:float=0) -> Tensor:
     ret = mlops.Pad.apply(self, arg=arg) if any(x != (0, 0) for x in arg) else self
-    if isinf(value): return ret + copysign(1,value)/mlops.Pad.apply(Tensor.full(self.shape, value), arg=arg)
-    return ret if 0 == value else ret + (value - mlops.Pad.apply(Tensor.full(self.shape, value), arg=arg))
+    return ret if 0 == value else ret + mlops.Pad.apply(Tensor.ones_like(self), arg=arg).where(0, value)
 
   # ***** movement hlops *****
-
-  # NOTE: using slice is discouraged and things should migrate to pad and shrink
-  def slice(self, arg:Sequence[Optional[Tuple[int, int]]], value:float=0) -> Tensor:
-    arg_ = tuple([a if a is not None else (0,s) for s,a in zip(self.shape, arg)])
-    padding = tuple([(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_)])
-    return self.pad(padding, value=value).shrink(tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)]))
 
   # - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
   # - A slice i:j returns the elements with indices in [i, j)
@@ -286,27 +275,23 @@ class Tensor:
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
-    val = list(val) if isinstance(val, tuple) else [val]
-    if (num_slices := sum(isinstance(v, (slice, int, Tensor)) for v in val)) > len(self.shape):
+    orig_slices = list(val) if isinstance(val, tuple) else [val]
+    if (num_slices := sum(isinstance(v, (slice, int, Tensor)) for v in orig_slices)) > len(self.shape):
       raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
-    orig_slices = list(val)
-    ellipses_found = [i for i, v in enumerate(val) if v is Ellipsis]
-    if len(ellipses_found) > 0:
-      if len(ellipses_found) != 1:
-        raise IndexError("an index can only have a single ellipsis ('...')")
-      ellipsis_idx = ellipses_found[0]
-      orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
-    else:
-      orig_slices += [slice(None)] * (len(self.shape) - num_slices)
+    ellipses_found = [i for i, v in enumerate(orig_slices) if v is Ellipsis]
+    if len(ellipses_found) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
+    ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices)
+    orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
+
     tensor_found = [(i,v) for i, v in enumerate(orig_slices) if isinstance(v, Tensor)]
-    orig_slices = [slice(None, None, None) if isinstance(v, Tensor) else v for v in orig_slices]
-    valid_slices = list(filterfalse(lambda x: x is None, orig_slices))
+    orig_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices]
+    valid_slices = [s for s in orig_slices if s is not None]
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     new_slice = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
-    new_shape = tuple(e - s for s, e in new_slice)
     # Shrink
     sliced_tensor = self.shrink(new_slice)
+    new_shape = sliced_tensor.shape
     # Flip
     if (flip_axes := tuple(i for i, s in enumerate(strides) if s < 0)):
       sliced_tensor = sliced_tensor.flip(axis=flip_axes)
@@ -318,15 +303,14 @@ class Tensor:
       paddings = tuple((0, num_zeros(s, dim_sz)) for s, dim_sz in zip(strides, sliced_tensor.shape))
       padded_tensor = sliced_tensor.pad(paddings)
       # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
-      new_shape = reduce(operator.add, [[sh // s, s] for sh, s in zip(padded_tensor.shape, strides)], [])  # type: ignore
+      new_shape = flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides))
       reshaped_tensor = padded_tensor.reshape(new_shape)
       # Shrink: do [:, 0]
       new_shape = new_shape[::2]
-      final_slice = reduce(operator.add, (((0, sh), (0, 1)) for sh in new_shape), ())
+      final_slice = tuple(flatten(((0, sh), (0, 1)) for sh in new_shape))
       sliced_tensor = reshaped_tensor.shrink(final_slice)
-    final_shape = []
+    final_shape, it_shape = [], iter(new_shape)
     sub = [0] * len(tensor_found)
-    it_shape = iter(new_shape)
     for i,s in enumerate(orig_slices):
       if isinstance(s, (int, slice)):
         dim_shape = next(it_shape)
@@ -341,14 +325,14 @@ class Tensor:
       for i,s in enumerate(sub): tensor_found[i] = (tensor_found[i][0]+s, tensor_found[i][1])
       dim = [i[0] for i in tensor_found]
       idx = [i[1].sign().contiguous().__neg__().contiguous().relu() * ret.shape[i[0]] + i[1] for i in tensor_found] # TODO first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
-      max_dim = max(idx, key=lambda i: i.ndim).ndim
-      idx = [i if i.ndim == max_dim else i.reshape(*[1]*(max_dim-i.ndim), *i.shape) for i in idx]
-      sum_dim = [d if n==0 else d+i.ndim-n for n,(d,i) in enumerate(zip(dim,idx))]
-      new_idx = idx[0].reshape(*[1]*sum_dim[0], 1, *idx[0].shape, *[1]*(ret.ndim-sum_dim[0]-1))
-      arange = Tensor.arange(ret.shape[sum_dim[0]], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*sum_dim[0], ret.shape[sum_dim[0]], *[1]*idx[0].ndim, *[1]*(ret.ndim-sum_dim[0]-1))
-      ret = (ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*idx[0].ndim, *ret.shape[sum_dim[0]+1:]) * (arange == new_idx)).sum(sum_dim[0])
+      max_dim = max(i.ndim for i in idx)
+      idx = [i.reshape(*[1]*(max_dim-i.ndim), *i.shape) for i in idx]
+      sum_dim = [d+max_dim-n for n,d in enumerate(dim)]
+      new_idx = idx[0].reshape(*[1]*dim[0], 1,*idx[0].shape, *[1]*(ret.ndim-dim[0]-1))
+      arange = Tensor.arange(ret.shape[dim[0]], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*dim[0], ret.shape[dim[0]], *[1]*idx[0].ndim, *[1]*(ret.ndim-dim[0]-1))
+      ret = (ret.reshape(*ret.shape[:dim[0]+1], *[1]*idx[0].ndim, *ret.shape[dim[0]+1:]) * (arange == new_idx)).sum(dim[0])
       for idx_,d in zip(idx[1:],sum_dim[1:]):
-        new_idx = idx_.reshape(*[1]*sum_dim[0], *idx_.shape, *[1]*(ret.ndim-sum_dim[0]-idx_.ndim))
+        new_idx = idx_.reshape(*[1]*dim[0], *idx_.shape, *[1]*(ret.ndim-dim[0]-idx_.ndim))
         arange = Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False).reshape(*[1]*(d), ret.shape[d], *[1]*(ret.ndim-d-1))
         ret = ((new_idx == arange) * ret).sum(d)
       if dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1: # special permute case
@@ -356,6 +340,12 @@ class Tensor:
         order = order[dim[0]:dim[0]+idx[0].ndim] + order[:dim[0]] + order[dim[0]+idx[0].ndim:]
         ret = ret.permute(order=order)
     return ret
+
+  # NOTE: using slice is discouraged and things should migrate to pad and shrink
+  def slice(self, arg:Sequence[Optional[Tuple[int, int]]], value:float=0) -> Tensor:
+    arg_ = tuple([a if a is not None else (0,s) for s,a in zip(self.shape, arg)])
+    padding = tuple([(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_)])
+    return self.pad(padding, value=value).shrink(tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)]))
 
   def gather(self: Tensor, idx: Tensor, dim: int):
     assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
@@ -386,19 +376,15 @@ class Tensor:
     return first.cat(*unsqueezed_tensors, dim=dim)
 
   def repeat(self, repeats):
-    base_shape = self.shape
-    if len(repeats) > self.ndim:
-      base_shape = (1,) * (len(repeats) - self.ndim) + base_shape
-    new_shape = [x for i in range(len(base_shape)) for x in [1, base_shape[i]]]
-    expand_shape = [x for r,s in zip(repeats, base_shape) for x in [r,s]]
+    base_shape = (1,) * (len(repeats) - self.ndim) + self.shape
+    new_shape = [x for b in base_shape for x in [1, b]]
+    expand_shape = [x for rs in zip(repeats, base_shape) for x in rs]
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
     return self.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
-  # TODO: make this nicer with syntactic sugar in slice
-  def chunk(self, num, dim):
-    slice_params = [[slice(None) for s in self.shape] for _ in range(ceil(self.shape[dim]/ceil(self.shape[dim]/num)))]
-    for i, k in enumerate(range(0, self.shape[dim], ceil(self.shape[dim]/num))):
-      slice_params[i][dim] = slice(k, k + ceil(self.shape[dim]/num))
+  def chunk(self, num:int, dim:int) -> List[Tensor]:
+    dim, step = dim + self.ndim if dim < 0 else dim, ceil(self.shape[dim]/num)
+    slice_params = [[slice(None)]*dim + [slice(k, k + step)] for k in range(0, self.shape[dim], step)]
     return [self[tuple(sl)] for sl in slice_params]
 
   def squeeze(self, dim=None):
@@ -457,9 +443,19 @@ class Tensor:
     m, _, ss = self._softmax(axis)
     return m - ss.log()
 
+  def argmax(self, axis=None, keepdim=False):
+    if axis is None:
+      idx = (self == self.max(axis)) * Tensor.arange(prod(self.shape)-1,-1,-1).reshape(self.shape)
+      return prod(self.shape) - idx.max() - 1
+    axis = axis + len(self.shape) if axis < 0 else axis
+    m = self == self.max(axis=axis, keepdim=True)
+    idx = m * Tensor.arange(self.shape[axis]-1,-1,-1).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
+    return self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1
+  def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
+
   # ***** processing ops *****
 
-  def _pool(self, k_:Tuple[int, ...], stride:Union[Tuple[int, ...], int]=1, dilation:Union[Tuple[int, ...], int]=1, _insert_dims=tuple()) -> Tensor:
+  def _pool(self, k_:Tuple[int, ...], stride:Union[Tuple[int, ...], int]=1, dilation:Union[Tuple[int, ...], int]=1) -> Tensor:
     assert len(self.shape) >= len(k_), f"can't pool {self.shape} with {k_}"
     s_, d_ = make_pair(stride, len(k_)), make_pair(dilation, len(k_))
     assert len(k_) == len(s_) and len(k_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
@@ -467,10 +463,7 @@ class Tensor:
     if any(k > s for k,s in zip(k_, s_)) or any(d != 1 for d in d_):
       o_ = [(i - d * (k-1) - 1)//s + 1 for i,d,k,s in zip(i_, d_, k_, s_)]
       e_ = [ceil(k*(i+d) / i) for k,i,d in zip(k_, i_, d_)]  # expands such that we don't need padding
-      xup = self.reshape(*prefix, *([1]*len(_insert_dims)), *flatten((1,i) for i in i_)).expand(*prefix, *_insert_dims, *flatten((e,i) for e,i in zip(e_, i_))).reshape(*prefix, *_insert_dims, *[e*i for e,i in zip(e_, i_)])
-      # NOTE: _insert_dims is required because reduces can't be merged (yet)
-      prefix += _insert_dims
-      slc_prefix += [(0,x) for x in _insert_dims]
+      xup = self.reshape(*prefix, *flatten((1,i) for i in i_)).expand(*prefix, *flatten((e,i) for e,i in zip(e_, i_))).reshape(*prefix, *[e*i for e,i in zip(e_, i_)])
       # slide by dilation
       xup = xup.slice(slc_prefix + [(0,k*(i+d)) for k,i,d in zip(k_, i_, d_)])
       xup = xup.reshape(*prefix, *flatten((k,i+d) for k,i,d in zip(k_, i_, d_)))
@@ -483,11 +476,7 @@ class Tensor:
     # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
     o_ = [(i+(s-k))//s for i,s,k in zip(i_, s_, k_)]
     xup = self.slice(slc_prefix + [(0,o*s) for o,s in zip(o_, s_)])
-    xup = xup.reshape(*prefix, *([1]*len(_insert_dims)), *flatten(((o, s) for o,s in zip(o_, s_))))
-    if len(_insert_dims):
-      xup = xup.expand(*prefix, *_insert_dims, *flatten(((o, s) for o,s in zip(o_, s_))))
-      prefix += _insert_dims
-      slc_prefix += [(0,x) for x in _insert_dims]
+    xup = xup.reshape(*prefix, *flatten(((o, s) for o,s in zip(o_, s_))))
     xup = xup.slice(slc_prefix + flatten(((0,o), (0,k)) for o,k in zip(o_, k_)))
     return xup.permute(*range(len(prefix)), *[len(prefix)+i*2 for i in range(len(k_))], *[len(prefix)+i*2+1 for i in range(len(k_))])
 
@@ -518,12 +507,6 @@ class Tensor:
     rcout, oyx = cout//groups, x.shape[2:-len(HW)]
     x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW).permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
 
-    # expand the channels with the pool
-    # TODO: this reduces the number of kernels, but it's slower!
-    #x = self.pad2d(padding_)._pool((H,W), stride, dilation, _insert_dims=(cout//groups,))   # (bs, groups*cin, rcout, oy, ox, H, W)
-    #rcout, oy, ox = x.shape[2:5]
-    #x = x.reshape(bs, groups, cin, rcout, oy, ox, H, W).permute(0,1,3,4,5,2,6,7)
-
     # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
     ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
     return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
@@ -536,10 +519,7 @@ class Tensor:
     w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
     return (x*w).sum(-1)
 
-  def cumsum(self, axis=0):
-    axis = (axis + self.ndim) if axis < 0 else axis
-    x = self.permute(*(i for i in range(self.ndim) if i != axis), axis)
-    return x.reshape(1, 1, -1, self.shape[axis]).conv2d(Tensor.ones(1, 1, 1, self.shape[axis], dtype=self.dtype, device=self.device), padding=(self.shape[axis]-1, 0, 0, 0)).reshape(*x.shape).permute(*range(axis), self.ndim - 1, *range(axis, self.ndim-1))
+  def cumsum(self, axis:int=0) -> Tensor: return self.transpose(axis,-1).pad2d((self.shape[axis]-1,0))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
 
   # ***** mlops (unary) *****
 
@@ -590,23 +570,21 @@ class Tensor:
 
   # ***** broadcasted binary mlops *****
 
-  def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
-    dtype = self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
+  def _broadcasted(self, fxn:Type[Function], y:Union[Tensor, float], reverse:bool=False) -> Tensor:
     x: Tensor = self
-    y: Tensor = Tensor(cast(float, other), device=self.device, requires_grad=False, dtype=dtype) if other.__class__ is not Tensor else cast(Tensor, other)
+    if not isinstance(y, Tensor):
+      y = Tensor(y, device=self.device, requires_grad=False, dtype=self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32)
     if reverse: x, y = y, x
-    if x.shape == y.shape: return fxn.apply(x, y)
+    if (xshape:=x.shape) == (yshape:=y.shape): return fxn.apply(x, y)
 
-    len_x_shape, len_y_shape = len(x.shape), len(y.shape)
-    max_shape = max(len_x_shape, len_y_shape)
+    shape_delta = len(xshape) - len(yshape)
+    if shape_delta > 0: y = y.reshape((1,) * shape_delta + yshape)
+    elif shape_delta < 0: x = x.reshape((1,) * -shape_delta + xshape)
+    if (xshape:=x.shape) == (yshape:=y.shape): return fxn.apply(x, y)
 
-    if len_x_shape != max_shape: x = x.reshape((1,) * (max_shape - len_x_shape) + x.shape)
-    if len_y_shape != max_shape: y = y.reshape((1,) * (max_shape - len_y_shape) + y.shape)
-
-    shape_ret = tuple([max(x, y) for x, y in zip(x.shape, y.shape)])
-    if x.shape != shape_ret: x = x.expand(shape_ret)
-    if y.shape != shape_ret: y = y.expand(shape_ret)
-
+    shape_ret = tuple([max(x, y) for x, y in zip(xshape, yshape)])
+    if xshape != shape_ret: x = x.expand(shape_ret)
+    if yshape != shape_ret: y = y.expand(shape_ret)
     return fxn.apply(x, y)
 
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ is Tensor or x else self
@@ -620,6 +598,7 @@ class Tensor:
       if x == 2.0: return self*self
       if x == 1.0: return self
       if x == 0.5: return self.sqrt()
+    if not isinstance(x, Tensor) and reverse and x > 0: return self.mul(log(x)).exp()
     ar = self.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(log(abs(x))).exp()
     # correct sign of negative numbers raised to a power (cos has a period of 2pi so we use it here to get the oddness of the power)
     sign = (x * pi).cos() if isinstance(x, Tensor) else cos(x * pi) if not reverse else (self * pi).cos()
@@ -719,6 +698,12 @@ class Tensor:
     if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False).tril(0).cast(dtypes.bool)
     if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), attn_mask)
     return (self @ key.transpose(-2,-1) / sqrt(self.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
+
+  def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
+    loss_mask = Y != ignore_index
+    y_counter = Tensor.arange(self.shape[-1], requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
+    y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
+    return self.log_softmax().mul(y).sum() / loss_mask.sum()
 
   # ***** cast ops *****
 

@@ -13,6 +13,7 @@ from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
 from tinygrad.jit import TinyJit
+from tinygrad.shape.symbolic import Variable
 
 from examples.llama import sample
 
@@ -33,33 +34,26 @@ class Attention:
     self.dim = dim
     self.head_dim = dim // n_heads
 
-  def prepare_attention(self, x:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor]) -> Tensor:
     xqkv = self.c_attn(x)
     xq, xk, xv = [xqkv.slice([None, None, (i*self.dim, (i+1)*self.dim)]) for i in range(3)]
     xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], self.n_heads, self.head_dim) for x in (xq, xk, xv)]
-    return xq, xk, xv
 
-  def inner_attention(self, xq:Tensor, xk:Tensor, xv:Tensor, start_pos:int, mask:Optional[Tensor]) -> Tensor:
     bsz, seqlen, _, _ = xq.shape
     # kv caching!
     if start_pos == 0:
       keys, values = xk, xv
     else:
-      assert hasattr(self, 'cache_k'), "no cache"
-      assert start_pos == self.cache_k.shape[1] and start_pos == self.cache_v.shape[1], "cache is wrong shape"
+      assert cache_k, "no cache"
+      #assert start_pos == cache_k.shape[1] and start_pos == cache_v.shape[1], "cache is wrong shape"
       assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
-      keys, values = self.cache_k.cat(xk, dim=1), self.cache_v.cat(xv, dim=1)
+      keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
 
     # save the cache
-    self.cache_k, self.cache_v = keys.realize(), values.realize()
+    cache_k, cache_v = keys.realize(), values.realize()
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
-    return xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1)
-
-  # NOTE: this is not called
-  def __call__(self, x:Tensor, start_pos:int, mask:Optional[Tensor]) -> Tensor:
-    xq, xk, xv = self.prepare_attention(x)
-    output = self.inner_attention(xq, xk, xv, start_pos, mask)
-    return self.c_proj(output)
+    output = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1)
+    return self.c_proj(output), cache_k, cache_v
 
 class FeedForward:
   def __init__(self, dim, hidden_dim, linear=Linear):
@@ -75,25 +69,32 @@ class TransformerBlock:
     self.mlp = FeedForward(dim, 4*dim, linear)
     self.ln_1 = LayerNorm(dim, norm_eps)
     self.ln_2 = LayerNorm(dim, norm_eps)
-    if getenv("JIT"):
-      self._pre = TinyJit(self.pre)
-      self._post = TinyJit(self.post)
-    else:
-      self._pre, self._post = self.pre, self.post
+    self.cache_k, self.cache_v = None, None
+    self.jitted = TinyJit(self.inner)
 
-  def pre(self, x:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
-    xq, xk, xv = self.attn.prepare_attention(self.ln_1(x))
-    return xq.realize(), xk.realize(), xv.realize()
-
-  def post(self, x:Tensor, output:Tensor) -> Tensor:
-    h = x + self.attn.c_proj(output)
-    return (h + self.mlp(self.ln_2(h))).realize()
+  def inner(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor]):
+    output, cache_k, cache_v = self.attn(self.ln_1(x), cache_k, cache_v, start_pos, mask)
+    h = x + output
+    return (h + self.mlp(self.ln_2(h))).realize(), cache_k, cache_v
 
   def __call__(self, x:Tensor, start_pos:int, mask:Optional[Tensor]):
-    xq, xk, xv = self._pre(x) if mask is None else self.pre(x)
-    # inner_attention can't be jitted because it's dynamic based on start_pos
-    output = self.attn.inner_attention(xq, xk, xv, start_pos, mask)
-    return self._post(x, output) if mask is None else self.post(x, output)
+    if start_pos > 0 and mask is None and getenv("JIT"):
+      seqlen = x.shape[1]
+
+      pos = Variable("pos", 1, 128)  # max context
+      self.cache_k = self.cache_k.reshape(self.cache_k.shape[0], pos, self.cache_k.shape[2], self.cache_k.shape[3])
+      self.cache_v = self.cache_v.reshape(self.cache_v.shape[0], pos, self.cache_v.shape[2], self.cache_v.shape[3])
+
+      ret, cache_k, cache_v = self.jitted(x, self.cache_k, self.cache_v, start_pos, mask)
+
+      # save the cache. with symbolic shape, cast it back to int shape so we have int shape in cache
+      self.cache_k = cache_k.reshape(cache_k.shape[0], start_pos+seqlen, cache_k.shape[2], cache_k.shape[3]).realize()
+      self.cache_v = cache_v.reshape(cache_v.shape[0], start_pos+seqlen, cache_v.shape[2], cache_v.shape[3]).realize()
+
+      return ret
+    else:
+      ret, self.cache_k, self.cache_v = self.inner(x, self.cache_k, self.cache_v, start_pos, mask)
+      return ret
 
 class Transformer:
   def __init__(self, dim, n_heads, n_layers, norm_eps=1e-5, vocab_size=50257, linear=Linear, max_seq_len=1024):
@@ -131,7 +132,7 @@ class GPT2:
   @staticmethod
   def build(model_size="gpt2"):
     import tiktoken
-    from tinygrad.state import torch_load, load_state_dict
+    from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
     from extra.utils import fetch_as_file
     tokenizer = tiktoken.get_encoding("gpt2")
 
@@ -147,6 +148,8 @@ class GPT2:
     weights['lm_head.weight'] = Tensor(weights['wte.weight'].numpy())
 
     load_state_dict(model, weights)
+    if getenv("FP16"):
+      for v in get_state_dict(model).values(): v.assign(v.cast(dtypes.float16).realize())
     return GPT2(model, tokenizer)
 
   def __init__(self, model, tokenizer):
@@ -157,10 +160,11 @@ class GPT2:
     toks = self.tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})
     start_pos = 0
     for _ in trange(max_length, disable=(timing==True)):
+      GlobalCounters.reset()
       if args.timing: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=timing):
-        logits = self.model(Tensor([toks[start_pos:]]), start_pos).realize()[:, -1, :]
+      with Timing(f"ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU, {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB") if DEBUG else None, enabled=timing):
+        logits = self.model(Tensor([toks[start_pos:]]), start_pos)[:, -1, :].realize()
       with Timing("sync in ", enabled=timing):
         tok = sample(logits, temperature)
       start_pos = len(toks)
