@@ -132,7 +132,7 @@ class GPT2:
   @staticmethod
   def build(model_size="gpt2"):
     import tiktoken
-    from tinygrad.state import torch_load, load_state_dict, get_state_dict
+    from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
     from extra.utils import fetch_as_file
     tokenizer = tiktoken.get_encoding("gpt2")
 
