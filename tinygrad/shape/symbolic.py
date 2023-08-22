@@ -35,6 +35,7 @@ class Node:
   def __add__(self, b:Union[Node,int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __radd__(self, b:int): return self+b
   def __sub__(self, b:Union[Node,int]): return self+-b
+  def __rsub__(self, b:int): return -self+b
   def __le__(self, b:Union[Node,int]): return self < (b+1)
   def __gt__(self, b:Union[Node,int]): return (-self) < (-b)
   def __ge__(self, b:Union[Node,int]): return (-self) < (-b+1)
@@ -154,6 +155,7 @@ class NumNode(Node):
     self.b:int = num
     self.min, self.max = num, num
   def __int__(self): return self.b
+  def __index__(self): return self.b
   def __eq__(self, other): return self.b == other
   def __hash__(self): return self.hash  # needed with __eq__ override
 

@@ -52,6 +52,15 @@ class TestJit(unittest.TestCase):
     with self.assertRaises(AssertionError):
       add(a, bad)
 
+  def test_jit_shape_views_mismatch(self):
+    @TinyJit
+    def add(a): return (a+1).realize()
+    with self.assertRaises(AssertionError):
+      for i in range(1,5):
+        # a has an offset that the kernel doesn't know about
+        a = Tensor.randn(10, 10).realize()[:, i:i+2]
+        add(a)
+
   def test_jit_duplicate_fail(self):
     # the jit doesn't support duplicate arguments
     @TinyJit
