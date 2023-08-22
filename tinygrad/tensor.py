@@ -183,7 +183,7 @@ class Tensor:
 
   @staticmethod
   def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor:
-    dtype = kwargs.pop("dtype") if "dtype" in kwargs else Tensor.default_type
+    dtype = kwargs.pop("dtype", Tensor.default_type)
     return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype) + low
 
   @staticmethod
