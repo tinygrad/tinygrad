@@ -4,7 +4,8 @@ from tinygrad.helpers import DEBUG, DType, merge_dicts
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters, RawBuffer
-from tinygrad.shape.symbolic import Variable, Node
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.symbolic import Variable
 
 JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU"]
 
@@ -14,7 +15,7 @@ class TinyJit:
     self.cnt: int = 0
     self.jit_cache: List[Tuple[Callable, List[Optional[RawBuffer]], Dict[Variable, int]]] = []
     self.ret: Any = None
-    self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], Tuple[Union[Node, int],...], DType]]= {}   # (kernel_number, buffer_number) -> (input_name, expected_shape, expected_type)
+    self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], ShapeTracker, DType]]= {}   # (kernel_number, buffer_number) -> (input_name, expected_shapetracker, expected_type)
 
   # add support for instance methods
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
@@ -22,13 +23,13 @@ class TinyJit:
   def __call__(self, *args, **kwargs) -> Any:
     if Device.DEFAULT not in JIT_SUPPORTED_DEVICE: return self.fxn(*args, **kwargs)  # only jit on supported device
     # NOTE: this cast is needed since although we know realize will create a ".realized" RawBuffer, the type checker doesn't
-    input_rawbuffers: Dict[Union[int, str], Tuple[RawBuffer, Tuple[Union[Node, int],...]]] = {cast(Union[int, str], k):(cast(RawBuffer, v.realize().lazydata.realized), v.shape) for k,v in itertools.chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
+    input_rawbuffers: Dict[Union[int, str], Tuple[RawBuffer, ShapeTracker]] = {cast(Union[int, str], k):(cast(RawBuffer, v.realize().lazydata.realized), v.lazydata.st) for k,v in itertools.chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
     if self.cnt >= 2:
       var_vals = dict(sorted(merge_dicts([arg.lazydata.st.var_vals for arg in args if isinstance(arg, Tensor)]).items(), key=lambda kv: kv[0].key))
-      for (j,i),(input_name, expected_shape, expected_type) in self.input_replace.items():
-        assert input_rawbuffers[input_name][1] == expected_shape and input_rawbuffers[input_name][0].dtype == expected_type, f"shape or type mismatch in JIT, <{input_rawbuffers[input_name][1]}, {input_rawbuffers[input_name][0].dtype}> != <{expected_shape}, {expected_type}>"
+      for (j,i),(input_name, expected_st, expected_type) in self.input_replace.items():
+        assert input_rawbuffers[input_name][1].views == expected_st.views and input_rawbuffers[input_name][0].dtype == expected_type, f"ShapeTracker.views or type mismatch in JIT, <{input_rawbuffers[input_name][1].views}, {input_rawbuffers[input_name][0].dtype}> != <{expected_st.views}, {expected_type}>"
         self.jit_cache[j][1][i] = input_rawbuffers[input_name][0]
       for prg, pargs, variables in self.jit_cache: # type: Callable, List[Optional[RawBuffer]], Dict[Variable, int]
         for v in (var_vals.keys() & variables.keys()): variables[v] = var_vals[v]
