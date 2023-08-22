@@ -1,4 +1,3 @@
-
 from typing import Dict, List, Final, Callable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
 from tinygrad.helpers import dtypes, ImageDType
@@ -74,9 +73,6 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
 
     prg = f"@triton.jit\ndef {function_name}("+','.join(f"data{i}" for i in range(len(bufs)))+"):\n"
     prg += '\n'.join(kernel)
-    
-    print(prg)
-
     acc_local_size = 1
     for x in local_size: acc_local_size *= next_power_of_2(x)
     local_size = [acc_local_size] + [1] * (len(local_size) - 1)
