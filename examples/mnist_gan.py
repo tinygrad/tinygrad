@@ -59,7 +59,7 @@ def train_discriminator(optimizer, data_real, data_fake):
   loss_real.backward()
   loss_fake.backward()
   optimizer.step()
-  return (loss_real + loss_fake).cpu().numpy()
+  return (loss_real + loss_fake).numpy()
 
 def train_generator(optimizer, data_fake):
   real_labels = make_labels(batch_size, 1)
@@ -68,7 +68,7 @@ def train_generator(optimizer, data_fake):
   loss = (output * real_labels).mean()
   loss.backward()
   optimizer.step()
-  return loss.cpu().numpy()
+  return loss.numpy()
 
 if __name__ == "__main__":
   # data for training and validation
@@ -100,7 +100,7 @@ if __name__ == "__main__":
       data_fake = generator.forward(noise)
       loss_g += train_generator(optim_g, data_fake)
     if (epoch + 1) % sample_interval == 0:
-      fake_images = generator.forward(ds_noise).detach().cpu().numpy()
+      fake_images = generator.forward(ds_noise).detach().numpy()
       fake_images = (fake_images.reshape(-1, 1, 28, 28) + 1) / 2  # 0 - 1 range.
       save_image(make_grid(torch.tensor(fake_images)), output_dir / f"image_{epoch+1}.jpg")
     t.set_description(f"Generator loss: {loss_g/n_steps}, Discriminator loss: {loss_d/n_steps}")

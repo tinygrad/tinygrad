@@ -13,7 +13,7 @@ from extra.utils import fetch
 def show_labels(prediction, confidence=0.5, num_classes=80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   coco_labels = coco_labels.decode('utf-8').split('\n')
-  prediction = prediction.detach().cpu().numpy()
+  prediction = prediction.detach().numpy()
   conf_mask = (prediction[:,:,4] > confidence)
   prediction *= np.expand_dims(conf_mask, 2)
   labels = []
@@ -82,7 +82,7 @@ def bbox_iou(box1, box2):
   return iou
 
 def process_results(prediction, confidence=0.9, num_classes=80, nms_conf=0.4):
-  prediction = prediction.detach().cpu().numpy()
+  prediction = prediction.detach().numpy()
   conf_mask = (prediction[:,:,4] > confidence)
   conf_mask = np.expand_dims(conf_mask, 2)
   prediction = prediction * conf_mask
@@ -176,7 +176,7 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   prediction = prediction.reshape(shape=(batch_size, bbox_attrs*num_anchors, grid_size*grid_size))
   prediction = prediction.transpose(1, 2)
   prediction = prediction.reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs))
-  prediction_cpu = prediction.cpu().numpy()
+  prediction_cpu = prediction.numpy()
   for i in (0, 1, 4):
     prediction_cpu[:,:,i] = 1 / (1 + np.exp(-prediction_cpu[:,:,i]))
   # Add the center offsets
@@ -233,7 +233,7 @@ class Darknet:
         size, stride = int(x["size"]), int(x["stride"])
         module.append(lambda x: x.max_pool2d(kernel_size=(size, size), stride=stride))
       elif module_type == "upsample":
-        module.append(lambda x: Tensor(x.cpu().numpy().repeat(2, axis=-2).repeat(2, axis=-1)))
+        module.append(lambda x: Tensor(x.numpy().repeat(2, axis=-2).repeat(2, axis=-1)))
       elif module_type == "route":
         x["layers"] = x["layers"].split(",")
         # Start of route
@@ -272,11 +272,11 @@ class Darknet:
         print(self.blocks[i + 1]["type"], "weights", i)
         model = self.module_list[i]
         conv = model[0]
-        print(conv.weight.cpu().numpy()[0][0][0])
+        print(conv.weight.numpy()[0][0][0])
         if conv.bias is not None:
           print("biases")
           print(conv.bias.shape)
-          print(conv.bias.cpu().numpy()[0][0:5])
+          print(conv.bias.numpy()[0][0:5])
         else:
           print("None biases for layer", i)
 
@@ -352,7 +352,7 @@ class Darknet:
           if (layers[1]) > 0: layers[1] = layers[1] - i
           map1 = outputs[i + layers[0]]
           map2 = outputs[i + layers[1]]
-          x = Tensor(np.concatenate((map1.cpu().numpy(), map2.cpu().numpy()), axis=1))
+          x = Tensor(np.concatenate((map1.numpy(), map2.numpy()), axis=1))
       elif module_type == "shortcut":
         from_ = int(module["from"])
         x = outputs[i - 1] + outputs[i + from_]
@@ -364,7 +364,7 @@ class Darknet:
         if not write:
           detections, write = x, True
         else:
-          detections = Tensor(np.concatenate((detections.cpu().numpy(), x.cpu().numpy()), axis=1))
+          detections = Tensor(np.concatenate((detections.numpy(), x.numpy()), axis=1))
       outputs[i] = x
     return detections
 

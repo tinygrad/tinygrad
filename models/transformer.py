@@ -50,7 +50,7 @@ class Transformer:
 
   def forward(self, x):
     bs = x.shape[0]
-    xnp = x.cpu().numpy().astype(np.int32)
+    xnp = x.numpy().astype(np.int32)
     onehot = np.zeros((bs, x.shape[1], self.maxlen+self.syms), dtype=np.float32)
     for i in range(x.shape[1]):
       onehot[range(bs), i, i] = 1
