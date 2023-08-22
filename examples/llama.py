@@ -110,36 +110,16 @@ class TransformerBlock:
     self.feed_forward = FeedForward(dim, 4*dim, multiple_of, linear, ffn_dim_multiplier)
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
-    self.cache_k, self.cache_v = None, None
 
-    self.jitted_attention_norm = TinyJit(lambda x: self.attention_norm(x).realize())
-    self.jitted_attn = TinyJit(self.attention.__call__)
-    self.jitted_norm_output = TinyJit(self.norm_output)
-
-  def norm_output(self, x:Tensor, output:Tensor) -> Tensor:
+  def __call__(self, x:Tensor, cache_k:Tensor, cache_v:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]):
+    output, cache_k, cache_v = self.attention(self.attention_norm(x), cache_k, cache_v, start_pos, freqs_cis, mask)
     h = x + output
-    return (h + self.feed_forward(self.ffn_norm(h))).realize()
-
-  def __call__(self, x:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]):
-    bsz, seqlen, _ = x.shape
-    do_jit = getenv("JIT") and mask is None
-    if do_jit:
-      pos = Variable("pos", 1, 1024)
-      self.cache_k = self.cache_k.reshape(self.cache_k.shape[0], pos, self.cache_k.shape[2], self.cache_k.shape[3])
-      self.cache_v = self.cache_v.reshape(self.cache_v.shape[0], pos, self.cache_v.shape[2], self.cache_v.shape[3])
-      output, cache_k, cache_v = self.jitted_attn(self.jitted_attention_norm(x), self.cache_k, self.cache_v, start_pos, freqs_cis, mask)
-    else:
-      output, cache_k, cache_v = self.attention(self.attention_norm(x), self.cache_k, self.cache_v, start_pos, freqs_cis, mask)
-
-    # save the cache. with symbolic shape, cast it back to int shape so we have int shape in cache
-    self.cache_k = cache_k.reshape(cache_k.shape[0], start_pos+seqlen, cache_k.shape[2], cache_k.shape[3]).realize()
-    self.cache_v = cache_v.reshape(cache_v.shape[0], start_pos+seqlen, cache_v.shape[2], cache_v.shape[3]).realize()
-
-    return self.jitted_norm_output(x, output) if do_jit else self.norm_output(x, output)
+    return (h + self.feed_forward(self.ffn_norm(h))).realize(), cache_k.realize(), cache_v.realize()
 
 class Transformer:
   def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None, n_kv_heads=None):
     self.layers = [TransformerBlock(dim, multiple_of, n_heads, n_kv_heads, norm_eps, linear, ffn_dim_multiplier) for _ in range(n_layers)]
+    self.kv_caches = [(None, None) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = Embedding(vocab_size, dim)
     self.output = linear(dim, vocab_size, bias=False)
@@ -148,23 +128,31 @@ class Transformer:
 
     self.jitted_tok_embeddings = TinyJit(lambda x: self.tok_embeddings(x).realize())
     self.jitted_norm_output = TinyJit(lambda x: self.norm_output(x).realize())
+    self.jitted_layers = [TinyJit(layer.__call__) for layer in self.layers]
 
   def __call__(self, tokens:Tensor, start_pos:int):
     _bsz, seqlen = tokens.shape
     mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
     do_jit = getenv("JIT") and mask is None
-
     # get only the part of freqs_cis that we are using.
     if do_jit:
       pos = Variable("pos", 1, 1024)
       assert seqlen == 1, "seqlen > 1 not supported for JIT"
       freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (pos, pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
       freqs_cis.lazydata.st.var_vals[pos] = start_pos
+      h = self.jitted_tok_embeddings(tokens)
     else:
       freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (start_pos, start_pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
-
-    h = self.jitted_tok_embeddings(tokens) if do_jit else self.tok_embeddings(tokens)
-    h = h.sequential([functools.partial(layer, start_pos=start_pos, freqs_cis=freqs_cis, mask=mask) for layer in self.layers])
+      h = self.tok_embeddings(tokens)
+    for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.jitted_layers if do_jit else self.layers, self.kv_caches)):
+      if do_jit:
+        cache_k = cache_k.reshape(cache_k.shape[0], pos, cache_k.shape[2], cache_k.shape[3])
+        cache_v = cache_v.reshape(cache_v.shape[0], pos, cache_v.shape[2], cache_v.shape[3])
+      h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=freqs_cis, mask=mask)
+      if do_jit:
+        cache_k = cache_k.reshape(cache_k.shape[0], start_pos+seqlen, cache_k.shape[2], cache_k.shape[3]).realize()
+        cache_v = cache_v.reshape(cache_v.shape[0], start_pos+seqlen, cache_v.shape[2], cache_v.shape[3]).realize()
+      self.kv_caches[i] = (cache_k, cache_v)
     return self.jitted_norm_output(h) if do_jit else self.norm_output(h)
 
 # **** files and arguments ****
