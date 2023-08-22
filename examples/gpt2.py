@@ -13,6 +13,7 @@ from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
 from tinygrad.jit import TinyJit
+from tinygrad.shape.symbolic import Variable
 
 from examples.llama import sample
 
@@ -33,13 +34,11 @@ class Attention:
     self.dim = dim
     self.head_dim = dim // n_heads
 
-  def prepare_attention(self, x:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+  def __call__(self, x:Tensor, start_pos:int, mask:Optional[Tensor]) -> Tensor:
     xqkv = self.c_attn(x)
     xq, xk, xv = [xqkv.slice([None, None, (i*self.dim, (i+1)*self.dim)]) for i in range(3)]
     xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], self.n_heads, self.head_dim) for x in (xq, xk, xv)]
-    return xq, xk, xv
 
-  def inner_attention(self, xq:Tensor, xk:Tensor, xv:Tensor, start_pos:int, mask:Optional[Tensor]) -> Tensor:
     bsz, seqlen, _, _ = xq.shape
     # kv caching!
     if start_pos == 0:
@@ -53,12 +52,7 @@ class Attention:
     # save the cache
     self.cache_k, self.cache_v = keys.realize(), values.realize()
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
-    return xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1)
-
-  # NOTE: this is not called
-  def __call__(self, x:Tensor, start_pos:int, mask:Optional[Tensor]) -> Tensor:
-    xq, xk, xv = self.prepare_attention(x)
-    output = self.inner_attention(xq, xk, xv, start_pos, mask)
+    output = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1)
     return self.c_proj(output)
 
 class FeedForward:
@@ -75,25 +69,10 @@ class TransformerBlock:
     self.mlp = FeedForward(dim, 4*dim, linear)
     self.ln_1 = LayerNorm(dim, norm_eps)
     self.ln_2 = LayerNorm(dim, norm_eps)
-    if getenv("JIT"):
-      self._pre = TinyJit(self.pre)
-      self._post = TinyJit(self.post)
-    else:
-      self._pre, self._post = self.pre, self.post
-
-  def pre(self, x:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
-    xq, xk, xv = self.attn.prepare_attention(self.ln_1(x))
-    return xq.realize(), xk.realize(), xv.realize()
-
-  def post(self, x:Tensor, output:Tensor) -> Tensor:
-    h = x + self.attn.c_proj(output)
-    return (h + self.mlp(self.ln_2(h))).realize()
 
   def __call__(self, x:Tensor, start_pos:int, mask:Optional[Tensor]):
-    xq, xk, xv = self._pre(x) if mask is None else self.pre(x)
-    # inner_attention can't be jitted because it's dynamic based on start_pos
-    output = self.attn.inner_attention(xq, xk, xv, start_pos, mask)
-    return self._post(x, output) if mask is None else self.post(x, output)
+    h = x + self.attn(self.ln_1(x), start_pos, mask)
+    return (h + self.mlp(self.ln_2(h))).realize()
 
 class Transformer:
   def __init__(self, dim, n_heads, n_layers, norm_eps=1e-5, vocab_size=50257, linear=Linear, max_seq_len=1024):
