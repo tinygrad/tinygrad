@@ -227,7 +227,7 @@ class ShapeTracker:
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)]) if self.views[-1].mask else None
     self.views[-1] = View(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
     return self
-
+  @profile
   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
     if self.views[-1].shape == new_shape: return self
     new_ints, new_nodes = partition(new_shape, lambda s: isinstance(s, int))
@@ -242,8 +242,7 @@ class ShapeTracker:
     elif not new_nodes: self.var_vals = {}
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
-    if all(isinstance(s, int) for s in self.shape) and all(isinstance(s, int) for s in new_shape):
-      assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
+    assert any(s.__class__ is not int for s in new_shape + self.shape) or prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
     new_view, extra = _reshape(self.views[-1], new_shape)
     if extra: self.views.append(new_view)
     else: self.views[-1] = new_view
