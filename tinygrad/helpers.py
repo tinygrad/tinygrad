@@ -120,7 +120,8 @@ class dtypes:
   bfloat16: Final[DType] = DType(0, 2, "__bf16", None)
   # NOTE: these are internal dtypes, should probably check for that
   _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
-
+  def __setattr__(self, name: str, value: DType) -> None: ...
+  def __getattr__(self, name: str) -> DType: ...
   @staticmethod
   def get_vector_type(x:DType, amt=4):
     return dtypes.__dict__.get(f"_{x.name}{amt}", x if x.is_vector_type else dtypes._float4)
