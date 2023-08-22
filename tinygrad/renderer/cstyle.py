@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union
 import math
-from tinygrad.codegen.linearizer import UOps, UOp, MemOp, ConstOp
+from tinygrad.codegen.linearizer import UOps, UOp, MemOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, getenv, prod, DType
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, sym_render
@@ -169,10 +169,12 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     elif uop == UOps.ALU:
       assert newvar is not None
       kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")
+    elif uop == UOps.DEFINE_ACC:
+      assert newvar is not None
+      kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(lang.generic_var_prefix == '')} = {lang.render_const(args, newvar.dtype)};")
     elif uop == UOps.CONST:
       assert newvar is not None
-      val = lang.render_const(args, newvar.dtype)
-      kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(lang.generic_var_prefix == '')} = {val};")
+      #kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(lang.generic_var_prefix == '')} = {lang.render_const(args, newvar.dtype)};")
     elif uop == UOps.LOAD:
       """
       assert newvar is not None and isinstance(args, (MemOp, ConstOp))

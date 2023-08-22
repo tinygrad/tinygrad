@@ -16,7 +16,7 @@ VariableOrNum = Union[Variable, NumNode, Node]
 # bottom ones are asm only
 class UOps(Enum):
   LOOP = auto(); ENDLOOP = auto() # loops can be global, local, or other # noqa: E702
-  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto() # this defines buffers # noqa: E702
+  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
   CONST = auto(); LOAD = auto(); STORE = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto() # noqa: E702
   # *** assembly only UOps ***
@@ -243,7 +243,8 @@ class Linearizer:
     return Token(f"idx_{self.idx_count-1}", dtype)
   @functools.lru_cache(None)
   def uop_const(self, num, dtype):
-    return self.uop(UOps.CONST, Token(f"const_{dtype.name}_{str(mnum(num)).replace('.', '_')}", dtype), [], num)
+    #return self.uop(UOps.CONST, Token(f"const_{dtype.name}_{str(mnum(num)).replace('.', '_')}", dtype), [], num)
+    return self.uop(UOps.CONST, Token(str(num), dtype), [], num)
   def uop_alu_idx(self, a, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
     return self.uop_alu(self.ssa_idx(dtype), [a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx)], op)
   render_ops: Any = { Variable: lambda self, ops, ctx: Token(self.expr, dtypes.int32), NumNode: lambda self, ops, ctx: ctx.uop_const(self.b, dtypes.int32),
@@ -294,7 +295,7 @@ class Linearizer:
               [valid.render(self.render_ops, self), self.uop_const(this_const, localtype), self.uop_const(0.0, localtype)],
               TernaryOps.WHERE)
           else:
-            self.load_cache[key] = self.uop(UOps.CONST, token, [], this_const) if acc is not None else self.uop_const(this_const, localtype)
+            self.load_cache[key] = self.uop(UOps.DEFINE_ACC, token, [], this_const) if acc is not None else self.uop_const(this_const, localtype)
       ret.append(Token(self.load_cache[key].name, self.load_cache[key].dtype, expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
 
