@@ -34,7 +34,7 @@ class Attention:
     self.dim = dim
     self.head_dim = dim // n_heads
 
-  def __call__(self, x:Tensor, start_pos:int, mask:Optional[Tensor]) -> Tensor:
+  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor]) -> Tensor:
     xqkv = self.c_attn(x)
     xq, xk, xv = [xqkv.slice([None, None, (i*self.dim, (i+1)*self.dim)]) for i in range(3)]
     xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], self.n_heads, self.head_dim) for x in (xq, xk, xv)]
@@ -44,16 +44,16 @@ class Attention:
     if start_pos == 0:
       keys, values = xk, xv
     else:
-      assert hasattr(self, 'cache_k'), "no cache"
-      assert start_pos == self.cache_k.shape[1] and start_pos == self.cache_v.shape[1], "cache is wrong shape"
+      assert cache_k, "no cache"
+      assert start_pos == cache_k.shape[1] and start_pos == cache_v.shape[1], "cache is wrong shape"
       assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
-      keys, values = self.cache_k.cat(xk, dim=1), self.cache_v.cat(xv, dim=1)
+      keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
 
     # save the cache
-    self.cache_k, self.cache_v = keys.realize(), values.realize()
+    cache_k, cache_v = keys.realize(), values.realize()
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     output = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1)
-    return self.c_proj(output)
+    return self.c_proj(output), cache_k, cache_v
 
 class FeedForward:
   def __init__(self, dim, hidden_dim, linear=Linear):
@@ -69,9 +69,11 @@ class TransformerBlock:
     self.mlp = FeedForward(dim, 4*dim, linear)
     self.ln_1 = LayerNorm(dim, norm_eps)
     self.ln_2 = LayerNorm(dim, norm_eps)
+    self.cache_k, self.cache_v = None, None
 
   def __call__(self, x:Tensor, start_pos:int, mask:Optional[Tensor]):
-    h = x + self.attn(self.ln_1(x), start_pos, mask)
+    output, self.cache_k, self.cache_v = self.attn(self.ln_1(x), self.cache_k, self.cache_v, start_pos, mask)
+    h = x + output
     return (h + self.mlp(self.ln_2(h))).realize()
 
 class Transformer:
