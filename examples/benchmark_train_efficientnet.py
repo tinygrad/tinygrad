@@ -8,7 +8,7 @@ from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters
 from tinygrad.helpers import getenv
-from tinygrad.runtime.cache_collector import CacheCollector
+from tinygrad.jit import CacheCollector
 
 def tensors_allocated():
   return sum(isinstance(x, Tensor) for x in gc.get_objects())

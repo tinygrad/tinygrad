@@ -3,7 +3,7 @@ from tinygrad.helpers import prod
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters
-from tinygrad.runtime.cache_collector import CacheCollector
+from tinygrad.jit import CacheCollector
 
 class TestCopy(unittest.TestCase):
   def test_add1(self):

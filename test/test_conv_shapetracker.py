@@ -2,7 +2,7 @@
 import unittest
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import Conv2d
-from tinygrad.runtime.cache_collector import CacheCollector
+from tinygrad.jit import CacheCollector
 import pytest
 
 pytestmark = pytest.mark.webgpu

@@ -2,7 +2,7 @@
 import unittest
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes
-from tinygrad.runtime.cache_collector import CacheCollector
+from tinygrad.jit import CacheCollector
 from weakref import ref
 
 class FakeDeviceBuffer():

@@ -4,7 +4,7 @@ import unittest
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import Compiled, Device
 from tinygrad.tensor import Tensor
-from tinygrad.runtime.cache_collector import CacheCollector
+from tinygrad.jit import CacheCollector
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):

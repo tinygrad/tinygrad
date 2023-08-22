@@ -18,7 +18,7 @@ import numpy as np
 
 import tinygrad.graph as graph
 from tinygrad.ops import GlobalCounters
-from tinygrad.runtime.cache_collector import CacheCollector
+from tinygrad.jit import TinyJit, CacheCollector
 
 import pyopencl as cl
 from tinygrad.runtime.ops_gpu import CL
@@ -34,8 +34,6 @@ def get_random_input_tensors(input_shapes):
   inputs = {k:Tensor.randn(*shp, requires_grad=False)*8 for k,shp in input_shapes.items()}
   np_inputs = {k:v.realize().numpy() for k,v in inputs.items()}
   return inputs, np_inputs
-
-from tinygrad.jit import TinyJit
 
 @TinyJit
 def model_exec(run_onnx, using_graph, **inputs):

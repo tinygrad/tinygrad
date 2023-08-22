@@ -1,11 +1,11 @@
 from typing import Any, Optional, Tuple
 from extra import dist
 from multiprocessing import shared_memory
-from tinygrad.helpers import DEBUG, GlobalCounters, colored
+from tinygrad.helpers import DEBUG, colored
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawBufferCopyIn, RawBufferCopyInOut
 from tinygrad.runtime.ops_shm import RawShmBuffer
-from tinygrad.runtime.cache_collector import CacheCollector
+from tinygrad.jit import CacheCollector
 from tinygrad.tensor import Tensor, Function
 import numpy as np
 

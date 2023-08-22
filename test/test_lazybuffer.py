@@ -4,8 +4,7 @@ import unittest
 from tinygrad.lazy import LazyBuffer, Device
 from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import Variable
-from tinygrad.ops import GlobalCounters
-from tinygrad.runtime.cache_collector import CacheCollector
+from tinygrad.jit import CacheCollector
 
 class TestLazyBuffer(unittest.TestCase):
   def test_fromcpu_buffer_sharing(self):

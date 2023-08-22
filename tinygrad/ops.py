@@ -154,6 +154,7 @@ class ASTRunner:
     return self
 
   def exec(self, bufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False, optimizing=False) -> Optional[float]:
+    from tinygrad.jit import CacheCollector
     rawbufs = dedup([x.realized for x in bufs if buf_is_kernel_arg(x)])
     if not optimizing: CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return self(rawbufs, var_vals, force_wait=force_wait)
