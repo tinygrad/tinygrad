@@ -72,6 +72,9 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg):
 
   if global_db is not None and skey in global_db:
     choice = global_db[skey]
+  elif any(not isinstance(x, int) for x in k.full_shape):
+    # don't optimize variable shapes
+    choice = "BASELINE"
   else:
     # get baseline
     def get_baseline():
