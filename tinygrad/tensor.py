@@ -383,7 +383,7 @@ class Tensor:
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
     return self.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
-  def chunk(self, num:int, dim:int) -> List[Tensor,...]:
+  def chunk(self, num:int, dim:int) -> List[Tensor]:
     dim, step = dim + self.ndim if dim < 0 else dim, ceil(self.shape[dim]/num)
     slice_params = [[slice(None)]*dim + [slice(k, k + step)] for k in range(0, self.shape[dim], step)]
     return [self[tuple(sl)] for sl in slice_params]
