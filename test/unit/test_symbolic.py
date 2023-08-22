@@ -173,6 +173,9 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6) < 3, 0, 1, "(a<3)")
     self.helper_test_variable(Variable("a", 0, 6) < 8, 1, 1, "1")
 
+  def test_lt_sum_remove(self):
+    self.helper_test_variable((Variable("a", 0, 6) + 2) < 3, 0, 1, "(a<1)")
+
   def test_and_fold(self):
     self.helper_test_variable(Variable.ands([Variable.num(0), Variable("a", 0, 1)]), 0, 0, "0")
 
