@@ -5,7 +5,7 @@ from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast
-from math import ceil, pi, prod, sqrt, log, cos, copysign, isinf
+from math import ceil, pi, prod, sqrt, log, cos, copysign
 
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
 from tinygrad.lazy import Device, LazyBuffer
