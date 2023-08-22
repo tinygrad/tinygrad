@@ -3,7 +3,6 @@ import time, importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup, merge_dicts
-from tinygrad.runtime.cache_collector import CacheCollector
 if TYPE_CHECKING:
   from tinygrad.lazy import LazyBuffer
 
