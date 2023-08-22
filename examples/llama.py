@@ -232,17 +232,17 @@ class AbsmaxQuantizedLinear:
     self.scale = Tensor.ones(out_features, dtype=dtypes.half)
 
   def __call__(self, x):
-    return x.dot(self.weight.cast(dtype=dtypes.half).T/self.scale)
+    return x.dot(self.weight.cast(dtype=dtypes.half).T*self.scale)
 
   @staticmethod
   def quantize(tensors):
     new_tensors = {}
     for name,v in tensors.items():
       if 'feed_forward' in name or ('attention.w') in name or name == 'output.weight':
-        scale = 127.0 / v.abs().max(axis=1)
-        int8_weight = (v.T*scale).T.cast(dtype=dtypes.int8)
-        new_tensors[name] = int8_weight
-        new_tensors[name.replace('weight', 'scale')] = scale
+        scale = v.abs().max(axis=1) / 127.0
+        int8_weight = (v.T/scale).T.cast(dtype=dtypes.int8)
+        new_tensors[name] = int8_weight.realize()
+        new_tensors[name.replace('weight', 'scale')] = scale.realize()
       else:
         new_tensors[name] = v
     return new_tensors
