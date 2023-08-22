@@ -157,8 +157,8 @@ class Tensor:
     return Tensor.full((ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
 
   @staticmethod
-  def full_like(tensor, fill_value, dtype:Optional[DType]=None, device:Optional[Device]=None, **kwargs):
-    return Tensor.full(tensor.shape, fill_value=fill_value, dtype=tensor.dtype if dtype is None else dtype, device=tensor.device if device is None else device, **kwargs)
+  def full_like(tensor, fill_value, **kwargs):
+    return Tensor.full(tensor.shape, fill_value=fill_value, dtype=kwargs.pop("dtype", tensor.dtype), device=kwargs.pop("device", tensor.device), **kwargs)
 
   @staticmethod
   def zeros_like(tensor, **kwargs): return Tensor.full_like(tensor, 0, **kwargs)
@@ -243,8 +243,8 @@ class Tensor:
   def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
   def pad(self, arg: Tuple[Tuple[int, int], ...], value:float=0) -> Tensor:
     ret = mlops.Pad.apply(self, arg=arg) if any(x != (0, 0) for x in arg) else self
-    if isinf(value): return ret + copysign(1,value)/mlops.Pad.apply(Tensor.full(self.shape, value, device=self.device), arg=arg)
-    return ret if 0 == value else ret + (value - mlops.Pad.apply(Tensor.full(self.shape, value, device=self.device), arg=arg))
+    if isinf(value): return ret + copysign(1,value)/mlops.Pad.apply(Tensor.full_like(self, value), arg=arg)
+    return ret if 0 == value else ret + (value - mlops.Pad.apply(Tensor.full_like(self, value), arg=arg))
 
   # ***** movement hlops *****
 
