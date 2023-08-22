@@ -346,6 +346,6 @@ jobs:
         cache: 'pip'
         cache-dependency-path: setup.py
     - name: Install tinygrad dependencies
-      run: pip install -e '.[testing, triton]' --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[testing, triton]' --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ 
     - name: Run pytest
       run: FORWARD_ONLY=1 JIT=1 OPT=2 TRITON=1 CUDA=1 CUDACPU=1 python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --ignore=testunit/test_example.py
