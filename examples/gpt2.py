@@ -45,7 +45,7 @@ class Attention:
       keys, values = xk, xv
     else:
       assert cache_k, "no cache"
-      assert start_pos == cache_k.shape[1] and start_pos == cache_v.shape[1], "cache is wrong shape"
+      #assert start_pos == cache_k.shape[1] and start_pos == cache_v.shape[1], "cache is wrong shape"
       assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
       keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
 
@@ -70,11 +70,31 @@ class TransformerBlock:
     self.ln_1 = LayerNorm(dim, norm_eps)
     self.ln_2 = LayerNorm(dim, norm_eps)
     self.cache_k, self.cache_v = None, None
+    self.jitted = TinyJit(self.inner)
+
+  def inner(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor]):
+    output, cache_k, cache_v = self.attn(self.ln_1(x), cache_k, cache_v, start_pos, mask)
+    h = x + output
+    return (h + self.mlp(self.ln_2(h))).realize(), cache_k, cache_v
 
   def __call__(self, x:Tensor, start_pos:int, mask:Optional[Tensor]):
-    output, self.cache_k, self.cache_v = self.attn(self.ln_1(x), self.cache_k, self.cache_v, start_pos, mask)
-    h = x + output
-    return (h + self.mlp(self.ln_2(h))).realize()
+    if start_pos > 0 and mask is None and getenv("JIT"):
+      seqlen = x.shape[1]
+
+      pos = Variable("pos", 1, 1024)
+      self.cache_k = self.cache_k.reshape(self.cache_k.shape[0], pos, self.cache_k.shape[2], self.cache_k.shape[3])
+      self.cache_v = self.cache_v.reshape(self.cache_v.shape[0], pos, self.cache_v.shape[2], self.cache_v.shape[3])
+
+      ret, cache_k, cache_v = self.jitted(x, self.cache_k, self.cache_v, start_pos, mask)
+
+      # save the cache. with symbolic shape, cast it back to int shape so we have int shape in cache
+      self.cache_k = cache_k.reshape(cache_k.shape[0], start_pos+seqlen, cache_k.shape[2], cache_k.shape[3]).realize()
+      self.cache_v = cache_v.reshape(cache_v.shape[0], start_pos+seqlen, cache_v.shape[2], cache_v.shape[3]).realize()
+
+      return ret
+    else:
+      ret, self.cache_k, self.cache_v = self.inner(x, self.cache_k, self.cache_v, start_pos, mask)
+      return ret
 
 class Transformer:
   def __init__(self, dim, n_heads, n_layers, norm_eps=1e-5, vocab_size=50257, linear=Linear, max_seq_len=1024):
