@@ -288,7 +288,7 @@ You will find that the evaluation time is much faster than before and that your 
 ### Saving and Loading Models
 
 The standard weight format for tinygrad is [safetensors](https://github.com/huggingface/safetensors). This means that you can load the weights of any model also using safetensors into tinygrad.
-There are functions in [state.py](/tinygrad/state.py) to save and load models to and from this format.
+There are functions in [state.py](/tinygrad/nn/state.py) to save and load models to and from this format.
 
 ```python
 from tinygrad.nn.state import safe_save, safe_load, get_state_dict, load_state_dict
