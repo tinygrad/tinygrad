@@ -18,11 +18,11 @@ class TritonProgram:
 
     prg = "import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n" + prg
     
-    hash = hashlib.md5(prg.encode('utf-8')).hexdigest()
-    fn = f"/tmp/{hash}.py"
+    hsh = hashlib.md5(prg.encode('utf-8')).hexdigest()
+    fn = f"/tmp/{hsh}.py"
     with open(fn, "w") as f: f.write(prg)
     codeObject = compile(prg, fn, "exec")
-    exec(codeObject, globals())
+    exec(codeObject, globals()) # pylint: disable=W0122
     self.program = triton_compile(globals()[name], signature=signature, device_type="cuda", debug=True).asm["ptx"]
     if DEBUG >= 5: print(pretty_ptx(self.program))
     self.program = cuda.module_from_buffer(self.program.encode('utf-8')).get_function(self.program.split(".visible .entry ")[1].split("(")[0])
