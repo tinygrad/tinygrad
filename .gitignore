@@ -37,4 +37,7 @@ package.json
 package-lock.json
 temp
 *.csv
+.coverage
+coverage.xml
+htmlcov
 wandb/
