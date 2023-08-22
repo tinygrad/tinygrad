@@ -81,7 +81,7 @@ class TransformerBlock:
     if start_pos > 0 and mask is None and getenv("JIT"):
       seqlen = x.shape[1]
 
-      pos = Variable("pos", 1, 1024)
+      pos = Variable("pos", 1, 128)  # max context
       self.cache_k = self.cache_k.reshape(self.cache_k.shape[0], pos, self.cache_k.shape[2], self.cache_k.shape[3])
       self.cache_v = self.cache_v.reshape(self.cache_v.shape[0], pos, self.cache_v.shape[2], self.cache_v.shape[3])
 
@@ -132,7 +132,7 @@ class GPT2:
   @staticmethod
   def build(model_size="gpt2"):
     import tiktoken
-    from tinygrad.state import torch_load, load_state_dict
+    from tinygrad.state import torch_load, load_state_dict, get_state_dict
     from extra.utils import fetch_as_file
     tokenizer = tiktoken.get_encoding("gpt2")
 
@@ -148,6 +148,8 @@ class GPT2:
     weights['lm_head.weight'] = Tensor(weights['wte.weight'].numpy())
 
     load_state_dict(model, weights)
+    if getenv("FP16"):
+      for v in get_state_dict(model).values(): v.assign(v.cast(dtypes.float16).realize())
     return GPT2(model, tokenizer)
 
   def __init__(self, model, tokenizer):
@@ -158,10 +160,11 @@ class GPT2:
     toks = self.tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})
     start_pos = 0
     for _ in trange(max_length, disable=(timing==True)):
+      GlobalCounters.reset()
       if args.timing: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=timing):
-        logits = self.model(Tensor([toks[start_pos:]]), start_pos).realize()[:, -1, :]
+      with Timing(f"ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU, {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB") if DEBUG else None, enabled=timing):
+        logits = self.model(Tensor([toks[start_pos:]]), start_pos)[:, -1, :].realize()
       with Timing("sync in ", enabled=timing):
         tok = sample(logits, temperature)
       start_pos = len(toks)
