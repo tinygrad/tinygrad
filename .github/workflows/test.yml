@@ -200,7 +200,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda, ptx]
+        backend: [llvm, clang, gpu, cuda, ptx, triton]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
@@ -219,7 +219,7 @@ jobs:
           path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
           key: ${{ matrix.backend }}-packages-${{ hashFiles('*/setup.py') }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1'}}" >> $GITHUB_ENV
       - name: Find faster apt mirror
       #   uses: vegardit/fast-apt-mirror.sh@v1
       # - name: Install packages (gpu)
@@ -230,12 +230,12 @@ jobs:
           sudo apt update -y
           sudo apt install -y --no-install-recommends intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
       - name: Install packages (cuda)
-        if: matrix.backend == 'cuda' || matrix.backend == 'ptx'
+        if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         run: |
           sudo apt update -y
           sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
       - name: Cache gpuocelot
-        if: matrix.backend == 'cuda' || matrix.backend == 'ptx'
+        if: matrix.backend == 'cuda' || matrix.backend == 'ptx'|| matrix.backend == 'triton'
         id: cache-build
         uses: actions/cache@v3
         env:
@@ -244,7 +244,7 @@ jobs:
           path: ${{ github.workspace }}/gpuocelot/ocelot
           key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
       - name: Clone/compile gpuocelot
-        if: (matrix.backend == 'cuda' || matrix.backend == 'ptx') && steps.cache-build.outputs.cache-hit != 'true'
+        if: (matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
           git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
           cd ${{ github.workspace }}/gpuocelot/ocelot
@@ -254,12 +254,12 @@ jobs:
           cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
           ninja
       - name: Install gpuocelot
-        if: matrix.backend == 'cuda' || matrix.backend == 'ptx'
+        if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         run: |
           cd ${{ github.workspace }}/gpuocelot/ocelot/build
           sudo ninja install
       - name: Install dependencies
-        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Check Device.DEFAULT
         run: python -c "from tinygrad.lazy import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
       - name: Run pytest (not cuda)
@@ -270,6 +270,9 @@ jobs:
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
       - name: Run pytest (ptx)
         if: matrix.backend=='ptx'
+        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
+      - name: Run pytest (triton)
+        if: matrix.backend=='triton'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
 
   testunicorn:
@@ -296,56 +299,3 @@ jobs:
         run: pip install -e '.[testing,arm]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Test arm
         run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=auto test/ -k 'not (test_nn.py and (test_conv_transpose2d or test_conv2d))' --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/test_specific_conv.py  --ignore=test/unit/test_disk_tensor.py
-  
-  testtriton:
-    name: Triton tests
-    runs-on: ubuntu-22.04
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Update packages
-      run: |
-        export DEBIAN_FRONTEND=noninteractive
-        sudo apt-get update -y
-    - name: Install packages
-      run: sudo apt-get install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
-    - name: Cache gpuocelot
-      id: cache-build
-      uses: actions/cache@v3
-      env:
-        cache-name: cache-gpuocelot-build
-      with:
-        path: ${{ github.workspace }}/gpuocelot/ocelot/
-        key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
-        restore-keys: |
-          ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
-    - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
-      name: Clone gpuocelot
-      uses: actions/checkout@v3
-      with:
-        repository: gpuocelot/gpuocelot
-        ref: 19626fc00b6ee321638c3111074269c69050e091
-        path: ${{ github.workspace }}/gpuocelot
-        submodules: true
-    - if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
-      name: Compile gpuocelot
-      run: |
-        cd ${{ github.workspace }}/gpuocelot/ocelot
-        mkdir build
-        cd build
-        cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
-        ninja
-    - name: Install gpuocelot
-      run: |
-        cd ${{ github.workspace }}/gpuocelot/ocelot/build
-        sudo ninja install
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-        cache: 'pip'
-        cache-dependency-path: setup.py
-    - name: Install tinygrad dependencies
-      run: pip install -e '.[testing, triton]' --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ 
-    - name: Run pytest
-      run: FORWARD_ONLY=1 JIT=1 OPT=2 TRITON=1 CUDA=1 CUDACPU=1 python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --ignore=testunit/test_example.py
