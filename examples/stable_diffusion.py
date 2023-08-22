@@ -625,11 +625,11 @@ if __name__ == "__main__":
   @TinyJit
   def do_step(latent, timestep):
     e_t = get_model_output(latent, timestep)
-    x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t, index)
+    x_prev, _ = get_x_prev_and_pred_x0(latent, e_t, index)
     #e_t_next = get_model_output(x_prev)
     #e_t_prime = (e_t + e_t_next) / 2
     #x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t_prime, index)
-    return x_prev.realize(), pred_x0
+    return x_prev.realize()
 
   # start with random noise
   latent = Tensor.randn(1,4,64,64)
@@ -638,7 +638,7 @@ if __name__ == "__main__":
   for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
     GlobalCounters.reset()
     t.set_description("%3d %3d" % (index, timestep))
-    latent, pred_x0 = do_step(latent, Tensor([timestep]))
+    latent = do_step(latent, Tensor([timestep]))
 
   # upsample latent space to image with autoencoder
   x = model.first_stage_model.post_quant_conv(1/0.18215 * latent)

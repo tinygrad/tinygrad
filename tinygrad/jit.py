@@ -84,7 +84,7 @@ class _CacheCollector:
       if isinstance(buf, RawBuffer) and get_signature(buf) not in self.placeholders:
         self.last_buftype[self._buftype_key(buf)] = len(self.cache)
 
-    # Creating/updating a placeholder for the current output buffer. If we update output, set the ref to point to the new RawBuffer, 
+    # Creating/updating a placeholder for the current output buffer. If we update output, set the ref to point to the new RawBuffer,
     # since the previous RawBuffer is dead (overwise we won't get a new RawBuffer with the same signature). Do not care about dead buffers, they 100% could be replaced with any other buffer.
     self.placeholders.setdefault(get_signature(rawbufs[0]), _CacheCollector._Placeholder(rawbufs[0])).ref = ref(rawbufs[0])
     self.last_placeholder_index[self.placeholders[get_signature(rawbufs[0])]] = len(self.cache)
@@ -95,10 +95,11 @@ class _CacheCollector:
     for j,(p,cached_bufs,var_vals) in enumerate(self.cache):
       if cached_bufs[0].__class__ is _CacheCollector._Placeholder:
         if cached_bufs[0].alive():
-          # Since the placeholder is alive (someone hold a RawBuffer) to avoid hazards when this output buffer could be used as input on the other launch (e.g., LSTM), 
+          # Since the placeholder is alive (someone holds refed RawBuffer) to avoid hazards when this output buffer could be used as input on the other launch (e.g., LSTM),
           # we allocate a backing buffer and and use it until the penultimate entry (the last entry is 100% safe to use the original RawBuffer).
           if self.last_buftype.get(self._buftype_key(cached_bufs[0]), -1) < j or self.last_placeholder_index[cached_bufs[0]] == j:
-            placeholder_mapper[cached_bufs[0]] = cached_bufs[0].ref() # If it's safe to use original buffer, switch to it.
+            # Safe to use the original buffer when all inputs buffers of the same size and dtype are behind or this is the last usage of this buffer as output.
+            placeholder_mapper[cached_bufs[0]] = cached_bufs[0].ref()
           elif cached_bufs[0] not in placeholder_mapper:
             placeholder_mapper[cached_bufs[0]] = cached_bufs[0].alloc_rawbuf() # Allocating a backing buffer.
         elif cached_bufs[0] not in placeholder_mapper:
