@@ -109,7 +109,7 @@ class Tensor:
     return self
 
   def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
-  def numpy(self) -> np.ndarray: return self.lazydata.toCPU()
+  def numpy(self) -> np.ndarray: return self.to('CPU').lazydata.toCPU()
 
   # TODO: if things are realized this won't work
   def to_(self, device:str):
@@ -117,7 +117,7 @@ class Tensor:
     self.lazydata.device = device
     if self.grad: self.grad.to_(device)
 
-  def to(self, device:str):
+  def to(self, device:str) -> Tensor:
     ret = Tensor(self.lazydata, device)
     if self.grad: ret.grad = self.grad.to(device)
     return ret
