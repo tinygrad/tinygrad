@@ -37,7 +37,7 @@ class TestTinygrad(unittest.TestCase):
       out = out.log_softmax()
       out = out.mul(m).add(m).sum()
       out.backward()
-      return out.cpu().numpy(), x.grad.cpu().numpy(), W.grad.cpu().numpy()
+      return out.numpy(), x.grad.numpy(), W.grad.numpy()
 
     def test_pytorch():
       x = torch.tensor(x_init, requires_grad=True)
@@ -64,7 +64,7 @@ class TestTinygrad(unittest.TestCase):
       out = out.log_softmax()
       out = out.sum()
       out.backward()
-      return out.cpu().numpy(), u.cpu().grad.numpy(), v.cpu().grad.numpy(), w.cpu().grad.numpy()
+      return out.numpy(), u.grad.numpy(), v.grad.numpy(), w.grad.numpy()
 
     def test_pytorch():
       u = torch.tensor(U_init, requires_grad=True)
@@ -100,7 +100,7 @@ class TestTinygrad(unittest.TestCase):
     Tensor.training = True
     n, rate = 1_000_000, 0.1
     w = Tensor.ones(n).dropout(rate)
-    non_zeros = np.count_nonzero(w.cpu().numpy())
+    non_zeros = np.count_nonzero(w.numpy())
     expected = n * (1 - rate)
     np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
 

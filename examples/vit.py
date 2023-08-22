@@ -44,6 +44,6 @@ img -= 0.5
 img /= 0.5
 
 out = m.forward(Tensor(img))
-outnp = out.cpu().numpy().ravel()
+outnp = out.numpy().ravel()
 choice = outnp.argmax()
 print(out.shape, choice, outnp[choice], lbls[choice])
