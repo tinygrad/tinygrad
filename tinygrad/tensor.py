@@ -379,7 +379,7 @@ class Tensor:
   def repeat(self, repeats):
     base_shape = (1,) * (len(repeats) - self.ndim) + self.shape
     new_shape = [x for b in base_shape for x in [1, b]]
-    expand_shape = [x for r,s in zip(repeats, base_shape) for x in [r,s]]
+    expand_shape = [x for rs in zip(repeats, base_shape) for x in rs]
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
     return self.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
