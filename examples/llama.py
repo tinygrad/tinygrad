@@ -251,7 +251,7 @@ class LLaMa:
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == VOCAB_SIZE
 
-    from tinygrad.state import torch_load, load_state_dict
+    from tinygrad.nn.state import torch_load, load_state_dict
     params = MODEL_PARAMS[model_gen][model_size]
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
     weights = concat_weights([torch_load(filename) for filename in [f"{model_path}/{model_size}/consolidated.{i:02d}.pth" for i in range(params["files"])]])

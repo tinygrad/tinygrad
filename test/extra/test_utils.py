@@ -6,9 +6,9 @@ from unittest.mock import patch, MagicMock
 
 import torch
 import numpy as np
-from tinygrad.helpers import getenv 
+from tinygrad.helpers import getenv
 from extra.utils import fetch, temp, download_file
-from tinygrad.state import torch_load
+from tinygrad.nn.state import torch_load
 from PIL import Image
 
 @unittest.skipIf(getenv("CI", "") != "", "no internet tests in CI")
@@ -33,7 +33,7 @@ class TestFetchRelative(unittest.TestCase):
     os.chdir(self.tempdir.name)
     with open('test_file.txt', 'x') as f:
         f.write("12345")
-  
+
   def tearDown(self):
     os.chdir(self.working_dir)
     self.tempdir.cleanup()
@@ -41,7 +41,7 @@ class TestFetchRelative(unittest.TestCase):
   #test ./
   def test_fetch_relative_dotslash(self):
     self.assertEqual(b'12345', fetch("./test_file.txt"))
-  
+
   #test ../
   def test_fetch_relative_dotdotslash(self):
       os.mkdir('test_file_path')
@@ -92,7 +92,7 @@ class TestUtils(unittest.TestCase):
     )
     if isfloat16: model = model.half()
 
-    path = temp(f"test_load_{isfloat16}.pt") 
+    path = temp(f"test_load_{isfloat16}.pt")
     torch.save(model.state_dict(), path)
     model2 = torch_load(path)
 
