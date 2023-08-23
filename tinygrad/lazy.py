@@ -186,12 +186,9 @@ class LazyBuffer:
 
   def toCPU(self) -> np.ndarray:
     assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
-    realized = self.cast((dtypes.from_np(self.dtype.np), False)).contiguous().realize().realized
+    self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
+    realized = self_casted.contiguous().realize().realized
     return cast(RawBuffer, realized).toCPU().reshape(self.shape)
-
-  def cast(self:LazyBuffer, arg:Tuple[DType, bool]) -> LazyBuffer:
-    assert not arg[1] or self.dtype.itemsize == arg[0].itemsize, "can't bitcast mismatched dtype itemsizes"
-    return self.e(UnaryOps.CAST, arg=arg) if self.dtype != arg[0] else self
 
   def e(self:LazyBuffer, op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     # srcs includes self

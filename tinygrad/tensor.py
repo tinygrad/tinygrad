@@ -707,11 +707,14 @@ class Tensor:
   # ***** cast ops *****
 
   def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
-  def bitcast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype, bitcast=True) if self.dtype != dtype else self
+  def bitcast(self, dtype:DType) -> Tensor:
+    assert self.dtype.itemsize == dtype.itemsize, "can't bitcast mismatched dtype itemsizes"
+    return mlops.Cast.apply(self, dtype=dtype, bitcast=True) if self.dtype != dtype else self
   def float(self) -> Tensor: return self.cast(dtypes.float32)
   def half(self) -> Tensor: return self.cast(dtypes.float16)
 
-  # ***** Convenience stuff *****
+  # ***** convenience stuff *****
+
   @property
   def ndim(self) -> int: return len(self.shape)
   def numel(self) -> int: return math.prod(self.shape)
