@@ -201,14 +201,14 @@ class Tensor:
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
   @staticmethod
-  def choice(a: Union[Tensor, int], size: Tuple[int, ...] = (1,), replace: bool = True, p: Optional[Tensor] = None):
-    if isinstance(a, int):
-      a = Tensor.arange(a)
-    assert a.ndim == 1, "a must be 1-dimensional"
+  def choice(a: Union[Tensor, int], size: Union[int, Tuple[int, ...]] = 1, replace: bool = True, p: Optional[Tensor] = None):
+    if isinstance(a, int): a = Tensor.arange(a)
+    assert isinstance(a, Tensor) and a.ndim == 1, "a must be 1-dimensional"
     if p is not None:
       assert a.shape == p.shape, "a and p must have the same shape"
     else:
       p = Tensor.full(a.shape, 1 / a.numel())
+    size = (size,) if isinstance(size, int) else size
     cdf = p.cumsum()
     cdf /= cdf[-1] # probabilities should sum to 1
     unif_samples = Tensor.rand(n_samples := math.prod(size))
