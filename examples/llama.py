@@ -150,6 +150,7 @@ class Transformer:
         cache_v = cache_v.reshape(cache_v.shape[0], pos, cache_v.shape[2], cache_v.shape[3])
       h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=freqs_cis, mask=mask)
       if do_jit:
+        # jit function should not care about input's shape, we will reshape inside jitted function so it does not matter
         cache_k = cache_k.reshape(cache_k.shape[0], start_pos+seqlen, cache_k.shape[2], cache_k.shape[3]).realize()
         cache_v = cache_v.reshape(cache_v.shape[0], start_pos+seqlen, cache_v.shape[2], cache_v.shape[3]).realize()
       self.kv_caches[i] = (cache_k, cache_v)
@@ -463,6 +464,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       if args.timing: print("")
       st = GlobalCounters.time_sum_s
       with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=args.timing):
+        # TODO: eventually passing jit_ctx here
         logits = llama.model(Tensor([toks[start_pos:]]), start_pos).realize()[:, -1, :]
       with Timing("sync in ", enabled=args.timing):
         tok = sample(logits, args.temperature)
