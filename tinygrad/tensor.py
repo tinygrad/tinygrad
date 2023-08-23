@@ -140,19 +140,23 @@ class Tensor:
     Tensor._seed += 1
     return Tensor._loadop(LoadOps.RAND, prod(shape), arg=Tensor._seed, **kwargs).reshape(shape)
 
-  def choice(high:int, size:int, p:Tensor):
+  def choice(high, size, p:Tensor):
     ints = Tensor.arange(high)
-    cum_b4_sum = (p[1:-1].reshape(high-2,1).expand(high-2,2)/2).flatten()
-    cum = (cum_b4_sum==0).where(float('-inf'), cum_b4_sum.cumsum())
-    pp = cum.add(p[0])[::2].pad(((1,1),))
-    pp = (p[0]==0).where(Tensor([float('-inf')]), Tensor([0])).pad(((0,high-1),)) + pp + (cum[-2] + p[-2]).reshape(1).pad(((high-1,0),))
-    pp /= pp.max()
-    peecumsum = pp.reshape(1, high).expand(size,high)
+    peesum = p/p.sum()
+    peemaxidx = peesum.max() == peesum
+    pp = (peemaxidx).where(0, peesum)
+    firstpee = pp[0]
+    restpee = pp[1:].pad(((1,0),))
+    cummy = ((restpee.reshape(high,1).expand(high,2)/2).flatten().cumsum() + firstpee)[1::2]
+    maxpee = cummy.max()
+    cummy = cummy.cat(cummy[:-1].pad(((1,0),)), dim=0).reshape(2,high).sum(0)/2
+    cummy = (p==0).where(float('-inf'), (peemaxidx).where(maxpee, cummy))
+    cummy = firstpee.reshape(1).pad(((0,high-1),)) + cummy[1:].pad(((1,0),))
     rand = Tensor.rand(size).reshape(size, 1).expand(size,high)
-    diff = (peecumsum - rand).abs()
+    cummy = cummy.reshape(1, high).expand(size,high)
+    diff = (cummy-rand).abs()
     idx = ((diff == diff.min(axis=1).reshape(size,1)) * ints.reshape(1,high)).sum(axis=1)
     return ints[idx]
-
 
   # ***** creation helper functions *****
 
