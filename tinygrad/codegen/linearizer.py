@@ -242,9 +242,12 @@ class Linearizer:
     self.idx_count += 1
     return Token(f"idx_{self.idx_count-1}", dtype)
   @functools.lru_cache(None)
-  def uop_const(self, num, dtype):
+  def uop_const(self, x, dtype):
     #return self.uop(UOps.CONST, Token(f"const_{dtype.name}_{str(mnum(num)).replace('.', '_')}", dtype), [], num)
-    return self.uop(UOps.CONST, Token(str(num), dtype), [], num)
+    if math.isnan(x): val = "NAN"
+    elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
+    else: val = str(x)
+    return self.uop(UOps.CONST, Token(val, dtype), [], x)
   def uop_alu_idx(self, a, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
     return self.uop_alu(self.ssa_idx(dtype), [a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx)], op)
   render_ops: Any = { Variable: lambda self, ops, ctx: Token(self.expr, dtypes.int32), NumNode: lambda self, ops, ctx: ctx.uop_const(self.b, dtypes.int32),
