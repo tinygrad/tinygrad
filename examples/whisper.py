@@ -211,7 +211,7 @@ def online_mode(model, record_seconds, task_prompt):
       log_spec = prep_audio(total, 0)
       encoded_audio = model.encoder(Tensor(log_spec)).realize()
     out = model.decoder(Tensor([lst]), encoded_audio).realize()
-    idx = out[0,-1].numpy().argmax()
+    idx = out[0,-1].argmax().numpy()
     lst.append(idx)
     dec = model.tokenizer.decode(lst)
     print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
@@ -233,7 +233,7 @@ class GreedyDecoder:
 
   def update(self, tokens, logits, sum_logprobs):
     tokens = tokens.numpy()
-    next_tokens = logits.numpy().argmax(-1)
+    next_tokens = logits.argmax(-1).numpy()
     logprobs = logits.log_softmax(-1).numpy()
     current_logprobs = logprobs[np.arange(0, logprobs.shape[0]), next_tokens]
     sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)
