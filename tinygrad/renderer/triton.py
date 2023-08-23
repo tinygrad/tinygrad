@@ -13,6 +13,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   local_size: List[int] = []
   depth = 1
   bufs = []
+  signatures = []
   def kk(s): kernel.append("  "*depth+s)  
   gid = [f"tl.program_id({i})" for i in range(3)]
   code_for_op: Final[Dict[Op, Callable]] = {
@@ -27,6 +28,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     TernaryOps.MULACC: lambda x,y,z: f"(({x}*{y})+{z})",
     TernaryOps.WHERE: lambda x,y,z: f"tl.where({x},{y},{z})",
   }
+  signature_dtypes = {dtypes.double: "*fp64",dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.int8: "*i8", dtypes.uint8: "*u8", dtypes.int32: "*i32", dtypes.int64: "*i64"}
   for uop,newvar,vin,args in uops:
     if uop == UOps.LOOP:
       for i,var in enumerate(args[0]):
@@ -66,11 +68,14 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       kk(f"tl.store({args.name} + {args.idx.render()}, {vin[0].render()}, mask = {args.idx.render()}<{args.idx.max+1}) ")
     elif uop == UOps.DEFINE_GLOBAL:
       bufs.append(args)
+      signatures.append(signature_dtypes[args[1]])
     elif uop == UOps.CAST: raise NotImplementedError("unimplemented: cast")
     else:
       raise NotImplementedError(f"unimplemented: {uop}")  
-  prg = f"@triton.jit\ndef {function_name}("+','.join(f"data{i}" for i in range(len(bufs)))+"):\n"
+  
+  prg = f"@triton.jit\ndef {function_name}("+','.join(f"{buf[0]}" for buf in bufs)+"):\n"
   prg += '\n'.join(kernel)
+  prg += "#SIGNATURE:" + ",".join(signatures)
   acc_local_size = 1
   for x in local_size: acc_local_size *= next_power_of_2(x)
   local_size = [acc_local_size] + [1] * (len(local_size) - 1)  
