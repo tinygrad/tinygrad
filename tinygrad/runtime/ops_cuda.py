@@ -70,7 +70,7 @@ def find_cicc_path():
   tmp = nvcc_dir + "../nvvm/bin/cicc"
   if os.path.exists(tmp): return tmp
 
-  raise Exception("cicc not found")
+  raise EnvironmentError("cicc not found")
 
 CUDA_PROGRAM_HEADER = 'const float INFINITY = __builtin_inff(); const float NAN = __builtin_nanf ("");struct __attribute__((device_builtin)) uint3{unsigned int x, y, z;};struct __attribute__((device_builtin)) __attribute__((aligned(8))) float2 { float x; float y; };struct __attribute__((device_builtin)) __attribute__((aligned(16))) float4{float x, y, z, w;};struct __attribute__((device_builtin)) dim3{unsigned int x, y, z;};static __inline__ __attribute__((host)) __attribute__((device)) float4 make_float4(float x, float y, float z, float w){float4 t; t.x = x; t.y = y; t.z = z; t.w = w; return t;}extern __attribute__((host)) __attribute__((device)) __attribute__((device_builtin)) float fminf(float x, float y) noexcept (true);extern __attribute__((host)) __attribute__((device)) __attribute__((device_builtin)) float fmaxf(float x, float y) noexcept (true);extern __attribute__((host)) __attribute__((device)) __attribute__((device_builtin)) double sqrt(double x) noexcept (true);extern __attribute__((host)) __attribute__((device)) __attribute__((device_builtin)) double log2(double x) noexcept (true);namespace std __attribute__ ((__visibility__ ("default"))){ inline constexpr float sin(float __x){return __builtin_sinf(__x);}constexpr float exp2(float __x){return __builtin_exp2f(__x);}extern __attribute__((host)) __attribute__((device)) __attribute__((cudart_builtin)) float sqrt(float);extern __attribute__((host)) __attribute__((device)) __attribute__((cudart_builtin)) float sin(float);__attribute__((host)) __attribute__((device)) __attribute__((cudart_builtin)) constexpr float exp2(float a);__attribute__((host)) __attribute__((device)) __attribute__((cudart_builtin)) constexpr float log2(float a);__attribute__((host)) __attribute__((device)) __attribute__((cudart_builtin)) constexpr float fmax(float a, float b);__attribute__((host)) __attribute__((device)) __attribute__((cudart_builtin)) constexpr float fmin(float a, float b);}using std::sin, std::exp2;static inline __attribute__((host)) __attribute__((device)) float min(const float a, const float b){return fminf(a, b);}static inline __attribute__((host)) __attribute__((device)) float max(const float a, const float b){return fmaxf(a, b);}uint3 __attribute__((device_builtin)) extern const threadIdx;uint3 __attribute__((device_builtin)) extern const blockIdx;dim3 __attribute__((device_builtin)) extern const blockDim;dim3 __attribute__((device_builtin)) extern const gridDim;int __attribute__((device_builtin)) extern const warpSize;'
 
@@ -79,10 +79,10 @@ class CUDAProgram:
     if not binary:
       fn = os.path.join(tempfile.gettempdir(), f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.ii")
       try: 
-          if not os.path.exists(fn):
-            with open(fn, 'w+') as f: f.write(CUDA_PROGRAM_HEADER + prg)
-            subprocess.run([find_cicc_path(),"-arch",f"compute_{arch()[3:]}","--c++17","--allow_managed", "-m64","-ftz=0", "-prec_div=1", "-prec_sqrt=1", "-fmad=1", "-tused", fn, "-o",fn+'.ptx'], check=True, stderr=subprocess.DEVNULL if DEBUG < 3 else None)
-          with open(fn+'.ptx', 'r') as f: prg = f.read()
+        if not os.path.exists(fn+".ptx"):
+          with open(fn, 'w+') as f: f.write(CUDA_PROGRAM_HEADER + prg)
+          subprocess.run([find_cicc_path(),"-arch",f"compute_{arch()[3:]}","--c++17","--allow_managed", "-m64","-ftz=0", "-prec_div=1", "-prec_sqrt=1", "-fmad=1", "-tused", fn, "-o",fn+'.ptx'], check=True, stderr=subprocess.DEVNULL if DEBUG < 3 else None)
+        with open(fn+'.ptx', 'r') as f: prg = f.read()
       except Exception as e:
         if DEBUG >= 3: print("FAILED TO BUILD", prg)
         os.remove(fn)
