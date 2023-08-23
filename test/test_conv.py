@@ -7,8 +7,8 @@ pytestmark = [pytest.mark.exclude_cuda]
 
 class TestConv(unittest.TestCase):
   def test_simple(self):
-    x = Tensor.ones(1,12,128,256)
-    w = Tensor.ones(32,12,3,3)
+    x = Tensor.ones(1,12,128,256).contiguous().realize()
+    w = Tensor.ones(32,12,3,3).contiguous().realize()
     ret = x.conv2d(w, stride=(2,2), padding=(1,1)).numpy()
     # it's not 108 around the padding
     assert (ret[:, :, 1:-1, 1:-1] == 108).all()
@@ -24,15 +24,15 @@ class TestConv(unittest.TestCase):
 
   def test_lazycache(self):
     Tensor.no_grad = True
-    x = Tensor.zeros(1, 32)
-    y = Tensor.zeros(32)
+    x = Tensor.rand(1, 32)
+    y = Tensor.rand(32)
     out = x + y.reshape((1,32,1)).reshape((1,32)) + y.reshape((1,32,1)).reshape((1,32))
     out.numpy()
     Tensor.no_grad = False
 
   def test_simple_biased(self):
     C = 8
-    x = Tensor.zeros(1,C,5,5)
+    x = Tensor.rand(1,C,5,5)
     w = Tensor.eye(C).reshape((C,C,1,1))
     b = Tensor(np.arange(C).astype(np.float32))
     ret = Tensor.conv2d(x,w,b).relu().conv2d(w,b)
@@ -61,15 +61,15 @@ class TestConv(unittest.TestCase):
 
   def test_first_three(self):
     Tensor.no_grad = True
-    x = Tensor.ones(1,12,128,256)
+    x = Tensor.rand(1,12,128,256)
 
-    w = Tensor.ones(32,12,3,3)
+    w = Tensor.rand(32,12,3,3)
     x = x.conv2d(w, stride=(2,2), padding=(1,1)).elu()
 
-    w = Tensor.ones(32,1,3,3)
+    w = Tensor.rand(32,1,3,3)
     x = x.conv2d(w, padding=(1,1), groups=32).elu()
 
-    w = Tensor.ones(16,32,1,1)
+    w = Tensor.rand(16,32,1,1)
     x = x.conv2d(w).elu()
 
     x = x.numpy()
@@ -92,7 +92,7 @@ class TestConv(unittest.TestCase):
 
   def test_reduce_relu(self):
     Tensor.no_grad = True
-    x = Tensor.ones(1,12,128,256)
+    x = Tensor.rand(1,12,128,256)
     x = x.sum(keepdim=True).relu()
     out = x.numpy()
     Tensor.no_grad = False
@@ -100,7 +100,7 @@ class TestConv(unittest.TestCase):
   def test_bias(self):
     Tensor.no_grad = True
     from tinygrad.nn import Conv2d
-    x = Tensor.ones(1,12,128,256)
+    x = Tensor.rand(1,12,128,256)
     c = Conv2d(12, 32, 3)
     x = c(x).relu()
     w = Tensor.uniform(32, 1, 3, 3)
@@ -109,13 +109,13 @@ class TestConv(unittest.TestCase):
     Tensor.no_grad = False
 
   def test_multiadd(self):
-    w = Tensor.ones(32)
-    x = Tensor.ones(32).relu()
+    w = Tensor.rand(32)
+    x = Tensor.rand(32).relu()
     (w+x).numpy()
 
   def test_reorder(self):
-    x = Tensor.ones(1,12,128,256)
-    w = Tensor.ones(12,12,3,3)
+    x = Tensor.rand(1,12,128,256)
+    w = Tensor.rand(12,12,3,3)
     x = x.conv2d(w, padding=(1,1))
     print(x.shape)
     x = x.reshape((1, 12, 256, 128))
