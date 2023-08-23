@@ -11,7 +11,7 @@ np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple
 
 from tinygrad.helpers import Timing, getenv, DEBUG, dtypes
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
 from tinygrad.ops import GlobalCounters
