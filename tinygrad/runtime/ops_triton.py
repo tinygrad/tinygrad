@@ -39,4 +39,4 @@ class TritonProgram:
       return start.time_till(end)*1e-3
 
 
-TritonBuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False, supports_float4_alu=False), uops_to_triton, TritonProgram)
+TritonBuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]), uops_to_triton, TritonProgram)
