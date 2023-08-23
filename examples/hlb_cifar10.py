@@ -42,7 +42,7 @@ hyp = {
       'kernel_size': 2,             # kernel size for the whitening layer
       'batch_norm_momentum': .5,
       'cutmix_size': 3,
-      'cutmix_steps': 418,          # original repo used epoch 6 which is roughly 6*98=588 STEPS
+      'cutmix_steps': 588,          # original repo used epoch > 12.1 - 6 which is roughly 7*98=686 STEPS
       'pad_amount': 2
   }
 }
@@ -166,9 +166,7 @@ def random_crop(X, crop_size=32):
 
   return X_cropped.reshape((-1, 3, crop_size, crop_size))
 
-def cutmix(X, Y, mask_size=3, p=0.5):
-  if Tensor.rand(1) > p: return X, Y
-
+def cutmix(X, Y, mask_size=3):
   # fill the square with randomly selected images from the same batch
   mask = make_square_mask(X.shape, mask_size)
   order = list(range(0, X.shape[0]))
@@ -191,7 +189,7 @@ def fetch_batches(X_in, Y_in, BS, seed, is_train):
     if is_train:
       X = random_crop(X, crop_size=32)
       X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < 0.5, X[..., ::-1], X) # flip LR
-      if step >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y_in, mask_size=hyp['net']['cutmix_size'])
+      # if step >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y_in, mask_size=hyp['net']['cutmix_size'])
     X, Y = X.numpy(), Y.numpy()
     for i in range(0, X.shape[0], BS):
       # pad the last batch
@@ -235,7 +233,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   # precompute whitening patches
   W = whitening(X_train)
 
-  # padding is not timed in the original repo since it can be done all at once 
+  # padding is not timed in the original repo since it can be done all at once
   X_train = pad_reflect(X_train, size=hyp['net']['pad_amount'])
 
   model = SpeedyResNet(W)
