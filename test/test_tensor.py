@@ -153,7 +153,7 @@ class TestTinygrad(unittest.TestCase):
 
   def test_choice_dirac_distribution(self):
     p = Tensor([0, 0, 1, 0, 0])
-    assert np.array_equal(Tensor.choice(5, (10,), p=p).numpy(), Tensor.full((10,), 2).numpy())
+    assert np.array_equal(Tensor.choice(5, 10, p=p).numpy(), Tensor.full((10,), 2).numpy())
 
   def test_zeros_like_has_same_dtype(self):
     for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:

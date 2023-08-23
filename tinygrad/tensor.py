@@ -211,8 +211,8 @@ class Tensor:
     size = (size,) if isinstance(size, int) else size
     cdf = p.cumsum()
     cdf /= cdf[-1] # probabilities should sum to 1
-    unif_samples = Tensor.rand(n_samples := math.prod(size))
-    indices = a.numel() - (unif_samples.reshape(n_samples, 1).expand(n_samples, a.numel()) <= cdf).sum(1)
+    unif_samples = Tensor.rand(n_samples := math.prod(size), 1)
+    indices = (unif_samples.expand(n_samples, a.numel()) >= cdf).sum(1).cast(dtypes.int32)
     return a[indices].reshape(size)
 
   # ***** toposort and backward pass *****
