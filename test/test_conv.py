@@ -78,14 +78,14 @@ class TestConv(unittest.TestCase):
 
   def test_elu(self):
     Tensor.no_grad = True
-    x = Tensor.ones(1,12,128,256)
+    x = Tensor.rand(1,12,128,256)
 
-    w = Tensor.ones(32,12,3,3)
+    w = Tensor.rand(32,12,3,3)
     x = x.conv2d(w, stride=(2,2), padding=(1,1))
 
     x = x.elu()
 
-    w = Tensor.ones(32,1,3,3)
+    w = Tensor.rand(32,1,3,3)
     x = x.conv2d(w, padding=(1,1), groups=32)
     out = x.numpy()
     Tensor.no_grad = False

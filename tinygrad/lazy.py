@@ -191,7 +191,9 @@ class LazyBuffer:
   def toCPU(self) -> np.ndarray:
     assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
     self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
-    realized = self_casted.contiguous().realize().realized
+    # TODO: can this check go in contiguous?
+    self_contiguous = self_casted if self_casted.st.contiguous else self_casted.contiguous()
+    realized = self_contiguous.realize().realized
     return cast(RawBuffer, realized).toCPU().reshape(self.shape)
 
   def e(self:LazyBuffer, op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
