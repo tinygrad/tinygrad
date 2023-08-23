@@ -201,7 +201,7 @@ class Tensor:
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
   @staticmethod
-  def choice(a: Union[Tensor, int], size: Union[int, Tuple[int, ...]] = 1, replace: bool = True, p: Optional[Tensor] = None):
+  def choice(a: Union[Tensor, int], size: Union[int, Tuple[int, ...]] = 1, p: Optional[Tensor] = None):
     if isinstance(a, int): a = Tensor.arange(a)
     assert isinstance(a, Tensor) and a.ndim == 1, "a must be 1-dimensional"
     if p is not None:
