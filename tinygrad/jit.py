@@ -7,7 +7,7 @@ from tinygrad.ops import GlobalCounters, RawBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
 
-JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU"]
+JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU", "LLVM"]
 
 class TinyJit:
   def __init__(self, fxn:Callable):
