@@ -222,7 +222,7 @@ def hand_coded_optimizations(k:Linearizer):
       # early exit
       return
 
-  if k.opts.has_local and all(isinstance(s, int) for s in k.sts[0].shape[:k.first_reduce]):
+  if k.opts.has_local and k.opts.has_shared and all(isinstance(s, int) for s in k.sts[0].shape[:k.first_reduce]):
     # are we grouping? (requires local shape support)
     if not k.float4_axis(0) and k.first_reduce <= 2 and k.first_reduce + 1 <= k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
