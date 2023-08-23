@@ -57,6 +57,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       assert newvar is not None
       if isinstance(args, ConstOp):
         val = ('-' if math.isinf(args.value) and args.value<0 else'') + ('float("inf")' if math.isinf(args.value) else str(args.value))
+        if math.isnan(args.value): val = "float('nan')"
         if len(local_size) > 0:
           kk(f"{newvar.render()} = tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},), {val}, dtype={triton_dtypes[newvar.dtype]})") 
         else:
