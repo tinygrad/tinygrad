@@ -42,7 +42,7 @@ hyp = {
       'kernel_size': 2,             # kernel size for the whitening layer
       'batch_norm_momentum': .5,
       'cutmix_size': 3,
-      'cutmix_steps': 588,          # original repo used epoch > 12.1 - 6 which is roughly 7*98=686 STEPS
+      'cutmix_steps': 490,          # different from original repo which used epoch > 12.1 - 6 which is roughly 7*98=686 STEPS
       'pad_amount': 2
   }
 }
@@ -189,7 +189,7 @@ def fetch_batches(X_in, Y_in, BS, seed, is_train):
     if is_train:
       X = random_crop(X, crop_size=32)
       X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < 0.5, X[..., ::-1], X) # flip LR
-      # if step >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y_in, mask_size=hyp['net']['cutmix_size'])
+      if step >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
     X, Y = X.numpy(), Y.numpy()
     for i in range(0, X.shape[0], BS):
       # pad the last batch
@@ -209,7 +209,7 @@ transform = [
 ]
 
 def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
-  # this import needs to be done here because this is running in a subproi >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])cess
+  # this import needs to be done here because this is running in a subprocess
   from extra.dist import OOB
   set_seed(seed)
   Tensor.training = True
@@ -238,7 +238,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
 
   model = SpeedyResNet(W)
 
-  # parse the training params into bias and non-biasi >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
+  # parse the training params into bias and non-bias
   params_dict = get_state_dict(model)
   params_bias = []
   params_non_bias = []
@@ -254,7 +254,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
 
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
   initial_div_factor = 1e16
-  final_lr_ratio = 0.022
+  final_lr_ratio = 0.02199
   pct_start = hyp['opt']['percent_start']
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']     ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'] ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
