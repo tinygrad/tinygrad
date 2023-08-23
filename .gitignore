@@ -7,12 +7,11 @@ notebooks
 *.pyc
 *.so
 build
-dist
+/dist
 *.egg-info
 /env
 a.out
 boxes.jpg
-weights/*
 pandecode.dump
 vertex.bin
 recognize*
@@ -36,3 +35,7 @@ node_modules
 package.json
 package-lock.json
 temp
+*.csv
+.coverage
+coverage.xml
+htmlcov

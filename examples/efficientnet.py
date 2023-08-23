@@ -50,7 +50,7 @@ def infer(model, img):
   # if you want to look at the outputs
   """
   import matplotlib.pyplot as plt
-  plt.plot(out.numpy()[0])
+  plt.plot(out[0])
   plt.show()
   """
   return out, retimg

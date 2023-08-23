@@ -3,7 +3,7 @@ import gc
 import time
 from tqdm import trange
 from models.efficientnet import EfficientNet
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters
@@ -61,7 +61,7 @@ if __name__ == "__main__":
       GlobalCounters.cache = None
 
     mem_used = GlobalCounters.mem_used
-    loss_cpu = loss.detach().numpy()[0]
+    loss_cpu = loss.detach().numpy()
     cl = time.monotonic()
 
     print(f"{(st-cpy)*1000.0:7.2f} ms cpy,  {(cl-st)*1000.0:7.2f} ms run, {(mt-st)*1000.0:7.2f} ms build, {(et-mt)*1000.0:7.2f} ms realize, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {tensors_allocated():4d} tensors, {mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")

@@ -1,8 +1,7 @@
-import dataclasses
 import numpy as np
 import torch
 import unittest
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
@@ -38,7 +37,7 @@ class TestTinygrad(unittest.TestCase):
       out = out.log_softmax()
       out = out.mul(m).add(m).sum()
       out.backward()
-      return out.cpu().numpy(), x.grad.cpu().numpy(), W.grad.cpu().numpy()
+      return out.numpy(), x.grad.numpy(), W.grad.numpy()
 
     def test_pytorch():
       x = torch.tensor(x_init, requires_grad=True)
@@ -53,6 +52,7 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "this test uses more than 8 bufs which breaks webgpu") #TODO: remove after #1461
   def test_backward_pass_diamond_model(self):
     def test_tinygrad():
       u = Tensor(U_init, requires_grad=True)
@@ -64,7 +64,7 @@ class TestTinygrad(unittest.TestCase):
       out = out.log_softmax()
       out = out.sum()
       out.backward()
-      return out.cpu().numpy(), u.cpu().grad.numpy(), v.cpu().grad.numpy(), w.cpu().grad.numpy()
+      return out.numpy(), u.grad.numpy(), v.grad.numpy(), w.grad.numpy()
 
     def test_pytorch():
       u = torch.tensor(U_init, requires_grad=True)
@@ -100,7 +100,7 @@ class TestTinygrad(unittest.TestCase):
     Tensor.training = True
     n, rate = 1_000_000, 0.1
     w = Tensor.ones(n).dropout(rate)
-    non_zeros = np.count_nonzero(w.cpu().numpy())
+    non_zeros = np.count_nonzero(w.numpy())
     expected = n * (1 - rate)
     np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
 
@@ -212,6 +212,13 @@ class TestTinygrad(unittest.TestCase):
   def test_element_size(self):
     for _, dtype in dtypes.fields().items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
+
+  def test_deepwalk_ctx_check(self):
+    layer = Tensor.uniform(1, 1, requires_grad=True)
+    x = Tensor.randn(1, 1, 1)
+    x.dot(layer).mean().backward()
+    x = Tensor.randn(1, 1, 1)
+    x.dot(layer).mean().backward()
 
 if __name__ == '__main__':
   unittest.main()

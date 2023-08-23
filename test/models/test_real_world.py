@@ -1,7 +1,7 @@
 import unittest, time
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 from tinygrad.ops import GlobalCounters, LazyOp, LoadOps
 from tinygrad.lazy import Device
@@ -31,7 +31,7 @@ def derandomize(x):
   if isinstance(x, LazyOp):
     if x.op == LoadOps.RAND: x.op = LoadOps.EMPTY
     x.src = [derandomize(s) for s in x.src]
-  else:
+  elif hasattr(x, "op"):
     x.op = derandomize(x.op)
   return x
 
@@ -47,7 +47,7 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t, t2): return model(t, 801, t2).realize()
-    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 14.5, 924)
+    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 967)
 
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE, "needs JIT")
   def test_llama(self):
@@ -73,8 +73,7 @@ class TestRealWorld(unittest.TestCase):
     # TODO: with train
     old_training = Tensor.training
     Tensor.training = True
-
-    model = SpeedyResNet()
+    model = SpeedyResNet(Tensor.ones((12,3,2,2)))
     optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=0.8, nesterov=True, weight_decay=0.15)
 
     BS = 32 if CI else 512
@@ -87,7 +86,7 @@ class TestRealWorld(unittest.TestCase):
       loss.backward()
       optimizer.step()
 
-    helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/32)*BS, 236)
+    helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 153)
 
     # reset device
     Tensor.training = old_training

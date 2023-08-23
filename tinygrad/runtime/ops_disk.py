@@ -1,6 +1,6 @@
 import os, mmap
 from typing import Optional
-from typing import Callable, Dict
+from typing import Callable, Dict, Tuple
 from tinygrad.helpers import prod, DType
 from tinygrad.runtime.lib import RawBufferMapped
 from tinygrad.ops import Interpreted, Op, MovementOps, UnaryOps
@@ -21,7 +21,7 @@ class RawDiskBuffer(RawBufferMapped):
   def __del__(self):
     self._buf[2] -= 1
     if self._buf[2] == 0: self._buf[0].close()
-  def cast(self, new_dtype:DType): return RawDiskBuffer(self.size, new_dtype, buf=self._buf, shape=self.shape, offset=self.offset)
+  def cast(self, arg:Tuple[DType, bool]): return RawDiskBuffer(self.size, arg[0], buf=self._buf, shape=self.shape, offset=self.offset)
   def reshape(self, arg): return RawDiskBuffer(self.size, self.dtype, buf=self._buf, shape=arg, offset=self.offset)
   def shrink(self, arg):
     assert arg[1:] == tuple([(0,x) for x in self.shape[1:]]), f"can only slice the first dim of disk tensor {arg}"
@@ -34,5 +34,4 @@ class RawDiskBuffer(RawBufferMapped):
     self._buf[0].readinto(buf)
 
 disk_fxn_for_op: Dict[Op, Callable] = { UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.RESHAPE: RawDiskBuffer.reshape, MovementOps.SHRINK: RawDiskBuffer.shrink }
-
 DiskBuffer = Interpreted(RawDiskBuffer, disk_fxn_for_op, to_underlying=lambda x:x, from_underlying=lambda x:x)

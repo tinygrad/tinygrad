@@ -2,7 +2,7 @@
 import numpy as np
 from PIL import Image
 
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import getenv
 from extra.training import train, evaluate

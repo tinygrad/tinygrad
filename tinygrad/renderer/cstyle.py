@@ -1,9 +1,9 @@
-from typing import Final, Dict, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Union
-import math, collections
-from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, MemOp, ConstOp
-from tinygrad.ops import ASTRunner, UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import ImageDType, dtypes, colored, getenv, prod, DType
-from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
+from typing import Dict, List, Optional, NamedTuple, Tuple, Union
+import math
+from tinygrad.codegen.linearizer import UOps, UOp, MemOp, ConstOp
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.helpers import ImageDType, dtypes, getenv, prod, DType
+from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, sym_render
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -17,6 +17,7 @@ class CStyleLanguage(NamedTuple):
   buffer_prefix: str = ""
   buffer_suffix: str = ""
   smem_prefix: str = ""
+  arg_int_prefix: str = ""
   barrier: str = ""
   gid: List[str] = []
   lid: List[str] = []
@@ -28,6 +29,7 @@ class CStyleLanguage(NamedTuple):
   uses_vload: bool = False
   external_local_bufs: bool = False
   uses_ptr_arithmetic: bool = False
+  launch_bounds: bool = False
   code_for_op: Dict = {
     UnaryOps.EXP2: lambda x: f"exp2({x})",
     UnaryOps.LOG2: lambda x: f"log2({x})",
@@ -35,8 +37,8 @@ class CStyleLanguage(NamedTuple):
     UnaryOps.SQRT: lambda x: f"sqrt({x})",
     BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
     BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
-    BinaryOps.MAX: lambda a,b: f"max({a},{b})",
-    BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", TernaryOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})",
+    BinaryOps.MAX: lambda a,b: f"max({a},{b})", BinaryOps.MOD: lambda a,b: f"({a}%{b})",
+    BinaryOps.CMPLT: lambda a,b: f"({a}<{b})", TernaryOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})",
     TernaryOps.WHERE: lambda a,b,c: f"({a}!=0?{b}:{c})"
   }
 
@@ -52,7 +54,7 @@ class CStyleLanguage(NamedTuple):
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    else: val = f"{x}" + ("f" if isinstance(x, float) else "")
+    else: val = f"{x}f" if dtypes.is_float(var_dtype) and isinstance(x, float) else f"{int(x)}"
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
 
   # returns a str expression of the loaded value with the output type
@@ -69,17 +71,18 @@ class CStyleLanguage(NamedTuple):
   def render_local(self, name:str, size:int):
     return self.smem_prefix + f"float {name}[{size}];"
 
-  def render_for(self, expr: str, _min:int, _max:int) -> str:
+  def render_for(self, expr: str, _min:int, _max:Union[int,str]) -> str:
     return f"for (int {expr} = {_min}; {expr} <= {_max}; ++{expr}) {{"
 
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
 
-  def render_kernel(self, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str,List[int],List[int]]:
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str,List[int],List[int]]:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
+                self.arg_int_prefix if dtype == dtypes._arg_int32 else
                 ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix) for i,(name,dtype) in enumerate(bufs)]
-    prg = ''.join([f"{self.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
+    prg = ''.join([f"{self.kernel_prefix} void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
@@ -110,7 +113,7 @@ def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:Li
   local_size.append(var.max+1)
   return "{" if isinstance(var, NumNode) else f"{{ {prefix} {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
-def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
+def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> Tuple[str, List[int], List[int]]:
   global_size: List[int] = []
   local_size: List[int] = []
   kernel,prekernel = [],[]
@@ -127,13 +130,13 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
         elif args[1] == "local" and lang.lid:
           kk(add_gl_dimension(lang.size_prefix, args, i, var, local_size, lang.lid))
         else:
-          if getenv("NOUNROLL"): kk("#pragma unroll(1)")   # prevent loop unrolling
-          kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, var.min, var.max))
+          if getenv("NOUNROLL") and not isinstance(var, NumNode): kk("#pragma unroll(1)")   # prevent loop unrolling
+          kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, var.min, sym_render(var.max)))
       depth += 1
     elif uop == UOps.BARRIER:
       kk(lang.barrier)
     elif uop == UOps.ENDLOOP:
-      if args[1] == "local" and len(lang.lid):
+      if args[1] == "local" and lang.lid:
         # TODO: this is a bit of a hack. the local loop isn't real on the GPU
         kk(f"if ({Variable.sum(args[0]).render(render_cl)} == 0) {{")
         pend_close = "}"*(len(args[0])+1) + f" /* {args[1]} */"
@@ -145,22 +148,31 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
         depth -= 1
         kk("}"*len(args[0]) + f" /* {args[1]} */")
     elif uop == UOps.WMMA:
-      # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
-      kk("{ simdgroup_float8x8 a,b,c;")
-      kk(f"a.thread_elements()[0] = {vin[0].render()}; a.thread_elements()[1] = {vin[1].render()};")
-      kk(f"b.thread_elements()[0] = {vin[2].render()}; b.thread_elements()[1] = {vin[3].render()};")
-      kk(f"c.thread_elements()[0] = {vin[4].render()}; c.thread_elements()[1] = {vin[5].render()};")
-      kk("simdgroup_multiply_accumulate(c, a, b, c);")
-      kk(f"{vin[4].render()} = c.thread_elements()[0]; {vin[5].render()} = c.thread_elements()[1]; }}")
+      if args == "METAL":
+        # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
+        kk("{ simdgroup_float8x8 a,b,c;")
+        kk(f"a.thread_elements()[0] = {vin[0].render()}; a.thread_elements()[1] = {vin[1].render()};")
+        kk(f"b.thread_elements()[0] = {vin[2].render()}; b.thread_elements()[1] = {vin[3].render()};")
+        kk(f"c.thread_elements()[0] = {vin[4].render()}; c.thread_elements()[1] = {vin[5].render()};")
+        kk("simdgroup_multiply_accumulate(c, a, b, c);")
+        kk(f"{vin[4].render()} = c.thread_elements()[0]; {vin[5].render()} = c.thread_elements()[1]; }}")
+      elif args == "HIP":
+        kk("{")
+        kk(f"half16 a_frag = {{ {','.join(['(half)'+x.render() for x in vin[8:8+16]])} }};")
+        kk(f"half16 b_frag = {{ {','.join(['(half)'+x.render() for x in vin[8+16:8+32]])} }};")
+        kk(f"float8 c_frag = {{ {','.join([x.render() for x in vin[:8]])} }};")
+        kk("c_frag = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(a_frag, b_frag, c_frag);")
+        for i in range(8): kk(f"{vin[i].render()} = c_frag[{i}];")
+        kk("}")
+      else:
+        raise NotImplementedError(f"WMMA not implemented for {args}")
     elif uop == UOps.ALU:
       assert newvar is not None
       kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")
     elif uop == UOps.LOAD:
       assert newvar is not None and isinstance(args, (MemOp, ConstOp))
       # valids are handled here
-      if args.valid.max == 0:
-        val = lang.render_const(args.invalid_value, newvar.dtype)
-      elif isinstance(args, ConstOp):
+      if isinstance(args, ConstOp):
         val = lang.render_const(args.value, newvar.dtype)
       else:
         val = lang.render_load(newvar.dtype, args.name, args.memory_dtype, args.idx, args.local)
@@ -182,32 +194,4 @@ def uops_to_cstyle(uops:List[UOp], lang:CStyleLanguage) -> Tuple[str, List[int],
     else:
       raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(kernel, bufs, global_size, local_size, prekernel)
-
-class CStyleCodegen(Linearizer):
-  lang: ClassVar[CStyleLanguage] = CStyleLanguage()
-  supports_constant_folding: bool = True
-  supports_float4: bool = True
-  supports_float4_alu: bool = True
-
-  # for renaming
-  kernel_cnt: Final[DefaultDict[str, int]] = collections.defaultdict(int)
-  kernel_name_cache: Final[Dict[str, Tuple[str, str]]] = {}
-
-  def codegen(self):
-    self.process()
-    if self.lang.global_max: self.limit_global_dims(len(self.lang.gid), self.lang.global_max, self.lang.local_max)  # NOTE: this is optional now
-    self.linearize()
-
-    prg, global_size, local_size = uops_to_cstyle(self.uops, self.lang)
-
-    # painfully name the function something unique
-    if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]
-    else:
-      CStyleCodegen.kernel_cnt[self.function_name] += 1
-      suffix = f"{'n'+str(CStyleCodegen.kernel_cnt[self.function_name]-1)}" if CStyleCodegen.kernel_cnt[self.function_name] > 1 else ""
-      CStyleCodegen.kernel_name_cache[prg] = function_name, display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
-
-    return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
-      global_size, local_size,
-      op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=display_name)
+  return lang.render_kernel(function_name, kernel, bufs, global_size, local_size, prekernel)
