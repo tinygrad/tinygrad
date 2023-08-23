@@ -25,6 +25,16 @@ class RawBuffer:  # pylint: disable=abstract-method
   def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
   def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
 
+class RawConst(RawBuffer): # pylint: disable=abstract-method
+  def __repr__(self): return f"const<{self._buf}, {self.dtype}>"
+  @property
+  def key(self): return (str(self._buf), self.dtype)
+
+def buf_is_kernel_arg(x) -> bool:
+  return x.realized is not None and x.realized.__class__ is not RawConst
+
+# --teenygrad--
+
 class RawBufferCopyIn(RawBuffer):
   def _copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
 
@@ -61,14 +71,6 @@ class RawBufferTransfer(RawBuffer):
     ret = cls(prod(shape), dtype, **kwargs)
     ret._transfer(x)
     return ret
-
-class RawConst(RawBuffer): # pylint: disable=abstract-method
-  def __repr__(self): return f"const<{self._buf}, {self.dtype}>"
-  @property
-  def key(self): return (str(self._buf), self.dtype)
-
-def buf_is_kernel_arg(x) -> bool:
-  return x.realized is not None and x.realized.__class__ is not RawConst
 
 class LRUAllocator:
   def __init__(self, dev_memsz=(4<<30)):

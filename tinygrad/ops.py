@@ -3,8 +3,6 @@ import time, importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup, merge_dicts
-from tinygrad.shape.symbolic import Variable, sym_infer
-from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg
 if TYPE_CHECKING:
   from tinygrad.lazy import LazyBuffer
 
@@ -123,6 +121,8 @@ class Interpreted:
       return output.output_buffer
     return ret
 
+# --teenygrad--
+
 class FlopCounter:
   def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops, self._buf = *tup, self
   def consume_flops(self):
@@ -138,6 +138,9 @@ InterpretedFlopCounter = Interpreted(FlopCounter, shape_fxn_for_op, lambda x: Fl
 def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.exec_ast(ast)
 
 # **************** for Compiled Buffers ****************
+
+from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg
+from tinygrad.shape.symbolic import Variable, sym_infer
 
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
