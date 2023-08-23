@@ -1,6 +1,6 @@
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import GlobalCounters, getenv
 from tqdm import tqdm
@@ -85,7 +85,8 @@ def train_resnet():
                  "train/python_time": et - st,
                  "train/step_time": cl - st,
                  "train/other_time": cl - et,
-                 "train/loss": loss_cpu
+                 "train/loss": loss_cpu,
+                 "train/GFLOPS": GlobalCounters.global_ops*1e-9/(cl-st),
       })
     
     # "eval" loop. Evaluate every 4 epochs, starting with epoch 1
