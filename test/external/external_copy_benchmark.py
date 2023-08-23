@@ -1,6 +1,6 @@
 import unittest
 from tinygrad.helpers import prod
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters
 

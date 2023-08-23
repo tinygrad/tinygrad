@@ -1,7 +1,7 @@
 from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
 import functools, itertools
 from tinygrad.helpers import DEBUG, DType, merge_dicts
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters, RawBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
