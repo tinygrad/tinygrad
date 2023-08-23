@@ -199,6 +199,21 @@ class Tensor:
   def kaiming_normal(*shape, a:float = 0.01, **kwargs) -> Tensor:
     std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(math.prod(shape[1:]))
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
+  
+  @staticmethod
+  def choice(a: Union[Tensor, int], size: Tuple[int, ...] = (1,), replace: bool = True, p: Optional[Tensor] = None):
+    if isinstance(a, int):
+        a = Tensor.arange(a)
+    assert a.ndim == 1, "a must be 1-dimensional"
+    if p is not None:
+        assert a.shape == p.shape, "a and p must have the same shape"
+    else:
+        p = Tensor.full(a.shape, 1 / a.numel())
+    cdf = p.cumsum()
+    cdf /= cdf[-1] # probabilities should sum to 1
+    unif_samples = Tensor.rand(n_samples := math.prod(size))
+    indices = a.numel() - (unif_samples.reshape(n_samples, 1).expand(n_samples, a.numel()) <= cdf).sum(1)
+    return a[indices].reshape(size)
 
   # ***** toposort and backward pass *****
   def deepwalk(self):
