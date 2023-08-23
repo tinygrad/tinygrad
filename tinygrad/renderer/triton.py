@@ -30,6 +30,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   }
   triton_dtypes = {dtypes.double: "tl.float64", dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64"}
   signature_dtypes = {dtypes.double: "*fp64",dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.int8: "*i8", dtypes.uint8: "*u8", dtypes.int32: "*i32", dtypes.int64: "*i64"}
+  inf = 'float("inf")'
   for uop,newvar,vin,args in uops:
     if uop == UOps.LOOP:
       for i,var in enumerate(args[0]):
@@ -56,9 +57,9 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       assert newvar is not None
       if isinstance(args, ConstOp):
         if len(local_size) > 0:
-          kk(f"{newvar.render()} = tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},), {args.value}, dtype={triton_dtypes[newvar.dtype]})") 
+          kk(f"{newvar.render()} = tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},), {inf if args.value == float('inf') else args.value}, dtype={triton_dtypes[newvar.dtype]})") 
         else:
-          kk(f"{newvar.render()} = ({args.value})")
+          kk(f"{newvar.render()} = ({inf if args.value == float('inf') else args.value})")
       elif args.valid.min == 1: kk(f"{newvar.render()} = tl.load({args.name} + {args.idx.render()}, mask = {args.idx.render()}<{args.idx.max+1}).to({triton_dtypes[args.memory_dtype]})")
       else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({args.name}), 0.0).to({triton_dtypes[args.memory_dtype]})")
     elif uop == UOps.STORE:
