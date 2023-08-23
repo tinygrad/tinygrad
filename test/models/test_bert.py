@@ -13,7 +13,7 @@ def get_question_samp(bsz, seq_len, vocab_size, seed):
   return in_ids, mask, seg_ids
 
 def set_equal_weights(mdl, torch_mdl):
-  from tinygrad.state import get_state_dict
+  from tinygrad.nn.state import get_state_dict
   state, torch_state = get_state_dict(mdl), torch_mdl.state_dict()
   assert len(state) == len(torch_state)
   for k, v in state.items():

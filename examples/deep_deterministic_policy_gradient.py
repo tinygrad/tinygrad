@@ -1,7 +1,7 @@
 from typing import Optional, Tuple
 from numpy.typing import NDArray
 
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from tinygrad.helpers import getenv

@@ -1,5 +1,5 @@
 import unittest
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d, BatchNorm2d, optim
 
@@ -33,7 +33,7 @@ class TestBatchnorm(unittest.TestCase):
         return self.c2(self.c(x)).relu()
     lm = LilModel()
     model_step(lm)
-  
+
   def test_two_conv_bn(self):
     class LilModel:
       def __init__(self):

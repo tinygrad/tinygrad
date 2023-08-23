@@ -1,7 +1,7 @@
 import unittest, time
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 from tinygrad.ops import GlobalCounters, LazyOp, LoadOps
 from tinygrad.lazy import Device
