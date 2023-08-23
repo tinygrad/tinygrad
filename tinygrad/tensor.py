@@ -706,8 +706,8 @@ for device in Device._buffers:
   setattr(Tensor, f"{device.lower()}", partialmethod(Tensor.to, device))
   setattr(Tensor, f"{device.lower()}_", partialmethod(Tensor.to_, device))
 
-# if IMAGE>0 we install these replacement functions in Tensor (hack!)
-from tinygrad.nn.image import image_conv2d, image_dot
 if IMAGE:
+  # if IMAGE>0 we install these replacement functions in Tensor (hack!)
+  from tinygrad.nn.image import image_conv2d, image_dot
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
