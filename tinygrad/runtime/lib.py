@@ -18,7 +18,7 @@ class RawBuffer:  # pylint: disable=abstract-method
     if hasattr(self, '_allocator') and self._allocator: self._allocator.free(self._buf)
   def __repr__(self): return f"buffer<{self.size}, {self.dtype}>"
   @property
-  def key(self): return (self.size, self.dtype.key)
+  def key(self): return (self.size, self.dtype)
 
   # NOTE: this interface allows for 0 copy
   @classmethod
@@ -65,7 +65,7 @@ class RawBufferTransfer(RawBuffer):
 class RawConst(RawBuffer): # pylint: disable=abstract-method
   def __repr__(self): return f"const<{self._buf}, {self.dtype}>"
   @property
-  def key(self): return (str(self._buf), self.dtype.key)
+  def key(self): return (str(self._buf), self.dtype)
 
 def buf_is_kernel_arg(x) -> bool:
   return x.realized is not None and x.realized.__class__ is not RawConst

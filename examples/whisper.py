@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 import numpy as np
 from tinygrad import nn
-from tinygrad.state import torch_load, load_state_dict
+from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
 from extra.utils import download_file

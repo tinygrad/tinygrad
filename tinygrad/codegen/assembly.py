@@ -80,7 +80,7 @@ class AssemblyLanguage:
     off = 0  # TODO: should this be None?
     if isinstance(idx, SumNode):
       nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
-      if len(nums) > 0 and nums[0] < 4096 and (idx-nums[0]).min >= 0:  # TODO: different for each GPU?
+      if nums and nums[0] < 4096 and (idx-nums[0]).min >= 0:  # TODO: different for each GPU?
         idx -= nums[0]
         off = cast(int, nums[0])
     reg = idx.render(self.render_ops, self)
@@ -184,8 +184,6 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
     elif uop == UOps.STORE:
       idx, treg, off = lang.addr_w_offset(args)
       lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype if args.memory_dtype != dtypes.float else None)))
-  # define registers
-  lang.ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, lang.type_to_letter(dtype), c)) for dtype,c in lang.cnts.items()] + lang.ins
 
   if DEBUG >= 4:
     for tins in lang.ins: print(tins)

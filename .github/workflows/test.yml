@@ -14,27 +14,27 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Set up Python 3.8
+    - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
-        python-version: 3.8
-    - name: Cache pip
+        python-version: 3.11
+    - name: Cache python packages
       uses: actions/cache@v3
       with:
-        path: ~/.cache/pip
-        key: linting
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+        key: linting-packages-${{ hashFiles('*/setup.py') }}
     - name: Install dependencies
       run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Repo line count
-      run: python3 sz.py
+      run: python sz.py
     - name: Lint with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with flake8
-      run: flake8 --statistics -j4
+      run: python -m flake8 . --statistics -j4
     - name: Lint tinygrad with pylint
-      run: pylint tinygrad/
+      run: python -m pylint tinygrad/
     - name: Run mypy
-      run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
+      run: python -m mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
     - name: Install SLOCCount
       run: sudo apt install sloccount
     - name: Check <5000 lines
@@ -48,21 +48,21 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Set up Python 3.8
+    - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
-        python-version: 3.8
-    - name: Cache pip
+        python-version: 3.11
+    - name: Cache python packages
       uses: actions/cache@v3
       with:
-        path: ~/.cache/pip
-        key: testing
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+        key: testing-packages-${{ hashFiles('*/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test Docs
       run: python docs/abstractions.py
     - name: Test Quickstart
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && PYTHONPATH=. python3 quickstart.py
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Run Pytest
       run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)"
     - name: Fuzz Test symbolic
@@ -70,7 +70,7 @@ jobs:
     - name: Fuzz Test shapetracker
       run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
     - name: Compile EfficientNet to C
-      run: PYTHONPATH="." CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
+      run: PYTHONPATH="." CLANG=1 python examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
@@ -84,15 +84,15 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Set up Python 3.8
+    - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
-        python-version: 3.8
-    - name: Cache pip
+        python-version: 3.11
+    - name: Cache python packages
       uses: actions/cache@v3
       with:
-        path: ~/.cache/pip
-        key: testing
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+        key: testing-packages-${{ hashFiles('*/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
@@ -121,15 +121,15 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt update
           sudo apt install -y --no-install-recommends intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
-      - name: Set up Python 3.8
+      - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
-          python-version: 3.8
-      - name: Cache pip
+          python-version: 3.11
+      - name: Cache python packages
         uses: actions/cache@v3
         with:
-          path: ~/.cache/pip
-          key: testing
+          path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+          key: testing-packages-${{ hashFiles('*/setup.py') }}
       - name: Install Dependencies
         run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - if: ${{ matrix.task == 'optimage' }}
@@ -140,19 +140,19 @@ jobs:
       - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE ops
         run: |
-          GPU=1 IMAGE=1 python3 -m pytest -n=auto test/test_ops.py
-          FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 -m pytest -n=auto test/test_ops.py
+          GPU=1 IMAGE=1 python -m pytest -n=auto test/test_ops.py
+          FORWARD_ONLY=1 GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model compile and size
         run: |
-          DEBUG=2 ALLOWED_KERNEL_COUNT=199 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
-          python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
+          DEBUG=2 ALLOWED_KERNEL_COUNT=199 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile.py
+          python -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model correctness (float32)
-        run: DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+        run: DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test tensor core ops
-        run: GPU=1 TC=2 python3 -m pytest -n=auto test/test_ops.py
+        run: GPU=1 TC=2 python -m pytest -n=auto test/test_ops.py
       - if: ${{ matrix.task == 'multigpu' }}
         name: Test multigpu
         run: |
@@ -171,15 +171,15 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.11
-    - name: Cache pip
+    - name: Cache python packages
       uses: actions/cache@v3
       with:
-        path: ~/Library/Caches/pip
-        key: metalwebgpu
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+        key: metal-webgpu-testing-packages-${{ hashFiles('*/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test LLaMA compile speed
-      run: PYTHONPATH="." METAL=1 python3 test/external/external_test_speed_llama.py
+      run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
     #- name: Run dtype test
     #  run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
     # dtype test has issues on test_half_to_int8
@@ -209,15 +209,15 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
-      - name: Set up Python 3.8
+      - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
-          python-version: 3.8
-      - name: Cache pip
+          python-version: 3.11
+      - name: Cache python packages
         uses: actions/cache@v3
         with:
-          path: '~/.cache/pip'
-          key: ${{ matrix.backend }}
+          path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+          key: ${{ matrix.backend }}-packages-${{ hashFiles('*/setup.py') }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' }}" >> $GITHUB_ENV
       - name: Find faster apt mirror
@@ -279,15 +279,15 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
-      - name: Set up Python 3.8
+      - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
-          python-version: 3.8
-      - name: Cache pip
+          python-version: 3.11
+      - name: Cache python packages
         uses: actions/cache@v3
         with:
-          path: '~/.cache/pip'
-          key: unicorn
+          path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+          key: testing-arm-packages-${{ hashFiles('*/setup.py') }}
       - name: Install cross-assembler
         run: |
           sudo apt update -y

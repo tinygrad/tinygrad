@@ -2,7 +2,7 @@
 import unittest, gc
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.state import get_parameters, get_state_dict
+from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.ops import GlobalCounters, LazyOp, LoadOps
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, prod

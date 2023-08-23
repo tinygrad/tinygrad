@@ -143,7 +143,7 @@ class EfficientNet:
     }
 
     from extra.utils import fetch_as_file
-    from tinygrad.state import torch_load
+    from tinygrad.nn.state import torch_load
     b0 = torch_load(fetch_as_file(model_urls[self.number]))
     for k,v in b0.items():
       if k.endswith("num_batches_tracked"): continue

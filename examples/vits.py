@@ -5,7 +5,7 @@ from typing import List
 from extra.utils import download_file
 from tinygrad import nn
 from tinygrad.helpers import dtypes
-from tinygrad.state import torch_load
+from tinygrad.nn.state import torch_load
 from tinygrad.tensor import Tensor
 from unidecode import unidecode
 
