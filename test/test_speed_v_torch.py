@@ -16,6 +16,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.helpers import colored, getenv, CI
 from tinygrad.jit import TinyJit
+from extra.perf_report import rpt
 import pytest
 
 pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
@@ -31,15 +32,6 @@ elif str(torch_device) == "cuda":
   sync = lambda: torch.cuda.synchronize()
 else:
   sync = lambda: None
-
-def colorize_float(x):
-  ret = f"{x:7.2f}x"
-  if x < 0.75:
-    return colored(ret, 'green')
-  elif x > 1.15:
-    return colored(ret, 'red')
-  else:
-    return colored(ret, 'yellow')
 
 save_ops, save_mem = 0, 0
 CNT = 8
@@ -104,11 +96,10 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
     val_torch, et_torch = helper_test_speed(f1, *f1_args)
   val_tinygrad, et_tinygrad = helper_test_speed(f2, *f2_args)
 
-  desc = "faster" if et_torch > et_tinygrad else "slower"
   flops = save_ops*1e-6
   mem = save_mem*1e-6
-  print(("\r" if not CI else "")+f"{name:42s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
+  rpt.log_perf(name, et_tinygrad, flops, mem, baseline=et_torch)  # don't log performance results if test failed
 
 def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_x):
   torch.manual_seed(0)
