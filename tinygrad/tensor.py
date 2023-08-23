@@ -7,8 +7,8 @@ import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
-from tinygrad.lazy import Device, LazyBuffer
-from tinygrad.ops import LoadOps
+from tinygrad.lazy import LazyBuffer
+from tinygrad.ops import Device, LoadOps
 
 # An instantiation of the Function is the Context
 class Function:
