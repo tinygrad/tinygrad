@@ -140,6 +140,7 @@ class Tensor:
     Tensor._seed += 1
     return Tensor._loadop(LoadOps.RAND, prod(shape), arg=Tensor._seed, **kwargs).reshape(shape)
 
+  @staticmethod
   def choice(high, size, p:Tensor):
     ints = Tensor.arange(high)
     peesum = p/p.sum()
@@ -151,7 +152,7 @@ class Tensor:
     maxpee = cummy.max()
     cummy = cummy.cat(cummy[:-1].pad(((1,0),)), dim=0).reshape(2,high).sum(0)/2
     cummy = (p==0).where(float('-inf'), (peemaxidx).where(maxpee, cummy))
-    cummy = firstpee.reshape(1).pad(((0,high-1),)) + cummy[1:].pad(((1,0),))
+    cummy = (firstpee/2).reshape(1).pad(((0,high-1),)) + cummy[1:].pad(((1,0),))
     rand = Tensor.rand(size).reshape(size, 1).expand(size,high)
     cummy = cummy.reshape(1, high).expand(size,high)
     diff = (cummy-rand).abs()
