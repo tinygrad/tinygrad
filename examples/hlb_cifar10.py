@@ -42,7 +42,7 @@ hyp = {
       'kernel_size': 2,             # kernel size for the whitening layer
       'batch_norm_momentum': .5,
       'cutmix_size': 3,
-      'cutmix_steps': 588,          # original repo used epoch 6 which is roughly 6*98=588 STEPS
+      'cutmix_steps': 418,          # original repo used epoch 6 which is roughly 6*98=588 STEPS
       'pad_amount': 2
   }
 }
@@ -166,23 +166,6 @@ def random_crop(X, crop_size=32):
 
   return X_cropped.reshape((-1, 3, crop_size, crop_size))
 
-transform = [
-  lambda x: x.to(device=Device.DEFAULT).float(),
-  lambda x: x / 255.0, # scale
-  lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1), # normalize
-  lambda x: x.reshape((-1,3,32,32)),
-  lambda x: pad_reflect(x, size=hyp['net']['pad_amount']),
-  lambda x: random_crop(x, crop_size=32),
-  lambda x: Tensor.where(Tensor.rand(x.shape[0],1,1,1) < 0.5, x[..., ::-1], x), # flip LR
-]
-
-transform_test = [
-  lambda x: x.to(device=Device.DEFAULT).float(),
-  lambda x: x / 255.0,
-  lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1),
-  lambda x: x.reshape((-1,3,32,32)),
-]
-
 def cutmix(X, Y, mask_size=3, p=0.5):
   if Tensor.rand(1) > p: return X, Y
 
@@ -197,25 +180,38 @@ def cutmix(X, Y, mask_size=3, p=0.5):
   Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
   return X_cutmix, Y_cutmix
 
-def fetch_batches(X, Y, BS, seed, is_train=False):
+# the operations that remain inside batch fetcher is the ones that involves random operations
+def fetch_batches(X_in, Y_in, BS, seed, is_train):
+  step = 0
   while True:
     set_seed(seed)
+    X, Y = X_in, Y_in
     order = list(range(0, X.shape[0]))
     random.shuffle(order)
+    if is_train:
+      X = random_crop(X, crop_size=32)
+      X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < 0.5, X[..., ::-1], X) # flip LR
+      if step >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y_in, mask_size=hyp['net']['cutmix_size'])
+    X, Y = X.numpy(), Y.numpy()
     for i in range(0, X.shape[0], BS):
-      # padding the last batch in order to match buffer size during JIT
+      # pad the last batch
       batch_end = min(i+BS, Y.shape[0])
-      # TODO need indexing support for tinygrad Tensor
-      x = Tensor(X.numpy()[order[batch_end-BS:batch_end],:])
-      y = Tensor(np.eye(10, dtype=np.float32)[Y.numpy()[order[batch_end-BS:batch_end]]])
-      x = x.sequential(transform) if is_train else x.sequential(transform_test)
+      x = Tensor(X[order[batch_end-BS:batch_end],:])
+      y = Tensor(Y[order[batch_end-BS:batch_end]])
+      step += 1
       yield x, y
 
     if not is_train: break
     seed += 1
 
+transform = [
+  lambda x: x / 255.0,
+  lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1),
+  lambda x: x.reshape((-1,3,32,32))
+]
+
 def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
-  # this import needs to be done here because this is running in a subprocess
+  # this import needs to be done here because this is running in a subproi >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])cess
   from extra.dist import OOB
   set_seed(seed)
   Tensor.training = True
@@ -228,13 +224,23 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
     X_test, Y_test = X_train, Y_train
   else:
     X_train, Y_train, X_test, Y_test = fetch_cifar()
+    # load data and label into GPU and convert to dtype accordingly
+    X_train, X_test = X_train.to(device=Device.DEFAULT).float(), X_test.to(device=Device.DEFAULT).float()
+    Y_train, Y_test = Y_train.to(device=Device.DEFAULT).float(), Y_test.to(device=Device.DEFAULT).float()
+    # one-hot encode labels
+    Y_train, Y_test = Tensor.eye(10)[Y_train], Tensor.eye(10)[Y_test]
+    # preprocess data
+    X_train, X_test = X_train.sequential(transform), X_test.sequential(transform)
 
   # precompute whitening patches
-  W = whitening(X_train.sequential(transform_test))
+  W = whitening(X_train)
+
+  # padding is not timed in the original repo since it can be done all at once 
+  X_train = pad_reflect(X_train, size=hyp['net']['pad_amount'])
 
   model = SpeedyResNet(W)
 
-  # parse the training params into bias and non-bias
+  # parse the training params into bias and non-biasi >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
   params_dict = get_state_dict(model)
   params_bias = []
   params_non_bias = []
@@ -306,7 +312,6 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
   while i <= STEPS:
     X, Y = next(batcher)
-    if i >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
     # further split batch if distributed
     if getenv("DIST"):
       X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
@@ -315,7 +320,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
       # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
       corrects = []
       losses = []
-      for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed):
+      for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed, is_train=False):
         # further split batch if distributed
         if getenv("DIST"):
           Xt, Yt = Xt.chunk(min(world_size, 5), 0)[min(rank, 4)], Yt.chunk(min(world_size, 5), 0)[min(rank, 4)]
