@@ -67,7 +67,7 @@ class Attention:
     self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
-  def __call__(self, x:Tensor, cache_k:Tensor, cache_v:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]:
+  def __call__(self, x:Tensor, cache_k:Tensor, cache_v:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor], jit_ctx=None) -> Tuple[Tensor, Tensor, Tensor]:
     bsz, seqlen, _ = x.shape
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
@@ -79,6 +79,9 @@ class Attention:
     if start_pos == 0:
       keys, values = xk, xv
     else:
+      if jit_ctx:
+        cache_k.lazydata.st.var_vals.update(jit_ctx)
+        cache_v.lazydata.st.var_vals.update(jit_ctx)
       assert cache_k.shape[0] > 0, "no cache"
       assert start_pos == sym_infer(cache_k.shape[1], cache_k.lazydata.st.var_vals) == sym_infer(cache_v.shape[1], cache_v.lazydata.st.var_vals), f"cache has wrong shape, not ({start_pos} == {sym_infer(cache_k.shape[1], cache_k.lazydata.st.var_vals)} == {sym_infer(cache_v.shape[1], cache_v.lazydata.st.var_vals)})"
       assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
@@ -111,8 +114,20 @@ class TransformerBlock:
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
 
-  def __call__(self, x:Tensor, cache_k:Tensor, cache_v:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]):
-    output, cache_k, cache_v = self.attention(self.attention_norm(x), cache_k, cache_v, start_pos, freqs_cis, mask)
+  def __call__(self, x:Tensor, cache_k:Tensor, cache_v:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor], jit_ctx=None):
+    seqlen = x.shape[1]
+    do_jit = getenv("JIT") and mask is None
+    if do_jit:
+      pos = Variable("pos", 1, 1024)
+      cache_k = cache_k.reshape(cache_k.shape[0], pos, cache_k.shape[2], cache_k.shape[3])
+      cache_v = cache_v.reshape(cache_v.shape[0], pos, cache_v.shape[2], cache_v.shape[3])
+      # get only the part of freqs_cis that we are using.
+      freqs_cis = freqs_cis.shrink(((0, freqs_cis.shape[0]), (pos, pos+seqlen),(0, freqs_cis.shape[2]),(0, freqs_cis.shape[3]),(0, freqs_cis.shape[4])))
+      freqs_cis.lazydata.st.var_vals[pos] = start_pos
+    else:
+      freqs_cis = freqs_cis.shrink(((0, freqs_cis.shape[0]), (start_pos, start_pos+seqlen),(0, freqs_cis.shape[2]),(0, freqs_cis.shape[3]),(0, freqs_cis.shape[4])))
+
+    output, cache_k, cache_v = self.attention(self.attention_norm(x), cache_k, cache_v, start_pos, freqs_cis, mask, jit_ctx=jit_ctx)
     h = x + output
     return (h + self.feed_forward(self.ffn_norm(h))).realize(), cache_k.realize(), cache_v.realize()
 
@@ -134,25 +149,10 @@ class Transformer:
     _bsz, seqlen = tokens.shape
     mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
     do_jit = getenv("JIT") and mask is None
-    # get only the part of freqs_cis that we are using.
-    if do_jit:
-      pos = Variable("pos", 1, 1024)
-      assert seqlen == 1, "seqlen > 1 not supported for JIT"
-      freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (pos, pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
-      freqs_cis.lazydata.st.var_vals[pos] = start_pos
-      h = self.jitted_tok_embeddings(tokens)
-    else:
-      freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (start_pos, start_pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
-      h = self.tok_embeddings(tokens)
+    pos = Variable("pos", 1, 1024)
+    h = self.jitted_tok_embeddings(tokens) if do_jit else self.tok_embeddings(tokens)
     for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.jitted_layers if do_jit else self.layers, self.kv_caches)):
-      if do_jit:
-        cache_k = cache_k.reshape(cache_k.shape[0], pos, cache_k.shape[2], cache_k.shape[3])
-        cache_v = cache_v.reshape(cache_v.shape[0], pos, cache_v.shape[2], cache_v.shape[3])
-      h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=freqs_cis, mask=mask)
-      if do_jit:
-        # jit function should not care about input's shape, we will reshape inside jitted function so it does not matter
-        cache_k = cache_k.reshape(cache_k.shape[0], start_pos+seqlen, cache_k.shape[2], cache_k.shape[3]).realize()
-        cache_v = cache_v.reshape(cache_v.shape[0], start_pos+seqlen, cache_v.shape[2], cache_v.shape[3]).realize()
+      h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=self.freqs_cis, mask=mask, jit_ctx={pos: start_pos})
       self.kv_caches[i] = (cache_k, cache_v)
     return self.jitted_norm_output(h) if do_jit else self.norm_output(h)
 

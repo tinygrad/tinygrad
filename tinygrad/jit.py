@@ -24,18 +24,21 @@ class TinyJit:
   def __call__(self, *args, **kwargs) -> Any:
     if Device.DEFAULT not in JIT_SUPPORTED_DEVICE: return self.fxn(*args, **kwargs)  # only jit on supported device
     # NOTE: this cast is needed since although we know realize will create a ".realized" RawBuffer, the type checker doesn't
-    input_rawbuffers: Dict[Union[int, str], Tuple[RawBuffer, ShapeTracker]] = {cast(Union[int, str], k):(cast(RawBuffer, v.realize().lazydata.realized), v.lazydata.st) for k,v in itertools.chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
+    input_rawbuffers: Dict[Union[int, str], Tuple[RawBuffer, ShapeTracker]] = {cast(Union[int, str], k):(cast(RawBuffer, v.realize().lazydata.realized), v.lazydata.st) for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
     if self.cnt >= 2:
-      if "jit_ctx" in kwargs: var_vals = kwargs["jit_ctx"]
-      else: var_vals = dict(sorted(merge_dicts([arg.lazydata.st.var_vals for arg in args if isinstance(arg, Tensor)]).items(), key=lambda kv: kv[0].key))
+      try:
+        var_vals = kwargs["jit_ctx"]
+      except KeyError:
+        var_vals = dict(sorted(merge_dicts([arg.lazydata.st.var_vals for arg in args if arg.__class__ is Tensor]).items(), key=lambda kv: kv[0].key))
       for (j,i),(input_name, expected_st, expected_type) in self.input_replace.items():
         # TODO: this check needs to be -> jit template with var_vals has the same size as input
         # assert input_rawbuffers[input_name][1].views == expected_st.views and input_rawbuffers[input_name][0].dtype == expected_type, f"ShapeTracker.views or type mismatch in JIT, <{input_rawbuffers[input_name][1].views}, {input_rawbuffers[input_name][0].dtype}> != <{expected_st.views}, {expected_type}>"
         self.jit_cache[j][1][i] = input_rawbuffers[input_name][0]
       for prg, pargs, variables in self.jit_cache: # type: Callable, List[Optional[RawBuffer]], Dict[Variable, int]
-        for v in (var_vals.keys() & variables.keys()): variables[v] = var_vals[v]
+        for k, v in var_vals.items():
+          if k in variables: variables[k] = v
         prg(pargs, variables, jit=True)
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 1:
