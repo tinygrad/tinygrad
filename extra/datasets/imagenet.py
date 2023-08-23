@@ -2,6 +2,7 @@
 import glob, random
 import math
 import json
+import time
 import numpy as np
 from PIL import Image
 import functools, pathlib
@@ -115,12 +116,14 @@ def iterate(bs=32, val=True, shuffle=True, num_workers=0):
     from multiprocessing import Pool
     p = Pool(16)
   for i in range(0, len(files), bs)[:-1]:  # Don't get last batch so all batch shapes are consistent
+    st = time.monotonic()
     if num_workers > 0:
       X = p.starmap(image_load, zip([files[i] for i in order[i:i+bs]], repeat(val)))
     else:
       X = [image_load(files[i], val) for i in order[i:i+bs]]
     Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
-    yield (np.array(X), np.array(Y))
+    et = time.monotonic()
+    yield (np.array(X), np.array(Y), et - st)
 
 def fetch_batch(bs, val=False):
   files = get_val_files() if val else get_train_files()

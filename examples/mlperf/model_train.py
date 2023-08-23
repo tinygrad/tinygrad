@@ -2,7 +2,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.state import get_parameters
 from tinygrad.nn import optim
-from tinygrad.helpers import getenv
+from tinygrad.helpers import GlobalCounters, getenv
 from tqdm import tqdm
 import numpy as np
 import random
@@ -70,16 +70,22 @@ def train_resnet():
   for e in range(epochs):
     # train loop
     Tensor.training = True
-    for X, Y in (t := tqdm(iterate(bs=BS, val=False, num_workers=16), total=steps_in_train_epoch)):
+    for X, Y, data_time in (t := tqdm(iterate(bs=BS, val=False, num_workers=16), total=steps_in_train_epoch)):
+      GlobalCounters.reset()
+      st = time.monotonic()
       X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
-      st = time.time()
       loss, out = train_step(X, Y)
-      et = time.time()
+      et = time.monotonic()
+      loss_cpu = loss.numpy()
+      cl = time.monotonic()
 
-      t.set_description(f"loss: {loss.numpy().item():.3f}")
-      wandb.log({"train/loss": loss.numpy().item(),
-                 "train/forward_time": et - st,
-                 "lr": scheduler.get_lr().cpu().numpy().item(),
+      print(f"{(data_time+cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {data_time*1000.0:7.2f} ms fetch data, {loss_cpu:7.2f} loss, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      wandb.log({"lr": scheduler.get_lr().numpy().item(),
+                 "train/data_time": data_time,
+                 "train/python_time": et - st,
+                 "train/step_time": cl - st,
+                 "train/other_time": cl - et,
+                 "train/loss": loss_cpu
       })
     
     # "eval" loop. Evaluate every 4 epochs, starting with epoch 1
