@@ -35,7 +35,7 @@ def _simplify_sum_reshape_expand_sum(self:LazyBuffer, src: Any, prev_src: Any) -
         if len(dim_difference) == 1:
           expansion_index = dim_difference[0]
           expansion_size = prev_src.shape[expansion_index]
-          return LazyOp(BinaryOps.MUL, (src, LazyBuffer.const_like(src, expansion_size)))
+          return LazyOp(BinaryOps.MUL, (src, LazyBuffer.const(src, expansion_size)))
   return None
 
 # **** realize functions ****
@@ -175,42 +175,51 @@ class LazyBuffer:
   def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
     return create_lazybuffer(device, ShapeTracker(tuple(shape)), LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
 
-  @staticmethod
-  def fromCPU(x: np.ndarray) -> LazyBuffer:
-    return LazyBuffer("CPU", ShapeTracker(x.shape, [View(x.shape, tuple(st//x.itemsize for st in x.strides))]), LoadOps, LazyOp(LoadOps.EMPTY, (), None), dtypes.from_np(x.dtype), RawNumpyBuffer.fromCPU(x))
-
   # create a constant with the shape and dtype of self
-  def const_like(self, val) -> LazyBuffer:
+  def const(self, val) -> LazyBuffer:
     # NOTE: dtypes.from_np(self.dtype.np) to deal with image types
     return self.loadop(LoadOps.CONST, tuple(), dtypes.from_np(self.dtype.np), self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
-
-  def toCPU(self) -> np.ndarray:
-    assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
-    realized = self.cast((dtypes.from_np(self.dtype.np), False)).contiguous().realize().realized
-    return cast(RawBuffer, realized).toCPU().reshape(self.shape)
-
-  def cast(self:LazyBuffer, arg:Tuple[DType, bool]) -> LazyBuffer:
-    assert not arg[1] or self.dtype.itemsize == arg[0].itemsize, "can't bitcast mismatched dtype itemsizes"
-    return elementwise_op(UnaryOps.CAST, self, arg=arg) if self.dtype != arg[0] else self
-  def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
-  def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
-  def ternary_op(self:LazyBuffer, op:TernaryOps, y:LazyBuffer, z:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y, z)
-
-  def __add__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.ADD, self, y)
-  def __radd__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.ADD, y, self)
-  def __mul__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.MUL, self, y)
-  def __rmul__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.MUL, y, self)
-  def __truediv__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.DIV, self, y)
-  def __rtruediv__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.DIV, y, self)
-  def __sub__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.SUB, self, y)
-  def __rsub__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.SUB, y, self)
-  def __lt__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.CMPLT, self, y)
-  def __gt__(self, y:LazyBuffer) -> LazyBuffer: return elementwise_op(BinaryOps.CMPLT, y, self)
-  def __neg__(self) -> LazyBuffer: return self.const_like(0.0)-self
 
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
     return create_lazybuffer(self.device, ShapeTracker(self.shape), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype)
+
+  @staticmethod
+  def fromCPU(x: np.ndarray) -> LazyBuffer:
+    return LazyBuffer("CPU", ShapeTracker(x.shape, [View(x.shape, tuple(st//x.itemsize for st in x.strides))]), LoadOps, LazyOp(LoadOps.EMPTY, (), None), dtypes.from_np(x.dtype), RawNumpyBuffer.fromCPU(x))
+
+  def toCPU(self) -> np.ndarray:
+    assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
+    self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
+    realized = self_casted.contiguous().realize().realized
+    return cast(RawBuffer, realized).toCPU().reshape(self.shape)
+
+  def e(self:LazyBuffer, op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
+    # srcs includes self
+    srcs = (self,)+srcs
+
+    # if we are separated from other binary ops by movement ops, we push those movement ops above those binaryops
+    if SHUFFLE_MOVEMENT_OPS: srcs = _push_movement_ops(srcs)
+
+    # get outputs now
+    out_device, out_shape, out_dtype = srcs[0].device, srcs[0].shape, max([x.dtype for x in srcs]) if op != UnaryOps.CAST else cast(Tuple[DType, bool], arg)[0]
+
+    # push all contiguous to the end of BinaryOps. kernels 198 -> 196
+    if PUSH_CONTIGUOUS and any(not x.realized and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1 for x in srcs):
+      new_srcs: List[LazyBuffer] = []
+      for x in srcs:
+        if not x.realized and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1:
+          x.op.src[0].children.discard(x)
+          new_srcs.append(cast(LazyBuffer, x.op.src[0]))
+        else:
+          new_srcs.append(x)
+      return new_srcs[0].e(op, *new_srcs[1:], arg=arg).contiguous()
+
+    if MERGE_ELEMENTWISE_OPS:
+      # remove the buffers from any (childless) BinaryOps that feed into this
+      srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
+
+    return create_lazybuffer(out_device, ShapeTracker(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype)
 
   def shuffle_and_prune_movement_ops(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[Union[Node,int], ...], Tuple[Tuple[int, int], ...]]) -> LazyBuffer:
     if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and (op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and self.op.op in UnaryOps)) and not self.children:
@@ -313,30 +322,6 @@ def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
     else:
       new_srcs.append(x)
   return tuple(new_srcs)
-
-def elementwise_op(op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
-  # if we are separated from other binary ops by movement ops, we push those movement ops above those binaryops
-  if SHUFFLE_MOVEMENT_OPS: srcs = _push_movement_ops(srcs)
-
-  # get outputs now
-  out_device, out_shape, out_dtype = srcs[0].device, srcs[0].shape, max([x.dtype for x in srcs]) if op != UnaryOps.CAST else cast(Tuple[DType, bool], arg)[0]
-
-  # push all contiguous to the end of BinaryOps. kernels 198 -> 196
-  if PUSH_CONTIGUOUS and any(not x.realized and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1 for x in srcs):
-    new_srcs: List[LazyBuffer] = []
-    for x in srcs:
-      if not x.realized and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1:
-        x.op.src[0].children.discard(x)
-        new_srcs.append(cast(LazyBuffer, x.op.src[0]))
-      else:
-        new_srcs.append(x)
-    return elementwise_op(op, *new_srcs, arg=arg).contiguous()
-
-  if MERGE_ELEMENTWISE_OPS:
-    # remove the buffers from any (childless) BinaryOps that feed into this
-    srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
-
-  return create_lazybuffer(out_device, ShapeTracker(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype)
 
 class _Device:
   def __init__(self) -> None:
