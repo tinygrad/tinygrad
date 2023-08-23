@@ -3,6 +3,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
 from tinygrad.helpers import dtypes, ImageDType
 from tinygrad.codegen.linearizer import  UOp, UOps, ConstOp
 from tinygrad.shape.symbolic import NumNode
+import math
 
 def next_power_of_2(x):
   return 1 << (x - 1).bit_length()
