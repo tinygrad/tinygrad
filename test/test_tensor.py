@@ -213,6 +213,13 @@ class TestTinygrad(unittest.TestCase):
     for _, dtype in dtypes.fields().items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
 
+  def test_random_choices(self):
+    Tensor.manual_seed(1337)
+    np.testing.assert_allclose(Tensor.randn(10).random_choices(size=2).numpy(), np.array([0.057881717, -0.8825585]))
+    np.testing.assert_allclose(Tensor.randn(10, 10).random_choices(size=2).numpy(), np.array([0.17522986, 1.1555185]))
+    np.testing.assert_allclose(Tensor.randn(11,2,50).random_choices(size=2).numpy(), np.array([-0.48442662, -0.6531357]))
+    np.testing.assert_allclose(Tensor.randn(1,1,1,1,1,1).random_choices(size=2).numpy(), np.array([0.7662951, 0.7662951]))
+
   def test_deepwalk_ctx_check(self):
     layer = Tensor.uniform(1, 1, requires_grad=True)
     x = Tensor.randn(1, 1, 1)
