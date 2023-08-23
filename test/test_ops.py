@@ -132,6 +132,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.arange(5, 10, 3), lambda: Tensor.arange(5, 10, 3), forward_only=True)
     helper_test_op([], lambda: torch.arange(10, 5, -3), lambda: Tensor.arange(10, 5, -3), forward_only=True)
     helper_test_op([], lambda: torch.arange(11, 5, -3), lambda: Tensor.arange(11, 5, -3), forward_only=True)
+  def test_arange_simple(self):
+    helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
+  def test_arange_big(self):
+    helper_test_op([], lambda: torch.arange(256), lambda: Tensor.arange(256), forward_only=True)
+
   def test_where(self):
     helper_test_op(
       [(100,)],

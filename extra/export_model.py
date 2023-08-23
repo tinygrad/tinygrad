@@ -2,7 +2,7 @@ from typing import Tuple, Dict, List
 from tinygrad.helpers import DType
 from tinygrad.tensor import Device, Tensor
 from tinygrad.jit import TinyJit
-from tinygrad.state import get_state_dict
+from tinygrad.nn.state import get_state_dict
 import json
 
 def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:

@@ -3,7 +3,7 @@ import numpy as np
 from tqdm import trange
 import torch
 from torchvision.utils import make_grid, save_image
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.nn import optim

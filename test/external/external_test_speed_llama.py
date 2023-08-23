@@ -5,7 +5,7 @@ from examples.llama import Transformer, MODEL_PARAMS
 from test.test_net_speed import start_profile, stop_profile
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import Device
-from tinygrad.state import get_state_dict
+from tinygrad.nn.state import get_state_dict
 from tinygrad.ops import Compiled
 from tinygrad.helpers import dtypes, prod
 from tinygrad.runtime.lib import RawBuffer

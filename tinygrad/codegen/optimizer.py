@@ -72,6 +72,9 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg):
 
   if global_db is not None and skey in global_db:
     choice = global_db[skey]
+  elif k.has_variable_shape():
+    # don't optimize variable shapes
+    choice = "BASELINE"
   else:
     # get baseline
     def get_baseline():
@@ -256,6 +259,10 @@ def hand_coded_optimizations(k:Linearizer):
 
   # no more opt if we are grouping
   if k.group_for_reduce: return
+
+  # no more opt if there's non ints in any shapes
+  # TODO: this is due to a bug. repro by commenting this one while running GPT-2 with the JIT
+  if k.has_variable_shape(): return
 
   # **** below this line need to be optional and benchmarked ****
 
