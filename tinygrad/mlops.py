@@ -13,6 +13,7 @@ class Cast(Function):
   def forward(self, x:LazyBuffer, dtype:DType, bitcast:bool=False) -> LazyBuffer:
     self.input_dtype, self.bitcast = x.dtype, bitcast
     return x.e(UnaryOps.CAST, arg=(dtype, bitcast))
+
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(UnaryOps.CAST, arg=(self.input_dtype, self.bitcast))
 
@@ -22,6 +23,7 @@ class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
     return x.e(UnaryOps.SIN)
+
   def backward(self, grad:LazyBuffer) -> LazyBuffer:
     return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad)
 
@@ -137,7 +139,7 @@ class Where(Function):
     self.x = x
     return x.e(TernaryOps.WHERE, y, z)
 
-  def backward(self, grad_output:LazyBuffer):
+  def backward(self, grad_output:LazyBuffer) -> Tuple[None, Optional[LazyBuffer], Optional[LazyBuffer]]:
     return None, \
            self.x.e(TernaryOps.WHERE, grad_output, grad_output.const(0)) if self.needs_input_grad[1] else None, \
            self.x.e(TernaryOps.WHERE, grad_output.const(0), grad_output) if self.needs_input_grad[2] else None
@@ -158,7 +160,7 @@ class Reshape(Function):
     self.input_shape = x.shape
     return x.reshape(shape)
 
-  def backward(self, grad_output:LazyBuffer):
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.reshape(self.input_shape)
 
 class Permute(Function):
@@ -186,7 +188,7 @@ class Shrink(Function):
     return grad_output.pad(self.narg)
 
 class Flip(Function):
-  def forward(self, x:LazyBuffer, axis:Tuple[int, ...]):
+  def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
     self.arg = tuple([-1 if i in set(axis) else 1 for i in range(len(x.shape))])
     return x.stride(self.arg)
 
