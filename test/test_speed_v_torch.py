@@ -86,10 +86,10 @@ def helper_test_generic_square(name, N, f1, f2, onearg=False):
 
   helper_test_generic(f"{name:30s} {N:5d}x{N:5d}", f1, (torch_a, torch_b), TinyJit(lambda a,b:f2(a,b).realize()), (tiny_a, tiny_b))
 
-def helper_test_matvec(name, N, M):
+def helper_test_matvec(name, N, M, f16=False):
   torch.manual_seed(0)
   torch_a = (torch.rand(1, N) - 0.5).to(torch_device)
-  torch_b = (torch.rand(N, M) - 0.5).to(torch_device)
+  torch_b = (torch.rand(N, M, dtype=torch.float16 if f16 else torch.float32) - 0.5).to(torch_device)
 
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy())
@@ -141,6 +141,8 @@ class TestBigSpeed(unittest.TestCase):
   def test_large_conv_5x5(self): helper_test_conv(bs=4, in_chans=128, out_chans=128, kernel_size=5, img_size_y=130, img_size_x=130)
   def test_matvec_4096_16384(self): helper_test_matvec('matvec_4096_16384', 4096, 16384)
   def test_matvec_16384_4096(self): helper_test_matvec('matvec_16384_4096', 16384, 4096)
+  def test_matvec_4096_16384_f16(self): helper_test_matvec('matvec_4096_16384_f16', 4096, 16384, True)
+  def test_matvec_16384_4096_f16(self): helper_test_matvec('matvec_16384_4096_f16', 16384, 4096, True)
 
 @unittest.skipIf(getenv("BIG") == 1, "only big tests")
 class TestSpeed(unittest.TestCase):
