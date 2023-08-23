@@ -329,7 +329,6 @@ def _realize_contiguous(buffer: LazyBuffer) -> None:
     # no need to run an AST, this is already contiguous
     buffer.realized = realized
   else:
-    # TODO: remove UnaryOps.NOOP, replace with LoadOps.CONTIGUOUS. confusing with Compiled though
     buffer.op = LazyOp(UnaryOps.NOOP, buffer.op.src)
 
 def _realize_custom(buffer: LazyBuffer) -> None:
