@@ -2,7 +2,7 @@
 #inspired by https://github.com/Matuzas77/MNIST-0.17/blob/master/MNIST_final_solution.ipynb
 import sys
 import numpy as np
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d, optim
 from tinygrad.helpers import getenv

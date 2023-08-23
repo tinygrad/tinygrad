@@ -8,7 +8,7 @@ import cv2
 from collections import defaultdict
 import os
 import time, io, sys
-from tinygrad.state import safe_load, load_state_dict
+from tinygrad.nn.state import safe_load, load_state_dict
 
 
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189

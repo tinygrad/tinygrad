@@ -1,5 +1,5 @@
 from __future__ import annotations
-import time
+import time, importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup, merge_dicts
@@ -53,9 +53,9 @@ class LazyOp:
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
-    from tinygrad.lazy import elementwise_op
     assert self.op in BinaryOps or self.op in UnaryOps or self.op in TernaryOps
-    return elementwise_op(self.op, *[z.replace_with_movement_ops(ops) for z in self.src], arg=self.arg)   # type: ignore
+    srcs = [z.replace_with_movement_ops(ops) for z in self.src]
+    return srcs[0].e(self.op, *srcs[1:], arg=self.arg)   # type: ignore
 
   @property
   def st(self): raise NotImplementedError
@@ -76,6 +76,25 @@ class LazyOp:
   def permute(self, _): raise NotImplementedError
   def shrink(self, _): raise NotImplementedError
   def stride(self, _): raise NotImplementedError
+
+# **************** Device ****************
+
+class _Device:
+  def __init__(self) -> None:
+    self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
+    self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None) or self._default_device()
+  def canonicalize(self, device:Optional[str]) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "") if device is not None else self.DEFAULT
+  @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
+  def __getitem__(self, x:str) -> Union[Interpreted, Compiled]:
+    x = x.split(":")[0].upper()
+    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
+  def _default_device(self) -> str:
+    for device in ["METAL", "CUDA", "GPU"]:
+      try:
+        if self[device]: return device
+      except Exception: pass
+    return "CPU"
+Device = _Device()
 
 # **************** for Interpreted Buffers ****************
 
@@ -148,7 +167,6 @@ class ASTRunner:
     GlobalCounters.kernel_count += 1
     GlobalCounters.global_ops += op_estimate
     GlobalCounters.global_mem += self.mem_estimate
-    if getenv("EARLY_STOPPING") and GlobalCounters.kernel_count == getenv("EARLY_STOPPING"): exit(0)
     return et
 
 class Compiled:
@@ -181,8 +199,7 @@ class Compiled:
           break
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-    if not output.realized:
-      output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
+    if not output.realized: output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
     # update the output var_vals from src
     output.st.var_vals = dict(sorted(merge_dicts([buf.st.var_vals for buf in ast.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 

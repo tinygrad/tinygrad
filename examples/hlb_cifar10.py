@@ -14,9 +14,9 @@ import random
 import numpy as np
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from tinygrad import nn
-from tinygrad.state import get_state_dict
+from tinygrad.nn.state import get_state_dict
 from tinygrad.nn import optim
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR

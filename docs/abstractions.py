@@ -22,7 +22,7 @@ from abc import ABC
 # let's trace an addition down through the layers of abstraction.
 
 # we will be using the clang backend
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 Device.DEFAULT = "CLANG"
 
 # first, 2+3 as a Tensor, the highest level

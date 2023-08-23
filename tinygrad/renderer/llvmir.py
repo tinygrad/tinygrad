@@ -77,6 +77,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
   # create llvm function
   func_dtypes = [dtype_to_llvm_dtype[dtype] for dtype in buf_to_dtype.values()]
   func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in func_dtypes]), name=function_name)
+  for a in func.args: a.add_attribute("noalias")
 
   # force llvmlite to allow us to add function attribute then add the attribute
   func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))

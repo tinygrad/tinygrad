@@ -11,7 +11,7 @@ np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple
 
 from tinygrad.helpers import Timing, getenv, DEBUG, dtypes
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
 from tinygrad.ops import GlobalCounters
@@ -151,15 +151,18 @@ class Transformer:
 
   def __call__(self, tokens:Tensor, start_pos:int):
     _bsz, seqlen = tokens.shape
-    # get only the part we are using.
-    # NOTE: if you remove contiguous here, it breaks because you can't put different ShapeTrackers into the compiled JIT
-    # NOTE: realize is not enough, since the realized buffer will have an offset that the kernel doesn't know about
-    # TODO: check that we didn't do this in the JIT and confirm the ShapeTrackers match the template
-    # TODO: support Variables in shrink
-    freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen].contiguous()
     mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
-
     do_jit = getenv("JIT") and mask is None
+
+    # get only the part of freqs_cis that we are using.
+    if do_jit:
+      pos = Variable("pos", 1, 1024)
+      assert seqlen == 1, "seqlen > 1 not supported for JIT"
+      freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (pos, pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
+      freqs_cis.lazydata.st.var_vals[pos] = start_pos
+    else:
+      freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (start_pos, start_pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
+
     h = self.jitted_tok_embeddings(tokens) if do_jit else self.tok_embeddings(tokens)
     h = h.sequential([functools.partial(layer, start_pos=start_pos, freqs_cis=freqs_cis, mask=mask) for layer in self.layers])
     return self.jitted_norm_output(h) if do_jit else self.norm_output(h)
@@ -229,17 +232,17 @@ class AbsmaxQuantizedLinear:
     self.scale = Tensor.ones(out_features, dtype=dtypes.half)
 
   def __call__(self, x):
-    return x.dot(self.weight.cast(dtype=dtypes.half).T/self.scale)
+    return x.dot(self.weight.cast(dtype=dtypes.half).T*self.scale)
 
   @staticmethod
   def quantize(tensors):
     new_tensors = {}
     for name,v in tensors.items():
       if 'feed_forward' in name or ('attention.w') in name or name == 'output.weight':
-        scale = 127.0 / v.abs().max(axis=1)
-        int8_weight = (v.T*scale).T.cast(dtype=dtypes.int8)
-        new_tensors[name] = int8_weight
-        new_tensors[name.replace('weight', 'scale')] = scale
+        scale = v.abs().max(axis=1) / 127.0
+        int8_weight = (v.T/scale).T.cast(dtype=dtypes.int8)
+        new_tensors[name] = int8_weight.realize()
+        new_tensors[name.replace('weight', 'scale')] = scale.realize()
       else:
         new_tensors[name] = v
     return new_tensors
@@ -251,7 +254,7 @@ class LLaMa:
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == VOCAB_SIZE
 
-    from tinygrad.state import torch_load, load_state_dict
+    from tinygrad.nn.state import torch_load, load_state_dict
     params = MODEL_PARAMS[model_gen][model_size]
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
     weights = concat_weights([torch_load(filename) for filename in [f"{model_path}/{model_size}/consolidated.{i:02d}.pth" for i in range(params["files"])]])

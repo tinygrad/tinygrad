@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import unittest
 import numpy as np
-from tinygrad.state import get_parameters, get_state_dict
+from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.nn import optim, Linear, Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
 from extra.datasets import fetch_mnist
