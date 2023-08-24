@@ -642,7 +642,7 @@ if __name__ == "__main__":
     latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep.expand(2, *timestep.shape[1:]), unconditional_context.cat(context, dim=0))
     unconditional_latent, latent = latents[0:1], latents[1:2]
 
-    unconditional_guidance_scale = 7.5
+    unconditional_guidance_scale = 3.5
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
     return e_t
 
@@ -652,7 +652,7 @@ if __name__ == "__main__":
   alphas = [model.alphas_cumprod.numpy()[t] for t in timesteps]
   print(alphas)
   alphas_prev = [1.0] + alphas[:-1]
-  print(alphas[:-1])
+  print(alphas_prev)
 
   def get_x_prev_and_pred_x0(x, e_t, index):
     temperature = 1
@@ -670,10 +670,12 @@ if __name__ == "__main__":
     x_prev = Tensor.sqrt(a_prev) * pred_x0 + dir_xt #+ noise
     print(x_prev)
     print(pred_x0)
-    return x_prev, pred_x0
+    return x_prev
 
   # start with random noise
   latent = Tensor.randn(1,4,64,64)
+  np.save("./random_tensor", latent.numpy())
+
 
   # this is diffusion
   for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
@@ -681,7 +683,7 @@ if __name__ == "__main__":
     GlobalCounters.reset()
     t.set_description("%3d %3d" % (index, timestep))
     e_t = get_model_output(latent, Tensor([timestep]))
-    x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t, index)
+    x_prev = get_x_prev_and_pred_x0(latent, e_t, index)
     #e_t_next = get_model_output(x_prev)
     #e_t_prime = (e_t + e_t_next) / 2
     #x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t_prime, index)

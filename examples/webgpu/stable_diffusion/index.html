@@ -178,60 +178,86 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
 		resultText.innerHTML = "ready"
 	}
 
-    function tensorRandn(size) {
-
-    }
-
     function runStableDiffusion(prompt) {
-        let prompt = clipTokenizer.encodeForCLIP("A horse sized cat eating a bagel.");
-        let context = nets[0](prompt);
+        return new Promise((resolve, reject) => {
+            NumpyLoader.ajax("./random_tensor.npy", async (rand) => {
+                let latent = rand.data;
+                console.log("Got random tensor: " + latent);
 
-        prompt = clipTokenizer.encodeForCLIP("");
-        let unconditional_context = nets[0](prompt);
+                let prompt_encoded = clipTokenizer.encodeForCLIP(prompt);
+                let context = await timer(() => nets[0](prompt_encoded));
+                context = context.subarray(0, context.length/4);
+                
+                console.log("Got context: " + context);
 
-        let timesteps = [];
-        let steps = 5;
+                prompt_encoded = clipTokenizer.encodeForCLIP("");
+                let unconditional_context = await timer(() => nets[0](prompt_encoded));
+                unconditional_context = unconditional_context.subarray(0, unconditional_context.length/4);
 
-        for (let i = 0; i < 1000; i += (1000/steps)) {
-            timesteps.push(i);
-        }
 
-        let alphasCumprod = window.alphas_cumprod;
-        let alphas = [];
+                console.log("Got unconditional context: " + context.length);
 
-        for (t of timesteps) {
-            alphas.push(alphasCumprod[t]);
-        }
+                let timesteps = [];
+                let steps = 6;
 
-        alphas_prev = [1.0];
+                for (let i = 1; i < 1000; i += (1000/steps)) {
+                    timesteps.push(i);
+                }
 
-        for (let i = alphas.length - 2; i >= 0; i--) {
-            alphas_prev.push(alphas[i]);
-        }
+                console.log("Timesteps: " + timesteps);
+
+                let alphasCumprod = window.alphas_cumprod;
+                let alphas = [];
+
+                for (t of timesteps) {
+                    alphas.push(alphasCumprod[Math.floor(t)]);
+                }
+
+                console.log("Alphas: " + alphas);
+
+                alphas_prev = [1.0];
+
+                for (let i = 0; i < alphas.length-1; i++) {
+                    alphas_prev.push(alphas[i]);
+                }
+
+                console.log("Alphas prev: " + alphas_prev);
+
+                for (let i = timesteps.length - 1; i >= 0; i--) {
+                    let timestep = new Float32Array([timesteps[i]]);
+                    // latent, timestep, unconditional_context, context
+                    let e_t = await timer(() => nets[1](latent, timestep, unconditional_context, context));
+                    e_t = e_t.subarray(0, e_t.length/4);
+                    x_prev = await timer(() => nets[2](latent, e_t, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]])));
+                    x_prev = x_prev.subarray(0, x_prev.length/4);
+                    latent = x_prev;
+                }
+
+                
+                resolve(await timer(() => nets[3](latent)));
+            });
+        });
     }
 
     document.getElementById("btnRunNet").addEventListener("click", function(e) {
             if (!nets || nets.length != 4) error("Net not loaded yet.");
 
-            NumpyLoader.ajax("./latent_tensor.npy", async (input) => {
-                console.log(input.data);
-                const out = await timer(() => nets[3](input.data));
-                
+            runStableDiffusion("A large dog barking at a cat").then((image) => {
                 let pixels = []
                 let pixelCounter = 0
 
                 for (let j = 0; j < 512; j++) {
                     for (let k = 0; k < 512; k++) {
-                        pixels.push(out[pixelCounter])
-                        pixels.push(out[pixelCounter+1])
-                        pixels.push(out[pixelCounter+2])
+                        pixels.push(image[pixelCounter])
+                        pixels.push(image[pixelCounter+1])
+                        pixels.push(image[pixelCounter+2])
                         pixels.push(255)
                         pixelCounter += 3
                     }
                 }
                 
                 ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), 512, 512), 0, 0);
-                console.log(out);
+                console.log(image);
                 console.log("Success");
             });
         }, false);

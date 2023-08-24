@@ -62,7 +62,7 @@ if __name__ == "__main__":
       latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep.expand(2, *timestep.shape[1:]), unconditional_context.cat(context, dim=0))
       unconditional_latent, latent = latents[0:1], latents[1:2]
 
-      unconditional_guidance_scale = 7.5
+      unconditional_guidance_scale = 11.5
       e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
       return e_t
 
@@ -80,7 +80,7 @@ if __name__ == "__main__":
 
       x_prev = Tensor.sqrt(a_prev) * pred_x0 + dir_xt
     
-      return Tensor.cat(x_prev, pred_x0, dim=0)
+      return x_prev
     
     return {'forward': forward, 'name': 'get_x_prev_and_pred_x0'}
   
@@ -101,9 +101,9 @@ if __name__ == "__main__":
   print(prompt)
   sub_steps = [
     {"input": prompt, "run": text_model(model)}, 
-    {"input": [Tensor.rand(1,4,64,64), Tensor([1]), Tensor.rand(1, 77, 768), Tensor.rand(1, 77, 768)], "run": diffusor(model)}, 
-    {"input": [Tensor.rand(1,4,64,64), Tensor.rand(1,4,64,64), Tensor.rand(1), Tensor.rand(1)], "run": get_x_prev_and_pred_x0()}, 
-    {"input": Tensor.rand(1,4,64,64), "run": decoder(model)}
+    {"input": [Tensor.randn(1,4,64,64), Tensor([800]), Tensor.randn(1, 77, 768), Tensor.randn(1, 77, 768)], "run": diffusor(model)}, 
+    {"input": [Tensor.randn(1,4,64,64), Tensor.randn(1,4,64,64), Tensor.randn(1), Tensor.randn(1)], "run": get_x_prev_and_pred_x0()}, 
+    {"input": Tensor.randn(1,4,64,64), "run": decoder(model)}
   ]
   
   prg = ""
