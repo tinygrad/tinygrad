@@ -84,7 +84,8 @@ class TestBFloat16DType(unittest.TestCase):
 
 # for GPU, cl_khr_fp16 isn't supported (except now we don't need it!)
 # for LLVM, it segfaults because it can't link to the casting function
-@unittest.skipIf((getenv("CI", "") != "" and Device.DEFAULT in ["LLVM"]) or Device.DEFAULT == "WEBGPU", "float16 broken in some CI backends")
+# for METAL, see https://github.com/tinygrad/tinygrad/issues/1019
+@unittest.skipIf((getenv("CI", "") != "" and Device.DEFAULT in ["LLVM", "METAL"]) or Device.DEFAULT == "WEBGPU", "float16 broken in some CI backends")
 class TestHalfDtype(unittest.TestCase):
   def test_float16_to_np(self): _test_to_np(Tensor([1,2,3,4], dtype=dtypes.float16), np.float16, [1,2,3,4])
   def test_casts_to_half(self): _test_casts_to([1,2,3,4], source_dtypes=[dtypes.float32, dtypes.int8, dtypes.uint8], target_dtype=dtypes.float16)
