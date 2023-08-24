@@ -5,7 +5,7 @@ from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawConst
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import dtypes, DEBUG
 from enum import Enum, auto
 from tinygrad.shape.symbolic import Variable, NumNode, Node, MulNode, SumNode, DivNode, ModNode, LtNode, AndNode
 VariableOrNum = Union[Variable, NumNode, Node]
@@ -63,6 +63,9 @@ class UAst(OptimizedKernel):
   def linearize(self):
     self.process()
 
+    # print
+    if DEBUG >= 3: self.printbufs()
+
     global_bufs = [self.uop(UOps.DEFINE_GLOBAL, tuple(), (name, buf.dtype)) for buf,name in self.arg_bufs.items()]
 
     # define Variables
@@ -73,25 +76,32 @@ class UAst(OptimizedKernel):
     full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
     upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
 
-    def ast_parse(x, idxs) -> UOp:
+    def ast_parse(x:Union[LazyBuffer, LazyOp], idxs) -> UOp:
       if isinstance(x, LazyBuffer):
         buf_idx = self.bufs.index(x)
         idx, valid = self.sts[buf_idx].expr_idxs(idxs)
         idx_rendered = idx.render(self.render_ops, self)
         valid_rendered = valid.render(self.render_ops, self) if valid.min == 0 else None
         return self.uop(UOps.LOAD, (global_bufs[buf_idx], idx_rendered) + ((valid_rendered,) if valid_rendered is not None else tuple()))
+      if x.op in ReduceOps:
+        nidxs = global_idxs+local_idxs+reduce_idxs
+        nidxs += [(i1 if i2==i3 else i2) for i1,i2,i3 in zip(idxs[len(nidxs):], full_upcast_idxs, upcast_idxs)]
+        expanded_nodes = [expand_node(idx) for idx in nidxs]
+        lreduce_idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
+        return self.uop(UOps.ALU, tuple(ast_parse(x.src[0], lidxs) for lidxs in lreduce_idxs), x.op)
+        # TODO: Variables here
       return self.uop(UOps.ALU, tuple(ast_parse(v, idxs) for v in x.src), x.op)
       #print(x.op, idxs)
       #pass
 
     sinks = []
     expanded_nodes = [expand_node(idx) for idx in (global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)]
-    for idxs in [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]:
+    store_idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
+    for idxs in store_idxs:
       idx, valid = self.sts[0].expr_idxs(idxs)
       assert valid.min == 1
       idx_rendered = idx.render(self.render_ops, self)
       sinks.append(self.uop(UOps.STORE, (global_bufs[0], idx_rendered, ast_parse(self.ast, idxs))))
-
 
     # graph debugging
     import networkx as nx
@@ -106,7 +116,8 @@ class UAst(OptimizedKernel):
     import os
     from tinygrad.helpers import GRAPHPATH
     nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
-    os.system(f'dot -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
+    #os.system(f'dot -Grankdir=LR -Tpng {GRAPHPATH}.dot -o {GRAPHPATH}.png')
+    os.system(f'dot -Grankdir=LR -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
 
     #ast_parse(self.ast)
 
