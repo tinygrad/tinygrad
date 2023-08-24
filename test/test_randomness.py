@@ -29,7 +29,6 @@ def kstest(l1, l2):
   j1, j2, d, fn1, fn2 = 0, 0, 0.0, 0.0, 0.0
   while j1 < n1 and j2 < n2:
     d1, d2 = l1[j1], l2[j2]
-    #print(d1, d2)
     if d1 <= d2:
       fn1 = (float(j1) + 1.0) / float(n1)
       j1 += 1
