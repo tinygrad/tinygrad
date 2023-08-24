@@ -152,6 +152,9 @@ class Transformer:
     pos = Variable("pos", 1, 1024)
     h = self.jitted_tok_embeddings(tokens) if do_jit else self.tok_embeddings(tokens)
     for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.jitted_layers if do_jit else self.layers, self.kv_caches)):
+      if not do_jit and start_pos > 0:
+        cache_k = cache_k.reshape(cache_k.shape[0], start_pos, cache_k.shape[2], cache_k.shape[3])
+        cache_v = cache_v.reshape(cache_v.shape[0], start_pos, cache_v.shape[2], cache_v.shape[3])
       h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=self.freqs_cis, mask=mask, jit_ctx={pos: start_pos})
       self.kv_caches[i] = (cache_k, cache_v)
     return self.jitted_norm_output(h) if do_jit else self.norm_output(h)
