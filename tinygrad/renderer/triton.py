@@ -26,6 +26,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})",
     BinaryOps.MAX: lambda x,y: f"tl.maximum({x},{y})", # axis?
     BinaryOps.CMPLT: lambda x,y: f"({x}<{y})",
+    BinaryOps.MOD: lambda x,y: f"({x}%{y})",
     TernaryOps.MULACC: lambda x,y,z: f"(({x}*{y})+{z})",
     TernaryOps.WHERE: lambda x,y,z: f"tl.where({x},{y},{z})",
   }
