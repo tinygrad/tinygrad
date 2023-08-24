@@ -1,8 +1,10 @@
 from typing import Dict, List, Final, Callable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
-from tinygrad.helpers import dtypes, ImageDType
+from tinygrad.helpers import dtypes, ImageDType, DEBUG, getenv
 from tinygrad.codegen.linearizer import  UOp, UOps, ConstOp
 from tinygrad.shape.symbolic import NumNode
+from triton.compiler import compile as triton_compile
+import hashlib
 import math
 
 def next_power_of_2(x):
@@ -80,8 +82,16 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   
   prg = f"@triton.jit\ndef {function_name}("+','.join(f"{buf[0]}" for buf in bufs)+"):\n"
   prg += '\n'.join(kernel)
-  prg += "#SIGNATURE:" + ",".join(signatures)
   acc_local_size = 1
   for x in local_size: acc_local_size *= next_power_of_2(x)
   local_size = [acc_local_size] + [1] * (len(local_size) - 1)  
-  return prg, global_size, local_size
+
+  prg = "import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n" + prg
+  if DEBUG >=4: print(prg)
+  hsh = hashlib.md5(prg.encode('utf-8')).hexdigest()
+  fn = f"/tmp/{hsh}.py"
+  with open(fn, "w") as f: f.write(prg)
+  codeObject = compile(prg, fn, "exec")
+  exec(codeObject, globals()) # pylint: disable=W0122
+  prg = triton_compile(globals()[function_name], signature=",".join(signatures), device_type="cuda", debug=True, cc=(35 if getenv("CUDACPU", 0) else None)).asm["ptx"]
+  return prg, global_size, [int(x) for x in prg.split(".maxntid ")[1].split("\n")[0].split(", ")], True
