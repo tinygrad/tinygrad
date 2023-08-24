@@ -294,14 +294,12 @@ class Tensor:
     if any(abs(s) != 1 for s in strides):
       # normalize if negative strides
       strides = tuple(abs(s) for s in strides)
-      def num_zeros(step, dim_sz): return 0 if step == 1 or (y := dim_sz % step) == 0 else (step - y)
       # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
-      padded_tensor = sliced_tensor.pad(tuple((0, num_zeros(s, dim_sz)) for s, dim_sz in zip(strides, sliced_tensor.shape)))
+      padded_tensor = sliced_tensor.pad(tuple((0, s-(dim_sz % s) if dim_sz % s != 0 else 0) for s, dim_sz in zip(strides, sliced_tensor.shape)))
       # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
-      new_shape = flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides))
-      reshaped_tensor = padded_tensor.reshape(new_shape)
+      reshaped_tensor = padded_tensor.reshape(flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides)))
+      new_shape = reshaped_tensor.shape[::2]
       # Shrink: do [:, 0]
-      new_shape = new_shape[::2]
       sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
     final_shape, it_shape = [], iter(new_shape)
     dim = list(orig_dim) # make a copy
@@ -309,7 +307,7 @@ class Tensor:
       if isinstance(s, (int, slice)):
         dim_shape = next(it_shape)
         if isinstance(s, slice): final_shape.append(dim_shape)
-        elif tensors: # s is int
+        elif tensors: # s is int and there are tensors extracted
           for i_ in range(len(orig_dim)):
             if orig_dim[i_] > i: dim[i_] -= 1
       else: final_shape.append(1) # s is None
