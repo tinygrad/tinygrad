@@ -279,11 +279,10 @@ class Tensor:
     if len((ellipses_found := [i for i, v in enumerate(orig_slices) if v is Ellipsis])) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     else: ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices)
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
-    # extract tensors
+    # extract tensors and their associated dims
     orig_dim, tensors = zip(*y) if (y := [(i,v) for i,v in enumerate(orig_slices) if isinstance(v, Tensor)]) else ((), ())
-    orig_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices]
-    # filter None and normalize int
-    valid_slices = [s for s in orig_slices if s is not None]
+    # filter None and Tensors, and normalize ints
+    valid_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices if v is not None]
     valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), int(y_)+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     # compute new_slice
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
@@ -304,13 +303,13 @@ class Tensor:
     final_shape, it_shape = [], iter(new_shape)
     dim = list(orig_dim) # make a copy
     for i,s in enumerate(orig_slices):
-      if isinstance(s, (int, slice)):
+      if s is None: final_shape.append(1)
+      else: # isinstance(s, (int, slice, Tensor))
         dim_shape = next(it_shape)
-        if isinstance(s, slice): final_shape.append(dim_shape)
-        elif tensors: # s is int and there are tensors extracted
+        if isinstance(s, (slice, Tensor)): final_shape.append(dim_shape)
+        elif tensors: # and isinstance(s, int)
           for i_ in range(len(orig_dim)):
             if orig_dim[i_] > i: dim[i_] -= 1
-      else: final_shape.append(1) # s is None
     ret = sliced_tensor.reshape(tuple(final_shape))  # Reshape
     if tensors: # Fancy/tensor indexing
       idx = [t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[d] + t for d,t in zip(dim, tensors)] # TODO first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm

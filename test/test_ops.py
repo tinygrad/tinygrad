@@ -622,7 +622,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5])  # x.shape = (0, 3, 3)
 
   def test_slice_errors(self):
-    a = Tensor.ones(4, 3, 2)
+    a = Tensor.ones(4, 3)
     with self.assertRaises(IndexError):
       a[1, 77, 77, 77]  # IndexError: (finds too many indices before the out of bounds)
       a[1, 77]  # IndexError: (out of bounds).
