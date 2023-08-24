@@ -303,7 +303,7 @@ class Tensor:
       new_shape = new_shape[::2]
       sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
     final_shape, it_shape = [], iter(new_shape)
-    dim = list(orig_dim[:]) # make a copy
+    dim = list(orig_dim) # make a copy
     for i,s in enumerate(orig_slices):
       if isinstance(s, (int, slice)):
         dim_shape = next(it_shape)
