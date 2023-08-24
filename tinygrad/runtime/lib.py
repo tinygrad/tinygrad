@@ -41,13 +41,13 @@ class RawBufferCopyIn(RawBuffer):
   @classmethod
   def fromCPU(cls, x:np.ndarray, **kwargs):
     ret = cls(prod(x.shape), dtypes.from_np(x.dtype), **kwargs)
-    ret._copyin(x)
+    if x.size > 0: ret._copyin(x)
     return ret
 
 class RawBufferMapped(RawBufferCopyIn):
   def _buffer(self) -> memoryview: raise NotImplementedError("must be implemented")
   # NOTE: this metadata prevents the backing buffer from being freed. hack can be removed with PEP688
-  def toCPU(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=np.dtype(self.dtype.np, metadata={"backing": self}))  # type: ignore
+  def toCPU(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=np.dtype(self.dtype.np, metadata={"backing": self}), count=self.size)  # type: ignore
   def _copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
 
 # this one is simple enough that i moved it out of the runtimes
@@ -60,7 +60,7 @@ class RawBufferCopyInOut(RawBufferCopyIn):
 
   def toCPU(self) -> np.ndarray:
     x: np.ndarray = np.empty(self.size, dtype=self.dtype.np)
-    self._copyout(x)
+    if x.size > 0: self._copyout(x)
     return x
 
 class RawBufferTransfer(RawBuffer):

@@ -222,6 +222,7 @@ class TestTinygrad(unittest.TestCase):
 
   def test_zerosized_tensors(self):
     Tensor([]).realize()
+    Tensor([]).numpy()
 
 if __name__ == '__main__':
   unittest.main()
