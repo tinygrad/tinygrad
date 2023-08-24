@@ -176,6 +176,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       assert newvar is not None
       #kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(lang.generic_var_prefix == '')} = {lang.render_const(args, newvar.dtype)};")
     elif uop == UOps.LOAD:
+      assert newvar is not None
       """
       assert newvar is not None and isinstance(args, (MemOp, ConstOp))
       # valids are handled here
@@ -186,7 +187,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(args.invalid_value, newvar.dtype))
       kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = {val};")
       """
-      kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = {args.name}[{vin[0].render()}];")
+      kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = *{'(device float4*)' if newvar.dtype.sz > 1 else ''}({args.name}+{vin[0].render()});")
     elif uop == UOps.STORE:
       assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
       # TODO: instead of dtypes.float, a base type
