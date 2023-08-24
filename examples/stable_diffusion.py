@@ -12,7 +12,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, GlobalCounters
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from extra.utils import download_file
-from tinygrad.state import torch_load, load_state_dict, get_state_dict
+from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 
 class AttnBlock:
   def __init__(self, in_channels):

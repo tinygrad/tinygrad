@@ -14,7 +14,6 @@ def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https
 def all_same(items): return all(x == items[0] for x in items)
 def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
 def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
-def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if not fxn(x)]
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterator): return [item for sublist in l for item in sublist]
 def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
@@ -23,6 +22,11 @@ def merge_dicts(ds:Iterable[Dict]) -> Dict:
   kvs = set([(k,v) for d in ds for k,v in d.items()])
   assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for k,v in kvs}
+def partition(lst, fxn):
+  a: list[Any] = []
+  b: list[Any] = []
+  for s in lst: (a if fxn(s) else b).append(s)
+  return a,b
 
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
@@ -69,8 +73,6 @@ class DType(NamedTuple):
   np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
   sz: int = 1
   def __repr__(self): return f"dtypes.{self.name}"
-  @property
-  def key(self): return (self.name)
 
 # dependent typing?
 class ImageDType(DType):

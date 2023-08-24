@@ -1,11 +1,8 @@
 from __future__ import annotations
-import functools, time
+import time, importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup, merge_dicts
-from tinygrad.shape.shapetracker import MovementOps
-from tinygrad.shape.symbolic import Variable, sym_infer
-from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg
 if TYPE_CHECKING:
   from tinygrad.lazy import LazyBuffer
 
@@ -17,6 +14,7 @@ class UnaryOps(Enum): NOOP = auto(); EXP2 = auto(); LOG2 = auto(); CAST = auto()
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class TernaryOps(Enum): MULACC = auto(); WHERE = auto() # noqa: E702
+class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
 class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto() # noqa: E702
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps]
@@ -53,9 +51,9 @@ class LazyOp:
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
-    from tinygrad.lazy import elementwise_op
     assert self.op in BinaryOps or self.op in UnaryOps or self.op in TernaryOps
-    return elementwise_op(self.op, *[z.replace_with_movement_ops(ops) for z in self.src], arg=self.arg)   # type: ignore
+    srcs = [z.replace_with_movement_ops(ops) for z in self.src]
+    return srcs[0].e(self.op, *srcs[1:], arg=self.arg)   # type: ignore
 
   @property
   def st(self): raise NotImplementedError
@@ -76,6 +74,26 @@ class LazyOp:
   def permute(self, _): raise NotImplementedError
   def shrink(self, _): raise NotImplementedError
   def stride(self, _): raise NotImplementedError
+
+# **************** Device ****************
+
+class _Device:
+  def __init__(self) -> None: self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
+  def canonicalize(self, device:Optional[str]) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "") if device is not None else self.DEFAULT
+  @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
+  def __getitem__(self, x:str) -> Union[Interpreted, Compiled]:
+    x = x.split(":")[0].upper()
+    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
+  @functools.cached_property
+  def DEFAULT(self) -> str:
+    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)
+    if device_from_env: return device_from_env
+    for device in ["METAL", "CUDA", "GPU"]:
+      try:
+        if self[device]: return device
+      except Exception: pass
+    return "CPU"
+Device = _Device()
 
 # **************** for Interpreted Buffers ****************
 
@@ -104,23 +122,26 @@ class Interpreted:
       return output.output_buffer
     return ret
 
+# --teenygrad--
+
 class FlopCounter:
   def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops, self._buf = *tup, self
   def consume_flops(self):
     self.flops, ret = 0, self.flops
     return ret
-from tinygrad.shape.shapetracker import ShapeTracker
 shape_fxn_for_op: Dict[Op, Callable] = {
   UnaryOps.CAST: lambda self,arg: (self.shape, arg[0], self.consume_flops()),   # cast uses no flops
   **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op != UnaryOps.CAST},
   **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
   **{op:lambda self,new_shape: (new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
-  **{op:functools.partial(lambda mop,self,arg: (ShapeTracker(self.shape).movement_op(mop, arg).shape, self.dtype, self.consume_flops()), op) for op in MovementOps},
   TernaryOps.WHERE: lambda self,y,z: (self.shape, self.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape))}
 InterpretedFlopCounter = Interpreted(FlopCounter, shape_fxn_for_op, lambda x: FlopCounter((x.shape, x.dtype, 0)), lambda x: x)
 def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.exec_ast(ast)
 
 # **************** for Compiled Buffers ****************
+
+from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg
+from tinygrad.shape.symbolic import Variable, sym_infer
 
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
@@ -150,7 +171,6 @@ class ASTRunner:
     GlobalCounters.kernel_count += 1
     GlobalCounters.global_ops += op_estimate
     GlobalCounters.global_mem += self.mem_estimate
-    if getenv("EARLY_STOPPING") and GlobalCounters.kernel_count == getenv("EARLY_STOPPING"): exit(0)
     return et
 
 class Compiled:
@@ -162,10 +182,9 @@ class Compiled:
     k.linearize()
     ret = self.renderer(k.function_name, k.uops)
     src, global_size, local_size, binary = ret if len(ret) == 4 else ret + (False,)
-    #TODO: I need to find a better way to select ARM64
     return ASTRunner(k.function_name, src, global_size, local_size,
-                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
-                      display_name=k.display_name, runtime_args={"binary": binary}).build(self.runtime)
+                     op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
+                     display_name=k.display_name, runtime_args={"binary": binary}).build(self.runtime)
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):
     # all movementops do nothing in a Compiled buffer!
@@ -183,8 +202,7 @@ class Compiled:
           break
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-    if not output.realized:
-      output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
+    if not output.realized: output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
     # update the output var_vals from src
     output.st.var_vals = dict(sorted(merge_dicts([buf.st.var_vals for buf in ast.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 
@@ -193,9 +211,9 @@ class Compiled:
 
     # compilation time
     def get_program():
-      from tinygrad.codegen.optimizer import kernel_optimize, hand_coded_optimizations
+      from tinygrad.codegen.search import kernel_optimize
       if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, output, self.linearizer_opts), self.to_program)
-      elif not getenv("NOOPT"): hand_coded_optimizations(k)
+      elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):

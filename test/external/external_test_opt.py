@@ -36,7 +36,7 @@ from models.convnext import ConvNeXt
 from models.efficientnet import EfficientNet
 from models.resnet import ResNet18
 from models.vit import ViT
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestInferenceMinKernels(unittest.TestCase):

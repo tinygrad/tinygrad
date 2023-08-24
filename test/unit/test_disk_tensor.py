@@ -2,7 +2,7 @@ import pathlib
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
-from tinygrad.state import safe_load, safe_save, get_state_dict, torch_load
+from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
 from tinygrad.helpers import dtypes
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.helpers import Timing

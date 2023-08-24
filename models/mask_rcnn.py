@@ -7,7 +7,7 @@ from tinygrad import nn
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes
 from extra.utils import get_child, download_file
-from tinygrad.state import torch_load
+from tinygrad.nn.state import torch_load
 from models.resnet import ResNet
 from models.retinanet import nms as _box_nms
 

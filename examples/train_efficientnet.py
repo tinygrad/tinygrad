@@ -3,7 +3,7 @@ import time
 from multiprocessing import Process, Queue
 import numpy as np
 from tqdm import trange
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
@@ -90,7 +90,7 @@ if __name__ == "__main__":
 
     st = time.time()
     loss = loss.numpy()
-    cat = np.argmax(out.numpy(), axis=1)
+    cat = out.argmax(axis=1).numpy()
     accuracy = (cat == Y).mean()
     finish_time = (time.time()-st)*1000.0
 
