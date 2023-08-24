@@ -275,22 +275,23 @@ class Tensor:
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
     orig_slices = list(val) if isinstance(val, tuple) else [val]
     if (num_slices := sum(isinstance(v, (slice, int, Tensor)) for v in orig_slices)) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    # handle ellipses
     if len((ellipses_found := [i for i, v in enumerate(orig_slices) if v is Ellipsis])) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     else: ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices)
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
+    # extract tensors
     orig_dim, tensors = zip(*y) if (y := [(i,v) for i,v in enumerate(orig_slices) if isinstance(v, Tensor)]) else ((), ())
     orig_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices]
+    # filter None and normalize int
     valid_slices = [s for s in orig_slices if s is not None]
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
+    # compute new_slice
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     new_slice = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
-    # Shrink
-    sliced_tensor = self.shrink(new_slice)
+    # shrink and flip
+    sliced_tensor = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
     new_shape = sliced_tensor.shape
-    # Flip
-    if (flip_axes := tuple(i for i, s in enumerate(strides) if s < 0)):
-      sliced_tensor = sliced_tensor.flip(axis=flip_axes)
-    if any(s > 1 or s < 0 for s in strides):
+    if any(abs(s) != 1 for s in strides):
       # normalize if negative strides
       strides = tuple(abs(s) for s in strides)
       def num_zeros(step, dim_sz): return 0 if step == 1 or (y := dim_sz % step) == 0 else (step - y)
