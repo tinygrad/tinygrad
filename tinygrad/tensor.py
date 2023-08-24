@@ -274,17 +274,13 @@ class Tensor:
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
     orig_slices = list(val) if isinstance(val, tuple) else [val]
-    if (num_slices := sum(isinstance(v, (slice, int, Tensor)) for v in orig_slices)) > len(self.shape):
-      raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
-    ellipses_found = [i for i, v in enumerate(orig_slices) if v is Ellipsis]
-    if len(ellipses_found) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
-    ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices)
+    if (num_slices := sum(isinstance(v, (slice, int, Tensor)) for v in orig_slices)) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    if len((ellipses_found := [i for i, v in enumerate(orig_slices) if v is Ellipsis])) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
+    else: ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices)
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
-
     tensor_found = [(i,v) for i, v in enumerate(orig_slices) if isinstance(v, Tensor)]
     orig_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices]
-    valid_slices = [s for s in orig_slices if s is not None]
-    valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
+    valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(orig_slices, self.shape)) if v is not None]
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     new_slice = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
     # Shrink
@@ -298,15 +294,12 @@ class Tensor:
       strides = tuple(abs(s) for s in strides)
       def num_zeros(step, dim_sz): return 0 if step == 1 or (y := dim_sz % step) == 0 else (step - y)
       # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
-      paddings = tuple((0, num_zeros(s, dim_sz)) for s, dim_sz in zip(strides, sliced_tensor.shape))
-      padded_tensor = sliced_tensor.pad(paddings)
+      padded_tensor = sliced_tensor.pad(tuple((0, num_zeros(s, dim_sz)) for s, dim_sz in zip(strides, sliced_tensor.shape)))
       # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
-      new_shape = flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides))
-      reshaped_tensor = padded_tensor.reshape(new_shape)
+      reshaped_tensor = padded_tensor.reshape(flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides)))
       # Shrink: do [:, 0]
       new_shape = new_shape[::2]
-      final_slice = tuple(flatten(((0, sh), (0, 1)) for sh in new_shape))
-      sliced_tensor = reshaped_tensor.shrink(final_slice)
+      sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
     final_shape, it_shape = [], iter(new_shape)
     sub = [0] * len(tensor_found)
     for i,s in enumerate(orig_slices):
