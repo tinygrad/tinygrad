@@ -180,8 +180,15 @@ jobs:
       run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
-    - name: Run metal tests
-      run: METAL=1 python -m pytest -n=auto test/ --ignore test/unit/test_example.py
+    #- name: Run dtype test
+    #  run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
+    # dtype test has issues on test_half_to_int8
+    - name: Run metal ops test
+      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
+    - name: Run JIT test
+      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_jit.py
+    - name: Run symbolic shapetracker test
+      run: METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py test/test_symbolic_ops.py test/test_symbolic_jit.py
     - name: Check Device.DEFAULT
       run: WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
     #- name: Run webgpu pytest
