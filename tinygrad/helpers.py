@@ -83,6 +83,10 @@ class ImageDType(DType):
     super().__init__()
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
+class PtrDType(DType):
+  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.np, dt.sz)
+  def __repr__(self): return f"ptr.{super().__repr__()}"
+
 class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   def is_int(x: DType)-> bool: return x in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)

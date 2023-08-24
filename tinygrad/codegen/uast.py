@@ -5,7 +5,7 @@ from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawConst
-from tinygrad.helpers import dtypes, DEBUG, DType, all_same
+from tinygrad.helpers import dtypes, DEBUG, DType, all_same, getenv, colored, PtrDType
 from enum import Enum, auto
 from tinygrad.shape.symbolic import Variable, NumNode, Node, MulNode, SumNode, DivNode, ModNode, LtNode, AndNode
 VariableOrNum = Union[Variable, NumNode, Node]
@@ -34,7 +34,7 @@ def expand_node(idx:Node) -> List[Node]:
 class UAst(OptimizedKernel):
   @functools.lru_cache(None)
   def uop(self, uop:UOps, vin:Tuple[UOp], dtype:Optional[DType]=None, arg:Any=None) -> UOp:
-    print(f"{str(uop):20s}: {len(vin)} {str(dtype):20s} {arg}")
+    #print(f"{str(uop):20s}: {len(vin)} {str(dtype):20s} {arg}")
     return UOp(uop, vin, dtype, arg)
 
   def uop_alu_idx(self, a, b, ops, ctx:UAst, op, dtype=dtypes.int32):
@@ -63,7 +63,11 @@ class UAst(OptimizedKernel):
   def linearize(self):
     self.process()
     if DEBUG >= 3: self.printbufs()
-    global_bufs = [self.uop(UOps.DEFINE_GLOBAL, tuple(), buf.dtype, name) for buf,name in self.arg_bufs.items()]
+    # kernel name (before late upcast)
+    self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) if isinstance(x, int) else sym_rename(x) for x in self.full_shape])
+    self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
+
+    global_bufs = [self.uop(UOps.DEFINE_GLOBAL, tuple(), PtrDType(buf.dtype), name) for buf,name in self.arg_bufs.items()]
 
     # define Variables
     global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
@@ -86,10 +90,12 @@ class UAst(OptimizedKernel):
         expanded_nodes = [expand_node(idx) for idx in nidxs]
         lreduce_idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
         vin = tuple(ast_parse(x.src[0], lidxs) for lidxs in lreduce_idxs)
+        # NOTE: this determines the order of these when it doesn't have to
+        return functools.reduce(lambda a,b: self.uop(UOps.ALU, (a,b), dtypes.float32, BinaryOps.ADD), vin)
       else:
         vin = tuple(ast_parse(v, idxs) for v in x.src)
-      assert all_same([x.dtype for x in vin])
-      return self.uop(UOps.ALU, vin, vin[0].dtype, x.op)
+        assert all_same([x.dtype for x in vin])
+        return self.uop(UOps.ALU, vin, vin[0].dtype, x.op)
 
     sinks = []
     expanded_nodes = [expand_node(idx) for idx in (global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)]
@@ -101,16 +107,37 @@ class UAst(OptimizedKernel):
       sinks.append(self.uop(UOps.STORE, (global_bufs[0], idx_rendered, ast_parse(self.ast, idxs))))
 
     # graph debugging
-    import networkx as nx
-    G = nx.DiGraph()
-    def add_node_recursive(x:UOp):
-      if x in G.nodes: return
-      G.add_node(id(x), label=str(x))
-      for a in x.vin:
-        add_node_recursive(a)
-        G.add_edge(id(a), id(x))
-    for s in sinks: add_node_recursive(s)
-    import os
-    from tinygrad.helpers import GRAPHPATH
-    nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
-    os.system(f'dot -Grankdir=LR -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
+    if getenv("UASTGRAPH"):
+      import networkx as nx
+      G = nx.DiGraph()
+      def add_node_recursive(x:UOp):
+        if x in G.nodes: return
+        G.add_node(id(x), label=str(x))
+        for a in x.vin:
+          add_node_recursive(a)
+          G.add_edge(id(a), id(x))
+      for s in sinks: add_node_recursive(s)
+      import os
+      from tinygrad.helpers import GRAPHPATH
+      nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
+      os.system(f'dot -Grankdir=LR -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
+
+    return sinks
+
+from tinygrad.renderer.cstyle import CStyleLanguage
+def uops_to_cstyle2(function_name:str, uops:List[UOp]):
+  lang = CStyleLanguage()
+  rendered = set()
+  def render(a:List[UOp]) -> List[str]:
+    prereqs = tuple()
+    for u in a:
+      prereqs += u.vin
+    if prereqs: render(prereqs)
+    for u in a:
+      if u in rendered: continue
+      rendered.add(u)
+      print(u.uop, u.dtype, u.arg)
+  render(uops)
+
+  return "test"
+

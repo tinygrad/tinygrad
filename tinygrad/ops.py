@@ -206,10 +206,16 @@ class Compiled:
     # update the output var_vals from src
     output.st.var_vals = dict(sorted(merge_dicts([buf.st.var_vals for buf in ast.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 
-    from tinygrad.codegen.uast import UAst
+    from tinygrad.codegen.uast import UAst, uops_to_cstyle2
     k = UAst(ast, output, self.linearizer_opts)
     k.hand_coded_optimizations()
-    k.linearize()
+    uast = k.linearize()
+    src = uops_to_cstyle2(k.function_name, uast)
+    global_size, local_size, binary = [], [], False
+    prg = ASTRunner(k.function_name, src, global_size, local_size,
+                    op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
+                    display_name=k.display_name, runtime_args={"binary": binary}).build(self.runtime)
+
 
     """
     from tinygrad.codegen.linearizer import Linearizer
