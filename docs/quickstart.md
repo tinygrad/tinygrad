@@ -205,11 +205,11 @@ for step in range(1000):
   opt.step()
 
   # calculate accuracy
-  pred = out.argmax(axis=-1).numpy()
+  pred = out.argmax(axis=-1)
   acc = (pred == labels).mean()
 
   if step % 100 == 0:
-    print(f"Step {step+1} | Loss: {loss.numpy()} | Accuracy: {acc}")
+    print(f"Step {step+1} | Loss: {loss.numpy()} | Accuracy: {acc.numpy()}")
 ```
 
 ## Evaluation
