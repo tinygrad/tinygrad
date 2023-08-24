@@ -622,11 +622,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5])  # x.shape = (0, 3, 3)
 
   def test_slice_errors(self):
-    a = Tensor.ones(4, 3)
+    a = Tensor.ones(4, 3, 2)
     with self.assertRaises(IndexError):
       a[1, 77, 77, 77]  # IndexError: (finds too many indices before the out of bounds)
       a[1, 77]  # IndexError: (out of bounds).
       a[0, -77]
+      a[..., ...] # IndexError: only single ellipsis
 
   def test_slice_ellipsis(self):
     helper_test_op([(3,3,3,3)], lambda x: x[..., 0], lambda x: x[..., 0])
