@@ -316,7 +316,7 @@ class Tensor:
     if tensors:
       # turn negative idx positive
       idx = [t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[d] + t for d,t in zip(dim, tensors)] # TODO first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
-      # reshape to same ndim when idxs have different ndim and reshape to reducable shape
+      # reshape to same ndim when idxs have different ndim
       max_dim = max(i.ndim for i in idx)
       idx = [i.reshape(*[1]*(max_dim-i.ndim), *i.shape) for i in idx] # TODO this reshape is removable. Just add it to args of other reshapes, but makes args more unreadable
       # compute sum_dim
@@ -331,7 +331,7 @@ class Tensor:
         arange = Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*(d), ret.shape[d], *[1]*(ret.ndim-d-1))
         ret = ((new_idx == arange) * ret).sum(d)
       # special permute case
-      if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1]+1)): # special permute case
+      if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1]+1)):
         order = list(range(ret.ndim))
         order = order[dim[0]:dim[0]+idx[0].ndim] + order[:dim[0]] + order[dim[0]+idx[0].ndim:]
         ret = ret.permute(order=order)
