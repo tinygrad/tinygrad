@@ -464,7 +464,6 @@ After you are done speaking, output [EOS]. You are not Chad.
       if args.timing: print("")
       st = GlobalCounters.time_sum_s
       with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=args.timing):
-        # TODO: eventually passing jit_ctx here
         logits = llama.model(Tensor([toks[start_pos:]]), start_pos).realize()[:, -1, :]
       with Timing("sync in ", enabled=args.timing):
         tok = sample(logits, args.temperature)
