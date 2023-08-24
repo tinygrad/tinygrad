@@ -5,7 +5,7 @@ from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawConst
-from tinygrad.helpers import dtypes, DEBUG
+from tinygrad.helpers import dtypes, DEBUG, DType, all_same
 from enum import Enum, auto
 from tinygrad.shape.symbolic import Variable, NumNode, Node, MulNode, SumNode, DivNode, ModNode, LtNode, AndNode
 VariableOrNum = Union[Variable, NumNode, Node]
@@ -19,9 +19,9 @@ class UOps(Enum):
 class UOp(NamedTuple):
   uop: UOps
   vin: Tuple[UOp]
+  dtype: Optional[DType]
   arg: Any
-  def __repr__(self): return f"{str(self.uop).replace('UOps.', ''):20s} {self.arg}" if self.arg else str(self.uop).replace('UOps.', '')
-  #def __repr__(self): return f"{str(self.uop):20s}: {str(self.vin):32s} {self.arg}"
+  def __repr__(self): return str(self.uop).replace('UOps.', '') + "\n" + (f"{self.arg}\n" if self.arg else "") + str(self.dtype)
 
 # TODO: generic visitor pattern?
 def expand_node(idx:Node) -> List[Node]:
@@ -33,15 +33,15 @@ def expand_node(idx:Node) -> List[Node]:
 
 class UAst(OptimizedKernel):
   @functools.lru_cache(None)
-  def uop(self, uop:UOps, vin:Tuple[UOp], arg:Any=None) -> UOp:
-    print(f"{str(uop):20s}: {len(vin)} {arg}")
-    return UOp(uop, vin, arg)
+  def uop(self, uop:UOps, vin:Tuple[UOp], dtype:Optional[DType]=None, arg:Any=None) -> UOp:
+    print(f"{str(uop):20s}: {len(vin)} {str(dtype):20s} {arg}")
+    return UOp(uop, vin, dtype, arg)
 
   def uop_alu_idx(self, a, b, ops, ctx:UAst, op, dtype=dtypes.int32):
-    return self.uop(UOps.ALU, (a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx)), op)
+    return self.uop(UOps.ALU, (a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx)), dtype, op)
 
-  render_ops: Any = { Variable: lambda self, ops, ctx: ctx.uop(UOps.LOOP, tuple(), (self.expr,self.min,self.max)),
-                NumNode: lambda self, ops, ctx: ctx.uop(UOps.CONST, tuple(), (self.b, dtypes.int32)),
+  render_ops: Any = { Variable: lambda self, ops, ctx: ctx.uop(UOps.LOOP, tuple(), dtypes.int32, (self.expr,self.min,self.max)),
+                NumNode: lambda self, ops, ctx: ctx.uop(UOps.CONST, tuple(), dtypes.int32, self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
                 DivNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.DIV),
                 ModNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MOD),
@@ -62,11 +62,8 @@ class UAst(OptimizedKernel):
 
   def linearize(self):
     self.process()
-
-    # print
     if DEBUG >= 3: self.printbufs()
-
-    global_bufs = [self.uop(UOps.DEFINE_GLOBAL, tuple(), (name, buf.dtype)) for buf,name in self.arg_bufs.items()]
+    global_bufs = [self.uop(UOps.DEFINE_GLOBAL, tuple(), buf.dtype, name) for buf,name in self.arg_bufs.items()]
 
     # define Variables
     global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
@@ -82,17 +79,17 @@ class UAst(OptimizedKernel):
         idx, valid = self.sts[buf_idx].expr_idxs(idxs)
         idx_rendered = idx.render(self.render_ops, self)
         valid_rendered = valid.render(self.render_ops, self) if valid.min == 0 else None
-        return self.uop(UOps.LOAD, (global_bufs[buf_idx], idx_rendered) + ((valid_rendered,) if valid_rendered is not None else tuple()))
+        return self.uop(UOps.LOAD, (global_bufs[buf_idx], idx_rendered) + ((valid_rendered,) if valid_rendered is not None else tuple()), x.dtype)
       if x.op in ReduceOps:
         nidxs = global_idxs+local_idxs+reduce_idxs
         nidxs += [(i1 if i2==i3 else i2) for i1,i2,i3 in zip(idxs[len(nidxs):], full_upcast_idxs, upcast_idxs)]
         expanded_nodes = [expand_node(idx) for idx in nidxs]
         lreduce_idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
-        return self.uop(UOps.ALU, tuple(ast_parse(x.src[0], lidxs) for lidxs in lreduce_idxs), x.op)
-        # TODO: Variables here
-      return self.uop(UOps.ALU, tuple(ast_parse(v, idxs) for v in x.src), x.op)
-      #print(x.op, idxs)
-      #pass
+        vin = tuple(ast_parse(x.src[0], lidxs) for lidxs in lreduce_idxs)
+      else:
+        vin = tuple(ast_parse(v, idxs) for v in x.src)
+      assert all_same([x.dtype for x in vin])
+      return self.uop(UOps.ALU, vin, vin[0].dtype, x.op)
 
     sinks = []
     expanded_nodes = [expand_node(idx) for idx in (global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)]
@@ -116,41 +113,4 @@ class UAst(OptimizedKernel):
     import os
     from tinygrad.helpers import GRAPHPATH
     nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
-    #os.system(f'dot -Grankdir=LR -Tpng {GRAPHPATH}.dot -o {GRAPHPATH}.png')
     os.system(f'dot -Grankdir=LR -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
-
-    #ast_parse(self.ast)
-
-
-    """
-    self.global_bufs = [self.uop(UOps.DEFINE_GLOBAL, tuple(), (name, buf.dtype)) for buf,name in self.arg_bufs.items()]
-
-    # parse AST
-    loaded_buffers = {}
-    acc = []
-
-    # global loop
-    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
-
-    # local loop
-    local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce-self.local_dims, self.first_reduce+len(self.group_for_reduce))]
-
-    # upcast indexes
-    full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
-    upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
-
-    if self.reduceop is not None:
-      # define indexes
-      reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
-      fake_reduce_idxs = [x*0 for x in reduce_idxs]
-
-      # define accumulator
-      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
-
-      # load earlybufs
-      loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
-
-      # run early AST (with reduce)
-      self.ast_parse(self.reduceop, [acc[off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, do_reduce=True)
-    """
-
