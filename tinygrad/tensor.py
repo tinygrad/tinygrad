@@ -534,7 +534,7 @@ class Tensor:
   def tan(self): return self.sin() / self.cos()
 
   @staticmethod
-  def _tri(r:int, c:int, k:int=0, **kwargs) -> Tensor: return Tensor.ones(c := c + max(0,-k), **kwargs).pad(((0,c),))._pool((c,)).flip(1).slice(((0,r),(-k,c-k - max(0,-k))))
+  def _tri(r:int, c:int, k:int=0, **kwargs) -> Tensor: return Tensor.ones(c + max(0,-k), **kwargs).pad(((0,r-1),))._pool((c + max(0,-k),)).flip(1).slice(((0,r),(-k,c-k)))
   def triu(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k, dtype=self.dtype, device=self.device).where(self, Tensor.zeros_like(self))
   def tril(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, dtype=self.dtype, device=self.device).where(Tensor.zeros_like(self), self)
 
