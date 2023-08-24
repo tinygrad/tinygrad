@@ -277,12 +277,12 @@ class Tensor:
     if (num_slices := sum(isinstance(v, (slice, int, Tensor)) for v in orig_slices)) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     # handle ellipses
     if len((ellipses_found := [i for i, v in enumerate(orig_slices) if v is Ellipsis])) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
-    else: ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices)
+    else: ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices) # NOTE this is needlessly confusing but it fits in 1 line :D
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
-    # extract tensors and their associated dims
+    # extract tensors and their respective dims
     orig_dim, tensors = zip(*y) if (y := [(i,v) for i,v in enumerate(orig_slices) if isinstance(v, Tensor)]) else ((), ())
-    # filter None and Tensors, and normalize ints
-    valid_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices if v is not None]
+    # filter out None and Tensors, and normalize ints
+    valid_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices if v is not None] 
     valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), int(y_)+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     # compute new_slice
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
@@ -302,27 +302,35 @@ class Tensor:
       sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
     final_shape, it_shape = [], iter(new_shape)
     dim = list(orig_dim) # make a copy
+    # essentially where there's None in orig_slices, new_shape.insert(i,1), elif int in orig_slices new_shape.pop(i) TODO maybe try another way of looping
     for i,s in enumerate(orig_slices):
       if s is None: final_shape.append(1)
-      else: # isinstance(s, (int, slice, Tensor))
+      else: # s is int or slice or Tensor
         dim_shape = next(it_shape)
         if isinstance(s, (slice, Tensor)): final_shape.append(dim_shape)
-        elif tensors: # and isinstance(s, int)
+        elif tensors: # and s is int
           for i_ in range(len(orig_dim)):
             if orig_dim[i_] > i: dim[i_] -= 1
     ret = sliced_tensor.reshape(tuple(final_shape))  # Reshape
-    if tensors: # Fancy/tensor indexing
+    # Fancy/tensor indexing
+    if tensors:
+      # turn negative idx positive
       idx = [t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[d] + t for d,t in zip(dim, tensors)] # TODO first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
+      # reshape to same ndim for case where idxs have different ndim
       max_dim = max(i.ndim for i in idx)
       idx = [i.reshape(*[1]*(max_dim-i.ndim), *i.shape) for i in idx]
+      # compute sum_dim
       sum_dim = [d+max_dim-n for n,d in enumerate(dim)]
+      # first iteration
       new_idx = idx[0].reshape(*[1]*dim[0], 1,*idx[0].shape, *[1]*(ret.ndim-dim[0]-1))
       arange = Tensor.arange(ret.shape[dim[0]], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*dim[0], ret.shape[dim[0]], *[1]*idx[0].ndim, *[1]*(ret.ndim-dim[0]-1))
       ret = (ret.reshape(*ret.shape[:dim[0]+1], *[1]*idx[0].ndim, *ret.shape[dim[0]+1:]) * (arange == new_idx)).sum(dim[0])
+      # consecutive iterations
       for idx_,d in zip(idx[1:],sum_dim[1:]):
         new_idx = idx_.reshape(*[1]*dim[0], *idx_.shape, *[1]*(ret.ndim-dim[0]-idx_.ndim))
         arange = Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*(d), ret.shape[d], *[1]*(ret.ndim-d-1))
         ret = ((new_idx == arange) * ret).sum(d)
+      # special permute case
       if dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1: # special permute case
         order = list(range(ret.ndim))
         order = order[dim[0]:dim[0]+idx[0].ndim] + order[:dim[0]] + order[dim[0]+idx[0].ndim:]
