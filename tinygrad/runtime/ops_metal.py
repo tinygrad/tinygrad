@@ -19,7 +19,7 @@ class _METAL:
   def __init__(self):
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
-    self.mtl_queue = self.device.newCommandQueue()
+    self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
   # TODO: is there a better way to do this?
   def synchronize(self):
