@@ -284,7 +284,7 @@ class OptimizedKernel(Kernel):
         # early exit
         return
 
-    if self.opts.has_local and k.opts.has_shared and all(isinstance(s, int) for s in self.sts[0].shape[:self.first_reduce]):
+    if self.opts.has_local and self.opts.has_shared and all(isinstance(s, int) for s in self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
       if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
         # TODO: use 1024 if it's allowed in a smarter way
