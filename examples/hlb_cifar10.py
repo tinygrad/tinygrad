@@ -309,11 +309,6 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   i = 0
   batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
   while i <= STEPS:
-    X, Y = next(batcher)
-    # further split batch if distributed
-    if getenv("DIST"):
-      X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
-
     if i%100 == 0 and i > 1:
       # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
       corrects = []
@@ -345,6 +340,10 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
           best_eval = acc
           print(f"eval {correct_sum}/{correct_len} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
     if STEPS == 0 or i==STEPS: break
+    X, Y = next(batcher)
+    # further split batch if distributed
+    if getenv("DIST"):
+      X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
     GlobalCounters.reset()
     st = time.monotonic()
     loss = train_step_jitted(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
