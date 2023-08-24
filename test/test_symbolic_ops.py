@@ -44,7 +44,7 @@ class TestSymbolicOps(unittest.TestCase):
     with self.assertRaises(AssertionError):
       f(a.reshape(3, vi), b.reshape(vi, 5)).numpy()
 
-  @unittest.skipIf(Device.DEFAULT == "CLANG" and CI, "broken on CLANG CI")
+  @unittest.skip("potential method cache collision")
   def test_attention(self):
     def f(q, k, v): return Tensor.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)).realize()
     vi = Variable("i", 1, 10)

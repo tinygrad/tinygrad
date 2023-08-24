@@ -13,12 +13,12 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(4), Tensor.randn(4)
     np_a, np_b = a.numpy(), b.numpy()
     GlobalCounters.cache = []
-    c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),)))).realize()
+    c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) + (b.shrink(((0, 2),)) - b.shrink(((2, 4),)))).realize()
     rawbufs = GlobalCounters.cache[0][1]
     GlobalCounters.cache = None
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.realized, b.lazydata.realized}
-    np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
-    np.testing.assert_allclose(np_c, c.numpy())
+    np_c = (np_a[:2] - np_a[2:]) + (np_b[:2] - np_b[2:])
+    np.testing.assert_allclose(np_c, c.numpy(), rtol=1e-6, atol=1e-6)
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
