@@ -2,7 +2,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
-from tinygrad.helpers import GlobalCounters, getenv
+from tinygrad.helpers import GlobalCounters, getenv, dtypes
 from tqdm import tqdm
 import numpy as np
 import random
@@ -16,6 +16,7 @@ def train_resnet():
   from extra.lr_scheduler import CosineAnnealingLR
 
   def sparse_categorical_crossentropy(out, Y, label_smoothing=0):
+    out = out.float()
     num_classes = out.shape[-1]
     y_counter = Tensor.arange(num_classes, requires_grad=False).unsqueeze(0).expand(Y.numel(), num_classes)
     y = (y_counter == Y.flatten().reshape(-1, 1)).where(-1.0 * num_classes, 0)
@@ -24,6 +25,8 @@ def train_resnet():
   
   @TinyJit
   def train_step(X, Y):
+    X = X.half()
+    Y = Y.half()
     optimizer.zero_grad()
     out = model.forward(X)
     loss = sparse_categorical_crossentropy(out, Y, label_smoothing=0.1)
@@ -55,6 +58,9 @@ def train_resnet():
   wandb.init()
 
   num_classes = 1000
+  fp16 = getenv("HALF", 0)
+  if fp16 == 1:
+    Tensor.default_type = dtypes.float16
   model = ResNet50(num_classes)
   parameters = get_parameters(model)
 

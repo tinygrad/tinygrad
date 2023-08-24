@@ -95,11 +95,11 @@ class dtypes:
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", np.bool_)
-  float16: Final[DType] = DType(0, 2, "half", np.float16)
+  float16: Final[DType] = DType(1, 2, "half", np.float16)
   half = float16
   float32: Final[DType] = DType(4, 4, "float", np.float32)
   float = float32
-  float64: Final[DType] = DType(0, 8, "double", np.float64)
+  float64: Final[DType] = DType(5, 8, "double", np.float64)
   double = float64
   int8: Final[DType] = DType(0, 1, "char", np.int8)
   int16: Final[DType] = DType(1, 2, "short", np.int16)
