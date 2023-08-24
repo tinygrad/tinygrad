@@ -270,7 +270,7 @@ class Tensor:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
   def __getitem__(self, val):
-    def normalize_int(e: int, i: int, dim_sz: int) -> int:
+    def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
     orig_slices = list(val) if isinstance(val, tuple) else [val]
@@ -284,8 +284,7 @@ class Tensor:
     orig_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices]
     # filter None and normalize int
     valid_slices = [s for s in orig_slices if s is not None]
-    valid_slices = [v if isinstance(v, slice) else slice(normalize_int(v, i, dim_sz), normalize_int(v, i, dim_sz)+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
-    # valid_slices = [v if isinstance(v, slice) else slice(y := v if v != -1 else dim_sz-1, y+1) for v, dim_sz in zip(valid_slices, self.shape)]
+    valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), int(y_)+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     # compute new_slice
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     new_slice = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
