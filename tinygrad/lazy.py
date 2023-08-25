@@ -4,6 +4,7 @@ from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast
 from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
+from tinygrad.graph import log_op
 from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType
 from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp
 from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction
@@ -124,7 +125,6 @@ class LazyBuffer:
 
     # log phantom ops to the graph
     if GRAPH >= 3:
-      from tinygrad.graph import log_op
       log_op(self, self.op, phantom=True)
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
@@ -164,7 +164,6 @@ class LazyBuffer:
 
       # log to the graph
       if (DEBUG or GRAPH) and (self.realized.__class__ is not RawConst or GRAPH >= 2):
-        from tinygrad.graph import log_op
         log_op(self, self.op)
 
       # no need to keep the op after realization
