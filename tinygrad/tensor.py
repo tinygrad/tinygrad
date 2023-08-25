@@ -265,7 +265,6 @@ class Tensor:
   #    - Combined indexing works by letting regular slicing finish first -> computing the resulting dims w.r.t to Tensors passed in -> fancy indexing
   #    - Any Tensors passed in __getitem__ will perform (CMPEQ with arange -> MUL with self -> SUM_REDUCE) iteratively
   #        - The first iteration will expand the dim of self while consecutive iterations will reduce the dim
-  #        - The dims are reduced at sum_dim for each Tensor passed in
   #    - There's a special case where a permute is needed at the end:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
@@ -310,7 +309,7 @@ class Tensor:
         elif tensors: # s is int
           for i_ in range(len(orig_dim)):
             if orig_dim[i_] > i: dim[i_] -= 1 # trim dims associated with tensors after dim is collapsed
-    ret = sliced_tensor.reshape(tuple(final_shape))  # Reshape
+    ret = sliced_tensor.reshape(tuple(final_shape))
     # Fancy/tensor indexing
     if tensors:
       # normalize idx
