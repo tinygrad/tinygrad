@@ -275,13 +275,13 @@ class Tensor:
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
     orig_slices = list(val) if isinstance(val, tuple) else [val]
     if (num_slices := sum(isinstance(v, (slice, int, Tensor)) for v in orig_slices)) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
-    # handle ellipses
+    # handle Ellipses
     if len(ellipses_found := [i for i, v in enumerate(orig_slices) if v is Ellipsis]) <= 1: ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices) # if len(ellipses_found) == 1 else
     else: raise IndexError("an index can only have a single ellipsis ('...')")
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
-    # extract tensors and their associated dims
+    # extract tensors associated dims
     orig_dim, tensors = zip(*y) if (y := [(i,v) for i,v in enumerate(orig_slices) if isinstance(v, Tensor)]) else ((), ())
-    # handle invalid slices (Tensor, None)
+    # handle Tensor and None
     valid_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices if v is not None]
     valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), y_+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     # compute shrink arg
