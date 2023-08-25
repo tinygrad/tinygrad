@@ -7,7 +7,7 @@ from pathlib import Path
 import functools, sys, argparse, json, os
 import numpy as np
 np.set_printoptions(linewidth=200)
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 
 from tinygrad.helpers import Timing, getenv, DEBUG, dtypes
 from tinygrad.ops import Device
@@ -67,7 +67,7 @@ class Attention:
     self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
-  def __call__(self, x:Tensor, cache_k:Tensor, cache_v:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor], jit_ctx=None) -> Tuple[Tensor, Tensor, Tensor]:
+  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor], jit_ctx:Optional[Dict[Variable,int]]=None) -> Tuple[Tensor, Tensor, Tensor]:
     bsz, seqlen, _ = x.shape
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
@@ -79,7 +79,7 @@ class Attention:
     if start_pos == 0:
       keys, values = xk, xv
     else:
-      assert cache_k.shape[0] > 0, "no cache"
+      assert cache_k is not None and cache_v is not None, "no cache"
       assert start_pos == sym_infer(cache_k.shape[1], cache_k.lazydata.st.var_vals) == sym_infer(cache_v.shape[1], cache_v.lazydata.st.var_vals), f"cache has wrong shape, not ({start_pos} == {sym_infer(cache_k.shape[1], cache_k.lazydata.st.var_vals)} == {sym_infer(cache_v.shape[1], cache_v.lazydata.st.var_vals)})"
       assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
       keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
@@ -111,10 +111,10 @@ class TransformerBlock:
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
 
-  def __call__(self, x:Tensor, cache_k:Tensor, cache_v:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor], jit_ctx=None):
-    seqlen = x.shape[1]
-    do_jit = getenv("JIT") and mask is None
-    if do_jit:
+  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor], jit_ctx:Optional[Dict[Variable,int]]=None):
+    bsz, seqlen, _ = x.shape
+    if getenv("JIT") and mask is None:
+      assert cache_k is not None and cache_v is not None, "no cache"
       pos = Variable("pos", 1, 1024)
       cache_k = cache_k.reshape(cache_k.shape[0], pos, cache_k.shape[2], cache_k.shape[3])
       cache_v = cache_v.reshape(cache_v.shape[0], pos, cache_v.shape[2], cache_v.shape[3])
@@ -124,10 +124,10 @@ class TransformerBlock:
       cache_v.lazydata.st.var_vals[pos] = start_pos
 
       # get only the part of freqs_cis that we are using.
-      freqs_cis = freqs_cis.shrink(((0, freqs_cis.shape[0]), (pos, pos+seqlen),(0, freqs_cis.shape[2]),(0, freqs_cis.shape[3]),(0, freqs_cis.shape[4])))
+      freqs_cis = freqs_cis.shrink(((0, freqs_cis.shape[0]), (pos, pos+seqlen), (0, freqs_cis.shape[2]), (0, freqs_cis.shape[3]), (0, freqs_cis.shape[4])))
       freqs_cis.lazydata.st.var_vals[pos] = start_pos
     else:
-      freqs_cis = freqs_cis.shrink(((0, freqs_cis.shape[0]), (start_pos, start_pos+seqlen),(0, freqs_cis.shape[2]),(0, freqs_cis.shape[3]),(0, freqs_cis.shape[4])))
+      freqs_cis = freqs_cis.shrink(((0, freqs_cis.shape[0]), (start_pos, start_pos+seqlen), (0, freqs_cis.shape[2]), (0, freqs_cis.shape[3]), (0, freqs_cis.shape[4])))
 
     output, cache_k, cache_v = self.attention(self.attention_norm(x), cache_k, cache_v, start_pos, freqs_cis, mask, jit_ctx=jit_ctx)
     h = x + output
@@ -155,7 +155,7 @@ class Transformer:
     h = self.jitted_tok_embeddings(tokens) if do_jit else self.tok_embeddings(tokens)
     for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.jitted_layers if do_jit else self.layers, self.kv_caches)):
       if not do_jit and start_pos > 0:
-        # need this reshape back to int shape in conversational mode that mixed jitted and unjitted calls share the same cache
+        # need this reshape back to int shape in conversational mode because jitted and unjitted calls share the same cache
         cache_k = cache_k.reshape(cache_k.shape[0], start_pos, cache_k.shape[2], cache_k.shape[3])
         cache_v = cache_v.reshape(cache_v.shape[0], start_pos, cache_v.shape[2], cache_v.shape[3])
       h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=self.freqs_cis, mask=mask, jit_ctx={pos: start_pos})
