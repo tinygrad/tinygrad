@@ -118,10 +118,10 @@ class TransformerBlock:
       pos = Variable("pos", 1, 1024)
       cache_k = cache_k.reshape(cache_k.shape[0], pos, cache_k.shape[2], cache_k.shape[3])
       cache_v = cache_v.reshape(cache_v.shape[0], pos, cache_v.shape[2], cache_v.shape[3])
-      if jit_ctx:
-        # need update because we don't reshape back to int shape in jitted path, and we only call the jitted function after two unjitted call so we don't have var_vars in the second call
-        cache_k.lazydata.st.var_vals.update(jit_ctx)
-        cache_v.lazydata.st.var_vals.update(jit_ctx)
+      # need this because we don't reshape back to int shape in the jitted path, and we only call the jitted function after two unjitted calls
+      # and we don't have the correct var_vars in the second call as reshape from symbol to symbol does not update the var_vals
+      cache_k.lazydata.st.var_vals[pos] = start_pos
+      cache_v.lazydata.st.var_vals[pos] = start_pos
 
       # get only the part of freqs_cis that we are using.
       freqs_cis = freqs_cis.shrink(((0, freqs_cis.shape[0]), (pos, pos+seqlen),(0, freqs_cis.shape[2]),(0, freqs_cis.shape[3]),(0, freqs_cis.shape[4])))

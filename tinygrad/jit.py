@@ -31,9 +31,9 @@ class TinyJit:
       try: var_vals = kwargs["jit_ctx"]
       except KeyError: var_vals = dict(sorted(merge_dicts([arg.lazydata.st.var_vals for arg in args if arg.__class__ is Tensor]).items(), key=lambda kv: kv[0].key))
       for (j,i),(input_name, expected_st, expected_type) in self.input_replace.items():
-        # TODO: what to assert if reshape is inside fxn? cache has symbolic st and input has rawbuffer
-        # maybe store the linearizer sts in the cache and use it to compare
-        if "jit_ctx" not in kwargs: assert input_rawbuffers[input_name][1].views == expected_st.views and input_rawbuffers[input_name][0].dtype == expected_type, f"ShapeTracker.views or type mismatch in JIT, <{input_rawbuffers[input_name][1].views}, {input_rawbuffers[input_name][0].dtype}> != <{expected_st.views}, {expected_type}>"
+        assert input_rawbuffers[input_name][0].dtype == expected_type, f"type mismatch in JIT, {input_rawbuffers[input_name][0].dtype} != {expected_type}"
+        # NOTE: if we pass jit_ctx instead of using reshape to update the var_vals, we cannot compare the shapetracker directly
+        if "jit_ctx" not in kwargs: assert input_rawbuffers[input_name][1].views == expected_st.views, f"ShapeTracker.views mismatch in JIT, {input_rawbuffers[input_name][1].views} != {expected_st.views}"
         self.jit_cache[j][1][i] = input_rawbuffers[input_name][0]
       for prg, pargs, variables in self.jit_cache: # type: Callable, List[Optional[RawBuffer]], Dict[Variable, int]
         for k in variables.keys():
