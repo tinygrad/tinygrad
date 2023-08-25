@@ -50,8 +50,8 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
             kk(f"for {var.expr} in range({var.min}, {var.max+1}):")
             depth += 1
     elif uop == UOps.ENDLOOP:
-      if args[1] not in ["global", "local"] and len(args[0]):
-        depth -= 1
+      if args[1] not in ["global", "local", "global+local"] and len(args[0]):
+        depth -= len(args[0])
         kk(f"# end {args[1]}")
     elif uop == UOps.ALU:
       assert newvar is not None
