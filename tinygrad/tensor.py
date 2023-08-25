@@ -269,19 +269,19 @@ class Tensor:
   #    - There's a special case where a permute is needed at the end:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
-  def __getitem__(self, val):
+  def __getitem__(self, val): # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
     orig_slices = list(val) if isinstance(val, tuple) else [val]
     if (num_slices := sum(isinstance(v, (slice, int, Tensor)) for v in orig_slices)) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     # handle ellipses
-    if len(ellipses_found := [i for i, v in enumerate(orig_slices) if v is Ellipsis]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
-    else: ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices) # NOTE this is needlessly confusing but it fits in 1 line :D
+    if len(ellipses_found := [i for i, v in enumerate(orig_slices) if v is Ellipsis]) <= 1: ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices) # if len(ellipses_found) == 1 else
+    else: raise IndexError("an index can only have a single ellipsis ('...')")
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
     # extract tensors and their respective dims
     orig_dim, tensors = zip(*y) if (y := [(i,v) for i,v in enumerate(orig_slices) if isinstance(v, Tensor)]) else ((), ())
-    # filter out None and Tensors, and normalize ints
+    # filter out None and Tensors, normalize ints
     valid_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices if v is not None]
     valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), y_+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     # compute new_slice
@@ -300,9 +300,8 @@ class Tensor:
       new_shape = reshaped_tensor.shape[::2]
       # Shrink: do [:, 0]
       sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
-    final_shape, it_shape = [], iter(new_shape)
-    dim = list(orig_dim) # make a copy
-    # essentially where there's None in orig_slices, new_shape.insert(i,1), elif int in orig_slices new_shape.pop(i) TODO maybe try another way of looping
+    # loop through orig_slices to determine final shape and trim dim
+    final_shape, it_shape, dim = [], iter(new_shape), list(orig_dim)
     for i,s in enumerate(orig_slices):
       if s is None: final_shape.append(1)
       else: # s is int or slice or Tensor
@@ -314,11 +313,11 @@ class Tensor:
     ret = sliced_tensor.reshape(tuple(final_shape))  # Reshape
     # Fancy/tensor indexing
     if tensors:
-      # turn negative idx positive
+      # normalize idx
       idx = [t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[d] + t for d,t in zip(dim, tensors)] # TODO first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
       # reshape to same ndim when idxs have different ndim
       max_dim = max(i.ndim for i in idx)
-      idx = [i.reshape(*[1]*(max_dim-i.ndim), *i.shape) for i in idx] # TODO this reshape is removable. Just add it to args of other reshapes, but makes args more unreadable
+      idx = [i.reshape(*[1]*(max_dim-i.ndim), *i.shape) for i in idx] # NOTE this reshape is removable. Just add it to args of other reshapes, but makes args more unreadable
       # compute sum_dim
       sum_dim = [d if n==0 else d+i.ndim-n for n,(d,i) in enumerate(zip(dim,idx))]
       # first iteration
@@ -326,7 +325,7 @@ class Tensor:
       arange = Tensor.arange(ret.shape[sum_dim[0]], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*sum_dim[0], ret.shape[sum_dim[0]], *[1]*idx[0].ndim, *[1]*(ret.ndim-sum_dim[0]-1))
       ret = (ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*idx[0].ndim, *ret.shape[sum_dim[0]+1:]) * (arange == new_idx)).sum(sum_dim[0])
       # consecutive iterations
-      for idx_,d in zip(idx[1:],sum_dim[1:]):
+      for idx_,d in zip(idx[1:], sum_dim[1:]):
         new_idx = idx_.reshape(*[1]*dim[0], *idx_.shape, *[1]*(ret.ndim-dim[0]-idx_.ndim))
         arange = Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*(d), ret.shape[d], *[1]*(ret.ndim-d-1))
         ret = ((new_idx == arange) * ret).sum(d)
