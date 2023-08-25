@@ -12,8 +12,6 @@ from models.resnet import ResNet
 from models.retinanet import nms as _box_nms
 
 
-USE_NP_GATHER = os.getenv('FULL_TINYGRAD', '0') == '0'
-
 def rint(tensor):
   x = (tensor*2).cast(dtypes.int32).contiguous().cast(dtypes.float32)/2
   return (x<0).where(x.floor(), x.ceil())
@@ -52,13 +50,14 @@ def _gather(array, indices):
     array, 0,
   ).sum(indices.ndim)
 
-# TODO: replace npgather with a faster gather using tinygrad only
-# NOTE: this blocks the gradient
-def npgather(array,indices):
-  if isinstance(array, Tensor): array = array.numpy()
-  if isinstance(indices, Tensor): indices = indices.numpy()
-  if isinstance(indices, list): indices = np.asarray(indices)
-  return Tensor(array[indices.astype(int)])
+def gather(array, indices):
+    assert isinstance(array, Tensor), "array should be of type Tensor"
+    assert isinstance(indices, Tensor), "indices should be of type Tensor"
+    array.lazydata.realize()
+    array_data = array.lazydata.realized.toCPU()
+    indices.lazydata.realize()
+    indices_data = indices.lazydata.realized.toCPU()
+    return Tensor(array_data[indices_data])
 
 def get_strides(shape):
   prod = [1]
@@ -72,8 +71,7 @@ def tensor_getitem(tensor, *keys):
   flat_keys = Tensor.stack([key.expand((sum(keys)).shape).reshape(-1) for key in keys], dim=1).cpu().cast(dtypes.int32)
   strides = get_strides(tensor.shape)
   idxs = (flat_keys * strides).sum(1)
-  gatherer = npgather if USE_NP_GATHER else _gather
-  return gatherer(tensor.reshape(-1), idxs).reshape(sum(keys).shape)
+  return gather(tensor.reshape(-1), idxs).reshape(sum(keys).shape)
 
 
 # for gather with indicies only on axis=0
