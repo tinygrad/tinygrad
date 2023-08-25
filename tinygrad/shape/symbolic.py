@@ -1,5 +1,5 @@
 from __future__ import annotations
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 import functools
 import itertools
 from math import gcd
@@ -11,7 +11,7 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
 
 def is_sym_int(x: Any) -> bool: return isinstance(x, (int, Node))
 
-class Node:
+class Node(ABC):
   b: Union[Node, int]
   min: int
   max: int
