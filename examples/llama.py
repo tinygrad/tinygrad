@@ -79,9 +79,6 @@ class Attention:
     if start_pos == 0:
       keys, values = xk, xv
     else:
-      if jit_ctx:
-        cache_k.lazydata.st.var_vals.update(jit_ctx)
-        cache_v.lazydata.st.var_vals.update(jit_ctx)
       assert cache_k.shape[0] > 0, "no cache"
       assert start_pos == sym_infer(cache_k.shape[1], cache_k.lazydata.st.var_vals) == sym_infer(cache_v.shape[1], cache_v.lazydata.st.var_vals), f"cache has wrong shape, not ({start_pos} == {sym_infer(cache_k.shape[1], cache_k.lazydata.st.var_vals)} == {sym_infer(cache_v.shape[1], cache_v.lazydata.st.var_vals)})"
       assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
@@ -121,6 +118,11 @@ class TransformerBlock:
       pos = Variable("pos", 1, 1024)
       cache_k = cache_k.reshape(cache_k.shape[0], pos, cache_k.shape[2], cache_k.shape[3])
       cache_v = cache_v.reshape(cache_v.shape[0], pos, cache_v.shape[2], cache_v.shape[3])
+      if jit_ctx:
+        # need update because we don't reshape back to int shape in jitted path, and we only call the jitted function after two unjitted call so we don't have var_vars in the second call
+        cache_k.lazydata.st.var_vals.update(jit_ctx)
+        cache_v.lazydata.st.var_vals.update(jit_ctx)
+
       # get only the part of freqs_cis that we are using.
       freqs_cis = freqs_cis.shrink(((0, freqs_cis.shape[0]), (pos, pos+seqlen),(0, freqs_cis.shape[2]),(0, freqs_cis.shape[3]),(0, freqs_cis.shape[4])))
       freqs_cis.lazydata.st.var_vals[pos] = start_pos
@@ -153,6 +155,7 @@ class Transformer:
     h = self.jitted_tok_embeddings(tokens) if do_jit else self.tok_embeddings(tokens)
     for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.jitted_layers if do_jit else self.layers, self.kv_caches)):
       if not do_jit and start_pos > 0:
+        # need this reshape back to int shape in conversational mode that mixed jitted and unjitted calls share the same cache
         cache_k = cache_k.reshape(cache_k.shape[0], start_pos, cache_k.shape[2], cache_k.shape[3])
         cache_v = cache_v.reshape(cache_v.shape[0], start_pos, cache_v.shape[2], cache_v.shape[3])
       h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=self.freqs_cis, mask=mask, jit_ctx={pos: start_pos})
