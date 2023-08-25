@@ -279,12 +279,12 @@ class Tensor:
     if len(ellipses_found := [i for i, v in enumerate(orig_slices) if v is Ellipsis]) <= 1: ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices) # if len(ellipses_found) == 1 else
     else: raise IndexError("an index can only have a single ellipsis ('...')")
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
-    # extract tensors and their respective dims
+    # extract tensors and their associated dims
     orig_dim, tensors = zip(*y) if (y := [(i,v) for i,v in enumerate(orig_slices) if isinstance(v, Tensor)]) else ((), ())
-    # filter out None and Tensors, normalize ints
+    # handle invalid slices (Tensor, None)
     valid_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices if v is not None]
     valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), y_+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
-    # compute new_slice
+    # compute shrink arg
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     new_slice = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
     # shrink and flip
@@ -300,7 +300,7 @@ class Tensor:
       new_shape = reshaped_tensor.shape[::2]
       # Shrink: do [:, 0]
       sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
-    # loop through orig_slices to determine final shape and trim dim
+    # determine final shape and trim dim associated with tensors
     final_shape, it_shape, dim = [], iter(new_shape), list(orig_dim)
     for i,s in enumerate(orig_slices):
       if s is None: final_shape.append(1)
@@ -309,7 +309,7 @@ class Tensor:
         if isinstance(s, (slice, Tensor)): final_shape.append(dim_shape)
         elif tensors: # s is int
           for i_ in range(len(orig_dim)):
-            if orig_dim[i_] > i: dim[i_] -= 1 # compute resulting dims after dim is collapsed when s is int
+            if orig_dim[i_] > i: dim[i_] -= 1 # trim dims associated with tensors after dim is collapsed
     ret = sliced_tensor.reshape(tuple(final_shape))  # Reshape
     # Fancy/tensor indexing
     if tensors:
@@ -321,9 +321,8 @@ class Tensor:
       # compute sum_dim, arange, and idx
       sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(dim)]
       arange = [Tensor.arange(ret.shape[d]).reshape(*[1]*sd, ret.shape[d], *[1]*(((ret.ndim + max_dim) if n==0 else (ret.ndim + max_dim - n)) - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, dim))]
-      idx = [i.reshape(*[1]*sum_dim[0], *((1, *i.shape) if n == 0 else i.shape), *[1]*((ret.ndim-sd-1) if n==0 else (ret.ndim - sum_dim[0]-n))) for n,(sd,i) in enumerate(zip(sum_dim, idx))]
+      idx = [i.reshape(*[1]*sum_dim[0], *((1, *i.shape) if n == 0 else i.shape), *[1]*((ret.ndim - sd - 1) if n==0 else (ret.ndim - sum_dim[0] - n))) for n,(sd,i) in enumerate(zip(sum_dim, idx))]
       ret = ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*max_dim, *ret.shape[sum_dim[0]+1:])
-      # iteratively cmpeq -> mul -> reduce
       for a,i,sd in zip(arange, idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
       # special permute case
       if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1]+1)):
