@@ -66,10 +66,10 @@ class FileLoader(threading.Thread):
         # Sleep for a short while to avoid busy-waiting
         time.sleep(0.1)
 
-  # not threadsafe
   def get_next(self) -> Optional[Tuple[str, T]]:
       try:
           res = self.buffer.get_nowait()
+          # TODO not threadsafe
           self.retrievals += 1
           return res
       except Empty:
@@ -89,7 +89,7 @@ if __name__ == '__main__':
     return Image.open(file_path).convert("RGB")
     
   dir_path = '../../../coco/train2017'
-  loader = FileLoader(dir_path, convert_function)
+  loader = FileLoader(dir_path, convert_function, buffer_size=10)
   
   time.sleep(10)
 
