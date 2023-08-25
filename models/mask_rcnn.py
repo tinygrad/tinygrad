@@ -51,13 +51,13 @@ def _gather(array, indices):
   ).sum(indices.ndim)
 
 def gather(array, indices):
-    assert isinstance(array, Tensor), "array should be of type Tensor"
-    assert isinstance(indices, Tensor), "indices should be of type Tensor"
-    array.lazydata.realize()
-    array_data = array.lazydata.realized.toCPU()
-    indices.lazydata.realize()
-    indices_data = indices.lazydata.realized.toCPU()
-    return Tensor(array_data[indices_data])
+  assert isinstance(array, Tensor), "array should be of type Tensor"
+  assert isinstance(indices, Tensor), "indices should be of type Tensor"
+  array.lazydata.realize()
+  array_data = array.lazydata.realized.toCPU()
+  indices.lazydata.realize()
+  indices_data = indices.lazydata.realized.toCPU()
+  return Tensor(array_data[indices_data])
 
 def get_strides(shape):
   prod = [1]
