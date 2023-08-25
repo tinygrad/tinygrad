@@ -276,14 +276,14 @@ class Tensor:
     orig_slices = list(val) if isinstance(val, tuple) else [val]
     if (num_slices := sum(isinstance(v, (slice, int, Tensor)) for v in orig_slices)) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     # handle ellipses
-    if len((ellipses_found := [i for i, v in enumerate(orig_slices) if v is Ellipsis])) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
+    if len(ellipses_found := [i for i, v in enumerate(orig_slices) if v is Ellipsis]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     else: ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices) # NOTE this is needlessly confusing but it fits in 1 line :D
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
     # extract tensors and their respective dims
     orig_dim, tensors = zip(*y) if (y := [(i,v) for i,v in enumerate(orig_slices) if isinstance(v, Tensor)]) else ((), ())
     # filter out None and Tensors, and normalize ints
     valid_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices if v is not None]
-    valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), int(y_)+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
+    valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), y_+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     # compute new_slice
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     new_slice = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
@@ -332,9 +332,8 @@ class Tensor:
         ret = ((new_idx == arange) * ret).sum(d)
       # special permute case
       if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1]+1)):
-        order = list(range(ret.ndim))
-        order = order[dim[0]:dim[0]+idx[0].ndim] + order[:dim[0]] + order[dim[0]+idx[0].ndim:]
-        ret = ret.permute(order=order)
+        ret_dims = list(range(ret.ndim))
+        ret = ret.permute(ret_dims[dim[0]:dim[0]+idx[0].ndim] + ret_dims[:dim[0]] + ret_dims[dim[0]+idx[0].ndim:])
     return ret
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
