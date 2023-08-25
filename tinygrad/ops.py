@@ -3,8 +3,7 @@ import time, importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup, merge_dicts
-if TYPE_CHECKING:
-  from tinygrad.lazy import LazyBuffer
+if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
