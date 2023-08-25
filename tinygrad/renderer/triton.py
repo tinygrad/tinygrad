@@ -6,9 +6,12 @@ from tinygrad.shape.symbolic import NumNode
 from triton.compiler import compile as triton_compile
 import hashlib
 import math
-
 def next_power_of_2(x):
   return 1 << (x - 1).bit_length()
+
+def render_valid(node):
+  return '(' * (len(node.nodes) -1) + ') and '.join([f'{n.render()}<{n.max+1}' for n in node.nodes]) if hasattr(node, "nodes") else f"{node.render()}<{node.max+1}"
+
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
   kernel = []
@@ -71,8 +74,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       assert vin[0].dtype == dtypes.float, "unimplemented: float4 store"
       assert not isinstance(args.memory_dtype, ImageDType), "unimplemented: image store"
       assert args.valid.min == 1, "store must be valid"
-      if hasattr(args.idx, "nodes") : kk(f"tl.store({args.name} + {args.idx.render()}, {vin[0].render()}, mask = {'(' * (len(args.idx.nodes) -1) + ') and '.join([f'{n.render()}<{n.max+1}' for n in args.idx.nodes])}) ")
-      else: kk(f"tl.store({args.name} + {args.idx.render()}, {vin[0].render()}, mask = {args.idx.render()}<{args.idx.max+1}) ")
+      kk(f"tl.store({args.name} + {args.idx.render()}, {vin[0].render()}, mask = {render_valid(args.idx)}) ")
     elif uop == UOps.DEFINE_GLOBAL:
       bufs.append(args)
       signatures.append(signature_dtypes[args[1]])
