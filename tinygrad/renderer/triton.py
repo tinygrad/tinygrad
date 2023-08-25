@@ -68,8 +68,8 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
           kk(f"{newvar.render()} = tl.where({args.valid.render()},tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{val}, dtype={triton_dtypes[newvar.dtype]}),tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{args.invalid_value}, dtype={triton_dtypes[newvar.dtype]}))") 
         else:
           kk(f"{newvar.render()} = tl.where({args.valid.render()},{val},{args.invalid_value})")
-      elif args.valid.min == 1: kk(f"{newvar.render()} = tl.load({args.name} + {args.idx.render()}, mask = {args.idx.render()}<{args.idx.max+1}).to({triton_dtypes[args.memory_dtype]})")
-      else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({args.name}+{args.idx.render()}" + (f", mask={args.valid.render()})" if "lidx" in args.idx.render() else ")")+ f', 0.0).to({triton_dtypes[args.memory_dtype]})')
+      elif args.valid.min == 1: kk(f"{newvar.render()} = tl.load({args.name} + {args.idx.render()}, mask = {render_valid(args.idx)}).to({triton_dtypes[args.memory_dtype]})")
+      else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({args.name}+{args.idx.render()}" + (f", mask={args.valid.render()})" if "lidx" in args.idx.render() or "ridx" in args.idx.render() else ")")+ f', 0.0).to({triton_dtypes[args.memory_dtype]})')
     elif uop == UOps.STORE:
       assert vin[0].dtype == dtypes.float, "unimplemented: float4 store"
       assert not isinstance(args.memory_dtype, ImageDType), "unimplemented: image store"
