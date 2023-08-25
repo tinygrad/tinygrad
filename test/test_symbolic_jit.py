@@ -8,10 +8,6 @@ import numpy as np
 @unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
 @unittest.skipUnless(Device.DEFAULT in ["GPU", "METAL", "CLANG", "CUDA", "LLVM"], f"{Device.DEFAULT} is not supported")
 class TestSymbolicJit(unittest.TestCase):
-  def setUp(self):
-    # TODO: fix sym_rename / ENABLE_METHOD_CACHE to avoid bad cache
-    Device[Device.DEFAULT].method_cache.clear()
-
   def test_plus1(self):
     def f(a): return (a+1).realize()
     jf = TinyJit(f)
