@@ -9,8 +9,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, T
 from tinygrad.helpers import GRAPH, GRAPHPATH, PRUNEGRAPH, DEBUG, GlobalCounters
 from tinygrad.runtime.lib import RawConst
 
-if TYPE_CHECKING:
-  from tinygrad.lazy import LazyBuffer
+if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
 
 # **** debugging and graphing ****
 
