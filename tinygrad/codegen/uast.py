@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools, math, itertools
-from typing import NamedTuple, Optional, List, Any, Tuple, cast, Sequence, Union
+from typing import NamedTuple, Optional, List, Any, Tuple, cast, Sequence, Union, Dict
 from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.lazy import LazyBuffer
@@ -127,17 +127,42 @@ class UAst(OptimizedKernel):
 from tinygrad.renderer.cstyle import CStyleLanguage
 def uops_to_cstyle2(function_name:str, uops:List[UOp]):
   lang = CStyleLanguage()
-  rendered = set()
-  def render(a:List[UOp]) -> List[str]:
+  r: Dict[UOp, Optional[str]] = {}
+  statements: List[str] = []  # LOOP, LOAD, STORE
+  c = -1
+  def ssa():
+    nonlocal c
+    c += 1
+    return f"t{c}"
+  def render_one(u:UOp) -> Optional[str]:
+    if u.uop == UOps.CONST: return str(u.arg)
+    if u.uop == UOps.LOOP:
+      statements.append(f"for (int {u.arg[0]} = {u.arg[1]}; {u.arg[0]} < {u.arg[2]}; {u.arg[0]}++) {{")
+      return u.arg[0]
+    if u.uop == UOps.ALU: return lang.code_for_op[u.arg](*[r[x] for x in u.vin])
+    if u.uop == UOps.DEFINE_GLOBAL: return u.arg
+    if u.uop == UOps.LOAD:
+      tok = ssa()
+      statements.append(f"{u.dtype.name} {tok} = {r[u.vin[0]]}[{r[u.vin[1]]}]")
+      return tok
+    if u.uop == UOps.STORE:
+      statements.append(f"{r[u.vin[0]]}[{r[u.vin[1]]}] = {r[u.vin[2]]}")
+      return None
+
+    print(u.uop, u.dtype, u.arg)
+
+  def render(a:List[UOp]):
     prereqs = tuple()
     for u in a:
       prereqs += u.vin
     if prereqs: render(prereqs)
     for u in a:
-      if u in rendered: continue
-      rendered.add(u)
-      print(u.uop, u.dtype, u.arg)
+      if u not in r:
+        r[u] = render_one(u)
   render(uops)
+
+  print('\n'.join(statements))
+
 
   return "test"
 
