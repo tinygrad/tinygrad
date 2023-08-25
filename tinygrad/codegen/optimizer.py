@@ -325,6 +325,19 @@ class OptimizedKernel(Kernel):
 
     # **** below this line need to be optional and benchmarked ****
 
+    # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
+    # this can be made much smarter
+    to_upcast = []
+    for axis in range(self.first_reduce):
+      # todo: we need to be able to split axes that are masked, or refuse to merge them in simplify_merge_adjacent
+      if self.full_shape[axis] <= 36 and any(st.axis_needs_valid(axis) for st in self.sts) and prod(self.full_shape[self.shape_len-self.upcasted:]) * self.full_shape[axis] <= 7 * 7:
+        if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
+        to_upcast.append(axis)
+    for axis in to_upcast[::-1]:
+      self.shift_to(axis, amount=self.full_shape[axis])
+      self.upcast()
+      self.simplify_ones()
+
     # potentially do more upcasts of non reduce axes based on a heuristic
     upcasted_axis = set()
     while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
@@ -365,15 +378,23 @@ class OptimizedKernel(Kernel):
 
     # **** local groups ****
 
-    if self.opts.has_local:
+    for axis in range(self.first_reduce - self.local_dims - 1, -1, -1):
+      local_size = prod(self.full_shape[self.first_reduce - self.local_dims:self.first_reduce])
+      if self.full_shape[axis] == 1: continue
+      if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))):
+        for sz in [x for x in ([16, 8, 4, 3]) if self.full_shape[axis] % x == 0 and local_size * x <= 128]:
+          self.shift_to(axis, sz, insert_before=self.first_reduce - self.local_dims)
+          self.local_dims += 1
+          break
+      if self.local_dims >= 3: break
+
+    if not self.local_dims:
       for axis in range(self.first_reduce - self.local_dims - 1, -1, -1):
-        local_size = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
-        if self.full_shape[axis] == 1: continue
+        local_size = prod(self.full_shape[self.first_reduce - self.local_dims:self.first_reduce])
+        if local_size >= 32: break
         last_try = self.local_dims == 0 and axis == 0
-        if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))) or last_try:
-          for sz in [x for x in (([32] if last_try else []) + [16,8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 128]:
-            self.shift_to(axis, sz, insert_before=self.first_reduce-self.local_dims)
-            self.local_dims += 1
-            break
+        for sz in [x for x in [32] * last_try + [16, 8, 4, 3] if self.full_shape[axis] % x == 0 and local_size * x <= 128]:
+          self.shift_to(axis, sz, insert_before=self.first_reduce - self.local_dims)
+          self.local_dims += 1
+          break
         if self.local_dims >= 3: break
-    self.simplify_ones()
