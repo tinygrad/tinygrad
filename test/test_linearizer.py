@@ -2,7 +2,7 @@ import numpy as np
 import unittest
 
 from tinygrad.codegen.linearizer import Linearizer, UOps
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 from tinygrad.ops import GlobalCounters, Compiled
 from tinygrad.tensor import Tensor
 

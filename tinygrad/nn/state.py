@@ -4,7 +4,7 @@ from typing import Dict, Union, List
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters, CI
 from tinygrad.shape.shapetracker import strides_for_shape
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 
 safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}

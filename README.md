@@ -79,14 +79,16 @@ optim.step()
 
 tinygrad already supports numerous accelerators, including:
 
-- [x] CPU
-- [x] GPU (OpenCL)
-- [x] C Code (Clang)
-- [x] LLVM
-- [x] METAL
-- [x] CUDA
-- [x] Triton
-- [x] PyTorch
+- [x] [CPU](tinygrad/runtime/ops_cpu.py)
+- [x] [GPU (OpenCL)](tinygrad/runtime/ops_gpu.py)
+- [x] [C Code (Clang)](tinygrad/runtime/ops_clang.py)
+- [x] [LLVM](tinygrad/runtime/ops_llvm.py)
+- [x] [METAL](tinygrad/runtime/ops_metal.py)
+- [x] [CUDA](tinygrad/runtime/ops_cuda.py)
+- [x] [Triton](extra/accel/triton/ops_triton.py)
+- [x] [PyTorch](tinygrad/runtime/ops_torch.py)
+- [x] [HIP](tinygrad/runtime/ops_hip.py)
+- [x] [WebGPU](tinygrad/runtime/ops_webgpu.py)
 
 And it is easy to add more! Your accelerator of choice only needs to support a total of 26 (optionally 27) low level ops.
 More information can be found in the [documentation for adding new accelerators](/docs/adding_new_accelerators.md).
