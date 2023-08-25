@@ -491,9 +491,9 @@ def _scale_enum(anchor, scales):
 
 class RPNHead:
   def __init__(self, in_channels, num_anchors):
-    self.conv = nn.Conv2d(in_channels, 256, kernel_size=3, padding=1)
-    self.cls_logits = nn.Conv2d(256, num_anchors, kernel_size=1)
-    self.bbox_pred = nn.Conv2d(256, num_anchors * 4, kernel_size=1)
+    self.conv = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
+    self.cls_logits = nn.Conv2d(in_channels, num_anchors, kernel_size=1)
+    self.bbox_pred = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=1)
 
   def __call__(self, x):
     logits = []
@@ -710,6 +710,7 @@ class RPN:
     objectness, rpn_box_regression = self.head(features)
     anchors = self.anchor_generator(images, features)
     boxes = self.box_selector_test(anchors, objectness, rpn_box_regression)
+    # TODO: Mask-RCNN Training, return losses
     return boxes, {}
 
 
@@ -1184,6 +1185,7 @@ class RoIHeads:
   def __call__(self, features, proposals, targets=None):
     x, detections, _ = self.box(features, proposals, targets)
     x, detections, _ = self.mask(features, detections, targets)
+    # TODO: Mask-RCNN Training, return losses
     return x, detections, {}
 
 
@@ -1233,7 +1235,7 @@ def to_image_list(tensors, size_divisible=32):
 
 
 class MaskRCNN:
-  def __init__(self, backbone: ResNet):
+  def __init__(self, backbone: ResNet, training: bool = False):
     self.backbone = ResNetFPN(backbone, out_channels=256)
     self.rpn = RPN(self.backbone.out_channels)
     self.roi_heads = RoIHeads(self.backbone.out_channels)
@@ -1259,11 +1261,21 @@ class MaskRCNN:
       get_child(self, k).assign(v.numpy()).realize()
     return loaded_keys
 
-  def __call__(self, images):
+  def __call__(self, images, targets):
+    if self.training and targets is None:
+            raise ValueError("In training mode, targets should be passed")
     images = to_image_list(images)
     features = self.backbone(images.tensors)
-    proposals, _ = self.rpn(images, features)
-    x, result, _ = self.roi_heads(features, proposals)
+    proposals, proposal_losses = self.rpn(images, features, targets)
+    
+    x, result, detector_losses = self.roi_heads(features, proposals, targets)
+
+    if self.training:
+      losses = {}
+      losses.update(detector_losses)
+      losses.update(proposal_losses)
+      return losses
+
     return result
 
 
