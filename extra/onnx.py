@@ -32,14 +32,17 @@ ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
   def type_parse(type_proto: TypeProto):
+    print(type_proto)
     while True:
       attr = type_proto.WhichOneof('value')
-      if attr == 'tensor_type': return tuple(x.dim_value for x in getattr(type_proto, attr).shape.dim)
+      if attr == 'tensor_type': 
+        if "shape" not in getattr(type_proto, attr).__dir__(): return True # variable type, unable to determine shape
+        else: return tuple(x.dim_value for x in getattr(type_proto, attr).shape.dim)
       elif attr == 'sequence_type':
         type_proto = getattr(type_proto, attr).elem_type
         attr = type_proto.WhichOneof('value')
-        t_shape = [(x.dim_value,) for x in getattr(type_proto, attr).shape.dim]
-        return (1, t_shape)
+        if "shape" not in getattr(type_proto, attr).__dir__(): return True # variable type, unable to determine shape
+        else: return (1, [(x.dim_value,) for x in getattr(type_proto, attr).shape.dim])
       elif attr == 'map_type': raise NotImplementedError(f"map_type is not implemented: {type_proto}")
       elif attr == 'opaque_type': raise NotImplementedError(f"opaque_type is not implemented: {type_proto}")
       elif attr == 'sparse_tensor_type': raise NotImplementedError(f"sparse_tensor_type is not implemented: {type_proto}")
@@ -111,6 +114,7 @@ def get_run_onnx(onnx_model: ModelProto):
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
       shape = type_parse(inp.type)
+      # this works for gpt3 but does not work elsewhere
       # if len(shape) >= 1 and shape[0] == 0 and shape != (0,): shape = tuple([1]+list(shape[1:]))   # 1 batch size
       # if len(shape) >= 1: shape = tuple([x if x != 0 else 1 for x in shape])  # replace all dynamic dims with 1 for now
       if inp.name in inputs:
@@ -119,11 +123,12 @@ def get_run_onnx(onnx_model: ModelProto):
         elif isinstance(inputs[inp.name], list):
           input_tensors[inp.name] = [Tensor(i, requires_grad=False) for i in inputs[inp.name]]
         elif domain == "ai.onnx.preview.training": # not sure if in real use the domain is "ai.onnx.preview.training"
-          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True) # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizers
+          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True) # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
-        input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else (1, [i.shape for i in input_tensors[inp.name]])
-        assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
+        if shape is not True: # if only input_tensor is not variable type
+          input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else (1, [i.shape for i in input_tensors[inp.name]])
+          assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
         for _,v in input_tensors.items():
           if isinstance(v, Tensor):
             v.realize()
