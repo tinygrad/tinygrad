@@ -12,6 +12,9 @@ def next_power_of_2(x):
 def render_valid(node):
   return '(' * (len(node.nodes) -1) + ') and '.join([f'{n.render()}<{n.max+1}' for n in node.nodes]) if hasattr(node, "nodes") else f"{node.render()}<{node.max+1}"
 
+#NOTE triton requires matching dimensions for load/store, disable this and see TestOps::test_output_padded_conv_transpose2d fail to compile
+def fill_dims_for_idx(idx, dims):
+  return "(" + idx.render() + "+ (" + (f"0 * ({'+'.join(d for d in dims)})))")
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
   kernel = []
@@ -20,6 +23,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   depth = 1
   bufs = []
   signatures = []
+  dims = []
   def kk(s): kernel.append("  "*depth+s)  
   gid = [f"tl.program_id({i})" for i in range(3)]
   code_for_op: Final[Dict[Op, Callable]] = {
@@ -42,6 +46,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       for i,var in enumerate(args[0]):
         if isinstance(var, NumNode): continue # python doesnt have block scope
         else:
+          dims.append(var.expr)
           if args[1] == "global":
             global_size.append(var.max+1)
             kk(f"{var.expr} = {gid[i]} # {var.max+1}")
@@ -69,7 +74,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
         else:
           kk(f"{newvar.render()} = tl.where({args.valid.render()},{val},{args.invalid_value})")
       elif args.valid.min == 1: kk(f"{newvar.render()} = tl.load({args.name} + {args.idx.render()}, mask = {render_valid(args.idx)}).to({triton_dtypes[args.memory_dtype]})")
-      else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({args.name}+{args.idx.render()}" + (f", mask={args.valid.render()})" if "lidx" in args.idx.render() or "ridx" in args.idx.render() else ")")+ f', 0.0).to({triton_dtypes[args.memory_dtype]})')
+      else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({args.name}+{fill_dims_for_idx(args.idx,dims)} , mask={args.valid.render()}), 0.0).to({triton_dtypes[args.memory_dtype]})")
     elif uop == UOps.STORE:
       assert vin[0].dtype == dtypes.float, "unimplemented: float4 store"
       assert not isinstance(args.memory_dtype, ImageDType), "unimplemented: image store"
