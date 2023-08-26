@@ -24,7 +24,7 @@ class Function:
   @classmethod
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
     ctx = fxn(x[0].device, *x)
-    ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
+    ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad, canonicalize=False)  # ctx is created from a Tensor device, which is always canonical
     if ctx.requires_grad and not Tensor.no_grad: ret._ctx = ctx    # used by autograd engine
     return ret
 
@@ -39,9 +39,9 @@ class Tensor:
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
-  def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+  def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None, canonicalize=True):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
-    device = Device.canonicalize(device)
+    if canonicalize: device = Device.DEFAULT if device is None else Device.canonicalize(device)
     # tensors have gradients, buffers do not
     self.grad: Optional[Tensor] = None
 
