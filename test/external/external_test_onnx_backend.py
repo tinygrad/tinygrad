@@ -41,13 +41,10 @@ backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 # no support for reduce with multiply (needs llop)
 backend_test.exclude('test_reduce_prod_*')
 
-# TODO figure out why it's returning wrong values, my naive guess is it's due to imprecision from float64 (double) -> float32 
+# TODO figure out why it's returning wrong values, geohotstan's uneducated guess is it's due to imprecision from float64 (double) -> float32 
 # see Type Constraints: https://onnx.ai/onnx/operators/onnx_aionnxpreviewtraining_Adam.html#type-constraints
 backend_test.exclude('test_adam_multiple_cpu')
 backend_test.exclude('test_nesterov_momentum_cpu')
-
-# disable some creation ops
-backend_test.exclude('test_eyelike_*')
 
 # we only support float32
 backend_test.exclude('uint8')
@@ -140,7 +137,7 @@ backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to imple
 
 # rest of the failing tests
 backend_test.exclude('test_averagepool_2d_dilations_cpu') # dilations != 1 not supported for avgpool
-backend_test.exclude('test_convtranspose_autopad_same_cpu') # TODO do this
+backend_test.exclude('test_convtranspose_autopad_same_cpu') # TODO geohotstan has no idea how this is done, autopad requires output_shape but output_shape requires pads from autopad
 backend_test.exclude('test_optional_has_element_empty_optional_input_cpu') # Attempts to create Tensor from None
 backend_test.exclude('test_range_int32_type_negative_delta_expanded_cpu') # AttributeProto.GRAPH not implemented
 backend_test.exclude('test_reshape_allowzero_reordered_cpu') # reshaping to 0 shape

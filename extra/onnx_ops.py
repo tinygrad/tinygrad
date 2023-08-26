@@ -4,6 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, dtypes, argfix
 from extra.onnx import safe_numpy
 from onnx.helper import tensor_dtype_to_np_dtype
+from onnx.onnx_pb import TensorProto
 import numpy as np
 import functools
 from typing import Union, Tuple, Optional
@@ -219,6 +220,11 @@ def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=Non
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=padding)
 
 def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, output_shape=None, output_padding=0, strides=1):
+  # total_padding = [st * (xs-1) + op + ((ks-1)*di+1) - os for st,xs,op,ks,di,os in zip(strides_, X.shape, output_padding, kernel_shape, dilations_, output_shape)]
+  # if auto_pad == "SAME_UPPER": pads = [total_padding[-2]/2, total_padding[-1]/2, total_padding[-2]-total_padding[-2]/2, total_padding[-1]-total_padding[-1]/2]
+  # else: pads = [total_padding[-2]-total_padding[-2]/2, total_padding[-1]-total_padding[-1]/2, total_padding[-2]/2, total_padding[-1]/2]
+  # output_shape = [st*(xs-1) + (ks-1)*di+1 if n < 2 else st*(xs-1) + (ks-1)*di+1 - pads[n-2] - pads[n-1] for n, (st, xs, ks, di) in enumerate(zip(strides_, X.shape, kernel_shape, dilations_))]
+  # output_padding = [os - rs for os, rs in zip(output_shape, output_shape[-len(output_shape):])]  
   if not kernel_shape: kernel_shape = W.shape
   if pads is None and auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
   elif pads is None and auto_pad == "NOTSET": pads = [0,0] * (X.ndim - 2)
@@ -689,3 +695,18 @@ def ArgMin(x, axis=0, keepdims=1, select_last_index=0):
 
 def Upsample(X, scales, mode):
   return Resize(X=X, scales=scales, mode=mode)
+
+# def NoneZero(condition):
+  # condition.shape
+
+type_map = {TensorProto.DOUBLE: dtypes.double, TensorProto.FLOAT: dtypes.float32}
+def EyeLike(x, dtype=None, k=0):
+  if dtype is None: dtype = x.dtype
+  else: dtype = type_map[dtype]
+  shape = x.shape
+  dim = min(x.shape)
+  if shape[0] == shape[1]: return Tensor.eye(dim=dim, dtype=dtype)
+  else: 
+    diff = (shape[0]-dim, shape[1]-dim)
+    padarg = tuple([(d, d) if d == 0 else (k, d-k) for d in diff]) 
+    return Tensor.eye(dim=dim, dtype=dtype).pad(padarg)
