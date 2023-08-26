@@ -317,7 +317,7 @@ class Tensor:
       # compute sum_dim, arange, and idx
       max_dim = max(i.ndim for i in idx)
       sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(dim)]
-      arange = [Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(((ret.ndim + max_dim) if n==0 else (ret.ndim + max_dim - n)) - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, dim))]
+      arange = [Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, dim))]
       idx = [i.reshape(*[1]*sum_dim[0], *((1, *[1]*(max_dim-i.ndim), *i.shape, *[1]*(ret.ndim - sd - 1)) if n == 0 else (*[1]*(max_dim-i.ndim), *i.shape, *[1]*(ret.ndim - sum_dim[0] - n)))) for n,(sd,i) in enumerate(zip(sum_dim, idx))]
       ret = ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*max_dim, *ret.shape[sum_dim[0]+1:])
       for a,i,sd in zip(arange, idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
