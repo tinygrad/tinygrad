@@ -504,7 +504,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   scales_lol = [os/xs for xs, os in zip(X.shape, output_shape)]
   x_out = Tensor.arange(output_shape[-1])
   y_out = Tensor.arange(output_shape[-2])
-  assert output_shape[1] == 1, "TODO: DOES NOT YET SUPPORT MULTIPLE CHANNELS"
   if mode == "nearest":
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol, roi)
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
