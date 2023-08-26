@@ -3,8 +3,7 @@ import time, importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup, merge_dicts
-if TYPE_CHECKING:
-  from tinygrad.lazy import LazyBuffer
+if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -211,9 +210,9 @@ class Compiled:
 
     # compilation time
     def get_program():
-      from tinygrad.codegen.optimizer import kernel_optimize, hand_coded_optimizations
+      from tinygrad.codegen.search import kernel_optimize
       if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, output, self.linearizer_opts), self.to_program)
-      elif not getenv("NOOPT"): hand_coded_optimizations(k)
+      elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
