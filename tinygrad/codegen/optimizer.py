@@ -378,23 +378,13 @@ class OptimizedKernel(Kernel):
 
     # **** local groups ****
 
-    for axis in range(self.first_reduce - self.local_dims - 1, -1, -1):
-      local_size = prod(self.full_shape[self.first_reduce - self.local_dims:self.first_reduce])
-      if self.full_shape[axis] == 1: continue
-      if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))):
-        for sz in [x for x in ([16, 8, 4, 3]) if self.full_shape[axis] % x == 0 and local_size * x <= 128]:
-          self.shift_to(axis, sz, insert_before=self.first_reduce - self.local_dims)
-          self.local_dims += 1
-          break
-      if self.local_dims >= 3: break
-
-    if not self.local_dims:
-      for axis in range(self.first_reduce - self.local_dims - 1, -1, -1):
-        local_size = prod(self.full_shape[self.first_reduce - self.local_dims:self.first_reduce])
-        if local_size >= 32: break
-        last_try = self.local_dims == 0 and axis == 0
-        for sz in [x for x in [32] * last_try + [16, 8, 4, 3] if self.full_shape[axis] % x == 0 and local_size * x <= 128]:
-          self.shift_to(axis, sz, insert_before=self.first_reduce - self.local_dims)
-          self.local_dims += 1
-          break
-        if self.local_dims >= 3: break
+    local_axis_ranking = [(any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))), axis) for axis in range(len(self.full_shape[:self.first_reduce]))]
+    to_local = []
+    for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
+      local_size = prod(sz for _, sz in to_local)
+      sz = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)
+      if sz is not None: to_local.append((axis, sz))
+    for axis, sz in sorted(to_local[:3]):
+      self.shift_to(axis, sz, insert_before=self.first_reduce)
+      self.local_dims += 1
+    self.simplify_ones()
