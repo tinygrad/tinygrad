@@ -1237,6 +1237,7 @@ def to_image_list(tensors, size_divisible=32):
 class MaskRCNN:
   def __init__(self, backbone: ResNet, training: bool = False):
     self.backbone = ResNetFPN(backbone, out_channels=256)
+    # TODO: this RPN can be retinanet
     self.rpn = RPN(self.backbone.out_channels)
     self.roi_heads = RoIHeads(self.backbone.out_channels)
 
