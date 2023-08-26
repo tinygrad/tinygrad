@@ -333,7 +333,7 @@ def Tile(input, repeats):
   final_shape = [r*s for r,s in zip(repeats_, input.shape)]
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
-def Range(start, limit, delta): return Tensor.arange(start=int(safe_numpy(start)), stop=int(safe_numpy(limit)), step=int(safe_numpy(delta))).cast(dtype=start.dtype)
+def Range(start, limit, delta): return Tensor.arange(start=int(safe_numpy(start)), stop=int(safe_numpy(limit)), step=int(safe_numpy(delta))).cast(dtype=start.dtype) # DeprecationWarning: Conversion of an array with ndim > 0 to a scalar is deprecated, and will error in future. Ensure you extract a single element from your array before performing this operation. (Deprecated NumPy 1.25.)
 def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
 
 def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
@@ -532,13 +532,10 @@ def CenterCropPad(input, shape, axes=None):
   shrink_arg = [(0,i) for i in input.shape]
   pad_arg = [(0,0) for _ in range(input.ndim)]
   shape = safe_numpy(shape).tolist()
-  print(shape)
-  print(input.shape)
   for s, x in zip(shape, axes):
     if s < input.shape[x]: shrink_arg[x] = (input.shape[x]//2 - s//2, input.shape[x]//2 + s//2) if s%2 == 0 else (input.shape[x]//2 - s//2 - 1, input.shape[x]//2 + s//2)
     elif s > input.shape[x]: pad_arg[x] = ((s - input.shape[x])//2, (s - input.shape[x])//2)  if (s - input.shape[x])% 2 == 0 else ((s - input.shape[x])//2, (s - input.shape[x])//2 + 1)
     else: pass
-  print(pad_arg)
   return input.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
 def OneHot(indices, depth, values, axis=-1):
@@ -689,3 +686,8 @@ def ArgMax(x, axis=0, keepdims=1, select_last_index=0):
 
 def ArgMin(x, axis=0, keepdims=1, select_last_index=0):
   return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
+
+def Upsample(X, scales, mode):
+  return Resize(X=X, scales=scales, mode=mode)
+
+def Nonzero

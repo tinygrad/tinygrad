@@ -68,7 +68,7 @@ backend_test.exclude('test_reduce_log_sum_exp*') # dependent on float64
 backend_test.exclude('test_operator_add*') # dependent on float64
 
 # we don't support indexes
-#backend_test.exclude('test_argmax_*') # Needs more work #select_last_index
+# backend_test.exclude('test_argmax_*') # Needs more work #select_last_index
 # backend_test.exclude('test_argmin_*') # Needs more work #select_last_index
 backend_test.exclude('test_nonzero_*')
 
@@ -135,7 +135,6 @@ backend_test.exclude('test_depthtospace_*')
 backend_test.exclude('test_spacetodepth_*')
 backend_test.exclude('test_scan*')
 backend_test.exclude('test_split_to_sequence_*')
-backend_test.exclude('test_upsample_nearest_cpu') # Deprecated since version 10 of the default ONNX operator set.
 backend_test.exclude('test_resize_downsample_scales_cubic_*') # unsure how to implement cubic
 backend_test.exclude('test_resize_downsample_sizes_cubic_*') # unsure how to implement cubic
 backend_test.exclude('test_resize_upsample_scales_cubic_*') # unsure how to implement cubic
@@ -150,7 +149,6 @@ backend_test.exclude('test_reshape_allowzero_reordered_cpu') # reshaping to 0 sh
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
-backend_test.exclude('test_identity_sequence_cpu') # type_proto has no shape or dim_value
 
 
 # disable model tests for now since they are slow
