@@ -378,6 +378,7 @@ class OptimizedKernel(Kernel):
 
     # **** local groups ****
 
+    # prioritize making expand axes local
     local_axis_ranking = [(any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))), axis) for axis in range(len(self.full_shape[:self.first_reduce]))]
     to_local = []
     for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
