@@ -34,11 +34,11 @@ class TestOnnxModel(unittest.TestCase):
       np_inputs = {
         "input_imgs": np.random.randn(*(1, 12, 128, 256)),
         "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
-        "desire": np.zeros((1, 8)),
+        "desire": np.zeros((1, 100, 8)),
         "traffic_convention": np.array([[1., 0.]]),
-        "initial_state": np.zeros((1, 512))
-        #"initial_state": np.zeros((1, 768))
-      }
+        "nav_features": np.zeros((1, 256)),
+        "features_buffer": np.zeros((1, 99, 128)),
+    }
       inputs = {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in np_inputs.items()}
       return inputs
 
@@ -78,10 +78,10 @@ class TestOnnxModel(unittest.TestCase):
     inputs = {
       "input_imgs": np.random.randn(*(1, 12, 128, 256)),
       "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
-      "desire": np.zeros((1, 8)),
+      "desire": np.zeros((1, 100, 8)),
       "traffic_convention": np.array([[1., 0.]]),
-      "initial_state": np.zeros((1, 512))
-      #"initial_state": np.zeros((1, 768))
+      "nav_features": np.zeros((1, 256)),
+      "features_buffer": np.zeros((1, 99, 128)),
     }
     inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
 
