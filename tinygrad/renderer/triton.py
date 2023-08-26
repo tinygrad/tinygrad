@@ -6,15 +6,20 @@ from tinygrad.shape.symbolic import NumNode
 from triton.compiler import compile as triton_compile
 import hashlib
 import math
+import re
 def next_power_of_2(x):
   return 1 << (x - 1).bit_length()
 
 def render_valid(node):
-  return '(' * (len(node.nodes) -1) + ') and '.join([f'{n.render()}<{n.max+1}' for n in node.nodes]) if hasattr(node, "nodes") else f"{node.render()}<{node.max+1}"
+  return '(' * (len(node.nodes) -1) + ') and '.join([f'{n.render()}<{get_max(n+1)}' for n in node.nodes]) if hasattr(node, "nodes") else f"{node.render()}<{get_max(node+1)}"
 
 #NOTE triton requires matching dimensions for load/store, disable this and see TestOps::test_output_padded_conv_transpose2d fail to compile
 def fill_dims_for_idx(idx, dims):
   return "(" + idx.render() + "+ (" + (f"0 * ({'+'.join(d for d in dims)})))")
+
+def get_max(var):
+  if isinstance(var.max, int): return var.max
+  return re.sub(r'\[(.*?)\]', '', str(var.max))[1:-1]
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
   kernel = []
@@ -49,13 +54,13 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
           dims.append(var.expr)
           if args[1] == "global":
             global_size.append(var.max+1)
-            kk(f"{var.expr} = {gid[i]} # {var.max+1}")
+            kk(f"{var.expr} = {gid[i]} # {get_max(var+1)}")
           elif args[1] == "local":
             assert var.min == 0, "local loop must start at 0"
             kk(f"{var.expr} = tl.arange({0}, {next_power_of_2(var.max+1)})[{', '.join([':' if i == j else 'None' for j in range(len(args[0]))])}]")
             local_size.append(var.max+1)
           else:
-            kk(f"for {var.expr} in range({var.min}, {var.max+1}):")
+            kk(f"for {var.expr} in range({var.min}, {get_max(var+1)}):")
             depth += 1
     elif uop == UOps.ENDLOOP:
       if args[1] not in ["global", "local", "global+local"] and len(args[0]):
