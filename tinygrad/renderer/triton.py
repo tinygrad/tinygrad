@@ -63,7 +63,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
         kk(f"# end {args[1]}")
     elif uop == UOps.ALU:
       assert newvar is not None
-      kk(f"{newvar.render()} = {code_for_op[args](*[x.render() for x in vin])}")
+      kk(f"{newvar.render()} = ({code_for_op[args](*[x.render() for x in vin])}).to({triton_dtypes[newvar.dtype]})")
     elif uop == UOps.LOAD:
       assert newvar is not None
       if isinstance(args, ConstOp):
@@ -72,7 +72,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
         if len(local_size) > 0:
           kk(f"{newvar.render()} = tl.where({args.valid.render()},tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{val}, dtype={triton_dtypes[newvar.dtype]}),tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{args.invalid_value}, dtype={triton_dtypes[newvar.dtype]}))") 
         else:
-          kk(f"{newvar.render()} = tl.where({args.valid.render()},{val},{args.invalid_value})")
+          kk(f"{newvar.render()} = tl.where({args.valid.render()},{val},{args.invalid_value}).to({triton_dtypes[newvar.dtype]})")
       elif args.valid.min == 1: kk(f"{newvar.render()} = tl.load({args.name} + {args.idx.render()}, mask = {render_valid(args.idx)}).to({triton_dtypes[args.memory_dtype]})")
       else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({args.name}+{fill_dims_for_idx(args.idx,dims)} , mask={args.valid.render()}), 0.0).to({triton_dtypes[args.memory_dtype]})")
     elif uop == UOps.STORE:
