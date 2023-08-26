@@ -132,19 +132,14 @@ Variable | Possible Value(s) | Description
 TORCHWEIGHTS     | [1] | use torch to initialize weights
 DISABLE_BACKWARD | [1] | don't do backward pass
 DIST             | [1] | enable distributed training
+STEPS            | [#] | number of steps
+FAKEDATA         | [1] | enable to use random data
 
 ### examples/benchmark_train_efficientnet.py & examples/hlb_cifar10.py
 
 Variable | Possible Value(s) | Description
 ---|---|---
 ADAM | [1] | use the Adam optimizer
-
-### examples/hlb_cifar10.py & xamples/hlb_cifar10_torch.py
-
-Variable | Possible Value(s) | Description
----|---|---
-STEPS    | [0-10] | number of steps
-FAKEDATA | [1]    | enable to use random data
 
 ### examples/train_efficientnet.py
 
