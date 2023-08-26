@@ -43,7 +43,7 @@ LLVM                | [1]        | enable LLVM backend
 LLVMOPT             | [1]        | enable slightly more expensive LLVM optimizations
 LAZY                | [1]        | enable lazy operations (this is the default)
 OPT                 | [1-3]      | optimization level
-KOPT                |            | kernel optimization, 1 turns it on, 2 caches the found optimizations
+KOPT                | [1-2]      | kernel optimization, 1 turns it on, 2 caches the found optimizations
 GRAPH               | [1]        | create a graph of all operations (requires graphviz)
 GRAPHPATH           | [/path/to] | where to put the generated graph
 PRUNEGRAPH          | [1]        | prune MovementOps and LoadOps from the graph
