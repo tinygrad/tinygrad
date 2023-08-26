@@ -24,7 +24,7 @@ class Function:
   @classmethod
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
     ctx = fxn(x[0].device, *x)
-    ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad, canonicalize=False)  # ctx is created from a Tensor device, which is always canonical
+    ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=(ctx.device,), requires_grad=ctx.requires_grad)  # ctx is created from a Tensor device, which is always canonical
     if ctx.requires_grad and not Tensor.no_grad: ret._ctx = ctx    # used by autograd engine
     return ret
 
@@ -39,9 +39,9 @@ class Tensor:
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
-  def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None, canonicalize=True):
+  def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device:Optional[Union[str, tuple[str]]]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
-    if canonicalize: device = Device.DEFAULT if device is None else Device.canonicalize(device)
+    device = Device.DEFAULT if device is None else  device[0] if device.__class__ is tuple else Device.canonicalize(device)
     # tensors have gradients, buffers do not
     self.grad: Optional[Tensor] = None
 
@@ -95,7 +95,7 @@ class Tensor:
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK
     if self.device.startswith("DISK"):
-      if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
+      if x.__class__ is not Tensor: x = Tensor(x, device=("CPU",), dtype=self.dtype)
       self.lazydata.realize().realized._copyin(x.numpy())  # type: ignore
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
