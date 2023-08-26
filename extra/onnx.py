@@ -54,7 +54,7 @@ def get_run_onnx(onnx_model: ModelProto):
       if len(inp.float_data) > 0:
         ret = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
       elif len(inp.int64_data) > 0:
-        ret = Tensor(np.array(inp.int64_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
+        ret = Tensor(np.array(inp.int64_data, dtype=np.int64).reshape(inp.dims), requires_grad=False)
       elif len(inp.int32_data) > 0:
         ret = Tensor(np.array(inp.int32_data, dtype=np.int32).reshape(inp.dims), requires_grad=False)
       else:
@@ -85,7 +85,7 @@ def get_run_onnx(onnx_model: ModelProto):
     elif len(inp.float_data) > 0:
       tensors[inp.name] = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
     elif len(inp.int64_data) > 0:
-      tensors[inp.name] = Tensor(np.array(inp.int64_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
+      tensors[inp.name] = Tensor(np.array(inp.int64_data, dtype=np.int64).reshape(inp.dims), requires_grad=False)
     else:
       print(inp.name, inp.dims, inp.data_type, len(inp.raw_data))
       print(inp)
@@ -179,7 +179,7 @@ def get_run_onnx(onnx_model: ModelProto):
         else: raise NotImplementedError(f'Constant not implemented for {opt}')
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
-        if n.op_type == "Add": ret = inp[0] + inp[1]
+        if n.op_type == "Add": ret = (inp[0] + inp[1]).cast(inp[0].dtype) # TODO casting like this is probably not right
         if n.op_type == "Sub": ret = inp[0] - inp[1]
         if n.op_type == "Mul": ret = (inp[0] * inp[1]).cast(inp[0].dtype)
         if n.op_type == "Pow": ret = (inp[0].float() ** inp[1].float()).cast(inp[0].dtype)
