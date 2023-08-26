@@ -1,4 +1,4 @@
-from typing import Tuple, List, cast
+from typing import Tuple, List, cast, Optional
 import itertools, math
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp
@@ -381,12 +381,12 @@ class OptimizedKernel(Kernel):
     if self.opts.has_local:
       # prioritize making expand axes local
       local_axis_ranking = [(any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))), axis) for axis in range(len(self.full_shape[:self.first_reduce]))]
-      to_local = []
+      to_local: List[Tuple[int, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
         local_size = prod(sz for _, sz in to_local)
-        sz = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)
-        if sz is not None: to_local.append((axis, sz))
-      for axis, sz in sorted(to_local[:3]):
-        self.shift_to(axis, sz, insert_before=self.first_reduce)
+        local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)
+        if local_sz is not None: to_local.append((axis, local_sz))
+      for axis, local_sz in sorted(to_local[:3]):
+        self.shift_to(axis, local_sz, insert_before=self.first_reduce)
         self.local_dims += 1
     self.simplify_ones()
