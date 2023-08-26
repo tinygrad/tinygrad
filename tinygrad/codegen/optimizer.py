@@ -389,4 +389,4 @@ class OptimizedKernel(Kernel):
       for axis, sz in sorted(to_local[:3]):
         self.shift_to(axis, sz, insert_before=self.first_reduce)
         self.local_dims += 1
-      self.simplify_ones()
+    self.simplify_ones()
