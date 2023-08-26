@@ -64,8 +64,6 @@ backend_test.exclude('test_cast_*')
 backend_test.exclude('test_castlike_*')
 backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
-backend_test.exclude('test_reduce_log_sum_exp*') # dependent on float64
-backend_test.exclude('test_operator_add*') # dependent on float64
 
 # we don't support indexes
 # backend_test.exclude('test_argmax_*') # Needs more work #select_last_index
@@ -149,6 +147,7 @@ backend_test.exclude('test_reshape_allowzero_reordered_cpu') # reshaping to 0 sh
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
+backend_test.exclude('test_operator_addconstant_cpu') # bad data type
 
 
 # disable model tests for now since they are slow

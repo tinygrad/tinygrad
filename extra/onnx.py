@@ -32,7 +32,6 @@ ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
   def type_parse(type_proto: TypeProto):
-    print(type_proto)
     while True:
       attr = type_proto.WhichOneof('value')
       if attr == 'tensor_type': 
@@ -180,10 +179,7 @@ def get_run_onnx(onnx_model: ModelProto):
         else: raise NotImplementedError(f'Constant not implemented for {opt}')
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
-        if all(isinstance(x, Tensor) for x in inp) and (len(inp[0].shape) != len(inp[1].shape)) and (prod(inp[0].shape) == prod(inp[1].shape)):
-          inp[1] = inp[1].reshape(inp[0].shape)
         # TODO: is this right?
-        if 'broadcast' in opt: inp[1] = inp[1].reshape([-1 if i == opt['broadcast'] else 1 for i in range(len(inp[0].shape))])
         if n.op_type == "Add": ret = inp[0] + inp[1]
         if n.op_type == "Sub": ret = inp[0] - inp[1]
         if n.op_type == "Mul": ret = (inp[0] * inp[1]).cast(inp[0].dtype)

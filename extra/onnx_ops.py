@@ -689,5 +689,3 @@ def ArgMin(x, axis=0, keepdims=1, select_last_index=0):
 
 def Upsample(X, scales, mode):
   return Resize(X=X, scales=scales, mode=mode)
-
-def Nonzero
