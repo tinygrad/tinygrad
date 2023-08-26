@@ -2,6 +2,8 @@ import random
 import time
 import datetime
 
+from tinygrad.tensor import Tensor
+import tinygrad.nn.optim as optim
 from torchvision import transforms as T
 from models.mask_rcnn import MaskRCNN, Resize, Normalize
 from models.resnet import ResNet
@@ -43,32 +45,36 @@ def do_train(
   print("Start training")
   start_training_time = time.time()
   iteration = 0
-  for image in file_loader: 
-    iteration = iteration + 1
 
-    # TODO is there a tiny scheduler equiv?
-    scheduler.step()
+  transform = build_transforms(is_train=True)
+  optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0005)
+  for batch in file_loader: 
+    iteration = iteration + len(batch)
 
-    # todo convert to tiny
-    images = image.to(device )## TODO: multi image batches  
-    targets = [target.to(device) for target in targets]
-
-    loss_dict = model(images, targets)
-
+    imgs = []
+    targets = []
+    for img,tg in batch:
+      imgs.append(Tensor(transform(img).numpy(), requires_grad=False))
+      targets.append(tg)
+    loss_dict = model(imgs, targets)
+    del imgs
+    del targets
     losses = sum(loss for loss in loss_dict.values())
-
     losses.backward()
-
     optimizer.step()
     optimizer.zero_grad()
 
     if iteration % 20 == 0:
       print(f"iter {iteration}")
-    # TODO tiny checkpointer
-    # TODO: Implement early-exit -- nice for testing
+    # TODO checkpointer
+    # TODO: early-exit
   total_training_time = time.time() - start_training_time
   total_time_str = str(datetime.timedelta(seconds=total_training_time))
   print("Total training time: {} ({:.4f} s / it)".format(total_time_str, total_training_time / (file_loader.num_files)))
+
+## loads the image and the target
+def load_image(image_path):
+  return Image.open(image_path).convert("RGB"), {}
 
 def train():
   model = MaskRCNN(ResNet(50, num_classes=None, stride_in_1x1=True), training=True)
@@ -80,9 +86,6 @@ def train():
   )
   end_train_time = time.time()
   total_training_time = end_train_time - start_train_time
-  print(
-          "&&&& MLPERF METRIC THROUGHPUT per GPU={:.4f} iterations / s".format((arguments["iteration"] * 1.0) / total_training_time)
-  )
 
   return model, success
 

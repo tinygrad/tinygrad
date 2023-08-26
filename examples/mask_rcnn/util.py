@@ -7,19 +7,20 @@ import time
 
 T = TypeVar('T')
 
+# multi-threads file loading 
 class FileLoader(threading.Thread):
   def __init__(
     self,
     dir: str,
-    convert_fn: Callable[[str], T],
+    load_fn: Callable[[str], T],
+    batch_size: int = 1,
     shuffle: bool = True,
     threads: int = 6,
     buffer_size: Optional[int] = None
   ) -> None:
     super().__init__()
-    self.daemon = True
     self.dir = dir
-    self.convert = convert_fn
+    self.load = load_fn
     self.threads = threads
     self.shuffle = shuffle
     if buffer_size is None:
@@ -48,6 +49,7 @@ class FileLoader(threading.Thread):
     print(f"Found {self.num_files} files in {self.dir}.")
     if self.shuffle:
       random.shuffle(file_list)
+    # reduces read-time lock contention
     chunk_size = (len(file_list) + self.threads - 1) // self.threads
     return [file_list[i:i+chunk_size] for i in range(0, len(file_list), chunk_size)]
 
@@ -76,11 +78,20 @@ class FileLoader(threading.Thread):
           if self.retrievals < self.num_files:
               # TODO these metrics could be less noisy
               print("Buffer empty, waiting for next file...")
-              return self.buffer.get()
+              res = self.buffer.get()
+              # TODO not threadsafe
+              self.retrievals += 1
+              return res
 
-  def __iter__(self) -> Generator[Tuple[str, T], None, None]:
+  def get_batch(self) -> list[Tuple[str, T]]:
+    batch = []
+    for _ in range(self.batch_size):
+      batch.append(self.get_next())
+    return batch
+
+  def __iter__(self) -> Generator[list[Tuple[str, T]], None, None]:
     while self.retrievals < self.num_files:
-      yield self.get_next()
+      yield self.get_batch()
 
 if __name__ == '__main__':
   from PIL import Image
