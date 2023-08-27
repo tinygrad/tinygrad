@@ -1,12 +1,13 @@
 from __future__ import annotations
 import time, importlib, inspect, functools, pathlib
 import numpy as np
+
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -47,18 +48,18 @@ class ScheduleItem:
   inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
 
+@dataclass
 class LazyOp:
-  __slots__ = "op", "src", "arg", "buffers", "__weakref__"
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
-  arg: Any
-  buffers: Tuple[LazyBuffer, ...]
-  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None):
-    self.op, self.src, self.arg, self.buffers = op, src, arg, ()
-    try:  # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
-      for x in src: self.buffers += x.buffers
+  arg: Any = None
+  buffers: Tuple[LazyBuffer, ...] = field(init=False)
+  def __post_init__(self):
+    self.buffers = ()
+    try:
+      for x in self.src: self.buffers += x.buffers
     except AttributeError: self.buffers = ()
-
+    # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   def __eq__(self, __value: object) -> bool: return isinstance(__value, LazyOp) and self.op is __value.op and self.src == __value.src and self.arg == __value.arg
   def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
