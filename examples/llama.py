@@ -118,8 +118,7 @@ class TransformerBlock:
       pos = Variable("pos", 1, 1024)
       cache_k = cache_k.reshape(cache_k.shape[0], pos, cache_k.shape[2], cache_k.shape[3])
       cache_v = cache_v.reshape(cache_v.shape[0], pos, cache_v.shape[2], cache_v.shape[3])
-      # need this because we don't reshape back to int shape in the jitted path, and we only call the jitted function after two unjitted calls
-      # and we don't have the correct var_vars in the second call as reshape from symbol to symbol does not update the var_vals
+      # need this because we don't reshape back to int shape in the jitted path and we don't have the correct var_vars in cache
       cache_k.lazydata.st.var_vals[pos] = start_pos
       cache_v.lazydata.st.var_vals[pos] = start_pos
 
@@ -141,26 +140,39 @@ class Transformer:
     self.tok_embeddings = Embedding(vocab_size, dim)
     self.output = linear(dim, vocab_size, bias=False)
     self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2))
-    self.norm_output = lambda x: self.output(self.norm(x))
 
-    self.jitted_tok_embeddings = TinyJit(lambda x: self.tok_embeddings(x).realize())
-    self.jitted_norm_output = TinyJit(lambda x: self.norm_output(x).realize())
-    self.jitted_layers = [TinyJit(layer.__call__) for layer in self.layers]
+    self.tok_embeddings_jitted = TinyJit(lambda x: self.tok_embeddings(x).realize())
+    self.postprocess_jitted = TinyJit(self.postprocess)
+    self.layers_jitted = [TinyJit(layer.__call__) for layer in self.layers]
 
-  def __call__(self, tokens:Tensor, start_pos:int):
+  def postprocess(self, x, temperature:Optional[float]):
+    logits = self.output(self.norm(x))
+    if temperature is not None: return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
+    return logits.realize()
+
+  def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
-    mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
-    do_jit = getenv("JIT") and mask is None
-    pos = Variable("pos", 1, 1024)
-    h = self.jitted_tok_embeddings(tokens) if do_jit else self.tok_embeddings(tokens)
-    for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.jitted_layers if do_jit else self.layers, self.kv_caches)):
-      if not do_jit and start_pos > 0:
+    if seqlen == 1 and getenv("JIT"):
+      pos = Variable("pos", 1, 1024)
+      freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (pos, pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
+      freqs_cis.lazydata.st.var_vals[pos] = start_pos
+      h = self.tok_embeddings_jitted(tokens)
+      for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.layers_jitted, self.kv_caches)):
+        h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=self.freqs_cis, mask=None, jit_ctx={pos: start_pos})
+        self.kv_caches[i] = (cache_k, cache_v)
+      return self.postprocess_jitted(h, temperature)
+    else:
+      freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (start_pos, start_pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
+      mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize()
+      h = self.tok_embeddings(tokens)
+      for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.layers, self.kv_caches)):
         # need this reshape back to int shape in conversational mode because jitted and unjitted calls share the same cache
-        cache_k = cache_k.reshape(cache_k.shape[0], start_pos, cache_k.shape[2], cache_k.shape[3])
-        cache_v = cache_v.reshape(cache_v.shape[0], start_pos, cache_v.shape[2], cache_v.shape[3])
-      h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=self.freqs_cis, mask=mask, jit_ctx={pos: start_pos})
-      self.kv_caches[i] = (cache_k, cache_v)
-    return self.jitted_norm_output(h) if do_jit else self.norm_output(h)
+        if cache_k is not None and start_pos > 0:
+          cache_k = cache_k.reshape(cache_k.shape[0], start_pos, cache_k.shape[2], cache_k.shape[3])
+          cache_v = cache_v.reshape(cache_v.shape[0], start_pos, cache_v.shape[2], cache_v.shape[3])
+        h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=self.freqs_cis, mask=mask)
+        self.kv_caches[i] = (cache_k, cache_v)
+      return self.postprocess(h, temperature)
 
 # **** files and arguments ****
 
@@ -201,15 +213,6 @@ MODEL_PARAMS = {
 }
 
 # **** helper functions ****
-def sample(logits, temperature):
-  if temperature < 1e-6:
-    # so close to 0 we use argmax
-    return int(logits.argmax().numpy())
-  else:
-    probs = (logits / temperature).softmax()
-    probs = probs.numpy().flatten()
-    return int(np.random.choice(len(probs), p=probs))
-
 def concat_weights(models):
   def convert(name) -> Tensor:
     disk_tensors = [model[name] for model in models]
@@ -295,8 +298,9 @@ class LLaMa:
     toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)
     start_pos = 0
     for i in range(max_length):
-      logits = self.model(Tensor([toks[start_pos:]]), start_pos).realize()[:, -1, :]
-      tok = sample(logits, temperature)
+      probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
+      probs_np = probs.numpy()
+      tok = int(np.random.choice(len(probs_np), p=probs_np))
       start_pos = len(toks)
       toks.append(tok)
 
@@ -434,7 +438,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
     print(f"Preparing KV cache for chatbot with personality {args.personality}...")
     with Timing():
-      llama.model(Tensor([toks]), 0).realize()  # NOTE: output logits are not used
+      llama.model(Tensor([toks]), 0, args.temperature).realize()  # NOTE: output logits are not used
     start_pos = len(toks)
   else:
     # non chat bot mode
@@ -469,10 +473,13 @@ After you are done speaking, output [EOS]. You are not Chad.
 
       if args.timing: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=args.timing):
-        logits = llama.model(Tensor([toks[start_pos:]]), start_pos).realize()[:, -1, :]
+      with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU"+
+                  f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                  f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s") if DEBUG else None, enabled=args.timing):
+        probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
       with Timing("sync in ", enabled=args.timing):
-        tok = sample(logits, args.temperature)
+        probs_np = probs.numpy()
+        tok = int(np.random.choice(len(probs_np), p=probs_np))
 
       # use the kv cache
       start_pos = len(toks)
