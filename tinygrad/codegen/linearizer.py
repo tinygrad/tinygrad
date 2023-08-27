@@ -314,11 +314,17 @@ class Linearizer(OptimizedKernel):
       # copy in any global buffers
       if self.use_tensor_cores:
         if self.bufs[0].device == "METAL":
-          i = 0
-          for y0,y1 in zip(locals_to_store[1][2][::2], locals_to_store[1][2][1::2]):
-            for x0,x1 in zip(locals_to_store[0][2][::2], locals_to_store[0][2][1::2]):
-              self.uop(UOps.WMMA, None, [x0, x1, y0, y1, acc[i], acc[i+1]], "METAL")
-              i += 2
+          if 2 * len(acc) == len(locals_to_store[0][2]) * len(locals_to_store[1][2]):
+            i = 0
+            for y0,y1 in zip(locals_to_store[1][2][::2], locals_to_store[1][2][1::2]):
+              for x0,x1 in zip(locals_to_store[0][2][::2], locals_to_store[0][2][1::2]):
+                self.uop(UOps.WMMA, None, [x0, x1, y0, y1, acc[i], acc[i+1]], "METAL")
+                i += 2
+          else:
+            k = len(locals_to_store[1][2]) // 2
+            for i in range(0, len(acc), 2):
+              for y0,y1,x0,x1 in zip(locals_to_store[1][2][:k], locals_to_store[1][2][k:], locals_to_store[0][2][k*i:], locals_to_store[0][2][k*i+k:]):
+                self.uop(UOps.WMMA, None, [x0, x1, y0, y1, acc[i], acc[i+1]], "METAL")
         elif self.bufs[0].device == "HIP":
           i = 0
           for y in range(0, len(locals_to_store[1][2]), 0x10):
