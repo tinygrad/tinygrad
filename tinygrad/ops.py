@@ -29,7 +29,7 @@ class LazyOp:
     self.op, self.src, self.arg, self.buffers = op, src, arg, ()
     try:  # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
       for x in src: self.buffers += x.buffers
-    except AttributeError: pass
+    except AttributeError: self.buffers = ()
 
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   def __eq__(self, __value: object) -> bool:
