@@ -1173,6 +1173,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,:,np.newaxis,d,e], lambda x: x[i,:,np.newaxis,o,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,:,10:11,d,0:2], lambda x: x[1,:,10:11,o,0:2])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,4,c,d,2], lambda x: x[1,4,k,o,2])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,2,d,2], lambda x: x[1,j,2,o,2])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,np.newaxis,2,e], lambda x: x[None,j,np.newaxis,2,p])
     helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)], lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor(1)])
     helper_test_op([(2,3)], lambda x: x[torch.tensor([1]), torch.tensor([[0,0,0],[0,0,0]])], lambda x: x[Tensor([1]), Tensor([[0,0,0],[0,0,0]])])
