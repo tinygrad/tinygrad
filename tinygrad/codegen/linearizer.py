@@ -213,13 +213,13 @@ class Linearizer(OptimizedKernel):
     # uops
     self.uops: List[UOp] = []
     self.load_cache: Dict[str, Token] = {}
-    self.saved_exprs: Dict[Tuple[Op, Tuple[Token, ...]], Token] = dict()
+    self.saved_exprs: Dict[Tuple[Op, Tuple[Token, ...]], Token] = {}
 
     # add global buffers
     for buf,name in self.arg_bufs.items():
       self.uop(UOps.DEFINE_GLOBAL, None, [], (name, buf.dtype))
     # add variables from symbolic shapes
-    for var in sorted(set(v for buf in self.ast.buffers for v in buf.st.var_vals), key=lambda k: k.key):
+    for var in sorted({v for buf in self.ast.buffers for v in buf.st.var_vals}, key=lambda k: k.key):
       self.uop(UOps.DEFINE_GLOBAL, None, [], (var.expr, dtypes._arg_int32))
 
     # add a local buffer for multistage reduce

@@ -172,12 +172,12 @@ class LazyBuffer:
 
   @staticmethod
   def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
-    return create_lazybuffer(device, ShapeTracker(tuple(shape)), LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
+    return create_lazybuffer(device, ShapeTracker(tuple(shape)), LoadOps, LazyOp(op, () if src is None else (src,), arg), dtype)
 
   # create a constant with the shape and dtype of self
   def const(self, val:Union[float, int]) -> LazyBuffer:
     # NOTE: dtypes.from_np(self.dtype.np) to deal with image types
-    return self.loadop(LoadOps.CONST, tuple(), dtypes.from_np(self.dtype.np), self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
+    return self.loadop(LoadOps.CONST, (), dtypes.from_np(self.dtype.np), self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
 
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one

@@ -57,7 +57,7 @@ class Tensor:
       return
 
     if isinstance(data, (int, float)):
-      self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
+      self.lazydata = LazyBuffer.loadop(LoadOps.CONST, (), dtype or Tensor.default_type, device, data)
       return
 
     if data.__class__ is list:
@@ -214,7 +214,7 @@ class Tensor:
     return _deepwalk(self, set(), [])
 
   def backward(self):
-    assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
+    assert self.shape == (), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
     # this is "implicit gradient creation"
@@ -354,7 +354,7 @@ class Tensor:
     idx = idx.transpose(ax1=dim, ax2=0).unsqueeze(-1)
     permarg = list(range(self.ndim))
     permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
-    return ((idx == Tensor.arange(self.shape[dim], dtype=dtypes.int32, requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)
+    return ((idx == Tensor.arange(self.shape[dim], dtype=dtypes.int32, requires_grad=False, device=self.device)) * self.permute(*permarg).shrink((*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim]))).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim

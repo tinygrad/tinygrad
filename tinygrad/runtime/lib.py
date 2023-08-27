@@ -76,7 +76,7 @@ class LRUAllocator:
   def __init__(self, dev_memsz=(4<<30)):
     self.epoch = 0
     self.free_space: Dict[Any, int] = defaultdict(lambda: dev_memsz)
-    self.buffer_info: Dict[Any, Tuple[int, DType, str]] = dict()
+    self.buffer_info: Dict[Any, Tuple[int, DType, str]] = {}
     self.cached_buffers: Dict[Tuple[int, ...], Deque[Tuple[Any, int]]] = defaultdict(deque) # Cached buffer storage, splitted by type and size, newest first.
     self.aging_order: Dict[Any, Deque[Tuple[Tuple[int, ...], int]]] = defaultdict(deque) # Keys of cached_buffers, ordered from oldest to newest updates.
   def __del__(self):

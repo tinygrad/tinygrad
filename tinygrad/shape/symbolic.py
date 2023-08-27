@@ -123,7 +123,7 @@ class Node:
       if node.__class__ is NumNode: num_node_sum += node.b
       else: new_nodes.append(node)
 
-    if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes):
+    if len(new_nodes) > 1 and len({x.a if isinstance(x, MulNode) else x for x in new_nodes}) < len(new_nodes):
       new_nodes = Node.factorize(new_nodes)
     if num_node_sum: new_nodes.append(NumNode(num_node_sum))
     return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
