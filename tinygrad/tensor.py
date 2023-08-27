@@ -670,7 +670,7 @@ class Tensor:
     return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
 
   def dropout(self, p=0.5) -> Tensor:
-    if not Tensor.training: return self
+    if not Tensor.training or p == 0: return self
     mask = (Tensor.rand(*self.shape, requires_grad=False, device=self.device) >= p).cast(dtypes.bool)
     return self * mask * (1/(1.0 - p))
 
