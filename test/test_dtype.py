@@ -115,7 +115,6 @@ class TestInt8Dtype(unittest.TestCase):
 
   @unittest.skipIf(getenv("CUDA",0)==1, "cuda saturation works differently")
   @unittest.skipIf(getenv("PTX",0)==1, "cuda saturation doesn't wrap")
-  @unittest.skipIf(getenv("TRITON",0)==1, "triton saturation doesn't wrap")
   def test_int8_to_uint8_negative(self): _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint8), dtypes.uint8, [255, 254, 253, 252])
 
   @unittest.skipIf(getenv("PTX",0)==1, "cuda saturation doesn't wrap")
