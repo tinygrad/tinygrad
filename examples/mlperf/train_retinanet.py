@@ -54,7 +54,7 @@ def foreground_background_matrix(anchors, ann_boxes):
         for j in range(len(ann_boxes)):
             pair_iou = iou(anchors[i], ann_boxes[j])
             if pair_iou >= 0.5:
-                overlaps[i,j] = pair_iou
+                overlaps[i,j] = 1
             elif pair_iou<0.4:
                 overlaps[i,j] = -1 #background
     return overlaps
@@ -101,7 +101,7 @@ class RetinaNetTrainer:
         self.input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
         self.input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
         self.dataset = COCO(openimages())
-        self.image_size = IMAGE_SIZES["debug"]
+        self.image_size = IMAGE_SIZES["mlperf"]
     def get_ground_truths(self, anchors, annotations, n_classes):
         #TODO tensorize this function for lazyness exploitation
         #TODO rescale bboxes to transformed size
@@ -110,14 +110,15 @@ class RetinaNetTrainer:
         for i in range(batch_size):
             ann_boxes, ann_labels = annotations[i]['boxes'], annotations[i]['labels']
             assert len(ann_boxes) > 0
+            print(ann_boxes)
             ann_boxes = np.array([resize_box_based_on_new_image_size(box, 
                                 img_old_size=annotations[i]['image_size'], 
                                 img_new_size=self.image_size) for box in ann_boxes])
+            print(ann_boxes)
             fg_bg_mat = foreground_background_matrix(anchors, ann_boxes)
             #fg_bg_mat[anchor_idx, ann_box_idx]
             
             foreground_idxs = np.argwhere(fg_bg_mat==1,)
-            breakpoint()
             background_idxs = np.argwhere(fg_bg_mat==-1,)
             #fg_bg_mat==0 is skipped as paper states
             matched_anchor_idxs = foreground_idxs[:,0]
@@ -129,20 +130,21 @@ class RetinaNetTrainer:
         
     def train(self):
         NUM = getenv("NUM", 2)
-        BS = getenv("BS", 4)
+        BS = getenv("BS", 2)
         CNT = getenv("CNT", 10)
         BACKWARD = getenv("BACKWARD", 0)
         TRAINING = getenv("TRAINING", 1)
         ADAM = getenv("ADAM", 0)
         CLCACHE = getenv("CLCACHE", 0)
-        #retina_pt = TorchRN()
+        retina_pt = TorchRN()
         backbone = ResNeXt50_32X4D()
         retina = RetinaNet(backbone) #remember num_classes = 600 for openimages
         retina.load_from_pretrained()
-        
 
-        anchors_flattened_levels = np.concatenate(retina.anchor_gen(self.image_size))
 
+
+        anchors_flattened_levels = retina.anchor_gen(self.image_size)
+        anchors_flattened_levels = np.concatenate(anchors_flattened_levels)
         params = get_parameters(retina)
         for p in params: p.realize()
         optimizer = optim.SGD(params, lr=0.001)
@@ -151,14 +153,19 @@ class RetinaNetTrainer:
         Tensor.no_grad = not BACKWARD
         for x, annotations in iterate(self.dataset, BS):
             optimizer.zero_grad()
+            targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
             #self.resize_images_and_bboxes(x, annotations, self.image_size)
             resized = [Image.fromarray(image) for image in x]
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
             images = Tensor(resized)
+            #images_pt = [torch.tensor(image) for image in resized]
+            #retina_pt.training = False
+            #es_pt = retina_pt.forward(images_pt)
+
             head_outputs = retina(self.input_fixup(images)).numpy()
             box_regs = head_outputs[:, :, :4] # anchors??
             cls_preds = head_outputs[:, :, 4:]
-            targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
+            #targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
             ground_truth_boxes, ground_truth_clss = targets["regression_targets"], targets["classification_targets"]
             
 
