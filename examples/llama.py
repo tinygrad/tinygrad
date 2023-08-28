@@ -4,9 +4,8 @@
 #typeguard.importhook.install_import_hook('tinygrad')
 
 from pathlib import Path
-import functools, sys, argparse, math, platform, json, os, re
+import functools, sys, argparse, json, os
 import numpy as np
-from tqdm import tqdm
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple
 
@@ -17,6 +16,7 @@ from tinygrad.nn import Embedding, Linear
 from tinygrad.ops import GlobalCounters
 from tinygrad.jit import TinyJit
 from tinygrad.shape.symbolic import Variable, sym_infer
+from tinygrad.state import safe_load, torch_load, load_state_dict
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
@@ -224,10 +224,8 @@ def load(fn:str):
     parts = {n: load(f'{os.path.dirname(fn)}/{os.path.basename(n)}') for n in set(weight_map.values())}
     return {k: parts[n][k] for k, n in weight_map.items()}
   elif fn.endswith('.safetensors'):
-    from tinygrad.state import safe_load
     return safe_load(fn)
   else:
-    from tinygrad.state import torch_load
     return torch_load(fn)
 
 def convert_from_huggingface(weights, model):
@@ -271,7 +269,6 @@ class LLaMa:
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == VOCAB_SIZE
 
-    from tinygrad.state import load_state_dict
     params = MODEL_PARAMS[model_gen][model_size]
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
 
