@@ -169,40 +169,51 @@ class Transformer:
 
 # **** files and arguments ****
 
-VOCAB_SIZE = 32000
+VOCAB_SIZE = {
+  1: 32000,
+  2: 32000,
+  "code": 32016
+}
+
 MODEL_PARAMS = {
   1: {
     "7B": {
-      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
+      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE[1]},
       "files": 1,
     },
     "13B": {
-      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
+      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE[1]},
       "files": 2,
     },
     "30B": {
-      "args": {"dim": 6656, "multiple_of": 256, "n_heads": 52, "n_layers": 60, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE},
+      "args": {"dim": 6656, "multiple_of": 256, "n_heads": 52, "n_layers": 60, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE[1]},
       "files": 4,
     },
     "65B": {
-      "args": {"dim": 8192, "multiple_of": 256, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+      "args": {"dim": 8192, "multiple_of": 256, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE[1]},
       "files": 8,
     },
   },
   2: {
     "7B": {
-      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE[2]},
       "files": 1,
     },
     "13B": {
-      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE[2]},
       "files": 2,
     },
     "70B": {
-      "args": {"dim": 8192, "multiple_of": 4096, "ffn_dim_multiplier": 1.3, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE},
+      "args": {"dim": 8192, "multiple_of": 4096, "ffn_dim_multiplier": 1.3, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE[2]},
       "files": 8,
     },
   },
+  "code": {
+    "7B": {
+      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE["code"]},
+      "files": 1,
+    },
+  }
 }
 
 # **** helper functions ****
@@ -274,7 +285,7 @@ class LLaMa:
   def build(model_path, tokenizer_path, model_gen=1, model_size="7B", quantize=False):
     from sentencepiece import SentencePieceProcessor
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
-    assert sp_model.vocab_size() == VOCAB_SIZE
+    assert sp_model.vocab_size() == VOCAB_SIZE[model_gen]
 
     params = MODEL_PARAMS[model_gen][model_size]
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
@@ -312,25 +323,41 @@ class LLaMa:
     return output
 
 # **** main code ****
+"""
+test: python3 examples/llama.py --prompt="Hello." --temperature=0
+Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
 
+test: python3 examples/llama.py --gen 2 --prompt="Hello." --temperature=0
+Hello. I'm a 20 year old girl who is looking for a good lay in Palm Coast. I don't care whether it's at your place or not, as long as it's clean.
+
+test:
+python3 examples/llama.py --gen="code" --temperature=0.2 --count=50 --prompt="\
+import argparse
+
+def main(string: str):
+    print(string)
+    print(string[::-1])
+
+if __name__ == "__main__":"
+output:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('string', type=str, help='string to be reversed')
+    args = parser.parse_args()
+    main(args.string)
+"""
 if __name__ == "__main__":
   Tensor.no_grad = True
   print(f"using {Device.DEFAULT} backend")
 
   parser = argparse.ArgumentParser(description='Run LLaMA in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  # test: python3 examples/llama.py --prompt="Hello." --temperature=0
-  # Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
-  # test: python3 examples/llama.py --gen 2 --prompt="Hello." --temperature=0
-  # Hello. I'm a 20 year old girl who is looking for a good lay in Palm Coast. I don't care whether it's at your place or not, as long as it's clean.
   parser.add_argument('--prompt', type=str, default=None, help="Phrase to start with. Without this, it goes into chatbot mode")
   parser.add_argument('--count', type=int, default=1000, help="Max number of tokens to generate")
   parser.add_argument('--personality', type=str, default="Stacy", help="Personality, can be Stacy, George, Gary, or Lexie")
-
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
   parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
   parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B, 70B] for Gen 2")
-  parser.add_argument('--gen', type=int, default="1", help="Generation of the model to use [1, 2]")
+  parser.add_argument('--gen', default="1", help="Generation of the model to use [1, 2]")
   parser.add_argument('--quantize', action='store_true', help="Quantize the weights to int8 in memory")
   parser.add_argument('--model', type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
 
@@ -427,7 +454,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   # *** prompt engineers stop here ****
 
 
-  LLAMA_SUFFIX = {1: "", 2: "-2"}[args.gen]
+  LLAMA_SUFFIX = {1: "", 2: "-2", "code": "-code"}[args.gen]
   MODEL_PATH = args.model or Path(__file__).parent.parent / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
