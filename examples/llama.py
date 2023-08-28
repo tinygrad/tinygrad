@@ -138,12 +138,12 @@ class TransformerBlock:
     return self.jitted_norm_output(x, output) if do_jit else self.norm_output(x, output)
 
 class Transformer:
-  def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None, n_kv_heads=None):
+  def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None, n_kv_heads=None, rope_theta=10000):
     self.layers = [TransformerBlock(dim, multiple_of, n_heads, n_kv_heads, norm_eps, linear, ffn_dim_multiplier) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = Embedding(vocab_size, dim)
     self.output = linear(dim, vocab_size, bias=False)
-    self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2))
+    self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2, rope_theta))
     self.norm_output = lambda x: self.output(self.norm(x))
 
     self.jitted_tok_embeddings = TinyJit(lambda x: self.tok_embeddings(x).realize())
@@ -170,47 +170,47 @@ class Transformer:
 # **** files and arguments ****
 
 VOCAB_SIZE = {
-  1: 32000,
-  2: 32000,
+  '1': 32000,
+  '2': 32000,
   "code": 32016
 }
 
 MODEL_PARAMS = {
-  1: {
+  '1': {
     "7B": {
-      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE[1]},
+      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE['1']},
       "files": 1,
     },
     "13B": {
-      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE[1]},
+      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE['1']},
       "files": 2,
     },
     "30B": {
-      "args": {"dim": 6656, "multiple_of": 256, "n_heads": 52, "n_layers": 60, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE[1]},
+      "args": {"dim": 6656, "multiple_of": 256, "n_heads": 52, "n_layers": 60, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE['1']},
       "files": 4,
     },
     "65B": {
-      "args": {"dim": 8192, "multiple_of": 256, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE[1]},
+      "args": {"dim": 8192, "multiple_of": 256, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE['1']},
       "files": 8,
     },
   },
-  2: {
+  '2': {
     "7B": {
-      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE[2]},
+      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE['2']},
       "files": 1,
     },
     "13B": {
-      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE[2]},
+      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE['2']},
       "files": 2,
     },
     "70B": {
-      "args": {"dim": 8192, "multiple_of": 4096, "ffn_dim_multiplier": 1.3, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE[2]},
+      "args": {"dim": 8192, "multiple_of": 4096, "ffn_dim_multiplier": 1.3, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE['2']},
       "files": 8,
     },
   },
   "code": {
     "7B": {
-      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE["code"]},
+      "args": {"dim": 4096, "multiple_of": 256,  "ffn_dim_multiplier": 1.0, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": VOCAB_SIZE["code"]},
       "files": 1,
     },
   }
@@ -324,10 +324,14 @@ class LLaMa:
 
 # **** main code ****
 """
-test: python3 examples/llama.py --prompt="Hello." --temperature=0
+test: 
+python3 examples/llama.py  --temperature=0 --count=50 --prompt="Hello."
+output:
 Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
 
-test: python3 examples/llama.py --gen 2 --prompt="Hello." --temperature=0
+test: 
+python3 examples/llama.py --gen='2' --temperature=0 --count=50 --prompt="Hello."
+output:
 Hello. I'm a 20 year old girl who is looking for a good lay in Palm Coast. I don't care whether it's at your place or not, as long as it's clean.
 
 test:
@@ -454,7 +458,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   # *** prompt engineers stop here ****
 
 
-  LLAMA_SUFFIX = {1: "", 2: "-2", "code": "-code"}[args.gen]
+  LLAMA_SUFFIX = {'1': "", '2': "-2", "code": "-code"}[args.gen]
   MODEL_PATH = args.model or Path(__file__).parent.parent / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
