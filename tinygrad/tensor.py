@@ -1,6 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, math
+from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
@@ -274,17 +275,22 @@ class Tensor:
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
+
+    count = defaultdict(list)
     orig_slices = list(val) if isinstance(val, tuple) else [val]
-    if (num_slices := sum(isinstance(v, (slice, int, Tensor)) for v in orig_slices)) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
-    # handle Ellipses
-    if len(ellipses_found := [i for i, v in enumerate(orig_slices) if v is Ellipsis]) <= 1: ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices) # if len(ellipses_found) == 1 else
-    else: raise IndexError("an index can only have a single ellipsis ('...')")
+    for i,v in enumerate(orig_slices): count[type(v)].append(i)
+
+    if (num_slices := len(count[int]) + len(count[slice]) + len(count[Tensor])) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    if len(ellipsis_found := count[type(Ellipsis)]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
+
+    ellipsis_idx = ellipsis_found[0] if ellipsis_found else len(orig_slices)
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
     # extract tensors associated dims
     orig_dim, tensors = zip(*y) if (y := [(i,v) for i,v in enumerate(orig_slices) if isinstance(v, Tensor)]) else ((), ())
     # handle Tensor and None
     valid_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices if v is not None]
     valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), y_+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
+
     # compute shrink arg
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     new_slice = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
@@ -292,7 +298,6 @@ class Tensor:
     sliced_tensor = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
     new_shape = sliced_tensor.shape
     if any(abs(s) != 1 for s in strides):
-      # normalize if negative strides
       strides = tuple(abs(s) for s in strides)
       # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
       padded_tensor = sliced_tensor.pad(tuple((0, s-(dim_sz % s) if dim_sz % s != 0 else 0) for s, dim_sz in zip(strides, sliced_tensor.shape)))
@@ -301,6 +306,7 @@ class Tensor:
       new_shape = reshaped_tensor.shape[::2]
       # Shrink: do [:, 0]
       sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
+
     # determine final shape and trim dim associated with tensors
     final_shape, it_shape, dim = [], iter(new_shape), list(orig_dim)
     for i,s in enumerate(orig_slices):
@@ -312,6 +318,7 @@ class Tensor:
           for i_ in range(len(orig_dim)):
             if orig_dim[i_] > i: dim[i_] -= 1 # trim dims associated with tensors after dim is collapsed
     ret = sliced_tensor.reshape(tuple(final_shape))
+
     # Fancy/tensor indexing
     if tensors:
       # normalize idx
