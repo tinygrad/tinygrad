@@ -12,6 +12,7 @@ import pytest
 pytestmark = [pytest.mark.exclude_cuda]
 
 class TestNN(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu does not support dtypes.long")
   def test_sparse_cat_cross_entropy(self):
     input = torch.randn(3, 5)
     target = torch.empty(3, dtype=torch.long).random_(5)

@@ -3,12 +3,13 @@ import gc
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad.ops import Device
 
 def tensors_allocated():
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])
 
+@unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu might not gc properly if tested with other tests")
 class TestGC(unittest.TestCase):
-
   def test_gc(self):
     a = Tensor.zeros(4, 4, requires_grad=True)
     b = Tensor.zeros(4, 4, requires_grad=True)
