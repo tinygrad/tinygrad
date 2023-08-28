@@ -5,7 +5,7 @@ import numpy as np
 import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, dtypes
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 
 if CI:
   import warnings
@@ -132,6 +132,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.arange(5, 10, 3), lambda: Tensor.arange(5, 10, 3), forward_only=True)
     helper_test_op([], lambda: torch.arange(10, 5, -3), lambda: Tensor.arange(10, 5, -3), forward_only=True)
     helper_test_op([], lambda: torch.arange(11, 5, -3), lambda: Tensor.arange(11, 5, -3), forward_only=True)
+  def test_arange_simple(self):
+    helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
+  def test_arange_big(self):
+    helper_test_op([], lambda: torch.arange(256), lambda: Tensor.arange(256), forward_only=True)
+
   def test_where(self):
     helper_test_op(
       [(100,)],
@@ -207,6 +212,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
     helper_test_op([(), ()], torch.maximum, Tensor.maximum)
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1., 0., 3., 4.], [1., 2., 3., 0.]])
+    helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1, 0, 3, 4], [1, 2, 3, 0]], forward_only=True)
   def test_minimum(self):
     helper_test_op([(45,65), (45,65)], torch.minimum, Tensor.minimum)
     helper_test_op([(), ()], torch.minimum, Tensor.minimum)
@@ -241,6 +247,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
     helper_test_op([(), ()], lambda x,y: x/y, Tensor.div)
     helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=[[5],[1]])
+    helper_test_op(None, lambda x: (x/2).to(torch.int), lambda x: x/2, forward_only=True, vals=[[3]])
   def test_div_const(self):
     helper_test_op([(45,65)], lambda x: x/255, lambda x: x/255)
     helper_test_op([(45,65)], lambda x: x/1, lambda x: x/1)
@@ -392,6 +399,20 @@ class TestOps(unittest.TestCase):
     helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=1), lambda x: Tensor.cumsum(x, axis=1), atol=1e-6)
     helper_test_op([(20,30,40)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2), atol=1e-6)
     helper_test_op([(20,30,40)], lambda x: torch.cumsum(x, dim=-1), lambda x: Tensor.cumsum(x, axis=-1), atol=1e-6)
+
+  def test_argmax(self):
+    self.assertEqual(torch.Tensor([2,2]).argmax().numpy(), Tensor([2,2]).argmax().numpy()) # check if returns first index for same max
+    helper_test_op([(10,20)], lambda x: x.argmax(), lambda x: x.argmax(), forward_only=True)
+    helper_test_op([(10,20)], lambda x: x.argmax(0, False), lambda x: x.argmax(0, False), forward_only=True)
+    helper_test_op([(10,20)], lambda x: x.argmax(1, False), lambda x: x.argmax(1, False), forward_only=True)
+    helper_test_op([(10,20)], lambda x: x.argmax(1, True), lambda x: x.argmax(1, True), forward_only=True)
+  def test_argmin(self):
+    self.assertEqual(torch.Tensor([2, 2]).argmin().numpy(), Tensor([2, 2]).argmin().numpy())
+    helper_test_op([(10,20)], lambda x: x.argmin(), lambda x: x.argmin(), forward_only=True)
+    helper_test_op([(10,20)], lambda x: x.argmin(0, False), lambda x: x.argmin(0, False), forward_only=True)
+    helper_test_op([(10,20)], lambda x: x.argmin(1, False), lambda x: x.argmin(1, False), forward_only=True)
+    helper_test_op([(10,20)], lambda x: x.argmin(1, True), lambda x: x.argmin(1, True), forward_only=True)
+
   def test_matmul_simple(self):
     helper_test_op([(4), (4,4)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_matmul(self):

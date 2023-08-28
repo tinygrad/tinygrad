@@ -6,7 +6,7 @@ from collections import defaultdict
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 from tinygrad.shape.shapetracker import strides_for_shape
 OSX = platform.system() == "Darwin"
 WINDOWS = platform.system() == "Windows"

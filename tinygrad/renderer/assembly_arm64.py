@@ -55,7 +55,7 @@ def specialize_to_arm64(fn_nm, asm):
     for v in [v for v in mvars if v is not None and v.__class__ is not int and v.nm not in rtor]:
       available_regs = s_regs if dtypes.is_float(v[1]) else x_regs
       #NOTE: Very simple spill, everything that don't fit in regs goes to mem
-      if len(available_regs) == 0:
+      if not available_regs:
         # ARM needs the stack 16-byte aligned
         var_size += 16
         available_regs.append('s0' if dtypes.is_float(out[1]) else 'x12')

@@ -35,6 +35,7 @@ class Node:
   def __add__(self, b:Union[Node,int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __radd__(self, b:int): return self+b
   def __sub__(self, b:Union[Node,int]): return self+-b
+  def __rsub__(self, b:int): return -self+b
   def __le__(self, b:Union[Node,int]): return self < (b+1)
   def __gt__(self, b:Union[Node,int]): return (-self) < (-b)
   def __ge__(self, b:Union[Node,int]): return (-self) < (-b+1)
@@ -42,7 +43,7 @@ class Node:
     lhs = self
     if isinstance(lhs, SumNode) and isinstance(b, int):
       muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
-      if len(muls):
+      if muls:
         # NOTE: gcd in python 3.8 takes exactly 2 args
         mul_gcd = muls[0].b
         for x in muls[1:]: mul_gcd = gcd(mul_gcd, x.b)
@@ -151,8 +152,10 @@ class Variable(Node):
 
 class NumNode(Node):
   def __init__(self, num:int):
-    self.b, self.min, self.max = num, num, num
+    self.b:int = num
+    self.min, self.max = num, num
   def __int__(self): return self.b
+  def __index__(self): return self.b
   def __eq__(self, other): return self.b == other
   def __hash__(self): return self.hash  # needed with __eq__ override
 
@@ -252,6 +255,16 @@ class SumNode(RedNode):
       elif isinstance(x, MulNode): new_nodes.append(x.a * (x.b%b))
       else: new_nodes.append(x)
     return Node.__mod__(Node.sum(new_nodes), b)
+
+  def __lt__(self, b:Union[Node,int]):
+    if isinstance(b, int):
+      new_sum = []
+      for x in self.nodes:
+        # TODO: should we just force the last one to always be the number
+        if isinstance(x, NumNode): b -= x.b
+        else: new_sum.append(x)
+      return Node.__lt__(Node.sum(new_sum), b)
+    return Node.__lt__(self, b)
 
   @property
   def flat_components(self): # recursively expand sumnode components

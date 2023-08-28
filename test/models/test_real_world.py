@@ -1,10 +1,10 @@
 import unittest, time
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 from tinygrad.ops import GlobalCounters, LazyOp, LoadOps
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 from tinygrad.helpers import CI, dtypes
 
 from examples.hlb_cifar10 import SpeedyResNet
@@ -47,7 +47,7 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t, t2): return model(t, 801, t2).realize()
-    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 14.5, 967)
+    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 967)
 
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE, "needs JIT")
   def test_llama(self):

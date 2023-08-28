@@ -136,7 +136,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     elif uop == UOps.BARRIER:
       kk(lang.barrier)
     elif uop == UOps.ENDLOOP:
-      if args[1] == "local" and len(lang.lid):
+      if args[1] == "local" and lang.lid:
         # TODO: this is a bit of a hack. the local loop isn't real on the GPU
         kk(f"if ({Variable.sum(args[0]).render(render_cl)} == 0) {{")
         pend_close = "}"*(len(args[0])+1) + f" /* {args[1]} */"

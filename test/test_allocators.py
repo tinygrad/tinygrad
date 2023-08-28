@@ -5,7 +5,7 @@ from weakref import ref
 from tinygrad.ops import GlobalCounters
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, prod
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 
 def check_gc():
   if Device.DEFAULT == "GPU":

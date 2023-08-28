@@ -1,18 +1,14 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
-from enum import Enum, auto
 import functools
-from typing import Dict, Tuple, Union, List, Optional, Callable, cast, NamedTuple
+from typing import Dict, Tuple, Union, List, Optional, cast, NamedTuple
 from tinygrad.helpers import prod, DEBUG, partition
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, is_sym_int
-
-# these ops live here
-class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
 
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
   assert len(shape) == len(strides)
-  ret = [(shape[0], strides[0])] if len(shape) > 0 else []
+  ret = [(shape[0], strides[0])] if shape else []
   for i in range(1, len(shape)):
     if ret[-1][1] == shape[i]*strides[i] or ret[-1][0] == 1:
       ret[-1] = (ret[-1][0] * shape[i], strides[i])
@@ -232,6 +228,7 @@ class ShapeTracker:
     return self
 
   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
+    if self.views[-1].shape == new_shape: return self
     new_ints, new_nodes = partition(new_shape, lambda s: isinstance(s, int))
     if new_nodes and all(isinstance(s, int) for s in self.shape):
       # reshape from all int shape into shape with a variable, update the variable value
@@ -242,7 +239,6 @@ class ShapeTracker:
         self.var_vals[new_var] = new_val
       else: assert self.var_vals[new_var] == new_val, f"value conflicts, was {self.var_vals[new_var]}, set to {new_val}"
     elif not new_nodes: self.var_vals = {}
-    if self.views[-1].shape == new_shape: return self
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
     if all(isinstance(s, int) for s in self.shape) and all(isinstance(s, int) for s in new_shape):
@@ -267,16 +263,6 @@ class ShapeTracker:
     mask = tuple([(((mx if m > 0 else s-my)+(abs(m)-1))//abs(m), ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(self.views[-1].mask, self.views[-1].shape, mul)]) if self.views[-1].mask is not None else None
     self.views[-1] = View(new_shape, strides, self.views[-1].offset + offset, mask)
     return self
-
-  # *** entry point for external ***
-
-  def movement_op(self, op: MovementOps, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
-    assert isinstance(arg, tuple) and (len(arg) == len(self.shape) or op == MovementOps.RESHAPE), f"arg {arg} for {op} doesn't match dim of shape {self.shape}"
-    dispatch[op](self, arg)
-    return self
-
-dispatch: Dict[MovementOps, Callable] = {MovementOps.RESHAPE: ShapeTracker.reshape, MovementOps.EXPAND: ShapeTracker.expand, MovementOps.PAD: ShapeTracker.pad,
-                                         MovementOps.SHRINK: ShapeTracker.shrink, MovementOps.PERMUTE: ShapeTracker.permute, MovementOps.STRIDE: ShapeTracker.stride}
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Optional[List[List[int]]]:
