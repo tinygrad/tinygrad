@@ -317,8 +317,7 @@ class Tensor:
             dim.append(i-i_)
     ret = sliced_tensor.reshape(tuple(final_shape))
 
-    # Fancy/tensor indexing
-    if tensors:
+    if tensors: # Fancy/tensor indexing
       # normalize idx
       idx = [t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[d] + t for d,t in zip(dim, tensors)] # TODO first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
       max_dim = max(i.ndim for i in idx)
