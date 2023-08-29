@@ -312,7 +312,7 @@ class Tensor:
           i_ += 1
         else:
           final_shape.append(dim_shape)
-          if isinstance(s, Tensor): 
+          if isinstance(s, Tensor):
             tensors.append(s)
             dim.append(i-i_)
     ret = sliced_tensor.reshape(tuple(final_shape))
