@@ -6,6 +6,7 @@ name: Upload Python Package
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 jobs:
   deploy:
