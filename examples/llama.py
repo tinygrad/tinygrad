@@ -211,7 +211,7 @@ MODEL_PARAMS = {
       "files": 1,
     },
     "7B-Instruct": {
-      "args": {"dim": 4096, "n_layers": 32, "n_heads": 32, "multiple_of": 256, "ffn_dim_multiplier": 1.0, "norm_eps": 1e-5, "rope_theta": 1000000, "vocab_size": 32000},
+      "args": {"dim": 4096, "n_layers": 32, "n_heads": 32, "multiple_of": 256, "ffn_dim_multiplier": 1.0, "norm_eps": 1e-5, "rope_theta": 1000000, "vocab_size": 32016},
       "files": 1,
     },
     "13B": {
@@ -385,6 +385,28 @@ output:
 arr = [1, 2, 3, 4, 5]
 k = 2
 print(add_elements(arr, k))
+
+test:
+python3 examples/llama.py --gen="code" --size="7B-Instruct" --temperature=0.2 --count=120 --prompt="write a function in c++ that adds three float numbers"
+output:
+\begin{code}
+#include<iostream>
+using namespace std;
+
+float add(float a, float b, float c)
+{
+    return a+b+c;
+}
+
+int main()
+{
+    float a, b, c;
+    cout<<"Enter three numbers: ";
+    cin>>a>>b>>c;
+    cout<<"The sum is: "<<add(a,b,c);
+    return 0;
+}
+\end{code}
 """
 if __name__ == "__main__":
   Tensor.no_grad = True
