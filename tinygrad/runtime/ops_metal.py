@@ -1,12 +1,15 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
-import os, subprocess, pathlib, functools, ctypes
-import Metal, Cocoa, libdispatch # type: ignore
-from typing import List, Any
-from tinygrad.codegen.linearizer import LinearizerOptions
-from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
-from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferMapped, LRUAllocator
+try:
+    import os, subprocess, pathlib, functools, ctypes
+    import Metal, Cocoa, libdispatch # type: ignore
+    from typing import List, Any
+    from tinygrad.codegen.linearizer import LinearizerOptions
+    from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
+    from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
+    from tinygrad.ops import Compiled
+    from tinygrad.runtime.lib import RawBufferMapped, LRUAllocator
+except ImportError as e:
+    raise ImportError(f"{e.name}. \n If you may want to try:\n\tpip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch\n")
 
 METAL_XCODE = getenv("METAL_XCODE")
 
