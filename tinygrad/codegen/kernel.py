@@ -31,6 +31,7 @@ class Kernel:
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)
     self.arg_bufs = {x:f"data{i}" for i,x in enumerate(dedup([x.realized for x in self.bufs if buf_is_kernel_arg(x)]))}
+    self.arg_bufs_num = {x:i for i,x in enumerate(dedup([x.realized for x in self.bufs if buf_is_kernel_arg(x)]))}
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.

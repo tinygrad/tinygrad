@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, math, itertools
 from collections import defaultdict
 from typing import NamedTuple, Optional, List, Any, Tuple, cast, Sequence, Union, Dict, Set
-from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
+from tinygrad.ops import ReduceOps, BinaryOps, LazyOp, TernaryOps
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawConst
@@ -17,7 +17,6 @@ class UOps(Enum):
   ALU = auto(); WMMA = auto(); CAST = auto() # noqa: E702
   LOOP = auto(); ENDLOOP = auto() # loops can be global, local, or other # noqa: E702
   def __lt__(self, x): return self.value < x.value
-
 
 class UOp(NamedTuple):
   uop: UOps
@@ -83,13 +82,20 @@ class UAst(OptimizedKernel):
     full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
     upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
 
+    acc_count = 0
     def ast_parse(x:Union[LazyBuffer, LazyOp], idxs) -> UOp:
+      nonlocal acc_count
       if isinstance(x, LazyBuffer):
         buf_idx = self.bufs.index(x)
         idx, valid = self.sts[buf_idx].expr_idxs(idxs)
         idx_rendered = idx.render(self.render_ops, self)
         valid_rendered = valid.render(self.render_ops, self) if valid.min == 0 else None
-        return self.uop(UOps.LOAD, (global_bufs[buf_idx], idx_rendered) + ((valid_rendered,) if valid_rendered is not None else tuple()), x.dtype)
+        if isinstance(x.realized, RawConst):
+          ret = self.uop(UOps.CONST, (), x.dtype, x.realized._buf)
+          if valid_rendered is not None: ret = self.uop(UOps.ALU, (valid_rendered, ret, self.uop(UOps.CONST, (), x.dtype, 0)), x.dtype, TernaryOps.WHERE)
+          return ret
+        else:
+          return self.uop(UOps.LOAD, (global_bufs[self.arg_bufs_num[x.realized]], idx_rendered) + ((valid_rendered,) if valid_rendered is not None else tuple()), x.dtype)
       if x.op in ReduceOps:
         nidxs = global_idxs+local_idxs+reduce_idxs
         nidxs += [(i1 if i2==i3 else i2) for i1,i2,i3 in zip(idxs[len(nidxs):], full_upcast_idxs, upcast_idxs)]
@@ -97,11 +103,18 @@ class UAst(OptimizedKernel):
         lreduce_idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
         vin = tuple(ast_parse(x.src[0], lidxs) for lidxs in lreduce_idxs)
         if len(reduce_idxs):
-          acc = self.uop(UOps.DEFINE_ACC, (self.uop(UOps.CONST, tuple(), dtypes.float32, 0), ), dtypes.float32)
-          vin += (acc, )
+          acc = self.uop(UOps.DEFINE_ACC, (), dtypes.float32, acc_count)
+          acc_count += 1
+          #first = self.uop(UOps.ALU, (self.var_to_loop(reduce_idxs[0]), self.uop(UOps.CONST, (), dtypes.int32, reduce_idxs[0].min+1)), dtypes.bool, BinaryOps.CMPLT)
+          phi = self.uop(UOps.ALU, (self.var_to_loop(reduce_idxs[0]), acc, self.uop(UOps.CONST, tuple(), dtypes.float32, float('-inf') if x.op == ReduceOps.MAX else 0)), dtypes.float32, TernaryOps.WHERE)
+          vin += (phi, )
         # NOTE: this determines the order of these when it doesn't have to
-        ret = functools.reduce(lambda a,b: self.uop(UOps.ALU, (a,b), dtypes.float32, BinaryOps.ADD), vin)
-        return self.uop(UOps.ENDLOOP, (acc, ret, self.var_to_loop(reduce_idxs[0]))) if len(reduce_idxs) else ret
+        ret = functools.reduce(lambda a,b: self.uop(UOps.ALU, (a,b), dtypes.float32, BinaryOps.MAX if x.op == ReduceOps.MAX else BinaryOps.ADD), vin)
+        if len(reduce_idxs):
+          ret = self.uop(UOps.STORE, (acc, ret), dtypes.float32)
+          ret = self.uop(UOps.ENDLOOP, (ret, self.var_to_loop(reduce_idxs[0])), dtypes.float32)
+        return ret
+        #return self.uop(UOps.PHI, (acc, ret, self.var_to_loop(reduce_idxs[0])), dtypes.float32) if len(reduce_idxs) else ret
       else:
         vin = tuple(ast_parse(v, idxs) for v in x.src)
         assert all_same([x.dtype for x in vin])
@@ -114,7 +127,7 @@ class UAst(OptimizedKernel):
       idx, valid = self.sts[0].expr_idxs(idxs)
       assert valid.min == 1
       idx_rendered = idx.render(self.render_ops, self)
-      sinks.append(self.uop(UOps.STORE, (global_bufs[0], idx_rendered, ast_parse(self.ast, idxs))))
+      sinks.append(self.uop(UOps.STORE, (global_bufs[0], ast_parse(self.ast, idxs), idx_rendered)))
 
     # graph debugging
     if getenv("UASTGRAPH"):
@@ -140,6 +153,7 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
   r: Dict[UOp, Optional[str]] = {}
   statements: List[str] = []  # LOOP, LOAD, STORE
   globalz: List[Optional[str]] = []
+  seen_end = set()
   c = defaultdict(int)
   def ssa(prefix="t"):
     nonlocal c
@@ -147,30 +161,38 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
     return f"{prefix}{c[prefix]-1}"
   def render_one(u:UOp) -> Optional[str]:
     nonlocal globalz
-    print(u.uop, u.dtype, u.arg)
-    if u.uop == UOps.CONST: return str(u.arg)
+    if DEBUG >= 4: print(u.uop, u.dtype, u.arg)
+    if u.uop == UOps.CONST:
+      if u.arg == float("inf"): return "INFINITY"
+      if u.arg == float("-inf"): return "-INFINITY"
+      return str(u.arg)
     elif u.uop == UOps.LOOP:
       statements.append(f"for (int {u.arg[0]} = {u.arg[1]}; {u.arg[0]} <= {u.arg[2]}; {u.arg[0]}++) {{")
       return u.arg[0]
-    elif u.uop == UOps.ENDLOOP:
-      statements.append(f"{r[u.vin[0]]} = {r[u.vin[1]]}; }}")
-      return r[u.vin[0]]
     elif u.uop == UOps.ALU: return lang.code_for_op[u.arg](*[r[x] for x in u.vin])
     elif u.uop == UOps.DEFINE_GLOBAL:
       globalz += [None] * (u.arg+1-len(globalz))
       globalz[u.arg] = f"float *data{u.arg}"
       return f"data{u.arg}"
+    elif u.uop == UOps.ENDLOOP:
+      if u.vin[1] not in seen_end: statements.append("}")
+      seen_end.add(u.vin[1])
+      return r[u.vin[0]]
     elif u.uop == UOps.DEFINE_ACC:
       tok = ssa("acc")
-      statements.append(f"{u.dtype.name} {tok} = {r[u.vin[0]]};")
+      #statements.append(f"{u.dtype.name} {tok} = {r[u.vin[0]]};")
+      statements.append(f"{u.dtype.name} {tok};")
       return tok
     elif u.uop == UOps.LOAD:
       tok = ssa("val")
       statements.append(f"{u.dtype.name} {tok} = {r[u.vin[0]]}[{r[u.vin[1]]}];")
       return tok
     elif u.uop == UOps.STORE:
-      statements.append(f"{r[u.vin[0]]}[{r[u.vin[1]]}] = {r[u.vin[2]]};")
-      return None
+      if len(u.vin) == 2:
+        statements.append(f"{r[u.vin[0]]} = {r[u.vin[1]]};")
+      else:
+        statements.append(f"{r[u.vin[0]]}[{r[u.vin[2]]}] = {r[u.vin[1]]};")
+      return r[u.vin[0]]
     else:
       raise NotImplementedError(f"can't render {u.uop}")
 
@@ -181,17 +203,22 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
     seen.append(x)
     for u in x.vin: visit(u)
   for u in uops: visit(u)
-  in_loops = sum([1 if x.uop == UOps.LOOP else -1 if x.uop == UOps.ENDLOOP else 0 for x in seen])
+  in_loops = sum([1 if x.uop == UOps.LOOP else 0 for x in seen])
 
   # then we figure out which are renderable and do that, leaving loops for last
   while len(seen):
     rend, seen = partition(seen, lambda x: all(u in r for u in x.vin))
     assert len(rend), "none to render"
     rend_nl, rend_l = partition(rend, lambda x: x.uop != UOps.LOOP)
-    if not rend_nl: rend_nl, rend_l = rend_l, []
-    for u in rend_nl: r[u] = render_one(u)
-    seen = rend_l + seen
+    if not rend_nl:
+      rend_l = sorted(rend_l, key=lambda x: x.arg)
+      # we render one loop and see if it unlocks anything
+      r[rend_l[0]] = render_one(rend_l[0])
+      seen = rend_l[1:] + seen
+    else:
+      for u in rend_nl: r[u] = render_one(u)
+      seen = rend_l + seen
 
-  src = f"void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements)  + '\n' + '}'*(in_loops+1)
+  src = f"void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements)  + '\n' + '}'*(in_loops+1-len(seen_end))
   return src
 
