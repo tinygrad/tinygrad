@@ -12,17 +12,19 @@ from tinygrad.shape.symbolic import Variable, NumNode, Node, MulNode, SumNode, D
 VariableOrNum = Union[Variable, NumNode, Node]
 
 class UOps(Enum):
-  LOOP = auto(); ENDLOOP = auto() # loops can be global, local, or other # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
   CONST = auto(); LOAD = auto(); STORE = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto() # noqa: E702
+  LOOP = auto(); ENDLOOP = auto() # loops can be global, local, or other # noqa: E702
+  def __lt__(self, x): return self.value < x.value
+
 
 class UOp(NamedTuple):
   uop: UOps
   vin: Tuple[UOp]
   dtype: Optional[DType]
   arg: Any
-  def __repr__(self): return str(self.uop).replace('UOps.', '') + "\n" + (f"{self.arg}\n" if self.arg is not None else "") + str(self.dtype)
+  def __repr__(self): return f"{self.uop} {self.dtype} {self.arg}"
 
 # TODO: generic visitor pattern?
 def expand_node(idx:Node) -> List[Node]:
@@ -41,7 +43,10 @@ class UAst(OptimizedKernel):
   def uop_alu_idx(self, a, b, ops, ctx:UAst, op, dtype=dtypes.int32):
     return self.uop(UOps.ALU, (a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx)), dtype, op)
 
-  render_ops: Any = { Variable: lambda self, ops, ctx: ctx.uop(UOps.LOOP, tuple(), dtypes.int32, (self.expr,self.min,self.max)),
+  def var_to_loop(self, var):
+    return self.uop(UOps.LOOP, tuple(), dtypes.int32, (var.expr,var.min,var.max))
+
+  render_ops: Any = { Variable: lambda self, ops, ctx: ctx.var_to_loop(self),
                 NumNode: lambda self, ops, ctx: ctx.uop(UOps.CONST, tuple(), dtypes.int32, self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
                 DivNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.DIV),
@@ -90,11 +95,13 @@ class UAst(OptimizedKernel):
         nidxs += [(i1 if i2==i3 else i2) for i1,i2,i3 in zip(idxs[len(nidxs):], full_upcast_idxs, upcast_idxs)]
         expanded_nodes = [expand_node(idx) for idx in nidxs]
         lreduce_idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
-        acc = self.uop(UOps.DEFINE_ACC, (self.uop(UOps.CONST, tuple(), dtypes.float32, 0), ), dtypes.float32)
         vin = tuple(ast_parse(x.src[0], lidxs) for lidxs in lreduce_idxs)
+        if len(reduce_idxs):
+          acc = self.uop(UOps.DEFINE_ACC, (self.uop(UOps.CONST, tuple(), dtypes.float32, 0), ), dtypes.float32)
+          vin += (acc, )
         # NOTE: this determines the order of these when it doesn't have to
-        ret = functools.reduce(lambda a,b: self.uop(UOps.ALU, (a,b), dtypes.float32, BinaryOps.ADD), (acc,) + vin)
-        return self.uop(UOps.ENDLOOP, (acc, ret))
+        ret = functools.reduce(lambda a,b: self.uop(UOps.ALU, (a,b), dtypes.float32, BinaryOps.ADD), vin)
+        return self.uop(UOps.ENDLOOP, (acc, ret, self.var_to_loop(reduce_idxs[0]))) if len(reduce_idxs) else ret
       else:
         vin = tuple(ast_parse(v, idxs) for v in x.src)
         assert all_same([x.dtype for x in vin])
@@ -115,7 +122,7 @@ class UAst(OptimizedKernel):
       G = nx.DiGraph()
       def add_node_recursive(x:UOp):
         if x in G.nodes: return
-        G.add_node(id(x), label=str(x))
+        G.add_node(id(x), label=str(x.uop).replace('UOps.', '') + "\n" + (f"{x.arg}\n" if x.arg is not None else "") + str(x.dtype))
         for a in x.vin:
           add_node_recursive(a)
           G.add_edge(id(a), id(x))
@@ -146,7 +153,7 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
       statements.append(f"for (int {u.arg[0]} = {u.arg[1]}; {u.arg[0]} <= {u.arg[2]}; {u.arg[0]}++) {{")
       return u.arg[0]
     elif u.uop == UOps.ENDLOOP:
-      statements.append(f"{r[u.vin[0]]} = {r[u.vin[1]]};")
+      statements.append(f"{r[u.vin[0]]} = {r[u.vin[1]]}; }}")
       return r[u.vin[0]]
     elif u.uop == UOps.ALU: return lang.code_for_op[u.arg](*[r[x] for x in u.vin])
     elif u.uop == UOps.DEFINE_GLOBAL:
@@ -167,21 +174,24 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
     else:
       raise NotImplementedError(f"can't render {u.uop}")
 
-  def render(a:List[UOp], in_loops:Set[UOp]) -> Set[UOp]:
-    prereqs = tuple()
-    for u in a: prereqs += u.vin
-    if prereqs:
-      p_nl, p_l = partition(prereqs, lambda x: x.uop != UOps.LOOP)
-      in_loops = render(p_nl, in_loops)
-      in_loops = render(p_l, in_loops)
-    for u in a:
-      if u.uop == UOps.LOOP:
-        in_loops.add(u)
-      if u not in r:
-        r[u] = render_one(u)
-    return in_loops
+  # first, we fetch all the uops
+  seen = []
+  def visit(x):
+    if x in seen: return
+    seen.append(x)
+    for u in x.vin: visit(u)
+  for u in uops: visit(u)
+  in_loops = sum([1 if x.uop == UOps.LOOP else -1 if x.uop == UOps.ENDLOOP else 0 for x in seen])
 
-  in_loops = render(uops, set())
-  src = f"void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements) + '\n' + '}'*(len(in_loops)+1)
+  # then we figure out which are renderable and do that, leaving loops for last
+  while len(seen):
+    rend, seen = partition(seen, lambda x: all(u in r for u in x.vin))
+    assert len(rend), "none to render"
+    rend_nl, rend_l = partition(rend, lambda x: x.uop != UOps.LOOP)
+    if not rend_nl: rend_nl, rend_l = rend_l, []
+    for u in rend_nl: r[u] = render_one(u)
+    seen = rend_l + seen
+
+  src = f"void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements)  + '\n' + '}'*(in_loops+1)
   return src
 
