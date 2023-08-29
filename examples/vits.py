@@ -556,8 +556,8 @@ def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None, skip_li
   return model, optimizer, learning_rate, iteration
 
 def download_if_not_present(file_path: Path, url: str):
-  if not Path(file_path).is_file():
-    logging.info(f"Did not find {file_path}, downloading...")
+  if not file_path.is_file():
+    logging.info(f"Did not find {file_path.as_posix()}, downloading...")
     download_file(url, file_path)
   return file_path
 
