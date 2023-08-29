@@ -7,6 +7,7 @@ from math import prod # noqa: F401 # pylint:disable=unused-import
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
 CI = os.getenv("CI", "") != ""
+TINYBOARD = os.getenv("TINYBOARD", "") != ""
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x): return tuple(x[0]) if x and x[0].__class__ in (tuple, list) else x

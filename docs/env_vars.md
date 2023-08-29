@@ -56,6 +56,9 @@ CL_EXCLUDE          | [name0,name1] | comma-separated list of device names to ex
 CL_PLATFORM         | [# >= 0]   | index of the OpenCL [platform](https://documen.tician.de/pyopencl/runtime_platform.html#pyopencl.Platform) to run on. Defaults to 0.
 RDNA                | [1]        | enable the specialized [RDNA 3](https://en.wikipedia.org/wiki/RDNA_3) assembler for AMD 7000-series GPUs. If not set, defaults to generic OpenCL codegen backend.
 PTX                 | [1]        | enable the specialized [PTX](https://docs.nvidia.com/cuda/parallel-thread-execution/) assembler for Nvidia GPUs. If not set, defaults to generic CUDA codegen backend.
+TINYBOARD           | [1]        | enables logging to [tinyboard](https://github.com/nimlgen/tinyboard/).
+TINYBOARD_NAME      | [name]     | name of newly created run in the tinyboard.
+TINYBOARD_HOST      | [url]      | address to tinyboard host.
 
 ## File Specific Variables
 

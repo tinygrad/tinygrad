@@ -6,7 +6,7 @@ from itertools import accumulate
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 
-from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
+from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, TINYBOARD
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device, LoadOps
 
@@ -26,6 +26,9 @@ class Function:
     ctx = fxn(x[0].device, *x)
     ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
     if ctx.requires_grad and not Tensor.no_grad: ret._ctx = ctx    # used by autograd engine
+    if TINYBOARD:
+      from extra.tinyboard import tinyboard_log_mlops
+      tinyboard_log_mlops(fxn, ret, *x)
     return ret
 
 import tinygrad.mlops as mlops
@@ -33,7 +36,7 @@ import tinygrad.mlops as mlops
 # **** start with two base classes, Tensor and Function ****
 
 class Tensor:
-  __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
+  __slots__ = "lazydata", "requires_grad", "grad", "_ctx", "node_id"
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False

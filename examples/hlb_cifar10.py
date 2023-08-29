@@ -22,6 +22,7 @@ from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
 from extra.dist import collectives
+from extra.tinyboard import tinyboard_log_graph
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
@@ -332,6 +333,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
         acc = correct_sum/correct_len*100.0
         if acc > best_eval:
           best_eval = acc
+          tinyboard_log_graph("Val stat", "line", [[correct_sum/correct_len], [sum(losses)/len(losses)]], graphinfo={'series_names': ['eval', 'val_loss']})
           print(f"eval {correct_sum}/{correct_len} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
     if STEPS == 0 or i==STEPS: break
     X, Y = next(batcher)
@@ -344,6 +346,8 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
     et = time.monotonic()
     loss_cpu = loss.numpy()
     cl = time.monotonic()
+    tinyboard_log_graph("Train stat", "line", [[float(loss_cpu)]], graphinfo={'series_names': ['loss']})
+    tinyboard_log_graph("Train LR", "line", [[float(opt_non_bias.lr.numpy()[0])]], graphinfo={'series_names': ['LR']})
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
 
