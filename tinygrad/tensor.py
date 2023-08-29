@@ -276,8 +276,8 @@ class Tensor:
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
 
-    count = defaultdict(list)
     orig_slices = list(val) if isinstance(val, tuple) else [val]
+    count = defaultdict(list)
     for i,v in enumerate(orig_slices): count[type(v)].append(i)
 
     if (num_slices := len(count[int]) + len(count[slice]) + len(count[Tensor])) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
@@ -285,16 +285,12 @@ class Tensor:
 
     ellipsis_idx = ellipsis_found[0] if ellipsis_found else len(orig_slices)
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
-    # extract tensors associated dims
-    orig_dim, tensors = zip(*y) if (y := [(i,v) for i,v in enumerate(orig_slices) if isinstance(v, Tensor)]) else ((), ())
-    # handle Tensor and None
-    valid_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices if v is not None]
-    valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), y_+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
 
-    # compute shrink arg
+    valid_slices = [v for v in orig_slices if v is not None]
+    valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), y_+1) if isinstance(v, int) else slice(None) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
+
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     new_slice = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
-    # shrink and flip
     sliced_tensor = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
     new_shape = sliced_tensor.shape
     if any(abs(s) != 1 for s in strides):
@@ -307,30 +303,33 @@ class Tensor:
       # Shrink: do [:, 0]
       sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
 
-    # determine final shape and trim dim associated with tensors
-    final_shape, it_shape, dim = [], iter(new_shape), list(orig_dim)
+    final_shape, it_shape, dim, tensors, i_ = [], iter(new_shape), [], [], 0
     for i,s in enumerate(orig_slices):
       if s is None: final_shape.append(1)
       else: # s is int or slice or Tensor
         dim_shape = next(it_shape)
-        if isinstance(s, (slice, Tensor)): final_shape.append(dim_shape)
-        elif tensors: # s is int
-          for i_ in range(len(orig_dim)):
-            if orig_dim[i_] > i: dim[i_] -= 1 # trim dims associated with tensors after dim is collapsed
+        if isinstance(s, int):
+          i_ += 1
+        else:
+          final_shape.append(dim_shape)
+          if isinstance(s, Tensor): 
+            tensors.append(s)
+            dim.append(i-i_)
     ret = sliced_tensor.reshape(tuple(final_shape))
 
     # Fancy/tensor indexing
     if tensors:
       # normalize idx
       idx = [t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[d] + t for d,t in zip(dim, tensors)] # TODO first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
-      # compute sum_dim, arange, and idx
       max_dim = max(i.ndim for i in idx)
+      # compute sum_dim, arange, and idx
       sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(dim)]
       arange = [Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, dim))]
       first_idx = [idx[0].reshape(*[1]*dim[0], *[1]*(1 + max_dim - idx[0].ndim), *idx[0].shape, *[1]*(ret.ndim - dim[0] - 1))]
       rest_idx = [i.reshape(*[1]*dim[0], *[1]*(max_dim - i.ndim), *i.shape, *[1]*(ret.ndim - dim[0] - n)) for n,i in enumerate(idx[1:], 1)]
       idx = first_idx + rest_idx
       ret = ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*max_dim, *ret.shape[sum_dim[0]+1:])
+      # iteratively fancy index
       for a,i,sd in zip(arange, idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
       # special permute case
       if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1]+1)):
