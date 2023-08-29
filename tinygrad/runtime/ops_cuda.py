@@ -67,7 +67,7 @@ class CUDAProgram:
     if DEBUG >= 5: print(pretty_ptx(prg))
     if DEBUG >= 6:
       try:
-        fn = Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}"
+        fn = str(Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}")
         with open(fn + ".ptx", "wb") as f: f.write(prg.encode('utf-8'))
         subprocess.run(["ptxas", f"-arch={arch()}", "-o", fn, fn+".ptx"], check=True)
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
