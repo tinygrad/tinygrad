@@ -1,39 +1,26 @@
 # RCNN-specific loss functions
 
+from models.mask_rcnn import BoxList
+from tinygrad.tensor import Tensor
+
 # implementation from https://github.com/kuangliu/torchcv/blob/master/torchcv/utils/box.py
 # with slight modifications
-def boxlist_iou(boxlist1, boxlist2):
-  """Compute the intersection over union of two set of boxes.
-  The box order must be (xmin, ymin, xmax, ymax).
 
-  Arguments:
-    box1: (BoxList) bounding boxes, sized [N,4].
-    box2: (BoxList) bounding boxes, sized [M,4].
+def test_boxlist_iou():
+  a = boxlist_iou(BoxList(Tensor([[0, 0, 9, 9]]), image_size = (50, 50)), BoxList(Tensor([[0, 0, 4, 4]]), image_size = (50, 50)))
+  assert all(((a == .25)[0]).numpy())
 
-  Returns:
-    (tensor) iou, sized [N,M].
 
-  Reference:
-    https://github.com/chainer/chainercv/blob/master/chainercv/utils/bbox/bbox_iou.py
-  """
-  if boxlist1.size != boxlist2.size:
-    raise RuntimeError(
-      "boxlists should have same image size, got {}, {}".format(boxlist1, boxlist2))
-
-  N = len(boxlist1)
-  M = len(boxlist2)
-
-  area1 = boxlist1.area()
-  area2 = boxlist2.area()
-
+def boxlist_iou(boxlist1: BoxList, boxlist2: BoxList) -> Tensor:
+  # Compute the intersection over union of two set of boxes.
+  assert boxlist1.size == boxlist2.size, f"boxlists should have same image size, got {boxlist1}, {boxlist2}"
+  N, M = len(boxlist1), len(boxlist2)
+  area1, area2 = boxlist1.area(), boxlist2.area()
   box1, box2 = boxlist1.bbox, boxlist2.bbox
-
-  lt = torch.max(box1[:, None, :2], box2[:, :2])  # [N,M,2]
-  rb = torch.min(box1[:, None, 2:], box2[:, 2:])  # [N,M,2]
-
+  lt = Tensor.maximum(box1[:, None, :2], box2[:, :2])  # [N,M,2]
+  rb = Tensor.minimum(box1[:, None, 2:], box2[:, 2:])  # [N,M,2]
   TO_REMOVE = 1
-
-  wh = (rb - lt + TO_REMOVE).clamp(min=0)  # [N,M,2]
+  wh = (rb - lt + TO_REMOVE).maximum(0)  # [N,M,2]
   inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
 
   iou = inter / (area1[:, None] + area2 - inter)
@@ -147,3 +134,6 @@ class RPNLossComputation:
     )
 
     return objectness_loss, box_loss
+
+if __name__ == "__main__":
+  test_boxlist_iou()
