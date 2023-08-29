@@ -12,10 +12,12 @@ from tinygrad.shape.symbolic import Variable, NumNode, Node, MulNode, SumNode, D
 VariableOrNum = Union[Variable, NumNode, Node]
 
 class UOps(Enum):
+  SPECIAL = auto(); ENDLOOP = auto() # loops can be global, local, or other # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
   CONST = auto(); LOAD = auto(); STORE = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto() # noqa: E702
-  LOOP = auto(); ENDLOOP = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
+  LOOP = auto()  # loop is last
+  def __lt__(self, x): return self.value < x.value
 
 class UOp(NamedTuple):
   uop: UOps
@@ -224,30 +226,38 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
       raise NotImplementedError(f"can't render {u.uop}")
 
   # first, we fetch all the uops
-  seen = []
-  def visit(x):
-    if x in seen: return
-    seen.append(x)
-    for u in x.vin: visit(u)
-  for u in uops: visit(u)
   in_loops = 0
-  for x in seen:
+  seen = set()
+  srcs = []
+  children = defaultdict(list)
+  seen_end = defaultdict(int)
+  def visit(x):
+    nonlocal in_loops
+    if x in seen: return
     if x.uop == UOps.LOOP: in_loops += 1
     if x.uop == UOps.ENDLOOP: seen_end[x.vin[1]] += 1
+    if len(x.vin) == 0: srcs.append(x)
+    seen.add(x)
+    for u in x.vin:
+      children[u].append(x)
+      visit(u)
+  for u in uops: visit(u)
 
   # then we figure out which are renderable and do that, leaving loops for last
-  while len(seen):
-    rend, seen = partition(seen, lambda x: all(u in r for u in x.vin))
-    assert len(rend), "none to render"
-    rend_nl, rend_l = partition(rend, lambda x: x.uop != UOps.LOOP)
-    if not rend_nl:
-      rend_l = sorted(rend_l, key=lambda x: x.arg)
-      # we render one loop and see if it unlocks anything
-      r[rend_l[0]] = render_one(rend_l[0])
-      seen = rend_l[1:] + seen
+  while len(srcs):
+    srcs, srcs_loop = partition(srcs, lambda x: x.uop != UOps.LOOP)
+    if len(srcs):
+      srcs = sorted(srcs, key=lambda x: x.uop)
+      new_srcs = srcs_loop
     else:
-      for u in rend_nl: r[u] = render_one(u)
-      seen = rend_l + seen
+      # this is a loop rendering pass
+      srcs_loop = sorted(srcs_loop, key=lambda x: x.arg)
+      srcs, new_srcs = srcs_loop[0:1], srcs_loop[1:]
+    for u in srcs:
+      if u not in r and all(x in r for x in u.vin):
+        r[u] = render_one(u)
+        new_srcs += children[u]
+    srcs = new_srcs
 
   #globalz += ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   #src = f"#include <metal_stdlib>\nusing namespace metal;\nkernel void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements)  + '\n' + '}'*(in_loops+1-len(seen_end))
