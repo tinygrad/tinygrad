@@ -202,8 +202,7 @@ class Compiled:
     k = UAst(ast, output, self.linearizer_opts)
     k.hand_coded_optimizations()
     uast = k.linearize()
-    src = uops_to_cstyle2(k.function_name, uast)
-    global_size, local_size, binary = [], [], False
+    src, global_size, local_size, binary = uops_to_cstyle2(k.function_name, uast)
     prg = ASTRunner(k.function_name, src, global_size, local_size,
                     op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                     display_name=k.display_name, runtime_args={"binary": binary}).build(self.runtime)

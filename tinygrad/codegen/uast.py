@@ -15,8 +15,7 @@ class UOps(Enum):
   DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
   CONST = auto(); LOAD = auto(); STORE = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto() # noqa: E702
-  LOOP = auto(); ENDLOOP = auto() # loops can be global, local, or other # noqa: E702
-  def __lt__(self, x): return self.value < x.value
+  LOOP = auto(); ENDLOOP = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
 
 class UOp(NamedTuple):
   uop: UOps
@@ -36,14 +35,19 @@ def expand_node(idx:Node) -> List[Node]:
 class UAst(OptimizedKernel):
   @functools.lru_cache(None)
   def uop(self, uop:UOps, vin:Tuple[UOp], dtype:Optional[DType]=None, arg:Any=None) -> UOp:
-    #print(f"{str(uop):20s}: {len(vin)} {str(dtype):20s} {arg}")
     return UOp(uop, vin, dtype, arg)
 
   def uop_alu_idx(self, a, b, ops, ctx:UAst, op, dtype=dtypes.int32):
     return self.uop(UOps.ALU, (a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx)), dtype, op)
 
   def var_to_loop(self, var):
-    return self.uop(UOps.LOOP, tuple(), dtypes.int32, (var.expr,var.min,var.max))
+    if self.opts.has_local and var.expr.startswith("gidx"):
+      assert var.min == 0
+      return self.uop(UOps.SPECIAL, tuple(), dtypes.int32, ("global", int(var.expr[4:]), var.max+1))
+    elif self.opts.has_local and var.expr.startswith("lidx"):
+      assert var.min == 0
+      return self.uop(UOps.SPECIAL, tuple(), dtypes.int32, ("local", int(var.expr[4:])-(self.first_reduce-self.local_dims), var.max+1))
+    return self.uop(UOps.LOOP, tuple(), dtypes.int32, (var.expr,var.min,var.max+1))
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.var_to_loop(self),
                 NumNode: lambda self, ops, ctx: ctx.uop(UOps.CONST, tuple(), dtypes.int32, self.b),
@@ -106,7 +110,6 @@ class UAst(OptimizedKernel):
         if len(reduce_idxs):
           acc = self.uop(UOps.DEFINE_ACC, (), dtypes.float32, acc_count)
           acc_count += 1
-          #first = self.uop(UOps.ALU, (self.var_to_loop(reduce_idxs[0]), self.uop(UOps.CONST, (), dtypes.int32, reduce_idxs[0].min+1)), dtypes.bool, BinaryOps.CMPLT)
           first = functools.reduce(lambda a,b: self.uop(UOps.ALU, (a,b), dtypes.int32, BinaryOps.ADD), [self.var_to_loop(ri) for ri in reduce_idxs])
           phi = self.uop(UOps.ALU, (first, acc, self.uop(UOps.CONST, tuple(), dtypes.float32, float('-inf') if x.op == ReduceOps.MAX else 0)), dtypes.float32, TernaryOps.WHERE)
           vin += (phi, )
@@ -114,15 +117,15 @@ class UAst(OptimizedKernel):
         ret = functools.reduce(lambda a,b: self.uop(UOps.ALU, (a,b), dtypes.float32, BinaryOps.MAX if x.op == ReduceOps.MAX else BinaryOps.ADD), vin)
         if len(reduce_idxs):
           ret = self.uop(UOps.STORE, (acc, ret), dtypes.float32)
-          for ri in reduce_idxs:
+          for ri in reduce_idxs[::-1]:
             ret = self.uop(UOps.ENDLOOP, (ret, self.var_to_loop(ri)), dtypes.float32)
         return ret
-        #return self.uop(UOps.PHI, (acc, ret, self.var_to_loop(reduce_idxs[0])), dtypes.float32) if len(reduce_idxs) else ret
       else:
         vin = tuple(ast_parse(v, idxs) for v in x.src)
-        assert all_same([x.dtype for x in vin])
+        # TODO: reenable this at some point
+        #assert all_same([x.dtype for x in vin])
         if x.op == UnaryOps.NOOP: return vin[0]
-        if x.op == UnaryOps.CAST: return self.uop(UOps.CAST, vin, x.arg)
+        if x.op == UnaryOps.CAST: return self.uop(UOps.CAST, vin, x.arg[0], x.arg[1])
         return self.uop(UOps.ALU, vin, vin[0].dtype, x.op)
 
     sinks = []
@@ -159,6 +162,8 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
   statements: List[str] = []  # LOOP, LOAD, STORE
   globalz: List[Optional[str]] = []
   seen_end = defaultdict(int)
+  global_size = []
+  local_size = []
 
   c = defaultdict(int)
   def ssa(prefix="t"):
@@ -172,13 +177,25 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
       if u.arg == float("inf"): return "INFINITY"
       if u.arg == float("-inf"): return "-INFINITY"
       if math.isnan(u.arg): return "NAN"
-      return str(u.arg)
+      return f"{float(u.arg)}f" if dtypes.is_float(u.dtype) else f"{int(u.arg)}"
+    elif u.uop == UOps.SPECIAL:
+      if u.arg[0] == "global":
+        global_size.append(u.arg[2])
+        return f"((int)gid.{'xyz'[u.arg[1]]})"
+      elif u.arg[0] == "local":
+        local_size.append(u.arg[2])
+        return f"((int)lid.{'xyz'[u.arg[1]]})"
+      else:
+        raise NotImplementedError(f"no special {u.arg[0]}")
+    elif u.uop == UOps.CAST:
+      return r[u.vin[0]]
     elif u.uop == UOps.LOOP:
-      statements.append(f"for (int {u.arg[0]} = {u.arg[1]}; {u.arg[0]} <= {u.arg[2]}; {u.arg[0]}++) {{")
+      statements.append(f"for (int {u.arg[0]} = {u.arg[1]}; {u.arg[0]} < {u.arg[2]}; {u.arg[0]}++) {{")
       return u.arg[0]
     elif u.uop == UOps.ALU: return lang.code_for_op[u.arg](*[r[x] for x in u.vin])
     elif u.uop == UOps.DEFINE_GLOBAL:
       globalz += [None] * (u.arg+1-len(globalz))
+      #globalz[u.arg] = f"device float *data{u.arg}"
       globalz[u.arg] = f"float *data{u.arg}"
       return f"data{u.arg}"
     elif u.uop == UOps.ENDLOOP:
@@ -187,7 +204,6 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
       return r[u.vin[0]]
     elif u.uop == UOps.DEFINE_ACC:
       tok = ssa("acc")
-      #statements.append(f"{u.dtype.name} {tok} = {r[u.vin[0]]};")
       statements.append(f"{u.dtype.name} {tok};")
       return tok
     elif u.uop == UOps.LOAD:
@@ -233,6 +249,8 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
       for u in rend_nl: r[u] = render_one(u)
       seen = rend_l + seen
 
+  #globalz += ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
+  #src = f"#include <metal_stdlib>\nusing namespace metal;\nkernel void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements)  + '\n' + '}'*(in_loops+1-len(seen_end))
   src = f"void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements)  + '\n' + '}'*(in_loops+1-len(seen_end))
-  return src
+  return src, global_size[::-1], local_size[::-1], False
 
