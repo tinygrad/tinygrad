@@ -9,7 +9,8 @@ from collections import namedtuple
 
 from tqdm import tqdm
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes, GlobalCounters
+from tinygrad.ops import Device
+from tinygrad.helpers import dtypes, GlobalCounters, Timing
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from extra.utils import download_file
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
@@ -566,6 +567,7 @@ if __name__ == "__main__":
   parser.add_argument('--out', type=str, default=os.path.join(tempfile.gettempdir(), "rendered.png"), help="Output filename")
   parser.add_argument('--noshow', action='store_true', help="Don't show the image")
   parser.add_argument('--fp16', action='store_true', help="Cast the weights to float16")
+  parser.add_argument('--timing', action='store_true', help="Print timing per step")
   args = parser.parse_args()
 
   Tensor.no_grad = True
@@ -638,7 +640,10 @@ if __name__ == "__main__":
   for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
     GlobalCounters.reset()
     t.set_description("%3d %3d" % (index, timestep))
-    latent = do_step(latent, Tensor([timestep]))
+    with Timing("step in ", enabled=args.timing):
+      latent = do_step(latent, Tensor([timestep]))
+      if args.timing: Device[Device.DEFAULT].synchronize()
+  del do_step
 
   # upsample latent space to image with autoencoder
   x = model.first_stage_model.post_quant_conv(1/0.18215 * latent)
