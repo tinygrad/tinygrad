@@ -20,8 +20,10 @@ jobs:
       run: python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+      shell: bash
     - name: Run Tensor Core GEMM
       run: DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
+      shell: bash
     - name: Run Stable Diffusion
       run: |
         ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
@@ -32,14 +34,17 @@ jobs:
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
         JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+      shell: bash
     - name: Run GPT2
       run: |
         python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
         JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
+      shell: bash
     - name: Run 10 CIFAR training steps
       run: |
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
         STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+      shell: bash
     - uses: actions/upload-artifact@v3
       with:
         name: Speed (Mac)
@@ -66,8 +71,10 @@ jobs:
       run: python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+      shell: bash
     - name: Run Tensor Core GEMM
       run: HIP=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
+      shell: bash
     - name: Run Stable Diffusion
       run: |
         ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
@@ -78,14 +85,17 @@ jobs:
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
         JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+      shell: bash
     - name: Run GPT2
       run: |
         python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
         JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
+      shell: bash
     - name: Run 10 CIFAR training steps
       run: |
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
         STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+      shell: bash
     - uses: actions/upload-artifact@v3
       with:
         name: Speed (AMD)
