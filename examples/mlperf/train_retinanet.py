@@ -1,7 +1,6 @@
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, Context
+from tinygrad.helpers import getenv
 from typing import Any
-from tinygrad.helpers import getenv, Context, dtypes
 from models.retinanet import RetinaNet
 from models.resnet import ResNeXt50_32X4D
 from extra.datasets import openimages
@@ -17,7 +16,7 @@ import torch
 from examples.hlb_cifar10 import cross_entropy
 from torchvision.models.detection.retinanet import retinanet_resnet50_fpn_v2 as TorchRN
 from typing import List, Tuple
-
+from extra.training import focal_loss, smooth_l1_loss
 NUM = getenv("NUM", 2)
 BS = getenv("BS", 8)
 CNT = getenv("CNT", 10)
@@ -25,7 +24,7 @@ BACKWARD = getenv("BACKWARD", 0)
 TRAINING = getenv("TRAINING", 1)
 ADAM = getenv("ADAM", 0)
 CLCACHE = getenv("CLCACHE", 0)
-IMAGE_SIZES = {"debug" : (100,100), "mlperf" : (800,800)}
+IMAGE_SIZES = {"debug" : (200,200), "mlperf" : (800,800)}
 
 def resize_box_based_on_new_image_size(box: List[float], img_old_size: Tuple[int], img_new_size: Tuple[int]) -> List[float]:
   ratio_height, ratio_width = [new / orig for new, orig in zip(img_new_size[:2], img_old_size[:2])]
@@ -101,12 +100,16 @@ class RetinaNetTrainer:
         self.input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
         self.input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
         self.dataset = COCO(openimages())
-        self.image_size = IMAGE_SIZES["mlperf"]
+        self.image_size = IMAGE_SIZES["debug"]
     def get_ground_truths(self, anchors, annotations, n_classes):
         #TODO tensorize this function for lazyness exploitation
         #TODO rescale bboxes to transformed size
         batch_size = len(annotations)
-        regression_targets, classification_targets = np.zeros((batch_size, len(anchors), 4), dtype=np.float32), np.zeros((batch_size, len(anchors), n_classes), dtype=np.float32)
+        regression_targets = np.zeros((batch_size, len(anchors), 4), dtype=np.float32)
+        classification_targets = np.zeros((batch_size, len(anchors), n_classes), dtype=np.float32)
+
+        regression_masks = np.zeros((batch_size, len(anchors)), dtype=np.float32)
+        classification_masks = np.zeros((batch_size, len(anchors)), dtype=np.float32)
         for i in range(batch_size):
             ann_boxes, ann_labels = annotations[i]['boxes'], annotations[i]['labels']
             assert len(ann_boxes) > 0
@@ -114,7 +117,6 @@ class RetinaNetTrainer:
             ann_boxes = np.array([resize_box_based_on_new_image_size(box, 
                                 img_old_size=annotations[i]['image_size'], 
                                 img_new_size=self.image_size) for box in ann_boxes])
-            print(ann_boxes)
             fg_bg_mat = foreground_background_matrix(anchors, ann_boxes)
             #fg_bg_mat[anchor_idx, ann_box_idx]
             
@@ -123,10 +125,14 @@ class RetinaNetTrainer:
             #fg_bg_mat==0 is skipped as paper states
             matched_anchor_idxs = foreground_idxs[:,0]
             matched_ann_box_idxs = foreground_idxs[:,1]
+            unmatched_anchor_idxs = background_idxs[:,0]
+            #[iou(anch,ann_box)>=0.5 for (anch, ann_box) in zip(anchors[matched_anchor_idxs], ann_boxes[matched_ann_box_idxs, :])].sum()
             regression_targets[i, matched_anchor_idxs, :] = bbox_transform(anchors[matched_anchor_idxs], ann_boxes[matched_ann_box_idxs, :])
             classification_targets[i, matched_anchor_idxs, ann_labels[matched_ann_box_idxs].astype(int)] = 1
+            regression_masks[i, matched_anchor_idxs] = 1
+            classification_masks[i, np.concatenate((matched_anchor_idxs,unmatched_anchor_idxs))] = 1
                    
-        return {"regression_targets": regression_targets, "classification_targets": classification_targets}
+        return {"regression_targets": regression_targets, "classification_targets": classification_targets, "regression_masks": regression_masks, "classification_masks": classification_masks}
         
     def train(self):
         NUM = getenv("NUM", 2)
@@ -152,22 +158,30 @@ class RetinaNetTrainer:
         Tensor.training = TRAINING
         Tensor.no_grad = not BACKWARD
         for x, annotations in iterate(self.dataset, BS):
-            optimizer.zero_grad()
             targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
+            optimizer.zero_grad()
             #self.resize_images_and_bboxes(x, annotations, self.image_size)
             resized = [Image.fromarray(image) for image in x]
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
             images = Tensor(resized)
-            #images_pt = [torch.tensor(image) for image in resized]
-            #retina_pt.training = False
-            #es_pt = retina_pt.forward(images_pt)
 
             head_outputs = retina(self.input_fixup(images)).numpy()
-            box_regs = head_outputs[:, :, :4] # anchors??
-            cls_preds = head_outputs[:, :, 4:]
-            #targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
-            ground_truth_boxes, ground_truth_clss = targets["regression_targets"], targets["classification_targets"]
+
+            total_loss = 0
+            for img_idx in range(BS):
+                #TODO tensorize, increase mask exploitation, don't use fors
+                box_regs = head_outputs[img_idx, :, :4] # anchors??
+                cls_preds = head_outputs[img_idx, :, 4:]
+                ground_truth_boxes, ground_truth_clss = targets["regression_targets"][img_idx], targets["classification_targets"][img_idx]
+                cls_targets_idxs = np.argwhere(targets["classification_masks"][img_idx]==1)
+                reg_targets_idxs = np.argwhere(targets["regression_masks"][img_idx]==1)
+
+                box_reg_losses = [smooth_l1_loss(Tensor(box_regs[target_box_idx]), Tensor(ground_truth_boxes[target_box_idx]), beta = 0.11, reduction="sum").numpy() for target_box_idx in reg_targets_idxs]
+                focal_losses = [focal_loss(Tensor(cls_preds[target_cls_idx]), Tensor(ground_truth_clss[target_cls_idx])).numpy() for target_cls_idx in cls_targets_idxs]
+                #TODO use reductions instead
+                total_loss += sum(focal_losses) + sum(box_reg_losses)     
             
+                    
 
     def resize_images_and_bboxes(self, images, annotations, new_size):
         images = [Image.fromarray(image) for image in images]
