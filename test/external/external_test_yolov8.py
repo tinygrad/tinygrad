@@ -46,7 +46,7 @@ class TestYOLOv8(unittest.TestCase):
 
     download_file(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{variant}.pt', weights_location_pt)
     # the ultralytics export prints a lot of unneccesary things
-    if not os.path.isfile(weights_location_onnx):
+    if not weights_location_onnx.is_file():
       model = ultralytics.YOLO(model=weights_location_pt, task='Detect')
       model.export(format="onnx",imgsz=[640, 480])
 

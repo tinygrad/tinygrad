@@ -1,6 +1,6 @@
 # original implementation: https://github.com/svc-develop-team/so-vits-svc
 from __future__ import annotations
-import sys, os, logging, time, io, math, argparse, operator, numpy as np
+import sys, logging, time, io, math, argparse, operator, numpy as np
 from functools import partial, reduce
 from pathlib import Path
 from typing import Tuple, Optional, Type
@@ -468,14 +468,14 @@ def repeat_expand_2d_left(content, target_len): # content : [h, t]
   return Tensor.stack(cols).transpose(0, 1)
 
 def load_fairseq_cfg(checkpoint_path):
-  assert os.path.isfile(checkpoint_path)
+  assert Path(checkpoint_path).is_file()
   state = torch_load(checkpoint_path)
   cfg = state["cfg"] if ("cfg" in state and state["cfg"] is not None) else None
   if cfg is None: raise RuntimeError(f"No cfg exist in state keys = {state.keys()}")
   return HParams(**cfg)
 
 def load_checkpoint_enc(checkpoint_path, model: ContentVec, optimizer=None, skip_list=[]):
-  assert os.path.isfile(checkpoint_path)
+  assert Path(checkpoint_path).is_file()
   start_time = time.time()
   checkpoint_dict = torch_load(checkpoint_path)
   saved_state_dict = checkpoint_dict['model']
@@ -600,7 +600,7 @@ if __name__=="__main__":
 
   ### Loading audio and slicing ###
   if audio_path == DEMO_PATH: download_if_not_present(DEMO_PATH, DEMO_URL)
-  assert os.path.isfile(audio_path) and Path(audio_path).suffix == ".wav"
+  assert Path(audio_path).is_file() and Path(audio_path).suffix == ".wav"
   chunks = preprocess.cut(audio_path, db_thresh=slice_db)
   audio_data, audio_sr = preprocess.chunks2audio(audio_path, chunks)
 

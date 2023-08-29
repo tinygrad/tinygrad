@@ -1,4 +1,4 @@
-import json, logging, math, os, re, sys, time, wave, argparse, numpy as np
+import json, logging, math, re, sys, time, wave, argparse, numpy as np
 from functools import reduce
 from pathlib import Path
 from typing import List
@@ -522,7 +522,7 @@ def load_model(symbols, hps, model) -> Synthesizer:
   _ = load_checkpoint(weights_path, net_g, None)
   return net_g
 def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None, skip_list=[]):
-  assert os.path.isfile(checkpoint_path)
+  assert Path(checkpoint_path).is_file()
   start_time = time.time()
   checkpoint_dict = torch_load(checkpoint_path)
   iteration, learning_rate = checkpoint_dict['iteration'], checkpoint_dict['learning_rate']
@@ -556,7 +556,7 @@ def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None, skip_li
   return model, optimizer, learning_rate, iteration
 
 def download_if_not_present(file_path: Path, url: str):
-  if not os.path.isfile(file_path):
+  if not Path(file_path).is_file():
     logging.info(f"Did not find {file_path}, downloading...")
     download_file(url, file_path)
   return file_path
