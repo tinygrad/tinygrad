@@ -28,8 +28,9 @@ class TinyJit:
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
     if self.cnt >= 2:
-      try: var_vals = kwargs["jit_ctx"]
-      except KeyError: var_vals = dict(sorted(merge_dicts([arg.lazydata.st.var_vals for arg in args if arg.__class__ is Tensor]).items(), key=lambda kv: kv[0].key))
+      try: var_vals: Dict[Variable, int] = kwargs["jit_ctx"]
+      except KeyError: var_vals = merge_dicts([arg.lazydata.st.var_vals for arg in args if arg.__class__ is Tensor])
+      if len(var_vals) > 1: var_vals = dict(sorted(var_vals.items(), key=lambda kv: kv[0].key))
       for (j,i),(input_name, expected_st, expected_type) in self.input_replace.items():
         assert input_rawbuffers[input_name][0].dtype == expected_type, f"type mismatch in JIT, {input_rawbuffers[input_name][0].dtype} != {expected_type}"
         # NOTE: if we pass jit_ctx instead of using reshape to update the var_vals, we cannot compare the shapetracker directly
