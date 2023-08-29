@@ -1,11 +1,12 @@
 from __future__ import annotations
 import functools, math, itertools
+from collections import defaultdict
 from typing import NamedTuple, Optional, List, Any, Tuple, cast, Sequence, Union, Dict, Set
 from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawConst
-from tinygrad.helpers import dtypes, DEBUG, DType, all_same, getenv, colored, PtrDType
+from tinygrad.helpers import dtypes, DEBUG, DType, all_same, getenv, colored, PtrDType, partition
 from enum import Enum, auto
 from tinygrad.shape.symbolic import Variable, NumNode, Node, MulNode, SumNode, DivNode, ModNode, LtNode, AndNode
 VariableOrNum = Union[Variable, NumNode, Node]
@@ -21,7 +22,7 @@ class UOp(NamedTuple):
   vin: Tuple[UOp]
   dtype: Optional[DType]
   arg: Any
-  def __repr__(self): return str(self.uop).replace('UOps.', '') + "\n" + (f"{self.arg}\n" if self.arg else "") + str(self.dtype)
+  def __repr__(self): return str(self.uop).replace('UOps.', '') + "\n" + (f"{self.arg}\n" if self.arg is not None else "") + str(self.dtype)
 
 # TODO: generic visitor pattern?
 def expand_node(idx:Node) -> List[Node]:
@@ -89,9 +90,11 @@ class UAst(OptimizedKernel):
         nidxs += [(i1 if i2==i3 else i2) for i1,i2,i3 in zip(idxs[len(nidxs):], full_upcast_idxs, upcast_idxs)]
         expanded_nodes = [expand_node(idx) for idx in nidxs]
         lreduce_idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
+        acc = self.uop(UOps.DEFINE_ACC, (self.uop(UOps.CONST, tuple(), dtypes.float32, 0), ), dtypes.float32)
         vin = tuple(ast_parse(x.src[0], lidxs) for lidxs in lreduce_idxs)
         # NOTE: this determines the order of these when it doesn't have to
-        return functools.reduce(lambda a,b: self.uop(UOps.ALU, (a,b), dtypes.float32, BinaryOps.ADD), vin)
+        ret = functools.reduce(lambda a,b: self.uop(UOps.ALU, (a,b), dtypes.float32, BinaryOps.ADD), (acc,) + vin)
+        return self.uop(UOps.ENDLOOP, (acc, ret))
       else:
         vin = tuple(ast_parse(v, idxs) for v in x.src)
         assert all_same([x.dtype for x in vin])
@@ -130,38 +133,47 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
   r: Dict[UOp, Optional[str]] = {}
   statements: List[str] = []  # LOOP, LOAD, STORE
   globalz: List[Optional[str]] = []
-  c = -1
-  def ssa():
+  c = defaultdict(int)
+  def ssa(prefix="t"):
     nonlocal c
-    c += 1
-    return f"t{c}"
+    c[prefix] += 1
+    return f"{prefix}{c[prefix]-1}"
   def render_one(u:UOp) -> Optional[str]:
     nonlocal globalz
+    print(u.uop, u.dtype, u.arg)
     if u.uop == UOps.CONST: return str(u.arg)
-    if u.uop == UOps.LOOP:
-      statements.append(f"for (int {u.arg[0]} = {u.arg[1]}; {u.arg[0]} < {u.arg[2]}; {u.arg[0]}++) {{")
+    elif u.uop == UOps.LOOP:
+      statements.append(f"for (int {u.arg[0]} = {u.arg[1]}; {u.arg[0]} <= {u.arg[2]}; {u.arg[0]}++) {{")
       return u.arg[0]
-    if u.uop == UOps.ALU: return lang.code_for_op[u.arg](*[r[x] for x in u.vin])
-    if u.uop == UOps.DEFINE_GLOBAL:
+    elif u.uop == UOps.ENDLOOP:
+      statements.append(f"{r[u.vin[0]]} = {r[u.vin[1]]};")
+      return r[u.vin[0]]
+    elif u.uop == UOps.ALU: return lang.code_for_op[u.arg](*[r[x] for x in u.vin])
+    elif u.uop == UOps.DEFINE_GLOBAL:
       globalz += [None] * (u.arg+1-len(globalz))
       globalz[u.arg] = f"float *data{u.arg}"
       return f"data{u.arg}"
-    if u.uop == UOps.LOAD:
-      tok = ssa()
+    elif u.uop == UOps.DEFINE_ACC:
+      tok = ssa("acc")
+      statements.append(f"{u.dtype.name} {tok} = {r[u.vin[0]]};")
+      return tok
+    elif u.uop == UOps.LOAD:
+      tok = ssa("val")
       statements.append(f"{u.dtype.name} {tok} = {r[u.vin[0]]}[{r[u.vin[1]]}];")
       return tok
-    if u.uop == UOps.STORE:
+    elif u.uop == UOps.STORE:
       statements.append(f"{r[u.vin[0]]}[{r[u.vin[1]]}] = {r[u.vin[2]]};")
       return None
-
-    print(u.uop, u.dtype, u.arg)
+    else:
+      raise NotImplementedError(f"can't render {u.uop}")
 
   def render(a:List[UOp], in_loops:Set[UOp]) -> Set[UOp]:
     prereqs = tuple()
-    for u in a:
-      prereqs += u.vin
+    for u in a: prereqs += u.vin
     if prereqs:
-      in_loops = render(prereqs, in_loops)
+      p_nl, p_l = partition(prereqs, lambda x: x.uop != UOps.LOOP)
+      in_loops = render(p_nl, in_loops)
+      in_loops = render(p_l, in_loops)
     for u in a:
       if u.uop == UOps.LOOP:
         in_loops.add(u)
@@ -170,7 +182,6 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
     return in_loops
 
   in_loops = render(uops, set())
-  src = f"void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements) + '\n' + '}'*len(in_loops) + " /* end loops */\n}"
-  print(src)
+  src = f"void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements) + '\n' + '}'*(len(in_loops)+1)
   return src
 

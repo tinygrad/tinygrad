@@ -216,7 +216,6 @@ class Compiled:
                     op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                     display_name=k.display_name, runtime_args={"binary": binary}).build(self.runtime)
 
-
     """
     from tinygrad.codegen.linearizer import Linearizer
     k = Linearizer(ast, output, self.linearizer_opts)
@@ -233,9 +232,9 @@ class Compiled:
       prg = self.method_cache[k.key]
     else:
       prg = get_program()
+    """
 
-    if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
+    #if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
     prg.exec(k.bufs, var_vals=output.st.var_vals)
-    """
     return output.realized
