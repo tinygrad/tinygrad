@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools, math, itertools
-from typing import NamedTuple, Optional, List, Any, Tuple, cast, Sequence, Union, Dict
+from typing import NamedTuple, Optional, List, Any, Tuple, cast, Sequence, Union, Dict, Set
 from tinygrad.ops import ReduceOps, BinaryOps, LazyOp
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.lazy import LazyBuffer
@@ -67,7 +67,7 @@ class UAst(OptimizedKernel):
     self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) if isinstance(x, int) else sym_rename(x) for x in self.full_shape])
     self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
-    global_bufs = [self.uop(UOps.DEFINE_GLOBAL, tuple(), PtrDType(buf.dtype), name) for buf,name in self.arg_bufs.items()]
+    global_bufs = [self.uop(UOps.DEFINE_GLOBAL, tuple(), PtrDType(buf.dtype), i) for i,buf in enumerate(self.arg_bufs.keys())]
 
     # define Variables
     global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
@@ -129,40 +129,48 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
   lang = CStyleLanguage()
   r: Dict[UOp, Optional[str]] = {}
   statements: List[str] = []  # LOOP, LOAD, STORE
+  globalz: List[Optional[str]] = []
   c = -1
   def ssa():
     nonlocal c
     c += 1
     return f"t{c}"
   def render_one(u:UOp) -> Optional[str]:
+    nonlocal globalz
     if u.uop == UOps.CONST: return str(u.arg)
     if u.uop == UOps.LOOP:
       statements.append(f"for (int {u.arg[0]} = {u.arg[1]}; {u.arg[0]} < {u.arg[2]}; {u.arg[0]}++) {{")
       return u.arg[0]
     if u.uop == UOps.ALU: return lang.code_for_op[u.arg](*[r[x] for x in u.vin])
-    if u.uop == UOps.DEFINE_GLOBAL: return u.arg
+    if u.uop == UOps.DEFINE_GLOBAL:
+      globalz += [None] * (u.arg+1-len(globalz))
+      globalz[u.arg] = f"float *data{u.arg}"
+      return f"data{u.arg}"
     if u.uop == UOps.LOAD:
       tok = ssa()
-      statements.append(f"{u.dtype.name} {tok} = {r[u.vin[0]]}[{r[u.vin[1]]}]")
+      statements.append(f"{u.dtype.name} {tok} = {r[u.vin[0]]}[{r[u.vin[1]]}];")
       return tok
     if u.uop == UOps.STORE:
-      statements.append(f"{r[u.vin[0]]}[{r[u.vin[1]]}] = {r[u.vin[2]]}")
+      statements.append(f"{r[u.vin[0]]}[{r[u.vin[1]]}] = {r[u.vin[2]]};")
       return None
 
     print(u.uop, u.dtype, u.arg)
 
-  def render(a:List[UOp]):
+  def render(a:List[UOp], in_loops:Set[UOp]) -> Set[UOp]:
     prereqs = tuple()
     for u in a:
       prereqs += u.vin
-    if prereqs: render(prereqs)
+    if prereqs:
+      in_loops = render(prereqs, in_loops)
     for u in a:
+      if u.uop == UOps.LOOP:
+        in_loops.add(u)
       if u not in r:
         r[u] = render_one(u)
-  render(uops)
+    return in_loops
 
-  print('\n'.join(statements))
-
-
-  return "test"
+  in_loops = render(uops, set())
+  src = f"void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements) + '\n' + '}'*len(in_loops) + " /* end loops */\n}"
+  print(src)
+  return src
 
