@@ -2,6 +2,7 @@ import pickle
 import numpy as np
 from tqdm import tqdm
 import tempfile, platform, os
+from pathlib import Path
 from collections import defaultdict
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
 from tinygrad.ops import GlobalCounters
@@ -11,7 +12,7 @@ from tinygrad.shape.shapetracker import strides_for_shape
 OSX = platform.system() == "Darwin"
 WINDOWS = platform.system() == "Windows"
 
-def temp(x:str) -> str: return os.path.join(tempfile.gettempdir(), x)
+def temp(x:str) -> str: return str(Path(tempfile.gettempdir()) / x)
 
 def fetch(url):
   if url.startswith("/") or url.startswith("."):

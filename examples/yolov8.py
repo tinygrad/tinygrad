@@ -6,7 +6,6 @@ from extra.utils import get_child, fetch, download_file
 from pathlib import Path
 import cv2
 from collections import defaultdict
-import os
 import time, io, sys
 from tinygrad.nn.state import safe_load, load_state_dict
 
@@ -398,13 +397,12 @@ if __name__ == '__main__':
   yolo_variant = sys.argv[2] if len(sys.argv) >= 3 else (print("No variant given, so choosing 'n' as the default. Yolov8 has different variants, you can choose from ['n', 's', 'm', 'l', 'x']") or 'n')
   print(f'running inference for YOLO version {yolo_variant}')
 
-  output_folder_path = './outputs_yolov8'
-  if not os.path.exists(output_folder_path):
-    os.makedirs(output_folder_path)
+  output_folder_path = Path('./outputs_yolov8')
+  output_folder_path.mkdir(parents=True, exist_ok=True)
   #absolute image path or URL
   image_location = [np.frombuffer(io.BytesIO(fetch(img_path)).read(), np.uint8)]
   image = [cv2.imdecode(image_location[0], 1)]
-  out_paths = [os.path.join(output_folder_path, img_path.split("/")[-1].split('.')[0] + "_output" + '.' + img_path.split("/")[-1].split('.')[1])]
+  out_paths = [output_folder_path / img_path.split("/")[-1].split('.')[0] + "_output" + '.' + img_path.split("/")[-1].split('.')[1]]
   if not isinstance(image[0], np.ndarray):
     print('Error in image loading. Check your image file.')
     sys.exit(1)
