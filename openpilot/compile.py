@@ -18,6 +18,7 @@ import numpy as np
 
 import tinygrad.graph as graph
 from tinygrad.ops import GlobalCounters
+from tinygrad.jit import TinyJit, CacheCollector
 
 import pyopencl as cl
 from tinygrad.runtime.ops_gpu import CL
@@ -25,7 +26,7 @@ from extra.utils import fetch
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 
-OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/6c5693e965b9c63f8678f52b9e9b5abe35f23feb/selfdrive/modeld/models/supercombo.onnx"
+OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
 np.random.seed(1337)
 def get_random_input_tensors(input_shapes):
@@ -34,13 +35,11 @@ def get_random_input_tensors(input_shapes):
   np_inputs = {k:v.realize().numpy() for k,v in inputs.items()}
   return inputs, np_inputs
 
-from tinygrad.jit import TinyJit
-
 @TinyJit
 def model_exec(run_onnx, using_graph, **inputs):
   ret = next(iter(run_onnx(inputs).values())).cast(dtypes.float32)
   GlobalCounters.reset()
-  GlobalCounters.cache = []  # don't cache pre-realize
+  CacheCollector.start() # don't cache pre-realize
   if using_graph: graph.GRAPH = True
   print("realizing")
   return ret.realize()

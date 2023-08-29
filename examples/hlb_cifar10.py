@@ -215,20 +215,14 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   Tensor.training = True
   rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
 
-  if getenv("FAKEDATA"):
-    N = 2048
-    X_train = np.random.default_rng().standard_normal(size=(N, 3, 32, 32), dtype=np.float32)
-    Y_train = np.random.randint(0,10,size=(N), dtype=np.int32)
-    X_test, Y_test = X_train, Y_train
-  else:
-    X_train, Y_train, X_test, Y_test = fetch_cifar()
-    # load data and label into GPU and convert to dtype accordingly
-    X_train, X_test = X_train.to(device=Device.DEFAULT).float(), X_test.to(device=Device.DEFAULT).float()
-    Y_train, Y_test = Y_train.to(device=Device.DEFAULT).float(), Y_test.to(device=Device.DEFAULT).float()
-    # one-hot encode labels
-    Y_train, Y_test = Tensor.eye(10)[Y_train], Tensor.eye(10)[Y_test]
-    # preprocess data
-    X_train, X_test = X_train.sequential(transform), X_test.sequential(transform)
+  X_train, Y_train, X_test, Y_test = fetch_cifar()
+  # load data and label into GPU and convert to dtype accordingly
+  X_train, X_test = X_train.to(device=Device.DEFAULT).float(), X_test.to(device=Device.DEFAULT).float()
+  Y_train, Y_test = Y_train.to(device=Device.DEFAULT).float(), Y_test.to(device=Device.DEFAULT).float()
+  # one-hot encode labels
+  Y_train, Y_test = Tensor.eye(10)[Y_train], Tensor.eye(10)[Y_test]
+  # preprocess data
+  X_train, X_test = X_train.sequential(transform), X_test.sequential(transform)
 
   # precompute whitening patches
   W = whitening(X_train)

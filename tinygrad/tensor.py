@@ -38,7 +38,6 @@ class Tensor:
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
-
   def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     device = Device.canonicalize(device)
@@ -51,25 +50,18 @@ class Tensor:
 
     # internal variables used for autograd graph construction
     self._ctx: Optional[Function] = None
-    if isinstance(data, LazyBuffer):
-      assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-      self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
-      return
-
-    if isinstance(data, (int, float)):
+    if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
+    elif isinstance(data, (int, float)):
       self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
       return
-
-    if data.__class__ is list:
+    elif data.__class__ is list:
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
-      data = np.array(data, dtype=(dtype or Tensor.default_type).np)
-
-    if isinstance(data, np.ndarray):
+      data = LazyBuffer.fromCPU(np.array(data, dtype=(dtype or Tensor.default_type).np))
+    elif isinstance(data, np.ndarray):
       data = LazyBuffer.fromCPU(data)
-      self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
-      return
+    else: raise RuntimeError(f"can't create Tensor from {data}")
 
-    raise RuntimeError(f"can't create Tensor from {data}")
+    self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
 
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
@@ -179,7 +171,9 @@ class Tensor:
   def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
 
   @staticmethod
-  def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor: return ((high-low) * Tensor.rand(*shape, **kwargs)) + low
+  def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor:
+    dtype = kwargs.pop("dtype", Tensor.default_type)
+    return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype) + low
 
   @staticmethod
   def scaled_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul(math.prod(shape)**-0.5)
@@ -668,7 +662,7 @@ class Tensor:
     return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
 
   def dropout(self, p=0.5) -> Tensor:
-    if not Tensor.training: return self
+    if not Tensor.training or p == 0: return self
     mask = (Tensor.rand(*self.shape, requires_grad=False, device=self.device) >= p).cast(dtypes.bool)
     return self * mask * (1/(1.0 - p))
 

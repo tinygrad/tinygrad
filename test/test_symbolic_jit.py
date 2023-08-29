@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor, Device
 import numpy as np
 
 @unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
-@unittest.skipUnless(Device.DEFAULT in ["GPU", "METAL", "CLANG", "CUDA"], f"{Device.DEFAULT} is not supported")
+@unittest.skipUnless(Device.DEFAULT in ["GPU", "METAL", "CLANG", "CUDA", "LLVM"], f"{Device.DEFAULT} is not supported")
 class TestSymbolicJit(unittest.TestCase):
   def test_plus1(self):
     def f(a): return (a+1).realize()
@@ -58,7 +58,6 @@ class TestSymbolicJit(unittest.TestCase):
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert len(jf.jit_cache) == 2
 
-  @unittest.skipIf(Device.DEFAULT == "CLANG", "broken on CLANG CI")
   def test_attention(self):
     def f(q, k, v): return Tensor.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)).realize()
     jf = TinyJit(f)
