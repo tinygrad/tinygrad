@@ -421,7 +421,6 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
         self.assertRaises(NotImplementedError, node.expand)
 
     test_non_expandable_nodes_recursive(Node)
-    assert False
     
 
 if __name__ == '__main__':
