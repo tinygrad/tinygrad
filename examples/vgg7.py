@@ -76,11 +76,11 @@ def load_and_save(path, save):
 
 if cmd == "import":
   src = sys.argv[2]
-  model = Path(sys.argv[3])
+  model = sys.argv[3]
 
   vgg7.load_waifu2x_json(json.load(open(src, "rb")))
 
-  model.mkdir(exist_ok=True)
+  Path(model).mkdir(exist_ok=True)
   load_and_save(model, True)
 elif cmd == "execute":
   model = sys.argv[2]
@@ -99,9 +99,9 @@ elif cmd == "execute_full":
 
   image_save(out_file, vgg7.forward_tiled(image_load(in_file), 156))
 elif cmd == "new":
-  model = Path(sys.argv[2])
+  model = sys.argv[2]
 
-  model.mkdir(exist_ok=True)
+  Path(model).mkdir(exist_ok=True)
   load_and_save(model, True)
 elif cmd == "train":
   model = sys.argv[2]
