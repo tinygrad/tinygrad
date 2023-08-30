@@ -1,6 +1,7 @@
 from __future__ import annotations
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 import functools
+import itertools
 from math import gcd
 from tinygrad.helpers import partition
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
@@ -10,7 +11,7 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
 
 def is_sym_int(x: Any) -> bool: return isinstance(x, (int, Node))
 
-class Node:
+class Node(ABC):
   b: Union[Node, int]
   min: int
   max: int
@@ -21,6 +22,8 @@ class Node:
     if strip_parens and ret[0] == '(' and ret[-1] == ')': ret = ret[1:-1]
     return ret
   def vars(self): return []
+  def expand(self) -> List[Node]:
+    raise NotImplementedError(self.__class__.__name__)
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
   @functools.cached_property
@@ -149,6 +152,7 @@ class Variable(Node):
   def __init__(self, expr:Optional[str], nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
   def vars(self): return [self]
+  def expand(self) -> List[Node]: return [self] if self.expr is not None else [Variable.num(j) for j in range(self.min, self.max+1)] 
 
 class NumNode(Node):
   def __init__(self, num:int):
@@ -158,6 +162,7 @@ class NumNode(Node):
   def __index__(self): return self.b
   def __eq__(self, other): return self.b == other
   def __hash__(self): return self.hash  # needed with __eq__ override
+  def expand(self) -> List[Node]: return [self]
 
 def create_node(ret:Node):
   assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {type(ret)} {ret}"
@@ -190,6 +195,7 @@ class MulNode(OpNode):
     return Node.__mod__(a, b)
   def get_bounds(self) -> Tuple[int, int]:
     return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
+  def expand(self) -> List[Node]: return [x*self.b for x in self.a.expand()]
 
 class DivNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], _=False): return self.a//(self.b*b) # two divs is one div
@@ -265,6 +271,8 @@ class SumNode(RedNode):
         else: new_sum.append(x)
       return Node.__lt__(Node.sum(new_sum), b)
     return Node.__lt__(self, b)
+  
+  def expand(self) -> List[Node]: return [Variable.sum(list(it)) for it in itertools.product(*[x.expand() for x in self.nodes])]
 
   @property
   def flat_components(self): # recursively expand sumnode components
