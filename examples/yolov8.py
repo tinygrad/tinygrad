@@ -402,7 +402,7 @@ if __name__ == '__main__':
   #absolute image path or URL
   image_location = [np.frombuffer(io.BytesIO(fetch(img_path)).read(), np.uint8)]
   image = [cv2.imdecode(image_location[0], 1)]
-  out_paths = [output_folder_path / img_path.split("/")[-1].split('.')[0] + "_output" + '.' + img_path.split("/")[-1].split('.')[1]]
+  out_paths = [(output_folder_path / f"{Path(img_path).stem}_output{Path(img_path).suffix}").as_posix()]
   if not isinstance(image[0], np.ndarray):
     print('Error in image loading. Check your image file.')
     sys.exit(1)
@@ -412,7 +412,7 @@ if __name__ == '__main__':
   depth, width, ratio = get_variant_multiples(yolo_variant)
   yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
 
-  weights_location = Path(__file__).parent.parent / "weights" / f'yolov8{yolo_variant}.safetensors'
+  weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
   download_file(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location)
 
   state_dict = safe_load(weights_location)

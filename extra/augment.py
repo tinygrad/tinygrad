@@ -3,8 +3,8 @@ from PIL import Image
 from pathlib import Path
 import sys
 cwd = Path.cwd()
-sys.path.append(str(cwd))
-sys.path.append(str(cwd / 'test'))
+sys.path.append(cwd.as_posix())
+sys.path.append((cwd / 'test').as_posix())
 from extra.datasets import fetch_mnist
 from tqdm import trange
 

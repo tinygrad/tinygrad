@@ -14,7 +14,7 @@ libane = None
 aneregs = None
 def init_libane():
   global libane, aneregs
-  libane = cdll.LoadLibrary(basedir / "libane.dylib")
+  libane = cdll.LoadLibrary((basedir / "libane.dylib").as_posix())
 
   libane.ANE_Compile.argtypes = [c_char_p, c_int]
   libane.ANE_Compile.restype = c_void_p
