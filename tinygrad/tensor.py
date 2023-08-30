@@ -122,85 +122,85 @@ class Tensor:
 
   # ***** creation llop entrypoint *****
 
-  @staticmethod
-  def _loadop(op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
-    return Tensor(LazyBuffer.loadop(op, [sz], Tensor.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
+  @classmethod
+  def _loadop(cls, op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
+    return cls(LazyBuffer.loadop(op, [sz], cls.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
 
-  @staticmethod
-  def empty(*shape, **kwargs): return Tensor._loadop(LoadOps.EMPTY, math.prod(shape), **kwargs).reshape(shape)
+  @classmethod
+  def empty(cls, *shape, **kwargs): return cls._loadop(LoadOps.EMPTY, math.prod(shape), **kwargs).reshape(shape)
 
   _seed: int = int(time.time())
-  @staticmethod
-  def manual_seed(seed=0): Tensor._seed = seed
+  @classmethod
+  def manual_seed(cls, seed=0): cls._seed = seed
 
-  @staticmethod
-  def rand(*shape, **kwargs):
-    Tensor._seed += 1
-    return Tensor._loadop(LoadOps.RAND, math.prod(shape), arg=Tensor._seed, **kwargs).reshape(shape)
+  @classmethod
+  def rand(cls, *shape, **kwargs):
+    cls._seed += 1
+    return cls._loadop(LoadOps.RAND, math.prod(shape), arg=cls._seed, **kwargs).reshape(shape)
 
   # ***** creation helper functions *****
 
-  @staticmethod
-  def full(shape:Tuple[int, ...], fill_value, **kwargs): return Tensor(fill_value, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape)
+  @classmethod
+  def full(cls, shape:Tuple[int, ...], fill_value, **kwargs): return cls(fill_value, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape)
 
-  @staticmethod
-  def zeros(*shape, **kwargs): return Tensor.full(argfix(*shape), 0, **kwargs)
+  @classmethod
+  def zeros(cls, *shape, **kwargs): return cls.full(argfix(*shape), 0, **kwargs)
 
-  @staticmethod
-  def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
+  @classmethod
+  def ones(cls, *shape, **kwargs): return cls.full(argfix(*shape), 1, **kwargs)
 
-  @staticmethod
-  def arange(start, stop=None, step=1, **kwargs):
+  @classmethod
+  def arange(cls, start, stop=None, step=1, **kwargs):
     if stop is None: stop, start = start, 0
-    return Tensor.full((math.ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
+    return cls.full((math.ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
 
-  @staticmethod
-  def full_like(tensor, fill_value, **kwargs):
-    return Tensor.full(tensor.shape, fill_value=fill_value, dtype=kwargs.pop("dtype", tensor.dtype), device=kwargs.pop("device", tensor.device), **kwargs)
+  @classmethod
+  def full_like(cls, tensor, fill_value, **kwargs):
+    return cls.full(tensor.shape, fill_value=fill_value, dtype=kwargs.pop("dtype", tensor.dtype), device=kwargs.pop("device", tensor.device), **kwargs)
 
-  @staticmethod
-  def zeros_like(tensor, **kwargs): return Tensor.full_like(tensor, 0, **kwargs)
+  @classmethod
+  def zeros_like(cls, tensor, **kwargs): return cls.full_like(tensor, 0, **kwargs)
 
-  @staticmethod
-  def ones_like(tensor, **kwargs): return Tensor.full_like(tensor, 1, **kwargs)
+  @classmethod
+  def ones_like(cls, tensor, **kwargs): return cls.full_like(tensor, 1, **kwargs)
 
-  @staticmethod
-  def eye(dim:int, **kwargs): return Tensor.full((dim,1),1,**kwargs).pad(((0,0),(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
+  @classmethod
+  def eye(cls, dim:int, **kwargs): return cls.full((dim,1),1,**kwargs).pad(((0,0),(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
 
   # ***** rng hlops *****
 
-  @staticmethod
-  def randn(*shape, dtype:Optional[DType]=None, **kwargs) -> Tensor:
+  @classmethod
+  def randn(cls, *shape, dtype:Optional[DType]=None, **kwargs) -> Tensor:
     # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
-    src = Tensor.rand(2, *shape, **kwargs)
-    return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(Tensor.default_type if dtype is None else dtype)
+    src = cls.rand(2, *shape, **kwargs)
+    return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(cls.default_type if dtype is None else dtype)
 
-  @staticmethod
-  def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
+  @classmethod
+  def normal(cls, *shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * cls.randn(*shape, **kwargs)) + mean
 
-  @staticmethod
-  def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor:
-    dtype = kwargs.pop("dtype", Tensor.default_type)
-    return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype) + low
+  @classmethod
+  def uniform(cls, *shape, low=-1.0, high=1.0, **kwargs) -> Tensor:
+    dtype = kwargs.pop("dtype", cls.default_type)
+    return ((high-low) * cls.rand(*shape, **kwargs)).cast(dtype) + low
 
-  @staticmethod
-  def scaled_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul(math.prod(shape)**-0.5)
+  @classmethod
+  def scaled_uniform(cls, *shape, **kwargs) -> Tensor: return cls.uniform(*shape, **kwargs).mul(math.prod(shape)**-0.5)
 
   # https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform
-  @staticmethod
-  def glorot_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul((6/(shape[0]+math.prod(shape[1:])))**0.5)
+  @classmethod
+  def glorot_uniform(cls, *shape, **kwargs) -> Tensor: return cls.uniform(*shape, **kwargs).mul((6/(shape[0]+math.prod(shape[1:])))**0.5)
 
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
-  @staticmethod
-  def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
+  @classmethod
+  def kaiming_uniform(cls, *shape, a:float = 0.01, **kwargs) -> Tensor:
     bound = math.sqrt(3.0) * math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(math.prod(shape[1:]))
-    return Tensor.uniform(*shape, low=-bound, high=bound, **kwargs)
+    return cls.uniform(*shape, low=-bound, high=bound, **kwargs)
 
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_normal_
-  @staticmethod
-  def kaiming_normal(*shape, a:float = 0.01, **kwargs) -> Tensor:
+  @classmethod
+  def kaiming_normal(cls, *shape, a:float = 0.01, **kwargs) -> Tensor:
     std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(math.prod(shape[1:]))
-    return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
+    return cls.normal(*shape, mean=0.0, std=std, **kwargs)
 
   # ***** toposort and backward pass *****
   def deepwalk(self):
@@ -368,10 +368,9 @@ class Tensor:
       s[dim] = (k, shape_cumsum[-1] - k - shp)
     return reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
-  @staticmethod
-  def stack(tensors, dim=0):
-    first = tensors[0].unsqueeze(dim)
-    unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors[1:]]
+  @classmethod
+  def stack(cls, tensors, dim=0):
+    unsqueezed_tensors = [tensor.unsqueeze(cls, dim) for tensor in tensors[1:]]
     # checks for shapes and number of dimensions delegated to cat
     return first.cat(*unsqueezed_tensors, dim=dim)
 
@@ -535,8 +534,8 @@ class Tensor:
   def cos(self): return ((math.pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
 
-  @staticmethod
-  def _tri(r:int, c:int, k:int=0, **kwargs) -> Tensor: return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= Tensor.arange(-k, c-k, **kwargs).unsqueeze(0).expand(r,c)
+  @classmethod
+  def _tri(cls, r:int, c:int, k:int=0, **kwargs) -> Tensor: return cls.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= cls.arange(-k, c-k, **kwargs).unsqueeze(0).expand(r,c)
   def triu(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k, dtype=self.dtype, device=self.device).where(self, Tensor.zeros_like(self))
   def tril(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, dtype=self.dtype, device=self.device).where(Tensor.zeros_like(self), self)
 
