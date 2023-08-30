@@ -35,11 +35,11 @@ def get_run_onnx(onnx_model: ModelProto):
     ret = []
     while True:
       attr = type_proto.WhichOneof('value')
-      if attr == 'tensor_type': 
+      if attr == 'tensor_type':
         if "dim_value" not in getattr(type_proto, attr).shape.dim.__dir__(): return () # variable type, unable to determine shape
         elif not ret:
           return tuple([x.dim_value for x in getattr(type_proto, attr).shape.dim])
-        else: 
+        else:
           ret.extend([(x.dim_value,) for x in getattr(type_proto, attr).shape.dim])
           return tuple(ret)
       elif attr == 'sequence_type':
