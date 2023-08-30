@@ -21,6 +21,10 @@ def get_max(var):
   if isinstance(var.max, int): return var.max
   return re.sub(r'\[(.*?)\]', '', str(var.max))[1:-1]
 
+#NOTE can be removed after https://github.com/gpuocelot/gpuocelot/issues/8 gets resolved
+def remove_single_scalar_curly_braces(ptx_code):
+  return '\n'.join([re.sub(r'\{\s*(%\w+)\s*\}', r'\1', line) for line in ptx_code.split('\n')])
+
 def uops_to_triton(function_name:str, uops:List[UOp]):
   kernel = []
   global_size: List[int] = []
@@ -104,5 +108,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   with open(fn, "w") as f: f.write(prg)
   codeObject = compile(prg, fn, "exec")
   exec(codeObject, globals()) # pylint: disable=W0122
-  prg = triton_compile(globals()[function_name], signature=",".join(signatures), device_type="cuda", debug=True, cc=(35 if getenv("CUDACPU", 0) else None)).asm["ptx"]
+  prg = triton_compile(globals()[function_name], signature=",".join(signatures), device_type="cuda", debug=False, cc=(35 if getenv("CUDACPU", 0) else None)).asm["ptx"]
+  if getenv("CUDACPU"):
+    prg = remove_single_scalar_curly_braces(prg.split(".file")[0].split(".visible .func")[0])
   return prg, global_size, [int(x) for x in prg.split(".maxntid ")[1].split("\n")[0].split(", ")], True
