@@ -267,7 +267,7 @@ class LazyBuffer:
     if not self.realized:
       if PUSH_PERMUTES and self.optype == ReduceOps:
         # reduceops have one buffer input, permute it
-        narg = tuple([self.op.arg[arg[i]] for i in range(len(arg))])
+        narg = tuple([self.op.arg[a] for a in arg])
         src, rop = self.op.src[0], self.op.op
         src.children.discard(self)
         del self  # TODO: why doesn't this delete remove it from the children
