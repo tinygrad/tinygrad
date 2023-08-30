@@ -85,7 +85,7 @@ class Attention:
       keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
 
     cache_k, cache_v = keys, values
-    keys, values = repeat_kv(keys, self.n_rep).realize(), repeat_kv(values, self.n_rep).realize()
+    keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     attn = Tensor.scaled_dot_product_attention(xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2), mask).transpose(1, 2).reshape(bsz, seqlen, -1)
     return self.wo(attn).realize(), cache_k.realize(), cache_v.realize()
 
@@ -159,6 +159,7 @@ class Transformer:
       h = self.tok_embeddings_jitted(tokens)
       for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.layers_jitted, self.kv_caches)):
         h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=self.freqs_cis, mask=None, jit_ctx={pos: start_pos})
+        # TODO: move the kv cache into Attention, pre-allocate the cache and instead of cat, update the cache in-place
         self.kv_caches[i] = (cache_k, cache_v)
       return self.postprocess_jitted(h, temperature)
     else:
