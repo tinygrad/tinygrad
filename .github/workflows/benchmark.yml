@@ -24,7 +24,7 @@ jobs:
     - name: Run Tensor Core GEMM
       run: |
         ln -s ~/tinygrad/disassemblers/applegpu disassemblers/applegpu
-        DEBUG=5 python3 extra/gemm/simple_matmul.py | tee matmul.txt
+        DEBUG=4 python3 extra/gemm/simple_matmul.py | tee matmul.txt
       shell: bash
     - name: Run Stable Diffusion
       run: |
