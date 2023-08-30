@@ -331,7 +331,7 @@ class OptimizedKernel(Kernel):
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
         # if we haven't upcasted it, it's not symbolic, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
-        if axis not in upcasted_axis and isinstance(self.full_shape[axis], int) and self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
+        if axis not in upcasted_axis and isinstance(self.full_shape[axis], int) and self.full_shape[axis]%upcast_amount == 0 and any(st.views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index, st in enumerate(self.sts)):
           xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in self.sts), sum(st.views[-1].strides[axis] for st in self.sts), axis, upcast_amount))
       if xb_choices:
         xb_choices = sorted(xb_choices)
@@ -370,7 +370,7 @@ class OptimizedKernel(Kernel):
         local_size = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
         if self.full_shape[axis] == 1: continue
         last_try = self.local_dims == 0 and axis == 0
-        if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))) or last_try:
+        if any(st.views[-1].strides[axis] == 0 for st in self.sts) or last_try:
           for sz in [x for x in (([32] if last_try else []) + [16,8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 128]:
             self.shift_to(axis, sz, insert_before=self.first_reduce-self.local_dims)
             self.local_dims += 1
