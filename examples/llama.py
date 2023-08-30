@@ -85,7 +85,7 @@ class Attention:
       keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
 
     cache_k, cache_v = keys, values
-    keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
+    keys, values = repeat_kv(keys, self.n_rep).realize(), repeat_kv(values, self.n_rep).realize()
     attn = Tensor.scaled_dot_product_attention(xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2), mask).transpose(1, 2).reshape(bsz, seqlen, -1)
     return self.wo(attn).realize(), cache_k.realize(), cache_v.realize()
 
