@@ -11,7 +11,7 @@ class Optimizer:
 
     self.params: List[Tensor] = dedup([x for x in params if x.requires_grad])
     self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
-    self.lr = Tensor([lr], requires_grad=False).contiguous()
+    self.lr = Tensor([lr], requires_grad=False, device=self.params[0].device).contiguous()
 
   def zero_grad(self):
     for param in self.params: param.grad = None
@@ -46,7 +46,7 @@ def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8): return LAM
 class LAMB(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
     super().__init__(params, lr)
-    self.b1, self.b2, self.eps, self.wd, self.adam, self.t = b1, b2, eps, wd, adam, Tensor([0], requires_grad=False).realize()
+    self.b1, self.b2, self.eps, self.wd, self.adam, self.t = b1, b2, eps, wd, adam, Tensor([0], requires_grad=False, device=self.params[0].device).realize()
     self.m = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
     self.v = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
 
@@ -67,4 +67,7 @@ class LAMB(Optimizer):
       else:
         r = 1.0
       t.assign(t.detach() - self.lr * r * up)
+    print(self.t.realize())
+    print([m.realize() for m in self.m])
+    print([v.realize() for v in self.v])
     self.realize([self.t] + self.m + self.v)

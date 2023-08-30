@@ -15,9 +15,9 @@ DEVICE = "GPU" if getenv("GPU") else "CPU"
 
 class Actor:
   def __init__(self, num_actions: int, num_states: int, hidden_size: Tuple[int, int] = (400, 300)):
-    self.l1 = Tensor.glorot_uniform(num_states, hidden_size[0])
-    self.l2 = Tensor.glorot_uniform(hidden_size[0], hidden_size[1])
-    self.mu = Tensor.glorot_uniform(hidden_size[1], num_actions)
+    self.l1 = Tensor.glorot_uniform(num_states, hidden_size[0], device=DEVICE)
+    self.l2 = Tensor.glorot_uniform(hidden_size[0], hidden_size[1], device=DEVICE)
+    self.mu = Tensor.glorot_uniform(hidden_size[1], num_actions, device=DEVICE)
 
   def forward(self, state: Tensor, upper_bound: float) -> Tensor:
     out = state.dot(self.l1).relu()
@@ -30,9 +30,9 @@ class Actor:
 
 class Critic:
   def __init__(self, num_inputs: int, hidden_size: Tuple[int, int] = (400, 300)):
-    self.l1 = Tensor.glorot_uniform(num_inputs, hidden_size[0])
-    self.l2 = Tensor.glorot_uniform(hidden_size[0], hidden_size[1])
-    self.q = Tensor.glorot_uniform(hidden_size[1], 1)
+    self.l1 = Tensor.glorot_uniform(num_inputs, hidden_size[0], device=DEVICE)
+    self.l2 = Tensor.glorot_uniform(hidden_size[0], hidden_size[1], device=DEVICE)
+    self.q = Tensor.glorot_uniform(hidden_size[1], 1, device=DEVICE)
 
   def forward(self, state: Tensor, action: Tensor) -> Tensor:
     inputs = state.cat(action, dim=1)
