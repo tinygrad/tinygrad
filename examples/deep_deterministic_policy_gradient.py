@@ -5,19 +5,20 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from tinygrad.helpers import getenv
+from tinygrad.lazy import Device
 
 import numpy as np
 import gym
 
 
-DEVICE = "GPU" if getenv("GPU") else "CPU"
+Device.DEFAULT = "GPU" if getenv("GPU") else "CPU"
 
 
 class Actor:
   def __init__(self, num_actions: int, num_states: int, hidden_size: Tuple[int, int] = (400, 300)):
-    self.l1 = Tensor.glorot_uniform(num_states, hidden_size[0], device=DEVICE)
-    self.l2 = Tensor.glorot_uniform(hidden_size[0], hidden_size[1], device=DEVICE)
-    self.mu = Tensor.glorot_uniform(hidden_size[1], num_actions, device=DEVICE)
+    self.l1 = Tensor.glorot_uniform(num_states, hidden_size[0])
+    self.l2 = Tensor.glorot_uniform(hidden_size[0], hidden_size[1])
+    self.mu = Tensor.glorot_uniform(hidden_size[1], num_actions)
 
   def forward(self, state: Tensor, upper_bound: float) -> Tensor:
     out = state.dot(self.l1).relu()
@@ -30,9 +31,9 @@ class Actor:
 
 class Critic:
   def __init__(self, num_inputs: int, hidden_size: Tuple[int, int] = (400, 300)):
-    self.l1 = Tensor.glorot_uniform(num_inputs, hidden_size[0], device=DEVICE)
-    self.l2 = Tensor.glorot_uniform(hidden_size[0], hidden_size[1], device=DEVICE)
-    self.q = Tensor.glorot_uniform(hidden_size[1], 1, device=DEVICE)
+    self.l1 = Tensor.glorot_uniform(num_inputs, hidden_size[0])
+    self.l2 = Tensor.glorot_uniform(hidden_size[0], hidden_size[1])
+    self.q = Tensor.glorot_uniform(hidden_size[1], 1)
 
   def forward(self, state: Tensor, action: Tensor) -> Tensor:
     inputs = state.cat(action, dim=1)
@@ -73,11 +74,11 @@ class Buffer:
     record_range = min(self.buffer_counter, self.buffer_capacity)
     batch_indices = np.random.choice(record_range, self.batch_size)
 
-    state_batch = Tensor(self.state_buffer[batch_indices], device=DEVICE, requires_grad=False)
-    action_batch = Tensor(self.action_buffer[batch_indices], device=DEVICE, requires_grad=False)
-    reward_batch = Tensor(self.reward_buffer[batch_indices], device=DEVICE, requires_grad=False)
-    next_state_batch = Tensor(self.next_state_buffer[batch_indices], device=DEVICE, requires_grad=False)
-    done_batch = Tensor(self.done_buffer[batch_indices], device=DEVICE, requires_grad=False)
+    state_batch = Tensor(self.state_buffer[batch_indices], requires_grad=False)
+    action_batch = Tensor(self.action_buffer[batch_indices], requires_grad=False)
+    reward_batch = Tensor(self.reward_buffer[batch_indices], requires_grad=False)
+    next_state_batch = Tensor(self.next_state_buffer[batch_indices], requires_grad=False)
+    done_batch = Tensor(self.done_buffer[batch_indices], requires_grad=False)
 
     return state_batch, action_batch, reward_batch, next_state_batch, done_batch
 
@@ -92,7 +93,6 @@ class GaussianActionNoise:
         np.random.default_rng()
         .normal(self.mean, self.std_dev, size=self.mean.shape)
         .astype(np.float32),
-        device=DEVICE,
         requires_grad=False,
     )
 
@@ -158,7 +158,7 @@ class DeepDeterministicPolicyGradient:
     target_actor_params = get_parameters(self.target_actor)
     target_critic_params = get_parameters(self.target_critic)
 
-    if DEVICE == "GPU":
+    if Device.DEFAULT == "GPU":
       [x.gpu_() for x in actor_params + critic_params + target_actor_params + target_critic_params]
 
     self.actor_optimizer = optim.Adam(actor_params, lr_actor)
@@ -207,7 +207,7 @@ class DeepDeterministicPolicyGradient:
     target_actions = self.target_actor.forward(next_state_batch, self.max_action)
     y = reward_batch + self.gamma * self.target_critic.forward(
         next_state_batch, target_actions.detach()
-    ) * (Tensor.ones(*done_batch.shape, device=DEVICE, requires_grad=False) - done_batch)
+    ) * (Tensor.ones(*done_batch.shape, requires_grad=False) - done_batch)
 
     self.critic_optimizer.zero_grad()
     critic_value = self.critic.forward(state_batch, action_batch)
@@ -236,7 +236,7 @@ if __name__ == "__main__":
     done = False
 
     while not done:
-      prev_state = Tensor(prev_state, device=DEVICE, requires_grad=False)
+      prev_state = Tensor(prev_state, requires_grad=False)
       action = agent.choose_action(prev_state)
 
       state, reward, done, _, info = env.step(action)  # for older gym versions there is only one bool, so remove _
