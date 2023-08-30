@@ -111,4 +111,6 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   prg = triton_compile(globals()[function_name], signature=",".join(signatures), device_type="cuda", debug=False, cc=(35 if getenv("CUDACPU", 0) else None)).asm["ptx"]
   if getenv("CUDACPU"):
     prg = remove_single_scalar_curly_braces(prg.split(".file")[0].split(".visible .func")[0])
-  return prg, global_size, [int(x) for x in prg.split(".maxntid ")[1].split("\n")[0].split(", ")], True
+  max_local_size =  [int(x) for x in prg.split(".maxntid ")[1].split("\n")[0].split(", ")]
+  for i in range(len(local_size)): local_size[i] = min(local_size[i], max_local_size[i])
+  return prg, global_size, local_size, True
