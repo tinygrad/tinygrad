@@ -12,7 +12,7 @@ if __name__ == "__main__":
   model.load_from_pretrained()
   mode = "clang" if getenv("CLANG", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else ""
   prg, inp_size, out_size, state = export_model(model, Tensor.randn(1,3,224,224), mode)
-  dirname = Path(__file__).resolve().parent
+  dirname = Path(__file__).parent
   if getenv("CLANG", "") == "":
     safe_save(state, (dirname / "net.safetensors").as_posix())
     ext = "js" if getenv("WEBGPU", "") != "" else "json"
