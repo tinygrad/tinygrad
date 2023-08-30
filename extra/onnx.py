@@ -86,6 +86,8 @@ def get_run_onnx(onnx_model: ModelProto):
       tensors[inp.name] = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
     elif len(inp.int64_data) > 0:
       tensors[inp.name] = Tensor(np.array(inp.int64_data, dtype=np.int64).reshape(inp.dims), requires_grad=False)
+    elif len(inp.raw_data) == 0:
+      tensors[inp.name] = Tensor(np.array([], dtype=np.float32), requires_grad=False)
     else:
       print(inp.name, inp.dims, inp.data_type, len(inp.raw_data))
       print(inp)
@@ -114,7 +116,7 @@ def get_run_onnx(onnx_model: ModelProto):
       if inp.name in tensors: continue
       shape = type_parse(inp.type)
       # this works for gpt3 but does not work elsewhere
-      # if len(shape) >= 1 and shape[0] == 0 and shape != (0,): shape = tuple([1]+list(shape[1:]))   # 1 batch size
+      if len(shape) >= 1 and shape[0] == 0 and shape != (0,): shape = tuple([1]+list(shape[1:]))   # 1 batch size
       # if len(shape) >= 1: shape = tuple([x if x != 0 else 1 for x in shape])  # replace all dynamic dims with 1 for now
       if inp.name in inputs:
         if isinstance(inputs[inp.name], Tensor):
