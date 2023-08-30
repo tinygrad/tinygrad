@@ -419,11 +419,7 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
         
         # test that node expand is not implemented
         node = node_subcls.__new__(node_subcls)
-        try:
-          node.expand()
-          assert False
-        except NotImplementedError:
-          assert True
+        self.assertRaises(NotImplementedError, node.expand)
 
     test_non_expandable_nodes_recursive(Node)
     
