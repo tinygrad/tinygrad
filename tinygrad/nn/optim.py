@@ -67,7 +67,4 @@ class LAMB(Optimizer):
       else:
         r = 1.0
       t.assign(t.detach() - self.lr * r * up)
-    print(self.t.realize())
-    print([m.realize() for m in self.m])
-    print([v.realize() for v in self.v])
     self.realize([self.t] + self.m + self.v)
