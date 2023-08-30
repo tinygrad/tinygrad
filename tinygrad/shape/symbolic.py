@@ -283,10 +283,11 @@ def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   return create_node(ret)
 
 def sym_infer(n:Union[Node,int], var_vals: Dict[Variable, int]) -> int:
-  if isinstance(n, (int, NumNode)): return int(n)
-  if isinstance(n, Variable): return var_vals[n]
-  if isinstance(n, MulNode): return sym_infer(n.a, var_vals) * sym_infer(n.b, var_vals)
-  if isinstance(n, SumNode): return sum(sym_infer(s, var_vals) for s in n.nodes)
+  if n.__class__ is int: return n # type: ignore
+  if n.__class__ is NumNode: return n.b # type: ignore
+  if n.__class__ is Variable: return var_vals[n] # type: ignore
+  if n.__class__ is MulNode: return sym_infer(n.a, var_vals) * sym_infer(n.b, var_vals) # type: ignore
+  if n.__class__ is SumNode: return sum([sym_infer(s, var_vals) for s in n.nodes]) # type: ignore
   raise NotImplementedError(n)
 @functools.lru_cache(maxsize=None)
 def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
