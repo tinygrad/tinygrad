@@ -198,7 +198,7 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
     elif u.uop == UOps.DEFINE_GLOBAL:
       globalz += [None] * (u.arg+1-len(globalz))
       #globalz[u.arg] = f"device float *data{u.arg}"
-      globalz[u.arg] = f"float *data{u.arg}"
+      globalz[u.arg] = f"{u.dtype.name} *data{u.arg}"
       return f"data{u.arg}"
     elif u.uop == UOps.ENDLOOP:
       seen_end[u.vin[1]] -= 1
@@ -243,7 +243,9 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
       visit(u)
   for u in uops: visit(u)
 
-  # then we figure out which are renderable and do that, leaving loops for last
+  # then we figure out which are renderable and put them in order, leaving loops for last
+  rendered = set()
+  order = []
   while len(srcs):
     srcs, srcs_loop = partition(srcs, lambda x: x.uop != UOps.LOOP)
     if len(srcs):
@@ -254,10 +256,14 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
       srcs_loop = sorted(srcs_loop, key=lambda x: x.arg)
       srcs, new_srcs = srcs_loop[0:1], srcs_loop[1:]
     for u in srcs:
-      if u not in r and all(x in r for x in u.vin):
-        r[u] = render_one(u)
+      if u not in rendered and all(x in rendered for x in u.vin):
+        rendered.add(u)
+        order.append(u)
         new_srcs += children[u]
     srcs = new_srcs
+
+  # render the line
+  for ru in order: r[ru] = render_one(ru)
 
   #globalz += ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   #src = f"#include <metal_stdlib>\nusing namespace metal;\nkernel void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements)  + '\n' + '}'*(in_loops+1-len(seen_end))
