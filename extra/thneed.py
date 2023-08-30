@@ -5,7 +5,7 @@ import json
 import traceback
 import numpy as np
 from tinygrad.runtime.ops_gpu import CLProgram
-from tinygrad.helpers import prod, getenv
+from tinygrad.helpers import DEBUG, getenv
 from collections import defaultdict
 import pyopencl as cl
 from tinygrad.runtime.ops_gpu import CL, OSX_TIMING_RATIO
@@ -139,6 +139,8 @@ class Thneed:
           aa = bufs[a]
         aaa.append(aa)
       self.cl_cache.append((kernel, [k['global_work_size'], k['local_work_size'], *aaa]))
+
+    if DEBUG >= 1: print(f"thneed: total bufs loaded: {len(bufs.keys())}")
 
     # load inputs
     for k in jdat['inputs']:

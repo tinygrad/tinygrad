@@ -49,7 +49,7 @@ class TestRealWorld(unittest.TestCase):
     def test(t, t2): return model(t, 801, t2).realize()
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 967)
 
-  @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE, "needs JIT")
+  @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
   def test_llama(self):
     old_type = Tensor.default_type
     Tensor.default_type = dtypes.float16
@@ -63,7 +63,7 @@ class TestRealWorld(unittest.TestCase):
 
     Tensor.default_type = old_type
 
-  @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE, "needs JIT")
+  @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
   def test_train_cifar(self):
     # TODO: with default device
     #old_default = Device.DEFAULT
