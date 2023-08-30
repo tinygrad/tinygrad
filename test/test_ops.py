@@ -766,7 +766,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,4,9,9), (4,4,1,1)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
-  
+
   @unittest.skipIf(getenv("TRITON") and getenv("CUDACPU"), "Broken in ocelot")
   def test_simple_conv2d_1x1_m4(self):
     helper_test_op([(1,16,32,32), (16,16,1,1)],
