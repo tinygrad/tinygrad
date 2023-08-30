@@ -6,18 +6,18 @@ from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp, TernaryOps
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawConst
-from tinygrad.helpers import dtypes, DEBUG, DType, all_same, getenv, colored, PtrDType, partition
+from tinygrad.helpers import dtypes, DEBUG, DType, all_same, getenv, colored, PtrDType, partition, dedup
 from enum import Enum, auto
 from tinygrad.shape.symbolic import Variable, NumNode, Node, MulNode, SumNode, DivNode, ModNode, LtNode, AndNode
 VariableOrNum = Union[Variable, NumNode, Node]
 
 class UOps(Enum):
-  SPECIAL = auto(); ENDLOOP = auto() # loops can be global, local, or other # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
+  SPECIAL = auto(); ENDLOOP = auto() # loops can be global, local, or other # noqa: E702
   CONST = auto(); LOAD = auto(); STORE = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto() # noqa: E702
   LOOP = auto()  # loop is last
-  def __lt__(self, x): return self.value < x.value
+  #def __lt__(self, x): return self.value < x.value
 
 class UOp(NamedTuple):
   uop: UOps
@@ -25,6 +25,9 @@ class UOp(NamedTuple):
   dtype: Optional[DType]
   arg: Any
   def __repr__(self): return f"{self.uop} {self.dtype} {self.arg}"
+  def __lt__(self, x):
+    if self.uop == UOps.LOOP and x.uop == UOps.LOOP: return self.arg < x.arg
+    return self.uop.value < x.uop.value
 
 # TODO: generic visitor pattern?
 def expand_node(idx:Node) -> List[Node]:
@@ -71,13 +74,7 @@ class UAst(OptimizedKernel):
       ret.append(self.uop(UOps.LOAD, (self.global_bufs[i], idx_rendered, valid_rendered)))
     return ret
 
-  def linearize(self):
-    self.process()
-    if DEBUG >= 3: self.printbufs()
-    # kernel name (before late upcast)
-    self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) if isinstance(x, int) else sym_rename(x) for x in self.full_shape])
-    self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
-
+  def get_uast(self) -> List[UOp]:
     global_bufs = [self.uop(UOps.DEFINE_GLOBAL, tuple(), PtrDType(buf.dtype), i) for i,buf in enumerate(self.arg_bufs.keys())]
 
     # define Variables
@@ -157,6 +154,48 @@ class UAst(OptimizedKernel):
 
     return sinks
 
+  def linearize(self):
+    self.process()
+    if DEBUG >= 3: self.printbufs()
+
+    # kernel name (before late upcast)
+    self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) if isinstance(x, int) else sym_rename(x) for x in self.full_shape])
+    self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
+
+    # get sink uops
+    uops = self.get_uast()
+
+    # first, we fetch all the uops
+    seen = set()
+    srcs = []
+    children = defaultdict(list)
+    def visit(x):
+      if x in seen: return
+      if len(x.vin) == 0: srcs.append(x)
+      seen.add(x)
+      for u in x.vin:
+        children[u].append(x)
+        visit(u)
+    for u in uops: visit(u)
+
+    # then we figure out which are renderable and put them in order, leaving loops for last
+    import heapq
+    heapq.heapify(srcs)
+
+    rendered = set()
+    order = []
+    while len(srcs):
+      u = heapq.heappop(srcs)
+      if u not in rendered:
+        rendered.add(u)
+        order.append(u)
+        for c in children[u]:
+          if all(x in rendered for x in c.vin):
+            heapq.heappush(srcs, c)
+
+    return order
+
+
 from tinygrad.renderer.cstyle import CStyleLanguage
 def uops_to_cstyle2(function_name:str, uops:List[UOp]):
   lang = CStyleLanguage()
@@ -167,6 +206,10 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
   global_size = []
   local_size = []
 
+  for ru in uops:
+    if ru.uop == UOps.ENDLOOP:
+      seen_end[ru.vin[1]] += 1
+
   c = defaultdict(int)
   def ssa(prefix="t"):
     nonlocal c
@@ -174,7 +217,7 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
     return f"{prefix}{c[prefix]-1}"
   def render_one(u:UOp) -> Optional[str]:
     nonlocal globalz
-    if DEBUG >= 4: print(u.uop, u.dtype, u.arg)
+    #if DEBUG >= 4: print(u.uop, u.dtype, u.arg)
     if u.uop == UOps.CONST:
       if u.arg == float("inf"): return "INFINITY"
       if u.arg == float("-inf"): return "-INFINITY"
@@ -225,45 +268,11 @@ def uops_to_cstyle2(function_name:str, uops:List[UOp]):
     else:
       raise NotImplementedError(f"can't render {u.uop}")
 
-  # first, we fetch all the uops
-  in_loops = 0
-  seen = set()
-  srcs = []
-  children = defaultdict(list)
-  seen_end = defaultdict(int)
-  def visit(x):
-    nonlocal in_loops
-    if x in seen: return
-    if x.uop == UOps.LOOP: in_loops += 1
-    if x.uop == UOps.ENDLOOP: seen_end[x.vin[1]] += 1
-    if len(x.vin) == 0: srcs.append(x)
-    seen.add(x)
-    for u in x.vin:
-      children[u].append(x)
-      visit(u)
-  for u in uops: visit(u)
-
-  # then we figure out which are renderable and put them in order, leaving loops for last
-  rendered = set()
-  order = []
-  while len(srcs):
-    srcs, srcs_loop = partition(srcs, lambda x: x.uop != UOps.LOOP)
-    if len(srcs):
-      srcs = sorted(srcs, key=lambda x: x.uop)
-      new_srcs = srcs_loop
-    else:
-      # this is a loop rendering pass
-      srcs_loop = sorted(srcs_loop, key=lambda x: x.arg)
-      srcs, new_srcs = srcs_loop[0:1], srcs_loop[1:]
-    for u in srcs:
-      if u not in rendered and all(x in rendered for x in u.vin):
-        rendered.add(u)
-        order.append(u)
-        new_srcs += children[u]
-    srcs = new_srcs
-
   # render the line
-  for ru in order: r[ru] = render_one(ru)
+  in_loops = 0
+  for ru in uops:
+    if ru.uop == UOps.LOOP: in_loops += 1
+    r[ru] = render_one(ru)
 
   #globalz += ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   #src = f"#include <metal_stdlib>\nusing namespace metal;\nkernel void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements)  + '\n' + '}'*(in_loops+1-len(seen_end))
