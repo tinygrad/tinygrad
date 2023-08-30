@@ -372,7 +372,7 @@ class Tensor:
   def stack(cls, tensors, dim=0):
     unsqueezed_tensors = [tensor.unsqueeze(cls, dim) for tensor in tensors[1:]]
     # checks for shapes and number of dimensions delegated to cat
-    return first.cat(*unsqueezed_tensors, dim=dim)
+    return cls.cat(*unsqueezed_tensors, dim=dim)
 
   def repeat(self, repeats):
     base_shape = (1,) * (len(repeats) - self.ndim) + self.shape
