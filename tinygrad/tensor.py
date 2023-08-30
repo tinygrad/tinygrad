@@ -370,7 +370,7 @@ class Tensor:
 
   @classmethod
   def stack(cls, tensors, dim=0):
-    unsqueezed_tensors = [tensor.unsqueeze(cls, dim) for tensor in tensors[1:]]
+    unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors[1:]]
     # checks for shapes and number of dimensions delegated to cat
     return cls.cat(*unsqueezed_tensors, dim=dim)
 
