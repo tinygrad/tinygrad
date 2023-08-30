@@ -11,7 +11,7 @@ from tinygrad.nn.state import safe_load, load_state_dict
 class TestYOLOv8(unittest.TestCase):
   def test_all_load_weights(self):
     for variant in ['n', 's', 'm', 'l', 'x']:
-      weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.safetensors'
+      weights_location = Path(__file__).parents[2] / "weights" / f'yolov8{variant}.safetensors'
       download_file(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{variant}.safetensors', weights_location)
 
       depth, width, ratio = get_variant_multiples(variant)
@@ -23,7 +23,7 @@ class TestYOLOv8(unittest.TestCase):
   def test_predictions(self):
     test_image_urls = ['https://raw.githubusercontent.com/ultralytics/yolov5/master/data/images/bus.jpg', 'https://www.aljazeera.com/wp-content/uploads/2022/10/2022-04-28T192650Z_1186456067_UP1EI4S1I0P14_RTRMADP_3_SOCCER-ENGLAND-MUN-CHE-REPORT.jpg']
     variant = 'n'
-    weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.safetensors'
+    weights_location = Path(__file__).parents[2] / "weights" / f'yolov8{variant}.safetensors'
     depth, width, ratio = get_variant_multiples(variant)
     TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
     state_dict = safe_load(weights_location)

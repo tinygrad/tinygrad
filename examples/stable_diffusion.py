@@ -423,7 +423,7 @@ class CLIPTextTransformer:
 # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
 @lru_cache()
 def default_bpe():
-  fn = Path(__file__).parent.parent / "weights/bpe_simple_vocab_16e6.txt.gz"
+  fn = Path(__file__).parents[1] / "weights/bpe_simple_vocab_16e6.txt.gz"
   download_file("https://github.com/openai/CLIP/raw/main/clip/bpe_simple_vocab_16e6.txt.gz", fn)
   return fn
 
@@ -557,7 +557,7 @@ class StableDiffusion:
 # cond_stage_model.transformer.text_model
 
 # this is sd-v1-4.ckpt
-FILENAME = Path(__file__).parent.parent / "weights/sd-v1-4.ckpt"
+FILENAME = Path(__file__).parents[1] / "weights/sd-v1-4.ckpt"
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)

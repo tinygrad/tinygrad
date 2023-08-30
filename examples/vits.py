@@ -649,7 +649,7 @@ class TextMapper: # Based on https://github.com/keithito/tacotron
 # anime lady 1 | --model_to_use uma_trilingual --speaker_id 36
 # anime lady 2 | --model_to_use uma_trilingual --speaker_id 121
 #########################################################################################
-VITS_PATH = Path(__file__).parent.parent / "weights/VITS/"
+VITS_PATH = Path(__file__).parents[1] / "weights/VITS/"
 MODELS = { # config_path, weights_path, config_url, weights_url
   "ljs": (VITS_PATH / "config_ljs.json", VITS_PATH / "pretrained_ljs.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/ljs_base.json", "https://drive.google.com/uc?export=download&id=1q86w74Ygw2hNzYP9cWkeClGT5X25PvBT&confirm=t"),
   "vctk": (VITS_PATH / "config_vctk.json", VITS_PATH / "pretrained_vctk.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/vctk_base.json", "https://drive.google.com/uc?export=download&id=11aHOlhnxzjpdWDpsz1vFDCzbeEfoIxru&confirm=t"),
@@ -665,7 +665,7 @@ if __name__ == '__main__':
   parser.add_argument("--model_to_use", default="vctk", help="Specify the model to use. Default is 'vctk'.")
   parser.add_argument("--speaker_id", type=int, default=6, help="Specify the speaker ID. Default is 6.")
   parser.add_argument("--out_path", default=None, help="Specify the full output path. Overrides the --out_dir and --name parameter.")
-  parser.add_argument("--out_dir", default=str(Path(__file__).parent.parent / "temp"), help="Specify the output path.")
+  parser.add_argument("--out_dir", default=str(Path(__file__).parents[1] / "temp"), help="Specify the output path.")
   parser.add_argument("--base_name", default="test", help="Specify the base of the output file name. Default is 'test'.")
   parser.add_argument("--text_to_synthesize", default="""Hello person. If the code you are contributing isn't some of the highest quality code you've written in your life, either put in the effort to make it great, or don't bother.""", help="Specify the text to synthesize. Default is a greeting message.")
   parser.add_argument("--noise_scale", type=float, default=0.667, help="Specify the noise scale. Default is 0.667.")
