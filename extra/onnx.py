@@ -35,12 +35,12 @@ def get_run_onnx(onnx_model: ModelProto):
     while True:
       attr = type_proto.WhichOneof('value')
       if attr == 'tensor_type': 
-        if "shape" not in getattr(type_proto, attr).__dir__(): return True # variable type, unable to determine shape
+        if "shape" not in getattr(type_proto, attr).__dir__(): return [] # variable type, unable to determine shape
         else: return tuple(x.dim_value for x in getattr(type_proto, attr).shape.dim)
       elif attr == 'sequence_type':
         type_proto = getattr(type_proto, attr).elem_type
         attr = type_proto.WhichOneof('value')
-        if "shape" not in getattr(type_proto, attr).__dir__(): return True # variable type, unable to determine shape
+        if "shape" not in getattr(type_proto, attr).__dir__(): return [] # variable type, unable to determine shape
         else: return (1, [(x.dim_value,) for x in getattr(type_proto, attr).shape.dim])
       elif attr == 'map_type': raise NotImplementedError(f"map_type is not implemented: {type_proto}")
       elif attr == 'opaque_type': raise NotImplementedError(f"opaque_type is not implemented: {type_proto}")
@@ -127,7 +127,7 @@ def get_run_onnx(onnx_model: ModelProto):
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True) # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
-        if shape is not True: # if only input_tensor is not variable type
+        if shape: # if only input_tensor is not variable type
           input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else (1, [i.shape for i in input_tensors[inp.name]])
           assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
         for _,v in input_tensors.items():
