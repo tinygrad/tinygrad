@@ -169,7 +169,7 @@ def create_node(ret:Node):
   if ret.min == ret.max: return NumNode(ret.min)
   return ret
 
-class OpNode(Node, ABC):
+class OpNode(Node):
   def __init__(self, a:Node, b:Union[Node, int]):
     self.a, self.b = a, b
     self.min, self.max = self.get_bounds()
