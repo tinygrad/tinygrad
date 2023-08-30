@@ -368,11 +368,12 @@ class Tensor:
       s[dim] = (k, shape_cumsum[-1] - k - shp)
     return reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
-  @classmethod
-  def stack(cls, tensors, dim=0):
+  @staticmethod
+  def stack(tensors, dim=0):
+    first = tensors[0].unsqueeze(dim)
     unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors[1:]]
     # checks for shapes and number of dimensions delegated to cat
-    return cls.cat(*unsqueezed_tensors, dim=dim)
+    return first.cat(*unsqueezed_tensors, dim=dim)
 
   def repeat(self, repeats):
     base_shape = (1,) * (len(repeats) - self.ndim) + self.shape
