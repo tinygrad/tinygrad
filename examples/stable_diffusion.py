@@ -605,27 +605,27 @@ if __name__ == "__main__":
 
   timesteps = list(range(1, 1000, 1000//args.steps))
   print(f"running for {timesteps} timesteps")
-  alphas = [model.alphas_cumprod.numpy()[t] for t in timesteps]
-  alphas_prev = [1.0] + alphas[:-1]
+  alphas = model.alphas_cumprod[Tensor(timesteps)]
+  alphas_prev = Tensor([1.0]).cat(alphas[:-1])
 
   def get_x_prev_and_pred_x0(x, e_t, index):
     temperature = 1
     a_t, a_prev = alphas[index], alphas_prev[index]
     sigma_t = 0
-    sqrt_one_minus_at = math.sqrt(1-a_t)
+    sqrt_one_minus_at = (1-a_t).sqrt()
     #print(a_t, a_prev, sigma_t, sqrt_one_minus_at)
 
-    pred_x0 = (x - sqrt_one_minus_at * e_t) / math.sqrt(a_t)
+    pred_x0 = (x - sqrt_one_minus_at * e_t) / a_t.sqrt()
 
     # direction pointing to x_t
-    dir_xt = math.sqrt(1. - a_prev - sigma_t**2) * e_t
+    dir_xt = (1. - a_prev - sigma_t**2).sqrt() * e_t
     noise = sigma_t * Tensor.randn(*x.shape) * temperature
 
-    x_prev = math.sqrt(a_prev) * pred_x0 + dir_xt #+ noise
+    x_prev = a_prev.sqrt() * pred_x0 + dir_xt #+ noise
     return x_prev, pred_x0
 
   @TinyJit
-  def do_step(latent, timestep):
+  def do_step(latent, timestep, index):
     e_t = get_model_output(latent, timestep)
     x_prev, _ = get_x_prev_and_pred_x0(latent, e_t, index)
     #e_t_next = get_model_output(x_prev)
@@ -641,7 +641,7 @@ if __name__ == "__main__":
     GlobalCounters.reset()
     t.set_description("%3d %3d" % (index, timestep))
     with Timing("step in ", enabled=args.timing):
-      latent = do_step(latent, Tensor([timestep]))
+      latent = do_step(latent, Tensor([timestep]), Tensor([index]))
       if args.timing: Device[Device.DEFAULT].synchronize()
   del do_step
 
