@@ -7,7 +7,7 @@ from tinygrad.tensor import Tensor
 # with slight modifications
 
 def test_boxlist_iou():
-  a = boxlist_iou(BoxList(Tensor([[0, 0, 9, 9]]), image_size = (50, 50)), BoxList(Tensor([[0, 0, 4, 4]]), image_size = (50, 50)))
+  a = boxlist_iou(BoxList(Tensor([[0, 0, 10, 10]]), image_size = (50, 50)), BoxList(Tensor([[0, 0, 5, 5]]), image_size = (50, 50)))
   assert all(((a == .25)[0]).numpy())
 
 
@@ -19,13 +19,32 @@ def boxlist_iou(boxlist1: BoxList, boxlist2: BoxList) -> Tensor:
   box1, box2 = boxlist1.bbox, boxlist2.bbox
   lt = Tensor.maximum(box1[:, None, :2], box2[:, :2])  # [N,M,2]
   rb = Tensor.minimum(box1[:, None, 2:], box2[:, 2:])  # [N,M,2]
-  TO_REMOVE = 1
-  wh = (rb - lt + TO_REMOVE).maximum(0)  # [N,M,2]
+  wh = (rb - lt).maximum(0)  # [N,M,2]
   inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
 
   iou = inter / (area1[:, None] + area2 - inter)
   return iou
 
+
+def make_rpn_loss_evaluator(cfg, box_coder):
+  # just, "is it in range", another overthought class construct that could be a lambda
+  matcher = Matcher(
+      0.7,
+      0.3,
+      allow_low_quality_matches=True,
+  )
+
+  fg_bg_sampler = BalancedPositiveNegativeSampler(
+      cfg.MODEL.RPN.BATCH_SIZE_PER_IMAGE, cfg.MODEL.RPN.POSITIVE_FRACTION
+  )
+
+  loss_evaluator = RPNLossComputation(
+      matcher,
+      fg_bg_sampler,
+      box_coder,
+      generate_rpn_labels
+  )
+  return loss_evaluator
 
 class RPNLossComputation:
   def __init__(self, proposal_matcher, fg_bg_sampler, box_coder,
