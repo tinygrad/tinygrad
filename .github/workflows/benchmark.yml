@@ -28,7 +28,8 @@ jobs:
       run: |
         ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
-        time python3 examples/stable_diffusion.py --noshow --timing
+        python3 examples/stable_diffusion.py --noshow --timing | tee sd.txt
+      shell: bash
     - name: Run LLaMA
       run: |
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
@@ -57,6 +58,7 @@ jobs:
           gpt2_unjitted.txt
           gpt2_jitted.txt
           matmul.txt
+          sd.txt
 
   testamdbenchmark:
     name: AMD Benchmark
@@ -79,7 +81,8 @@ jobs:
       run: |
         ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
-        time python3 examples/stable_diffusion.py --noshow --timing
+        python3 examples/stable_diffusion.py --noshow --timing | tee sd.txt
+      shell: bash
     - name: Run LLaMA
       run: |
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
@@ -108,3 +111,4 @@ jobs:
           gpt2_unjitted.txt
           gpt2_jitted.txt
           matmul.txt
+          sd.txt
