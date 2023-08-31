@@ -149,11 +149,15 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     if u.uop == UOps.SPECIAL:
       if u.arg[0] == "global":
         global_size[u.arg[1]] = u.arg[2]
-        return f"((int){lang.gid[u.arg[1]]})"
-      if u.arg[0] == "local":
+        ret = lang.gid[u.arg[1]]
+      elif u.arg[0] == "local":
         local_size[u.arg[1]] = u.arg[2]
-        return f"((int){lang.lid[u.arg[1]]})"
-      raise NotImplementedError(f"no special {u.arg[0]}")
+        ret = lang.lid[u.arg[1]]
+      else:
+        raise NotImplementedError(f"no special {u.arg[0]}")
+      tok = f"{u.arg[0][0:1]}idx{u.arg[1]}"
+      kk(f"{u.dtype.name} {tok} = {ret};")
+      return tok
     if u.uop == UOps.CAST:
       return r[u.vin[0]]
     if u.uop == UOps.LOOP:
