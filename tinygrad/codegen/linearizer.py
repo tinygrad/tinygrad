@@ -233,6 +233,21 @@ class Linearizer(OptimizedKernel):
     self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) if isinstance(x, int) else sym_rename(x) for x in self.full_shape])
     self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
+    # name the function something unique
+    Linearizer.kernel_cnt[self.function_name] += 1
+    suffix = f"{'n'+str(Linearizer.kernel_cnt[self.function_name]-1)}" if Linearizer.kernel_cnt[self.function_name] > 1 else ""
+    self.function_name, self.display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
+
+    # define indexes
+    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
+    local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce-self.local_dims, self.first_reduce+len(self.group_for_reduce))]
+    full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
+    upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
+
+    # global and local loops
+    self.uop(UOps.LOOP, None, [], (global_idxs, "global"))
+    self.uop(UOps.LOOP, None, [], (local_idxs, "local"))
+
     # parse AST
     loaded_buffers = {}
     acc = []
@@ -242,18 +257,6 @@ class Linearizer(OptimizedKernel):
     def ssa(name, ltype=dtypes.float) -> Token:
       _ssa[name] += 1
       return Token(f"{name}{_ssa[name]-1}", ltype)
-
-    # global loop
-    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
-    self.uop(UOps.LOOP, None, [], (global_idxs, "global"))
-
-    # local loop
-    local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce-self.local_dims, self.first_reduce+len(self.group_for_reduce))]
-    self.uop(UOps.LOOP, None, [], (local_idxs, "local"))
-
-    # upcast indexes
-    full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
-    upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
 
     # reduce op
     fake_reduce_idxs = []
@@ -388,10 +391,6 @@ class Linearizer(OptimizedKernel):
       # end the global loop
       self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
-    # name the function something unique
-    Linearizer.kernel_cnt[self.function_name] += 1
-    suffix = f"{'n'+str(Linearizer.kernel_cnt[self.function_name]-1)}" if Linearizer.kernel_cnt[self.function_name] > 1 else ""
-    self.function_name, self.display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
     return self
 
   _OT = TypeVar("_OT")
