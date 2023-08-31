@@ -5,13 +5,9 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from tinygrad.helpers import getenv
-from tinygrad.lazy import Device
 
 import numpy as np
 import gym
-
-
-Device.DEFAULT = "GPU" if getenv("GPU") else "CPU"
 
 
 class Actor:
@@ -158,9 +154,6 @@ class DeepDeterministicPolicyGradient:
     target_actor_params = get_parameters(self.target_actor)
     target_critic_params = get_parameters(self.target_critic)
 
-    if Device.DEFAULT == "GPU":
-      [x.gpu_() for x in actor_params + critic_params + target_actor_params + target_critic_params]
-
     self.actor_optimizer = optim.Adam(actor_params, lr_actor)
     self.critic_optimizer = optim.Adam(critic_params, lr_critic)
 
@@ -236,6 +229,7 @@ if __name__ == "__main__":
     done = False
 
     while not done:
+      print(episode)
       prev_state = Tensor(prev_state, requires_grad=False)
       action = agent.choose_action(prev_state)
 
