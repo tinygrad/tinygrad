@@ -3,7 +3,7 @@ import ctypes, functools
 import extra.hip_wrapper as hip
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator
+from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.linearizer import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
@@ -20,10 +20,12 @@ class HIPAllocator(LRUAllocator):
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 HIPAlloc = HIPAllocator(hip.hipGetDeviceProperties(hip.hipGetDevice()).totalGlobalMem)
 
-class RawHIPBuffer(RawBufferCopyInOut):
+class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype): super().__init__(size, dtype, allocator=HIPAlloc)
   def _copyin(self, x:np.ndarray): hip.hipMemcpyAsync_htod(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, 0)
   def _copyout(self, x:np.ndarray): hip.hipMemcpy_dtoh(x.ctypes.data, self._buf, self.size * self.dtype.itemsize)
+  def _transfer(self, x):
+    pass
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
