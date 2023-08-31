@@ -3,7 +3,7 @@
 from models.mask_rcnn import BoxList
 from tinygrad.tensor import Tensor
 from tinygrad.tensor import dtypes
-from typing import List, Callable
+from typing import List, Callable, Tuple
 
 # implementation from https://github.com/kuangliu/torchcv/blob/master/torchcv/utils/box.py
 # with slight modifications
@@ -31,13 +31,12 @@ def boxlist_iou(boxlist1: BoxList, boxlist2: BoxList) -> Tensor:
 def test_match_eval():
   fn1 = make_match_evaluation_fn(0.7, 0.4)
 
-  match_quality_matrix = Tensor([[0.9, 0.7, 0.8, 0.9], # gt 1
-                                [0.1, 0.8, 0.1, 0.2],  # gt 2
-                                [0.1, 0.5, 0.1, 0.2],  # gt 2
-                                [0.1, 0.2, 0.2, 0.3]]) # gt 3
+  match_quality_matrix = Tensor([[0.9, 0.7, 0.8, 0.9], # gt 1, .9
+                                [0.1, 0.5, 0.1, 0.2],  # gt 2, .5
+                                [0.1, 0.2, 0.2, 0.3]]) # gt 3, .3
   # 1. test that it works
   a = fn1(match_quality_matrix)
-  assert all(((a == Tensor([[ 0.9],[ 0.8],[-2.],[-1.]]))[:, 0]).numpy())
+  assert all(((a == Tensor([[ 0.9],[-2.],[-1.]]))[:, 0]).numpy())
    
 
 def make_match_evaluation_fn(high: float, low: float, allow_low_qual: bool = False) -> Callable[[Tensor], Tensor]:
@@ -86,32 +85,94 @@ def make_match_evaluation_fn(high: float, low: float, allow_low_qual: bool = Fal
 
     # find best gt candidate for each prediction
     preds = match_quality_matrix.max(axis=1, keepdim=True)
-    if allow_low_qual:
-      all_matches = Tensor.zeros(preds.shape, dtype=dtypes.int8)
-    preds = Tensor(
-       [[0.9],
-        [0.8],
-        [0.5],
-        [0.3]]
-    )
+
     above_high_threshold = preds >= high
     below_low_threshold = preds < low
     between_thresholds = (preds >= low) * (preds < high)
+    
     if allow_low_qual:
       set_low_quality_matches_(preds)
 
     return above_high_threshold*preds - between_thresholds*2 - below_low_threshold*1
   return loss_eval_fn
    
+def test_balanced_sampler():
+  fn1 = make_balanced_sampler_fn(10, 0.5)
+  a = fn1([Tensor([1, 0, 1, 1, 1, 1, 0, 1, 1, 0])])
+  assert all(((a[0] == Tensor([1, 1, 1, 1, 1]))).numpy())
+
+def make_balanced_sampler_fn(batch_size_per_image: int, positive_fraction: float) -> Callable[[Tensor], Tuple[List[Tensor], List[Tensor]]]:
+  """
+  Arguments:
+      matched idxs: list of tensors containing -1, 0 or positive values.
+          Each tensor corresponds to a specific image.
+          -1 values are ignored, 0 are considered as negatives and > 0 as
+          positives.
+
+  Returns:
+      pos_idx (list[tensor])
+      neg_idx (list[tensor])
+
+  Returns two lists of binary masks for each image.
+  The first list contains the positive elements that were selected,
+  and the second list the negative example.
+  """
+  def sampler_fn(image_matches: List[Tensor]) -> (Tensor, Tensor):
+    pos_idx = []
+    neg_idx = []
+    for matches in image_matches:
+      positive = matches.where(matches >= 1, 0).squeeze(1)
+      print("Positive matches:", positive.numpy())
+      negative = matches.where(matches == 0, 0)
+      #positive = Tensor.nonzero(matched_idxs_per_image >= 1).squeeze(1)
+      #negative = Tensor.nonzero(matched_idxs_per_image == 0).squeeze(1)
+
+      num_pos = int(batch_size_per_image * positive_fraction)
+      # protect against not enough positive examples
+      pos_numel, neg_numel = positive.numel(), negative.numel()
+      num_pos = min(pos_numel, num_pos)
+      num_neg = min(neg_numel, batch_size_per_image - num_pos)
+
+      # randomly select positive and negative examples
+      # this is to replicate randperm
+      pos_index,pos_r = Tensor.arange(pos_numel),Tensor.rand(pos_numel)
+      pos_pairs = Tensor.stack([pos_index,pos_r],dim=1)
+      # TODO these numpy calls are slow, where better
+      pos_pairs = pos_pairs.numpy()[pos_pairs[:,1].numpy().argsort()] #randperm faster
+      pos_index = pos_pairs[:, 0].astype("int32")
+      print("Random permutation of indices:", pos_index)
+
+
+      neg_index,neg_r = Tensor.arange(neg_numel),Tensor.rand(neg_numel)
+      neg_pairs = Tensor.stack([neg_index,neg_r],dim=1)
+      
+      neg_pairs = neg_pairs.numpy()[neg_pairs[:,1].numpy().argsort()]
+      neg_index = neg_pairs[:, 0].astype("int32")
+
+
+      pos_idx_per_image = positive.numpy()[pos_index]
+      print("Positive indices:", pos_idx_per_image)
+      neg_idx_per_image = negative.numpy()[neg_index]
+      
+
+      # # create binary mask from indices
+      # pos_idx_per_image_mask = torch.zeros_like(
+      #     matched_idxs_per_image, dtype=torch.uint8
+      # )
+      # neg_idx_per_image_mask = torch.zeros_like(
+      #     matched_idxs_per_image, dtype=torch.uint8
+      # )
+      # pos_idx_per_image_mask[pos_idx_per_image] = 1
+      # neg_idx_per_image_mask[neg_idx_per_image] = 1
+
+      # pos_idx.append(pos_idx_per_image_mask)
+      # neg_idx.append(neg_idx_per_image_mask)
+
+    return pos_idx, neg_idx
+  return sampler_fn
 
 def make_rpn_loss_evaluator(cfg, box_coder):
-  # just, "is it in range", another overthought class construct that could be a lambda
-  matcher = Matcher(
-      0.7,
-      0.3,
-      allow_low_quality_matches=True,
-  )
-
+  matcher = make_match_evaluation_fn(.7, .3)
   fg_bg_sampler = BalancedPositiveNegativeSampler(
       cfg.MODEL.RPN.BATCH_SIZE_PER_IMAGE, cfg.MODEL.RPN.POSITIVE_FRACTION
   )
@@ -233,118 +294,16 @@ class RPNLossComputation:
     return objectness_loss, box_loss
 
 if __name__ == "__main__":
+  #PLAYGROUND
+  data = Tensor([[1, 2, 3],
+               [4, 5, 6],
+               [7, 8, 9],
+               [10, 11, 12]])
+  idx = Tensor([0, 2, 1, 1]).reshape(4, 1)
+  result = data.gather(idx, dim=1)
+
+
   test_boxlist_iou()
   test_match_eval()
-
-
-
-
-
-class Matcher(object):
-    """
-    This class assigns to each predicted "element" (e.g., a box) a ground-truth
-    element. Each predicted element will have exactly zero or one matches; each
-    ground-truth element may be assigned to zero or more predicted elements.
-
-    Matching is based on the MxN match_quality_matrix, that characterizes how well
-    each (ground-truth, predicted)-pair match. For example, if the elements are
-    boxes, the matrix may contain box IoU overlap values.
-
-    The matcher returns a tensor of size N containing the index of the ground-truth
-    element m that matches to prediction n. If there is no match, a negative value
-    is returned.
-    """
-
-    BELOW_LOW_THRESHOLD = -1
-    BETWEEN_THRESHOLDS = -2
-
-    def __init__(self, high_threshold, low_threshold, allow_low_quality_matches=False):
-        """
-        Args:
-            high_threshold (float): quality values greater than or equal to
-                this value are candidate matches.
-            low_threshold (float): a lower quality threshold used to stratify
-                matches into three levels:
-                1) matches >= high_threshold
-                2) BETWEEN_THRESHOLDS matches in [low_threshold, high_threshold)
-                3) BELOW_LOW_THRESHOLD matches in [0, low_threshold)
-            allow_low_quality_matches (bool): if True, produce additional matches
-                for predictions that have only low-quality match candidates. See
-                set_low_quality_matches_ for more details.
-        """
-        assert low_threshold <= high_threshold
-        self.high_threshold = high_threshold
-        self.low_threshold = low_threshold
-        self.allow_low_quality_matches = allow_low_quality_matches
-
-    def __call__(self, match_quality_matrix):
-        """
-        Args:
-            match_quality_matrix (Tensor[float]): an MxN tensor, containing the
-            pairwise quality between M ground-truth elements and N predicted elements.
-
-        Returns:
-            matches (Tensor[int64]): an N tensor where N[i] is a matched gt in
-            [0, M - 1] or a negative value indicating that prediction i could not
-            be matched.
-        """
-        if match_quality_matrix.numel() == 0:
-            # empty targets or proposals not supported during training
-            if match_quality_matrix.shape[0] == 0:
-                raise ValueError(
-                    "No ground-truth boxes available for one of the images "
-                    "during training")
-            else:
-                raise ValueError(
-                    "No proposal boxes available for one of the images "
-                    "during training")
-
-        # match_quality_matrix is M (gt) x N (predicted)
-        # Max over gt elements (dim 0) to find best gt candidate for each prediction
-        matched_vals, matches = match_quality_matrix.max(dim=0)
-        if self.allow_low_quality_matches:
-            all_matches = matches.clone()
-
-        # Assign candidate matches with low quality to negative (unassigned) values
-        below_low_threshold = matched_vals < self.low_threshold
-        between_thresholds = (matched_vals >= self.low_threshold) & (
-            matched_vals < self.high_threshold
-        )
-        matches[below_low_threshold] = Matcher.BELOW_LOW_THRESHOLD
-        matches[between_thresholds] = Matcher.BETWEEN_THRESHOLDS
-
-        if self.allow_low_quality_matches:
-            self.set_low_quality_matches_(matches, all_matches, match_quality_matrix)
-
-        return matches
-
-    def set_low_quality_matches_(self, matches, all_matches, match_quality_matrix):
-        """
-        Produce additional matches for predictions that have only low-quality matches.
-        Specifically, for each ground-truth find the set of predictions that have
-        maximum overlap with it (including ties); for each prediction in that set, if
-        it is unmatched, then match it to the ground-truth with which it has the highest
-        quality value.
-        """
-        # For each gt, find the prediction with which it has highest quality
-        highest_quality_foreach_gt, _ = match_quality_matrix.max(dim=1)
-        # Find highest quality match available, even if it is low, including ties
-        gt_pred_pairs_of_highest_quality = torch.nonzero(
-            match_quality_matrix == highest_quality_foreach_gt[:, None]
-        )
-        # Example gt_pred_pairs_of_highest_quality:
-        #   tensor([[    0, 39796],
-        #           [    1, 32055],
-        #           [    1, 32070],
-        #           [    2, 39190],
-        #           [    2, 40255],
-        #           [    3, 40390],
-        #           [    3, 41455],
-        #           [    4, 45470],
-        #           [    5, 45325],
-        #           [    5, 46390]])
-        # Each row is a (gt index, prediction index)
-        # Note how gt items 1, 2, 3, and 5 each have two ties
-
-        pred_inds_to_update = gt_pred_pairs_of_highest_quality[:, 1]
-        matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
+  test_balanced_sampler()
+  
