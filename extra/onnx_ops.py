@@ -242,10 +242,9 @@ def Dropout(data, ratio=0.5, training_mode=False, seed=None):
 
 def Shape(data, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int64)
 def Size(data): return prod(data if isinstance(data, list) else data.shape)
-
-# TODO: this doesn't match Tensor.flatten behavior
 def Flatten(input, axis=1): return input.reshape(prod((1,) + input.shape[0:axis]), -1)
 
+# TODO: abstract out the broadcast logic in tensor
 def Expand(input, shape):
   x_shape, y_shape = input.shape, [int(x) for x in safe_numpy(shape)]
   # copied from _broadcasted
@@ -390,6 +389,12 @@ def SoftmaxCrossEntropyLoss(scores, labels, weights=None, ignore_index=None, red
   return loss, y
 
 def ArrayFeatureExtractor(input, indices): return input.__getitem__(tuple([slice(None) if i != (input.ndim-1) else indices for i in range(input.ndim)]))
+        # axis = opt['axis'] if 'axis' in opt else 0
+        # shape = list(inp[0].shape)
+        # indices = [shape[axis]+int(x) if x<0 else int(x) for x in safe_numpy(inp[1])]
+        # args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
+        # ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
+        # ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
 def Gather(input, indices, axis=0):
   if indices.numel() < 9: # TODO not sure the exact number, need to run performance tests
     # NOTE faster gather and lessor kernels for smaller indices SOMETHING SOMETHING O(?) IDK I DIDN'T GO TO SCHOOL FOR THIS but kernel number increases depending on size of indices
