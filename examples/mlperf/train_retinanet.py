@@ -14,7 +14,6 @@ from tqdm import trange
 import numpy as np
 import torch
 from examples.hlb_cifar10 import cross_entropy
-from torchvision.models.detection.retinanet import retinanet_resnet50_fpn_v2 as TorchRN
 from typing import List, Tuple
 from extra.training import focal_loss, smooth_l1_loss
 NUM = getenv("NUM", 2)
@@ -142,15 +141,13 @@ class RetinaNetTrainer:
         TRAINING = getenv("TRAINING", 1)
         ADAM = getenv("ADAM", 0)
         CLCACHE = getenv("CLCACHE", 0)
-        retina_pt = TorchRN()
-        backbone = ResNeXt50_32X4D()
-        retina = RetinaNet(backbone) #remember num_classes = 600 for openimages
-        retina.load_from_pretrained()
+        backbone = self.model.backbone
+        retina = self.model #remember num_classes = 600 for openimages
+        #retina.load_from_pretrained()
 
 
 
-        anchors_flattened_levels = retina.anchor_gen(self.image_size)
-        anchors_flattened_levels = np.concatenate(anchors_flattened_levels)
+        anchors_flattened_levels = np.concatenate(retina.anchor_gen(self.image_size))
         params = get_parameters(retina)
         for p in params: p.realize()
         optimizer = optim.SGD(params, lr=0.001)
@@ -167,19 +164,23 @@ class RetinaNetTrainer:
 
             head_outputs = retina(self.input_fixup(images)).numpy()
 
-            total_loss = 0
-            for img_idx in range(BS):
-                #TODO tensorize, increase mask exploitation, don't use fors
-                box_regs = head_outputs[img_idx, :, :4] # anchors??
-                cls_preds = head_outputs[img_idx, :, 4:]
-                ground_truth_boxes, ground_truth_clss = targets["regression_targets"][img_idx], targets["classification_targets"][img_idx]
-                cls_targets_idxs = np.argwhere(targets["classification_masks"][img_idx]==1)
-                reg_targets_idxs = np.argwhere(targets["regression_masks"][img_idx]==1)
+            loss = self._eltwise_compute_loss(BS, targets, head_outputs) 
 
-                box_reg_losses = [smooth_l1_loss(Tensor(box_regs[target_box_idx]), Tensor(ground_truth_boxes[target_box_idx]), beta = 0.11, reduction="sum").numpy() for target_box_idx in reg_targets_idxs]
-                focal_losses = [focal_loss(Tensor(cls_preds[target_cls_idx]), Tensor(ground_truth_clss[target_cls_idx])).numpy() for target_cls_idx in cls_targets_idxs]
-                #TODO use reductions instead
-                total_loss += sum(focal_losses) + sum(box_reg_losses)     
+    def _eltwise_compute_loss(self, BS, targets, head_outputs):
+        total_loss = 0
+        for img_idx in range(BS):
+            #TODO tensorize, increase mask exploitation, don't use fors
+            box_regs = head_outputs[img_idx, :, :4] # anchors??
+            cls_preds = head_outputs[img_idx, :, 4:]
+            ground_truth_boxes, ground_truth_clss = targets["regression_targets"][img_idx], targets["classification_targets"][img_idx]
+            cls_targets_idxs = np.argwhere(targets["classification_masks"][img_idx]==1)
+            reg_targets_idxs = np.argwhere(targets["regression_masks"][img_idx]==1)
+
+            box_reg_losses = [smooth_l1_loss(Tensor(box_regs[target_box_idx]), Tensor(ground_truth_boxes[target_box_idx]), beta = 0.11, reduction="sum").numpy() for target_box_idx in reg_targets_idxs]
+            focal_losses = [focal_loss(Tensor(cls_preds[target_cls_idx]), Tensor(ground_truth_clss[target_cls_idx])).numpy() for target_cls_idx in cls_targets_idxs]
+            #TODO use reductions instead
+            total_loss += sum(focal_losses) + sum(box_reg_losses)    
+        return total_loss
             
                     
 

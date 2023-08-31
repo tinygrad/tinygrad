@@ -7,64 +7,14 @@ def train_resnet():
   pass
 
 def train_retinanet():
-  from typing import Any
-  from tinygrad.helpers import getenv, Context, dtypes
-  from models.retinanet import RetinaNet
   from models.resnet import ResNeXt50_32X4D
-  from extra.datasets import openimages
-  from PIL import Image
-  from extra.datasets.openimages import openimages, iterate
-  from pycocotools.coco import COCO
-  from pycocotools.cocoeval import COCOeval
-  from tinygrad.nn import optim
-  from tinygrad.state import get_parameters
-  from tqdm import trange
-  import numpy as np
-  import torch
-  from examples.hlb_cifar10 import cross_entropy
-  from torchvision.models.detection.retinanet import retinanet_resnet50_fpn_v2 as TorchRN
-  
-  input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
-  input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
-  def input_fixup(x):
-      x = x.permute([0,3,1,2]) / 255.0
-      x -= input_mean
-      x /= input_std
-      return x
-  
-  NUM = getenv("NUM", 2)
-  BS = getenv("BS", 4)
-  CNT = getenv("CNT", 10)
-  BACKWARD = getenv("BACKWARD", 0)
-  TRAINING = getenv("TRAINING", 1)
-  ADAM = getenv("ADAM", 0)
-  CLCACHE = getenv("CLCACHE", 0)
-  #retina_pt = TorchRN()
+  from models.retinanet import RetinaNet
+  from examples.mlperf.train_retinanet import RetinaNetTrainer
   backbone = ResNeXt50_32X4D()
   retina = RetinaNet(backbone) #remember num_classes = 600 for openimages
-  retina.load_from_pretrained()
-  coco = COCO(openimages())
-
-  anchors = retina.anchor_gen(IMAGE_SIZES["debug"])
-  
-  params = get_parameters(retina)
-  for p in params: p.realize()
-  optimizer = optim.SGD(params, lr=0.001)
-
-  Tensor.training = TRAINING
-  Tensor.no_grad = not BACKWARD
-  for x, annotations in iterate(coco, BS):
-    optimizer.zero_grad()
-    breakpoint()
-    print(x.shape)
-    resized = [Image.fromarray(image) for image in x]
-    resized = [np.asarray(image.resize((100,100))) for image in resized]
-    images = Tensor(resized)
-    head_outputs = retina(input_fixup(images)).numpy()
-    box_regs = head_outputs[:, :, :4] # anchors??
-    cls_preds = head_outputs[:, :, 4:]
-
-    ground_truth_boxes, ground_truth_clss = get_ground_truths
+  trainer = RetinaNetTrainer(retina)
+  trainer.train()
+ 
 
 
 def example_inference(np, fo, os, input_fixup, retina):
