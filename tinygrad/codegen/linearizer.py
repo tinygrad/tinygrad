@@ -205,8 +205,6 @@ class Linearizer(OptimizedKernel):
 
     # uops
     self.uops: List[UOp] = []
-    self.load_cache: Dict[str, Token] = {}
-    self.saved_exprs: Dict[Tuple[Op, Tuple[Token, ...]], Token] = dict()
 
     # add global buffers
     for buf,name in self.arg_bufs.items():
@@ -251,6 +249,8 @@ class Linearizer(OptimizedKernel):
     # parse AST
     loaded_buffers = {}
     acc = []
+    self.load_cache: Dict[str, Token] = {}
+    self.saved_exprs: Dict[Tuple[Op, Tuple[Token, ...]], Token] = dict()
 
     # ssa
     _ssa:DefaultDict[str,int] = defaultdict(int)
