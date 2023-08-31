@@ -276,8 +276,8 @@ class LazyBuffer:
         return src.permute(arg).reduce_op(cast(ReduceOps, rop), narg)
 
       # move permutes before expands (always, this is safe)
-      if self.op.op == MovementOps.EXPAND:
-        return self.op.src[0].permute(arg).expand(tuple([self.op.arg[a] for a in arg]))
+      #if self.op.op == MovementOps.EXPAND:
+      #  return self.op.src[0].permute(arg).expand(tuple([self.op.arg[a] for a in arg]))
 
       # move permutes before reshapes if we can
       if PUSH_PERMUTES and self.op.op == MovementOps.RESHAPE and self.op.src[0].__class__ is LazyBuffer:
