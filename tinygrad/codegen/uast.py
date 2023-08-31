@@ -32,6 +32,7 @@ class UOp(NamedTuple):
 class UAst(OptimizedKernel):
   @functools.lru_cache(None)
   def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp], arg:Any=None) -> UOp:
+    #assert isinstance(vin, tuple) and (isinstance(dtype, DType) or dtype is None)
     return UOp(uop, dtype, vin, arg)
 
   def uop_alu_idx(self, a, b, ops, ctx:UAst, op, dtype=dtypes.int32):
@@ -90,8 +91,8 @@ class UAst(OptimizedKernel):
         if len(reduce_idxs):
           acc = self.uop(UOps.DEFINE_ACC, dtypes.float32, (), acc_count)
           acc_count += 1
-          first = functools.reduce(lambda a,b: self.uop(UOps.ALU, (a,b), dtypes.int32, BinaryOps.ADD), [self.var_to_loop(ri) for ri in reduce_idxs])
-          phi = self.uop(UOps.ALU, dtypes.float32, (first, acc, self.uop(UOps.CONST, tuple(), dtypes.float32, float('-inf') if x.op == ReduceOps.MAX else 0)),TernaryOps.WHERE)
+          first = functools.reduce(lambda a,b: self.uop(UOps.ALU, dtypes.int32, (a,b), BinaryOps.ADD), [self.var_to_loop(ri) for ri in reduce_idxs])
+          phi = self.uop(UOps.ALU, dtypes.float32, (first, acc, self.uop(UOps.CONST, dtypes.float32, tuple(), float('-inf') if x.op == ReduceOps.MAX else 0)),TernaryOps.WHERE)
           vin += (phi, )
         # NOTE: this determines the order of these when it doesn't have to
         ret = functools.reduce(lambda a,b: self.uop(UOps.ALU, dtypes.float32, (a,b), BinaryOps.MAX if x.op == ReduceOps.MAX else BinaryOps.ADD), vin)
