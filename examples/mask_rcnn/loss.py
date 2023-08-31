@@ -101,6 +101,57 @@ def test_balanced_sampler():
   a = fn1([Tensor([1, 0, 1, 1, 1, 1, 0, 1, 1, 0])])
   assert all(((a[0] == Tensor([1, 1, 1, 1, 1]))).numpy())
 
+def test_randperm():
+  # [.2, .6, .8, .2, 0, 0, 0, 0, .8, .9]
+  # [1,  1,  1,  1,  0, 0, 0, 0,  1, 1] # 6 positives
+  # [.2, .6, .8, .2, .8, .9] # positives only
+
+  # TODO perf
+  def rand_sample(t: Tensor, mask: Tensor, take: int) -> Tensor:
+    # TODO bool masks would be nice
+    # t = t[mask.cast(dtypes.bool)]
+    t = t.numpy()[mask.numpy().astype("bool")]
+    print("Masked:", t)
+    ind, r = Tensor.arange(t.shape[0]), Tensor.rand(t.shape[0])
+    pairs = Tensor.stack([ind,r],dim=1)
+    xx = Tensor(pairs[:,1].numpy().argsort().reshape(pairs.shape[0], 1)[:take])
+    print("here")
+    print(t.numpy())
+    print(xx.numpy())
+    return pairs.gather(Tensor(pairs[:,1].numpy().argsort().reshape(pairs.shape[0], 1)[:take]), dim=1)
+
+  t = Tensor([.2, .6, .8, .2, 0, 0, 0, 0, .8, .9])
+  x = rand_sample(t, Tensor([1, 1, 1, 1, 0, 0, 0, 0, 1, 1]), 3)
+  print(x.numpy())
+  # [1, 2, 3, 4, 9, 10]
+  # [.5,.1,.5,.2,.1,.4] # rand
+  # stack, then sort and take
+
+  def bool_mask(t: Tensor, mask: Tensor) -> Tensor:
+
+    pairs = Tensor.stack([idx,t],dim=1).numpy()
+    return pairs[pairs[:,1].argsort()]
+
+  # [[1,0], [1,1] .. [0,4] .. [1, 9]]
+  # [[2], [1], [10]] # sample 3
+  mask = Tensor([1, 0, 1, 1, 1, 1, 0, 1, 1, 0])
+  print("Mask:", mask.numpy())
+  r = Tensor.rand(10)
+  print("Random:", r.numpy())
+  print("masked:", r[mask * Tensor.arange(10)].numpy())
+  randperm(10, Tensor([1, 0, 1, 1, 1, 1, 0, 1, 1, 0]))
+
+def randperm(size: int, idx: Tensor) -> Tensor:
+  tensor = Tensor([.2, .6, .8, .2, 0, 0, 0, 0, .8, .9])
+  # Sort the tensor
+  sorted_tensor, _ = Tensor.sort(tensor)
+  # Find the index where zeros end
+  non_zero_start_idx = torch.sum(sorted_tensor == 0).item()
+  # Slice the tensor from that index to the end
+  non_zero_tensor = sorted_tensor[non_zero_start_idx:]
+  pairs = Tensor.stack([idx,Tensor.rand(size)],dim=1).numpy()
+  return pairs[pairs[:,1].argsort()]
+
 def make_balanced_sampler_fn(batch_size_per_image: int, positive_fraction: float) -> Callable[[Tensor], Tuple[List[Tensor], List[Tensor]]]:
   """
   Arguments:
@@ -117,35 +168,31 @@ def make_balanced_sampler_fn(batch_size_per_image: int, positive_fraction: float
   The first list contains the positive elements that were selected,
   and the second list the negative example.
   """
-  def sampler_fn(image_matches: List[Tensor]) -> (Tensor, Tensor):
+
+  def sampler_fn(image_matches: List[Tensor], numpy_fancy: bool) -> (Tensor, Tensor):
     pos_idx = []
     neg_idx = []
     for matches in image_matches:
-      positive = matches.where(matches >= 1, 0).squeeze(1)
+      positive = matches.where(matches >= 1, 0) # TODO this was 1 in the example, should be >0? or threshold
       print("Positive matches:", positive.numpy())
       negative = matches.where(matches == 0, 0)
-      #positive = Tensor.nonzero(matched_idxs_per_image >= 1).squeeze(1)
-      #negative = Tensor.nonzero(matched_idxs_per_image == 0).squeeze(1)
 
       num_pos = int(batch_size_per_image * positive_fraction)
       # protect against not enough positive examples
-      pos_numel, neg_numel = positive.numel(), negative.numel()
+      pos_numel, neg_numel = positive.sum().numpy().item(), negative.sum().numpy().item()
       num_pos = min(pos_numel, num_pos)
       num_neg = min(neg_numel, batch_size_per_image - num_pos)
 
-      # randomly select positive and negative examples
-      # this is to replicate randperm
-      pos_index,pos_r = Tensor.arange(pos_numel),Tensor.rand(pos_numel)
-      pos_pairs = Tensor.stack([pos_index,pos_r],dim=1)
-      # TODO these numpy calls are slow, where better
-      pos_pairs = pos_pairs.numpy()[pos_pairs[:,1].numpy().argsort()] #randperm faster
+      pos_pairs = randperm(num_pos)
+      neg_pairs = randperm(num_neg)
+      
       pos_index = pos_pairs[:, 0].astype("int32")
       print("Random permutation of indices:", pos_index)
 
 
       neg_index,neg_r = Tensor.arange(neg_numel),Tensor.rand(neg_numel)
       neg_pairs = Tensor.stack([neg_index,neg_r],dim=1)
-      
+
       neg_pairs = neg_pairs.numpy()[neg_pairs[:,1].numpy().argsort()]
       neg_index = neg_pairs[:, 0].astype("int32")
 
@@ -302,8 +349,16 @@ if __name__ == "__main__":
   idx = Tensor([0, 2, 1, 1]).reshape(4, 1)
   result = data.gather(idx, dim=1)
 
-
+  test_randperm()
   test_boxlist_iou()
   test_match_eval()
   test_balanced_sampler()
   
+
+  # boolmask
+  # ind = Tensor.arange(mask.shape[0])
+  # nz = mask.sum().numpy().item()
+  # print("Nonzero:", nz)
+  # mask = mask * ind
+  # masked = mask.numpy().argsort()[-int(nz):]
+  # print("Nonzero indices:", masked)
