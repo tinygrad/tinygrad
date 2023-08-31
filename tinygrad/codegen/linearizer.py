@@ -47,9 +47,8 @@ class Linearizer(OptimizedKernel):
   def var_to_loop(self, var):
     if self.opts.has_local and (var.expr.startswith("gidx") or var.expr.startswith("lidx")):
       assert var.min == 0
-      global_dims_count = self.first_reduce-self.local_dims
-      if var.expr.startswith("gidx"): spec = ("global", (global_dims_count-1)-int(var.expr[4:]), var.max+1)
-      elif var.expr.startswith("lidx"): spec = ("local", (self.local_dims-1)-(int(var.expr[4:])-global_dims_count), var.max+1)
+      if var.expr.startswith("gidx"): spec = ("global", (self.global_dims-1)-int(var.expr[4:]), var.max+1)
+      elif var.expr.startswith("lidx"): spec = ("local", (self.local_dims-1+len(self.group_for_reduce))-(int(var.expr[4:])-self.global_dims), var.max+1)
       return self.uop(UOps.SPECIAL, dtypes.int32, tuple(), spec)
     return self.uop(UOps.LOOP, dtypes.int32, tuple(), (var.expr,var.min,var.max+1))
 
@@ -144,6 +143,10 @@ class Linearizer(OptimizedKernel):
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
     self.process()
+
+    # limit dims if we need to
+    if self.opts.global_max and self.opts.local_max: self.limit_global_dims(3, self.opts.global_max, self.opts.local_max)
+
     if DEBUG >= 3: self.printbufs()
 
     # kernel name (before late upcast)

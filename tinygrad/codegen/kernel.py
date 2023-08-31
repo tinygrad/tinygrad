@@ -112,6 +112,9 @@ class Kernel:
   @property
   def upcast_in_mid_reduce_axes(self) -> List[int]: return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)) if self.full_shape[j] == self.sts[0].shape[j]]
 
+  @property
+  def global_dims(self) -> int: return self.first_reduce-self.local_dims
+
   # there's seven chunks of the shape
   # blue   -- global dims
   # cyan   -- local dims
