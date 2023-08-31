@@ -1,8 +1,7 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict
 import math
 from collections import defaultdict
-#from tinygrad.codegen.linearizer import UOps, UOp, MemOp
-from tinygrad.codegen.uast import UOps, UOp
+from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, prod, DType
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable

@@ -198,22 +198,6 @@ class Compiled:
     # update the output var_vals from src
     output.st.var_vals = dict(sorted(merge_dicts([buf.st.var_vals for buf in ast.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 
-    from tinygrad.codegen.uast import UAst
-    k = UAst(ast, output, self.linearizer_opts)
-    k.hand_coded_optimizations()
-    prg = self.to_program(k)
-
-    """
-    from tinygrad.codegen.uast import uops_to_cstyle2
-    k.hand_coded_optimizations()
-    uast = k.linearize()
-    src, global_size, local_size, binary = uops_to_cstyle2(k.function_name, uast)
-    prg = ASTRunner(k.function_name, src, global_size, local_size,
-                    op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
-                    display_name=k.display_name, runtime_args={"binary": binary}).build(self.runtime)
-    """
-
-    """
     from tinygrad.codegen.linearizer import Linearizer
     k = Linearizer(ast, output, self.linearizer_opts)
 
@@ -229,9 +213,8 @@ class Compiled:
       prg = self.method_cache[k.key]
     else:
       prg = get_program()
-    """
 
-    #if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
+    if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
     prg.exec(k.bufs, var_vals=output.st.var_vals)
     return output.realized
