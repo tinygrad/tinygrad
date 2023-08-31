@@ -1,12 +1,12 @@
 from __future__ import annotations
-import functools, math, itertools
+import functools, math, itertools, heapq
 from collections import defaultdict
 from typing import NamedTuple, Optional, List, Any, Tuple, Union, Dict
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp, TernaryOps
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawConst
-from tinygrad.helpers import dtypes, DEBUG, DType, getenv, colored, PtrDType
+from tinygrad.helpers import dtypes, DEBUG, DType, getenv, colored, PtrDType, Timing
 from enum import Enum, auto
 from tinygrad.shape.symbolic import Variable, NumNode, Node, MulNode, SumNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 VariableOrNum = Union[Variable, NumNode, Node]
@@ -17,7 +17,6 @@ class UOps(Enum):
   CONST = auto(); LOAD = auto(); STORE = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto() # noqa: E702
   LOOP = auto()  # loop is last
-  #def __lt__(self, x): return self.value < x.value
 
 class UOp(NamedTuple):
   uop: UOps
@@ -28,23 +27,25 @@ class UOp(NamedTuple):
   def __lt__(self, x):
     if self.uop == UOps.LOOP and x.uop == UOps.LOOP: return self.arg < x.arg
     return self.uop.value < x.uop.value
+  # NOTE: if you don't cache the hash, it's really slow
+  hash: int
+  def __hash__(self): return self.hash
 
 class UAst(OptimizedKernel):
   @functools.lru_cache(None)
   def uop(self, uop:UOps, dtype:DType, vin:Tuple[UOp], arg:Any=None) -> UOp:
-    #assert isinstance(vin, tuple) and (isinstance(dtype, DType) or dtype is None)
-    return UOp(uop, dtype, vin, arg)
+    return UOp(uop, dtype, vin, arg, hash((uop, dtype, vin, arg)))
 
   def uop_alu_idx(self, a, b, ops, ctx:UAst, op, dtype=dtypes.int32):
     return self.uop(UOps.ALU, dtype, (a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx)), op)
 
   def var_to_loop(self, var):
-    if self.opts.has_local and var.expr.startswith("gidx"):
+    if self.opts.has_local and (var.expr.startswith("gidx") or var.expr.startswith("lidx")):
       assert var.min == 0
-      return self.uop(UOps.SPECIAL, dtypes.int32, tuple(), ("global", int(var.expr[4:]), var.max+1))
-    elif self.opts.has_local and var.expr.startswith("lidx"):
-      assert var.min == 0
-      return self.uop(UOps.SPECIAL, dtypes.int32, tuple(), ("local", int(var.expr[4:])-(self.first_reduce-self.local_dims), var.max+1))
+      global_dims_count = self.first_reduce-self.local_dims
+      if var.expr.startswith("gidx"): spec = ("global", (global_dims_count-1)-int(var.expr[4:]), var.max+1)
+      elif var.expr.startswith("lidx"): spec = ("local", (self.local_dims-1)-(int(var.expr[4:])-global_dims_count), var.max+1)
+      return self.uop(UOps.SPECIAL, dtypes.int32, tuple(), spec)
     return self.uop(UOps.LOOP, dtypes.int32, tuple(), (var.expr,var.min,var.max+1))
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.var_to_loop(self),
@@ -161,9 +162,7 @@ class UAst(OptimizedKernel):
     for u in uops: visit(u)
 
     # then we figure out which are renderable and put them in order, leaving loops for last
-    import heapq
     heapq.heapify(srcs)
-
     rendered = set()
     order = []
     while len(srcs):

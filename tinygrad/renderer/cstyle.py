@@ -88,8 +88,9 @@ class CStyleLanguage(NamedTuple):
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
+    return prg, global_size, local_size
 
-    return prg, global_size[::-1], local_size[::-1]
+    #return prg, global_size[::-1], local_size[::-1]
 
   # returns a str statement that does the store
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
@@ -125,10 +126,15 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
   r: Dict[UOp, Optional[str]] = {}
   def kk(s): kernel.append("  "*depth+s)
 
+  child_count = defaultdict(int)
   seen_end = defaultdict(int)
   for ru in uops:
     if ru.uop == UOps.ENDLOOP: seen_end[ru.vin[1]] += 1
     if ru.uop == UOps.DEFINE_GLOBAL: bufs.append(None)
+    if ru.uop == UOps.SPECIAL and ru.arg[0] == "global": global_size.append(0)
+    if ru.uop == UOps.SPECIAL and ru.arg[0] == "local": local_size.append(0)
+    for v in ru.vin:
+      child_count[v] += 1
 
   c = defaultdict(int)
   def ssa(prefix="t"):
@@ -145,10 +151,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       return f"{float(u.arg)}f" if dtypes.is_float(u.dtype) else f"{int(u.arg)}"
     elif u.uop == UOps.SPECIAL:
       if u.arg[0] == "global":
-        global_size.append(u.arg[2])
+        global_size[u.arg[1]] = u.arg[2]
         return f"((int)gid.{'xyz'[u.arg[1]]})"
       elif u.arg[0] == "local":
-        local_size.append(u.arg[2])
+        local_size[u.arg[1]] = u.arg[2]
         return f"((int)lid.{'xyz'[u.arg[1]]})"
       else:
         raise NotImplementedError(f"no special {u.arg[0]}")
@@ -158,7 +164,13 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       kk(f"for (int {u.arg[0]} = {u.arg[1]}; {u.arg[0]} < {u.arg[2]}; {u.arg[0]}++) {{")
       depth += 1
       return u.arg[0]
-    elif u.uop == UOps.ALU: return lang.code_for_op[u.arg](*[r[x] for x in u.vin])
+    elif u.uop == UOps.ALU:
+      val = lang.code_for_op[u.arg](*[r[x] for x in u.vin])
+      if child_count[u] > 1 and not dtypes.is_int(u.dtype):
+        tok = ssa("alu")
+        kk(f"{u.dtype.name} {tok} = {val};")
+        return tok
+      return val
     elif u.uop == UOps.DEFINE_GLOBAL:
       bufs[u.arg] = (f"data{u.arg}", u.dtype)
       return f"data{u.arg}"
