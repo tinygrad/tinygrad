@@ -118,12 +118,6 @@ def get_run_onnx(onnx_model: ModelProto):
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
       shape = type_parse(inp.type)
-<<<<<<< Updated upstream
-=======
-      # this works for gpt3 but does not work elsewhere
-      if len(shape) >= 1 and shape[0] == 0 and shape != (0,): shape = tuple([1]+list(shape[1:]))   # 1 batch size
-      # if len(shape) >= 1: shape = tuple([x if x != 0 else 1 for x in shape])  # replace all dynamic dims with 1 for now
->>>>>>> Stashed changes
       if inp.name in inputs:
         if isinstance(inputs[inp.name], Tensor):
           input_tensors[inp.name] = inputs[inp.name]
