@@ -212,17 +212,15 @@ class Linearizer(OptimizedKernel):
     # add variables from symbolic shapes
     for var in sorted(set(v for buf in self.ast.buffers for v in buf.st.var_vals), key=lambda k: k.key):
       self.uop(UOps.DEFINE_GLOBAL, None, [], (var.expr, dtypes._arg_int32))
-
+    # define local buffers
+    for lb in self.local_alias.values():
+      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size()))
     # add a local buffer for multistage reduce
     if self.group_for_reduce:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
-
-    # define local buffers
-    for lb in self.local_alias.values():
-      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size()))
 
     # print
     if DEBUG >= 3: self.printbufs()
@@ -384,12 +382,8 @@ class Linearizer(OptimizedKernel):
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa)
 
-    if not self.group_for_reduce:
-      # end the global+local loop
-      self.uop(UOps.ENDLOOP, None, [], (global_idxs+local_idxs, "global+local"))
-    else:
-      # end the global loop
-      self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
+    # end the global (and maybe local) loop
+    self.uop(UOps.ENDLOOP, None, [], (global_idxs+local_idxs, "global+local") if not self.group_for_reduce else (global_idxs, "global"))
 
     return self
 
