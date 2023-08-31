@@ -62,6 +62,9 @@ backend_test.exclude('test_castlike_*')
 backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
 
+backend_test.exclude('test_reduce_log_sum_exp*') # dependent on actual float64 implementation for backends
+backend_test.exclude('test_operator_add*') # dependent on float64 math. Without it values default to 0 or inf
+
 # we don't support indexes
 # backend_test.exclude('test_argmax_*') # Needs more work #select_last_index
 # backend_test.exclude('test_argmin_*') # Needs more work #select_last_index
