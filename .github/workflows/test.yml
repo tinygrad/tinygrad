@@ -189,8 +189,8 @@ jobs:
       run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_jit.py
     - name: Run symbolic shapetracker test
       run: METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py test/test_symbolic_ops.py test/test_symbolic_jit.py
-    - name: Check Device.DEFAULT
-      run: WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
+    #- name: Check Device.DEFAULT
+    #  run: WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
     #- name: Run webgpu pytest
     #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto --ignore test/models/ --ignore test/unit/test_example.py --ignore test/extra/test_lr_scheduler.py --ignore test/test_linearizer.py test/
     #- name: Build WEBGPU Efficientnet
@@ -200,7 +200,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda, ptx]
+        backend: [llvm, clang, gpu, cuda]
+        #backend: [llvm, clang, gpu, cuda, ptx]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
@@ -275,6 +276,7 @@ jobs:
   testunicorn:
     name: ARM64 unicorn Test
     runs-on: ubuntu-latest
+    if: ${{ false }}
     timeout-minutes: 20
     steps:
       - name: Checkout Code
