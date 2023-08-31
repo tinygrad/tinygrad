@@ -127,9 +127,9 @@ class Kernel:
   # yellow -- normal upcasted dimensions
   def colors(self) -> List[str]:
     # up to first_reduce, they are all global (blue)
-    colors = ["blue"] * (self.first_reduce-self.local_dims)
+    colors = ["blue"] * self.global_dims
     # except the local_dims, these are non-reduce locals (cyan)
-    colors += ["cyan"] * (self.local_dims)
+    colors += ["cyan"] * self.local_dims
     # between first_reduce and first_reduce + group_for_reduce, they are either local (cyan), or late upcasted (green)
     colors += ["white" if i in self.upcast_in_mid_reduce_axes else "green" for i in range(self.first_reduce, self.first_reduce + len(self.group_for_reduce))]
     # between first_reduce + group_for_reduce and upcasted, they are reduce (red)
