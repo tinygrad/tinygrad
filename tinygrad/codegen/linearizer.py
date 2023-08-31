@@ -11,7 +11,7 @@ from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, sym_rename
 from tinygrad.codegen.optimizer import OptimizedKernel
-from tinygrad.codegen.kernel import LocalBuffer, LinearizerOptions # noqa: F401 # pylint:disable=unused-import
+from tinygrad.codegen.kernel import LocalBuffer
 VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
@@ -215,7 +215,7 @@ class Linearizer(OptimizedKernel):
     # define local buffers
     for lb in self.local_alias.values():
       self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size()))
-    # add a local buffer for multistage reduce
+    # add a local buffer for multistage reduce. # TODO: use local alias
     if self.group_for_reduce:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
@@ -273,6 +273,7 @@ class Linearizer(OptimizedKernel):
       if self.use_tensor_cores: self.uop(UOps.BARRIER, None, [], ())
 
       # compute local aliases
+      # TODO: this is garbage code and should be at least moved elsewhere
       locals_to_store = []
       for i in self.local_alias:
         strides = self.sts[i].real_strides()
