@@ -66,17 +66,15 @@ def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0
 
 def Unsqueeze(data, axes):
   axes = [len(data.shape) + int(x) if x < 0 else int(x) for x in safe_numpy(axes)]
-  ptr = 0
-  new_shape = []
-  for i in range(len(data.shape) + len(axes)):
-    if i in axes: new_shape.append(1)
-    else:
-      new_shape.append(data.shape[ptr])
-      ptr += 1
+  new_shape = [1] * (len(data.shape) + len(axes))
+  ptr = iter(data.shape)
+  for i in range(len(new_shape)):
+    if i not in axes:
+      new_shape[i] = next(ptr)
   return data.reshape(new_shape)
 
 def Gemm(A, B, C=None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=0):
-  ret = alpha * ((A.transpose() if transA == 1 else A) @ (B.transpose() if transB == 1 else B))
+  ret = alpha * (A.transpose(transA) @ B.transpose(transB))
   if C is not None: ret += beta * (C if broadcast == 0 else C.reshape([-1 if i <  len(C.shape) else 1 for i in range(len(ret.shape))][::-1]))
   return ret
 
@@ -137,9 +135,7 @@ def _padding(X, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., stri
   if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
   if pads is None: return X
   pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
-  zero_padded = X.pad(tuple(pads))
-  constant_padder = Tensor.zeros_like(X).pad(tuple(pads), value=constant_value)
-  return zero_padded + constant_padder
+  return X.pad(tuple(pads), value=constant_value)
 
 def _auto_pad(X, auto_pad, strides, kernel_shape, dilations):
   strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
@@ -193,8 +189,7 @@ def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=N
   if ceil_mode: auto_pad = "SAME_UPPER"
   ret = _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-len(kernel_shape):], strides=strides, kernel_shape=kernel_shape, dilations=dilations)
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations)
-  ret_len = ret.numel()
-  X_len = X.numel()
+  ret_len, X_len = ret.numel(), X.numel()
   indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)) * Tensor.arange(X_len).reshape(1, X_len).expand(ret_len, X_len)).sum(1).reshape(ret.shape).cast(dtypes.int64)
   if storage_order: indices = indices.transpose(indices.ndim-2, indices.ndim-1)
   return ret, indices
@@ -249,11 +244,8 @@ def Shape(data, end=None, start=0): return Tensor(list(data.shape)[start:end], d
 def Size(data): return prod(data if isinstance(data, list) else data.shape)
 
 # TODO: this doesn't match Tensor.flatten behavior
-def Flatten(input, axis=1):
-  new_shape = (1, -1) if axis == 0 else (prod(input.shape[0:axis]), -1)
-  return input.reshape(new_shape)
+def Flatten(input, axis=1): return input.reshape(prod((1,) + input.shape[0:axis]), -1)
 
-# TODO: abstract out the broadcast logic in tensor
 def Expand(input, shape):
   x_shape, y_shape = input.shape, [int(x) for x in safe_numpy(shape)]
   # copied from _broadcasted
@@ -332,12 +324,7 @@ def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=T
 def OptionalHasElement(x: Tensor=None): return Tensor(x is not None and x.numel() > 0, dtype=dtypes.bool)
 def OptionalGetElement(x: Tensor=None): return x if x is not None else Tensor([], dtype=dtypes.float32)
 
-def Tile(input, repeats):
-  repeats_ = [int(x) for x in safe_numpy(repeats)]
-  new_shape = [x for i in range(len(input.shape)) for x in [1,input.shape[i]]]
-  expand_shape = [x for r,s in zip(repeats_, input.shape) for x in [r,s]]
-  final_shape = [r*s for r,s in zip(repeats_, input.shape)]
-  return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
+def Tile(input, repeats): return input.repeat([int(x) for x in safe_numpy(repeats)])
 
 def Range(start, limit, delta): return Tensor.arange(start=int(safe_numpy(start)), stop=int(safe_numpy(limit)), step=int(safe_numpy(delta))).cast(dtype=start.dtype) # DeprecationWarning: Conversion of an array with ndim > 0 to a scalar is deprecated, and will error in future. Ensure you extract a single element from your array before performing this operation. (Deprecated NumPy 1.25.)
 def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
@@ -396,13 +383,13 @@ def SoftmaxCrossEntropyLoss(scores, labels, weights=None, ignore_index=None, red
   if ignore_index is not None: labels = (labels == ignore_index).where(C+1, labels)
   mask = labels.unsqueeze(1) == Tensor.arange(C).reshape(1, C, *[1]*len(s_dimensions))
   y = scores.log_softmax(axis=1)
-  if weights is not None: weights = weights.__getitem__(tuple([labels, *[slice(None,None,None)]*(weights.ndim-1)]))
+  if weights is not None: weights = weights.__getitem__(tuple([labels, *[slice(None)]*(weights.ndim-1)]))
   loss = (mask * -y).sum(1) if weights is None else (mask * -y).sum(1) * weights
   if reduction == "mean": loss = loss.sum() / (loss == 0).where(0, 1).sum() if weights is None else loss.sum() / weights.sum()
   elif reduction == "sum": loss = loss.sum()
   return loss, y
 
-def ArrayFeatureExtractor(input, indices): return input.__getitem__(tuple([slice(None,None,None) if i != (input.ndim-1) else indices for i in range(input.ndim)]))
+def ArrayFeatureExtractor(input, indices): return input.__getitem__(tuple([slice(None) if i != (input.ndim-1) else indices for i in range(input.ndim)]))
 def Gather(input, indices, axis=0):
   if indices.numel() < 9: # TODO not sure the exact number, need to run performance tests
     # NOTE faster gather and lessor kernels for smaller indices SOMETHING SOMETHING O(?) IDK I DIDN'T GO TO SCHOOL FOR THIS but kernel number increases depending on size of indices
@@ -413,7 +400,7 @@ def Gather(input, indices, axis=0):
     args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(input_sh)] for i in indices]
     return input.shrink(arg=tuple(args[0])).cat(*[input.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
   else: # NOTE faster gather with larger indices probably, fixed number of kernels, but exceeds 199 kernels for openpilot
-    return input.__getitem__(tuple([slice(None,None,None) if i != axis else indices for i in range(input.ndim)]))
+    return input.__getitem__(tuple([slice(None) if i != axis else indices for i in range(input.ndim)]))
 
 def GatherElements(input, indices, axis):
   indices = indices.sign().contiguous().__neg__().contiguous().relu() * input.shape[axis] + indices
@@ -435,8 +422,7 @@ def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
     x = (x > b).where(b+1-n, b-n)
     return x
 
-def Round(X:Tensor):
-  return _round(X, 0.5, "round_to_even")
+def Round(X:Tensor): return _round(X, 0.5, "round_to_even")
 
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
   def _nearest_gather(X: Tensor, x_out, y_out): return X[:,:,y_out,:][:,:,:,x_out]
@@ -572,7 +558,7 @@ def Compress(inp, condition, axis=None):
 
   con_np = condition.numpy()
   con = Tensor(np.arange(condition.shape[0])[con_np]) # no boolean indexing in Tensor
-  return inp.__getitem__(tuple([slice(None,None,None) if i != axis else con for i in range(inp.ndim)]))
+  return inp.__getitem__(tuple([slice(None) if i != axis else con for i in range(inp.ndim)]))
 
 def Acos(x):
   negate = (x < 0)
@@ -689,8 +675,7 @@ def ArgMax(x, axis=0, keepdims=1, select_last_index=0):
   c = Tensor.arange(x.shape[axis]).reshape(*[1]*(axis), x.shape[axis], *[1]*(x.ndim - axis-1)) * m
   return c.max(axis=axis,keepdim=keepdims).cast(dtypes.int64)
 
-def ArgMin(x, axis=0, keepdims=1, select_last_index=0):
-  return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
+def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
 
 def Upsample(X, scales, mode):
   return Resize(X=X, scales=scales, mode=mode)
