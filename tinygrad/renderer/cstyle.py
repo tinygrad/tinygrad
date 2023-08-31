@@ -173,6 +173,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     if u.uop == UOps.DEFINE_GLOBAL:
       bufs[u.arg] = (f"data{u.arg}", u.dtype)
       return f"data{u.arg}"
+    if u.uop == UOps.DEFINE_LOCAL:
+      kk(lang.render_local(u.arg[0], u.arg[1]))
+      return u.arg[0]
     if u.uop == UOps.ENDLOOP:
       seen_end[u.vin[1]] -= 1
       if seen_end[u.vin[1]] == 0:

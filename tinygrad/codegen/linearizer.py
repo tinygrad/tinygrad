@@ -9,7 +9,8 @@ from tinygrad.runtime.lib import RawConst
 from tinygrad.helpers import dtypes, DEBUG, DType, getenv, colored, PtrDType
 from enum import Enum, auto
 from tinygrad.shape.symbolic import Variable, NumNode, Node, MulNode, SumNode, DivNode, ModNode, LtNode, AndNode, sym_rename
-from tinygrad.codegen.kernel import LinearizerOptions # noqa: F401 # pylint:disable=unused-import
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.codegen.kernel import LocalBuffer, LinearizerOptions # noqa: F401 # pylint:disable=unused-import
 VariableOrNum = Union[Variable, NumNode, Node]
 
 class UOps(Enum):
@@ -32,6 +33,35 @@ class UOp(NamedTuple):
   hash: int
   def __hash__(self): return self.hash
 
+def linearize(uops:List[UOp]) -> List[UOp]:
+  # first, we fetch all the uops
+  seen = set()
+  srcs = []
+  children = defaultdict(list)
+  def visit(x):
+    if x in seen: return
+    if len(x.vin) == 0: srcs.append(x)
+    seen.add(x)
+    for u in x.vin:
+      children[u].append(x)
+      visit(u)
+  for u in uops: visit(u)
+
+  # then we figure out which are renderable and put them in order, leaving loops for last
+  heapq.heapify(srcs)
+  rendered = set()
+  order = []
+  while len(srcs):
+    u = heapq.heappop(srcs)
+    if u not in rendered:
+      rendered.add(u)
+      order.append(u)
+      if DEBUG >= 4: print(u)
+      for c in children[u]:
+        if all(x in rendered for x in c.vin):
+          heapq.heappush(srcs, c)
+  return order
+
 class Linearizer(OptimizedKernel):
   _uop_cache: Dict[Any, UOp] = {}
   def uop(self, uop:UOps, dtype:DType, vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
@@ -48,7 +78,7 @@ class Linearizer(OptimizedKernel):
     if self.opts.has_local and (var.expr.startswith("gidx") or var.expr.startswith("lidx")):
       assert var.min == 0
       if var.expr.startswith("gidx"): spec = ("global", (self.global_dims-1)-int(var.expr[4:]), var.max+1)
-      elif var.expr.startswith("lidx"): spec = ("local", (self.local_dims-1+len(self.group_for_reduce))-(int(var.expr[4:])-self.global_dims), var.max+1)
+      elif var.expr.startswith("lidx"): spec = ("local", (self.first_reduce-1+len(self.group_for_reduce))-(int(var.expr[4:])), var.max+1)
       return self.uop(UOps.SPECIAL, dtypes.int32, tuple(), spec)
     return self.uop(UOps.LOOP, dtypes.int32, tuple(), (var.expr,var.min,var.max+1))
 
@@ -61,11 +91,37 @@ class Linearizer(OptimizedKernel):
     SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops,ctx)),
     AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
+  kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def get_uast(self) -> List[UOp]:
+    self.process()
+
+    # limit dims if we need to
+    if self.opts.global_max and self.opts.local_max: self.limit_global_dims(3, self.opts.global_max, self.opts.local_max)
+
+    # kernel name (before late upcast)
+    self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) if isinstance(x, int) else sym_rename(x) for x in self.full_shape])
+    self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
+
+    # name the function something unique
+    Linearizer.kernel_cnt[self.function_name] += 1
+    suffix = f"{'n'+str(Linearizer.kernel_cnt[self.function_name]-1)}" if Linearizer.kernel_cnt[self.function_name] > 1 else ""
+    self.function_name, self.display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
+
+    # get the global buffers
     global_bufs = [self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype), tuple(), i) for i,buf in enumerate(self.arg_bufs.keys())]
+
+    # add a local buffer for multistage reduce
+    if self.group_for_reduce:
+      # TODO: the strides of this can be controlled
+      self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
+      global_bufs.append(self.uop(UOps.DEFINE_LOCAL, self.bufs[-1].dtype, (), ("temp", self.sts[-1].size())))
+
+    if DEBUG >= 3: self.printbufs()
 
     # define Variables
     global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
+    fake_global_idxs = [x*0 for x in global_idxs]
     local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce-self.local_dims, self.first_reduce+len(self.group_for_reduce))]
     reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
@@ -114,13 +170,20 @@ class Linearizer(OptimizedKernel):
       return self.uop(UOps.ALU, vin[0].dtype, vin, x.op)
 
     sinks = []
-    expanded_nodes = [idx.expand() for idx in (global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)]
+    this_global_idxs = fake_global_idxs if len(self.group_for_reduce) else global_idxs
+    this_buffer = -1 if len(self.group_for_reduce) else 0
+    expanded_nodes = [idx.expand() for idx in (this_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)]
     store_idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     for idxs in store_idxs:
-      idx, valid = self.sts[0].expr_idxs(idxs)
+      idx, valid = self.sts[this_buffer].expr_idxs(idxs)
       assert valid.min == 1
       idx_rendered = idx.render(self.render_ops, self)
-      sinks.append(self.uop(UOps.STORE, self.bufs[0].dtype, (global_bufs[0], ast_parse(self.ast, idxs), idx_rendered)))
+      sinks.append(self.uop(UOps.STORE, self.bufs[this_buffer].dtype, (global_bufs[this_buffer], ast_parse(self.ast, idxs), idx_rendered)))
+
+    return sinks
+
+  def linearize(self):
+    sinks = self.get_uast()  # TODO: should this be return?
 
     # graph debugging
     if getenv("UASTGRAPH"):
@@ -138,53 +201,4 @@ class Linearizer(OptimizedKernel):
       nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
       os.system(f'dot -Grankdir=LR -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
 
-    return sinks
-
-  kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
-  def linearize(self):
-    self.process()
-
-    # limit dims if we need to
-    if self.opts.global_max and self.opts.local_max: self.limit_global_dims(3, self.opts.global_max, self.opts.local_max)
-
-    if DEBUG >= 3: self.printbufs()
-
-    # kernel name (before late upcast)
-    self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) if isinstance(x, int) else sym_rename(x) for x in self.full_shape])
-    self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
-    # name the function something unique
-    Linearizer.kernel_cnt[self.function_name] += 1
-    suffix = f"{'n'+str(Linearizer.kernel_cnt[self.function_name]-1)}" if Linearizer.kernel_cnt[self.function_name] > 1 else ""
-    self.function_name, self.display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
-
-    # get sink uops
-    uops = self.get_uast()
-
-    # first, we fetch all the uops
-    seen = set()
-    srcs = []
-    children = defaultdict(list)
-    def visit(x):
-      if x in seen: return
-      if len(x.vin) == 0: srcs.append(x)
-      seen.add(x)
-      for u in x.vin:
-        children[u].append(x)
-        visit(u)
-    for u in uops: visit(u)
-
-    # then we figure out which are renderable and put them in order, leaving loops for last
-    heapq.heapify(srcs)
-    rendered = set()
-    order = []
-    while len(srcs):
-      u = heapq.heappop(srcs)
-      if u not in rendered:
-        rendered.add(u)
-        order.append(u)
-        #if DEBUG >= 4: print(u)
-        for c in children[u]:
-          if all(x in rendered for x in c.vin):
-            heapq.heappush(srcs, c)
-
-    self.uops = order  # TODO: should this be return?
+    self.uops = linearize(sinks)
