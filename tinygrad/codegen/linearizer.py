@@ -99,16 +99,8 @@ def get_grouped_maybe_float4(*values:List[Token], grouping_allowed=True):
       return zip(new_idxs, new_values)
   return zip([[i] for i in range(len(values[0]))], zip(*values))
 
-# TODO: generic visitor pattern?
-def expand_node(idx:Node) -> List[Node]:
-  if isinstance(idx, Variable): return [idx] if idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)]
-  if isinstance(idx, NumNode): return [idx]
-  if isinstance(idx, MulNode): return [x*idx.b for x in expand_node(idx.a)]
-  if isinstance(idx, SumNode): return [Variable.sum(list(it)) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
-  raise NotImplementedError(idx)
-
 def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
-  for x in itertools.product(*[expand_node(idx) for idx in idxs[::-1]]):
+  for x in itertools.product(*[idx.expand() for idx in idxs[::-1]]):
     yield x[::-1]
 
 class MemOp(NamedTuple):
@@ -165,7 +157,7 @@ class Linearizer(OptimizedKernel):
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[Token]:
     const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
 
-    expanded_nodes = [expand_node(idx) for idx in idxs]
+    expanded_nodes = [idx.expand() for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
 
@@ -207,7 +199,7 @@ class Linearizer(OptimizedKernel):
     return ret
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[Token], ssa) -> None:
-    expanded_nodes = [expand_node(idx) for idx in idxs]
+    expanded_nodes = [idx.expand() for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
 

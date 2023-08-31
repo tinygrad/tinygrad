@@ -220,5 +220,9 @@ class TestTinygrad(unittest.TestCase):
     x = Tensor.randn(1, 1, 1)
     x.dot(layer).mean().backward()
 
+  def test_zerosized_tensors(self):
+    Tensor([]).realize()
+    Tensor([]).numpy()
+
 if __name__ == '__main__':
   unittest.main()

@@ -11,7 +11,7 @@ from tinygrad.nn.state import safe_load, load_state_dict
 class TestYOLOv8(unittest.TestCase):
   def test_all_load_weights(self):
     for variant in ['n', 's', 'm', 'l', 'x']:
-      weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.safetensors'
+      weights_location = Path(__file__).parents[2] / "weights" / f'yolov8{variant}.safetensors'
       download_file(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{variant}.safetensors', weights_location)
 
       depth, width, ratio = get_variant_multiples(variant)
@@ -23,7 +23,7 @@ class TestYOLOv8(unittest.TestCase):
   def test_predictions(self):
     test_image_urls = ['https://raw.githubusercontent.com/ultralytics/yolov5/master/data/images/bus.jpg', 'https://www.aljazeera.com/wp-content/uploads/2022/10/2022-04-28T192650Z_1186456067_UP1EI4S1I0P14_RTRMADP_3_SOCCER-ENGLAND-MUN-CHE-REPORT.jpg']
     variant = 'n'
-    weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.safetensors'
+    weights_location = Path(__file__).parents[2] / "weights" / f'yolov8{variant}.safetensors'
     depth, width, ratio = get_variant_multiples(variant)
     TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
     state_dict = safe_load(weights_location)
@@ -40,13 +40,13 @@ class TestYOLOv8(unittest.TestCase):
 
   def test_forward_pass_torch_onnx(self):
     variant = 'n'
-    weights_location_onnx = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.onnx'
-    weights_location_pt = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.pt'
-    weights_location = Path(__file__).parent.parent.parent / "weights" / f'yolov8{variant}.safetensors'
+    weights_location_onnx = Path(__file__).parents[2] / "weights" / f'yolov8{variant}.onnx'
+    weights_location_pt = Path(__file__).parents[2] / "weights" / f'yolov8{variant}.pt'
+    weights_location = Path(__file__).parents[2] / "weights" / f'yolov8{variant}.safetensors'
 
     download_file(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{variant}.pt', weights_location_pt)
     # the ultralytics export prints a lot of unneccesary things
-    if not os.path.isfile(weights_location_onnx):
+    if not weights_location_onnx.is_file():
       model = ultralytics.YOLO(model=weights_location_pt, task='Detect')
       model.export(format="onnx",imgsz=[640, 480])
 
