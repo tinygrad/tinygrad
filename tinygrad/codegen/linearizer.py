@@ -5,7 +5,6 @@ from enum import Enum, auto
 
 from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, mnum, DType, all_same, partition, prod
 from tinygrad.ops import LazyOp, UnaryOps, Op
-from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -416,15 +415,6 @@ class Linearizer(OptimizedKernel):
     if x.__class__ is not LazyOp: return loaded_buffers[x]
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
-    # MULACC fusion. TODO: this is copied from Interpreted
-    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
-      x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
-    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL:
-      x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
-    if x.op in {BinaryOps.ADD, BinaryOps.MUL}:
-      # Reorder sources to put constants first so get_grouped_maybe_float4 can fold the op
-      srcs = sorted(x.src, key=lambda x: (x.realized.__class__ != RawConst) if x.__class__ == LazyBuffer else 0)
-      x.src = tuple(srcs)
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:
