@@ -1,12 +1,12 @@
 from __future__ import annotations
-import functools, math, itertools, heapq
+import functools, itertools, heapq
 from collections import defaultdict
-from typing import NamedTuple, Optional, List, Any, Tuple, Union, Dict
+from typing import NamedTuple, List, Any, Tuple, Union, Dict, cast
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp, TernaryOps
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawConst
-from tinygrad.helpers import dtypes, DEBUG, DType, getenv, colored, PtrDType, Timing
+from tinygrad.helpers import dtypes, DEBUG, DType, getenv, colored, PtrDType
 from enum import Enum, auto
 from tinygrad.shape.symbolic import Variable, NumNode, Node, MulNode, SumNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 VariableOrNum = Union[Variable, NumNode, Node]
@@ -21,7 +21,7 @@ class UOps(Enum):
 class UOp(NamedTuple):
   uop: UOps
   dtype: DType
-  vin: Tuple[UOp]
+  vin: Tuple[UOp, ...]
   arg: Any
   def __repr__(self): return f"{self.uop} {self.dtype} {self.arg}"
   def __lt__(self, x):
@@ -32,12 +32,16 @@ class UOp(NamedTuple):
   def __hash__(self): return self.hash
 
 class UAst(OptimizedKernel):
-  @functools.lru_cache(None)
-  def uop(self, uop:UOps, dtype:DType, vin:Tuple[UOp], arg:Any=None) -> UOp:
-    return UOp(uop, dtype, vin, arg, hash((uop, dtype, vin, arg)))
+  _uop_cache: Dict[Any, UOp] = {}
+  def uop(self, uop:UOps, dtype:DType, vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
+    key = (uop, dtype, vin, arg)
+    if key not in self._uop_cache:
+      self._uop_cache[key] = UOp(uop, dtype, vin, arg, hash(key))
+    return self._uop_cache[key]
 
-  def uop_alu_idx(self, a, b, ops, ctx:UAst, op, dtype=dtypes.int32):
-    return self.uop(UOps.ALU, dtype, (a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx)), op)
+  def uop_alu_idx(self, a:UOp, b, ops, ctx:UAst, op, dtype=dtypes.int32):
+    render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
+    return self.uop(UOps.ALU, dtype, (a, render_b), op)
 
   def var_to_loop(self, var):
     if self.opts.has_local and (var.expr.startswith("gidx") or var.expr.startswith("lidx")):
@@ -102,13 +106,12 @@ class UAst(OptimizedKernel):
           for ri in reduce_idxs[::-1]:
             ret = self.uop(UOps.ENDLOOP, dtypes.float32, (ret, self.var_to_loop(ri)))
         return ret
-      else:
-        vin = tuple(ast_parse(v, idxs) for v in x.src)
-        # TODO: reenable this at some point
-        #assert all_same([x.dtype for x in vin])
-        if x.op == UnaryOps.NOOP: return vin[0]
-        if x.op == UnaryOps.CAST: return self.uop(UOps.CAST, x.arg[0], vin, x.arg[1])
-        return self.uop(UOps.ALU, vin[0].dtype, vin, x.op)
+      vin = tuple(ast_parse(v, idxs) for v in x.src)
+      # TODO: reenable this at some point
+      #assert all_same([x.dtype for x in vin])
+      if x.op == UnaryOps.NOOP: return vin[0]
+      if x.op == UnaryOps.CAST: return self.uop(UOps.CAST, x.arg[0], vin, x.arg[1])
+      return self.uop(UOps.ALU, vin[0].dtype, vin, x.op)
 
     sinks = []
     expanded_nodes = [idx.expand() for idx in (global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)]

@@ -1,11 +1,11 @@
-from typing import Dict, List, Optional, NamedTuple, Tuple, Union
+from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict
 import math
 from collections import defaultdict
 #from tinygrad.codegen.linearizer import UOps, UOp, MemOp
 from tinygrad.codegen.uast import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import ImageDType, dtypes, getenv, prod, DType
-from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, sym_render
+from tinygrad.helpers import ImageDType, dtypes, prod, DType
+from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -119,24 +119,24 @@ def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:Li
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> Tuple[str, List[int], List[int]]:
   global_size: List[int] = []
   local_size: List[int] = []
-  kernel,prekernel = [],[]
-  pend_close = None
-  bufs = []
+  kernel: List[str] = []
+  prekernel: List[str] = []
+  bufs: List[Tuple[str,DType]] = []
   depth = 0
   r: Dict[UOp, Optional[str]] = {}
   def kk(s): kernel.append("  "*depth+s)
 
-  child_count = defaultdict(int)
-  seen_end = defaultdict(int)
+  child_count: DefaultDict[UOp, int] = defaultdict(int)
+  seen_end: DefaultDict[UOp, int]  = defaultdict(int)
   for ru in uops:
     if ru.uop == UOps.ENDLOOP: seen_end[ru.vin[1]] += 1
-    if ru.uop == UOps.DEFINE_GLOBAL: bufs.append(None)
+    if ru.uop == UOps.DEFINE_GLOBAL: bufs.append(None)  # type: ignore
     if ru.uop == UOps.SPECIAL and ru.arg[0] == "global": global_size.append(0)
     if ru.uop == UOps.SPECIAL and ru.arg[0] == "local": local_size.append(0)
     for v in ru.vin:
       child_count[v] += 1
 
-  c = defaultdict(int)
+  c: DefaultDict[str, int] = defaultdict(int)
   def ssa(prefix="t"):
     nonlocal c
     c[prefix] += 1
@@ -145,46 +145,42 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     nonlocal depth, bufs
     #if DEBUG >= 4: print(u.uop, u.dtype, u.arg)
     if u.uop == UOps.CONST:
-      if u.arg == float("inf"): return "INFINITY"
-      if u.arg == float("-inf"): return "-INFINITY"
-      if math.isnan(u.arg): return "NAN"
-      return f"{float(u.arg)}f" if dtypes.is_float(u.dtype) else f"{int(u.arg)}"
-    elif u.uop == UOps.SPECIAL:
+      return lang.render_const(u.arg, u.dtype)
+    if u.uop == UOps.SPECIAL:
       if u.arg[0] == "global":
         global_size[u.arg[1]] = u.arg[2]
-        return f"((int)gid.{'xyz'[u.arg[1]]})"
-      elif u.arg[0] == "local":
+        return f"((int){lang.gid[u.arg[1]]})"
+      if u.arg[0] == "local":
         local_size[u.arg[1]] = u.arg[2]
-        return f"((int)lid.{'xyz'[u.arg[1]]})"
-      else:
-        raise NotImplementedError(f"no special {u.arg[0]}")
-    elif u.uop == UOps.CAST:
+        return f"((int){lang.lid[u.arg[1]]})"
+      raise NotImplementedError(f"no special {u.arg[0]}")
+    if u.uop == UOps.CAST:
       return r[u.vin[0]]
-    elif u.uop == UOps.LOOP:
+    if u.uop == UOps.LOOP:
       kk(f"for (int {u.arg[0]} = {u.arg[1]}; {u.arg[0]} < {u.arg[2]}; {u.arg[0]}++) {{")
       depth += 1
       return u.arg[0]
-    elif u.uop == UOps.ALU:
+    if u.uop == UOps.ALU:
       val = lang.code_for_op[u.arg](*[r[x] for x in u.vin])
       if child_count[u] > 1 and not dtypes.is_int(u.dtype):
         tok = ssa("alu")
         kk(f"{u.dtype.name} {tok} = {val};")
         return tok
       return val
-    elif u.uop == UOps.DEFINE_GLOBAL:
+    if u.uop == UOps.DEFINE_GLOBAL:
       bufs[u.arg] = (f"data{u.arg}", u.dtype)
       return f"data{u.arg}"
-    elif u.uop == UOps.ENDLOOP:
+    if u.uop == UOps.ENDLOOP:
       seen_end[u.vin[1]] -= 1
       if seen_end[u.vin[1]] == 0:
         depth -= 1
         kk("}")
       return r[u.vin[0]]
-    elif u.uop == UOps.DEFINE_ACC:
+    if u.uop == UOps.DEFINE_ACC:
       tok = ssa("acc")
       kk(f"{u.dtype.name} {tok};")
       return tok
-    elif u.uop == UOps.LOAD:
+    if u.uop == UOps.LOAD:
       tok = ssa("val")
       if len(u.vin) == 3:
         # suppress the load if it's invalid
@@ -192,19 +188,17 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       else:
         kk(f"{u.dtype.name} {tok} = {r[u.vin[0]]}[{r[u.vin[1]]}];")
       return tok
-    elif u.uop == UOps.STORE:
+    if u.uop == UOps.STORE:
       if len(u.vin) == 2:
         kk(f"{r[u.vin[0]]} = {r[u.vin[1]]};")
       else:
         kk(f"{r[u.vin[0]]}[{r[u.vin[2]]}] = {r[u.vin[1]]};")
       return r[u.vin[0]]
-    else:
-      raise NotImplementedError(f"can't render {u.uop}")
+    raise NotImplementedError(f"can't render {u.uop}")
 
   # render the line
   for ru in uops: r[ru] = render_one(ru)
   kernel.append(depth*"}")
-
 
   """
   for u in uops:
