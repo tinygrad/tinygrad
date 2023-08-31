@@ -92,14 +92,16 @@ class OptimizedKernel(Kernel):
           new_shape[next_idx] = new_shape[next_idx] * 2
     return tuple(new_shape)
 
-  def limit_global_dims(self, limit: int, global_max: List[int], local_max: List[int]):
+  def limit_global_dim_count(self, limit:int):
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
     # NOTE: this might make multiview shapetrackers
-    if (self.first_reduce-self.local_dims) > limit:
-      num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
+    if self.global_dims > limit:
+      num_to_merge = (self.global_dims - limit)+1
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
       if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
+
+  def limit_dims_to_max(self, global_max: List[int], local_max: List[int]):
     # Check the global allocation limit, current the global_size will be flipped during codegen
     # and then padded right with 1s if its length < 3 which makes this part a bit awkward to write
     global_dims = self.first_reduce-self.local_dims
