@@ -4,7 +4,7 @@ import time, math
 from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, TypeVar, Union, Sequence
 
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -31,6 +31,7 @@ class Function:
 import tinygrad.mlops as mlops
 
 # **** start with two base classes, Tensor and Function ****
+TensorType = TypeVar("TensorType", bound="Tensor")
 
 class Tensor:
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
@@ -123,82 +124,82 @@ class Tensor:
   # ***** creation llop entrypoint *****
 
   @classmethod
-  def _loadop(cls, op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
+  def _loadop(cls:TensorType, op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs) -> TensorType:
     return cls(LazyBuffer.loadop(op, [sz], cls.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
 
   @classmethod
-  def empty(cls, *shape, **kwargs): return cls._loadop(LoadOps.EMPTY, math.prod(shape), **kwargs).reshape(shape)
+  def empty(cls:TensorType, *shape, **kwargs) -> TensorType: return cls._loadop(LoadOps.EMPTY, math.prod(shape), **kwargs).reshape(shape)
 
   _seed: int = int(time.time())
   @classmethod
-  def manual_seed(cls, seed=0): cls._seed = seed
+  def manual_seed(cls:TensorType, seed=0) -> TensorType: cls._seed = seed
 
   @classmethod
-  def rand(cls, *shape, **kwargs):
+  def rand(cls:TensorType, *shape, **kwargs) -> TensorType:
     cls._seed += 1
     return cls._loadop(LoadOps.RAND, math.prod(shape), arg=cls._seed, **kwargs).reshape(shape)
 
   # ***** creation helper functions *****
 
   @classmethod
-  def full(cls, shape:Tuple[int, ...], fill_value, **kwargs): return cls(fill_value, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape)
+  def full(cls:TensorType, shape:Tuple[int, ...], fill_value, **kwargs) -> TensorType: return cls(fill_value, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape)
 
   @classmethod
-  def zeros(cls, *shape, **kwargs): return cls.full(argfix(*shape), 0, **kwargs)
+  def zeros(cls:TensorType, *shape, **kwargs) -> TensorType: return cls.full(argfix(*shape), 0, **kwargs)
 
   @classmethod
-  def ones(cls, *shape, **kwargs): return cls.full(argfix(*shape), 1, **kwargs)
+  def ones(cls:TensorType, *shape, **kwargs) -> TensorType: return cls.full(argfix(*shape), 1, **kwargs)
 
   @classmethod
-  def arange(cls, start, stop=None, step=1, **kwargs):
+  def arange(cls:TensorType, start, stop=None, step=1, **kwargs) -> TensorType:
     if stop is None: stop, start = start, 0
     return cls.full((math.ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
 
   @classmethod
-  def full_like(cls, tensor, fill_value, **kwargs):
+  def full_like(cls:TensorType, tensor, fill_value, **kwargs) -> TensorType:
     return cls.full(tensor.shape, fill_value=fill_value, dtype=kwargs.pop("dtype", tensor.dtype), device=kwargs.pop("device", tensor.device), **kwargs)
 
   @classmethod
-  def zeros_like(cls, tensor, **kwargs): return cls.full_like(tensor, 0, **kwargs)
+  def zeros_like(cls:TensorType, tensor, **kwargs) -> TensorType: return cls.full_like(tensor, 0, **kwargs)
 
   @classmethod
-  def ones_like(cls, tensor, **kwargs): return cls.full_like(tensor, 1, **kwargs)
+  def ones_like(cls:TensorType, tensor, **kwargs) -> TensorType: return cls.full_like(tensor, 1, **kwargs)
 
   @classmethod
-  def eye(cls, dim:int, **kwargs): return cls.full((dim,1),1,**kwargs).pad(((0,0),(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
+  def eye(cls:TensorType, dim:int, **kwargs) -> TensorType: return cls.full((dim,1),1,**kwargs).pad(((0,0),(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
 
   # ***** rng hlops *****
 
   @classmethod
-  def randn(cls, *shape, dtype:Optional[DType]=None, **kwargs) -> Tensor:
+  def randn(cls:TensorType, *shape, dtype:Optional[DType]=None, **kwargs) -> TensorType:
     # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
     src = cls.rand(2, *shape, **kwargs)
     return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(cls.default_type if dtype is None else dtype)
 
   @classmethod
-  def normal(cls, *shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * cls.randn(*shape, **kwargs)) + mean
+  def normal(cls:TensorType, *shape, mean=0.0, std=1.0, **kwargs) -> TensorType: return (std * cls.randn(*shape, **kwargs)) + mean
 
   @classmethod
-  def uniform(cls, *shape, low=-1.0, high=1.0, **kwargs) -> Tensor:
+  def uniform(cls:TensorType, *shape, low=-1.0, high=1.0, **kwargs) -> TensorType:
     dtype = kwargs.pop("dtype", cls.default_type)
     return ((high-low) * cls.rand(*shape, **kwargs)).cast(dtype) + low
 
   @classmethod
-  def scaled_uniform(cls, *shape, **kwargs) -> Tensor: return cls.uniform(*shape, **kwargs).mul(math.prod(shape)**-0.5)
+  def scaled_uniform(cls:TensorType, *shape, **kwargs) -> TensorType: return cls.uniform(*shape, **kwargs).mul(math.prod(shape)**-0.5)
 
   # https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform
   @classmethod
-  def glorot_uniform(cls, *shape, **kwargs) -> Tensor: return cls.uniform(*shape, **kwargs).mul((6/(shape[0]+math.prod(shape[1:])))**0.5)
+  def glorot_uniform(cls:TensorType, *shape, **kwargs) -> TensorType: return cls.uniform(*shape, **kwargs).mul((6/(shape[0]+math.prod(shape[1:])))**0.5)
 
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @classmethod
-  def kaiming_uniform(cls, *shape, a:float = 0.01, **kwargs) -> Tensor:
+  def kaiming_uniform(cls:TensorType, *shape, a:float = 0.01, **kwargs) -> TensorType:
     bound = math.sqrt(3.0) * math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(math.prod(shape[1:]))
     return cls.uniform(*shape, low=-bound, high=bound, **kwargs)
 
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_normal_
   @classmethod
-  def kaiming_normal(cls, *shape, a:float = 0.01, **kwargs) -> Tensor:
+  def kaiming_normal(cls:TensorType, *shape, a:float = 0.01, **kwargs) -> TensorType:
     std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(math.prod(shape[1:]))
     return cls.normal(*shape, mean=0.0, std=std, **kwargs)
 
@@ -536,7 +537,7 @@ class Tensor:
   def tan(self): return self.sin() / self.cos()
 
   @classmethod
-  def _tri(cls, r:int, c:int, k:int=0, **kwargs) -> Tensor: return cls.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= cls.arange(-k, c-k, **kwargs).unsqueeze(0).expand(r,c)
+  def _tri(cls:TensorType, r:int, c:int, k:int=0, **kwargs) -> TensorType: return cls.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= cls.arange(-k, c-k, **kwargs).unsqueeze(0).expand(r,c)
   def triu(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k, dtype=self.dtype, device=self.device).where(self, Tensor.zeros_like(self))
   def tril(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, dtype=self.dtype, device=self.device).where(Tensor.zeros_like(self), self)
 
