@@ -1,8 +1,8 @@
 import sys
-import os
 import random
 import json
 import numpy
+from pathlib import Path
 from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import SGD
@@ -80,8 +80,7 @@ if cmd == "import":
 
   vgg7.load_waifu2x_json(json.load(open(src, "rb")))
 
-  if not os.path.isdir(model):
-    os.mkdir(model)
+  Path(model).mkdir(exist_ok=True)
   load_and_save(model, True)
 elif cmd == "execute":
   model = sys.argv[2]
@@ -102,8 +101,7 @@ elif cmd == "execute_full":
 elif cmd == "new":
   model = sys.argv[2]
 
-  if not os.path.isdir(model):
-    os.mkdir(model)
+  Path(model).mkdir(exist_ok=True)
   load_and_save(model, True)
 elif cmd == "train":
   model = sys.argv[2]

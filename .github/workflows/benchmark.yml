@@ -22,7 +22,9 @@ jobs:
       run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
       shell: bash
     - name: Run Tensor Core GEMM
-      run: DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
+      run: |
+        ln -s ~/tinygrad/disassemblers/applegpu disassemblers/applegpu
+        DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
       shell: bash
     - name: Run Stable Diffusion
       run: |

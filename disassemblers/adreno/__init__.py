@@ -8,7 +8,7 @@ def disasm(buf):
   global fxn
   if fxn is None:
     shared = pathlib.Path(__file__).parent / "disasm.so"
-    if not os.path.isfile(shared):
+    if not shared.is_file():
       os.system(f'cd {pathlib.Path(__file__).parent} && gcc -shared disasm-a3xx.c -o disasm.so')
     fxn = ctypes.CDLL(shared.as_posix())['disasm']
   #hexdump(buf)
