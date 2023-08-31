@@ -3,7 +3,7 @@ from extra import dist
 from multiprocessing import shared_memory
 from tinygrad.helpers import DEBUG, colored
 from tinygrad.lazy import LazyBuffer
-from tinygrad.runtime.lib import RawBufferCopyIn, RawBufferCopyInOut
+from tinygrad.runtime.lib import RawBufferCopyIn, RawBufferCopyInOut, RawBufferTransfer
 from tinygrad.runtime.ops_shm import RawShmBuffer
 from tinygrad.jit import CacheCollector
 from tinygrad.tensor import Tensor, Function
@@ -23,17 +23,22 @@ def __recv_rb(args:Tuple[RawBufferCopyIn, RawShmBuffer, int], variables=None, ji
 # send a rawbuffer from out rank to the target rank
 def _send_rb(x:RawBufferCopyInOut, target_rank:int, cache_id:Optional[str]=None):
   assert isinstance(x, RawBufferCopyInOut), "we only support RawBufferCopyInOut for now"
-  # cache the shared memory so we don't have to create it every time
-  if cache_id is not None and cache_id in _send_rb.shared_memory_cache:
-    shm_name = _send_rb.shared_memory_cache[cache_id]
+
+  if not issubclass(x, RawBufferTransfer):
+    # cache the shared memory so we don't have to create it every time
+    if cache_id is not None and cache_id in _send_rb.shared_memory_cache:
+      shm_name = _send_rb.shared_memory_cache[cache_id]
+    else:
+      shm_name = (s := shared_memory.SharedMemory(create=True, size=x.size * x.dtype.itemsize)).name
+      s.close()
+      if cache_id is not None: _send_rb.shared_memory_cache[cache_id] = shm_name
+    # copy the buffer into shared memory
+    device = f"{shm_name},{cache_id}" if cache_id is not None else shm_name
+    rb = RawShmBuffer(x.size, x.dtype, device=device)
+    x._copyout(np.frombuffer(rb._buffer(), dtype=x.dtype.np))
+    dist.OOB.send((shm_name, cache_id), target_rank)
   else:
-    shm_name = (s := shared_memory.SharedMemory(create=True, size=x.size * x.dtype.itemsize)).name
-    s.close()
-    if cache_id is not None: _send_rb.shared_memory_cache[cache_id] = shm_name
-  # copy the buffer into shared memory
-  device = f"{shm_name},{cache_id}" if cache_id is not None else shm_name
-  rb = RawShmBuffer(x.size, x.dtype, device=device)
-  __send_rb((x, rb, target_rank, (shm_name, cache_id)))
+    pass
 
   # jit support
   CacheCollector.add(__send_rb, [x, rb, target_rank, None], {})
