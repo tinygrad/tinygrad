@@ -1,6 +1,8 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union
 import math
-from tinygrad.codegen.linearizer import UOps, UOp, MemOp
+from collections import defaultdict
+#from tinygrad.codegen.linearizer import UOps, UOp, MemOp
+from tinygrad.codegen.uast import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, getenv, prod, DType
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, sym_render
@@ -120,10 +122,85 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
   pend_close = None
   bufs = []
   depth = 0
+  r: Dict[UOp, Optional[str]] = {}
   def kk(s): kernel.append("  "*depth+s)
 
-  for uop,newvar,vin,args in uops:
+  seen_end = defaultdict(int)
+  for ru in uops:
+    if ru.uop == UOps.ENDLOOP: seen_end[ru.vin[1]] += 1
+    if ru.uop == UOps.DEFINE_GLOBAL: bufs.append(None)
+
+  c = defaultdict(int)
+  def ssa(prefix="t"):
+    nonlocal c
+    c[prefix] += 1
+    return f"{prefix}{c[prefix]-1}"
+  def render_one(u:UOp) -> Optional[str]:
+    nonlocal depth, bufs
+    #if DEBUG >= 4: print(u.uop, u.dtype, u.arg)
+    if u.uop == UOps.CONST:
+      if u.arg == float("inf"): return "INFINITY"
+      if u.arg == float("-inf"): return "-INFINITY"
+      if math.isnan(u.arg): return "NAN"
+      return f"{float(u.arg)}f" if dtypes.is_float(u.dtype) else f"{int(u.arg)}"
+    elif u.uop == UOps.SPECIAL:
+      if u.arg[0] == "global":
+        global_size.append(u.arg[2])
+        return f"((int)gid.{'xyz'[u.arg[1]]})"
+      elif u.arg[0] == "local":
+        local_size.append(u.arg[2])
+        return f"((int)lid.{'xyz'[u.arg[1]]})"
+      else:
+        raise NotImplementedError(f"no special {u.arg[0]}")
+    elif u.uop == UOps.CAST:
+      return r[u.vin[0]]
+    elif u.uop == UOps.LOOP:
+      kk(f"for (int {u.arg[0]} = {u.arg[1]}; {u.arg[0]} < {u.arg[2]}; {u.arg[0]}++) {{")
+      depth += 1
+      return u.arg[0]
+    elif u.uop == UOps.ALU: return lang.code_for_op[u.arg](*[r[x] for x in u.vin])
+    elif u.uop == UOps.DEFINE_GLOBAL:
+      bufs[u.arg] = (f"data{u.arg}", u.dtype)
+      return f"data{u.arg}"
+    elif u.uop == UOps.ENDLOOP:
+      seen_end[u.vin[1]] -= 1
+      if seen_end[u.vin[1]] == 0:
+        depth -= 1
+        kk("}")
+      return r[u.vin[0]]
+    elif u.uop == UOps.DEFINE_ACC:
+      tok = ssa("acc")
+      kk(f"{u.dtype.name} {tok};")
+      return tok
+    elif u.uop == UOps.LOAD:
+      tok = ssa("val")
+      if len(u.vin) == 3:
+        # suppress the load if it's invalid
+        kk(f"{u.dtype.name} {tok} = {r[u.vin[2]]} ? {r[u.vin[0]]}[{r[u.vin[1]]}] : 0.0;")
+      else:
+        kk(f"{u.dtype.name} {tok} = {r[u.vin[0]]}[{r[u.vin[1]]}];")
+      return tok
+    elif u.uop == UOps.STORE:
+      if len(u.vin) == 2:
+        kk(f"{r[u.vin[0]]} = {r[u.vin[1]]};")
+      else:
+        kk(f"{r[u.vin[0]]}[{r[u.vin[2]]}] = {r[u.vin[1]]};")
+      return r[u.vin[0]]
+    else:
+      raise NotImplementedError(f"can't render {u.uop}")
+
+  # render the line
+  for ru in uops: r[ru] = render_one(ru)
+  kernel.append(depth*"}")
+
+
+  """
+  for u in uops:
+    uop,dtype,vin,args = u
+    print(uop, dtype, [r[x] for x in vin], args)
     if uop == UOps.LOOP:
+      kk(lang.render_for(args[0], args[1], sym_render(args[2])))
+      r[u] = args[0]
       for i,var in enumerate(args[0]):
         if args[1] == "global" and lang.gid:
           kk(add_gl_dimension(lang.size_prefix, args, i, var, global_size, lang.gid))
@@ -167,17 +244,20 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       else:
         raise NotImplementedError(f"WMMA not implemented for {args}")
     elif uop == UOps.ALU:
-      assert newvar is not None
-      kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")
+      #assert newvar is not None
+      #kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")
+      pass
     elif uop == UOps.DEFINE_ACC:
-      assert newvar is not None
-      kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(lang.generic_var_prefix == '')} = {lang.render_const(args, newvar.dtype)};")
-    elif uop == UOps.CONST:
-      assert newvar is not None
+      #assert newvar is not None
       #kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(lang.generic_var_prefix == '')} = {lang.render_const(args, newvar.dtype)};")
+      pass
+    elif uop == UOps.CONST:
+      r[u] = lang.render_const(args, dtype)
+      #assert newvar is not None
+      #kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(lang.generic_var_prefix == '')} = {lang.render_const(args, newvar.dtype)};")
+      pass
     elif uop == UOps.LOAD:
-      assert newvar is not None
-      """
+      #assert newvar is not None
       assert newvar is not None and isinstance(args, (MemOp, ConstOp))
       # valids are handled here
       if isinstance(args, ConstOp):
@@ -186,12 +266,13 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         val = lang.render_load(newvar.dtype, args.name, args.memory_dtype, args.idx, args.local)
       if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(args.invalid_value, newvar.dtype))
       kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = {val};")
-      """
-      kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = *{'(device float4*)' if newvar.dtype.sz > 1 else ''}({args.name}+{vin[0].render()});")
+      #kk(f"{lang.generic_var_prefix}{newvar.render(lang.generic_var_prefix == '')} = *{'(device float4*)' if newvar.dtype.sz > 1 else ''}({args.name}+{vin[0].render()});")
+      pass
     elif uop == UOps.STORE:
-      assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
+      #assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
       # TODO: instead of dtypes.float, a base type
-      kk(lang.render_store(args.name, args.memory_dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, args.local))
+      #kk(lang.render_store(args.name, args.memory_dtype, vin[0].render(), vin[0].dtype if vin[0].offset is None else dtypes.float, args.idx, args.local))
+      pass
     elif uop == UOps.CAST and newvar is not None and newvar.dtype.sz > 1:
       kk(f"{newvar.render(True)} = {lang.render_cast([x.render() for x in vin], newvar.dtype)};")
     elif uop == UOps.DEFINE_LOCAL:
@@ -203,5 +284,6 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       bufs.append(args)
     else:
       raise RuntimeError(f"failed to render {uop}")
+    """
 
   return lang.render_kernel(function_name, kernel, bufs, global_size, local_size, prekernel)

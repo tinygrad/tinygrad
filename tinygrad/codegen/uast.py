@@ -21,7 +21,7 @@ class UOps(Enum):
 
 class UOp(NamedTuple):
   uop: UOps
-  dtype: Optional[DType]
+  dtype: DType
   vin: Tuple[UOp]
   arg: Any
   def __repr__(self): return f"{self.uop} {self.dtype} {self.arg}"
@@ -31,7 +31,7 @@ class UOp(NamedTuple):
 
 class UAst(OptimizedKernel):
   @functools.lru_cache(None)
-  def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp], arg:Any=None) -> UOp:
+  def uop(self, uop:UOps, dtype:DType, vin:Tuple[UOp], arg:Any=None) -> UOp:
     #assert isinstance(vin, tuple) and (isinstance(dtype, DType) or dtype is None)
     return UOp(uop, dtype, vin, arg)
 
@@ -116,7 +116,7 @@ class UAst(OptimizedKernel):
       idx, valid = self.sts[0].expr_idxs(idxs)
       assert valid.min == 1
       idx_rendered = idx.render(self.render_ops, self)
-      sinks.append(self.uop(UOps.STORE, None, (global_bufs[0], ast_parse(self.ast, idxs), idx_rendered)))
+      sinks.append(self.uop(UOps.STORE, self.bufs[0].dtype, (global_bufs[0], ast_parse(self.ast, idxs), idx_rendered)))
 
     # graph debugging
     if getenv("UASTGRAPH"):
@@ -171,96 +171,9 @@ class UAst(OptimizedKernel):
       if u not in rendered:
         rendered.add(u)
         order.append(u)
-        if DEBUG >= 4: print(u)
+        #if DEBUG >= 4: print(u)
         for c in children[u]:
           if all(x in rendered for x in c.vin):
             heapq.heappush(srcs, c)
 
-    # TODO: fix API
-    self.uops = order
-    return order
-
-
-from tinygrad.renderer.cstyle import CStyleLanguage
-def uops_to_cstyle2(function_name:str, uops:List[UOp]):
-  lang = CStyleLanguage()
-  r: Dict[UOp, Optional[str]] = {}
-  statements: List[str] = []  # LOOP, LOAD, STORE
-  globalz: List[Optional[str]] = []
-  seen_end = defaultdict(int)
-  global_size = []
-  local_size = []
-
-  for ru in uops:
-    if ru.uop == UOps.ENDLOOP:
-      seen_end[ru.vin[1]] += 1
-
-  c = defaultdict(int)
-  def ssa(prefix="t"):
-    nonlocal c
-    c[prefix] += 1
-    return f"{prefix}{c[prefix]-1}"
-  def render_one(u:UOp) -> Optional[str]:
-    nonlocal globalz
-    #if DEBUG >= 4: print(u.uop, u.dtype, u.arg)
-    if u.uop == UOps.CONST:
-      if u.arg == float("inf"): return "INFINITY"
-      if u.arg == float("-inf"): return "-INFINITY"
-      if math.isnan(u.arg): return "NAN"
-      return f"{float(u.arg)}f" if dtypes.is_float(u.dtype) else f"{int(u.arg)}"
-    elif u.uop == UOps.SPECIAL:
-      if u.arg[0] == "global":
-        global_size.append(u.arg[2])
-        return f"((int)gid.{'xyz'[u.arg[1]]})"
-      elif u.arg[0] == "local":
-        local_size.append(u.arg[2])
-        return f"((int)lid.{'xyz'[u.arg[1]]})"
-      else:
-        raise NotImplementedError(f"no special {u.arg[0]}")
-    elif u.uop == UOps.CAST:
-      return r[u.vin[0]]
-    elif u.uop == UOps.LOOP:
-      statements.append(f"for (int {u.arg[0]} = {u.arg[1]}; {u.arg[0]} < {u.arg[2]}; {u.arg[0]}++) {{")
-      return u.arg[0]
-    elif u.uop == UOps.ALU: return lang.code_for_op[u.arg](*[r[x] for x in u.vin])
-    elif u.uop == UOps.DEFINE_GLOBAL:
-      globalz += [None] * (u.arg+1-len(globalz))
-      #globalz[u.arg] = f"device float *data{u.arg}"
-      globalz[u.arg] = f"{u.dtype.name} *data{u.arg}"
-      return f"data{u.arg}"
-    elif u.uop == UOps.ENDLOOP:
-      seen_end[u.vin[1]] -= 1
-      if seen_end[u.vin[1]] == 0: statements.append("}")
-      return r[u.vin[0]]
-    elif u.uop == UOps.DEFINE_ACC:
-      tok = ssa("acc")
-      statements.append(f"{u.dtype.name} {tok};")
-      return tok
-    elif u.uop == UOps.LOAD:
-      tok = ssa("val")
-      if len(u.vin) == 3:
-        # suppress the load if it's invalid
-        statements.append(f"{u.dtype.name} {tok} = {r[u.vin[2]]} ? {r[u.vin[0]]}[{r[u.vin[1]]}] : 0.0;")
-      else:
-        statements.append(f"{u.dtype.name} {tok} = {r[u.vin[0]]}[{r[u.vin[1]]}];")
-      return tok
-    elif u.uop == UOps.STORE:
-      if len(u.vin) == 2:
-        statements.append(f"{r[u.vin[0]]} = {r[u.vin[1]]};")
-      else:
-        statements.append(f"{r[u.vin[0]]}[{r[u.vin[2]]}] = {r[u.vin[1]]};")
-      return r[u.vin[0]]
-    else:
-      raise NotImplementedError(f"can't render {u.uop}")
-
-  # render the line
-  in_loops = 0
-  for ru in uops:
-    if ru.uop == UOps.LOOP: in_loops += 1
-    r[ru] = render_one(ru)
-
-  #globalz += ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
-  #src = f"#include <metal_stdlib>\nusing namespace metal;\nkernel void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements)  + '\n' + '}'*(in_loops+1-len(seen_end))
-  src = f"void {function_name}({', '.join(globalz)}) {{\n" + '\n'.join(statements)  + '\n' + '}'*(in_loops+1-len(seen_end))
-  return src, global_size[::-1], local_size[::-1], False
-
+    self.uops = order  # TODO: should this be return?

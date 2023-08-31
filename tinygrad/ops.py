@@ -201,8 +201,9 @@ class Compiled:
     from tinygrad.codegen.uast import UAst
     k = UAst(ast, output, self.linearizer_opts)
     k.hand_coded_optimizations()
-    #return self.to_program(k)
+    prg = self.to_program(k)
 
+    """
     from tinygrad.codegen.uast import uops_to_cstyle2
     k.hand_coded_optimizations()
     uast = k.linearize()
@@ -210,6 +211,7 @@ class Compiled:
     prg = ASTRunner(k.function_name, src, global_size, local_size,
                     op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                     display_name=k.display_name, runtime_args={"binary": binary}).build(self.runtime)
+    """
 
     """
     from tinygrad.codegen.linearizer import Linearizer
