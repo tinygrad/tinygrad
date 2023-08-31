@@ -67,10 +67,14 @@ class LazyOp:
   def stride(self, _): raise NotImplementedError
 
 # **************** Device ****************
+@functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
+def _canonicalize(device: str) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")
 
 class _Device:
-  def __init__(self) -> None: self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
-  def canonicalize(self, device:Optional[str]) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "") if device is not None else self.DEFAULT
+  def __init__(self) -> None:
+    self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
+    self.canonicals = ("METAL", "CUDA", "GPU", "CPU")
+  def canonicalize(self, device:Optional[str]) -> str: return Device.DEFAULT if device is None else device if device in self.canonicals else _canonicalize(device)
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __getitem__(self, x:str) -> Union[Interpreted, Compiled]:
     x = x.split(":")[0].upper()
