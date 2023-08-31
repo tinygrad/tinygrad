@@ -29,14 +29,6 @@ class UOp(NamedTuple):
     if self.uop == UOps.LOOP and x.uop == UOps.LOOP: return self.arg < x.arg
     return self.uop.value < x.uop.value
 
-# TODO: generic visitor pattern?
-def expand_node(idx:Node) -> List[Node]:
-  if isinstance(idx, Variable): return [idx] if idx.expr is not None else [Variable.num(j) for j in range(idx.min, idx.max+1)]
-  if isinstance(idx, NumNode): return [idx]
-  if isinstance(idx, MulNode): return [x*idx.b for x in expand_node(idx.a)]
-  if isinstance(idx, SumNode): return [Variable.sum(list(it)) for it in itertools.product(*[expand_node(x) for x in idx.nodes])]
-  raise NotImplementedError(idx)
-
 class UAst(OptimizedKernel):
   @functools.lru_cache(None)
   def uop(self, uop:UOps, vin:Tuple[UOp], dtype:Optional[DType]=None, arg:Any=None) -> UOp:
@@ -65,7 +57,7 @@ class UAst(OptimizedKernel):
 
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[UOp]:
     #const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
-    expanded_nodes = [expand_node(idx) for idx in idxs]
+    expanded_nodes = [idx.expand() for idx in idxs]
     ret = []
     for _idx in [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]:
       idx, valid = self.sts[i].expr_idxs(_idx)
@@ -103,7 +95,7 @@ class UAst(OptimizedKernel):
       if x.op in ReduceOps:
         nidxs = global_idxs+local_idxs+reduce_idxs
         nidxs += [(i1 if i2==i3 else i2) for i1,i2,i3 in zip(idxs[len(nidxs):], full_upcast_idxs, upcast_idxs)]
-        expanded_nodes = [expand_node(idx) for idx in nidxs]
+        expanded_nodes = [idx.expand() for idx in nidxs]
         lreduce_idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
         vin = tuple(ast_parse(x.src[0], lidxs) for lidxs in lreduce_idxs)
         if len(reduce_idxs):
@@ -128,7 +120,7 @@ class UAst(OptimizedKernel):
         return self.uop(UOps.ALU, vin, vin[0].dtype, x.op)
 
     sinks = []
-    expanded_nodes = [expand_node(idx) for idx in (global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)]
+    expanded_nodes = [idx.expand() for idx in (global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)]
     store_idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     for idxs in store_idxs:
       idx, valid = self.sts[0].expr_idxs(idxs)
