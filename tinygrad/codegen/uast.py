@@ -1,14 +1,14 @@
 from __future__ import annotations
 import functools, math, itertools
 from collections import defaultdict
-from typing import NamedTuple, Optional, List, Any, Tuple, cast, Sequence, Union, Dict, Set
+from typing import NamedTuple, Optional, List, Any, Tuple, Union, Dict
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp, TernaryOps
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawConst
-from tinygrad.helpers import dtypes, DEBUG, DType, all_same, getenv, colored, PtrDType, partition, dedup
+from tinygrad.helpers import dtypes, DEBUG, DType, getenv, colored, PtrDType
 from enum import Enum, auto
-from tinygrad.shape.symbolic import Variable, NumNode, Node, MulNode, SumNode, DivNode, ModNode, LtNode, AndNode
+from tinygrad.shape.symbolic import Variable, NumNode, Node, MulNode, SumNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 VariableOrNum = Union[Variable, NumNode, Node]
 
 class UOps(Enum):
@@ -21,8 +21,8 @@ class UOps(Enum):
 
 class UOp(NamedTuple):
   uop: UOps
-  vin: Tuple[UOp]
   dtype: Optional[DType]
+  vin: Tuple[UOp]
   arg: Any
   def __repr__(self): return f"{self.uop} {self.dtype} {self.arg}"
   def __lt__(self, x):
@@ -31,23 +31,23 @@ class UOp(NamedTuple):
 
 class UAst(OptimizedKernel):
   @functools.lru_cache(None)
-  def uop(self, uop:UOps, vin:Tuple[UOp], dtype:Optional[DType]=None, arg:Any=None) -> UOp:
-    return UOp(uop, vin, dtype, arg)
+  def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp], arg:Any=None) -> UOp:
+    return UOp(uop, dtype, vin, arg)
 
   def uop_alu_idx(self, a, b, ops, ctx:UAst, op, dtype=dtypes.int32):
-    return self.uop(UOps.ALU, (a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx)), dtype, op)
+    return self.uop(UOps.ALU, dtype, (a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx)), op)
 
   def var_to_loop(self, var):
     if self.opts.has_local and var.expr.startswith("gidx"):
       assert var.min == 0
-      return self.uop(UOps.SPECIAL, tuple(), dtypes.int32, ("global", int(var.expr[4:]), var.max+1))
+      return self.uop(UOps.SPECIAL, dtypes.int32, tuple(), ("global", int(var.expr[4:]), var.max+1))
     elif self.opts.has_local and var.expr.startswith("lidx"):
       assert var.min == 0
-      return self.uop(UOps.SPECIAL, tuple(), dtypes.int32, ("local", int(var.expr[4:])-(self.first_reduce-self.local_dims), var.max+1))
-    return self.uop(UOps.LOOP, tuple(), dtypes.int32, (var.expr,var.min,var.max+1))
+      return self.uop(UOps.SPECIAL, dtypes.int32, tuple(), ("local", int(var.expr[4:])-(self.first_reduce-self.local_dims), var.max+1))
+    return self.uop(UOps.LOOP, dtypes.int32, tuple(), (var.expr,var.min,var.max+1))
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.var_to_loop(self),
-                NumNode: lambda self, ops, ctx: ctx.uop(UOps.CONST, tuple(), dtypes.int32, self.b),
+                NumNode: lambda self, ops, ctx: ctx.uop(UOps.CONST, dtypes.int32, tuple(), self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
                 DivNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.DIV),
                 ModNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MOD),
@@ -55,19 +55,8 @@ class UAst(OptimizedKernel):
     SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops,ctx)),
     AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-  def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[UOp]:
-    #const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
-    expanded_nodes = [idx.expand() for idx in idxs]
-    ret = []
-    for _idx in [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]:
-      idx, valid = self.sts[i].expr_idxs(_idx)
-      idx_rendered = idx.render(self.render_ops, self)
-      valid_rendered = valid.render(self.render_ops, self) if valid.min == 0 else None
-      ret.append(self.uop(UOps.LOAD, (self.global_bufs[i], idx_rendered, valid_rendered)))
-    return ret
-
   def get_uast(self) -> List[UOp]:
-    global_bufs = [self.uop(UOps.DEFINE_GLOBAL, tuple(), PtrDType(buf.dtype), i) for i,buf in enumerate(self.arg_bufs.keys())]
+    global_bufs = [self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype), tuple(), i) for i,buf in enumerate(self.arg_bufs.keys())]
 
     # define Variables
     global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
@@ -86,11 +75,11 @@ class UAst(OptimizedKernel):
         idx_rendered = idx.render(self.render_ops, self)
         valid_rendered = valid.render(self.render_ops, self) if valid.min == 0 else None
         if isinstance(x.realized, RawConst):
-          ret = self.uop(UOps.CONST, (), x.dtype, x.realized._buf)
+          ret = self.uop(UOps.CONST, x.dtype, (), x.realized._buf)
         else:
           # TODO: gate the load
-          ret = self.uop(UOps.LOAD, (global_bufs[self.arg_bufs_num[x.realized]], idx_rendered) + ((valid_rendered,) if valid_rendered is not None else tuple()), x.dtype)
-        if valid_rendered is not None: ret = self.uop(UOps.ALU, (valid_rendered, ret, self.uop(UOps.CONST, (), x.dtype, 0)), x.dtype, TernaryOps.WHERE)
+          ret = self.uop(UOps.LOAD, x.dtype, (global_bufs[self.arg_bufs_num[x.realized]], idx_rendered) + ((valid_rendered,) if valid_rendered is not None else tuple()))
+        if valid_rendered is not None: ret = self.uop(UOps.ALU, x.dtype, (valid_rendered, ret, self.uop(UOps.CONST, x.dtype, (), 0)), TernaryOps.WHERE)
         return ret
       if x.op in ReduceOps:
         nidxs = global_idxs+local_idxs+reduce_idxs
@@ -99,25 +88,25 @@ class UAst(OptimizedKernel):
         lreduce_idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
         vin = tuple(ast_parse(x.src[0], lidxs) for lidxs in lreduce_idxs)
         if len(reduce_idxs):
-          acc = self.uop(UOps.DEFINE_ACC, (), dtypes.float32, acc_count)
+          acc = self.uop(UOps.DEFINE_ACC, dtypes.float32, (), acc_count)
           acc_count += 1
           first = functools.reduce(lambda a,b: self.uop(UOps.ALU, (a,b), dtypes.int32, BinaryOps.ADD), [self.var_to_loop(ri) for ri in reduce_idxs])
-          phi = self.uop(UOps.ALU, (first, acc, self.uop(UOps.CONST, tuple(), dtypes.float32, float('-inf') if x.op == ReduceOps.MAX else 0)), dtypes.float32, TernaryOps.WHERE)
+          phi = self.uop(UOps.ALU, dtypes.float32, (first, acc, self.uop(UOps.CONST, tuple(), dtypes.float32, float('-inf') if x.op == ReduceOps.MAX else 0)),TernaryOps.WHERE)
           vin += (phi, )
         # NOTE: this determines the order of these when it doesn't have to
-        ret = functools.reduce(lambda a,b: self.uop(UOps.ALU, (a,b), dtypes.float32, BinaryOps.MAX if x.op == ReduceOps.MAX else BinaryOps.ADD), vin)
+        ret = functools.reduce(lambda a,b: self.uop(UOps.ALU, dtypes.float32, (a,b), BinaryOps.MAX if x.op == ReduceOps.MAX else BinaryOps.ADD), vin)
         if len(reduce_idxs):
-          ret = self.uop(UOps.STORE, (acc, ret), dtypes.float32)
+          ret = self.uop(UOps.STORE, dtypes.float32, (acc, ret))
           for ri in reduce_idxs[::-1]:
-            ret = self.uop(UOps.ENDLOOP, (ret, self.var_to_loop(ri)), dtypes.float32)
+            ret = self.uop(UOps.ENDLOOP, dtypes.float32, (ret, self.var_to_loop(ri)))
         return ret
       else:
         vin = tuple(ast_parse(v, idxs) for v in x.src)
         # TODO: reenable this at some point
         #assert all_same([x.dtype for x in vin])
         if x.op == UnaryOps.NOOP: return vin[0]
-        if x.op == UnaryOps.CAST: return self.uop(UOps.CAST, vin, x.arg[0], x.arg[1])
-        return self.uop(UOps.ALU, vin, vin[0].dtype, x.op)
+        if x.op == UnaryOps.CAST: return self.uop(UOps.CAST, x.arg[0], vin, x.arg[1])
+        return self.uop(UOps.ALU, vin[0].dtype, vin, x.op)
 
     sinks = []
     expanded_nodes = [idx.expand() for idx in (global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)]
@@ -126,11 +115,11 @@ class UAst(OptimizedKernel):
       idx, valid = self.sts[0].expr_idxs(idxs)
       assert valid.min == 1
       idx_rendered = idx.render(self.render_ops, self)
-      sinks.append(self.uop(UOps.STORE, (global_bufs[0], ast_parse(self.ast, idxs), idx_rendered)))
+      sinks.append(self.uop(UOps.STORE, None, (global_bufs[0], ast_parse(self.ast, idxs), idx_rendered)))
 
     # graph debugging
     if getenv("UASTGRAPH"):
-      import networkx as nx
+      import networkx as nx   # type: ignore
       G = nx.DiGraph()
       def add_node_recursive(x:UOp):
         if x in G.nodes: return
@@ -181,10 +170,13 @@ class UAst(OptimizedKernel):
       if u not in rendered:
         rendered.add(u)
         order.append(u)
+        if DEBUG >= 4: print(u)
         for c in children[u]:
           if all(x in rendered for x in c.vin):
             heapq.heappush(srcs, c)
 
+    # TODO: fix API
+    self.uops = order
     return order
 
 
