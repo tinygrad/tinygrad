@@ -272,6 +272,7 @@ class Tensor:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
   def __getitem__(self, val): # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
+    print(val)
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
@@ -303,18 +304,17 @@ class Tensor:
       # Shrink: do [:, 0]
       sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
 
-    final_shape, it_shape, dim, tensors, i_ = [], iter(new_shape), [], [], 0
+    final_shape, it_shape, dim, tensors, dim_collapsed = [], iter(new_shape), [], [], 0
     for i,s in enumerate(orig_slices):
       if s is None: final_shape.append(1)
       else: # s is int or slice or Tensor
         dim_shape = next(it_shape)
         if isinstance(s, int):
-          i_ += 1
+          dim_collapsed += 1
         else:
           final_shape.append(dim_shape)
           if isinstance(s, Tensor):
-            tensors.append(s)
-            dim.append(i-i_)
+            tensors.append(s), dim.append(i-dim_collapsed)
     ret = sliced_tensor.reshape(tuple(final_shape))
 
     if tensors: # Fancy/tensor indexing

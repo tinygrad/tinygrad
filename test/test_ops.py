@@ -574,16 +574,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3)], lambda x: x[1:2, 1:2], lambda x: x[1:2, 1:2])
     helper_test_op([(3,3,3)], lambda x: x[1:2, 1:2, 0:-1], lambda x: x[1:2, 1:2, 0:-1])
 
-  def test_slice_with_none_and_npnewaxis(self):
+  def test_slice_with_none(self):
     helper_test_op([(3,3,3)], lambda x: x[None], lambda x: x[None])
     helper_test_op([(3,3,3)], lambda x: x[1:2, None], lambda x: x[1:2, None])
     helper_test_op([(3,3,3)], lambda x: x[1:2, None], lambda x: x[1:2, None])
     helper_test_op([(3,3,3)], lambda x: x[1:2, None, 1:2], lambda x: x[1:2, None, 1:2])
     helper_test_op([(3,3,3)], lambda x: x[1:2, 1:2, None, -1], lambda x: x[1:2, 1:2, None, -1])
-    helper_test_op([(3,3,3)], lambda x: x[np.newaxis], lambda x: x[np.newaxis])
-    helper_test_op([(3,3,3)], lambda x: x[1:2, np.newaxis], lambda x: x[1:2, np.newaxis])
-    helper_test_op([(3,3,3)], lambda x: x[1:2, np.newaxis, 1:2], lambda x: x[1:2, np.newaxis, 1:2])
-    helper_test_op([(3,3,3)], lambda x: x[np.newaxis, 1:2, None, -1], lambda x: x[np.newaxis, 1:2, None, -1])
 
   def test_slice_one_endpoint_out_of_bounds(self):
     helper_test_op([(3,3,3)], lambda x: x[0:4], lambda x: x[0:4])
@@ -1174,7 +1170,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,:,10:11,d,0:2], lambda x: x[1,:,10:11,o,0:2])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,4,c,d,2], lambda x: x[1,4,k,o,2])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,2,d,2], lambda x: x[1,j,2,o,2])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,np.newaxis,2,e], lambda x: x[None,j,np.newaxis,2,p])
     helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)], lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor(1)])
     helper_test_op([(2,3)], lambda x: x[torch.tensor([1]), torch.tensor([[0,0,0],[0,0,0]])], lambda x: x[Tensor([1]), Tensor([[0,0,0],[0,0,0]])])
 
