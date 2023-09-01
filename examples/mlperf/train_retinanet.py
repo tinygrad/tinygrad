@@ -161,32 +161,99 @@ class RetinaNetTrainer:
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
             images = Tensor(resized)
 
-            head_outputs = retina(self.input_fixup(images)).numpy()
+            #breakpoint()
+            #TODO tensors should not be turned into numpy
+            head_outputs = retina(self.input_fixup(images))
 
 
             #eltwise_loss = self._eltwise_compute_loss(BS, targets, head_outputs) 
+            
+            #imgwise_loss_np = self._imgwise_compute_loss_np(BS, targets, head_outputs)
             imgwise_loss = self._imgwise_compute_loss(BS, targets, head_outputs)
+            
+            #batchwise_loss = self._batchwise_compute_loss(BS, targets, head_outputs)
 
+            #print("step loss: ", imgwise_loss.numpy(), " np step loss: ", imgwise_loss_np.numpy())
+            print("step loss: ", imgwise_loss.numpy())
             optimizer.zero_grad()
             imgwise_loss.backward()
             optimizer.step()
-            print("step loss: ", imgwise_loss.numpy())
+            
+
+
+
+    def _batchwise_compute_loss(self, BS, targets, head_outputs):
+        from torchvision.ops.focal_loss import sigmoid_focal_loss
+        from torch.nn import SmoothL1Loss
+        from torch import tensor
+        total_loss = Tensor(0)
+        
+        box_regs = head_outputs[:, :, :4]
+        cls_preds = head_outputs[:, :, 4:]
+        ground_truth_boxes, ground_truth_clss = targets["regression_targets"], targets["classification_targets"]
+        cls_targets_idxs = np.argwhere(targets["classification_masks"]==1)
+        reg_targets_idxs = np.argwhere(targets["regression_masks"]==1)
+
+        box_reg_losses = smooth_l1_loss(Tensor(box_regs[reg_targets_idxs]), Tensor(ground_truth_boxes[reg_targets_idxs]), beta = 0.11, reduction="sum")
+        #TODO
+        Warning("You are normalizing over the BATCH number of anchors, not each image loss by its number of anchors...")
+        focal_losses = focal_loss(Tensor(cls_preds[cls_targets_idxs]).sigmoid(), Tensor(ground_truth_clss[cls_targets_idxs]), reduction="sum").div(len(cls_preds))
+        total_loss += focal_losses + box_reg_losses
+        print(total_loss.numpy() , " batch loss")
+        return total_loss
+    
+
+    
 
     def _imgwise_compute_loss(self, BS, targets, head_outputs):
         from torchvision.ops.focal_loss import sigmoid_focal_loss
         from torch.nn import SmoothL1Loss
         from torch import tensor
         total_loss = Tensor(0)
+        regression_losses = []
+        classification_losses = []
         for img_idx in range(BS):
-            #TODO tensorize, increase mask exploitation, don't use fors
+            #TODO tensorize even more for BS level, increase mask exploitation, don't use fors
             box_regs = head_outputs[img_idx, :, :4]
             cls_preds = head_outputs[img_idx, :, 4:]
+            ground_truth_boxes, ground_truth_clss = targets["regression_targets"][img_idx], targets["classification_targets"][img_idx]
+            
+            def generate_mtx_mask(targs_mask, preds):
+                #DEBUG and replace below
+                return Tensor(targs_mask).reshape(targs_mask.shape[0],1).expand(targs_mask.shape[0],targs_mask.shape[1])
+            reg_mask_mtx = Tensor(targets["regression_masks"][img_idx]).reshape(box_regs.shape[0],1).expand(box_regs.shape[0],4)
+            cls_mask_mtx = Tensor(targets["classification_masks"][img_idx]).reshape(cls_preds.shape[0],1).expand(cls_preds.shape[0],self.model.num_classes)
+
+            focal_losses = focal_loss((cls_preds * cls_mask_mtx).sigmoid(), Tensor(ground_truth_clss) * cls_mask_mtx, reduction="sum").div(cls_preds.shape[0])
+            #TODO box regs are very sparse, maybe matmul makes training slower?
+            box_reg_losses = smooth_l1_loss(box_regs * reg_mask_mtx, Tensor(ground_truth_boxes) * reg_mask_mtx, beta = 0.11, reduction="sum")
+            
+            regression_losses.append(box_reg_losses)
+            classification_losses.append(focal_losses)
+
+        classification_losses = Tensor.stack(classification_losses).sum()
+        regression_losses = Tensor.stack(regression_losses).sum()
+        print((classification_losses + regression_losses).numpy() , " batch loss")
+
+        return classification_losses + regression_losses
+    
+    def _imgwise_compute_loss_np(self, BS, targets, head_outputs):
+        from torchvision.ops.focal_loss import sigmoid_focal_loss
+        from torch.nn import SmoothL1Loss
+        from torch import tensor
+        total_loss = Tensor(0)
+        for img_idx in range(BS):
+            #TODO tensorize, increase mask exploitation, don't use fors
+            box_regs = head_outputs[img_idx, :, :4].numpy()
+            cls_preds = head_outputs[img_idx, :, 4:].numpy()
             ground_truth_boxes, ground_truth_clss = targets["regression_targets"][img_idx], targets["classification_targets"][img_idx]
             cls_targets_idxs = np.argwhere(targets["classification_masks"][img_idx]==1).flatten()
             reg_targets_idxs = np.argwhere(targets["regression_masks"][img_idx]==1).flatten()
 
+            #TODO this fails when there are 0 regression targets
+            #TODO is zero regression targets possible?
             box_reg_losses = smooth_l1_loss(Tensor(box_regs[reg_targets_idxs]), Tensor(ground_truth_boxes[reg_targets_idxs]), beta = 0.11, reduction="sum")
-            focal_losses = focal_loss(Tensor(cls_preds[cls_targets_idxs]).sigmoid(), Tensor(ground_truth_clss[cls_targets_idxs]), reduction="sum")
+            focal_losses = focal_loss(Tensor(cls_preds[cls_targets_idxs]).sigmoid(), Tensor(ground_truth_clss[cls_targets_idxs]), reduction="sum").div(len(cls_preds))
             
             #box_reg_losses_elt = [smooth_l1_loss(Tensor(box_regs[target_box_idx]), Tensor(ground_truth_boxes[target_box_idx]), beta = 0.11, reduction="sum").numpy() for target_box_idx in reg_targets_idxs]
             #focal_losses_elt = [focal_loss(Tensor(cls_preds[target_cls_idx]).sigmoid(), Tensor(ground_truth_clss[target_cls_idx])).numpy() for target_cls_idx in cls_targets_idxs]
@@ -200,8 +267,9 @@ class RetinaNetTrainer:
             #box_reg_losses_pt = SmoothL1Loss(reduction="sum", beta=0.11).forward(torch.tensor(box_regs[reg_targets_idxs]), torch.tensor(ground_truth_boxes[reg_targets_idxs]))
             #TODO use reductions instead
             total_loss += focal_losses + box_reg_losses
-
+        print(total_loss.numpy() , " batch loss")
         return total_loss
+    
     def _eltwise_compute_loss(self, BS, targets, head_outputs):
         total_loss = 0
         for img_idx in range(BS):
