@@ -69,7 +69,7 @@ def compile(dat, output_fn):
   # transform to CL.CACHE
   used_ops = 0
   cl_cache = []
-  for prg,args in model_exec.jit_cache:
+  for prg,args,_ in model_exec.jit_cache:
     # pass these to thneed
     setattr(prg.clprg, 'op_estimate', prg.op_estimate)
     setattr(prg.clprg, 'prg', prg.prg)

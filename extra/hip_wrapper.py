@@ -93,7 +93,7 @@ def hipMalloc(count):
   ptr = ctypes.c_void_p()
   status = _libhip.hipMalloc(ctypes.byref(ptr), count)
   hipCheckStatus(status)
-  return ptr
+  return ptr.value
 
 
 _libhip.hipFree.restype = int

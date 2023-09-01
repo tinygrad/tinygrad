@@ -93,7 +93,7 @@ def postprocess(preds, img, orig_imgs):
   print('copying to CPU now for post processing')
   #if you are on CPU, this causes an overflow runtime error. doesn't "seem" to make any difference in the predictions though.
   # TODO: make non_max_suppression in tinygrad - to make this faster
-  preds = preds.cpu().numpy() if isinstance(preds, Tensor) else preds
+  preds = preds.numpy() if isinstance(preds, Tensor) else preds
   preds = non_max_suppression(prediction=preds, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300)
   all_preds = []
   for i, pred in enumerate(preds):

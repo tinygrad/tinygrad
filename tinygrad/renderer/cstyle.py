@@ -29,6 +29,7 @@ class CStyleLanguage(NamedTuple):
   uses_vload: bool = False
   external_local_bufs: bool = False
   uses_ptr_arithmetic: bool = False
+  launch_bounds: bool = False
   code_for_op: Dict = {
     UnaryOps.EXP2: lambda x: f"exp2({x})",
     UnaryOps.LOG2: lambda x: f"log2({x})",
@@ -79,7 +80,7 @@ class CStyleLanguage(NamedTuple):
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 self.arg_int_prefix if dtype == dtypes._arg_int32 else
                 ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix) for i,(name,dtype) in enumerate(bufs)]
-    prg = ''.join([f"{self.kernel_prefix} void {function_name}(",] +
+    prg = ''.join([f"{self.kernel_prefix} void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
@@ -133,7 +134,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     elif uop == UOps.BARRIER:
       kk(lang.barrier)
     elif uop == UOps.ENDLOOP:
-      if args[1] == "local" and len(lang.lid):
+      if args[1] == "local" and lang.lid:
         # TODO: this is a bit of a hack. the local loop isn't real on the GPU
         kk(f"if ({Variable.sum(args[0]).render(render_cl)} == 0) {{")
         pend_close = "}"*(len(args[0])+1) + f" /* {args[1]} */"
@@ -145,13 +146,24 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         depth -= 1
         kk("}"*len(args[0]) + f" /* {args[1]} */")
     elif uop == UOps.WMMA:
-      # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
-      kk("{ simdgroup_float8x8 a,b,c;")
-      kk(f"a.thread_elements()[0] = {vin[0].render()}; a.thread_elements()[1] = {vin[1].render()};")
-      kk(f"b.thread_elements()[0] = {vin[2].render()}; b.thread_elements()[1] = {vin[3].render()};")
-      kk(f"c.thread_elements()[0] = {vin[4].render()}; c.thread_elements()[1] = {vin[5].render()};")
-      kk("simdgroup_multiply_accumulate(c, a, b, c);")
-      kk(f"{vin[4].render()} = c.thread_elements()[0]; {vin[5].render()} = c.thread_elements()[1]; }}")
+      if args == "METAL":
+        # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
+        kk("{ simdgroup_float8x8 a,b,c;")
+        kk(f"a.thread_elements()[0] = {vin[0].render()}; a.thread_elements()[1] = {vin[1].render()};")
+        kk(f"b.thread_elements()[0] = {vin[2].render()}; b.thread_elements()[1] = {vin[3].render()};")
+        kk(f"c.thread_elements()[0] = {vin[4].render()}; c.thread_elements()[1] = {vin[5].render()};")
+        kk("simdgroup_multiply_accumulate(c, a, b, c);")
+        kk(f"{vin[4].render()} = c.thread_elements()[0]; {vin[5].render()} = c.thread_elements()[1]; }}")
+      elif args == "HIP":
+        kk("{")
+        kk(f"half16 a_frag = {{ {','.join(['(half)'+x.render() for x in vin[8:8+16]])} }};")
+        kk(f"half16 b_frag = {{ {','.join(['(half)'+x.render() for x in vin[8+16:8+32]])} }};")
+        kk(f"float8 c_frag = {{ {','.join([x.render() for x in vin[:8]])} }};")
+        kk("c_frag = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(a_frag, b_frag, c_frag);")
+        for i in range(8): kk(f"{vin[i].render()} = c_frag[{i}];")
+        kk("}")
+      else:
+        raise NotImplementedError(f"WMMA not implemented for {args}")
     elif uop == UOps.ALU:
       assert newvar is not None
       kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")

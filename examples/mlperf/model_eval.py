@@ -43,7 +43,7 @@ def eval_resnet():
       dat = Tensor(x)
     except StopIteration:
       dat = None
-    t = outs.numpy().argmax(axis=1)
+    t = outs.argmax(axis=1).numpy()
     et = time.perf_counter()
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
     print(t)
