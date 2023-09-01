@@ -377,11 +377,11 @@ class Linearizer(OptimizedKernel):
     if x.op in ops:
       ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), ops[x.op])) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values, acc))]
     else:
-      ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
+      ret = [(idx, self.uop(UOps.ALU, ssa('alu'), list(val), x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
-      for o,k in enumerate(i):
-        ordered_ret[k] = Token(j.name, j.dtype, o) if j.dtype == dtypes._float4 else j
+      for k in i:
+        ordered_ret[k] = j
     assert all(isinstance(x, Token) for x in ordered_ret), "some tokens didn't get scattered?"
     return cast(List[Token], ordered_ret)
