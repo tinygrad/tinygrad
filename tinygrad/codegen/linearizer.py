@@ -127,9 +127,9 @@ class UOp(NamedTuple):
   arg: Any
   def __repr__(self): return f"{str(self.uop):20s}: {str(self.out) if self.out is not None else '':25s} {str(self.vin):32s} {self.arg}"
 
-def get_grouped_dims(prefix, start_dim, local_dims, maxdim=3):
+def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   local_idxs = loop_local_idxs = [Variable(f"{prefix}{start_dim+i}", 0, s-1) for i,s in enumerate(local_dims[0:maxdim-1] + (prod(local_dims[maxdim-1:]),) if len(local_dims) > maxdim else local_dims)]
-  if len(local_dims) > maxdim:
+  if maxdim != 0 and len(local_dims) > maxdim:
     dd = local_idxs[maxdim-1]
     nli = []
     for s in local_dims[maxdim-1:][::-1]:
@@ -245,8 +245,8 @@ class Linearizer(OptimizedKernel):
     self.function_name, self.display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
 
     # define indexes
-    global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims])
-    local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+len(self.group_for_reduce)])
+    global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
+    local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+len(self.group_for_reduce)], 3 if self.opts.has_local else 0)
     full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
     upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
 
