@@ -1128,8 +1128,11 @@ class TestOps(unittest.TestCase):
   def test_clip(self):
     helper_test_op([(45,65)], lambda x: x.clip(-2.3, 1.2), lambda x: x.clip(-2.3, 1.2))
 
-  def test_matvec(self):
+  def test_matvecmat(self):
     helper_test_op([(1,128), (128,128), (128,128)], lambda x,y,z: (x@y).relu()@z, atol=1e-4)
+
+  def test_matvec(self):
+    helper_test_op([(1,128), (128,128)], lambda x,y: (x@y).relu(), atol=1e-4)
 
   # this was the failure in llama early realizing freqs_cis
   def test_double_slice(self):
