@@ -229,7 +229,7 @@ class Tensor:
     assert 0 not in new_shape, f"zeros not allowed in shape {new_shape}"
     return mlops.Reshape.apply(self, shape=tuple([-math.prod(self.shape) // math.prod(new_shape) if s == -1 else s for s in new_shape]))
   def expand(self, shape, *args) -> Tensor:
-    shape = tuple([x if x != -1 else self.shape[i] for i,x in enumerate(argfix(shape, *args)[::-1])][::-1])
+    shape = tuple([x if x != -1 else self.shape[-i] for i,x in enumerate(argfix(shape, *args)[::-1], start=1)][::-1])
     return mlops.Expand.apply(self, shape=shape)
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
