@@ -3,7 +3,7 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, mnum, DType, all_same, partition
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, mnum, DType, all_same, partition, prod
 from tinygrad.ops import LazyOp, UnaryOps, Op
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
@@ -11,7 +11,7 @@ from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, sym_rename
 from tinygrad.codegen.optimizer import OptimizedKernel
-from tinygrad.codegen.kernel import LocalBuffer, LinearizerOptions # noqa: F401 # pylint:disable=unused-import
+from tinygrad.codegen.kernel import LocalBuffer
 VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
@@ -127,6 +127,17 @@ class UOp(NamedTuple):
   arg: Any
   def __repr__(self): return f"{str(self.uop):20s}: {str(self.out) if self.out is not None else '':25s} {str(self.vin):32s} {self.arg}"
 
+def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
+  local_idxs = loop_local_idxs = [Variable(f"{prefix}{start_dim+i}", 0, s-1) for i,s in enumerate(local_dims[0:maxdim-1] + (prod(local_dims[maxdim-1:]),) if len(local_dims) > maxdim else local_dims)]
+  if maxdim != 0 and len(local_dims) > maxdim:
+    dd = local_idxs[maxdim-1]
+    nli = []
+    for s in local_dims[maxdim-1:][::-1]:
+      nli.append(dd % s)
+      dd //= s
+    local_idxs = local_idxs[0:maxdim-1] + nli[::-1]
+  return local_idxs, loop_local_idxs
+
 class Linearizer(OptimizedKernel):
   def get_buffer_name(self, i):
     if self.bufs[i].__class__ == LocalBuffer: return self.bufs[i].name
@@ -200,12 +211,10 @@ class Linearizer(OptimizedKernel):
     self.process()
 
     # limit dims if we need to
-    if self.opts.global_max and self.opts.local_max: self.limit_global_dims(3, self.opts.global_max, self.opts.local_max)
+    if self.opts.global_max and self.opts.local_max: self.limit_dims_to_max(self.opts.global_max, self.opts.local_max)
 
     # uops
     self.uops: List[UOp] = []
-    self.load_cache: Dict[str, Token] = {}
-    self.saved_exprs: Dict[Tuple[Op, Tuple[Token, ...]], Token] = dict()
 
     # add global buffers
     for buf,name in self.arg_bufs.items():
@@ -213,17 +222,15 @@ class Linearizer(OptimizedKernel):
     # add variables from symbolic shapes
     for var in sorted(set(v for buf in self.ast.buffers for v in buf.st.var_vals), key=lambda k: k.key):
       self.uop(UOps.DEFINE_GLOBAL, None, [], (var.expr, dtypes._arg_int32))
-
-    # add a local buffer for multistage reduce
+    # define local buffers
+    for lb in self.local_alias.values():
+      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size()))
+    # add a local buffer for multistage reduce. # TODO: use local alias
     if self.group_for_reduce:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
-
-    # define local buffers
-    for lb in self.local_alias.values():
-      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size()))
 
     # print
     if DEBUG >= 3: self.printbufs()
@@ -232,27 +239,32 @@ class Linearizer(OptimizedKernel):
     self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) if isinstance(x, int) else sym_rename(x) for x in self.full_shape])
     self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
+    # name the function something unique
+    Linearizer.kernel_cnt[self.function_name] += 1
+    suffix = f"{'n'+str(Linearizer.kernel_cnt[self.function_name]-1)}" if Linearizer.kernel_cnt[self.function_name] > 1 else ""
+    self.function_name, self.display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
+
+    # define indexes
+    global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
+    local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+len(self.group_for_reduce)], 3 if self.opts.has_local else 0)
+    full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
+    upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
+
+    # global and local loops
+    self.uop(UOps.LOOP, None, [], (loop_global_idxs, "global"))
+    self.uop(UOps.LOOP, None, [], (loop_local_idxs, "local"))
+
     # parse AST
     loaded_buffers = {}
     acc = []
+    self.load_cache: Dict[str, Token] = {}
+    self.saved_exprs: Dict[Tuple[Op, Tuple[Token, ...]], Token] = dict()
 
     # ssa
     _ssa:DefaultDict[str,int] = defaultdict(int)
     def ssa(name, ltype=dtypes.float) -> Token:
       _ssa[name] += 1
       return Token(f"{name}{_ssa[name]-1}", ltype)
-
-    # global loop
-    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
-    self.uop(UOps.LOOP, None, [], (global_idxs, "global"))
-
-    # local loop
-    local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce-self.local_dims, self.first_reduce+len(self.group_for_reduce))]
-    self.uop(UOps.LOOP, None, [], (local_idxs, "local"))
-
-    # upcast indexes
-    full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
-    upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
 
     # reduce op
     fake_reduce_idxs = []
@@ -271,8 +283,10 @@ class Linearizer(OptimizedKernel):
       if self.use_tensor_cores: self.uop(UOps.BARRIER, None, [], ())
 
       # compute local aliases
+      # TODO: this is garbage code and should be at least moved elsewhere
       locals_to_store = []
       for i in self.local_alias:
+        localbuf_idx = self.bufs.index(self.local_alias[i])
         strides = self.sts[i].real_strides()
         extra_locals = [lidx for lidx,st in zip(local_idxs[self.exclude_local_upcast:], strides[len(global_idxs)+self.exclude_local_upcast:self.first_reduce]) if st == 0]
         this_upcast_idxs: List[Node] = []
@@ -300,8 +314,10 @@ class Linearizer(OptimizedKernel):
             if DEBUG >= 4: print(f"failed upcasting@{j} stride {v} extra locals {extra_locals}")
             this_upcast_idxs.append(v)
         idxs = global_idxs+local_idxs+reduce_idxs+(this_upcast_idxs[::-1] if self.reverse_upcast_dir else this_upcast_idxs)
+        idxs = [idx*0 if s == 0 else idx for idx,s in zip(idxs,strides)]
+        if DEBUG >= 3: print(f"{localbuf_idx} alias {i}:", idxs)
         ll = self.global_load(i, idxs)
-        locals_to_store.append((self.bufs.index(self.local_alias[i]), idxs, ll))
+        locals_to_store.append((localbuf_idx, idxs, ll))
 
       # copy in any global buffers
       if self.use_tensor_cores:
@@ -338,7 +354,7 @@ class Linearizer(OptimizedKernel):
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc, ssa)  # store accumulators
         self.uop(UOps.BARRIER, None, [], ())
-        self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
+        self.uop(UOps.ENDLOOP, None, [], (loop_local_idxs, "local"))
 
         # local indexs are over, 0 them out
         local_idxs = [x*0 for x in local_idxs]
@@ -380,17 +396,9 @@ class Linearizer(OptimizedKernel):
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa)
 
-    if not self.group_for_reduce:
-      # end the global+local loop
-      self.uop(UOps.ENDLOOP, None, [], (global_idxs+local_idxs, "global+local"))
-    else:
-      # end the global loop
-      self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
+    # end the global (and maybe local) loop
+    self.uop(UOps.ENDLOOP, None, [], (loop_global_idxs+loop_local_idxs, "global+local") if not self.group_for_reduce else (loop_global_idxs, "global"))
 
-    # name the function something unique
-    Linearizer.kernel_cnt[self.function_name] += 1
-    suffix = f"{'n'+str(Linearizer.kernel_cnt[self.function_name]-1)}" if Linearizer.kernel_cnt[self.function_name] > 1 else ""
-    self.function_name, self.display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
     return self
 
   _OT = TypeVar("_OT")

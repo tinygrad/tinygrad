@@ -152,7 +152,7 @@ class Variable(Node):
   def __init__(self, expr:Optional[str], nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
   def vars(self): return [self]
-  def expand(self) -> List[Node]: return [self] if self.expr is not None else [Variable.num(j) for j in range(self.min, self.max+1)] 
+  def expand(self) -> List[Node]: return [self] if self.expr is not None else [Variable.num(j) for j in range(self.min, self.max+1)]
 
 class NumNode(Node):
   def __init__(self, num:int):
@@ -202,6 +202,7 @@ class DivNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
+  def expand(self) -> List[Node]: return [x//self.b for x in self.a.expand()]
 
 class ModNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
@@ -210,6 +211,7 @@ class ModNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return (0, self.b-1) if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b) else (self.a.min%self.b, self.a.max%self.b)
+  def expand(self) -> List[Node]: return [x%self.b for x in self.a.expand()]
 
 class RedNode(Node):
   def __init__(self, nodes:List[Node]): self.nodes = nodes
@@ -271,7 +273,7 @@ class SumNode(RedNode):
         else: new_sum.append(x)
       return Node.__lt__(Node.sum(new_sum), b)
     return Node.__lt__(self, b)
-  
+
   def expand(self) -> List[Node]: return [Variable.sum(list(it)) for it in itertools.product(*[x.expand() for x in self.nodes])]
 
   @property
