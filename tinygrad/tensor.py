@@ -252,7 +252,7 @@ class Tensor:
   #    - If omitted, i and j will default to 0 and N, respectively, where N is the length of the sequence
   #    - Negative values for i and j are taken relative to the end of the sequence
   #    - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
-  # - Indexing with np.newaxis or None on a given axis will add a new dimension of size one before that axis
+  # - Indexing with None on a given axis will add a new dimension of size one before that axis
   # - Empty slices are not allowed (tensors with 0s in shape have to be supported first, for all backends).
   # - For a slice [i:j:k] finding the correct indices is delegated to slice.indices(len).
   # - Strides > 1 and < 0 are now allowed!:
