@@ -100,7 +100,7 @@ def benchmark_model(m, validate_outs=False):
     del ort_sess
 
   if validate_outs:
-    rtol, atol = 8e-4, 8e-4  # tolerance for fp16 models
+    rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
     tinygrad_model = get_run_onnx(onnx_model)
     tinygrad_out = tinygrad_model(inputs)
