@@ -4,7 +4,7 @@ import extra.hip_wrapper as hip
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
-from tinygrad.codegen.linearizer import LinearizerOptions
+from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
