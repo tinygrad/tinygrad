@@ -101,15 +101,7 @@ class CStyleLanguage(NamedTuple):
     return f"*({buf_name}+{idx.render(render_cl, strip_parens=True)}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx.render(render_cl)}] = {var_name};"
 
 def add_gl_dimension(prefix: str, args, i:int, var, local_size:List[int], xid:List[str]):
-  # for M1 tensor core stuff, support > 3 dims
-  if i >= 2 and len(args[0]) > len(xid):
-    # do this on the x dim for warps
-    if len(local_size) == 2: local_size.append(1)
-    local_size[-1] *= var.max+1
-    lidx = Variable(xid[0], 0, prod(x.max+1 for x in args[0][2:])-1)
-    lidx = (lidx//((lidx.max+1)//local_size[-1]))%(var.max+1)
-    assert lidx.max == var.max and lidx.min == var.min
-    return "{" if isinstance(var, NumNode) else f"{{ {prefix} {var.expr} = {lidx.render(render_cl)};  /* {var.max+1} */"
+  assert i < 3, "only 3 dims are supported"
   local_size.append(var.max+1)
   return "{" if isinstance(var, NumNode) else f"{{ {prefix} {var.expr} = {xid[min(len(xid), len(args[0]))-1-i]};  /* {var.max+1} */"
 
