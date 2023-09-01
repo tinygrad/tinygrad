@@ -22,7 +22,9 @@ class Node(ABC):
     if strip_parens and ret[0] == '(' and ret[-1] == ')': ret = ret[1:-1]
     return ret
   def vars(self): return []
+  # expand a Node into List[Node] that enumerates the underlying Variables from min to max
   def expand(self) -> List[Node]: raise NotImplementedError(self.__class__.__name__)
+  # infer the value of a Node given Variable values in var_vals
   def infer(self, var_vals: Dict[Variable, int]) -> int: raise NotImplementedError(self.__class__.__name__)
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
