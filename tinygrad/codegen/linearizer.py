@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict, Iterator, Union, Sequence, Final
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, Dict, Iterator, Union, Sequence, Final
 import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, mnum, DType, all_same, partition, prod
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
@@ -68,7 +68,7 @@ class ConstOp(NamedTuple):
 class UOp(NamedTuple):
   uop: UOps
   dtype: Optional[DType]
-  vin: Tuple[UOp]
+  vin: Tuple[UOp, ...]
   arg: Any
   def __repr__(self): return f"{self.num:4d} {str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.num for x in self.vin]):32s} {self.arg}"
   #def __repr__(self): return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str(self.vin):32s} {self.arg}"
@@ -135,11 +135,11 @@ class Linearizer(OptimizedKernel):
   def global_store(self, i, idxs:List[VariableOrNum], store:List[UOp]) -> None:
     expanded_nodes = [idx.expand() for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
-    upcast_dim = self.get_upcast_dim(i)
-
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
+    """
+    upcast_dim = self.get_upcast_dim(i)
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
@@ -156,6 +156,7 @@ class Linearizer(OptimizedKernel):
         else:
           store_offset_new[k] = self.uop(UOps.CAST, ssa("alu", dtypes._float4 if amt == 4 else dtypes._float2), out_tokens)
       store_offset = store_offset_new
+    """
 
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)

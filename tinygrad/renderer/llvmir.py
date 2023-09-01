@@ -1,3 +1,4 @@
+# type: ignore
 from typing import Final, Dict, Callable, Any, List, Optional, Tuple
 import functools
 from llvmlite import ir  # type: ignore

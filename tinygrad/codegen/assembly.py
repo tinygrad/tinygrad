@@ -1,3 +1,4 @@
+# type: ignore
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict, cast
 from tinygrad.codegen.linearizer import UOps, Token, ConstOp, MemOp, UOp
 from tinygrad.ops import BinaryOps, UnaryOps
