@@ -95,127 +95,55 @@ def make_match_evaluation_fn(high: float, low: float, allow_low_qual: bool = Fal
 
     return above_high_threshold*preds - between_thresholds*2 - below_low_threshold*1
   return loss_eval_fn
-   
+
+def test_rind():
+  x = rind(Tensor([1, 1, 1, 1, 0, 0, 0, 0, 1, 1]).numpy(), 3)
+  assert x.ndim == 1
+  assert x.shape[0] == 3
+  import numpy as np
+  assert np.isin(x, [0, 1, 2, 3, 8, 9]).all()
+
+# TODO perf
+import numpy as np
+def rind(mask: np.ndarray, take: int) -> Tensor:
+  assert mask.ndim == 1 and mask.shape[0] >= take
+  masked = (np.arange(mask.shape[0]) * mask)[mask.astype(bool)]
+  stacked = np.stack([masked,np.random.rand(masked.shape[0])],axis=0)
+  return stacked[0, stacked[1].argsort()[:take]]
+
 def test_balanced_sampler():
   fn1 = make_balanced_sampler_fn(10, 0.5)
-  a = fn1([Tensor([1, 0, 1, 1, 1, 1, 0, 1, 1, 0])])
-  assert all(((a[0] == Tensor([1, 1, 1, 1, 1]))).numpy())
+  t1 = Tensor([1, 0, 1, 1, 1, 1, 0, 1, 1, 0])
+  a1 = np.arange(t1.shape[0])
+  a, b = fn1([t1])
+  assert np.isin(a[0] * a1, t1.numpy() * a1).all()
+  assert np.isin(b[0] * a1, (t1 == 0).numpy() * a1).all()
 
-def test_randperm():
-  # [.2, .6, .8, .2, 0, 0, 0, 0, .8, .9]
-  # [1,  1,  1,  1,  0, 0, 0, 0,  1, 1] # 6 positives
-  # [.2, .6, .8, .2, .8, .9] # positives only
-
-  # TODO perf
-  def rand_sample(t: Tensor, mask: Tensor, take: int) -> Tensor:
-    # TODO bool masks would be nice
-    # t = t[mask.cast(dtypes.bool)]
-    t = t.numpy()[mask.numpy().astype("bool")]
-    print("Masked:", t)
-    ind, r = Tensor.arange(t.shape[0]), Tensor.rand(t.shape[0])
-    pairs = Tensor.stack([ind,r],dim=1)
-    xx = Tensor(pairs[:,1].numpy().argsort().reshape(pairs.shape[0], 1)[:take])
-    print("here")
-    print(t.numpy())
-    print(xx.numpy())
-    return pairs.gather(Tensor(pairs[:,1].numpy().argsort().reshape(pairs.shape[0], 1)[:take]), dim=1)
-
-  t = Tensor([.2, .6, .8, .2, 0, 0, 0, 0, .8, .9])
-  x = rand_sample(t, Tensor([1, 1, 1, 1, 0, 0, 0, 0, 1, 1]), 3)
-  print(x.numpy())
-  # [1, 2, 3, 4, 9, 10]
-  # [.5,.1,.5,.2,.1,.4] # rand
-  # stack, then sort and take
-
-  def bool_mask(t: Tensor, mask: Tensor) -> Tensor:
-
-    pairs = Tensor.stack([idx,t],dim=1).numpy()
-    return pairs[pairs[:,1].argsort()]
-
-  # [[1,0], [1,1] .. [0,4] .. [1, 9]]
-  # [[2], [1], [10]] # sample 3
-  mask = Tensor([1, 0, 1, 1, 1, 1, 0, 1, 1, 0])
-  print("Mask:", mask.numpy())
-  r = Tensor.rand(10)
-  print("Random:", r.numpy())
-  print("masked:", r[mask * Tensor.arange(10)].numpy())
-  randperm(10, Tensor([1, 0, 1, 1, 1, 1, 0, 1, 1, 0]))
-
-def randperm(size: int, idx: Tensor) -> Tensor:
-  tensor = Tensor([.2, .6, .8, .2, 0, 0, 0, 0, .8, .9])
-  # Sort the tensor
-  sorted_tensor, _ = Tensor.sort(tensor)
-  # Find the index where zeros end
-  non_zero_start_idx = torch.sum(sorted_tensor == 0).item()
-  # Slice the tensor from that index to the end
-  non_zero_tensor = sorted_tensor[non_zero_start_idx:]
-  pairs = Tensor.stack([idx,Tensor.rand(size)],dim=1).numpy()
-  return pairs[pairs[:,1].argsort()]
-
+# returns a random mask of positive and negative examples
 def make_balanced_sampler_fn(batch_size_per_image: int, positive_fraction: float) -> Callable[[Tensor], Tuple[List[Tensor], List[Tensor]]]:
-  """
-  Arguments:
-      matched idxs: list of tensors containing -1, 0 or positive values.
-          Each tensor corresponds to a specific image.
-          -1 values are ignored, 0 are considered as negatives and > 0 as
-          positives.
-
-  Returns:
-      pos_idx (list[tensor])
-      neg_idx (list[tensor])
-
-  Returns two lists of binary masks for each image.
-  The first list contains the positive elements that were selected,
-  and the second list the negative example.
-  """
-
-  def sampler_fn(image_matches: List[Tensor], numpy_fancy: bool) -> (Tensor, Tensor):
-    pos_idx = []
-    neg_idx = []
+  def sampler_fn(image_matches: List[Tensor]) -> (Tensor, Tensor):
+    pos_masks = []
+    neg_masks = []
     for matches in image_matches:
-      positive = matches.where(matches >= 1, 0) # TODO this was 1 in the example, should be >0? or threshold
-      print("Positive matches:", positive.numpy())
-      negative = matches.where(matches == 0, 0)
-
+      # TODO this was >= 1 in the example, docs say > 0
+      positive, negative = matches >= 1, matches == 0 
       num_pos = int(batch_size_per_image * positive_fraction)
+      
       # protect against not enough positive examples
       pos_numel, neg_numel = positive.sum().numpy().item(), negative.sum().numpy().item()
-      num_pos = min(pos_numel, num_pos)
-      num_neg = min(neg_numel, batch_size_per_image - num_pos)
-
-      pos_pairs = randperm(num_pos)
-      neg_pairs = randperm(num_neg)
+      num_pos = int(min(pos_numel, num_pos))
+      num_neg = int(min(neg_numel, batch_size_per_image - num_pos))
       
-      pos_index = pos_pairs[:, 0].astype("int32")
-      print("Random permutation of indices:", pos_index)
+      # option .. return a mask or return gather indices, which is more efficient?
+      pos_mask = np.zeros_like(matches.numpy())
+      pos_mask[rind(positive.numpy(), num_pos).astype(int)] = 1 # scatter 1s into the mask
+      pos_masks.append(pos_mask)
 
+      neg_mask = np.zeros_like(pos_mask)
+      neg_mask[rind(negative.numpy(), num_neg).astype(int)] = 1
+      neg_masks.append(neg_mask)
 
-      neg_index,neg_r = Tensor.arange(neg_numel),Tensor.rand(neg_numel)
-      neg_pairs = Tensor.stack([neg_index,neg_r],dim=1)
-
-      neg_pairs = neg_pairs.numpy()[neg_pairs[:,1].numpy().argsort()]
-      neg_index = neg_pairs[:, 0].astype("int32")
-
-
-      pos_idx_per_image = positive.numpy()[pos_index]
-      print("Positive indices:", pos_idx_per_image)
-      neg_idx_per_image = negative.numpy()[neg_index]
-      
-
-      # # create binary mask from indices
-      # pos_idx_per_image_mask = torch.zeros_like(
-      #     matched_idxs_per_image, dtype=torch.uint8
-      # )
-      # neg_idx_per_image_mask = torch.zeros_like(
-      #     matched_idxs_per_image, dtype=torch.uint8
-      # )
-      # pos_idx_per_image_mask[pos_idx_per_image] = 1
-      # neg_idx_per_image_mask[neg_idx_per_image] = 1
-
-      # pos_idx.append(pos_idx_per_image_mask)
-      # neg_idx.append(neg_idx_per_image_mask)
-
-    return pos_idx, neg_idx
+    return pos_masks, neg_masks
   return sampler_fn
 
 def make_rpn_loss_evaluator(cfg, box_coder):
@@ -349,13 +277,13 @@ if __name__ == "__main__":
   idx = Tensor([0, 2, 1, 1]).reshape(4, 1)
   result = data.gather(idx, dim=1)
 
-  test_randperm()
+  test_rind()
   test_boxlist_iou()
   test_match_eval()
   test_balanced_sampler()
   
 
-  # boolmask
+  # def bool_mask(t: Tensor, mask: Tensor) -> Tensor:
   # ind = Tensor.arange(mask.shape[0])
   # nz = mask.sum().numpy().item()
   # print("Nonzero:", nz)
