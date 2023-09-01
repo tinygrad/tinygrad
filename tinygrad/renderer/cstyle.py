@@ -197,6 +197,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         kk(lang.render_local(args[0], args[1]))
     elif uop == UOps.DEFINE_GLOBAL:
       bufs.append(args)
+    elif uop == UOps.GEP:
+      r[u] = f"{r[vin[0]]}.{'xyzw'[args]}"
     else:
       raise RuntimeError(f"failed to render {uop}")
 

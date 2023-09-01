@@ -129,7 +129,7 @@ class Linearizer(OptimizedKernel):
         else:
           self.load_cache[key] = self.uop(UOps.LOAD, localtype, [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value)) if this_const is None else \
                                  self.uop(UOps.LOAD, localtype, [], ConstOp(this_const, valid))
-      ret.append(self.uop(UOps.GEP, self.load_cache[key].dtype, [], expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
+      ret.append(self.uop(UOps.GEP, self.load_cache[key].dtype, [self.load_cache[key]], expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
 
   def global_store(self, i, idxs:List[VariableOrNum], store:List[UOp]) -> None:
