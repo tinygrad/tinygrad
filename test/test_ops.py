@@ -269,12 +269,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: float("inf")/x, lambda x: float("inf")/x)
     helper_test_op([(45,65)], lambda x: (-float("inf"))/x, lambda x: (-float("inf"))/x)
     helper_test_op([(45,65)], lambda x: float("nan")/x, lambda x: float("nan")/x)
+  def test_pow_full(self):
+    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, a=0)
   def test_pow(self):
     # TODO: why is a=0 for these tests?
     helper_test_op([(45,65)], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
     helper_test_op([(45,65)], lambda x: x**3, lambda x: Tensor.pow(x,3), a=0)
     helper_test_op([(45,65)], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
-    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, a=0)
     helper_test_op([()], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
     helper_test_op([()], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
     # Regression tests for https://github.com/tinygrad/tinygrad/issues/1151

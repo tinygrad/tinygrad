@@ -170,7 +170,7 @@ class ShapeTracker:
     return tuple(ret)
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
-  def _expr_idx(self, idx, valid):
+  def _expr_idx(self, idx, valid) -> Tuple[Node, Node]:
     for v in reversed(self.views[0:-1]):
       valid = v.expr_node_mask(idx, valid)
       idx = v.expr_node(idx)
