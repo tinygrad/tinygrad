@@ -150,10 +150,7 @@ class Linearizer(OptimizedKernel):
         idx, valid = self.sts[i].expr_idxs(k)
         assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
         assert valid.min == 1, "stores are always valid"
-        if all_same(out_tokens):
-          store_offset_new[k] = out_tokens[0]
-        else:
-          store_offset_new[k] = self.uop(UOps.CAST, dtypes._float4 if amt == 4 else dtypes._float2, out_tokens)
+        store_offset_new[k] = self.uop(UOps.CAST, dtypes._float4 if amt == 4 else dtypes._float2, out_tokens)
       store_offset = store_offset_new
 
     for idx, var in store_offset.items():
@@ -166,7 +163,8 @@ class Linearizer(OptimizedKernel):
     self.process()
 
     # limit dims if we need to
-    if self.opts.global_max and self.opts.local_max: self.limit_dims_to_max(self.opts.global_max, self.opts.local_max)
+    # TODO: broken, and doesn't really belong here
+    #if self.opts.global_max and self.opts.local_max: self.limit_dims_to_max(self.opts.global_max, self.opts.local_max)
 
     # uops
     self.uops: List[UOp] = []
