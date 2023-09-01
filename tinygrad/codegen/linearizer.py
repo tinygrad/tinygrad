@@ -4,7 +4,7 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod, all_same
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
@@ -109,7 +109,7 @@ class Linearizer(OptimizedKernel):
 
     ret = []
     invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
-    for load_i, _idx in enumerate(_idxs):
+    for _idx in _idxs:
       if amt > 1:
         idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
         localtype = dtypes._float4 if amt == 4 else dtypes._float2
@@ -132,13 +132,12 @@ class Linearizer(OptimizedKernel):
       ret.append(self.uop(UOps.GEP, self.load_cache[key].dtype, [self.load_cache[key]], expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
 
-  def global_store(self, i, idxs:List[VariableOrNum], store:List[UOp]) -> None:
+  def global_store(self, i:int, idxs:List[VariableOrNum], store:List[UOp]) -> None:
     expanded_nodes = [idx.expand() for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    """
     upcast_dim = self.get_upcast_dim(i)
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4]:
       grouped_store_offset = defaultdict(list)
@@ -151,12 +150,11 @@ class Linearizer(OptimizedKernel):
         idx, valid = self.sts[i].expr_idxs(k)
         assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
         assert valid.min == 1, "stores are always valid"
-        if all_same([x.name for x in out_tokens]) and tuple(range(amt)) == tuple(x.offset for x in out_tokens):
-          store_offset_new[k] = Token(out_tokens[0].name, dtypes._float4 if amt == 4 else dtypes._float2)
+        if all_same(out_tokens):
+          store_offset_new[k] = out_tokens[0]
         else:
-          store_offset_new[k] = self.uop(UOps.CAST, ssa("alu", dtypes._float4 if amt == 4 else dtypes._float2), out_tokens)
+          store_offset_new[k] = self.uop(UOps.CAST, dtypes._float4 if amt == 4 else dtypes._float2, out_tokens)
       store_offset = store_offset_new
-    """
 
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)

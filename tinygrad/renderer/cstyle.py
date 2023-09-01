@@ -165,13 +165,16 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       else:
         raise NotImplementedError(f"WMMA not implemented for {args}")
     elif uop == UOps.ALU:
+      assert dtype is not None
       r[u] = ssa('alu')
       kk(f"{dtype.name} {r[u]} = {lang.code_for_op[args](*[r[x] for x in vin])};")
       #kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")
     elif uop == UOps.DEFINE_ACC:
+      assert dtype is not None
       r[u] = ssa('acc')
       kk(f"{dtype.name} {r[u]} = {lang.render_const(args, dtype)};")
     elif uop == UOps.LOAD:
+      assert dtype is not None
       r[u] = ssa('val')
       # valids are handled here
       if isinstance(args, ConstOp):
@@ -185,11 +188,12 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
       else:
         assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
+        assert vin[0].dtype is not None
         # TODO: instead of dtypes.float, a base type
         kk(lang.render_store(args.name, args.memory_dtype, r[vin[0]], vin[0].dtype, args.idx, args.local))
-    elif uop == UOps.CAST and dtype.sz > 1:
+    elif uop == UOps.CAST and dtype is not None and dtype.sz > 1:
       r[u] = ssa('cast')
-      kk(f"{r[u]} = {lang.render_cast([x.render() for x in vin], dtype)};")
+      kk(f"{dtype.name} {r[u]} = {lang.render_cast([r[x] for x in vin], dtype)};")
     elif uop == UOps.DEFINE_LOCAL:
       if lang.external_local_bufs:
         prekernel.append(lang.render_local(args[0], args[1]))
