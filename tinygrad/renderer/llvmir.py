@@ -1,7 +1,7 @@
 from typing import Final, Dict, Callable, Any, List, Optional, Tuple
 import functools
 from llvmlite import ir  # type: ignore
-from tinygrad.codegen.linearizer import UOps, UOp, MemOp, ConstOp
+from tinygrad.codegen.linearizer import UOps, UOp, MemOp
 from tinygrad.helpers import dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
 
@@ -124,23 +124,18 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
     if uop == UOps.DEFINE_ACC:
       lvars[u] = ir.Constant(dtype_to_llvm_dtype[dtype], args)
       reduce_phis.append(u)
+    if uop == UOps.CONST:
+      val = ir.Constant(dtype_to_llvm_dtype[dtype], args)
     if uop == UOps.LOAD:
-      assert dtype is not None and isinstance(args, (MemOp, ConstOp))
+      assert dtype is not None
       valid = args.valid.render(render_llvm, bb[-1])
-      if isinstance(args, ConstOp):
-        value, invalid_value = [int(args.value), int(args.invalid_value)] if dtypes.is_int(dtype) else ([bool(args.value), bool(args.invalid_value)] if dtype == dtypes.bool else [args.value, args.invalid_value]) # type: ignore
-        if args.valid.min == 0 and args.valid.max == 1:
-          val = bb[-1].select(valid, ir.Constant(dtype_to_llvm_dtype[dtype], value), ir.Constant(dtype_to_llvm_dtype[dtype], invalid_value))
-        else:
-          val = ir.Constant(dtype_to_llvm_dtype[dtype], value if args.valid.min == 1 else invalid_value)
+      idx = args.idx.render(render_llvm, bb[-1])
+      if args.valid.min == 0:
+        aug_idx = bb[-1].select(valid, idx, sym_render(0))
+        val = bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [aug_idx], inbounds=True)), ir.Constant(dtype_to_llvm_dtype[args.memory_dtype], args.invalid_value))
       else:
-        idx = args.idx.render(render_llvm, bb[-1])
-        if args.valid.min == 0:
-          aug_idx = bb[-1].select(valid, idx, sym_render(0))
-          val = bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [aug_idx], inbounds=True)), ir.Constant(dtype_to_llvm_dtype[args.memory_dtype], args.invalid_value))
-        else:
-          val = bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [idx], inbounds=True))
-        val = cast(bb, val, args.memory_dtype, dtype)
+        val = bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [idx], inbounds=True))
+      val = cast(bb, val, args.memory_dtype, dtype)
       lvars[u] = val
     if uop == UOps.STORE:
       if args is None:

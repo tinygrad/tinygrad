@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod, PtrDType
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
@@ -53,13 +53,6 @@ class MemOp(NamedTuple):
   idx: Node
   local: bool
   memory_dtype: DType
-
-  # shared
-  valid: Node
-  invalid_value: Union[float, int] = 0.0
-
-class ConstOp(NamedTuple):
-  value: Union[float, int]
 
   # shared
   valid: Node
@@ -192,19 +185,19 @@ class Linearizer(OptimizedKernel):
 
     # add global buffers
     for buf,name in self.arg_bufs.items():
-      self.uop(UOps.DEFINE_GLOBAL, None, [], (name, buf.dtype))
+      self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype), [], (name, buf.dtype))
     # add variables from symbolic shapes
     for var in sorted(set(v for buf in self.ast.buffers for v in buf.st.var_vals), key=lambda k: k.key):
-      self.uop(UOps.DEFINE_GLOBAL, None, [], (var.expr, dtypes._arg_int32))
+      self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, [], (var.expr, dtypes._arg_int32))
     # define local buffers
     for lb in self.local_alias.values():
-      self.uop(UOps.DEFINE_LOCAL, None, [], (lb.name, self.sts[self.bufs.index(lb)].size()))
+      self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), [], (lb.name, self.sts[self.bufs.index(lb)].size()))
     # add a local buffer for multistage reduce. # TODO: use local alias
     if self.group_for_reduce:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
-      self.uop(UOps.DEFINE_LOCAL, None, [], ("temp", self.sts[-1].size()))
+      self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), [], ("temp", self.sts[-1].size()))
 
     # print
     if DEBUG >= 3: self.printbufs()

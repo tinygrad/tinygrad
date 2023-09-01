@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict
 import math
 from collections import defaultdict
-from tinygrad.codegen.linearizer import UOps, UOp, MemOp, ConstOp
+from tinygrad.codegen.linearizer import UOps, UOp, MemOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, getenv, prod, DType
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, sym_render
@@ -181,10 +181,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       assert dtype is not None
       r[u] = ssa('val')
       # valids are handled here
-      if isinstance(args, ConstOp):
-        val = lang.render_const(args.value, dtype)
-      else:
-        val = lang.render_load(dtype, args.name, args.memory_dtype, args.idx, args.local)
+      val = lang.render_load(dtype, args.name, args.memory_dtype, args.idx, args.local)
       if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(args.invalid_value, dtype))
       kk(f"{dtype.name} {r[u]} = {val};")
     elif uop == UOps.STORE:

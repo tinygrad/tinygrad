@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.helpers import dtypes, getenv, DType
 from tinygrad.tensor import Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ASTRunner, Compiled
-from tinygrad.codegen.linearizer import UOps, ConstOp, MemOp, UOp
+from tinygrad.codegen.linearizer import UOps, MemOp, UOp
 from tinygrad.shape.symbolic import Variable
 
 def _uops_to_prg(uops):
@@ -32,7 +32,7 @@ def _test_single_value(vals, op, dtype):
 def _test_single_value_const(vals, op, dtype):
   uops = []
   uop(uops, UOps.DEFINE_GLOBAL, None, (), ('data0', dtype))
-  loads = (uop(uops, UOps.LOAD, dtype, [], ConstOp(a, Variable.ands([]))) for a in vals)
+  loads = (uop(uops, UOps.CONST, dtype, [], a) for a in vals)
   alu = uop(uops, UOps.ALU, dtype, loads, op)
   uop(uops, UOps.STORE, None, (alu, ), MemOp('data0', Variable.num(0), False, dtype, Variable.ands([])))
   buf = Device[Device.DEFAULT].buffer(1, dtype)
