@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, Dict, Iterator, Union, Sequence, Final
-import itertools, math
+import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
@@ -9,7 +9,7 @@ from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, sym_rename
+from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.codegen.kernel import LocalBuffer
 VariableOrNum = Union[Variable, NumNode, Node]
@@ -18,7 +18,7 @@ VariableOrNum = Union[Variable, NumNode, Node]
 class UOps(Enum):
   LOOP = auto(); ENDLOOP = auto() # loops can be global, local, or other # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
-  LOAD = auto(); STORE = auto(); BARRIER = auto() # noqa: E702
+  LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
   # TODO: add CONST. use ALU WHERE for gated load
   # *** assembly only UOps ***
@@ -96,6 +96,19 @@ class Linearizer(OptimizedKernel):
     assert self.bufs[i].realized.__class__ is not RawConst  # constants shouldn't be loaded with memops
     return self.arg_bufs[self.bufs[i].realized]
 
+  def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
+    render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
+    return self.uop(UOps.ALU, dtype, (a, render_b), op, cachable=True)
+
+  render_ops: Any = { Variable: lambda self, ops, ctx: ctx.uop(UOps.SPECIAL, dtypes.int32, tuple(), self.expr),
+                NumNode: lambda self, ops, ctx: ctx.uop(UOps.CONST, dtypes.int32, tuple(), self.b),
+                MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
+                DivNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.DIV),
+                ModNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MOD),
+                LtNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.CMPLT, dtype=dtypes.bool),
+    SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops,ctx)),
+    AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
+
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[UOp]:
     const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
 
@@ -126,9 +139,14 @@ class Linearizer(OptimizedKernel):
         if acc is not None:
           assert valid.min == 1
           self.load_cache[key] = self.uop(UOps.DEFINE_ACC, localtype, [], this_const)
+        elif this_const is not None:
+          self.load_cache[key] = self.uop(UOps.CONST, localtype, [], this_const)
+          if valid.min == 0 and valid.max == 1:
+            valid_rendered = valid.render(self.render_ops, self)
+            alt = self.uop(UOps.CONST, localtype, [], invalid_value)
+            self.load_cache[key] = self.uop(UOps.ALU, localtype, [valid_rendered, self.load_cache[key], alt], TernaryOps.WHERE)
         else:
-          self.load_cache[key] = self.uop(UOps.LOAD, localtype, [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value)) if this_const is None else \
-                                 self.uop(UOps.LOAD, localtype, [], ConstOp(this_const, valid))
+          self.load_cache[key] = self.uop(UOps.LOAD, localtype, [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value))
       ret.append(self.uop(UOps.GEP, dtypes.float32, [self.load_cache[key]], expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
 
@@ -350,7 +368,7 @@ class Linearizer(OptimizedKernel):
 
     return self
 
-  def uop(self, uop:UOps, dtype:Optional[DType], vin:List[UOp], arg:Any=None, cachable=False) -> UOp:
+  def uop(self, uop:UOps, dtype:Optional[DType], vin:Union[Tuple[UOp, ...], List[UOp]], arg:Any=None, cachable=False) -> UOp:
     key = (uop, dtype, tuple(vin), arg)
     if cachable and key in self.saved_exprs: return self.saved_exprs[key]
     self.uops.append(UOp(uop, dtype, tuple(vin), arg, len(self.uops)))

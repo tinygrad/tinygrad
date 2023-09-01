@@ -173,6 +173,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       assert dtype is not None
       r[u] = ssa('acc')
       kk(f"{dtype.name} {r[u]} = {lang.render_const(args, dtype)};")
+    elif uop == UOps.SPECIAL:
+      r[u] = args
+    elif uop == UOps.CONST:
+      r[u] = lang.render_const(args, dtype)
     elif uop == UOps.LOAD:
       assert dtype is not None
       r[u] = ssa('val')
