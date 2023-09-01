@@ -19,11 +19,11 @@ from extra.training import focal_loss, smooth_l1_loss
 NUM = getenv("NUM", 2)
 BS = getenv("BS", 8)
 CNT = getenv("CNT", 10)
-BACKWARD = getenv("BACKWARD", 0)
+BACKWARD = getenv("BACKWARD", 1)
 TRAINING = getenv("TRAINING", 1)
 ADAM = getenv("ADAM", 0)
 CLCACHE = getenv("CLCACHE", 0)
-IMAGE_SIZES = {"debug" : (200,200), "mlperf" : (800,800)}
+IMAGE_SIZES = {"debug" : (100,100), "mlperf" : (800,800)}
 
 def resize_box_based_on_new_image_size(box: List[float], img_old_size: Tuple[int], img_new_size: Tuple[int]) -> List[float]:
   ratio_height, ratio_width = [new / orig for new, orig in zip(img_new_size[:2], img_old_size[:2])]
@@ -135,15 +135,15 @@ class RetinaNetTrainer:
         
     def train(self):
         NUM = getenv("NUM", 2)
-        BS = getenv("BS", 2)
+        BS = getenv("BS", 3)
         CNT = getenv("CNT", 10)
-        BACKWARD = getenv("BACKWARD", 0)
+        BACKWARD = getenv("BACKWARD", 1)
         TRAINING = getenv("TRAINING", 1)
         ADAM = getenv("ADAM", 0)
         CLCACHE = getenv("CLCACHE", 0)
         backbone = self.model.backbone
-        retina = self.model #remember num_classes = 600 for openimages
-        #retina.load_from_pretrained()
+        retina = self.model 
+        retina.load_from_pretrained()
 
 
 
@@ -156,7 +156,6 @@ class RetinaNetTrainer:
         Tensor.no_grad = not BACKWARD
         for x, annotations in iterate(self.dataset, BS):
             targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
-            optimizer.zero_grad()
             #self.resize_images_and_bboxes(x, annotations, self.image_size)
             resized = [Image.fromarray(image) for image in x]
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
@@ -164,25 +163,71 @@ class RetinaNetTrainer:
 
             head_outputs = retina(self.input_fixup(images)).numpy()
 
-            loss = self._eltwise_compute_loss(BS, targets, head_outputs) 
 
+            #eltwise_loss = self._eltwise_compute_loss(BS, targets, head_outputs) 
+            imgwise_loss = self._imgwise_compute_loss(BS, targets, head_outputs)
+
+            optimizer.zero_grad()
+            imgwise_loss.backward()
+            optimizer.step()
+            print("step loss: ", imgwise_loss.numpy())
+
+    def _imgwise_compute_loss(self, BS, targets, head_outputs):
+        from torchvision.ops.focal_loss import sigmoid_focal_loss
+        from torch.nn import SmoothL1Loss
+        from torch import tensor
+        total_loss = Tensor(0)
+        for img_idx in range(BS):
+            #TODO tensorize, increase mask exploitation, don't use fors
+            box_regs = head_outputs[img_idx, :, :4]
+            cls_preds = head_outputs[img_idx, :, 4:]
+            ground_truth_boxes, ground_truth_clss = targets["regression_targets"][img_idx], targets["classification_targets"][img_idx]
+            cls_targets_idxs = np.argwhere(targets["classification_masks"][img_idx]==1).flatten()
+            reg_targets_idxs = np.argwhere(targets["regression_masks"][img_idx]==1).flatten()
+
+            box_reg_losses = smooth_l1_loss(Tensor(box_regs[reg_targets_idxs]), Tensor(ground_truth_boxes[reg_targets_idxs]), beta = 0.11, reduction="sum")
+            focal_losses = focal_loss(Tensor(cls_preds[cls_targets_idxs]).sigmoid(), Tensor(ground_truth_clss[cls_targets_idxs]), reduction="sum")
+            
+            #box_reg_losses_elt = [smooth_l1_loss(Tensor(box_regs[target_box_idx]), Tensor(ground_truth_boxes[target_box_idx]), beta = 0.11, reduction="sum").numpy() for target_box_idx in reg_targets_idxs]
+            #focal_losses_elt = [focal_loss(Tensor(cls_preds[target_cls_idx]).sigmoid(), Tensor(ground_truth_clss[target_cls_idx])).numpy() for target_cls_idx in cls_targets_idxs]
+            #pt_loss = sigmoid_focal_loss(tensor(cls_preds[cls_targets_idxs]),tensor(ground_truth_clss[cls_targets_idxs]), reduction="sum")
+            #breakpoint()
+            #print("imgwise focal: ", focal_losses.numpy(), " eltwise_focal: ",  sum(focal_losses_elt), " torch focal: ", pt_loss)
+            #print("imgwise box_reg: ", box_reg_losses.numpy(), " eltwise_box_reg: ",  sum(box_reg_losses_elt))
+
+            #breakpoint()
+            #focal_losses_pt = sigmoid_focal_loss(torch.tensor(cls_preds[cls_targets_idxs]), torch.tensor(ground_truth_clss[cls_targets_idxs]),reduction="sum") 
+            #box_reg_losses_pt = SmoothL1Loss(reduction="sum", beta=0.11).forward(torch.tensor(box_regs[reg_targets_idxs]), torch.tensor(ground_truth_boxes[reg_targets_idxs]))
+            #TODO use reductions instead
+            total_loss += focal_losses + box_reg_losses
+
+        return total_loss
     def _eltwise_compute_loss(self, BS, targets, head_outputs):
         total_loss = 0
         for img_idx in range(BS):
             #TODO tensorize, increase mask exploitation, don't use fors
-            box_regs = head_outputs[img_idx, :, :4] # anchors??
+            box_regs = head_outputs[img_idx, :, :4]
             cls_preds = head_outputs[img_idx, :, 4:]
             ground_truth_boxes, ground_truth_clss = targets["regression_targets"][img_idx], targets["classification_targets"][img_idx]
             cls_targets_idxs = np.argwhere(targets["classification_masks"][img_idx]==1)
             reg_targets_idxs = np.argwhere(targets["regression_masks"][img_idx]==1)
 
             box_reg_losses = [smooth_l1_loss(Tensor(box_regs[target_box_idx]), Tensor(ground_truth_boxes[target_box_idx]), beta = 0.11, reduction="sum").numpy() for target_box_idx in reg_targets_idxs]
-            focal_losses = [focal_loss(Tensor(cls_preds[target_cls_idx]), Tensor(ground_truth_clss[target_cls_idx])).numpy() for target_cls_idx in cls_targets_idxs]
+            focal_losses = [focal_loss(Tensor(cls_preds[target_cls_idx]).sigmoid(), Tensor(ground_truth_clss[target_cls_idx])).numpy() for target_cls_idx in cls_targets_idxs]
             #TODO use reductions instead
             total_loss += sum(focal_losses) + sum(box_reg_losses)    
         return total_loss
             
-                    
+    def _dummy_test_sigmoid_focal_loss(self):
+        from torchvision.ops.focal_loss import sigmoid_focal_loss
+        from torch import tensor
+        from tinygrad.tensor import sigmoid
+        from torch.nn import SmoothL1Loss
+
+        a_, b_ = Tensor([[0.7, 0.2,0.1],[0.1,0.5,0.4],[0.3,0.1,0.6]]), Tensor([[1,0,0],[0,0,1],[0,0,1]])
+        pt_loss = sigmoid_focal_loss(tensor(a_.numpy()),tensor(b_.numpy()), reduction="sum")
+        tg_loss = focal_loss(a_,b_, reduction="none").numpy().sum()
+
 
     def resize_images_and_bboxes(self, images, annotations, new_size):
         images = [Image.fromarray(image) for image in images]
@@ -212,4 +257,5 @@ class RetinaNetTrainer:
 
 if __name__ == "__main__":
     trainer = RetinaNetTrainer()
+    #trainer._dummy_test_sigmoid_focal_loss()
     trainer.train()
