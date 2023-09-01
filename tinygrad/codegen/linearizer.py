@@ -127,6 +127,17 @@ class UOp(NamedTuple):
   arg: Any
   def __repr__(self): return f"{str(self.uop):20s}: {str(self.out) if self.out is not None else '':25s} {str(self.vin):32s} {self.arg}"
 
+def get_grouped_dims(prefix, start_dim, local_dims, maxdim=3):
+  local_idxs = loop_local_idxs = [Variable(f"{prefix}{start_dim+i}", 0, s-1) for i,s in enumerate(local_dims[0:maxdim-1] + (prod(local_dims[maxdim-1:]),) if len(local_dims) > maxdim else local_dims)]
+  if len(local_dims) > maxdim:
+    dd = local_idxs[maxdim-1]
+    nli = []
+    for s in local_dims[maxdim-1:][::-1]:
+      nli.append(dd % s)
+      dd //= s
+    local_idxs = local_idxs[0:maxdim-1] + nli[::-1]
+  return local_idxs, loop_local_idxs
+
 class Linearizer(OptimizedKernel):
   def get_buffer_name(self, i):
     if self.bufs[i].__class__ == LocalBuffer: return self.bufs[i].name
@@ -200,7 +211,6 @@ class Linearizer(OptimizedKernel):
     self.process()
 
     # limit dims if we need to
-    self.limit_global_dim_count(3)
     if self.opts.global_max and self.opts.local_max: self.limit_dims_to_max(self.opts.global_max, self.opts.local_max)
 
     # uops
@@ -235,24 +245,13 @@ class Linearizer(OptimizedKernel):
     self.function_name, self.display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
 
     # define indexes
-    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.global_dims)]
-
-    local_dims = self.full_shape[self.global_dims:self.first_reduce+len(self.group_for_reduce)]
-    local_idxs = loop_local_idxs = [Variable(f"lidx{i}", 0, s-1) for i,s in enumerate(local_dims[0:2] + (prod(local_dims[2:]),) if len(local_dims) > 3 else local_dims)]
-    if len(local_dims) > 3:
-      dd = local_idxs[2]
-      nli = []
-      for s in local_dims[2:][::-1]:
-        nli.append(dd % s)
-        dd //= s
-      local_idxs = local_idxs[0:2] + nli[::-1]
-
-    #local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.global_dims, self.first_reduce+len(self.group_for_reduce))]
+    global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims])
+    local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+len(self.group_for_reduce)])
     full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
     upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
 
     # global and local loops
-    self.uop(UOps.LOOP, None, [], (global_idxs, "global"))
+    self.uop(UOps.LOOP, None, [], (loop_global_idxs, "global"))
     self.uop(UOps.LOOP, None, [], (loop_local_idxs, "local"))
 
     # parse AST
@@ -355,7 +354,7 @@ class Linearizer(OptimizedKernel):
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc, ssa)  # store accumulators
         self.uop(UOps.BARRIER, None, [], ())
-        self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))
+        self.uop(UOps.ENDLOOP, None, [], (loop_local_idxs, "local"))
 
         # local indexs are over, 0 them out
         local_idxs = [x*0 for x in local_idxs]
@@ -398,7 +397,7 @@ class Linearizer(OptimizedKernel):
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa)
 
     # end the global (and maybe local) loop
-    self.uop(UOps.ENDLOOP, None, [], (global_idxs+loop_local_idxs, "global+local") if not self.group_for_reduce else (global_idxs, "global"))
+    self.uop(UOps.ENDLOOP, None, [], (loop_global_idxs+loop_local_idxs, "global+local") if not self.group_for_reduce else (loop_global_idxs, "global"))
 
     return self
 
