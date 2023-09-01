@@ -587,6 +587,7 @@ class Tensor:
     if x.__class__ is not Tensor and not reverse:
       # simple pow identities
       if x < 0: return (1.0/self).pow(-x)
+      if x == 3.0: return self*self*self
       if x == 2.0: return self*self
       if x == 1.0: return self
       if x == 0.5: return self.sqrt()

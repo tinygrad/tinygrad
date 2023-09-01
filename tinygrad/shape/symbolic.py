@@ -159,6 +159,7 @@ class Variable(Node):
 
 class NumNode(Node):
   def __init__(self, num:int):
+    assert isinstance(num, int), f"{num} is not an int"
     self.b:int = num
     self.min, self.max = num, num
   def __int__(self): return self.b
