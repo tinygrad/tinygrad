@@ -4,7 +4,7 @@ from collections import defaultdict
 from enum import Enum, auto
 
 from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, mnum, DType, all_same, partition, prod
-from tinygrad.ops import LazyOp, UnaryOps, Op
+from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -219,7 +219,6 @@ class Linearizer(OptimizedKernel):
     loaded_buffers = {}
     acc = []
     self.load_cache: Dict[str, Token] = {}
-    self.saved_exprs: Dict[Tuple[Op, Tuple[Token, ...]], Token] = dict()
 
     # ssa
     _ssa:DefaultDict[str,int] = defaultdict(int)
@@ -368,21 +367,21 @@ class Linearizer(OptimizedKernel):
     if DEBUG >= 4: print(self.uops[-1])
     return out
 
-  def uop_alu(self, out: Token, vin: List[Token], op: Op) -> Token:
-    key = (op, tuple(vin))
-    if key not in self.saved_exprs: self.saved_exprs[key] = self.uop(UOps.ALU, out, vin, op)
-    return self.saved_exprs[key]
-
   def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
     if x.__class__ is not LazyOp: return loaded_buffers[x]
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
+    # MULACC fusion. TODO: this is copied from Interpreted
+    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
+      x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
+    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL:
+      x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:
       ret = [(idx, self.uop(UOps.ALU, val[-1], list(val), ops[x.op])) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.opts.supports_float4_alu)]
     else:
-      ret = [(idx, self.uop_alu(ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.opts.supports_float4_alu and x.op not in {BinaryOps.CMPLT, TernaryOps.WHERE})]
+      ret = [(idx, self.uop(UOps.ALU, ssa('alu', dtypes._float4) if any(x.dtype == dtypes._float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.opts.supports_float4_alu and x.op not in {BinaryOps.CMPLT, TernaryOps.WHERE})]
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
