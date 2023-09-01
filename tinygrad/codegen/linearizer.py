@@ -3,7 +3,7 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, mnum, DType, all_same, partition
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, mnum, DType, all_same, partition, prod
 from tinygrad.ops import LazyOp, UnaryOps, Op
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
@@ -235,14 +235,25 @@ class Linearizer(OptimizedKernel):
     self.function_name, self.display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
 
     # define indexes
-    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.first_reduce-self.local_dims)]
-    local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce-self.local_dims, self.first_reduce+len(self.group_for_reduce))]
+    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1) for i in range(0, self.global_dims)]
+
+    local_dims = self.full_shape[self.global_dims:self.first_reduce+len(self.group_for_reduce)]
+    local_idxs = loop_local_idxs = [Variable(f"lidx{i}", 0, s-1) for i,s in enumerate(local_dims[0:2] + (prod(local_dims[2:]),) if len(local_dims) > 3 else local_dims)]
+    if len(local_dims) > 3:
+      dd = local_idxs[2]
+      nli = []
+      for s in local_dims[2:][::-1]:
+        nli.append(dd % s)
+        dd //= s
+      local_idxs = local_idxs[0:2] + nli[::-1]
+
+    #local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1) for i in range(self.global_dims, self.first_reduce+len(self.group_for_reduce))]
     full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
     upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
 
     # global and local loops
     self.uop(UOps.LOOP, None, [], (global_idxs, "global"))
-    self.uop(UOps.LOOP, None, [], (local_idxs, "local"))
+    self.uop(UOps.LOOP, None, [], (loop_local_idxs, "local"))
 
     # parse AST
     loaded_buffers = {}
@@ -276,6 +287,7 @@ class Linearizer(OptimizedKernel):
       # TODO: this is garbage code and should be at least moved elsewhere
       locals_to_store = []
       for i in self.local_alias:
+        localbuf_idx = self.bufs.index(self.local_alias[i])
         strides = self.sts[i].real_strides()
         extra_locals = [lidx for lidx,st in zip(local_idxs[self.exclude_local_upcast:], strides[len(global_idxs)+self.exclude_local_upcast:self.first_reduce]) if st == 0]
         this_upcast_idxs: List[Node] = []
@@ -303,8 +315,10 @@ class Linearizer(OptimizedKernel):
             if DEBUG >= 4: print(f"failed upcasting@{j} stride {v} extra locals {extra_locals}")
             this_upcast_idxs.append(v)
         idxs = global_idxs+local_idxs+reduce_idxs+(this_upcast_idxs[::-1] if self.reverse_upcast_dir else this_upcast_idxs)
+        idxs = [idx*0 if s == 0 else idx for idx,s in zip(idxs,strides)]
+        if DEBUG >= 3: print(f"{localbuf_idx} alias {i}:", idxs)
         ll = self.global_load(i, idxs)
-        locals_to_store.append((self.bufs.index(self.local_alias[i]), idxs, ll))
+        locals_to_store.append((localbuf_idx, idxs, ll))
 
       # copy in any global buffers
       if self.use_tensor_cores:
@@ -384,7 +398,7 @@ class Linearizer(OptimizedKernel):
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, ssa)
 
     # end the global (and maybe local) loop
-    self.uop(UOps.ENDLOOP, None, [], (global_idxs+local_idxs, "global+local") if not self.group_for_reduce else (global_idxs, "global"))
+    self.uop(UOps.ENDLOOP, None, [], (global_idxs+loop_local_idxs, "global+local") if not self.group_for_reduce else (global_idxs, "global"))
 
     return self
 
