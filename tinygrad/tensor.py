@@ -567,7 +567,7 @@ class Tensor:
   def _broadcasted(self, y:Union[Tensor, float], reverse:bool=False) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
     if not isinstance(y, Tensor):
-      y = Tensor(y, device=self.device, requires_grad=False, dtype=self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32)
+      y = Tensor(y, device=self.device, requires_grad=False, dtype=self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32).expand(x.shape)
     if reverse: x, y = y, x
     if (xshape:=x.shape) == (yshape:=y.shape): return (x, y)
 
