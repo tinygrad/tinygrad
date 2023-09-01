@@ -350,13 +350,12 @@ class Linearizer(OptimizedKernel):
 
     return self
 
-  CACHABLE_UOPS = [UOps.ALU]
-  def uop(self, uop:UOps, dtype:Optional[DType], vin:List[UOp], arg:Any=None) -> UOp:
+  def uop(self, uop:UOps, dtype:Optional[DType], vin:List[UOp], arg:Any=None, cachable=False) -> UOp:
     key = (uop, dtype, tuple(vin), arg)
-    if uop in self.CACHABLE_UOPS and key in self.saved_exprs: return self.saved_exprs[key]
+    if cachable and key in self.saved_exprs: return self.saved_exprs[key]
     self.uops.append(UOp(uop, dtype, tuple(vin), arg, len(self.uops)))
     if DEBUG >= 4: print(self.uops[-1])
-    if uop in self.CACHABLE_UOPS: self.saved_exprs[key] = self.uops[-1]
+    if cachable: self.saved_exprs[key] = self.uops[-1]
     return self.uops[-1]
 
   def ast_parse(self, x, acc, loaded_buffers, do_reduce=False) -> List[UOp]:
@@ -373,7 +372,7 @@ class Linearizer(OptimizedKernel):
     if x.op in ops:
       ret = [(idx, self.uop(UOps.STORE, dtypes.float32, [val[-1], self.uop(UOps.ALU, dtypes.float32, list(val), ops[x.op])])) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values, acc))]
     else:
-      ret = [(idx, self.uop(UOps.ALU, dtypes.float32, list(val), x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
+      ret = [(idx, self.uop(UOps.ALU, dtypes.float32, list(val), x.op, cachable=True)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
     ordered_ret: List[Optional[UOp]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
