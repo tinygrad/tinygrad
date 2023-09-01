@@ -135,11 +135,11 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
           lang.ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [lang.tor[var]], (var.max+1, f"lid{i}")))
     elif uop == UOps.CAST:
       # TODO: we should reconsider outputting CAST in the linearizer. these are needless copies
-      out = lang.newreg(u)
+      out = lang.newreg(u, dtype)
       for i,sr in enumerate(out.subregs()):
         lang.ins.append(AssemblyInstruction(UOps.ALU, sr, [lang.tor[vin[i]]], UnaryOps.NOOP))
     elif uop == UOps.ALU:
-      out = lang.newreg(u) if u not in lang.tor else lang.tor[u]
+      out = lang.newreg(u, dtype) if u not in lang.tor else lang.tor[u]
       # this is the only thing that can violate SSA
       if args in [BinaryOps.CMPLT]:
         pred_reg = lang.newreg((u, 'pred'), dtype=dtypes.bool)
