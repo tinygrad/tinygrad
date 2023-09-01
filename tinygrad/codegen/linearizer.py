@@ -162,6 +162,9 @@ class Linearizer(OptimizedKernel):
   def linearize(self):
     self.process()
 
+    # global uop cache
+    self.saved_exprs: Dict[Tuple, UOp] = dict()
+
     # limit dims if we need to
     # TODO: broken, and doesn't really belong here
     #if self.opts.global_max and self.opts.local_max: self.limit_dims_to_max(self.opts.global_max, self.opts.local_max)
@@ -347,9 +350,13 @@ class Linearizer(OptimizedKernel):
 
     return self
 
+  CACHABLE_UOPS = [UOps.ALU]
   def uop(self, uop:UOps, dtype:Optional[DType], vin:List[UOp], arg:Any=None) -> UOp:
+    key = (uop, dtype, tuple(vin), arg)
+    if uop in self.CACHABLE_UOPS and key in self.saved_exprs: return self.saved_exprs[key]
     self.uops.append(UOp(uop, dtype, tuple(vin), arg, len(self.uops)))
     if DEBUG >= 4: print(self.uops[-1])
+    if uop in self.CACHABLE_UOPS: self.saved_exprs[key] = self.uops[-1]
     return self.uops[-1]
 
   def ast_parse(self, x, acc, loaded_buffers, do_reduce=False) -> List[UOp]:
