@@ -1,7 +1,7 @@
 import ctypes
 import numpy as np
 from collections import defaultdict, deque
-from typing import TypeVar, Type, Any, Dict, Deque, Tuple
+from typing import TypeVar, Type, Any, Dict, Deque, Tuple, Union
 from tinygrad.helpers import DType, dtypes, prod, GlobalCounters, ImageDType
 
 _T = TypeVar("_T")
@@ -29,6 +29,11 @@ class RawConst(RawBuffer): # pylint: disable=abstract-method
   def __repr__(self): return f"const<{self._buf}, {self.dtype}>"
   @property
   def key(self): return (str(self._buf), self.dtype)
+  def toCPU(self) -> Union[int, float, bool]:
+    if self.dtype is dtypes.bool: return bool(self._buf)
+    if self.dtype in [dtypes.float16, dtypes.float32, dtypes.float64]: return float(self._buf)
+    if self.dtype in [dtypes.int8, dtypes.int32, dtypes.int64]: return int(self._buf)
+    raise NotImplementedError(f"toCPU not implemented for {self.dtype}")
 
 def buf_is_kernel_arg(x) -> bool:
   return x.realized is not None and x.realized.__class__ is not RawConst

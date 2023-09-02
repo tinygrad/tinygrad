@@ -1,9 +1,11 @@
 # RCNN-specific loss functions
 
-from models.mask_rcnn import BoxList
+from models.mask_rcnn import BoxList, BoxCoder, cat_boxlist
 from tinygrad.tensor import Tensor
 from tinygrad.tensor import dtypes
+import numpy as np
 from typing import List, Callable, Tuple
+from torch.nn import functional as F
 
 # implementation from https://github.com/kuangliu/torchcv/blob/master/torchcv/utils/box.py
 # with slight modifications
@@ -40,7 +42,7 @@ def test_match_eval():
    
 
 def make_match_evaluation_fn(high: float, low: float, allow_low_qual: bool = False) -> Callable[[Tensor], Tensor]:
-  # TODO
+  # TODO this is a bit of a mess but I guess it helps get out of holes
   def set_low_quality_matches_(preds: Tensor):
     """
     Produce additional matches for predictions that have only low-quality matches.
@@ -104,7 +106,6 @@ def test_rind():
   assert np.isin(x, [0, 1, 2, 3, 8, 9]).all()
 
 # TODO perf
-import numpy as np
 def rind(mask: np.ndarray, take: int) -> Tensor:
   assert mask.ndim == 1 and mask.shape[0] >= take
   masked = (np.arange(mask.shape[0]) * mask)[mask.astype(bool)]
@@ -146,20 +147,74 @@ def make_balanced_sampler_fn(batch_size_per_image: int, positive_fraction: float
     return pos_masks, neg_masks
   return sampler_fn
 
-def make_rpn_loss_evaluator(cfg, box_coder):
+# This function should be overwritten in RetinaNet
+def generate_rpn_labels(matched_idxs):
+    labels_per_image = matched_idxs >= 0
+    return labels_per_image
+
+def make_rpn_loss_evaluator(box_coder):
   matcher = make_match_evaluation_fn(.7, .3)
-  fg_bg_sampler = BalancedPositiveNegativeSampler(
-      cfg.MODEL.RPN.BATCH_SIZE_PER_IMAGE, cfg.MODEL.RPN.POSITIVE_FRACTION
-  )
+  fg_bg_sampler = make_balanced_sampler_fn(256, .5)
 
   loss_evaluator = RPNLossComputation(
-      matcher,
-      fg_bg_sampler,
-      box_coder,
-      generate_rpn_labels
+      proposal_matcher=matcher,
+      fg_bg_sampler=fg_bg_sampler,
+      box_coder=box_coder,
+      generate_labels_func=generate_rpn_labels
   )
   return loss_evaluator
 
+def permute_and_flatten(layer, N, A, C, H, W):
+  layer = layer.view(N, -1, C, H, W)
+  layer = layer.permute(0, 3, 4, 1, 2)
+  layer = layer.reshape(N, -1, C)
+  return layer
+
+def concat_box_prediction_layers(box_cls, box_regression):
+  box_cls_flattened = []
+  box_regression_flattened = []
+  # for each feature level, permute the outputs to make them be in the
+  # same format as the labels. Note that the labels are computed for
+  # all feature levels concatenated, so we keep the same representation
+  # for the objectness and the box_regression
+  for box_cls_per_level, box_regression_per_level in zip(
+      box_cls, box_regression
+  ):
+      N, AxC, H, W = box_cls_per_level.shape
+      Ax4 = box_regression_per_level.shape[1]
+      A = Ax4 // 4
+      C = AxC // A
+      box_cls_per_level = permute_and_flatten(
+          box_cls_per_level, N, A, C, H, W
+      )
+      box_cls_flattened.append(box_cls_per_level)
+
+      box_regression_per_level = permute_and_flatten(
+          box_regression_per_level, N, A, 4, H, W
+      )
+      box_regression_flattened.append(box_regression_per_level)
+  # concatenate on the first dimension (representing the feature levels), to
+  # take into account the way the labels were generated (with all feature maps
+  # being concatenated as well)
+  box_cls = Tensor.cat(box_cls_flattened, dim=1).reshape(-1, C)
+  box_regression = Tensor.cat(box_regression_flattened, dim=1).reshape(-1, 4)
+  return box_cls, box_regression
+
+# TODO maybe push this to nn?
+def smooth_l1_loss(input, target, beta=1. / 9, size_average=True):
+  """
+  very similar to the smooth_l1_loss from pytorch, but with
+  the extra beta parameter
+  """
+  n = Tensor.abs(input - target)
+  cond = n < beta
+  loss = Tensor.where(cond, 0.5 * n ** 2 / beta, n - 0.5 * beta)
+  if size_average:
+      return loss.mean()
+  return loss.sum()
+
+
+# one way this differs from reference is it doesn't rely on boxlist mutables
 class RPNLossComputation:
   def __init__(self, proposal_matcher, fg_bg_sampler, box_coder,
               generate_labels_func):
@@ -173,48 +228,35 @@ class RPNLossComputation:
     self.proposal_matcher = proposal_matcher
     self.fg_bg_sampler = fg_bg_sampler
     self.box_coder = box_coder
-    self.copied_fields = []
     self.generate_labels_func = generate_labels_func
     self.discard_cases = ['not_visibility', 'between_thresholds']
 
-  def match_targets_to_anchors(self, anchor, target, copied_fields=[]):
+  def match_targets_to_anchors(self, anchor, target):
     match_quality_matrix = boxlist_iou(target, anchor)
     matched_idxs = self.proposal_matcher(match_quality_matrix)
-    # RPN doesn't need any fields from target
-    # for creating the labels, so clear them all
-    target = target.copy_with_fields(copied_fields)
-    # get the targets corresponding GT for each anchor
-    # NB: need to clamp the indices because we can have a single
-    # GT in the image, and matched_idxs can be -2, which goes
-    # out of bounds
-    matched_targets = target[matched_idxs.clamp(min=0)]
-    matched_targets.add_field("matched_idxs", matched_idxs)
-    return matched_targets
+    matched_targets = target[matched_idxs.maximum(0)]
+    return matched_targets, matched_idxs
 
   def prepare_targets(self, anchors, targets):
     labels = []
     regression_targets = []
+    #
     for anchors_per_image, targets_per_image in zip(anchors, targets):
-      matched_targets = self.match_targets_to_anchors(
+      matched_targets, matched_idxs = self.match_targets_to_anchors(
           anchors_per_image, targets_per_image, self.copied_fields
       )
-
-      matched_idxs = matched_targets.get_field("matched_idxs")
-      labels_per_image = self.generate_labels_func(matched_targets)
-      labels_per_image = labels_per_image.to(dtype=torch.float32)
+      labels_per_image = self.generate_labels_func(matched_idxs)
+      labels_per_image = labels_per_image.to(dtype=dtypes.float32)
 
       # Background (negative examples)
-      bg_indices = matched_idxs == Matcher.BELOW_LOW_THRESHOLD
+      bg_indices = matched_idxs == -1 # TODO: magic number
       labels_per_image[bg_indices] = 0
 
       # discard anchors that go out of the boundaries of the image
-      if "not_visibility" in self.discard_cases:
-          labels_per_image[~anchors_per_image.get_field("visibility")] = -1
+      labels_per_image[~anchors_per_image.get_field("visibility")] = -1
 
-      # discard indices that are between thresholds
-      if "between_thresholds" in self.discard_cases:
-          inds_to_discard = matched_idxs == Matcher.BETWEEN_THRESHOLDS
-          labels_per_image[inds_to_discard] = -1
+      inds_to_discard = matched_idxs == -2 # TODO: magic number
+      labels_per_image[inds_to_discard] = -1
 
       # compute regression targets
       regression_targets_per_image = self.box_coder.encode(
@@ -242,18 +284,18 @@ class RPNLossComputation:
     anchors = [cat_boxlist(anchors_per_image) for anchors_per_image in anchors]
     labels, regression_targets = self.prepare_targets(anchors, targets)
     sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
-    sampled_pos_inds = torch.nonzero(torch.cat(sampled_pos_inds, dim=0)).squeeze(1)
-    sampled_neg_inds = torch.nonzero(torch.cat(sampled_neg_inds, dim=0)).squeeze(1)
+    sampled_pos_inds = Tensor.nonzero(Tensor.cat(sampled_pos_inds, dim=0)).squeeze(1)
+    sampled_neg_inds = Tensor.nonzero(Tensor.cat(sampled_neg_inds, dim=0)).squeeze(1)
 
-    sampled_inds = torch.cat([sampled_pos_inds, sampled_neg_inds], dim=0)
+    sampled_inds = Tensor.cat([sampled_pos_inds, sampled_neg_inds], dim=0)
 
     objectness, box_regression = \
             concat_box_prediction_layers(objectness, box_regression)
 
     objectness = objectness.squeeze()
 
-    labels = torch.cat(labels, dim=0)
-    regression_targets = torch.cat(regression_targets, dim=0)
+    labels = Tensor.cat(labels, dim=0)
+    regression_targets = Tensor.cat(regression_targets, dim=0)
 
     box_loss = smooth_l1_loss(
         box_regression[sampled_pos_inds],
@@ -276,17 +318,24 @@ if __name__ == "__main__":
                [10, 11, 12]])
   idx = Tensor([0, 2, 1, 1]).reshape(4, 1)
   result = data.gather(idx, dim=1)
-
+  t = Tensor(1)
+  print('ldata')
+  print(t.lazydata)
+  print('realize')
+  print(t.lazydata.realize())
+  print('lazydata')
+  print(t.lazydata)
+  print('realized')
+  print(type(t.lazydata.realized))
+  print(t.lazydata.realized)
+  print(t[0])
   test_rind()
   test_boxlist_iou()
   test_match_eval()
   test_balanced_sampler()
   
 
-  # def bool_mask(t: Tensor, mask: Tensor) -> Tensor:
-  # ind = Tensor.arange(mask.shape[0])
-  # nz = mask.sum().numpy().item()
-  # print("Nonzero:", nz)
-  # mask = mask * ind
-  # masked = mask.numpy().argsort()[-int(nz):]
-  # print("Nonzero indices:", masked)
+    # ind = Tensor.arange(mask.shape[0])
+    # nz = mask.sum().numpy().item()
+    # mask = mask * ind
+    # idx = mask.numpy().argsort()[-int(nz):]
