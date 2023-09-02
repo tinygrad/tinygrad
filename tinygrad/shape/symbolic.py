@@ -22,8 +22,10 @@ class Node(ABC):
     if strip_parens and ret[0] == '(' and ret[-1] == ')': ret = ret[1:-1]
     return ret
   def vars(self): return []
-  def expand(self) -> List[Node]:
-    raise NotImplementedError(self.__class__.__name__)
+  # expand a Node into List[Node] that enumerates the underlying Variables from min to max
+  def expand(self) -> List[Node]: raise NotImplementedError(self.__class__.__name__)
+  # infer the value of a Node given Variable values in var_vals
+  def infer(self, var_vals: Dict[Variable, int]) -> int: raise NotImplementedError(self.__class__.__name__)
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
   @functools.cached_property
@@ -152,10 +154,12 @@ class Variable(Node):
   def __init__(self, expr:Optional[str], nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
   def vars(self): return [self]
-  def expand(self) -> List[Node]: return [self] if self.expr is not None else [Variable.num(j) for j in range(self.min, self.max+1)] 
+  def expand(self) -> List[Node]: return [self] if self.expr is not None else [Variable.num(j) for j in range(self.min, self.max+1)]
+  def infer(self, var_vals: Dict[Variable, int]) -> int: return var_vals[self]
 
 class NumNode(Node):
   def __init__(self, num:int):
+    assert isinstance(num, int), f"{num} is not an int"
     self.b:int = num
     self.min, self.max = num, num
   def __int__(self): return self.b
@@ -163,6 +167,7 @@ class NumNode(Node):
   def __eq__(self, other): return self.b == other
   def __hash__(self): return self.hash  # needed with __eq__ override
   def expand(self) -> List[Node]: return [self]
+  def infer(self, var_vals: Dict[Variable, int]) -> int: return self.b
 
 def create_node(ret:Node):
   assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {type(ret)} {ret}"
@@ -196,12 +201,14 @@ class MulNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
     return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
   def expand(self) -> List[Node]: return [x*self.b for x in self.a.expand()]
+  def infer(self, var_vals: Dict[Variable, int]) -> int: return self.a.infer(var_vals) * sym_infer(self.b, var_vals)
 
 class DivNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], _=False): return self.a//(self.b*b) # two divs is one div
   def get_bounds(self) -> Tuple[int, int]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
+  def expand(self) -> List[Node]: return [x//self.b for x in self.a.expand()]
 
 class ModNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
@@ -210,6 +217,7 @@ class ModNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return (0, self.b-1) if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b) else (self.a.min%self.b, self.a.max%self.b)
+  def expand(self) -> List[Node]: return [x%self.b for x in self.a.expand()]
 
 class RedNode(Node):
   def __init__(self, nodes:List[Node]): self.nodes = nodes
@@ -271,8 +279,9 @@ class SumNode(RedNode):
         else: new_sum.append(x)
       return Node.__lt__(Node.sum(new_sum), b)
     return Node.__lt__(self, b)
-  
+
   def expand(self) -> List[Node]: return [Variable.sum(list(it)) for it in itertools.product(*[x.expand() for x in self.nodes])]
+  def infer(self, var_vals: Dict[Variable, int]) -> int: return sum([node.infer(var_vals) for node in self.nodes])
 
   @property
   def flat_components(self): # recursively expand sumnode components
@@ -290,16 +299,10 @@ def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   elif typ == AndNode: ret.min, ret.max = (min([x.min for x in nodes]), max([x.max for x in nodes]))
   return create_node(ret)
 
-def sym_infer(n:Union[Node,int], var_vals: Dict[Variable, int]) -> int:
-  if n.__class__ is int: return n # type: ignore
-  if n.__class__ is NumNode: return n.b # type: ignore
-  if n.__class__ is Variable: return var_vals[n] # type: ignore
-  if n.__class__ is MulNode: return sym_infer(n.a, var_vals) * sym_infer(n.b, var_vals) # type: ignore
-  if n.__class__ is SumNode: return sum([sym_infer(s, var_vals) for s in n.nodes]) # type: ignore
-  raise NotImplementedError(n)
 @functools.lru_cache(maxsize=None)
 def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
+def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int: return a if isinstance(a, int) else a.infer(var_vals)
 
 render_python: Dict[Type, Callable] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}]" if ctx == "DEBUG" else f"{self.expr}",

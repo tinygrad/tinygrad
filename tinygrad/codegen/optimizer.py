@@ -92,14 +92,7 @@ class OptimizedKernel(Kernel):
           new_shape[next_idx] = new_shape[next_idx] * 2
     return tuple(new_shape)
 
-  def limit_global_dims(self, limit: int, global_max: List[int], local_max: List[int]):
-    # sometimes, there's more dimensions than len(self.lang.gid).
-    # compact all the dimensions into the first
-    # NOTE: this might make multiview shapetrackers
-    if (self.first_reduce-self.local_dims) > limit:
-      num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
-      self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
-      if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
+  def limit_dims_to_max(self, global_max: List[int], local_max: List[int]):
     # Check the global allocation limit, current the global_size will be flipped during codegen
     # and then padded right with 1s if its length < 3 which makes this part a bit awkward to write
     global_dims = self.first_reduce-self.local_dims
@@ -137,14 +130,19 @@ class OptimizedKernel(Kernel):
   def apply_auto_opt(self, x):
     for axis, amt, typ in x:
       if axis is None or amt == 1: continue
+      if typ == "G":
+        assert self.full_shape[self.first_reduce+axis] % amt == 0, "no longer valid shift"
+        self.shift_to(self.first_reduce+axis, amt, top=True, insert_before=self.first_reduce+axis+len(self.group_for_reduce))
+        self.group_for_reduce.append(amt)
       if typ == "R":
         typ = "U"
         axis += self.first_reduce
-      assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-      if typ == "U":
+      if typ == "U" and (len(self.group_for_reduce) == 0 or self.first_reduce != axis):
+        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
         self.shift_to(axis, amt)
         self.upcast()
-      elif typ == "L":
+      elif typ == "L" and len(self.group_for_reduce) == 0: # TODO: Cannot mix local+group_for_reduce, codegen need to be fixed.
+        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
         self.shift_to(axis, amt, insert_before=self.first_reduce)
         self.local_dims += 1
     self.simplify_ones()
