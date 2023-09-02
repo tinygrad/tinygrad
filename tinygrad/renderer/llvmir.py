@@ -125,7 +125,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
       lvars[u] = ir.Constant(dtype_to_llvm_dtype[dtype], args)
       reduce_phis.append(u)
     if uop == UOps.SPECIAL:
-      lvars[u] = lvars[args]
+      lvars[u] = lvars[args.expr]
     if uop == UOps.CONST:
       lvars[u] = ir.Constant(dtype_to_llvm_dtype[dtype], args)
     if uop == UOps.LOAD:

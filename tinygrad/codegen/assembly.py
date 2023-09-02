@@ -158,6 +158,8 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
     elif uop == UOps.DEFINE_ACC:
       reg = lang.newreg(u, dtype=dtype)
       lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], args))
+    elif uop == UOps.SPECIAL:
+      lang.tor[u] = lang.tor[args]
     elif uop == UOps.CONST:
       lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(u, dtype=dtype), [], args))
     elif uop == UOps.LOAD:

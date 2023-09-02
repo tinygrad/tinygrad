@@ -173,7 +173,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       r[u] = ssa('acc')
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
-      r[u] = args
+      r[u] = args.expr
     elif uop == UOps.CONST:
       r[u] = lang.render_const(args, dtype)
     elif uop == UOps.LOAD:
