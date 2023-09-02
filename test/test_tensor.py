@@ -19,6 +19,12 @@ class TestTinygrad(unittest.TestCase):
     self.assertEqual(a.shape, ())
     self.assertEqual(b.shape, ())
 
+  def test_zerodim_item(self):
+    a,b,c = Tensor(55, dtype=dtypes.int32), Tensor(3.14), Tensor(True)
+    self.assertEqual(a.item(), 55)
+    self.assertEqual(b.item(), 3.14)
+    self.assertEqual(c.item(), True)
+
   def test_plus_equals(self):
     a = Tensor.randn(10,10)
     b = Tensor.randn(10,10)
