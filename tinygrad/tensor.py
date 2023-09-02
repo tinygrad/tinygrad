@@ -503,7 +503,7 @@ class Tensor:
     # conv2d is a pooling op (with padding)
     x = self.pad2d(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout//groups, x.shape[2:-len(HW)]
-    if not all(x == 3 for x in HW) or stride != 1 or dilation != 1 or getenv('NORMAL_CONV', 0):
+    if not all(x == 3 for x in HW) or stride != 1 or dilation != 1 or not getenv("WINO", 0):
       x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW).permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
 
       # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
@@ -523,10 +523,10 @@ class Tensor:
       d = d.permute(*range(len(d.shape)-len(HW),len(d.shape)), *range(len(d.shape)-len(HW))).contiguous_backward()  # move HW to the front: # (HWI, bs, cin_, tyx)
       tyx = d.shape[-len(HWI):]  # dim of tiling
 
-      g = weight.permute(*range(len(weight.shape)-len(HW),len(weight.shape)), *range(len(weight.shape)-len(HW))).reshape(*HW, 1, groups, rcout, cin, *([1]*len(tyx)))  # move HW to the front and expand
+      g = weight.permute(*range(len(weight.shape)-len(HW),len(weight.shape)), *range(len(weight.shape)-len(HW)))  # move HW to the front
 
       # compute 6x6 winograd tiles: GgGt, BtdB
-      gfactors = apply_matrix(winograd_G, g).contiguous()  # (HWI, bs=1, groups, rcout, cin, tyx=(1,1))
+      gfactors = apply_matrix(winograd_G, g).contiguous().reshape(*HW, 1, groups, rcout, cin, *([1]*len(tyx)))  # (HWI, groups * rcout, cin) -> (HWI, bs=1, groups, rcout, cin, tyx=(1,1))
       dfactors = apply_matrix(winograd_Bt, d).contiguous().reshape(*HWI, bs, groups, 1, cin, *tyx)  # (HWI, bs, cin_, tyx) -> (HWI, bs, groups, 1 ,cin, *tyx)
 
       ret = apply_matrix(winograd_At, (gfactors * dfactors).sum(axis=-1-len(HW)))  # matmul; sum across cin: (HWI, bs, groups, rcout, *tyx); then HWI -> HWO: (HWO, bs, groups, rcout, *tyx)
