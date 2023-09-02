@@ -48,7 +48,8 @@ class ClangProgram:
           prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n'])
           subprocess.check_output(args=('aarch64-linux-gnu-as -o '+tmp).split(), input=prg.encode('utf-8'))
           subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+tmp+' '+fn+'.bin').split())
-          self.prg = open(fn + '.bin', 'rb').read()
+          with open(fn + '.bin', 'rb') as f:
+            self.prg = f.read()
           return
         subprocess.check_output(args=('as -o' + tmp).split(), input=prg.encode('utf-8'))
         subprocess.check_output(args=('clang -lm -shared '+tmp+' -o'+fn).split())

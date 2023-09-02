@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import Node, MulNode, SumNode, Variable, NumNode, LtNode, sym_render
+from tinygrad.shape.symbolic import Node, MulNode, SumNode, Variable, NumNode, LtNode, sym_render, sym_infer
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -278,6 +278,21 @@ class TestSymRender(unittest.TestCase):
     assert sym_render(1) == "1"
     assert sym_render(a+1) == "(1+a)"
     assert sym_render(a*b) == "(a*b)"
+
+class TestSymInfer(unittest.TestCase):
+  def test_sym_infer(self):
+    a = Variable("a", 0, 10)
+    b = Variable("b", 0, 10)
+    c = Variable("c", 0, 10)
+    var_vals = {a: 2, b: 3, c: 4}
+    assert sym_infer(5, var_vals) == 5
+    assert sym_infer(a, var_vals) == 2
+    assert sym_infer(b, var_vals) == 3
+    assert sym_infer(a+b, var_vals) == 5
+    assert sym_infer(a-b, var_vals) == -1
+    assert sym_infer(a+b+c, var_vals) == 9
+    assert sym_infer(a*b, var_vals) == 6
+    assert sym_infer(a*b+c, var_vals) == 10
 
 class TestSymbolicSymbolicOps(unittest.TestCase):
   def test_node_divmod_node(self):

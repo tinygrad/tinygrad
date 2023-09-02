@@ -130,14 +130,19 @@ class OptimizedKernel(Kernel):
   def apply_auto_opt(self, x):
     for axis, amt, typ in x:
       if axis is None or amt == 1: continue
+      if typ == "G":
+        assert self.full_shape[self.first_reduce+axis] % amt == 0, "no longer valid shift"
+        self.shift_to(self.first_reduce+axis, amt, top=True, insert_before=self.first_reduce+axis+len(self.group_for_reduce))
+        self.group_for_reduce.append(amt)
       if typ == "R":
         typ = "U"
         axis += self.first_reduce
-      assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-      if typ == "U":
+      if typ == "U" and (len(self.group_for_reduce) == 0 or self.first_reduce != axis):
+        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
         self.shift_to(axis, amt)
         self.upcast()
-      elif typ == "L":
+      elif typ == "L" and len(self.group_for_reduce) == 0: # TODO: Cannot mix local+group_for_reduce, codegen need to be fixed.
+        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
         self.shift_to(axis, amt, insert_before=self.first_reduce)
         self.local_dims += 1
     self.simplify_ones()
