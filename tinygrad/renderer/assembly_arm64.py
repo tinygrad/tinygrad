@@ -95,8 +95,8 @@ def specialize_to_arm64(fn_nm, asm):
           mov_imm(1.0, 's1')
           ins.append(f"fcsel {rtor[out.nm]}, s1, s0, lt")
         if rtor[out.nm][0] == 'x':
-          mov_imm(0.0, 'x12')
-          mov_imm(1.0, 'x13')
+          mov_imm(0, 'x12')
+          mov_imm(1, 'x13')
           ins.append(f"csel {rtor[out.nm]}, x13, x12, lt")
       else:
         ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
