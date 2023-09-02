@@ -198,7 +198,7 @@ class ShapeTracker:
     return any(v.mask is not None for v in self.views)
 
   def axis_is_masked(self, axis) -> bool:
-    idx, valid = self.expr_idxs()
+    _, valid = self.expr_idxs()
     return f'idx{axis}' in [v.expr for v in valid.vars()]
 
   # *** under this line are the movement ops ***
