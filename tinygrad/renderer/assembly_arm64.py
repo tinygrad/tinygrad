@@ -90,9 +90,14 @@ def specialize_to_arm64(fn_nm, asm):
         ins.append(f"loop_{arg}:")
     elif uop == UOps.CAST:
       if arg == BinaryOps.CMPLT:
-        mov_imm(0.0, 's0')
-        mov_imm(1.0, 's1')
-        ins.append(f"fcsel {rtor[out.nm]}, s1, s0, lt")
+        if rtor[out.nm][0] == 's':
+          mov_imm(0.0, 's0')
+          mov_imm(1.0, 's1')
+          ins.append(f"fcsel {rtor[out.nm]}, s1, s0, lt")
+        if rtor[out.nm][0] == 'x':
+          mov_imm(0.0, 'x12')
+          mov_imm(1.0, 'x13')
+          ins.append(f"csel {rtor[out.nm]}, x13, x12, lt")
       else:
         ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
     elif uop == UOps.ALU:
@@ -100,7 +105,7 @@ def specialize_to_arm64(fn_nm, asm):
       if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
         ins.append(f"ands {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
       elif arg == TernaryOps.WHERE:
-        ins.append(f"fcmp {rtor[vin[0].nm]}, #0.0")
+        ins.append(f"fcmp {rtor[vin[0].nm]}, #0.0" if rtor[vin[0].nm][0] == 's' else f"cmp {rtor[vin[0].nm]}, #0")
         ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[1].nm]}, {rtor[vin[2].nm]}, ne")
       elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
         #NOTE: Not a real instruction, use to emulate a ext call in unicorn
