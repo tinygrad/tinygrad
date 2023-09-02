@@ -95,9 +95,9 @@ def specialize_to_arm64(fn_nm, asm):
           mov_imm(1.0, 's1')
           ins.append(f"fcsel {rtor[out.nm]}, s1, s0, lt")
         if rtor[out.nm][0] == 'x':
-          mov_imm(0, 'x12')
-          mov_imm(1, 'x13')
-          ins.append(f"csel {rtor[out.nm]}, x13, x12, lt")
+          mov_imm(0, 'x14')
+          mov_imm(1, 'x15')
+          ins.append(f"csel {rtor[out.nm]}, x15, x14, lt")
       else:
         ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
     elif uop == UOps.ALU:
@@ -129,8 +129,9 @@ def specialize_to_arm64(fn_nm, asm):
       elif arg == BinaryOps.CMPLT:
         ins.append(f"{alu[arg]} {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}" if not dtypes.is_float(vin[0][1]) else f"fcmp {rtor[vin[0].nm]}, {rtor[vin[1].nm]}")
       elif arg == BinaryOps.MOD:
-        ins.append(f"udiv x14, {rtor[vin[0].nm]}, x15")
-        ins.append(f"msub {rtor[out.nm]}, x14, x15, {rtor[vin[0].nm]}")
+        rhs = 'x15' if vin[1].__class__ is int else rtor[vin[1].nm]
+        ins.append(f"udiv x14, {rtor[vin[0].nm]}, {rhs}")
+        ins.append(f"msub {rtor[out.nm]}, x14, {rhs}, {rtor[vin[0].nm]}")
       else:
         ins.append(f"{'f' if dtypes.is_float(vin[0][1]) else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {', '.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
     elif uop == UOps.LOAD:
