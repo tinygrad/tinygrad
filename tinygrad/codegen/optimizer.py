@@ -1,10 +1,5 @@
-<<<<<<< HEAD
 from typing import Tuple, List, cast, Optional
-import itertools, math
-=======
-from typing import Tuple, List, cast
 import itertools, math, os
->>>>>>> origin/master
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp
 from tinygrad.codegen.kernel import Kernel, LocalBuffer
