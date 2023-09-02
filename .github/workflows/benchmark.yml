@@ -72,18 +72,18 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v3
     - name: Run model inference benchmark
-      run: python3 test/external/external_model_benchmark.py
+      run: CUDA=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
-      run: BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+      run: CUDA=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
       shell: bash
     - name: Run GPT2
       run: |
-        python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
-        JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
+        CUDA=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
+        CUDA=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
       shell: bash
     - uses: actions/upload-artifact@v3
       with:
-        name: Speed (AMD)
+        name: Speed (NVIDIA)
         path: |
           onnx_inference_speed.csv
           torch_speed.txt
