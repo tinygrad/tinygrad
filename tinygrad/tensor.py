@@ -352,7 +352,7 @@ class Tensor:
     assert self.shape == tuple(), f"only scalar tensors can be converted to Python scalars, but it has shape {self.shape}"
     if self.lazydata.realized is None: self.realize()
     return self.lazydata.realized.toCPU()
-  
+
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
     assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
