@@ -27,6 +27,8 @@ def partition(lst, fxn):
   b: list[Any] = []
   for s in lst: (a if fxn(s) else b).append(s)
   return a,b
+@functools.lru_cache(None)
+def all_int(t: Tuple): return all(x.__class__ is int for x in t)
 
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))

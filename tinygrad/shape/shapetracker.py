@@ -2,7 +2,7 @@
 from __future__ import annotations
 import functools
 from typing import Dict, Tuple, Union, List, Optional, cast, NamedTuple
-from tinygrad.helpers import prod, DEBUG, partition
+from tinygrad.helpers import prod, DEBUG, partition, all_int
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, is_sym_int
 
 @functools.lru_cache(maxsize=None)
@@ -227,22 +227,23 @@ class ShapeTracker:
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)]) if self.views[-1].mask else None
     self.views[-1] = View(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
     return self
-  @profile
+
   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
     if self.views[-1].shape == new_shape: return self
-    new_ints, new_nodes = partition(new_shape, lambda s: isinstance(s, int))
-    if new_nodes and all(isinstance(s, int) for s in self.shape):
-      # reshape from all int shape into shape with a variable, update the variable value
-      assert len(new_nodes) == 1 and isinstance(new_nodes[0], Variable), "only support adding one Variable to the int shape"
-      new_var, new_val = new_nodes[0], prod(self.shape) // prod(new_ints)
-      if new_var not in self.var_vals:
-        assert new_var.min <= new_val <= new_var.max, f"variable value {new_val} out of range [{new_var.min}, {new_var.max}]"
-        self.var_vals[new_var] = new_val
-      else: assert self.var_vals[new_var] == new_val, f"value conflicts, was {self.var_vals[new_var]}, set to {new_val}"
-    elif not new_nodes: self.var_vals = {}
+    if not all_int(new_shape):
+      if all_int(self.shape):
+        new_ints, new_nodes = partition(new_shape, lambda x: x.__class__ is int)
+        # reshape from all int shape into shape with a variable, update the variable value
+        assert len(new_nodes) == 1 and isinstance(new_nodes[0], Variable), "only support adding one Variable to the int shape"
+        new_var, new_val = new_nodes[0], prod(self.shape) // prod(new_ints)
+        if new_var not in self.var_vals:
+          assert new_var.min <= new_val <= new_var.max, f"variable value {new_val} out of range [{new_var.min}, {new_var.max}]"
+          self.var_vals[new_var] = new_val
+        else: assert self.var_vals[new_var] == new_val, f"value conflicts, was {self.var_vals[new_var]}, set to {new_val}"
+    else: self.var_vals = {}
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
-    assert any(s.__class__ is not int for s in new_shape + self.shape) or prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
+    assert not (all_int(new_shape) and all_int(self.shape)) or prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
     new_view, extra = _reshape(self.views[-1], new_shape)
     if extra: self.views.append(new_view)
     else: self.views[-1] = new_view
