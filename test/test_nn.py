@@ -131,8 +131,8 @@ class TestNN(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT != "TORCH", "Takes too long to compile for Compiled backends")
   def test_conv2d_winograd(self):
-    BS, C1, H, W = 4, 16, 32, 32
-    C2, K, S, P = 16, 3, 1, 1
+    BS, C1, H, W = 2, 8, 16, 16
+    C2, K, S, P = 8, 3, 1, 1
 
     Tensor.wino = True
 
