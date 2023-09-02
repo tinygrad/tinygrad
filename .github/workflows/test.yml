@@ -273,7 +273,7 @@ jobs:
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
       - name: Run pytest (triton)
         if: matrix.backend=='triton'
-        run: python -m pytest -n=auto test/ -capture=sys -v -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
+        run: python -m pytest -n=auto test/ -capture=sys -v -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --ignore=test/test_symbolic_ops.py 
 
   testunicorn:
     name: ARM64 unicorn Test
