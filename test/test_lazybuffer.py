@@ -4,7 +4,7 @@ import unittest
 from tinygrad.lazy import LazyBuffer, Device
 from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import Variable
-from tinygrad.ops import GlobalCounters
+from tinygrad.jit import CacheCollector
 
 class TestLazyBuffer(unittest.TestCase):
   def test_fromcpu_buffer_sharing(self):
@@ -55,18 +55,18 @@ class TestLazyBuffer(unittest.TestCase):
     d3 = in1.reshape(8,8)
     assert len(d3.lazydata.op.src[0].children) == 2
 
-    GlobalCounters.cache = []
+    CacheCollector.start()
     l = Tensor.rand(8,8)
     r = Tensor.rand(8,8)
     dd = d1 + l
     dd.realize()
     de = d3 + r
     de.realize()
-    assert len(GlobalCounters.cache) == 3
-    assert GlobalCounters.cache[0][0].name.startswith("r_") # Reduce should not merged 2 times.
-    assert GlobalCounters.cache[1][0].name.startswith("E_")
-    assert GlobalCounters.cache[2][0].name.startswith("E_")
-    GlobalCounters.cache = None
+    cache = CacheCollector.finish()
+    assert len(cache) == 3
+    assert cache[0][0].name.startswith("r_") # Reduce should not merged 2 times.
+    assert cache[1][0].name.startswith("E_")
+    assert cache[2][0].name.startswith("E_")
 
 if __name__ == "__main__":
   unittest.main()

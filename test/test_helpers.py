@@ -1,5 +1,6 @@
 import unittest
-from tinygrad.helpers import Context, ContextVar, merge_dicts
+import numpy as np
+from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts
 
 VARIABLE = ContextVar("VARIABLE", 0)
 
@@ -117,6 +118,12 @@ class TestMergeDicts(unittest.TestCase):
     assert merge_dicts([a, b, c]) == {"a": 1, "b": 2, "c": 3}
     with self.assertRaises(AssertionError):
       merge_dicts([a, d])
+
+class TestDtypes(unittest.TestCase):
+  def test_dtypes_fields(self):
+    fields = dtypes.fields()
+    self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
+    self.assertTrue(all(issubclass(value.np, np.generic) for value in fields.values() if value.np is not None))
 
 if __name__ == '__main__':
   unittest.main()

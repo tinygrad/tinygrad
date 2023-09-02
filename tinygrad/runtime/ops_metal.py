@@ -2,7 +2,7 @@
 import os, subprocess, pathlib, functools, ctypes
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
-from tinygrad.codegen.linearizer import LinearizerOptions
+from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
 from tinygrad.ops import Compiled
@@ -60,7 +60,7 @@ class MetalProgram:
       unwrap(arc.addComputePipelineFunctionsWithDescriptor_error_(desc, None))
       unwrap(arc.serializeToURL_error_(Cocoa.NSURL.URLWithString_("file:///tmp/shader.bin"), None))
       # clone https://github.com/dougallj/applegpu.git in tinygrad/disassemblers
-      os.system(f"cd {pathlib.Path(__file__).parent.parent.parent}/disassemblers/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
+      os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
     self.pipeline_state = unwrap(METAL.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
 
   def __call__(self, global_size, local_size, *bufs, wait=False):
