@@ -3,6 +3,7 @@ from tqdm import trange
 from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import getenv, dtypes
 from typing import Union
+
 def sparse_categorical_crossentropy(out, Y):
   num_classes = out.shape[-1]
   YY = Y.flatten().astype(np.int32)
@@ -22,7 +23,7 @@ def focal_loss(p : Tensor, y_train : Tensor,
     ce_loss = -(p_t + 1e-10).log()
     loss = ce_loss.mul((Tensor.ones_like(p_t) - p_t) ** (gamma))
     if alpha >= 0:
-            alpha_t = alpha * y_train + ((Tensor(1 - alpha)) * (Tensor.ones_like(y_train) - y_train))
+            alpha_t = alpha * y_train + ((Tensor(1 - alpha, requires_grad=False)) * (Tensor.ones_like(y_train, requires_grad=False) - y_train))
             loss = alpha_t * loss
     if reduction == "none":
         pass
@@ -32,20 +33,27 @@ def focal_loss(p : Tensor, y_train : Tensor,
         loss = loss.sum()
     return loss
 
+def dummy_tensor_identifier(t:Tensor):
+    print(" sums ", t.sum().numpy())
+    print("grad info: ", t.requires_grad, t.grad)
+
 def smooth_l1_loss(input: Tensor, target: Tensor, 
                    beta: float, reduction: str = "none") -> Tensor:
+  dti = dummy_tensor_identifier #temporal, for debugging
   if beta < 1e-5:
-      loss = (input - target).abs()
+      return (input - target).abs()
   else:
       n = (input - target).abs()
       mask = n < beta
+      #TODO this mask raises error when backwards. requires_grad=false prevents this. Loss is a function of this but this function is not differentiable.
+      mask.requires_grad = False #does this cut the backward deepwalk for loss below?
+      #TODO: should the .where have a requires_grad=False? where is not differentiable as well
       loss = mask.where(0.5 * (n**2) / beta, n - 0.5 * beta)
 
   if reduction == "mean":
-      loss = loss.mean() if loss.numel() > 0 else 0.0 * loss.sum()
+      return loss.mean() if loss.numel() > 0 else 0.0 * loss.sum()
   elif reduction == "sum":
-      loss = loss.sum()
-  return loss
+      return loss.sum()
 
 def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categorical_crossentropy,
         transform=lambda x: x, target_transform=lambda x: x, noloss=False):

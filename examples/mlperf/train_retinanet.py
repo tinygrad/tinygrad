@@ -16,6 +16,11 @@ import torch
 from examples.hlb_cifar10 import cross_entropy
 from typing import List, Tuple
 from extra.training import focal_loss, smooth_l1_loss
+from torchvision.ops.focal_loss import sigmoid_focal_loss
+from torch.nn import SmoothL1Loss
+from torch import tensor
+
+
 NUM = getenv("NUM", 2)
 BS = getenv("BS", 8)
 CNT = getenv("CNT", 10)
@@ -24,6 +29,7 @@ TRAINING = getenv("TRAINING", 1)
 ADAM = getenv("ADAM", 0)
 CLCACHE = getenv("CLCACHE", 0)
 IMAGE_SIZES = {"debug" : (100,100), "mlperf" : (800,800)}
+GRAPH = getenv("GRAPH", 1)
 
 def resize_box_based_on_new_image_size(box: List[float], img_old_size: Tuple[int], img_new_size: Tuple[int]) -> List[float]:
   ratio_height, ratio_width = [new / orig for new, orig in zip(img_new_size[:2], img_old_size[:2])]
@@ -141,6 +147,7 @@ class RetinaNetTrainer:
         TRAINING = getenv("TRAINING", 1)
         ADAM = getenv("ADAM", 0)
         CLCACHE = getenv("CLCACHE", 0)
+        GRAPH = getenv("GRAPH", 1)
         backbone = self.model.backbone
         retina = self.model 
         retina.load_from_pretrained()
@@ -148,18 +155,19 @@ class RetinaNetTrainer:
 
 
         anchors_flattened_levels = np.concatenate(retina.anchor_gen(self.image_size))
-        params = get_parameters(retina)
-        for p in params: p.realize()
-        optimizer = optim.SGD(params, lr=0.001)
+        #params = get_parameters(retina)
+        #for p in params: p.realize()
+        optimizer = optim.SGD(get_parameters(retina), lr=0.001)
 
         Tensor.training = TRAINING
+        print("training mode ", Tensor.training)
         Tensor.no_grad = not BACKWARD
         for x, annotations in iterate(self.dataset, BS):
             targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
             #self.resize_images_and_bboxes(x, annotations, self.image_size)
             resized = [Image.fromarray(image) for image in x]
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
-            images = Tensor(resized)
+            images = Tensor(resized, requires_grad=False)
 
             #breakpoint()
             #TODO tensors should not be turned into numpy
@@ -183,9 +191,6 @@ class RetinaNetTrainer:
 
 
     def _batchwise_compute_loss(self, BS, targets, head_outputs):
-        from torchvision.ops.focal_loss import sigmoid_focal_loss
-        from torch.nn import SmoothL1Loss
-        from torch import tensor
         total_loss = Tensor(0)
         
         box_regs = head_outputs[:, :, :4]
@@ -194,10 +199,10 @@ class RetinaNetTrainer:
         cls_targets_idxs = np.argwhere(targets["classification_masks"]==1)
         reg_targets_idxs = np.argwhere(targets["regression_masks"]==1)
 
-        box_reg_losses = smooth_l1_loss(Tensor(box_regs[reg_targets_idxs]), Tensor(ground_truth_boxes[reg_targets_idxs]), beta = 0.11, reduction="sum")
+        box_reg_losses = smooth_l1_loss(Tensor(box_regs[reg_targets_idxs], requires_grad=True), Tensor(ground_truth_boxes[reg_targets_idxs]), beta = 0.11, reduction="sum")
         #TODO
         Warning("You are normalizing over the BATCH number of anchors, not each image loss by its number of anchors...")
-        focal_losses = focal_loss(Tensor(cls_preds[cls_targets_idxs]).sigmoid(), Tensor(ground_truth_clss[cls_targets_idxs]), reduction="sum").div(len(cls_preds))
+        focal_losses = focal_loss(Tensor(cls_preds[cls_targets_idxs], requires_grad=True).sigmoid(), Tensor(ground_truth_clss[cls_targets_idxs]), reduction="sum").div(len(cls_preds))
         total_loss += focal_losses + box_reg_losses
         print(total_loss.numpy() , " batch loss")
         return total_loss
@@ -209,7 +214,6 @@ class RetinaNetTrainer:
         from torchvision.ops.focal_loss import sigmoid_focal_loss
         from torch.nn import SmoothL1Loss
         from torch import tensor
-        total_loss = Tensor(0)
         regression_losses = []
         classification_losses = []
         for img_idx in range(BS):
@@ -217,17 +221,17 @@ class RetinaNetTrainer:
             box_regs = head_outputs[img_idx, :, :4]
             cls_preds = head_outputs[img_idx, :, 4:]
             ground_truth_boxes, ground_truth_clss = targets["regression_targets"][img_idx], targets["classification_targets"][img_idx]
-            
+            print(box_regs.requires_grad, "< grads should be true >" ,cls_preds.requires_grad)
             def generate_mtx_mask(targs_mask, preds):
                 #DEBUG and replace below
                 return Tensor(targs_mask).reshape(targs_mask.shape[0],1).expand(targs_mask.shape[0],targs_mask.shape[1])
-            reg_mask_mtx = Tensor(targets["regression_masks"][img_idx]).reshape(box_regs.shape[0],1).expand(box_regs.shape[0],4)
-            cls_mask_mtx = Tensor(targets["classification_masks"][img_idx]).reshape(cls_preds.shape[0],1).expand(cls_preds.shape[0],self.model.num_classes)
-
-            focal_losses = focal_loss((cls_preds * cls_mask_mtx).sigmoid(), Tensor(ground_truth_clss) * cls_mask_mtx, reduction="sum").div(cls_preds.shape[0])
+            reg_mask_mtx = Tensor(targets["regression_masks"][img_idx], requires_grad=False).reshape(box_regs.shape[0],1).expand(box_regs.shape[0],4)
+            cls_mask_mtx = Tensor(targets["classification_masks"][img_idx], requires_grad=False).reshape(cls_preds.shape[0],1).expand(cls_preds.shape[0],self.model.num_classes)
+            print(reg_mask_mtx.requires_grad, "< grads should be false >" ,reg_mask_mtx.requires_grad)
+            focal_losses = focal_loss((cls_preds * cls_mask_mtx).sigmoid(), Tensor(ground_truth_clss, requires_grad=False) * cls_mask_mtx, reduction="sum").div(cls_preds.shape[0])
             #TODO box regs are very sparse, maybe matmul makes training slower?
-            box_reg_losses = smooth_l1_loss(box_regs * reg_mask_mtx, Tensor(ground_truth_boxes) * reg_mask_mtx, beta = 0.11, reduction="sum")
-            
+            box_reg_losses = smooth_l1_loss(box_regs * reg_mask_mtx, Tensor(ground_truth_boxes, requires_grad=False) * reg_mask_mtx, beta = 0.11, reduction="sum")
+            print(focal_losses.requires_grad, "< grads should be true >" ,box_reg_losses.requires_grad)
             regression_losses.append(box_reg_losses)
             classification_losses.append(focal_losses)
 
