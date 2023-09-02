@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict
 import math
 from collections import defaultdict
-from tinygrad.codegen.linearizer import UOps, UOp, MemOp, ConstOp
+from tinygrad.codegen.linearizer import UOps, UOp, MemOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, getenv, prod, DType
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, sym_render
@@ -167,22 +167,22 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     elif uop == UOps.ALU:
       assert dtype is not None
       r[u] = ssa('alu')
-      kk(f"{dtype.name} {r[u]} = {lang.code_for_op[args](*[r[x] for x in vin])};")
-      #kk(f"{lang.generic_var_prefix if newvar not in vin else ''}{newvar.render(newvar not in vin and lang.generic_var_prefix == '')} = {lang.code_for_op[args](*[x.render() for x in vin])};")
+      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {lang.code_for_op[args](*[r[x] for x in vin])};")
     elif uop == UOps.DEFINE_ACC:
       assert dtype is not None
       r[u] = ssa('acc')
-      kk(f"{dtype.name} {r[u]} = {lang.render_const(args, dtype)};")
+      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {lang.render_const(args, dtype)};")
+    elif uop == UOps.SPECIAL:
+      r[u] = args.expr
+    elif uop == UOps.CONST:
+      r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
     elif uop == UOps.LOAD:
       assert dtype is not None
       r[u] = ssa('val')
       # valids are handled here
-      if isinstance(args, ConstOp):
-        val = lang.render_const(args.value, dtype)
-      else:
-        val = lang.render_load(dtype, args.name, args.memory_dtype, args.idx, args.local)
+      val = lang.render_load(dtype, args.name, args.memory_dtype, args.idx, args.local)
       if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(args.invalid_value, dtype))
-      kk(f"{dtype.name} {r[u]} = {val};")
+      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {val};")
     elif uop == UOps.STORE:
       if args is None:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
@@ -193,7 +193,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         kk(lang.render_store(args.name, args.memory_dtype, r[vin[0]], vin[0].dtype, args.idx, args.local))
     elif uop == UOps.CAST and dtype is not None and dtype.sz > 1:
       r[u] = ssa('cast')
-      kk(f"{dtype.name} {r[u]} = {lang.render_cast([r[x] for x in vin], dtype)};")
+      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {lang.render_cast([r[x] for x in vin], dtype)};")
     elif uop == UOps.DEFINE_LOCAL:
       if lang.external_local_bufs:
         prekernel.append(lang.render_local(args[0], args[1]))

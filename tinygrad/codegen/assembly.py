@@ -1,5 +1,5 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict, cast
-from tinygrad.codegen.linearizer import UOps, ConstOp, MemOp, UOp
+from tinygrad.codegen.linearizer import UOps, MemOp, UOp
 from tinygrad.ops import BinaryOps, UnaryOps
 from tinygrad.helpers import DType, dtypes, DEBUG
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
@@ -158,32 +158,24 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
     elif uop == UOps.DEFINE_ACC:
       reg = lang.newreg(u, dtype=dtype)
       lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], args))
+    elif uop == UOps.SPECIAL:
+      lang.tor[u] = lang.tor[args]
+    elif uop == UOps.CONST:
+      lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(u, dtype=dtype), [], args))
     elif uop == UOps.LOAD:
-      if isinstance(args, ConstOp):
-        if args.valid.min == 0 and args.valid.max == 1:
-          reg = lang.newreg(u, dtype=dtype)
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], args.invalid_value))
+      idx, treg, off = lang.addr_w_offset(args)
+      reg = lang.newreg(u, dtype=dtype, scalar=(idx.scalar and (not isinstance(treg, Register) or treg.scalar)))
+      if args.valid.min == 0:
+        lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], 0))
+        if args.valid.max == 1:
           pred = args.valid.render(lang.render_ops, lang)
           lang.ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], args.value))
-          lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
-          skipload_branch += 1
-        else:
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(u, dtype=dtype), [], args.value if args.valid.min == 1 else args.invalid_value))
-      else:
-        idx, treg, off = lang.addr_w_offset(args)
-        reg = lang.newreg(u, dtype=dtype, scalar=(idx.scalar and (not isinstance(treg, Register) or treg.scalar)))
-        if args.valid.min == 0:
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], 0))
-          if args.valid.max == 1:
-            pred = args.valid.render(lang.render_ops, lang)
-            lang.ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
-        if args.valid.max == 1:
-            # NOTE: you can't compute the index in here, because it assumes it's all available later
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype if args.memory_dtype != dtypes.float else None)))
-        if args.valid.min == 0 and args.valid.max == 1:
-          lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
-          skipload_branch += 1
+      if args.valid.max == 1:
+          # NOTE: you can't compute the index in here, because it assumes it's all available later
+        lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype if args.memory_dtype != dtypes.float else None)))
+      if args.valid.min == 0 and args.valid.max == 1:
+        lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
+        skipload_branch += 1
     elif uop == UOps.STORE:
       if args is None:
         lang.ins.append(AssemblyInstruction(UOps.ALU, lang.tor[vin[0]], [lang.tor[vin[1]]], UnaryOps.NOOP))
