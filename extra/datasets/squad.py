@@ -141,7 +141,7 @@ def iterate(tokenizer, start=0):
     yield features, example
 
 if __name__ == "__main__":
-  tokenizer = BertTokenizer(str(Path(__file__).parent.parent.parent / "weights" / "bert_vocab.txt"))
+  tokenizer = BertTokenizer(str(Path(__file__).parents[2] / "weights" / "bert_vocab.txt"))
 
   X, Y = next(iterate(tokenizer))
   print(" ".join(X[0]["tokens"]))

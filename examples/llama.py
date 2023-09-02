@@ -85,7 +85,7 @@ class Attention:
       keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
 
     cache_k, cache_v = keys, values
-    keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
+    keys, values = repeat_kv(keys, self.n_rep).realize(), repeat_kv(values, self.n_rep).realize()
     attn = Tensor.scaled_dot_product_attention(xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2), mask).transpose(1, 2).reshape(bsz, seqlen, -1)
     return self.wo(attn).realize(), cache_k.realize(), cache_v.realize()
 
@@ -227,7 +227,7 @@ def concat_weights(models):
 def load(fn:str):
   if fn.endswith('.index.json'):
     with open(fn) as fp: weight_map = json.load(fp)['weight_map']
-    parts = {n: load(f'{os.path.dirname(fn)}/{os.path.basename(n)}') for n in set(weight_map.values())}
+    parts = {n: load(Path(fn).parent / Path(n).name) for n in set(weight_map.values())}
     return {k: parts[n][k] for k, n in weight_map.items()}
   elif fn.endswith('.safetensors'):
     return safe_load(fn)
@@ -262,8 +262,8 @@ class AbsmaxQuantizedLinear:
       if 'feed_forward' in name or ('attention.w') in name or name == 'output.weight':
         scale = v.abs().max(axis=1) / 127.0
         int8_weight = (v.T/scale).T.cast(dtype=dtypes.int8)
-        new_tensors[name] = int8_weight.realize()
-        new_tensors[name.replace('weight', 'scale')] = scale.realize()
+        new_tensors[name] = int8_weight
+        new_tensors[name.replace('weight', 'scale')] = scale
       else:
         new_tensors[name] = v
     return new_tensors
@@ -287,6 +287,7 @@ class LLaMa:
 
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
+      for _,v in weights.items(): v.realize()
     load_state_dict(model, weights, strict=False)
 
     return LLaMa(model, sp_model)
@@ -428,7 +429,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
 
   LLAMA_SUFFIX = {1: "", 2: "-2"}[args.gen]
-  MODEL_PATH = args.model or Path(__file__).parent.parent / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
+  MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
