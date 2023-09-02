@@ -351,7 +351,7 @@ class Tensor:
   def item(self):
     assert self.shape == tuple(), f"only scalar tensors can be converted to Python scalars, but it has shape {self.shape}"
     if self.lazydata.realized is None: self.realize()
-    return self.lazydata.realized.toCPU()
+    return self.lazydata.realized.toCPU().item() if isinstance(self.lazydata.realized.toCPU(), np.ndarray) else self.lazydata.realized.toCPU()
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim

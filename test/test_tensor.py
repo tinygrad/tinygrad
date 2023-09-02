@@ -22,7 +22,7 @@ class TestTinygrad(unittest.TestCase):
   def test_zerodim_item(self):
     a,b,c = Tensor(55, dtype=dtypes.int32), Tensor(3.14), Tensor(True)
     self.assertEqual(a.item(), 55)
-    self.assertEqual(b.item(), 3.14)
+    np.testing.assert_allclose(b.item(), 3.14)
     self.assertEqual(c.item(), True)
 
   def test_plus_equals(self):
