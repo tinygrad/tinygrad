@@ -127,7 +127,8 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
     if uop == UOps.SPECIAL:
       lvars[u] = lvars[args.expr]
     if uop == UOps.CONST:
-      lvars[u] = ir.Constant(dtype_to_llvm_dtype[dtype], args)
+      value = int(args) if dtypes.is_int(dtype) else bool(args) if dtype == dtypes.bool else args
+      lvars[u] = ir.Constant(dtype_to_llvm_dtype[dtype], value)
     if uop == UOps.LOAD:
       assert dtype is not None
       valid = args.valid.render(render_llvm, bb[-1])
