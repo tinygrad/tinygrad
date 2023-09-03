@@ -91,7 +91,6 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     elif uop == UOps.CONST or uop == UOps.DEFINE_ACC:
       r[u] = ssa("const" if uop == UOps.CONST else "acc")
       val = (('-' if args<0 else '') + 'float("inf")') if math.isinf(args) else ('float('nan")' if math.isnan(args) else str(args))
-      if math.isnan(args): val = "float('nan')"
       if len(local_size) > 0:
         kk(f"{r[u]} = tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{val}, dtype={triton_dtypes[newvar]})") 
       else:
