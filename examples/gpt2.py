@@ -5,7 +5,7 @@ import functools, argparse
 import numpy as np
 from tqdm import trange
 np.set_printoptions(linewidth=200)
-from typing import Optional, Tuple
+from typing import Optional, Dict
 
 from tinygrad.helpers import Timing, getenv, dtypes, DEBUG
 from tinygrad.ops import GlobalCounters
@@ -34,7 +34,7 @@ class Attention:
     self.dim = dim
     self.head_dim = dim // n_heads
 
-  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor]) -> Tensor:
+  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor], jit_ctx:Optional[Dict[Variable,int]]=None) -> Tensor:
     xqkv = self.c_attn(x)
     xq, xk, xv = [xqkv.slice([None, None, (i*self.dim, (i+1)*self.dim)]) for i in range(3)]
     xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], self.n_heads, self.head_dim) for x in (xq, xk, xv)]
@@ -69,43 +69,32 @@ class TransformerBlock:
     self.mlp = FeedForward(dim, 4*dim, linear)
     self.ln_1 = LayerNorm(dim, norm_eps)
     self.ln_2 = LayerNorm(dim, norm_eps)
-    self.cache_k, self.cache_v = None, None
-    self.jitted = TinyJit(self.inner)
 
-  def inner(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor]):
-    output, cache_k, cache_v = self.attn(self.ln_1(x), cache_k, cache_v, start_pos, mask)
-    h = x + output
-    return (h + self.mlp(self.ln_2(h))).realize(), cache_k, cache_v
-
-  def __call__(self, x:Tensor, start_pos:int, mask:Optional[Tensor]):
+  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor], jit_ctx:Optional[Dict[Variable,int]]=None):
     if start_pos > 0 and mask is None and getenv("JIT"):
-      seqlen = x.shape[1]
+      start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
+      cache_k = cache_k.reshape(cache_k.shape[0], start_pos_var, cache_k.shape[2], cache_k.shape[3])
+      cache_v = cache_v.reshape(cache_v.shape[0], start_pos_var, cache_v.shape[2], cache_v.shape[3])
+      # need this because we don't reshape back to int shape in the jitted path and we don't have the correct var_vars in cache
+      cache_k.lazydata.st.var_vals[start_pos_var] = start_pos
+      cache_v.lazydata.st.var_vals[start_pos_var] = start_pos
 
-      pos = Variable("pos", 1, MAX_CONTEXT)
-      self.cache_k = self.cache_k.reshape(self.cache_k.shape[0], pos, self.cache_k.shape[2], self.cache_k.shape[3])
-      self.cache_v = self.cache_v.reshape(self.cache_v.shape[0], pos, self.cache_v.shape[2], self.cache_v.shape[3])
-
-      ret, cache_k, cache_v = self.jitted(x, self.cache_k, self.cache_v, start_pos, mask)
-
-      # save the cache. with symbolic shape, cast it back to int shape so we have int shape in cache
-      self.cache_k = cache_k.reshape(cache_k.shape[0], start_pos+seqlen, cache_k.shape[2], cache_k.shape[3]).realize()
-      self.cache_v = cache_v.reshape(cache_v.shape[0], start_pos+seqlen, cache_v.shape[2], cache_v.shape[3]).realize()
-
-      return ret
-    else:
-      ret, self.cache_k, self.cache_v = self.inner(x, self.cache_k, self.cache_v, start_pos, mask)
-      return ret
+    output, cache_k, cache_v = self.attn(self.ln_1(x), cache_k, cache_v, start_pos, mask, jit_ctx=jit_ctx)
+    h = x + output
+    return (h + self.mlp(self.ln_2(h))).realize(), cache_k.realize(), cache_v.realize()
 
 class Transformer:
-  def __init__(self, dim, n_heads, n_layers, norm_eps=1e-5, vocab_size=50257, linear=Linear, max_seq_len=1024):
+  def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_seq_len=1024):
     self.wte = Embedding(vocab_size, dim)
     self.wpe = Embedding(max_seq_len, dim)
     self.h = [TransformerBlock(dim, n_heads, norm_eps, linear) for _ in range(n_layers)]
+    self.kv_caches = [(None, None) for _ in range(n_layers)]
     self.ln_f = LayerNorm(dim, norm_eps)
     self.lm_head = linear(dim, vocab_size, bias=False)
 
     self.embed_jitted = TinyJit(self.embed)
     self.postprocess_jitted = TinyJit(self.postprocess)
+    self.h_jitted = [TinyJit(h.__call__) for h in self.h]
 
   def embed(self, tokens, pos):
     tok_emb = self.wte(tokens)
@@ -118,28 +107,35 @@ class Transformer:
     if temperature is not None: return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
     return logits.realize()
 
-  def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]):
+  def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
     if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
     if seqlen == 1 and start_pos > 0 and getenv("JIT"):
       start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
       pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var+seqlen)))
       pos.lazydata.st.var_vals[start_pos_var] = start_pos
-      h = self.embed_jitted(tokens, pos).sequential([functools.partial(layer, start_pos=start_pos, mask=None) for layer in self.h])
+      h = self.embed_jitted(tokens, pos)
+      for i, (hi, (cache_k, cache_v)) in enumerate(zip(self.h_jitted, self.kv_caches)):
+        h, cache_k, cache_v = hi(h, cache_k, cache_v, start_pos=start_pos, mask=None, jit_ctx={start_pos_var: start_pos})
+        self.kv_caches[i] = (cache_k, cache_v)
       return self.postprocess_jitted(h, temperature)
     else:
       pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos, start_pos+seqlen)))
       mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize()
-      h = self.embed(tokens, pos).sequential([functools.partial(layer, start_pos=start_pos, mask=mask) for layer in self.h])
+      h = self.embed(tokens, pos)
+      for i, (hi, (cache_k, cache_v)) in enumerate(zip(self.h, self.kv_caches)):
+        h, cache_k, cache_v = hi(h, cache_k, cache_v, start_pos=start_pos, mask=mask)
+        self.kv_caches[i] = (cache_k, cache_v)
       return self.postprocess(h, temperature)
 
 # **** files and arguments ****
 
+VOCAB_SIZE = 50257
 MODEL_PARAMS = {
-  'gpt2':         dict(n_layers=12, n_heads=12, dim=768),   # 124M params
-  'gpt2-medium':  dict(n_layers=24, n_heads=16, dim=1024),  # 350M params
-  'gpt2-large':   dict(n_layers=36, n_heads=20, dim=1280),  # 774M params
-  'gpt2-xl':      dict(n_layers=48, n_heads=25, dim=1600),  # 1558M params
+  'gpt2':         dict(n_layers=12, n_heads=12, dim=768, norm_eps=1e-5, vocab_size=VOCAB_SIZE),   # 124M params
+  'gpt2-medium':  dict(n_layers=24, n_heads=16, dim=1024, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 350M params
+  'gpt2-large':   dict(n_layers=36, n_heads=20, dim=1280, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 774M params
+  'gpt2-xl':      dict(n_layers=48, n_heads=25, dim=1600, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 1558M params
 }
 
 def get_url(model_size): return f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'
@@ -179,11 +175,11 @@ class GPT2:
       GlobalCounters.reset()
       if args.timing: print("")
       st = GlobalCounters.time_sum_s
-      with Timing(f"ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU"+
-                  f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                  f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s") if DEBUG else None, enabled=timing):
-        probs = self.model(Tensor([toks[start_pos:]]), start_pos, temperature)
-      with Timing("sync in ", enabled=timing):
+      with Timing("total ", enabled=timing):
+        with Timing(f"ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU"+
+                    f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                    f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s") if DEBUG else None, enabled=timing):
+          probs = self.model(Tensor([toks[start_pos:]]), start_pos, temperature)
         probs_np = probs.numpy()
         tok = int(np.random.choice(len(probs_np), p=probs_np))
       start_pos = len(toks)

@@ -270,7 +270,8 @@ result = Tensor(2).realize() + Tensor(3).realize()
 result.lazydata.realized = Device[Device.DEFAULT].buffer(prod(result.shape), result.dtype)
 
 # use the real Linearizer to linearize 2+3
-from tinygrad.codegen.linearizer import Linearizer, LinearizerOptions
+from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.kernel import LinearizerOptions
 linearizer = Linearizer(result.lazydata.op, result.lazydata, LinearizerOptions())
 linearizer.linearize()
 

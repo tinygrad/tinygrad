@@ -3,7 +3,7 @@ from typing import ClassVar
 from tinygrad.ops import Compiled
 from tinygrad.helpers import getenv, DEBUG
 from ctypes import CFUNCTYPE
-from tinygrad.codegen.linearizer import LinearizerOptions
+from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
 from tinygrad.runtime.lib import RawMallocBuffer
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import os, time, io, pathlib, sys, traceback
-sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
 
 if os.getenv("OPT", None) is None:
   os.environ['OPT'] = '99'
