@@ -45,7 +45,8 @@ setup(name='tinygrad',
             "safetensors",
             "types-PyYAML",
             "cloudpickle",
-            "transformers"
+            "transformers",
+            "nevergrad",
         ],
       },
       include_package_data=True)
