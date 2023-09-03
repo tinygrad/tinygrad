@@ -161,6 +161,32 @@ def hipMemGetInfo():
   return free.value, total.value
 
 
+class hipIpcMemHandle_t(ctypes.Structure):
+  _fields_ = [('reserved', ctypes.c_char * 64)]
+
+
+_libhip.hipIpcGetMemHandle.restype = int
+_libhip.hipIpcGetMemHandle.argtypes = [ctypes.POINTER(hipIpcMemHandle_t), ctypes.c_void_p]
+
+
+def hipIpcGetMemHandle(ptr):
+  handle = hipIpcMemHandle_t()
+  status = _libhip.hipIpcGetMemHandle(ctypes.byref(handle), ptr)
+  hipCheckStatus(status)
+  return handle
+
+
+_libhip.hipIpcOpenMemHandle.restype = int
+_libhip.hipIpcOpenMemHandle.argtypes = [ctypes.POINTER(ctypes.c_void_p), hipIpcMemHandle_t, ctypes.c_uint]
+
+
+def hipIpcOpenMemHandle(handle, flags):
+  ptr = ctypes.c_void_p()
+  status = _libhip.hipIpcOpenMemHandle(ctypes.byref(ptr), handle, flags)
+  hipCheckStatus(status)
+  return ptr.value
+
+
 _libhip.hipSetDevice.restype = int
 _libhip.hipSetDevice.argtypes = [ctypes.c_int]
 

@@ -1,30 +1,43 @@
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, cast
 from extra import dist
 from multiprocessing import shared_memory
 from tinygrad.helpers import DEBUG, colored
 from tinygrad.lazy import LazyBuffer
-from tinygrad.runtime.lib import RawBufferCopyIn, RawBufferCopyInOut, RawBufferTransfer
+from tinygrad.runtime.lib import RawBuffer, RawBufferCopyIn, RawBufferCopyInOut, RawBufferTransfer
+from tinygrad.runtime.ops_hip import RawHIPBuffer
 from tinygrad.runtime.ops_shm import RawShmBuffer
 from tinygrad.jit import CacheCollector
 from tinygrad.tensor import Tensor, Function
+import extra.hip_wrapper as hip
 import numpy as np
 
 # fake the function signature of ASTRunner so we can put it in the cache
-def __send_rb(args:Tuple[RawBufferCopyInOut, RawShmBuffer, int, Any], variables=None, jit=False, force_wait=False):
-  args[0]._copyout(np.frombuffer(args[1]._buffer(), dtype=args[0].dtype.np))
-  dist.OOB.send(args[3], args[2])
-  if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}   sent {args[0]} to rank {args[2]}")
+def __send_rb(args, variables=None, jit=False, force_wait=False):
+  x, target_rank, y, extra = args
+  if y is not None:
+    if isinstance(x, RawBufferCopyInOut): x._copyout(np.frombuffer(y._buffer(), dtype=x.dtype.np))
+    else: y.fromCPU(x.toCPU())
+  dist.OOB.send(extra, target_rank)
+  if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}   sent {x} to rank {target_rank}")
 
-def __recv_rb(args:Tuple[RawBufferCopyIn, RawShmBuffer, int], variables=None, jit=False, force_wait=False):
-  dist.OOB.recv(args[2])
-  args[0]._copyin(args[1].toCPU())
-  if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}   recv {args[0]} from rank {args[2]}")
+def __recv_rb(args, variables=None, jit=False, force_wait=False):
+  x, target_rank, y = args
+  dist.OOB.recv(target_rank)
+  if isinstance(x, RawHIPBuffer):
+    x._transfer(cast(RawHIPBuffer, y))
+  elif isinstance(x, RawBufferCopyIn): x._copyin(y.toCPU())
+  else: x.fromCPU(y.toCPU())
+  if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}   recv {x} from rank {target_rank}")
 
 # send a rawbuffer from out rank to the target rank
-def _send_rb(x:RawBufferCopyInOut, target_rank:int, cache_id:Optional[str]=None):
-  assert isinstance(x, RawBufferCopyInOut), "we only support RawBufferCopyInOut for now"
+def _send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
+  if isinstance(x, RawHIPBuffer):
+    # send ipc handle
+    handle = hip.hipIpcGetMemHandle(x._buf)
+    dist.OOB.send(handle, target_rank)
 
-  if not issubclass(x, RawBufferTransfer):
+    CacheCollector.add(__send_rb, [x, target_rank, None, None], {})
+  else:
     # cache the shared memory so we don't have to create it every time
     if cache_id is not None and cache_id in _send_rb.shared_memory_cache:
       shm_name = _send_rb.shared_memory_cache[cache_id]
@@ -34,31 +47,46 @@ def _send_rb(x:RawBufferCopyInOut, target_rank:int, cache_id:Optional[str]=None)
       if cache_id is not None: _send_rb.shared_memory_cache[cache_id] = shm_name
     # copy the buffer into shared memory
     device = f"{shm_name},{cache_id}" if cache_id is not None else shm_name
-    rb = RawShmBuffer(x.size, x.dtype, device=device)
-    x._copyout(np.frombuffer(rb._buffer(), dtype=x.dtype.np))
-    dist.OOB.send((shm_name, cache_id), target_rank)
-  else:
-    pass
+    y = RawShmBuffer(x.size, x.dtype, device=device)
 
-  # jit support
-  CacheCollector.add(__send_rb, [x, rb, target_rank, None], {})
+    # fast path when we can directly copyout
+    if isinstance(x, RawBufferCopyInOut): x._copyout(np.frombuffer(y._buffer(), dtype=x.dtype.np))
+    else: y.fromCPU(x.toCPU())
+    dist.OOB.send((shm_name, cache_id), target_rank)
+
+    # jit support
+    CacheCollector.add(__send_rb, [x, target_rank, y, None], {})
 setattr(_send_rb, "shared_memory_cache", {})
 
 # receive a rawbuffer from the target rank
-def _recv_rb(x:RawBufferCopyIn, target_rank:int):
-  assert isinstance(x, RawBufferCopyIn), "we only support RawBufferCopyIn for now"
-  extra = dist.OOB.recv(target_rank)
-  device = f"{extra[0]},{extra[1]}" if extra[1] is not None else f"{extra[0]}"
-  rb = RawShmBuffer(x.size, x.dtype, device=device)
-  x._copyin(rb.toCPU())
-  if DEBUG >= 2: print(f"****   got {x} from rank {target_rank}")
+def _recv_rb(x:RawBuffer, target_rank:int):
+  if isinstance(x, RawHIPBuffer):
+    # open ipc handle
+    handle = dist.OOB.recv(target_rank)
+    ptr = hip.hipIpcOpenMemHandle(handle, 0)
+    # build a new buffer
+    y = RawBuffer(x.size, x.dtype, buf=ptr)
+    x._transfer(cast(RawHIPBuffer, y))
 
-  if extra[1] is None:
-    (s := shared_memory.SharedMemory(name=extra[0])).close()
-    s.unlink()
+    if DEBUG >= 2: print(f"****   got {x} from rank {target_rank}")
 
-  # jit support
-  CacheCollector.add(__recv_rb, [x, rb, target_rank], {})
+    CacheCollector.add(__recv_rb, [x, target_rank, y], {})
+  else:
+    extra = dist.OOB.recv(target_rank)
+    device = f"{extra[0]},{extra[1]}" if extra[1] is not None else f"{extra[0]}"
+    y = RawShmBuffer(x.size, x.dtype, device=device)
+
+    # fast path when we can directly copyin
+    if isinstance(x, RawBufferCopyIn): x._copyin(y.toCPU())
+    else: x.fromCPU(y.toCPU())
+    if DEBUG >= 2: print(f"****   got {x} from rank {target_rank}")
+
+    if extra[1] is None:
+      (s := shared_memory.SharedMemory(name=extra[0])).close()
+      s.unlink()
+
+    # jit support
+    CacheCollector.add(__recv_rb, [x, target_rank, y], {})
 
 # sends a lazybuffer from our rank to the target rank
 def _send_lb(x:LazyBuffer, target_rank:int, cache_id:Optional[str]=None) -> None: _send_rb(x.contiguous().realize().realized, target_rank, cache_id=cache_id)

@@ -51,7 +51,7 @@ def _process_wrap(rank:int, device:str, oob:_OOB, fn:Callable, args=()):
   if DEBUG >= 1: print(f"distributed process {rank} initialized runtime for device {device}")
 
   # convert device to be process specific
-  Device.DEFAULT = device.split(":")[0]
+  Device.DEFAULT = device.split(":")[0] if "HIP" not in device else device
 
   fn(*args)
 
