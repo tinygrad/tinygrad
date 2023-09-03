@@ -178,7 +178,13 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         raise NotImplementedError(f"WMMA not implemented for {args}")
     elif uop == UOps.ALU:
       assert dtype is not None
-      val = lang.code_for_op[args](*[r[x] for x in vin])
+      # remove parens if ALU types are the same. TODO: can do more here
+      if vin[0].uop == UOps.ALU and vin[0].arg == args:
+        fst = r[vin[0]]
+        if fst[0] == '(' and fst[-1] == ')': fst = fst[1:-1]
+        val = lang.code_for_op[args](fst, *[r[x] for x in vin[1:]])
+      else:
+        val = lang.code_for_op[args](*[r[x] for x in vin])
       assert child_count[u] != 0, f"childless ALU op found {u}"
       if child_count[u] <= 1 or dtypes.is_int(dtype):  # fix index rendering issue
         r[u] = val
