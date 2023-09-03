@@ -148,17 +148,12 @@ class Tensor:
     return Tensor.full((math.ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
 
   @staticmethod
-  def full_like(tensor, fill_value, **kwargs):
-    return Tensor.full(tensor.shape, fill_value=fill_value, dtype=kwargs.pop("dtype", tensor.dtype), device=kwargs.pop("device", tensor.device), **kwargs)
-
-  @staticmethod
-  def zeros_like(tensor, **kwargs): return Tensor.full_like(tensor, 0, **kwargs)
-
-  @staticmethod
-  def ones_like(tensor, **kwargs): return Tensor.full_like(tensor, 1, **kwargs)
-
-  @staticmethod
   def eye(dim:int, **kwargs): return Tensor.full((dim,1),1,**kwargs).pad(((0,0),(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
+
+  def full_like(self, fill_value, **kwargs):
+    return Tensor.full(self.shape, fill_value=fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
+  def zeros_like(self, **kwargs): return self.full_like(0, **kwargs)
+  def ones_like(self, **kwargs): return self.full_like(1, **kwargs)
 
   # ***** rng hlops *****
 
@@ -502,7 +497,7 @@ class Tensor:
       return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
 
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
-    def apply_matrix(mat, t, dim=0): return t if dim == len(HW) else Tensor.stack([apply_matrix(mat, sum(mat[i][j] * t[j] for j in range(len(mat[i]))), dim=dim+1) for i in range(len(mat))])
+    def apply_matrix(mat, t, dim=0): return t if dim == len(HW) else Tensor.stack([apply_matrix(mat, sum(mat[i][j] * t[j] for j in range(len(mat[i])) if mat[i][j]), dim=dim+1) for i in range(len(mat))])
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
     winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
     winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
@@ -606,7 +601,9 @@ class Tensor:
 
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return mlops.Add.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else self
   def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return mlops.Sub.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x or reverse else self
-  def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return mlops.Mul.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x != 1.0 else self
+  def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+    if x.__class__ is not Tensor and x == 0.0: return mlops.Zero.apply(self)
+    return mlops.Mul.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x != 1.0 else self
   def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return mlops.Div.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or reverse or not x or not dtypes.is_float(self.dtype) else self.mul(1/x)
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     if x.__class__ is not Tensor and not reverse:
