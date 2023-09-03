@@ -139,13 +139,15 @@ class Linearizer(OptimizedKernel):
             alt = self.uop(UOps.CONST, localtype, [], invalid_value, cachable=True)
             self.load_cache[key] = self.uop(UOps.ALU, localtype, [valid_rendered, self.load_cache[key], alt], TernaryOps.WHERE, cachable=True)
         else:
+          buf_uop = self.buf_uops[i]
+          assert buf_uop is not None, f"buffer {i} wasn't UOped"
           idx_rendered = idx.render(self.render_ops, self)
           if valid.min == 0:
             valid_rendered = valid.render(self.render_ops, self)
             alt = self.uop(UOps.CONST, localtype, [], invalid_value, cachable=True)
-            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [self.buf_uops[i], idx_rendered, valid_rendered, alt])
+            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [buf_uop, idx_rendered, valid_rendered, alt])
           else:
-            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [self.buf_uops[i], idx_rendered])
+            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [buf_uop, idx_rendered])
           #self.load_cache[key] = self.uop(UOps.LOAD, localtype, [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value))
       ret.append(self.uop(UOps.GEP, dtypes.float32, [self.load_cache[key]], expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
@@ -189,7 +191,7 @@ class Linearizer(OptimizedKernel):
 
     # uops
     self.uops: List[UOp] = []
-    self.buf_uops: Dict[int, UOp] = {}
+    self.buf_uops: List[Optional[UOp]] = [None]*len(self.bufs)
 
     # add global buffers
     arg_bufs = {}
@@ -202,13 +204,13 @@ class Linearizer(OptimizedKernel):
       self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, [], (var.expr, dtypes._arg_int32))
     # define local buffers
     for lb in self.local_alias.values():
-      self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), [], (lb.name, self.sts[self.bufs.index(lb)].size()))
+      self.buf_uops[self.bufs.index(lb)] = self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), [], (lb.name, self.sts[self.bufs.index(lb)].size()))
     # add a local buffer for multistage reduce. # TODO: use local alias
     if self.group_for_reduce:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
-      self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), [], ("temp", self.sts[-1].size()))
+      self.buf_uops[-1] = self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), [], ("temp", self.sts[-1].size()))
 
     # print
     if DEBUG >= 3: self.printbufs()

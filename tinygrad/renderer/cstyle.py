@@ -212,6 +212,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         prekernel.append(lang.render_local(args[0], args[1]))
       else:
         kk(lang.render_local(args[0], args[1]))
+      r[u] = args[0]
     elif uop == UOps.DEFINE_GLOBAL:
       bufs.append(args)
       r[u] = args[0]
