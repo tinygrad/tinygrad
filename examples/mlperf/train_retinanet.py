@@ -21,7 +21,7 @@ from torch.nn import SmoothL1Loss
 from torch import tensor
 
 
-NUM = getenv("NUM", 2)
+NUM = getenv("NUM", 18)
 BS = getenv("BS", 8)
 CNT = getenv("CNT", 10)
 BACKWARD = getenv("BACKWARD", 1)
@@ -99,7 +99,8 @@ def bbox_transform(proposals, reference_boxes):
   return targets
 
 class RetinaNetTrainer:
-    def __init__(self, model : RetinaNet = RetinaNet(ResNeXt50_32X4D())):
+    def __init__(self, model : RetinaNet = RetinaNet(ResNeXt50_32X4D(num_classes=None))):
+        Warning("Resnet numclasses = 1000 is ok? check this")
         self.model = model
         self.optimizer = optim.SGD(get_parameters(model), lr=0.001)   
         self.input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
@@ -138,9 +139,12 @@ class RetinaNetTrainer:
             classification_masks[i, np.concatenate((matched_anchor_idxs,unmatched_anchor_idxs))] = 1
                    
         return {"regression_targets": regression_targets, "classification_targets": classification_targets, "regression_masks": regression_masks, "classification_masks": classification_masks}
-        
+    def freeze_selected_backbone_layers(self, layers):
+        """(MLPerf) The weights of the first two stages are frozen (code). In addition, all batch norm layers in the backbone are frozen (code)."""
+        raise NotImplementedError
+    
     def train(self):
-        NUM = getenv("NUM", 2)
+        NUM = getenv("NUM", 18)
         BS = getenv("BS", 3)
         CNT = getenv("CNT", 10)
         BACKWARD = getenv("BACKWARD", 1)
@@ -152,11 +156,9 @@ class RetinaNetTrainer:
         retina = self.model 
         retina.load_from_pretrained()
 
-
+        #self.freeze_selected_backbone_layers()
 
         anchors_flattened_levels = np.concatenate(retina.anchor_gen(self.image_size))
-        #params = get_parameters(retina)
-        #for p in params: p.realize()
         optimizer = optim.SGD(get_parameters(retina), lr=0.001)
 
         Tensor.training = TRAINING
@@ -169,19 +171,13 @@ class RetinaNetTrainer:
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
             images = Tensor(resized, requires_grad=False)
 
-            #breakpoint()
-            #TODO tensors should not be turned into numpy
             head_outputs = retina(self.input_fixup(images))
 
-
             #eltwise_loss = self._eltwise_compute_loss(BS, targets, head_outputs) 
-            
             #imgwise_loss_np = self._imgwise_compute_loss_np(BS, targets, head_outputs)
+            #batchwise_loss = self._batchwise_compute_loss(BS, targets, head_outputs)
             imgwise_loss = self._imgwise_compute_loss(BS, targets, head_outputs)
             
-            #batchwise_loss = self._batchwise_compute_loss(BS, targets, head_outputs)
-
-            #print("step loss: ", imgwise_loss.numpy(), " np step loss: ", imgwise_loss_np.numpy())
             print("step loss: ", imgwise_loss.numpy())
             optimizer.zero_grad()
             imgwise_loss.backward()

@@ -66,19 +66,6 @@ class RetinaNet:
     return self.forward(x)
   def forward(self, x):
     return self.head(self.backbone(x))
-  
-  def _forward_train(self, images, features, targets = None, ):
-    assert(Tensor.training)
-    box_cls, box_regression = self.head.regression_head(images), self.head.classification_head(images)
-
-    anchors = self.anchor_gen(images[0][0].shape) #BS, Ch, w, h
-    
-    loss_box_cls, loss_box_reg = self.loss_evaluator(anchors, box_cls, box_regression, targets)
-    losses = {
-            "loss_retina_cls": loss_box_cls,
-            "loss_retina_reg": loss_box_reg,
-    }
-    return anchors, losses
 
   def load_from_pretrained(self):
     model_urls = {
