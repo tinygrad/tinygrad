@@ -149,12 +149,14 @@ backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # anti
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
 backend_test.exclude('test_operator_addconstant_cpu') # bad data type
 
+# 1556
 backend_test.exclude('test_isinf_cpu')
 backend_test.exclude('test_isinf_negative_cpu')
 backend_test.exclude('test_isinf_positive_cpu')
 backend_test.exclude('test_isnan_cpu')
 
 if getenv("CPU") or getenv("ARM64"):
+  # not too sure
   backend_test.exclude('test_dequantizelinear_axis_cpu')
   backend_test.exclude('test_dequantizelinear_cpu')
 

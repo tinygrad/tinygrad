@@ -180,9 +180,9 @@ def get_run_onnx(onnx_model: ModelProto):
         else: raise NotImplementedError(f'Constant not implemented for {opt}')
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
-        if n.op_type == "Add": ret = (inp[0] + inp[1])
-        if n.op_type == "Sub": ret = inp[0] - inp[1]
-        if n.op_type == "Mul": ret = (inp[0] * inp[1])
+        if n.op_type == "Add": ret = inp[0] + inp[1] if inp[0].dtype == dtypes.float else (inp[0] + inp[1]).cast(inp[0].dtype)
+        if n.op_type == "Sub": ret = inp[0] - inp[1] # some tests have ints as inp
+        if n.op_type == "Mul": ret = inp[0] * inp[1] if inp[0].dtype == dtypes.float else (inp[0] * inp[1]).cast(inp[0].dtype)
         if n.op_type == "Pow": ret = (inp[0].float() ** inp[1].float()).cast(inp[0].dtype)
       elif n.op_type == "Split":
         if 'axis' not in opt: opt['axis'] = 0
