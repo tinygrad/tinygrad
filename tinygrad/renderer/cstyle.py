@@ -173,6 +173,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     elif uop == UOps.ALU:
       assert dtype is not None
       val = lang.code_for_op[args](*[r[x] for x in vin])
+      assert child_count[u] != 0, f"childless ALU op found {u}"
       if child_count[u] <= 1: r[u] = val
       else:
         r[u] = ssa('alu')

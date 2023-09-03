@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, Dict, Iterator, Union, Sequence, Final
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, Dict, Iterator, Union, Sequence, Final, Set
 import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
@@ -358,6 +358,18 @@ class Linearizer(OptimizedKernel):
 
     # end the global (and maybe local) loop
     self.uop(UOps.ENDLOOP, None, [], (loop_global_idxs+loop_local_idxs, "global+local") if not self.group_for_reduce else (loop_global_idxs, "global"))
+
+    # (recursively) remove childless uops
+    UOPS_WO_SIDE_EFFECTS = {UOps.CONST, UOps.ALU, UOps.LOAD, UOps.CAST, UOps.GEP}
+    while 1:
+      has_child: Set[UOp] = set()
+      for ru in self.uops:
+        for vu in ru.vin:
+          has_child.add(vu)
+      nu: List[UOp] = [x for x in self.uops if x in has_child or x.uop not in UOPS_WO_SIDE_EFFECTS]
+      if len(nu) == len(self.uops): break
+      if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
+      self.uops = nu
 
     return self
 
