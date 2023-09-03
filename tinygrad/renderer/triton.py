@@ -90,7 +90,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       else: kk(f"{r[u]} = tl.where({args.valid.render()}, tl.load({args.name}+{fill_dims_for_idx(args.idx,dims)} , mask={args.valid.render()}), 0.0).to({triton_dtypes[args.memory_dtype]})")
     elif uop == UOps.CONST or uop == UOps.DEFINE_ACC:
       r[u] = ssa("const" if uop == UOps.CONST else "acc")
-      val = ('-' if math.isinf(args) and args<0 else'') + ('float("inf")' if math.isinf(args) else str(args))
+      val = (('-' if args<0 else '') + 'float("inf")') if math.isinf(args) else ('float('nan")' if math.isnan(args) else str(args))
       if math.isnan(args): val = "float('nan')"
       if len(local_size) > 0:
         kk(f"{r[u]} = tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{val}, dtype={triton_dtypes[newvar]})") 
