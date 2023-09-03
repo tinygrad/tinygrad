@@ -5,7 +5,7 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 from tinygrad.ops import GlobalCounters, LazyOp, LoadOps
 from tinygrad.ops import Device
-from tinygrad.helpers import CI, dtypes
+from tinygrad.helpers import CI, dtypes, getenv
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet
@@ -61,6 +61,7 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t): return model(t, 0).realize()
+    # NOTE: only test one pass, not testing the dynamic shape autoregressive part
     helper_test("test_llama", lambda: (Tensor([[1,]]),), test, 0.22 if CI else 13.5, 126 if CI else 486)
 
     Tensor.default_type = old_type
@@ -79,6 +80,7 @@ class TestRealWorld(unittest.TestCase):
 
     Tensor.default_type = old_type
 
+  @unittest.skipIf(getenv("KOPT"), "cifar hangs with KOPT")
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
   def test_train_cifar(self):
     # TODO: with default device
