@@ -159,9 +159,10 @@ class GPT2:
     # lm head and wte are tied
     weights['lm_head.weight'] = Tensor(weights['wte.weight'].numpy())
 
-    load_state_dict(model, weights)
     if getenv("FP16"):
-      for v in get_state_dict(model).values(): v.assign(v.cast(dtypes.float16).realize())
+      for k,v in weights.items():
+        weights[k] = v.cast(dtypes.float16).realize()
+    load_state_dict(model, weights)
     return GPT2(model, tokenizer)
 
   def __init__(self, model, tokenizer):
