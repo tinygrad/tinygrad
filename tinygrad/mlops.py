@@ -23,6 +23,10 @@ class Cast(Function):
 
 # ************* unary ops *************
 
+class Zero(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer: return x.const(0)
+  def backward(self, grad:LazyBuffer) -> LazyBuffer: return grad.const(0)
+
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
