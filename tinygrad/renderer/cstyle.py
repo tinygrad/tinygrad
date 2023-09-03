@@ -189,20 +189,23 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     elif uop == UOps.LOAD:
       assert dtype is not None
       cast = f"({lang.smem_prefix if vin[0].uop == UOps.DEFINE_LOCAL else lang.buffer_prefix}{dtype.name}*)" if dtype.sz > 1 else ""
-      r[u] = ssa('val')
       val = f"*{cast}({r[vin[0]]}+{r[vin[1]]})" if lang.uses_ptr_arithmetic else f"{r[vin[0]]}[{r[vin[1]]}]"
       # valids are handled here
       #val = lang.render_load(dtype, args.name, args.memory_dtype, args.idx, args.local)
       #if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(args.invalid_value, dtype))
-
+      r[u] = ssa('val')
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {val};")
     elif uop == UOps.STORE:
-      if args is None:
+      if len(vin) == 2:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
+      elif len(vin) == 3:
+        assert vin[2].dtype is not None
+        cast = f"({lang.smem_prefix if vin[0].uop == UOps.DEFINE_LOCAL else lang.buffer_prefix}{vin[2].dtype.name}*)" if vin[2].dtype.sz > 1 else ""
+        val = f"*{cast}({r[vin[0]]}+{r[vin[1]]})" if lang.uses_ptr_arithmetic else f"{r[vin[0]]}[{r[vin[1]]}]"
+        kk(f"{val} = {r[vin[2]]};")
       else:
         assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
         assert vin[0].dtype is not None
-        # TODO: instead of dtypes.float, a base type
         kk(lang.render_store(args.name, args.memory_dtype, r[vin[0]], vin[0].dtype, args.idx, args.local))
     elif uop == UOps.CAST and dtype is not None and dtype.sz > 1:
       r[u] = ssa('cast')
