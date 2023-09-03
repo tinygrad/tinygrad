@@ -363,6 +363,12 @@ class Linearizer(OptimizedKernel):
 
   def uop(self, uop:UOps, dtype:Optional[DType], vin:Union[Tuple[UOp, ...], List[UOp]], arg:Any=None, cachable=False) -> UOp:
     key = (uop, dtype, tuple(vin), arg)
+    # constant folding
+    if uop == UOps.ALU:
+      for x in [0,1]:
+        if arg == BinaryOps.ADD and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
+        if arg == BinaryOps.MUL and vin[x].uop == UOps.CONST and vin[x].arg == 1.0: return vin[1-x]
+        if arg == BinaryOps.MUL and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[x]
     if cachable and key in self.saved_exprs: return self.saved_exprs[key]
     self.uops.append(UOp(uop, dtype, tuple(vin), arg, len(self.uops)))
     if DEBUG >= 4: print(self.uops[-1])
