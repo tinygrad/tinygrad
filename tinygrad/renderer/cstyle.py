@@ -123,6 +123,12 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     for v in ru.vin:
       child_count[v] += 1
 
+  def render_deref(vin:List[UOp], dtype:DType) -> str:
+    cast = f"({lang.smem_prefix if vin[0].uop == UOps.DEFINE_LOCAL else lang.buffer_prefix}{dtype.name}*)" if dtype.sz > 1 else ""
+    ret = r[vin[1]]
+    if ret[0] == '(' and ret[-1] == ')': ret = ret[1:-1]
+    return f"*{cast}({r[vin[0]]}+{ret})" if lang.uses_ptr_arithmetic else f"{r[vin[0]]}[{ret}]"
+
   for u in uops:
     uop,dtype,vin,args,_ = u
     if uop == UOps.LOOP:
@@ -174,7 +180,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       assert dtype is not None
       val = lang.code_for_op[args](*[r[x] for x in vin])
       assert child_count[u] != 0, f"childless ALU op found {u}"
-      if child_count[u] <= 1: r[u] = val
+      if child_count[u] <= 1 or dtypes.is_int(dtype):  # fix index rendering issue
+        r[u] = val
       else:
         r[u] = ssa('alu')
         kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {val};")
@@ -188,8 +195,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
     elif uop == UOps.LOAD:
       assert dtype is not None
-      cast = f"({lang.smem_prefix if vin[0].uop == UOps.DEFINE_LOCAL else lang.buffer_prefix}{dtype.name}*)" if dtype.sz > 1 else ""
-      val = f"*{cast}({r[vin[0]]}+{r[vin[1]]})" if lang.uses_ptr_arithmetic else f"{r[vin[0]]}[{r[vin[1]]}]"
+      val = render_deref(vin, dtype)
       # valids are handled here
       #val = lang.render_load(dtype, args.name, args.memory_dtype, args.idx, args.local)
       #if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(args.invalid_value, dtype))
@@ -200,8 +206,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
       elif len(vin) == 3:
         assert vin[2].dtype is not None
-        cast = f"({lang.smem_prefix if vin[0].uop == UOps.DEFINE_LOCAL else lang.buffer_prefix}{vin[2].dtype.name}*)" if vin[2].dtype.sz > 1 else ""
-        val = f"*{cast}({r[vin[0]]}+{r[vin[1]]})" if lang.uses_ptr_arithmetic else f"{r[vin[0]]}[{r[vin[1]]}]"
+        val = render_deref(vin, vin[2].dtype)
         kk(f"{val} = {r[vin[2]]};")
       else:
         assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
