@@ -38,7 +38,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
   if not opts: return "BASELINE"
   search_space = prod([len(x.choices) for x in opts])
   st = time.perf_counter()
-  budget = int(getenv("BUDGET", 200))
+  budget = getenv("BUDGET", 200)
   optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, budget))
   recommendation = optimizer.minimize(opt)
   et = time.perf_counter() - st
