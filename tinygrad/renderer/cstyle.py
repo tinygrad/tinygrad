@@ -179,7 +179,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     elif uop == UOps.ALU:
       assert dtype is not None
       # remove parens if ALU types are the same. TODO: can do more here
-      if vin[0].uop == UOps.ALU and vin[0].arg == args:
+      if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL}:
         fst = r[vin[0]]
         if fst[0] == '(' and fst[-1] == ')': fst = fst[1:-1]
         val = lang.code_for_op[args](fst, *[r[x] for x in vin[1:]])
@@ -203,6 +203,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       assert dtype is not None
       val = render_deref(vin, dtype)
       # valids are handled here
+      if len(vin) > 2: val = lang.render_conditional(r[vin[2]], val, r[vin[3]])
       #val = lang.render_load(dtype, args.name, args.memory_dtype, args.idx, args.local)
       #if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(args.invalid_value, dtype))
       r[u] = ssa('val')
