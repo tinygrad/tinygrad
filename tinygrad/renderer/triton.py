@@ -106,9 +106,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       signatures.append(signature_dtypes[args[1]])
     elif uop == UOps.SPECIAL:
       r[u] = args.expr
-    elif uop == UOps.CAST: raise NotImplementedError("unimplemented: cast")
-    else:
-      raise NotImplementedError(f"unimplemented: {uop}")  
+    else: raise NotImplementedError(f"unimplemented: {uop}")  
   
   prg = f"@triton.jit\ndef {function_name}("+','.join(f"{buf[0]}" for buf in bufs)+"):\n"
   prg += '\n'.join(kernel)
