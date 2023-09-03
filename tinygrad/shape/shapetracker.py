@@ -114,7 +114,7 @@ def _reshape(view: View, new_shape:Tuple[int, ...]) -> Tuple[View, bool]:
   new_view = View(new_shape)
   if view.contiguous: return new_view, False # NOTE: if it's contiguous it can't have an offset
   if (merged_view := merge_views(view, new_view)) is not None: return merged_view, False
-  if DEBUG >= 4: print(f"WARNING: creating new view with reshape {view} -> {new_shape}")
+  if DEBUG >= 5: print(f"WARNING: creating new view with reshape {view} -> {new_shape}")
   return new_view, True
 
 @functools.lru_cache(maxsize=None)
