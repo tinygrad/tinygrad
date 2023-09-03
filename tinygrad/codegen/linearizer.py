@@ -139,7 +139,14 @@ class Linearizer(OptimizedKernel):
             alt = self.uop(UOps.CONST, localtype, [], invalid_value, cachable=True)
             self.load_cache[key] = self.uop(UOps.ALU, localtype, [valid_rendered, self.load_cache[key], alt], TernaryOps.WHERE, cachable=True)
         else:
-          self.load_cache[key] = self.uop(UOps.LOAD, localtype, [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value))
+          idx_rendered = idx.render(self.render_ops, self)
+          if valid.min == 0:
+            valid_rendered = valid.render(self.render_ops, self)
+            alt = self.uop(UOps.CONST, localtype, [], invalid_value, cachable=True)
+            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [self.buf_uops[i], idx_rendered, valid_rendered, alt])
+          else:
+            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [self.buf_uops[i], idx_rendered])
+          #self.load_cache[key] = self.uop(UOps.LOAD, localtype, [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value))
       ret.append(self.uop(UOps.GEP, dtypes.float32, [self.load_cache[key]], expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
 
@@ -182,10 +189,14 @@ class Linearizer(OptimizedKernel):
 
     # uops
     self.uops: List[UOp] = []
+    self.buf_uops: Dict[int, UOp] = {}
 
     # add global buffers
+    arg_bufs = {}
     for buf,name in self.arg_bufs.items():
-      self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype), [], (name, buf.dtype))
+      arg_bufs[buf] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype), [], (name, buf.dtype))
+    for i,b in enumerate(self.bufs):
+      if b.realized in arg_bufs: self.buf_uops[i] = arg_bufs[b.realized]
     # add variables from symbolic shapes
     for var in sorted(set(v for buf in self.ast.buffers for v in buf.st.var_vals), key=lambda k: k.key):
       self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, [], (var.expr, dtypes._arg_int32))

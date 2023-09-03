@@ -188,10 +188,13 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
     elif uop == UOps.LOAD:
       assert dtype is not None
+      cast = f"({lang.smem_prefix if vin[0].uop == UOps.DEFINE_LOCAL else lang.buffer_prefix}{dtype.name}*)" if dtype.sz > 1 else ""
       r[u] = ssa('val')
+      val = f"*{cast}({r[vin[0]]}+{r[vin[1]]})" if lang.uses_ptr_arithmetic else f"{r[vin[0]]}[{r[vin[1]]}]"
       # valids are handled here
-      val = lang.render_load(dtype, args.name, args.memory_dtype, args.idx, args.local)
-      if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(args.invalid_value, dtype))
+      #val = lang.render_load(dtype, args.name, args.memory_dtype, args.idx, args.local)
+      #if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(args.invalid_value, dtype))
+
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {val};")
     elif uop == UOps.STORE:
       if args is None:
@@ -211,6 +214,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         kk(lang.render_local(args[0], args[1]))
     elif uop == UOps.DEFINE_GLOBAL:
       bufs.append(args)
+      r[u] = args[0]
     elif uop == UOps.GEP:
       r[u] = f"{r[vin[0]]}.{'xyzw'[args]}"
     else:
