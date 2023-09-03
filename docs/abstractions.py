@@ -247,6 +247,7 @@ class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = aut
 
 class UOp:
   uop: UOps
+  dtype: Optional[DType]
   vin: Tuple[UOp, ...]
   arg: Any
   num: int  # UOps are unique
