@@ -197,6 +197,10 @@ class ShapeTracker:
   def needs_valid(self) -> bool:
     return any(v.mask is not None for v in self.views)
 
+  def axis_is_masked(self, axis) -> bool:
+    _, valid = self.expr_idxs()
+    return f'idx{axis}' in [v.expr for v in valid.vars()]
+
   # *** under this line are the movement ops ***
 
   def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...], mask=None):
