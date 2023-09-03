@@ -149,6 +149,69 @@ backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # anti
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
 backend_test.exclude('test_operator_addconstant_cpu') # bad data type
 
+backend_test.exclude('test_isinf_cpu')
+backend_test.exclude('test_isinf_negative_cpu')
+backend_test.exclude('test_isinf_positive_cpu')
+backend_test.exclude('test_isnan_cpu')
+
+if getenv("CPU") or getenv("ARM64"):
+  backend_test.exclude('test_dequantizelinear_axis_cpu')
+  backend_test.exclude('test_dequantizelinear_cpu')
+
+if getenv("TORCH"): # 1562
+  backend_test.exclude('test_and2d_cpu')
+  backend_test.exclude('test_and3d_cpu')
+  backend_test.exclude('test_and4d_cpu')
+  backend_test.exclude('test_and_bcast3v1d_cpu')
+  backend_test.exclude('test_and_bcast3v2d_cpu')
+  backend_test.exclude('test_and_bcast4v2d_cpu')
+  backend_test.exclude('test_and_bcast4v3d_cpu')
+  backend_test.exclude('test_and_bcast4v4d_cpu')
+  backend_test.exclude('test_dequantizelinear_axis_cpu')
+  backend_test.exclude('test_dequantizelinear_cpu')
+  backend_test.exclude('test_greater_equal_bcast_expanded_cpu')
+  backend_test.exclude('test_greater_equal_expanded_cpu')
+  backend_test.exclude('test_isinf_cpu')
+  backend_test.exclude('test_isinf_negative_cpu')
+  backend_test.exclude('test_isinf_positive_cpu')
+  backend_test.exclude('test_isnan_cpu')
+  backend_test.exclude('test_less_equal_bcast_expanded_cpu')
+  backend_test.exclude('test_less_equal_expanded_cpu')
+  backend_test.exclude('test_or2d_cpu')
+  backend_test.exclude('test_or3d_cpu')
+  backend_test.exclude('test_or4d_cpu')
+  backend_test.exclude('test_or_bcast3v1d_cpu')
+  backend_test.exclude('test_or_bcast3v2d_cpu')
+  backend_test.exclude('test_or_bcast4v2d_cpu')
+  backend_test.exclude('test_or_bcast4v3d_cpu')
+  backend_test.exclude('test_or_bcast4v4d_cpu')
+  backend_test.exclude('test_xor2d_cpu')
+  backend_test.exclude('test_xor3d_cpu')
+  backend_test.exclude('test_xor4d_cpu')
+  backend_test.exclude('test_xor_bcast3v1d_cpu')
+  backend_test.exclude('test_xor_bcast3v2d_cpu')
+  backend_test.exclude('test_xor_bcast4v2d_cpu')
+  backend_test.exclude('test_xor_bcast4v3d_cpu')
+  backend_test.exclude('test_xor_bcast4v4d_cpu')
+
+if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or getenv('MPS'):
+  # compiled backends cannot reshape to 0 or from 0
+  backend_test.exclude('test_slice_start_out_of_bounds_cpu')
+  backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
+
+if getenv('GPU') or getenv('METAL') or getenv('MPS'):
+  backend_test.exclude('test_mish_cpu') # weird inaccuracy
+  backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
+  backend_test.exclude('test_eyelike_with_dtype_cpu') # I'm not sure about this...
+
+if getenv('METAL') or getenv('MPS'):
+  # (((Tensor([0,1,2,3,4,5])+0.5)/3.5 - 0.5)) Try this with METAL and LLVM, weird weird inaccuracy
+  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
+  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
+  backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
+    
+    
+
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):

@@ -145,7 +145,7 @@ def _auto_pad(X, auto_pad, strides, kernel_shape, dilations):
   elif auto_pad == "SAME_LOWER": return [pad_shape[0]-pad_shape[0]//2, pad_shape[1]-pad_shape[1]//2, pad_shape[0]//2,  pad_shape[1]//2]
   else: raise NotImplementedError(f"auto_pad={auto_pad} not implemented, yet")
 
-def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.): # BUG: OUTPUT HAS WRONG SHAPE BUT CHECK DIDNT PICK UP
+def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
   constant_value = value if constant_value is None else float(safe_numpy(constant_value)[0])
   seq_pads = list(pads) if isinstance(pads, tuple) else safe_numpy(pads)
   seq_pads = [math.ceil(i) for i in seq_pads]
@@ -215,11 +215,6 @@ def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=Non
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=padding)
 
 def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, output_shape=None, output_padding=0, strides=1):
-  # total_padding = [st * (xs-1) + op + ((ks-1)*di+1) - os for st,xs,op,ks,di,os in zip(strides_, X.shape, output_padding, kernel_shape, dilations_, output_shape)]
-  # if auto_pad == "SAME_UPPER": pads = [total_padding[-2]/2, total_padding[-1]/2, total_padding[-2]-total_padding[-2]/2, total_padding[-1]-total_padding[-1]/2]
-  # else: pads = [total_padding[-2]-total_padding[-2]/2, total_padding[-1]-total_padding[-1]/2, total_padding[-2]/2, total_padding[-1]/2]
-  # output_shape = [st*(xs-1) + (ks-1)*di+1 if n < 2 else st*(xs-1) + (ks-1)*di+1 - pads[n-2] - pads[n-1] for n, (st, xs, ks, di) in enumerate(zip(strides_, X.shape, kernel_shape, dilations_))]
-  # output_padding = [os - rs for os, rs in zip(output_shape, output_shape[-len(output_shape):])]
   if not kernel_shape: kernel_shape = W.shape
   if pads is None and auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
   elif pads is None and auto_pad == "NOTSET": pads = [0,0] * (X.ndim - 2)
@@ -389,12 +384,6 @@ def SoftmaxCrossEntropyLoss(scores, labels, weights=None, ignore_index=None, red
   return loss, y
 
 def ArrayFeatureExtractor(input, indices): return input.__getitem__(tuple([slice(None) if i != (input.ndim-1) else indices for i in range(input.ndim)]))
-        # axis = opt['axis'] if 'axis' in opt else 0
-        # shape = list(inp[0].shape)
-        # indices = [shape[axis]+int(x) if x<0 else int(x) for x in safe_numpy(inp[1])]
-        # args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
-        # ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
-        # ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
 def Gather(input, indices, axis=0):
   if indices.numel() < 9: # TODO not sure the exact number, need to run performance tests
     # NOTE faster gather and lessor kernels for smaller indices SOMETHING SOMETHING O(?) IDK I DIDN'T GO TO SCHOOL FOR THIS but kernel number increases depending on size of indices
@@ -439,7 +428,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     return ret.clip(0, x_len-1)
   def _coordinate_transformation(x_out, y_out, output_shape, scales_lol, roi=None):
     if coordinate_transformation_mode == "half_pixel":
-      x_out = (x_out + 0.5)/Tensor(scales_lol[-1]) - 0.5 # TODO Tensor() because try (((Tensor([0,1,2,3,4,5])+0.5)/3.5 - 0.5)) with LLVM, inaccuacy.
+      x_out = (x_out + 0.5)/Tensor(scales_lol[-1]) - 0.5 # TODO Tensor() because try (((Tensor([0,1,2,3,4,5])+0.5)/3.5 - 0.5)) with LLVM or METAL, inaccuacy.
       y_out = (y_out + 0.5)/Tensor(scales_lol[-2]) - 0.5
     elif coordinate_transformation_mode == "align_corners":
       x_out = x_out * (X.shape[-1] - 1) / (output_shape[-1] - 1)
@@ -592,6 +581,7 @@ def Asinh(x): return Tensor.log(x + Tensor.sqrt(x * x + 1))
 def Acosh(x): return Tensor.log(x + Tensor.sqrt(x * x - 1))
 def Atanh(x): return 0.5 * Tensor.log((1 + x)/(1 - x))
 
+# Needs work
 def IsInf(x,detect_negative=1,detect_positive=1):
   ret = (x == float("inf"))*detect_positive + (x == float("-inf"))*detect_negative + Tensor.zeros(*x.shape)
   return ret.cast(dtypes.bool)
@@ -684,9 +674,6 @@ def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=a
 
 def Upsample(X, scales, mode):
   return Resize(X=X, scales=scales, mode=mode)
-
-# def NoneZero(condition):
-  # condition.shape
 
 type_map = {TensorProto.DOUBLE: dtypes.double, TensorProto.FLOAT: dtypes.float32}
 def EyeLike(x, dtype=None, k=0):
