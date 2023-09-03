@@ -92,9 +92,9 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       r[u] = ssa("const" if uop == UOps.CONST else "acc")
       val = (('-' if args<0 else '') + 'float("inf")') if math.isinf(args) else ('float("nan")' if math.isnan(args) else str(args))
       if len(local_size) > 0:
-        kk(f"{r[u]} = tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{val}, dtype={triton_dtypes[newvar]})") 
+        kk(f"{r[u]} = tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{val}, dtype={triton_dtypes[newvar]})") # type: ignore
       else:
-        kk(f"{r[u]} = tl.where(1, {val}, {val}).to({triton_dtypes[newvar]})")
+        kk(f"{r[u]} = tl.where(1, {val}, {val}).to({triton_dtypes[newvar]})")# type: ignore
     elif uop == UOps.STORE:
       assert not isinstance(newvar, ImageDType), "unimplemented: image store"
       if args is None:
