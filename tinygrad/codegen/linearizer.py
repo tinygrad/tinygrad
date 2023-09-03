@@ -364,7 +364,12 @@ class Linearizer(OptimizedKernel):
   def uop(self, uop:UOps, dtype:Optional[DType], vin:Union[Tuple[UOp, ...], List[UOp]], arg:Any=None, cachable=False) -> UOp:
     key = (uop, dtype, tuple(vin), arg)
     if uop == UOps.STORE and len(vin) == 2 and vin[0] == vin[1]: return vin[0]   # self store is noop
-    if uop == UOps.ALU:  # zero folding
+    if uop == UOps.ALU:
+      # rewrites. NOTE: the rewritten NEG op is still around...
+      if arg == BinaryOps.ADD and vin[1].uop == UOps.ALU and vin[1].arg == UnaryOps.NEG: return self.uop(UOps.ALU, dtype, [vin[0], vin[1].vin[0]], BinaryOps.SUB, cachable=cachable)
+      # constant folding
+      if arg == UnaryOps.NEG and vin[0].uop == UOps.CONST: return self.uop(UOps.CONST, dtype, [], -vin[0].arg, cachable=True)
+      # zero folding
       for x in [0,1]:
         if arg == BinaryOps.ADD and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
         if arg == BinaryOps.MUL and vin[x].uop == UOps.CONST and vin[x].arg == 1.0: return vin[1-x]
