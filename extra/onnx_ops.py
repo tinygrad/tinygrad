@@ -20,7 +20,7 @@ def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
   for input in grouped_inputs:
     X, G, H = input
     X.grad = norm_coefficient * X + G
-    X.grad.requires_grad, H.requires_grad = False, False # TODO manually turning off requires_grad, see onnx.py:119
+    X.grad.requires_grad, H.requires_grad = False, False # TODO manually turning off requires_grad, see onnx.py:127
     H.assign(H.detach() + X.grad * X.grad).realize()
     H_adaptive = H.sqrt() + epsilon
     X.assign(X.detach() - r * X.grad / H_adaptive)
@@ -385,15 +385,14 @@ def SoftmaxCrossEntropyLoss(scores, labels, weights=None, ignore_index=None, red
 
 def ArrayFeatureExtractor(input, indices): return input.__getitem__(tuple([slice(None) if i != (input.ndim-1) else indices for i in range(input.ndim)]))
 def Gather(input, indices, axis=0):
-  if indices.numel() < 9: # TODO not sure the exact number, need to run performance tests
-    # NOTE faster gather and lessor kernels for smaller indices SOMETHING SOMETHING O(?) IDK I DIDN'T GO TO SCHOOL FOR THIS but kernel number increases depending on size of indices
+  if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
     input_sh = list(input.shape)
     ret_shape = input_sh[:axis] + list(indices.shape) + input_sh[axis+1:]
     if indices.ndim > 1: indices = indices.flatten()
     indices = [int(safe_numpy(indices))] if indices.shape == () else [input_sh[axis]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
     args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(input_sh)] for i in indices]
     return input.shrink(arg=tuple(args[0])).cat(*[input.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
-  else: # NOTE faster gather with larger indices probably, fixed number of kernels, but exceeds 199 kernels for openpilot
+  else: # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
     return input.__getitem__(tuple([slice(None) if i != axis else indices for i in range(input.ndim)]))
 
 def GatherElements(input, indices, axis):
