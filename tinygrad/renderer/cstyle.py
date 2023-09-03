@@ -32,6 +32,7 @@ class CStyleLanguage(NamedTuple):
   uses_ptr_arithmetic: bool = False
   launch_bounds: bool = False
   code_for_op: Dict = {
+    UnaryOps.NEG: lambda x: f"(-{x})",
     UnaryOps.EXP2: lambda x: f"exp2({x})",
     UnaryOps.LOG2: lambda x: f"log2({x})",
     UnaryOps.SIN: lambda x: f"sin({x})",
