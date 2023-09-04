@@ -282,6 +282,31 @@ class OptimizedKernel(Kernel):
         # early exit
         return
 
+    # should use matvec
+    if getenv("MV",1) != 0 and self.opts.has_local and \
+        self.reduceop and self.reduceop.op == ReduceOps.SUM and \
+        isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
+        isinstance(self.reduceop.src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[1], LazyBuffer) and \
+        len(self.full_shape) >= 2:
+
+      buf0 = self.bufs.index(self.reduceop.src[0].src[0])
+      buf0_strides = self.sts[buf0].real_strides()
+      BLOCKSIZE = 32
+      THREADS_PER_ROW = 8
+      if self.full_shape[0] >= BLOCKSIZE*THREADS_PER_ROW and self.full_shape[0]%BLOCKSIZE == 0 and \
+          self.full_shape[1] >= BLOCKSIZE*THREADS_PER_ROW and self.full_shape[1]%THREADS_PER_ROW == 0 and \
+          buf0_strides[1] == 1:
+        self.shift_to(self.first_reduce, THREADS_PER_ROW, top=False, insert_before=self.first_reduce + len(self.group_for_reduce))
+        self.group_for_reduce.append(THREADS_PER_ROW)
+
+        self.shift_to(0, BLOCKSIZE, insert_before=self.first_reduce)
+        self.local_dims += 1
+
+        if self.full_shape[0] > BLOCKSIZE*4:
+          self.shift_to(0, 4)
+          self.upcast()
+        return
+
     if self.opts.has_local and all(isinstance(s, int) for s in self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
       if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:

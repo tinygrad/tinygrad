@@ -195,7 +195,7 @@ class Linearizer(OptimizedKernel):
     # add a local buffer for multistage reduce. # TODO: use local alias
     if self.group_for_reduce:
       # TODO: the strides of this can be controlled
-      self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      self.sts.append(ShapeTracker(tuple([1] * self.global_dims + [x for x in self.full_shape[self.global_dims:self.global_dims+self.local_dims+len(self.group_for_reduce)]] + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), [], ("temp", self.sts[-1].size()))
 
@@ -314,10 +314,7 @@ class Linearizer(OptimizedKernel):
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc)  # store accumulators
         self.uop(UOps.BARRIER, None, [], ())
-        self.uop(UOps.ENDLOOP, None, [], (loop_local_idxs, "local"))
-
-        # local indexs are over, 0 them out
-        local_idxs = [x*0 for x in local_idxs]
+        self.uop(UOps.ENDLOOP, None, [], ([loop_local_idxs[i]*0 if i < len(self.group_for_reduce) else loop_local_idxs[i] for i in range(0,self.local_dims+len(self.group_for_reduce))], "local"))
 
         # if any group_for_reduce items aren't reduces, upcast them here
         for j in self.upcast_in_mid_reduce_axes:
@@ -334,11 +331,11 @@ class Linearizer(OptimizedKernel):
         acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
 
         # late reduce loop
-        end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
+        end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(self.local_dims, self.first_reduce+len(self.group_for_reduce))]
         self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
         # load localbufs
-        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs)
+        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, fake_global_idxs+local_idxs[0:-len(self.group_for_reduce)]+end_local_idxs[-len(self.group_for_reduce):]+fake_reduce_idxs+upcast_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
         self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, do_reduce=True) # type: ignore
