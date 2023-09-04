@@ -43,30 +43,33 @@ class View(ViewInternal):
   def __init__(self, shape, strides=None, offset=0, mask=None, contiguous=False, shape_strides=()): super().__init__()
   def __repr__(self): return f"View(shape={self.shape}, strides={self.strides}, offset={self.offset}, mask={self.mask})"
 
-  def expr_node_mask(self, idx, valid=None) -> Node:
-    expr = [valid] if valid is not None else []
-    if self.mask is not None:
-      acc = 1
-      for ns,(x,y) in reversed(list(zip(self.shape, self.mask))):
-        base = ((idx//acc) % ns)
-        expr += [base >= x, base < y]
-        acc *= ns
-    return Variable.ands(expr)
-
-  # generate an expression if you have a single idx variable
-  def expr_node(self, idx=None) -> Node:
-    if idx is None: idx = Variable('idx', 0, prod(self.shape)-1)
-    ret: List[Node] = [Variable.num(self.offset) if isinstance(self.offset, int) else self.offset] if self.offset else []
+@functools.lru_cache(maxsize=None)
+def expr_node_mask(view, idx, valid=None) -> Node:
+  expr = [valid] if valid is not None else []
+  if view.mask is not None:
     acc = 1
-    for d,s in reversed(self.shape_strides):
-      ret.append(((idx//acc)%d)*s)
-      acc *= d
-    return Variable.sum(ret)
+    for ns,(x,y) in reversed(list(zip(view.shape, view.mask))):
+      base = ((idx//acc) % ns)
+      expr += [base >= x, base < y]
+      acc *= ns
+  return Variable.ands(expr)
 
-  # generate an expression if you have a variable or expression for each index
-  def expr_idxs(self, idxs) -> Node:
-    assert len(idxs) == len(self.shape), f"need an idx for all dimensions {idxs} vs {self.shape}"
-    return Variable.sum([Variable.num(self.offset) if isinstance(self.offset, int) else self.offset] + [idx*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
+# generate an expression if you have a single idx variable
+@functools.lru_cache(maxsize=None)
+def expr_node(view, idx=None) -> Node:
+  if idx is None: idx = Variable('idx', 0, prod(view.shape)-1)
+  ret: List[Node] = [Variable.num(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
+  acc = 1
+  for d,s in reversed(view.shape_strides):
+    ret.append(((idx//acc)%d)*s)
+    acc *= d
+  return Variable.sum(ret)
+
+# generate an expression if you have a variable or expression for each index
+@functools.lru_cache(maxsize=None)
+def expr_idxs_view(view, idxs) -> Node:
+  assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
+  return Variable.sum([Variable.num(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])
 
 @functools.lru_cache(maxsize=None)
 def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
@@ -172,8 +175,8 @@ class ShapeTracker:
 
   def _expr_idx(self, idx, valid) -> Tuple[Node, Node]:
     for v in reversed(self.views[0:-1]):
-      valid = v.expr_node_mask(idx, valid)
-      idx = v.expr_node(idx)
+      valid = expr_node_mask(v, idx, valid)
+      idx = expr_node(v, idx)
     return idx, valid
 
   def simplify(self):
@@ -186,13 +189,13 @@ class ShapeTracker:
 
   def expr_idxs(self, idxs=None):
     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
-    idx = self.views[-1].expr_idxs(tuple(idxs))
-    valid = self.views[-1].expr_node_mask(idxs_to_idx(self.views[-1].shape, tuple(idxs)))
+    idx = expr_idxs_view(self.views[-1], tuple(idxs))
+    valid = expr_node_mask(self.views[-1], idxs_to_idx(self.views[-1].shape, tuple(idxs)))
     return self._expr_idx(idx, valid)
 
   def expr_node(self, idx='idx'):
     if idx.__class__ is str: idx = Variable(idx, 0, prod(self.shape)-1)
-    return self._expr_idx(self.views[-1].expr_node(idx), self.views[-1].expr_node_mask(idx))
+    return self._expr_idx(expr_node(self.views[-1], idx), expr_node_mask(self.views[-1], idx))
 
   def needs_valid(self) -> bool:
     return any(v.mask is not None for v in self.views)
