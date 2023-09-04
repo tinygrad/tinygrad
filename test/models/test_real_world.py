@@ -36,15 +36,6 @@ def kopt_search_hook(k, create_k, to_prg, baseline):
   recommendation = optimizer.minimize(check_opt)
   return recommendation.value if recommendation.loss < baseline else "BASELINE"
 
-def hook_kopt():
-  np.random.seed(2002)
-  oldfunc = getattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search")
-  setattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search", kopt_search_hook)
-  return oldfunc
-
-def rem_kopt_hook(oldfunc):
-  setattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search", oldfunc)
-
 def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed):
   tms = []
   for _ in range(4):
@@ -76,20 +67,26 @@ def derandomize_model(model):
     p.realize()
 
 class TestRealWorld(unittest.TestCase):
+  def setUp(self):
+    np.random.seed(2002)
+    if getenv("KOPT"):
+      self.oldfunc = getattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search")
+      setattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search", kopt_search_hook)
+
+  def tearDown(self):
+    if getenv("KOPT"):
+      setattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search", self.oldfunc)
+
   @unittest.skipUnless(not CI, "too big for CI")
   def test_stable_diffusion(self):
-    if getenv("KOPT"): hooked_kopt_func = hook_kopt()
-
     model = UNetModel()
     derandomize_model(model)
     @TinyJit
     def test(t, t2): return model(t, 801, t2).realize()
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 967)
-    if getenv("KOPT"): rem_kopt_hook(hooked_kopt_func)
 
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
   def test_llama(self):
-    if getenv("KOPT"): hooked_kopt_func = hook_kopt()
     old_type = Tensor.default_type
     Tensor.default_type = dtypes.float16
 
@@ -102,11 +99,9 @@ class TestRealWorld(unittest.TestCase):
     helper_test("test_llama", lambda: (Tensor([[1,]]),), test, 0.22 if CI else 13.5, 126 if CI else 486)
 
     Tensor.default_type = old_type
-    if getenv("KOPT"): rem_kopt_hook(hooked_kopt_func)
 
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
   def test_gpt2(self):
-    if getenv("KOPT"): hooked_kopt_func = hook_kopt()
     old_type = Tensor.default_type
     Tensor.default_type = dtypes.float16
 
@@ -118,7 +113,6 @@ class TestRealWorld(unittest.TestCase):
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),), test, 0.21 if CI else 0.9, 129 if CI else 369)
 
     Tensor.default_type = old_type
-    if getenv("KOPT"): rem_kopt_hook(hooked_kopt_func)
 
   @unittest.skipIf(getenv("KOPT"), "cifar hangs with KOPT")
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
