@@ -74,7 +74,7 @@ class CStyleLanguage(NamedTuple):
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
 
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str,List[int],List[int]]:
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 self.arg_int_prefix if dtype == dtypes._arg_int32 else
@@ -83,22 +83,20 @@ class CStyleLanguage(NamedTuple):
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
-
-    return prg, global_size[::-1], local_size[::-1]
+    return prg
 
   # returns a str statement that does the store
-  def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
+  def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx:str, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
       assert var_dtype == dtypes._float4, "images must be float4"
       return f"write_imagef({buf_name}, {idx}, {var_name});"
     if self.uses_vload and buf_dtype == dtypes.float16:
-      return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{strip_parens(idx)});"
+      return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.sz > 1:
-      return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{strip_parens(idx)})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
-    return f"*({buf_name}+{strip_parens(idx)}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
+      return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
+    return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
 
-def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> Tuple[str, List[int], List[int]]:
-  global_size: List[int] = []
+def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> str:
   local_size: List[int] = []
   kernel,prekernel = [],[]
   #pend_close = None
@@ -168,13 +166,13 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     elif uop == UOps.SPECIAL:
       xid = lang.gid if args[1].startswith("g") else lang.lid
       kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]};")
-      (global_size if args[1].startswith("g") else local_size).append(args[2])
+      if args[1].startswith("l"): local_size.append(args[2])
       r[u] = args[1]
     elif uop == UOps.CONST:
       r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
     elif uop == UOps.LOAD:
       assert dtype is not None
-      val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, r[vin[1]], vin[0].uop == UOps.DEFINE_LOCAL)
+      val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
       if len(vin) > 2: val = lang.render_conditional(r[vin[2]], val, r[vin[3]])
       r[u] = ssa('val')
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {val};")
@@ -183,7 +181,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
       elif len(vin) == 3:
         assert vin[0].dtype is not None and vin[2].dtype is not None
-        kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, r[vin[1]], vin[0].uop == UOps.DEFINE_LOCAL))
+        kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
     elif uop == UOps.CAST and dtype is not None and dtype.sz > 1:
       val = lang.render_cast([r[x] for x in vin], dtype)
       if child_count[u] <= 1:
@@ -205,4 +203,4 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     else:
       raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(function_name, kernel, bufs, global_size, local_size, prekernel)
+  return lang.render_kernel(function_name, kernel, bufs, local_size, prekernel)

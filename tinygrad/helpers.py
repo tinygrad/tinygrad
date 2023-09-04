@@ -17,7 +17,7 @@ def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterator): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
-def strip_parens(fst): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' else fst
+def strip_parens(fst): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def merge_dicts(ds:Iterable[Dict]) -> Dict:
   kvs = set([(k,v) for d in ds for k,v in d.items()])
   assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
