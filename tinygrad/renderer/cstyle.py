@@ -32,6 +32,7 @@ class CStyleLanguage(NamedTuple):
   uses_ptr_arithmetic: bool = False
   launch_bounds: bool = False
   code_for_op: Dict = {
+    UnaryOps.NEG: lambda x: f"(-{x})",
     UnaryOps.EXP2: lambda x: f"exp2({x})",
     UnaryOps.LOG2: lambda x: f"log2({x})",
     UnaryOps.SIN: lambda x: f"sin({x})",
@@ -117,6 +118,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     return f"{prefix}{c[prefix]-1}"
   r: Dict[UOp, str] = {}
 
+  child_count: DefaultDict[UOp, int] = defaultdict(int)
+  for ru in uops:
+    for v in ru.vin:
+      child_count[v] += 1
+
   for u in uops:
     uop,dtype,vin,args,_ = u
     if uop == UOps.LOOP:
@@ -166,8 +172,12 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         raise NotImplementedError(f"WMMA not implemented for {args}")
     elif uop == UOps.ALU:
       assert dtype is not None
-      r[u] = ssa('alu')
-      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {lang.code_for_op[args](*[r[x] for x in vin])};")
+      val = lang.code_for_op[args](*[r[x] for x in vin])
+      assert child_count[u] != 0, f"childless ALU op found {u}"
+      if child_count[u] <= 1: r[u] = val
+      else:
+        r[u] = ssa('alu')
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {val};")
     elif uop == UOps.DEFINE_ACC:
       assert dtype is not None
       r[u] = ssa('acc')

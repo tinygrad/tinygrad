@@ -104,8 +104,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [optimage, openpilot, multigpu]
-    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'|| matrix.task=='openpilot'&&'openpilot (OpenCL) Tests'|| matrix.task=='multigpu'&&'MultiGPU Tests'}}
+        task: [optimage, openpilot, multigpu, kopt]
+    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'|| matrix.task=='openpilot'&&'openpilot (OpenCL) Tests'|| matrix.task=='multigpu'&&'MultiGPU Tests' || matrix.task=='kopt'&&'Kernel OPT Tests'}}
     runs-on: ubuntu-20.04
     timeout-minutes: 20
 
@@ -158,6 +158,9 @@ jobs:
         run: |
           PYTHONPATH="." python test/external/dist/test_world.py
           PYTHONPATH="." python test/external/dist/test_collectives.py
+      - if: ${{ matrix.task == 'kopt' }}
+        name: Test KOPT
+        run: PYTHONPATH="." KOPT=1 BUDGET=10 GPU=1 DEBUG=1 python -m pytest -rA -n=auto test/models/test_real_world.py
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests
