@@ -128,7 +128,6 @@ class Linearizer(OptimizedKernel):
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
-        if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         if acc is not None:
           assert valid.min == 1
           self.load_cache[key] = self.uop(UOps.DEFINE_ACC, localtype, [], this_const)
@@ -141,13 +140,17 @@ class Linearizer(OptimizedKernel):
         else:
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
-          idx_rendered = idx.render(self.render_ops, self)
+          if isinstance(self.bufs[i].dtype, ImageDType):
+            idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+            rendered_idx = self.uop(UOps.CAST, dtypes._int2, [idx[0].render(self.render_ops, self), idx[1].render(self.render_ops, self)])
+          else:
+            rendered_idx = idx.render(self.render_ops, self)
           if valid.min == 0:
             valid_rendered = valid.render(self.render_ops, self)
             alt = self.uop(UOps.CONST, localtype, [], invalid_value, cachable=True)
-            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [buf_uop, idx_rendered, valid_rendered, alt])
+            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [buf_uop, rendered_idx, valid_rendered, alt])
           else:
-            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [buf_uop, idx_rendered])
+            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [buf_uop, rendered_idx])
           #self.load_cache[key] = self.uop(UOps.LOAD, localtype, [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value))
       ret.append(self.uop(UOps.GEP, dtypes.float32, [self.load_cache[key]], expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
@@ -178,8 +181,12 @@ class Linearizer(OptimizedKernel):
 
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
-      if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-      self.uop(UOps.STORE, None, [buf_uop, idx.render(self.render_ops, self), var])
+      if isinstance(self.bufs[i].dtype, ImageDType):
+        idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+        rendered_idx = self.uop(UOps.CAST, dtypes._int2, [idx[0].render(self.render_ops, self), idx[1].render(self.render_ops, self)])
+      else:
+        rendered_idx = idx.render(self.render_ops, self)
+      self.uop(UOps.STORE, None, [buf_uop, rendered_idx, var])
       #self.uop(UOps.STORE, None, [var], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid))
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
@@ -200,7 +207,7 @@ class Linearizer(OptimizedKernel):
     # add global buffers
     arg_bufs = {}
     for buf,name in self.arg_bufs.items():
-      arg_bufs[buf] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype), [], (name, buf.dtype))
+      arg_bufs[buf] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, [], (name, buf.dtype))
     for i,b in enumerate(self.bufs):
       if b.realized in arg_bufs: self.buf_uops[i] = arg_bufs[b.realized]
     # add variables from symbolic shapes

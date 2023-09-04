@@ -50,6 +50,7 @@ class CStyleLanguage(NamedTuple):
     assert self.float4 is not None, "cast is not supported on this platform"
     if var_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
     if var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
+    if var_dtype == dtypes._int2: return f"{self.float4.replace('float4', 'int2')}({','.join(x)})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   # returns a str expression of the const with the given type
@@ -63,7 +64,7 @@ class CStyleLanguage(NamedTuple):
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
       assert output_dtype == dtypes._float4, "images must be float4"
-      return f"read_imagef({buf_name}, smp, (int2)({idx[0].render(render_cl)}, {idx[1].render(render_cl)}))"
+      return f"read_imagef({buf_name}, smp, {idx})"
     if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx})"
     if output_dtype.sz > 1:
@@ -95,7 +96,7 @@ class CStyleLanguage(NamedTuple):
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
       assert var_dtype == dtypes._float4, "images must be float4"
-      return f"write_imagef({buf_name}, (int2)({idx[0].render(render_cl)}, {idx[1].render(render_cl)}), {var_name});"
+      return f"write_imagef({buf_name}, {idx}, {var_name});"
     if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.sz > 1:
@@ -206,8 +207,12 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         assert vin[0].dtype is not None and vin[2].dtype is not None
         kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, r[vin[1]], vin[0].uop == UOps.DEFINE_LOCAL))
     elif uop == UOps.CAST and dtype is not None and dtype.sz > 1:
-      r[u] = ssa('cast')
-      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {lang.render_cast([r[x] for x in vin], dtype)};")
+      val = lang.render_cast([r[x] for x in vin], dtype)
+      if child_count[u] <= 1:
+        r[u] = val
+      else:
+        r[u] = ssa('cast')
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {val};")
     elif uop == UOps.DEFINE_LOCAL:
       if lang.external_local_bufs:
         prekernel.append(lang.render_local(args[0], args[1]))
