@@ -1,5 +1,5 @@
-from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict
-from tinygrad.codegen.linearizer import UOps, UOp
+from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict, cast
+from tinygrad.codegen.linearizer import UOps, MemOp, UOp
 from tinygrad.ops import BinaryOps, UnaryOps
 from tinygrad.helpers import DType, dtypes, DEBUG
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
@@ -73,7 +73,6 @@ class AssemblyLanguage:
     SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.render_alu(BinaryOps.ADD, a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
     AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.render_alu(BinaryOps.MUL, a, b.render(ops,ctx), dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-  """
   def addr_w_offset(self, args):
     assert isinstance(args, MemOp)
     idx = args.idx*args.memory_dtype.itemsize
@@ -91,12 +90,6 @@ class AssemblyLanguage:
         reg = new_reg
       return self.tor[args.name], reg, off
     reg = self.render_alu(BinaryOps.ADD, self.render_cast(reg, dtypes.uint64), self.tor[args.name], dtype=dtypes.uint64)
-    return reg, None, off
-  """
-  def addr_w_offset(self, buf_reg, buf_dtype, idx):
-    off = 0  # TODO: should this be None?
-    reg = self.render_alu(BinaryOps.MUL, self.render_cast(idx, dtypes.uint64), buf_dtype.sz, dtype=dtypes.uint64)
-    reg = self.render_alu(BinaryOps.ADD, reg, buf_reg, dtype=dtypes.uint64)
     return reg, None, off
 
 def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
@@ -162,8 +155,6 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         lang.ins.append(AssemblyInstruction(UOps.ALU, out, [tmp], args))
       else:
         lang.ins.append(AssemblyInstruction(UOps.ALU, out, [lang.tor[x] for x in vin], args))
-    elif uop in {UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL}:
-      lang.tor[u] = lang.tor[args[0]]
     elif uop == UOps.DEFINE_ACC:
       reg = lang.newreg(u, dtype=dtype)
       lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], args))
@@ -172,25 +163,8 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
     elif uop == UOps.CONST:
       lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(u, dtype=dtype), [], args))
     elif uop == UOps.LOAD:
-      assert vin[0].dtype is not None
-      reg = lang.newreg(u, dtype=dtype)
-      if len(vin) > 2:
-        lang.ins.append(AssemblyInstruction(UOps.ALU, reg, [lang.tor[vin[3]]], UnaryOps.NOOP))
-        pred = lang.render_alu(BinaryOps.CMPLT, lang.tor[vin[2]], 1, dtypes.bool)
-        lang.ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", True)))
-      idx = lang.newreg((u, "idx"), dtype=dtypes.int64)
-      off = 0
-      lang.ins.append(AssemblyInstruction(UOps.ALU, idx, [lang.tor[vin[1]], vin[0].dtype.itemsize], BinaryOps.MUL))
-      lang.ins.append(AssemblyInstruction(UOps.ALU, idx, [idx, lang.tor[vin[0]]], BinaryOps.ADD))
-      lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx], (off, 'global' if vin[0].uop == UOps.DEFINE_GLOBAL else 'shared', vin[0].dtype if vin[0].dtype != dtypes.float else None)))
-      if len(vin) > 2:
-        lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
-        skipload_branch += 1
-
-      #idx, treg, off = lang.addr_w_offset(lang.tor[vin[0]], vin[0].dtype, lang.tor[vin[1]])
-      #print(idx.scalar)
-
-      """
+      idx, treg, off = lang.addr_w_offset(args)
+      reg = lang.newreg(u, dtype=dtype, scalar=(idx.scalar and (not isinstance(treg, Register) or treg.scalar)))
       if args.valid.min == 0:
         lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], 0))
         if args.valid.max == 1:
@@ -202,20 +176,12 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
       if args.valid.min == 0 and args.valid.max == 1:
         lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
         skipload_branch += 1
-      """
     elif uop == UOps.STORE:
-      if len(vin) == 2:
+      if args is None:
         lang.ins.append(AssemblyInstruction(UOps.ALU, lang.tor[vin[0]], [lang.tor[vin[1]]], UnaryOps.NOOP))
-      elif len(vin) == 3:
-        assert vin[0].dtype is not None
-        idx = lang.newreg((u, "idx"), dtype=dtypes.int64)
-        off = 0
-        lang.ins.append(AssemblyInstruction(UOps.ALU, idx, [lang.tor[vin[1]], vin[0].dtype.itemsize], BinaryOps.MUL))
-        lang.ins.append(AssemblyInstruction(UOps.ALU, idx, [idx, lang.tor[vin[0]]], BinaryOps.ADD))
-
-        #reg = lang.newreg(u, dtype=dtype)
-        #idx, treg, off = lang.addr_w_offset(lang.tor[vin[0]], vin[0].dtype, lang.tor[vin[1]])
-        lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[2]]], (off, 'global' if vin[0].uop == UOps.DEFINE_GLOBAL else 'shared', vin[0].dtype if vin[0].dtype != dtypes.float else None)))
+      else:
+        idx, treg, off = lang.addr_w_offset(args)
+        lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype if args.memory_dtype != dtypes.float else None)))
 
   if DEBUG >= 4:
     for tins in lang.ins: print(tins)
