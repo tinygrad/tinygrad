@@ -121,9 +121,7 @@ class LazyBuffer:
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: WeakSet = WeakSet()
-    if op.buffers: 
-      op.buffers[0].children.add(self)
-      for x in op.buffers[1:]: x.children.add(self)
+    for x in op.buffers: x.children.add(self)
     if not LAZY: self.realize()
 
     # log phantom ops to the graph
