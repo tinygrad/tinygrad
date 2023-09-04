@@ -1,21 +1,8 @@
 from typing import Final, Dict, Callable, Any, List, Optional, Tuple
-import functools
 from llvmlite import ir  # type: ignore
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.helpers import dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
-
-from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
-def sym_render(a, ops=None, ctx=None): return ir.Constant(ir.IntType(32), a) if isinstance(a, int) else a.render(ops, ctx)
-render_llvm = {
-  NumNode: lambda self,ops,ctx: sym_render(self.b,ops,ctx),
-  MulNode: lambda self,ops,ctx: ctx.mul(self.a.render(ops,ctx), sym_render(self.b,ops,ctx)),
-  DivNode: lambda self,ops,ctx: ctx.sdiv(self.a.render(ops,ctx), sym_render(self.b,ops,ctx)),
-  ModNode: lambda self,ops,ctx: ctx.srem(self.a.render(ops,ctx), sym_render(self.b,ops,ctx)),
-  LtNode: lambda self,ops,ctx: ctx.icmp_signed("<", self.a.render(ops,ctx), sym_render(self.b,ops,ctx)),
-  SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.add(a,b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
-  AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.and_(a,b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx))
-}
 
 code_for_op: Final[Dict[Op, Callable]] = {
   UnaryOps.NEG: lambda builder,x: builder.neg(x) if isinstance(x.type, ir.IntType) else builder.fneg(x, flags=('fast',)),
@@ -91,7 +78,6 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
   reduce_phis: List = []
   # TODO: newvar probably shouldn't be optional
   lvars: Dict[Optional[UOp], Any] = {}  # this Any is an llvm type
-  render_llvm[Variable] = lambda self,ops,ctx: lvars[self.expr]
 
   for bufname,dtype in buf_to_dtype.items():
     if dtype == dtypes._arg_int32: lvars[bufname] = bb[-1].sext(func.args[buf_index[bufname]], ir.IntType(32))
@@ -133,7 +119,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
       assert dtype is not None
       if len(vin) > 2:
         gate = bb[-1].trunc(lvars[vin[2]], ir.IntType(1))
-        aug_idx = bb[-1].select(gate, lvars[vin[1]], sym_render(0))
+        aug_idx = bb[-1].select(gate, lvars[vin[1]], ir.Constant(ir.IntType(32), 0))
         val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [aug_idx], inbounds=True))
         val = cast(bb, val, vin[0].dtype, dtype)
         val = bb[-1].select(gate, val, lvars[vin[3]])

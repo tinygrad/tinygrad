@@ -4,12 +4,6 @@ from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, prod, DType
-from tinygrad.shape.symbolic import DivNode, AndNode, render_python
-
-# div is different in cl than python
-render_cl = render_python.copy()
-render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops, ctx)}/{self.b})"
-render_cl[AndNode] = lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
 
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
@@ -127,18 +121,6 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
   for u in uops:
     uop,dtype,vin,args,_ = u
     if uop == UOps.LOOP:
-      """
-      for i,var in enumerate(args[0]):
-        if args[1] == "global" and lang.gid:
-          global_size.append(var.max+1)
-          kk("{" if isinstance(var, NumNode) else f"{{ {lang.size_prefix} {var.expr} = {lang.gid[len(args[0])-1-i]};  /* {var.max+1} */")
-        elif args[1] == "local" and lang.lid:
-          local_size.append(var.max+1)
-          kk("{" if isinstance(var, NumNode) else f"{{ {lang.size_prefix} {var.expr} = {lang.lid[len(args[0])-1-i]};  /* {var.max+1} */")
-        else:
-          if getenv("NOUNROLL") and not isinstance(var, NumNode): kk("#pragma unroll(1)")   # prevent loop unrolling
-          kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, var.min, sym_render(var.max)))
-      """
       r[u] = ssa('ridx')
       kk(lang.render_for(r[u], r[vin[0]], r[vin[1]]))
       depth += 1
@@ -147,19 +129,6 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     elif uop == UOps.END:
       depth -= 1
       kk("}")
-      """
-      if args[1] == "local" and lang.lid:
-        # TODO: this is a bit of a hack. the local loop isn't real on the GPU
-        kk(f"if ({Variable.sum(args[0]).render(render_cl)} == 0) {{")
-        pend_close = "}"*(len(args[0])+1) + f" /* {args[1]} */"
-      else:
-        if args[1] == "global" and pend_close:
-          depth -= 1
-          kk(pend_close)
-          pend_close = None
-        depth -= 1
-        kk("}"*len(args[0]) + f" /* {args[1]} */")
-      """
     elif uop == UOps.WMMA:
       if args == "METAL":
         # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
