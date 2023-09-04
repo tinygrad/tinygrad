@@ -39,64 +39,48 @@ def test_match_eval():
   # 1. test that it works
   a = fn1(match_quality_matrix)
   assert all(((a == Tensor([[ 0.9],[-2.],[-1.]]))[:, 0]).numpy())
-   
 
-def make_match_evaluation_fn(high: float, low: float, allow_low_qual: bool = False) -> Callable[[Tensor], Tensor]:
-  # TODO this is a bit of a mess but I guess it helps get out of holes
-  def set_low_quality_matches_(preds: Tensor):
-    """
-    Produce additional matches for predictions that have only low-quality matches.
-    Specifically, for each ground-truth find the set of predictions that have
-    maximum overlap with it (including ties); for each prediction in that set, if
-    it is unmatched, then match it to the ground-truth with which it has the highest
-    quality value.
-    """
-    # For each gt, find the prediction with which it has highest quality
-    highest_quality_foreach_gt, _ = match_quality_matrix.max(axis=1)
-    # Find highest quality match available, even if it is low, including ties
-    gt_pred_pairs_of_highest_quality = Tensor.nonzero(
-        match_quality_matrix == highest_quality_foreach_gt[:, None]
-    )
-    # Example gt_pred_pairs_of_highest_quality:
-    #   tensor([[    0, 39796],
-    #           [    1, 32055],
-    #           [    1, 32070],
-    #           [    2, 39190],
-    #           [    2, 40255],
-    #           [    3, 40390],
-    #           [    3, 41455],
-    #           [    4, 45470],
-    #           [    5, 45325],
-    #           [    5, 46390]])
-    # Each row is a (gt index, prediction index)
-    # Note how gt items 1, 2, 3, and 5 each have two ties
+def test_low_qual_match():
+  matches = Tensor([
+    [.3, .4, .1], #gt 1
+    [.5, .5, .2],
+    [.5, .8, .7],
+    [.2, .1, .0]
+  ])
+  fn = make_hq_match_fn(.7, .3)
+  first_pass = fn(matches)
+  second_pass = add_low_quality_matches(first_pass, matches)
+  assert all(((second_pass == Tensor([[ 0.4],[.5],[.8],[-1.0]]))[:, 0]).numpy())
 
-    pred_inds_to_update = gt_pred_pairs_of_highest_quality[:, 1]
-    matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
+# mutes matches, adds best pred for each gt that had no matches
+def add_low_quality_matches(matches: Tensor, preds: Tensor) -> Tensor:
+  return (matches == -2).where(preds.max(axis=1)[:, None], matches)
 
-  def loss_eval_fn(match_quality_matrix: Tensor) -> Tensor:
-    if match_quality_matrix.numel() == 0:
-      if match_quality_matrix.shape[0] == 0:
-        raise ValueError(
-          "No ground-truth boxes available for one of the images "
-          "during training")
-      else:
-        raise ValueError(
-          "No proposal boxes available for one of the images "
-          "during training")
+def make_hq_match_fn(high: float, low: float) -> Callable[[Tensor], Tensor]:
+  # for the tensor of M*N
+  # where M is the index of the gt and N is the prediction's quality for that gt
+  # returns a tensor of N length, where N[i] is the gt that best matched this prediction
+  # N[i] is a negative value if there is no match
+  def hq_match_fn(preds: Tensor) -> Tensor:
+    assert preds.numel() > 0, "must be scoring something"
+     # drops lq matches early, drops 0
+    best_matches = ((preds >= high) * preds).max(axis=1, keepdim=True).maximum(low) == preds
+    nonzero()
+    print("bm")
+    print(best_matches.numpy())
+    best_matches
 
-    # find best gt candidate for each prediction
-    preds = match_quality_matrix.max(axis=1, keepdim=True)
-
-    above_high_threshold = preds >= high
-    below_low_threshold = preds < low
+    # these are potential "low quality"
     between_thresholds = (preds >= low) * (preds < high)
-    
-    if allow_low_qual:
-      set_low_quality_matches_(preds)
 
-    return above_high_threshold*preds - between_thresholds*2 - below_low_threshold*1
-  return loss_eval_fn
+    (preds >= high)*preds - between_thresholds*2 - (preds < low)*1
+    print("bm")
+    print(best_matches.numpy())
+    
+    
+    print(((preds >= high)*preds - between_thresholds*2 - (preds < low)*1).numpy())
+    return (preds >= high)*preds - between_thresholds*2 - (preds < low)*1
+  return hq_match_fn
 
 def test_rind():
   x = rind(Tensor([1, 1, 1, 1, 0, 0, 0, 0, 1, 1]).numpy(), 3)
@@ -219,7 +203,7 @@ class RPNLossComputation:
   def __init__(self, proposal_matcher, fg_bg_sampler, box_coder,
               generate_labels_func):
     """
-    Arguments:
+    Arguments: 
         proposal_matcher (Matcher)
         fg_bg_sampler (BalancedPositiveNegativeSampler)
         box_coder (BoxCoder)
@@ -311,6 +295,7 @@ class RPNLossComputation:
     return objectness_loss, box_loss
 
 if __name__ == "__main__":
+  test_low_qual_match()
   #PLAYGROUND
   data = Tensor([[1, 2, 3],
                [4, 5, 6],
@@ -318,17 +303,6 @@ if __name__ == "__main__":
                [10, 11, 12]])
   idx = Tensor([0, 2, 1, 1]).reshape(4, 1)
   result = data.gather(idx, dim=1)
-  t = Tensor(1)
-  print('ldata')
-  print(t.lazydata)
-  print('realize')
-  print(t.lazydata.realize())
-  print('lazydata')
-  print(t.lazydata)
-  print('realized')
-  print(type(t.lazydata.realized))
-  print(t.lazydata.realized)
-  print(t[0])
   test_rind()
   test_boxlist_iou()
   test_match_eval()
