@@ -114,20 +114,20 @@ UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, 
 class LazyBuffer:
   __deletable__ = ('op',)
   def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, src:Optional[RawBuffer]=None):
-    self.st: ShapeTracker = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
-    self.device, self.shape, self.optype, self.dtype = device, self.st.shape, optype, dtype
+    # NOTE: st is not a copy! this should be a "read-only" ShapeTracker
+    # NOTE: op should be read only after construction of LazyBuffer
+    self.device, self.st, self.op, self.optype, self.dtype, self.shape = device, st, op, optype, dtype, st.views[-1].shape
     self.realized: Optional[RawBuffer] = src
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: WeakSet = WeakSet()
-    # NOTE: op should be read only after construction of LazyBuffer
-    self.op: LazyOp = op
-    for x in op.buffers: x.children.add(self)
+    if op.buffers: 
+      op.buffers[0].children.add(self)
+      for x in op.buffers[1:]: x.children.add(self)
     if not LAZY: self.realize()
 
     # log phantom ops to the graph
-    if GRAPH >= 3:
-      log_op(self, self.op, phantom=True)
+    if GRAPH >= 3: log_op(self, self.op, phantom=True)
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
   @property
