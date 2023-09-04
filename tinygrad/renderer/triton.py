@@ -35,7 +35,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   global_size: List[int] = []
   local_size: List[int] = []
   depth = 1
-  signatures, dims, bufs, kernel = [], [], [] ,[]
+  signatures, dims, bufs, kernel = [], [], [], []
   c: DefaultDict[str, int] = defaultdict(int)
   def ssa(prefix="t"):
     nonlocal c
