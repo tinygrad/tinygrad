@@ -48,16 +48,6 @@ def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
   for x in itertools.product(*[idx.expand() for idx in idxs[::-1]]):
     yield x[::-1]
 
-class MemOp(NamedTuple):
-  name: str
-  idx: Node
-  local: bool
-  memory_dtype: DType
-
-  # shared
-  valid: Node
-  invalid_value: Union[float, int] = 0.0
-
 class UOp(NamedTuple):
   uop: UOps
   dtype: Optional[DType]
@@ -128,7 +118,6 @@ class Linearizer(OptimizedKernel):
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
-        if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         if acc is not None:
           assert valid.min == 1
           self.load_cache[key] = self.uop(UOps.DEFINE_ACC, localtype, [], this_const)
@@ -139,11 +128,26 @@ class Linearizer(OptimizedKernel):
             alt = self.uop(UOps.CONST, localtype, [], invalid_value, cachable=True)
             self.load_cache[key] = self.uop(UOps.ALU, localtype, [valid_rendered, self.load_cache[key], alt], TernaryOps.WHERE, cachable=True)
         else:
-          self.load_cache[key] = self.uop(UOps.LOAD, localtype, [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value))
+          buf_uop = self.buf_uops[i]
+          assert buf_uop is not None, f"buffer {i} wasn't UOped"
+          if isinstance(self.bufs[i].dtype, ImageDType):
+            idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+            rendered_idx = self.uop(UOps.CAST, dtypes._int2, [idx[0].render(self.render_ops, self), idx[1].render(self.render_ops, self)])
+          else:
+            rendered_idx = idx.render(self.render_ops, self)
+          if valid.min == 0:
+            valid_rendered = valid.render(self.render_ops, self)
+            alt = self.uop(UOps.CONST, localtype, [], invalid_value, cachable=True)
+            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [buf_uop, rendered_idx, valid_rendered, alt])
+          else:
+            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [buf_uop, rendered_idx])
       ret.append(self.uop(UOps.GEP, dtypes.float32, [self.load_cache[key]], expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
 
   def global_store(self, i:int, idxs:List[VariableOrNum], store:List[UOp]) -> None:
+    buf_uop = self.buf_uops[i]
+    assert buf_uop is not None, f"buffer {i} wasn't UOped"
+
     expanded_nodes = [idx.expand() for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     store_offset = dict(zip(_idxs, store))
@@ -166,8 +170,12 @@ class Linearizer(OptimizedKernel):
 
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
-      if isinstance(self.bufs[i].dtype, ImageDType): idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
-      self.uop(UOps.STORE, None, [var], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid))
+      if isinstance(self.bufs[i].dtype, ImageDType):
+        idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+        rendered_idx = self.uop(UOps.CAST, dtypes._int2, [idx[0].render(self.render_ops, self), idx[1].render(self.render_ops, self)])
+      else:
+        rendered_idx = idx.render(self.render_ops, self)
+      self.uop(UOps.STORE, None, [buf_uop, rendered_idx, var])
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
@@ -182,22 +190,26 @@ class Linearizer(OptimizedKernel):
 
     # uops
     self.uops: List[UOp] = []
+    self.buf_uops: List[Optional[UOp]] = [None]*len(self.bufs)
 
     # add global buffers
+    arg_bufs = {}
     for buf,name in self.arg_bufs.items():
-      self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype), [], (name, buf.dtype))
+      arg_bufs[buf] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, [], (name, buf.dtype))
+    for i,b in enumerate(self.bufs):
+      if b.realized in arg_bufs: self.buf_uops[i] = arg_bufs[b.realized]
     # add variables from symbolic shapes
     for var in sorted(set(v for buf in self.ast.buffers for v in buf.st.var_vals), key=lambda k: k.key):
       self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, [], (var.expr, dtypes._arg_int32))
     # define local buffers
     for lb in self.local_alias.values():
-      self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), [], (lb.name, self.sts[self.bufs.index(lb)].size()))
+      self.buf_uops[self.bufs.index(lb)] = self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), [], (lb.name, self.sts[self.bufs.index(lb)].size()))
     # add a local buffer for multistage reduce. # TODO: use local alias
     if self.group_for_reduce:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
-      self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), [], ("temp", self.sts[-1].size()))
+      self.buf_uops.append(self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), [], ("temp", self.sts[-1].size())))
 
     # print
     if DEBUG >= 3: self.printbufs()

@@ -1,4 +1,3 @@
-from tinygrad.renderer.cstyle import render_cl
 from tinygrad.helpers import dtypes, DType
 from tinygrad.renderer.cstyle import CStyleLanguage
 from typing import List, Union
@@ -53,4 +52,4 @@ class WGSLLanguage(CStyleLanguage):
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
     if buf_dtype != var_dtype:
       var_name = f"{type_map[buf_dtype]}({var_name})"
-    return f"{buf_name}[{idx.render(render_cl)}] = {var_name};"
+    return f"{buf_name}[{idx}] = {var_name};"
