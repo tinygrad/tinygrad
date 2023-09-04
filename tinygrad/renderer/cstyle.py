@@ -3,7 +3,7 @@ import math
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import ImageDType, dtypes, prod, DType
+from tinygrad.helpers import ImageDType, dtypes, prod, DType, strip_parens
 
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
@@ -92,10 +92,10 @@ class CStyleLanguage(NamedTuple):
       assert var_dtype == dtypes._float4, "images must be float4"
       return f"write_imagef({buf_name}, {idx}, {var_name});"
     if self.uses_vload and buf_dtype == dtypes.float16:
-      return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
+      return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{strip_parens(idx)});"
     if var_dtype.sz > 1:
-      return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
-    return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
+      return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{strip_parens(idx)})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
+    return f"*({buf_name}+{strip_parens(idx)}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
 
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> Tuple[str, List[int], List[int]]:
   global_size: List[int] = []
@@ -152,9 +152,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       assert dtype is not None
       # remove parens if ALU types are the same. TODO: can do more here
       if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL}:
-        fst = r[vin[0]]
-        if fst[0] == '(' and fst[-1] == ')': fst = fst[1:-1]
-        val = lang.code_for_op[args](fst, *[r[x] for x in vin[1:]])
+        val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]])
       else:
         val = lang.code_for_op[args](*[r[x] for x in vin])
       assert child_count[u] != 0, f"childless ALU op found {u}"
