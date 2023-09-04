@@ -26,12 +26,11 @@ def get_max(var):
 def remove_single_scalar_curly_braces(ptx_code):
   return '\n'.join([re.sub(r'\{\s*(%\w+)\s*\}', r'\1', line) for line in ptx_code.split('\n')])
 
-def define_scalar(local_size, type, args):
+def define_scalar(local_size, triton_type, args):
   val = (('-' if args<0 else '') + 'float("inf")') if math.isinf(args) else ('float("nan")' if math.isnan(args) else str(args))
   if len(local_size) > 0:
-    return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{val}, dtype={type})"
-  else:
-    return f"tl.where(1, {val}, {val}).to({type})"
+    return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{val}, dtype={triton_type})"
+  return f"tl.where(1, {val}, {val}).to({triton_type})"
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
   kernel = []
