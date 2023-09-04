@@ -29,7 +29,7 @@ class WGSLLanguage(CStyleLanguage):
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): val = "nan()"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "0x1.fffffep+127f"
-    else: val = f"{x}" + ("" if dtypes.is_int(var_dtype) else "f")
+    else: val = f"({x}" + ("" if dtypes.is_int(var_dtype) else "f") + ")"
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
