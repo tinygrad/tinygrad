@@ -87,7 +87,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
   func.attributes.add('"no-nans-fp-math"="true"')
 
   bb = [ir.IRBuilder(func.append_basic_block("entry"))]
-  loop_blocks = []
+  loop_blocks: List = []
   reduce_phis: List = []
   # TODO: newvar probably shouldn't be optional
   lvars: Dict[Optional[UOp], Any] = {}  # this Any is an llvm type
@@ -99,30 +99,26 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
   for u in uops:
     uop,dtype,vin,args,_ = u
     if uop == UOps.LOOP:
-      for var in args[0]:
-        if isinstance(var, NumNode): continue
-        bb.append(ir.IRBuilder(func.append_basic_block(f"loop_body_{var.expr}")))
-        bb[-2].branch(bb[-1]._block)
+      bb.append(ir.IRBuilder(func.append_basic_block(f"loop_body_{len(loop_blocks)}")))
+      bb[-2].branch(bb[-1]._block)
 
-        phis = []
-        for rp in reduce_phis:
-          incoming = lvars[rp]
-          lvars[rp] = bb[-1].phi(ir.FloatType())
-          lvars[rp].add_incoming(incoming, bb[-2]._block)
-          phis.append((rp, lvars[rp]))
-        loop_blocks.append((bb[-1], phis))
+      phis = []
+      for rp in reduce_phis:
+        incoming = lvars[rp]
+        lvars[rp] = bb[-1].phi(ir.FloatType())
+        lvars[rp].add_incoming(incoming, bb[-2]._block)
+        phis.append((rp, lvars[rp]))
 
-        lvars[var.expr] = bb[-1].phi(ir.IntType(32), name=var.expr)
-        lvars[var.expr].add_incoming(sym_render(var.min), bb[-2]._block)
-    if uop == UOps.ENDLOOP:
-      for var in args[0][::-1]:
-        if isinstance(var, NumNode): continue
-        block, phis = loop_blocks.pop()
-        idx_p1 = bb[-1].add(lvars[var.expr], sym_render(1))
-        lvars[var.expr].add_incoming(idx_p1, bb[-1]._block)
-        for n,phi in phis: phi.add_incoming(lvars[n], bb[-1]._block)
-        bb.append(ir.IRBuilder(func.append_basic_block(f"loop_exit_{var.expr}")))
-        bb[-2].cbranch(bb[-2].icmp_unsigned(">", idx_p1, sym_render(var.max, render_llvm, bb[-2])), bb[-1]._block, block._block)
+      lvars[u] = bb[-1].phi(ir.IntType(32), name=f"loop{len(loop_blocks)}")
+      lvars[u].add_incoming(lvars[vin[0]], bb[-2]._block)
+      loop_blocks.append((bb[-1], phis))
+    if uop == UOps.END:
+      block, phis = loop_blocks.pop()
+      idx_p1 = bb[-1].add(lvars[vin[0]], ir.Constant(ir.IntType(32), 1))
+      lvars[vin[0]].add_incoming(idx_p1, bb[-1]._block)
+      for n,phi in phis: phi.add_incoming(lvars[n], bb[-1]._block)
+      bb.append(ir.IRBuilder(func.append_basic_block(f"loop_exit_{len(loop_blocks)}")))
+      bb[-2].cbranch(bb[-2].icmp_unsigned(">", idx_p1, lvars[vin[0].vin[1]]), bb[-1]._block, block._block)
     if uop == UOps.DEFINE_GLOBAL:
       lvars[u] = func.args[buf_index[args[0]]]
     if uop == UOps.DEFINE_ACC:

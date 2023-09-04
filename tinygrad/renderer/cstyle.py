@@ -3,8 +3,8 @@ import math
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import ImageDType, dtypes, getenv, prod, DType
-from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, sym_render
+from tinygrad.helpers import ImageDType, dtypes, prod, DType
+from tinygrad.shape.symbolic import DivNode, AndNode, render_python
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -74,8 +74,8 @@ class CStyleLanguage(NamedTuple):
   def render_local(self, name:str, size:int):
     return self.smem_prefix + f"float {name}[{size}];"
 
-  def render_for(self, expr: str, _min:int, _max:Union[int,str]) -> str:
-    return f"for (int {expr} = {_min}; {expr} < {_max}; ++{expr}) {{"
+  def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str:
+    return f"for (int {expr} = {_min}; {expr} <= {_max}; ++{expr}) {{"
 
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"

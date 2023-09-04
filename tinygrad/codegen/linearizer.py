@@ -65,7 +65,7 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
       nli.append(dd % s)
       dd //= s
     local_idxs = local_idxs[0:maxdim-1] + nli[::-1]
-  return local_idxs, loop_local_idxs
+  return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
 class Linearizer(OptimizedKernel):
   def get_buffer_name(self, i):
@@ -193,7 +193,8 @@ class Linearizer(OptimizedKernel):
       if b.realized in arg_bufs: self.buf_uops[i] = arg_bufs[b.realized]
     # add variables from symbolic shapes
     for var in sorted(set(v for buf in self.ast.buffers for v in buf.st.var_vals), key=lambda k: k.key):
-      self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, [], (var.expr, dtypes._arg_int32))
+      assert var.expr is not None
+      self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, [], (var.expr, dtypes._arg_int32))
     # define local buffers
     for lb in self.local_alias.values():
       self.buf_uops[self.bufs.index(lb)] = self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), [], (lb.name, self.sts[self.bufs.index(lb)].size()))
@@ -224,16 +225,18 @@ class Linearizer(OptimizedKernel):
 
     # global and local loops
     def render_loop(xx:List[Variable]):
-      self.loop_uops.update({x.expr:self.uop(UOps.LOOP, dtypes.int32, (self.const(x.min), self.const(x.max+1))) for x in xx if not isinstance(x, NumNode)})
+      self.loop_uops.update({x.expr:self.uop(UOps.LOOP, dtypes.int32, (
+        self.const(x.min) if isinstance(x.min, int) else cast(Variable, x.min).render(self.render_ops, self),
+        self.const(x.max) if isinstance(x.max, int) else cast(Variable, x.max).render(self.render_ops, self))) for x in xx if not isinstance(x, NumNode) and x.expr is not None})
     def end_loop(xx:List[Variable]):
-      for x in xx:
-        if not isinstance(x, NumNode):
+      for x in xx[::-1]:
+        if not isinstance(x, NumNode) and x.expr is not None:
           loop_uop = self.loop_uops[x.expr]
           if loop_uop.uop == UOps.LOOP: self.uop(UOps.END, None, [loop_uop])
 
     if self.opts.has_local:
-      self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs) if not isinstance(x, NumNode)})
-      self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_local_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)  if not isinstance(x, NumNode)})
+      self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs)})
+      self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_local_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})
     else:
       render_loop(loop_global_idxs+loop_local_idxs)
 
