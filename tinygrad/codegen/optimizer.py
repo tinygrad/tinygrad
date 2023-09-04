@@ -237,7 +237,8 @@ class OptimizedKernel(Kernel):
       buf1_strides = self.sts[buf1].real_strides()
       axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
       axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
-      if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce) == 1:
+      optim_conv2d = (self.shape_len-self.first_reduce) == 3 and self.full_shape[self.first_reduce+1]%2 == 1 and self.full_shape[self.first_reduce+2]%2 == 1 and max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 21
+      if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce == 1 or optim_conv2d):
         if DEBUG >= 3: print("METAL TENSOR CORES", axis_buf0, axis_buf1)
         self.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
 
@@ -260,18 +261,36 @@ class OptimizedKernel(Kernel):
         self.upcast()
 
         # final global upcast
-        for ax in [s1, s0]:
-          for upc in [4,3,2]:
-            if self.full_shape[ax]%upc == 0:
-              self.shift_to(ax, upc)
-              self.upcast()
-              break
+        if not optim_conv2d:
+          for ax in [s1, s0]:
+            for upc in [4,3,2]:
+              if self.full_shape[ax]%upc == 0:
+                self.shift_to(ax, upc)
+                self.upcast()
+                break
 
         # alias buffer
         self.local_dims = self.first_reduce - global_count
         alias_pattern = [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2)
         self.alias_buffer(buf0, alias_pattern)
         self.alias_buffer(buf1, alias_pattern)
+
+        if self.use_tensor_cores and optim_conv2d:
+          self.upcast()
+
+          if max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 5:
+            self.upcast()
+            for upc in range(8, 1, -1):
+              if self.full_shape[global_count-2]%upc == 0:
+                self.shift_to(global_count-2, upc)
+                self.upcast()
+                break
+          else:
+            for upc in range(16, 1, -1):
+              if self.full_shape[global_count-1]%upc == 0:
+                self.shift_to(global_count-1, upc)
+                self.upcast()
+                break
 
         # very late upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
         if self.use_tensor_cores and self.full_shape[s0] % 2 == 0:
