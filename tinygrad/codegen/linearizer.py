@@ -16,13 +16,11 @@ VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
 class UOps(Enum):
-  LOOP = auto(); ENDLOOP = auto() # loops can be global, local, or other # noqa: E702
+  LOOP = auto(); IF = auto(); END = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
-  # TODO: add CONST. use ALU WHERE for gated load
   # *** assembly only UOps ***
-  SPECIAL = auto(); LABEL = auto(); COND_BRANCH = auto() # TODO: replace these with LOOP and ENDLOOP # noqa: E702
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
@@ -78,9 +76,9 @@ class Linearizer(OptimizedKernel):
   def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
     render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
     return self.uop(UOps.ALU, dtype, (a, render_b), op, cachable=True)
+  def const(self, b:Union[int,float], dtype=dtypes.int32) -> UOp: return self.uop(UOps.CONST, dtype, tuple(), b, cachable=True)
 
-  render_ops: Any = { Variable: lambda self, ops, ctx: ctx.uop(UOps.SPECIAL, dtypes.int32, tuple(), self, cachable=True),
-                NumNode: lambda self, ops, ctx: ctx.uop(UOps.CONST, dtypes.int32, tuple(), self.b, cachable=True),
+  render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
                 DivNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.DIV),
                 ModNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MOD),
@@ -118,11 +116,10 @@ class Linearizer(OptimizedKernel):
           assert valid.min == 1
           self.load_cache[key] = self.uop(UOps.DEFINE_ACC, localtype, [], this_const)
         elif this_const is not None:
-          self.load_cache[key] = self.uop(UOps.CONST, localtype, [], this_const, cachable=True)
+          self.load_cache[key] = self.const(this_const, localtype)
           if valid.min == 0 and valid.max == 1:
             valid_rendered = valid.render(self.render_ops, self)
-            alt = self.uop(UOps.CONST, localtype, [], invalid_value, cachable=True)
-            self.load_cache[key] = self.uop(UOps.ALU, localtype, [valid_rendered, self.load_cache[key], alt], TernaryOps.WHERE, cachable=True)
+            self.load_cache[key] = self.uop(UOps.ALU, localtype, [valid_rendered, self.load_cache[key], self.const(invalid_value, localtype)], TernaryOps.WHERE, cachable=True)
         else:
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
@@ -133,8 +130,7 @@ class Linearizer(OptimizedKernel):
             rendered_idx = idx.render(self.render_ops, self)
           if valid.min == 0:
             valid_rendered = valid.render(self.render_ops, self)
-            alt = self.uop(UOps.CONST, localtype, [], invalid_value, cachable=True)
-            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [buf_uop, rendered_idx, valid_rendered, alt])
+            self.load_cache[key] = self.uop(UOps.LOAD, localtype, [buf_uop, rendered_idx, valid_rendered, self.const(invalid_value, localtype)])
           else:
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, [buf_uop, rendered_idx])
       ret.append(self.uop(UOps.GEP, dtypes.float32, [self.load_cache[key]], expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
@@ -187,6 +183,7 @@ class Linearizer(OptimizedKernel):
     # uops
     self.uops: List[UOp] = []
     self.buf_uops: List[Optional[UOp]] = [None]*len(self.bufs)
+    self.loop_uops: Dict[str, UOp] = {}
 
     # add global buffers
     arg_bufs = {}
@@ -226,8 +223,19 @@ class Linearizer(OptimizedKernel):
     upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
 
     # global and local loops
-    self.uop(UOps.LOOP, None, [], (loop_global_idxs, "global"))
-    self.uop(UOps.LOOP, None, [], (loop_local_idxs, "local"))
+    def render_loop(xx:List[Variable]):
+      self.loop_uops.update({x.expr:self.uop(UOps.LOOP, dtypes.int32, (self.const(x.min), self.const(x.max+1))) for x in xx if not isinstance(x, NumNode)})
+    def end_loop(xx:List[Variable]):
+      for x in xx:
+        if not isinstance(x, NumNode):
+          loop_uop = self.loop_uops[x.expr]
+          if loop_uop.uop == UOps.LOOP: self.uop(UOps.END, None, [loop_uop])
+
+    if self.opts.has_local:
+      self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs) if not isinstance(x, NumNode)})
+      self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_local_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)  if not isinstance(x, NumNode)})
+    else:
+      render_loop(loop_global_idxs+loop_local_idxs)
 
     # parse AST
     loaded_buffers = {}
@@ -245,7 +253,7 @@ class Linearizer(OptimizedKernel):
       acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
 
       # reduce loop
-      self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
+      render_loop(reduce_idxs)
 
       # barrier for fast GEMM
       if self.use_tensor_cores: self.uop(UOps.BARRIER, None, [], ())
@@ -314,7 +322,7 @@ class Linearizer(OptimizedKernel):
         self.ast_parse(self.reduceop, [acc[off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, do_reduce=True)
 
       # end the reduce loop
-      self.uop(UOps.ENDLOOP, None, [], (reduce_idxs, "reduce"))
+      end_loop(reduce_idxs)
       self.load_cache.clear()
 
       # end the local loop, do the local reduce
@@ -322,7 +330,7 @@ class Linearizer(OptimizedKernel):
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc)  # store accumulators
         self.uop(UOps.BARRIER, None, [], ())
-        self.uop(UOps.ENDLOOP, None, [], (loop_local_idxs, "local"))
+        end_loop(loop_local_idxs)
 
         # local indexs are over, 0 them out
         local_idxs = [x*0 for x in local_idxs]
@@ -343,7 +351,7 @@ class Linearizer(OptimizedKernel):
 
         # late reduce loop
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
-        self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
+        render_loop(end_local_idxs)
 
         # load localbufs
         loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs)
@@ -352,7 +360,7 @@ class Linearizer(OptimizedKernel):
         self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, do_reduce=True) # type: ignore
 
         # end the late reduce loop
-        self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
+        end_loop(end_local_idxs)
         self.load_cache.clear()
 
     # load latebufs
@@ -365,7 +373,7 @@ class Linearizer(OptimizedKernel):
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
     # end the global (and maybe local) loop
-    self.uop(UOps.ENDLOOP, None, [], (loop_global_idxs+loop_local_idxs, "global+local") if not self.group_for_reduce else (loop_global_idxs, "global"))
+    end_loop(loop_global_idxs+loop_local_idxs if not self.group_for_reduce else loop_global_idxs)
 
     # (recursively) remove childless uops
     UOPS_WO_SIDE_EFFECTS = {UOps.CONST, UOps.ALU, UOps.LOAD, UOps.CAST, UOps.GEP}

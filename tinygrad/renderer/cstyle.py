@@ -75,7 +75,7 @@ class CStyleLanguage(NamedTuple):
     return self.smem_prefix + f"float {name}[{size}];"
 
   def render_for(self, expr: str, _min:int, _max:Union[int,str]) -> str:
-    return f"for (int {expr} = {_min}; {expr} <= {_max}; ++{expr}) {{"
+    return f"for (int {expr} = {_min}; {expr} < {_max}; ++{expr}) {{"
 
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
@@ -107,7 +107,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
   global_size: List[int] = []
   local_size: List[int] = []
   kernel,prekernel = [],[]
-  pend_close = None
+  #pend_close = None
   bufs = []
   depth = 0
   def kk(s): kernel.append("  "*depth+s)
@@ -127,6 +127,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
   for u in uops:
     uop,dtype,vin,args,_ = u
     if uop == UOps.LOOP:
+      """
       for i,var in enumerate(args[0]):
         if args[1] == "global" and lang.gid:
           global_size.append(var.max+1)
@@ -137,10 +138,16 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
         else:
           if getenv("NOUNROLL") and not isinstance(var, NumNode): kk("#pragma unroll(1)")   # prevent loop unrolling
           kk("{" if isinstance(var, NumNode) else lang.render_for(var.expr, var.min, sym_render(var.max)))
+      """
+      r[u] = ssa('ridx')
+      kk(lang.render_for(r[u], r[vin[0]], r[vin[1]]))
       depth += 1
     elif uop == UOps.BARRIER:
       kk(lang.barrier)
-    elif uop == UOps.ENDLOOP:
+    elif uop == UOps.END:
+      depth -= 1
+      kk("}")
+      """
       if args[1] == "local" and lang.lid:
         # TODO: this is a bit of a hack. the local loop isn't real on the GPU
         kk(f"if ({Variable.sum(args[0]).render(render_cl)} == 0) {{")
@@ -152,6 +159,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
           pend_close = None
         depth -= 1
         kk("}"*len(args[0]) + f" /* {args[1]} */")
+      """
     elif uop == UOps.WMMA:
       if args == "METAL":
         # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
@@ -191,7 +199,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       r[u] = ssa('acc')
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
-      r[u] = args.expr
+      xid = lang.gid if args[1].startswith("g") else lang.lid
+      kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]};")
+      (global_size if args[1].startswith("g") else local_size).append(args[2])
+      r[u] = args[1]
     elif uop == UOps.CONST:
       r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
     elif uop == UOps.LOAD:
