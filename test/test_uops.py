@@ -7,9 +7,8 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ASTRunner, Compiled
 from tinygrad.codegen.linearizer import UOps, UOp
 
 def _uops_to_prg(uops):
-  ret = Device[Device.DEFAULT].renderer("test", uops)
-  src, global_size, local_size, binary = ret if len(ret) == 4 else ret + (False,)
-  return ASTRunner("test", src, global_size, local_size, runtime_args={"binary": binary}).build(Device[Device.DEFAULT].runtime)
+  src = Device[Device.DEFAULT].renderer("test", uops)
+  return ASTRunner("test", src, [1], [1], runtime_args={"binary": False}).build(Device[Device.DEFAULT].runtime)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(vin), arg, len(uops)))
