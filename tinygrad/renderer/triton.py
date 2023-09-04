@@ -28,18 +28,14 @@ def remove_single_scalar_curly_braces(ptx_code):
 
 def define_scalar(local_size, triton_type, args):
   val = (('-' if args<0 else '') + 'float("inf")') if math.isinf(args) else ('float("nan")' if math.isnan(args) else str(args))
-  if len(local_size) > 0:
-    return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{val}, dtype={triton_type})"
+  if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{val}, dtype={triton_type})"
   return f"tl.where(1, {val}, {val}).to({triton_type})"
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
-  kernel = []
   global_size: List[int] = []
   local_size: List[int] = []
   depth = 1
-  bufs = []
-  signatures = []
-  dims = []
+  signatures, dims, bufs, kernel = [], [], [] ,[]
   c: DefaultDict[str, int] = defaultdict(int)
   def ssa(prefix="t"):
     nonlocal c
@@ -70,18 +66,17 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     if uop == UOps.LOOP:
       for i,var in enumerate(args[0]):
         if isinstance(var, NumNode): continue # python doesnt have block scope
+        dims.append(var.expr)
+        if args[1] == "global":
+          global_size.append(var.max+1)
+          kk(f"{var.expr} = {gid[i]} # {get_max(var+1)}")
+        elif args[1] == "local":
+          assert var.min == 0, "local loop must start at 0"
+          kk(f"{var.expr} = tl.arange({0}, {next_power_of_2(var.max+1)})[{', '.join([':' if i == j else 'None' for j in range(len(args[0]))])}]")
+          local_size.append(var.max+1)
         else:
-          dims.append(var.expr)
-          if args[1] == "global":
-            global_size.append(var.max+1)
-            kk(f"{var.expr} = {gid[i]} # {get_max(var+1)}")
-          elif args[1] == "local":
-            assert var.min == 0, "local loop must start at 0"
-            kk(f"{var.expr} = tl.arange({0}, {next_power_of_2(var.max+1)})[{', '.join([':' if i == j else 'None' for j in range(len(args[0]))])}]")
-            local_size.append(var.max+1)
-          else:
-            kk(f"for {var.expr} in range({var.min}, {get_max(var+1)}):")
-            depth += 1
+          kk(f"for {var.expr} in range({var.min}, {get_max(var+1)}):")
+          depth += 1
     elif uop == UOps.ENDLOOP:
       if args[1] not in ["global", "local", "global+local"] and len(args[0]):
         depth -= len(args[0])
