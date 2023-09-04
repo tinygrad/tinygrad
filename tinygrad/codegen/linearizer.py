@@ -48,16 +48,6 @@ def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
   for x in itertools.product(*[idx.expand() for idx in idxs[::-1]]):
     yield x[::-1]
 
-class MemOp(NamedTuple):
-  name: str
-  idx: Node
-  local: bool
-  memory_dtype: DType
-
-  # shared
-  valid: Node
-  invalid_value: Union[float, int] = 0.0
-
 class UOp(NamedTuple):
   uop: UOps
   dtype: Optional[DType]
@@ -151,7 +141,6 @@ class Linearizer(OptimizedKernel):
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, [buf_uop, rendered_idx, valid_rendered, alt])
           else:
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, [buf_uop, rendered_idx])
-          #self.load_cache[key] = self.uop(UOps.LOAD, localtype, [], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid, invalid_value))
       ret.append(self.uop(UOps.GEP, dtypes.float32, [self.load_cache[key]], expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
     return ret
 
@@ -187,7 +176,6 @@ class Linearizer(OptimizedKernel):
       else:
         rendered_idx = idx.render(self.render_ops, self)
       self.uop(UOps.STORE, None, [buf_uop, rendered_idx, var])
-      #self.uop(UOps.STORE, None, [var], MemOp(self.get_buffer_name(i), idx, self.bufs[i].__class__ is LocalBuffer, self.bufs[i].dtype, valid))
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
