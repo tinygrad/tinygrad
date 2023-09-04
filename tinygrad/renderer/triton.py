@@ -47,6 +47,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     UnaryOps.LOG2: lambda x: f"tl.math.log2({x})", # TODO: is fast_log2f ok?
     UnaryOps.SIN: lambda x: f"tl.sin({x})",
     UnaryOps.SQRT: lambda x: f"tl.sqrt({x})",
+    UnaryOps.NEG: lambda x: f"-{x}",
     BinaryOps.ADD: lambda x,y: f"({x}+{y})", BinaryOps.SUB: lambda x,y: f"({x}-{y})",
     BinaryOps.MUL: lambda x,y: f"({x}*{y})", BinaryOps.DIV: lambda x,y: f"({x}/{y})",
     BinaryOps.MAX: lambda x,y: f"tl.maximum({x},{y})", # axis?
