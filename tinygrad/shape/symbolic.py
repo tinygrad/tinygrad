@@ -44,21 +44,7 @@ class Node(ABC):
   def __le__(self, b:Union[Node,int]): return self < (b+1)
   def __gt__(self, b:Union[Node,int]): return (-self) < (-b)
   def __ge__(self, b:Union[Node,int]): return (-self) < (-b+1)
-  def __lt__(self, b:Union[Node,int]):
-    lhs = self
-    if isinstance(lhs, SumNode) and isinstance(b, int):
-      muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
-      if muls:
-        # NOTE: gcd in python 3.8 takes exactly 2 args
-        mul_gcd = muls[0].b
-        for x in muls[1:]: mul_gcd = gcd(mul_gcd, x.b)
-        if b%mul_gcd == 0:
-          all_others = Variable.sum(others)
-          #print(mul_gcd, muls, all_others)
-          if all_others.min >= 0 and all_others.max < mul_gcd:
-            # TODO: should we divide both by mul_gcd here?
-            lhs = Variable.sum(muls)
-    return create_node(LtNode(lhs, b))
+  def __lt__(self, b:Union[Node,int]): return create_node(LtNode(self, b))
   def __mul__(self, b:Union[Node, int]):
     if b == 0: return NumNode(0)
     if b == 1: return self
