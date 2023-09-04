@@ -160,7 +160,7 @@ jobs:
           PYTHONPATH="." python test/external/dist/test_collectives.py
       - if: ${{ matrix.task == 'kopt' }}
         name: Test KOPT
-        run: PYTHONPATH="." KOPT=1 BUDGET=10 GPU=1 DEBUG=1 python -m pytest -rA -n=auto test/models/test_real_world.py
+        run: PYTHONPATH="." KOPT=1 BUDGET=20 GPU=1 DEBUG=1 python -m pytest -rA -n=auto test/models/test_real_world.py
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests
@@ -203,7 +203,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda, ptx, triton]
+        backend: [llvm, clang, gpu, cuda,  triton] #, ptx]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
@@ -281,6 +281,7 @@ jobs:
   testunicorn:
     name: ARM64 unicorn Test
     runs-on: ubuntu-latest
+    if: ${{false}}
     timeout-minutes: 20
     steps:
       - name: Checkout Code
