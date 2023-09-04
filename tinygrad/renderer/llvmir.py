@@ -1,7 +1,7 @@
 from typing import Final, Dict, Callable, Any, List, Optional, Tuple
 import functools
 from llvmlite import ir  # type: ignore
-from tinygrad.codegen.linearizer import UOps, UOp, MemOp
+from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.helpers import dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
 
@@ -27,6 +27,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   BinaryOps.SUB: lambda builder,x,y: builder.sub(x,y) if isinstance(x.type, ir.IntType) else builder.fsub(x,y, flags=('fast',)),
   BinaryOps.MUL: lambda builder,x,y: builder.mul(x,y) if isinstance(x.type, ir.IntType) else builder.fmul(x,y, flags=('fast',)),
   BinaryOps.DIV: lambda builder,x,y: builder.sdiv(x,y) if isinstance(x.type, ir.IntType) else builder.fdiv(x,y, flags=('fast',)),
+  # TODO: this should be casted
   BinaryOps.CMPLT: lambda builder,x,y: builder.zext(builder.icmp_signed("<", x, y),ir.IntType(32)) if isinstance(x.type, ir.IntType) else builder.uitofp(builder.fcmp_ordered("<", x, y, flags=('fast',)), ir.FloatType()),
   BinaryOps.MAX: lambda builder,x,y: builder.select(builder.fcmp_unordered(">", x, y, flags=('fast',)), x, y, flags=('fast',)),
   BinaryOps.MOD: lambda builder,x,y: builder.srem(x,y),
@@ -122,6 +123,8 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
         for n,phi in phis: phi.add_incoming(lvars[n], bb[-1]._block)
         bb.append(ir.IRBuilder(func.append_basic_block(f"loop_exit_{var.expr}")))
         bb[-2].cbranch(bb[-2].icmp_unsigned(">", idx_p1, sym_render(var.max, render_llvm, bb[-2])), bb[-1]._block, block._block)
+    if uop == UOps.DEFINE_GLOBAL:
+      lvars[u] = func.args[buf_index[args[0]]]
     if uop == UOps.DEFINE_ACC:
       lvars[u] = ir.Constant(dtype_to_llvm_dtype[dtype], args)
       reduce_phis.append(u)
@@ -132,23 +135,22 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Optional[Li
       lvars[u] = ir.Constant(dtype_to_llvm_dtype[dtype], value)
     if uop == UOps.LOAD:
       assert dtype is not None
-      valid = args.valid.render(render_llvm, bb[-1])
-      idx = args.idx.render(render_llvm, bb[-1])
-      if args.valid.min == 0:
-        aug_idx = bb[-1].select(valid, idx, sym_render(0))
-        val = bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [aug_idx], inbounds=True)), ir.Constant(dtype_to_llvm_dtype[args.memory_dtype], args.invalid_value))
+      if len(vin) > 2:
+        gate = bb[-1].trunc(lvars[vin[2]], ir.IntType(1))
+        aug_idx = bb[-1].select(gate, lvars[vin[1]], sym_render(0))
+        val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [aug_idx], inbounds=True))
+        val = cast(bb, val, vin[0].dtype, dtype)
+        val = bb[-1].select(gate, val, lvars[vin[3]])
       else:
-        val = bb[-1].load(bb[-1].gep(func.args[buf_index[args.name]], [idx], inbounds=True))
-      val = cast(bb, val, args.memory_dtype, dtype)
+        val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
+        val = cast(bb, val, vin[0].dtype, dtype)
       lvars[u] = val
     if uop == UOps.STORE:
-      if args is None:
+      if len(vin) == 2:
         lvars[vin[0]] = lvars[vin[1]]
-      else:
-        assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
-        idx = args.idx.render(render_llvm, bb[-1])
-        element = cast(bb, lvars[vin[0]], vin[0].dtype, args.memory_dtype)
-        bb[-1].store(element, bb[-1].gep(func.args[buf_index[args.name]], [idx], inbounds=True))
+      elif len(vin) == 3:
+        element = cast(bb, lvars[vin[2]], vin[2].dtype, vin[0].dtype)
+        bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
     if uop == UOps.ALU:
       lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin])
 

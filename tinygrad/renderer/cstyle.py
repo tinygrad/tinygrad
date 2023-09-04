@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict
 import math
 from collections import defaultdict
-from tinygrad.codegen.linearizer import UOps, UOp, MemOp
+from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, getenv, prod, DType
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, sym_render
@@ -65,10 +65,10 @@ class CStyleLanguage(NamedTuple):
       assert output_dtype == dtypes._float4, "images must be float4"
       return f"read_imagef({buf_name}, smp, (int2)({idx[0].render(render_cl)}, {idx[1].render(render_cl)}))"
     if self.uses_vload and buf_dtype == dtypes.float16:
-      return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx.render(render_cl, strip_parens=True)})"
+      return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx})"
     if output_dtype.sz > 1:
-      return f"({output_dtype.name})(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})))"
-    return f"*({buf_name}+{idx.render(render_cl, strip_parens=True)})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx.render(render_cl)}]"
+      return f"({output_dtype.name})(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx})))"
+    return f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
 
   def render_local(self, name:str, size:int):
     return self.smem_prefix + f"float {name}[{size}];"
@@ -97,10 +97,10 @@ class CStyleLanguage(NamedTuple):
       assert var_dtype == dtypes._float4, "images must be float4"
       return f"write_imagef({buf_name}, (int2)({idx[0].render(render_cl)}, {idx[1].render(render_cl)}), {var_name});"
     if self.uses_vload and buf_dtype == dtypes.float16:
-      return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx.render(render_cl, strip_parens=True)});"
+      return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.sz > 1:
-      return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx.render(render_cl, strip_parens=True)})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
-    return f"*({buf_name}+{idx.render(render_cl, strip_parens=True)}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx.render(render_cl)}] = {var_name};"
+      return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
+    return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
 
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> Tuple[str, List[int], List[int]]:
   global_size: List[int] = []
@@ -122,12 +122,6 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
   for ru in uops:
     for v in ru.vin:
       child_count[v] += 1
-
-  def render_deref(vin:List[UOp], dtype:DType) -> str:
-    cast = f"({lang.smem_prefix if vin[0].uop == UOps.DEFINE_LOCAL else lang.buffer_prefix}{dtype.name}*)" if dtype.sz > 1 else ""
-    ret = r[vin[1]]
-    if ret[0] == '(' and ret[-1] == ')': ret = ret[1:-1]
-    return f"*{cast}({r[vin[0]]}+{ret})" if lang.uses_ptr_arithmetic else f"{r[vin[0]]}[{ret}]"
 
   for u in uops:
     uop,dtype,vin,args,_ = u
@@ -201,24 +195,16 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
       r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
     elif uop == UOps.LOAD:
       assert dtype is not None
-      val = render_deref(vin, dtype)
-      # valids are handled here
+      val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, r[vin[1]], vin[0].uop == UOps.DEFINE_LOCAL)
       if len(vin) > 2: val = lang.render_conditional(r[vin[2]], val, r[vin[3]])
-      #val = lang.render_load(dtype, args.name, args.memory_dtype, args.idx, args.local)
-      #if args.valid.min == 0 and args.valid.max == 1: val = lang.render_conditional(args.valid.render(render_cl), val, lang.render_const(args.invalid_value, dtype))
       r[u] = ssa('val')
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {val};")
     elif uop == UOps.STORE:
       if len(vin) == 2:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
       elif len(vin) == 3:
-        assert vin[2].dtype is not None
-        val = render_deref(vin, vin[2].dtype)
-        kk(f"{val} = {r[vin[2]]};")
-      else:
-        assert args.valid.min == 1 and isinstance(args, MemOp), "store must be valid and to memory"
-        assert vin[0].dtype is not None
-        kk(lang.render_store(args.name, args.memory_dtype, r[vin[0]], vin[0].dtype, args.idx, args.local))
+        assert vin[0].dtype is not None and vin[2].dtype is not None
+        kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, r[vin[1]], vin[0].uop == UOps.DEFINE_LOCAL))
     elif uop == UOps.CAST and dtype is not None and dtype.sz > 1:
       r[u] = ssa('cast')
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {lang.render_cast([r[x] for x in vin], dtype)};")
