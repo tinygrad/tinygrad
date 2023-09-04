@@ -35,7 +35,7 @@ class Node(ABC):
   def __bool__(self): return not (self.max == self.min == 0)
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
-    return self.key == other.key
+    return self.hash == other.hash
   def __neg__(self): return self*-1
   def __add__(self, b:Union[Node,int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __radd__(self, b:int): return self+b
@@ -44,9 +44,10 @@ class Node(ABC):
   def __le__(self, b:Union[Node,int]): return self < (b+1)
   def __gt__(self, b:Union[Node,int]): return (-self) < (-b)
   def __ge__(self, b:Union[Node,int]): return (-self) < (-b+1)
+  @functools.lru_cache(maxsize=100000)
   def __lt__(self, b:Union[Node,int]):
     lhs = self
-    if isinstance(lhs, SumNode) and isinstance(b, int):
+    if b.__class__ is int and isinstance(lhs, SumNode):
       muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
       if muls:
         # NOTE: gcd in python 3.8 takes exactly 2 args
@@ -59,6 +60,7 @@ class Node(ABC):
             # TODO: should we divide both by mul_gcd here?
             lhs = Variable.sum(muls)
     return create_node(LtNode(lhs, b))
+  @functools.lru_cache(maxsize=100000)
   def __mul__(self, b:Union[Node, int]):
     if b == 0: return NumNode(0)
     if b == 1: return self
@@ -117,7 +119,11 @@ class Node(ABC):
     return [MulNode(a, b_sum) if b_sum != 1 else a for a, b_sum in mul_groups.items() if b_sum != 0]
 
   @staticmethod
-  def sum(nodes:List[Node]) -> Node:
+  def sum(nodes:List[Node]) -> Node: return Node._sum(tuple(nodes))
+  
+  @staticmethod
+  @functools.lru_cache(maxsize=None)
+  def _sum(nodes:List[Node]) -> Node:
     nodes = [x for x in nodes if x.max or x.min]
     if not nodes: return NumNode(0)
     if len(nodes) == 1: return nodes[0]
@@ -183,6 +189,7 @@ class OpNode(Node):
   def get_bounds(self) -> Tuple[int, int]: pass
 
 class LtNode(OpNode):
+  @functools.lru_cache(maxsize=100000)
   def __mul__(self, b: Union[Node, int]): return (self.a*b) < (self.b*b)
   def __floordiv__(self, b: Union[Node, int], _=False): return (self.a//b) < (self.b//b)
   def get_bounds(self) -> Tuple[int, int]:
@@ -190,6 +197,7 @@ class LtNode(OpNode):
     return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min > self.b.max else (0, 1)
 
 class MulNode(OpNode):
+  @functools.lru_cache(maxsize=100000)
   def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=False): # NOTE: mod negative isn't handled right
     if self.b % b == 0: return self.a*(self.b//b)
@@ -224,7 +232,9 @@ class RedNode(Node):
   def vars(self): return functools.reduce(lambda l,x: l+x.vars(), self.nodes, [])
 
 class SumNode(RedNode):
+  @functools.lru_cache(maxsize=100000)
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
+  @functools.lru_cache(maxsize=100000)
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     fully_divided: List[Node] = []
     rest: List[Node] = []
@@ -256,7 +266,7 @@ class SumNode(RedNode):
     if _gcd > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(_gcd) // (b//_gcd)
     if divisor > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(divisor) // (b//divisor)
     return Node.sum(fully_divided) + Node.__floordiv__(Node.sum(rest), b)
-
+  @functools.lru_cache(maxsize=100000)
   def __mod__(self, b: Union[Node, int]):
     if isinstance(b, SumNode):
       nu_num = sum(node.b for node in self.flat_components if node.__class__ is NumNode)
@@ -269,7 +279,7 @@ class SumNode(RedNode):
       elif isinstance(x, MulNode): new_nodes.append(x.a * (x.b%b))
       else: new_nodes.append(x)
     return Node.__mod__(Node.sum(new_nodes), b)
-
+  @functools.lru_cache(maxsize=100000)
   def __lt__(self, b:Union[Node,int]):
     if isinstance(b, int):
       new_sum = []
@@ -290,6 +300,7 @@ class SumNode(RedNode):
     return new_nodes
 
 class AndNode(RedNode):
+  @functools.lru_cache(maxsize=100000)
   def __mul__(self, b: Union[Node, int]): Variable.ands([x*b for x in self.nodes])
   def __floordiv__(self, b: Union[Node, int], _=True): return Variable.ands([x//b for x in self.nodes])
 
