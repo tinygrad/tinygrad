@@ -26,6 +26,13 @@ def get_max(var):
 def remove_single_scalar_curly_braces(ptx_code):
   return '\n'.join([re.sub(r'\{\s*(%\w+)\s*\}', r'\1', line) for line in ptx_code.split('\n')])
 
+def define_scalar(local_size, type, args):
+  val = (('-' if args<0 else '') + 'float("inf")') if math.isinf(args) else ('float("nan")' if math.isnan(args) else str(args))
+  if len(local_size) > 0:
+    return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{val}, dtype={type})"
+  else:
+    return f"tl.where(1, {val}, {val}).to({type})"
+
 def uops_to_triton(function_name:str, uops:List[UOp]):
   kernel = []
   global_size: List[int] = []
@@ -89,13 +96,11 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       r[u] = ssa("val")
       if args.valid.min == 1: kk(f"{r[u]} = tl.load({args.name} + {args.idx.render()}, mask = {render_valid(args.idx)}).to({triton_dtypes[args.memory_dtype]})")
       else: kk(f"{r[u]} = tl.where({args.valid.render()}, tl.load({args.name}+{fill_dims_for_idx(args.idx,dims)} , mask={args.valid.render()}), 0.0).to({triton_dtypes[args.memory_dtype]})")
-    elif uop == UOps.CONST or uop == UOps.DEFINE_ACC:
-      r[u] = ssa("const" if uop == UOps.CONST else "acc")
-      val = (('-' if args<0 else '') + 'float("inf")') if math.isinf(args) else ('float("nan")' if math.isnan(args) else str(args))
-      if len(local_size) > 0:
-        kk(f"{r[u]} = tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{val}, dtype={triton_dtypes[newvar]})") # type: ignore
-      else:
-        kk(f"{r[u]} = tl.where(1, {val}, {val}).to({triton_dtypes[newvar]})")# type: ignore
+    elif uop == UOps.DEFINE_ACC:
+      r[u] = ssa("acc")
+      kk(f"{r[u]} = {define_scalar(local_size, triton_dtypes[newvar], args)}") # type: ignore
+    elif uop == UOps.CONST:
+      r[u] = define_scalar(local_size, triton_dtypes[newvar], args) # type: ignore
     elif uop == UOps.STORE:
       assert not isinstance(newvar, ImageDType), "unimplemented: image store"
       if args is None:
