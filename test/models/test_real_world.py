@@ -1,16 +1,49 @@
 import unittest, time
+import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 from tinygrad.ops import GlobalCounters, LazyOp, LoadOps
 from tinygrad.ops import Device
-from tinygrad.helpers import CI, dtypes, getenv
+from tinygrad.helpers import CI, dtypes, getenv, prod
+from tinygrad.codegen.search import kernel_optimize_opts
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet
 from examples.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
 from examples.stable_diffusion import UNetModel
+
+def kopt_search_hook(k, create_k, to_prg, baseline):
+  import nevergrad as ng
+  wanna_output = k.bufs[0].toCPU()
+  def check_opt(x):
+    try:
+      k = create_k()
+      k.process()
+      k.apply_auto_opt(x)
+      prg = to_prg(k)
+      first_tm = prg.exec(k.bufs, force_wait=True, optimizing=True)
+      np.testing.assert_allclose(wanna_output, k.bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
+      return first_tm
+    except Exception:
+      return 10000_000   # 10000 seconds is infinity
+  opts = kernel_optimize_opts(k)
+  if not opts: return "BASELINE"
+  search_space = prod([len(x.choices) for x in opts])
+  budget = getenv("BUDGET", 20) # THIS IS TEST BUDGET
+  optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, budget))
+  recommendation = optimizer.minimize(check_opt)
+  return recommendation.value if recommendation.loss < baseline else "BASELINE"
+
+def hook_kopt():
+  np.random.seed(2002)
+  oldfunc = getattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search")
+  setattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search", kopt_search_hook)
+  return oldfunc
+
+def rem_kopt_hook(oldfunc):
+  setattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search", oldfunc)
 
 def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed):
   tms = []
@@ -45,14 +78,18 @@ def derandomize_model(model):
 class TestRealWorld(unittest.TestCase):
   @unittest.skipUnless(not CI, "too big for CI")
   def test_stable_diffusion(self):
+    if getenv("KOPT"): hooked_kopt_func = hook_kopt()
+
     model = UNetModel()
     derandomize_model(model)
     @TinyJit
     def test(t, t2): return model(t, 801, t2).realize()
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 967)
+    if getenv("KOPT"): rem_kopt_hook(hooked_kopt_func)
 
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
   def test_llama(self):
+    if getenv("KOPT"): hooked_kopt_func = hook_kopt()
     old_type = Tensor.default_type
     Tensor.default_type = dtypes.float16
 
@@ -65,9 +102,11 @@ class TestRealWorld(unittest.TestCase):
     helper_test("test_llama", lambda: (Tensor([[1,]]),), test, 0.22 if CI else 13.5, 126 if CI else 486)
 
     Tensor.default_type = old_type
+    if getenv("KOPT"): rem_kopt_hook(hooked_kopt_func)
 
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
   def test_gpt2(self):
+    if getenv("KOPT"): hooked_kopt_func = hook_kopt()
     old_type = Tensor.default_type
     Tensor.default_type = dtypes.float16
 
@@ -79,6 +118,7 @@ class TestRealWorld(unittest.TestCase):
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),), test, 0.21 if CI else 0.9, 129 if CI else 369)
 
     Tensor.default_type = old_type
+    if getenv("KOPT"): rem_kopt_hook(hooked_kopt_func)
 
   @unittest.skipIf(getenv("KOPT"), "cifar hangs with KOPT")
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
