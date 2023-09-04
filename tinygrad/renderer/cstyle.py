@@ -74,7 +74,7 @@ class CStyleLanguage(NamedTuple):
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
 
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], global_size:List[int], local_size:List[int], prekernel:List[str]) -> Tuple[str,List[int],List[int]]:
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 self.arg_int_prefix if dtype == dtypes._arg_int32 else
@@ -83,8 +83,7 @@ class CStyleLanguage(NamedTuple):
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
-
-    return prg, global_size[::-1], local_size[::-1]
+    return prg
 
   # returns a str statement that does the store
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx:str, local=False) -> str:
@@ -97,8 +96,7 @@ class CStyleLanguage(NamedTuple):
       return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
 
-def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> Tuple[str, List[int], List[int]]:
-  global_size: List[int] = []
+def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> str:
   local_size: List[int] = []
   kernel,prekernel = [],[]
   #pend_close = None
@@ -168,7 +166,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     elif uop == UOps.SPECIAL:
       xid = lang.gid if args[1].startswith("g") else lang.lid
       kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]};")
-      (global_size if args[1].startswith("g") else local_size).append(args[2])
+      if args[1].startswith("l"): local_size.append(args[2])
       r[u] = args[1]
     elif uop == UOps.CONST:
       r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
@@ -205,4 +203,4 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp])  -> T
     else:
       raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(function_name, kernel, bufs, global_size, local_size, prekernel)
+  return lang.render_kernel(function_name, kernel, bufs, local_size, prekernel)
