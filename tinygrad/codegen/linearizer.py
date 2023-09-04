@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, Dict, Iterator, Union, Sequence, Final, Set
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, Dict, Union, Sequence, Final, Set
 import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
@@ -43,10 +43,6 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
     idx = (idxy//4)%base_shape[1]
   if DEBUG >= 5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return idx, idy
-
-def expand_idxs(idxs:Sequence[Node]) -> Iterator[Tuple[Node, ...]]:
-  for x in itertools.product(*[idx.expand() for idx in idxs[::-1]]):
-    yield x[::-1]
 
 class UOp(NamedTuple):
   uop: UOps
