@@ -69,6 +69,8 @@ def to_float4(x:List[UOp]) -> Optional[UOp]:
 
 def get_grouped_maybe_float4(*values:List[UOp], grouping_allowed=True):
   assert all_same([len(x) for x in values]), f"all values are not the same length {values}"
+  # TODO: enabling this make it worse
+  grouping_allowed = False
   # these use accumulators, we can only fold if the acc is a float4
   idxs = get_grouped_float4_idxs(values[-1]) if grouping_allowed else None
   if idxs is not None:

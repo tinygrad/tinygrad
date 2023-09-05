@@ -181,7 +181,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {val};")
     elif uop == UOps.STORE:
       if len(vin) == 2:
-        kk(f"{r[vin[0]]} = {r[vin[1]]};")
+        if vin[1].uop == UOps.ALU and vin[1].arg == TernaryOps.MULACC and vin[0] == vin[1].vin[2]:
+          # TODO: does this matter?
+          kk(f"{r[vin[0]]} += {lang.code_for_op[BinaryOps.MUL](*[r[x] for x in vin[1].vin[0:2]])};")
+        else:
+          kk(f"{r[vin[0]]} = {r[vin[1]]};")
       elif len(vin) == 3:
         assert vin[0].dtype is not None and vin[2].dtype is not None
         kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
