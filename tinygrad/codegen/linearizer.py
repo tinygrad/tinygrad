@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod, PtrDType, getenv
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod, PtrDType, getenv, all_same
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
@@ -40,6 +40,48 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
     idx = (idxy//4)%base_shape[1]
   if DEBUG >= 5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return idx, idy
+
+# TODO: the next three functions are poorly written
+def get_grouped_float4_idxs(acc:List[UOp]) -> Optional[List[int]]:
+  idxs: Optional[List[int]] = []
+  for i,a in enumerate(acc):
+    if idxs is None: break
+    if i in idxs: continue
+    if a.uop == UOps.GEP and a.arg == 0:
+      idxs.append(i)
+      friends: List[int] = []
+      for j,b in enumerate(acc):
+        if len(friends) == 3: break
+        if j in idxs: continue
+        if b.uop == UOps.GEP and a.vin[0] == b.vin[0] and b.arg == len(friends)+1:
+          friends.append(j)
+      if len(friends) == 3: idxs += friends
+      else: idxs = None
+    else:
+      idxs = None
+  return idxs
+
+def to_float4(x:List[UOp]) -> Optional[UOp]:
+  if all_same(x): return x[0]
+  if all(y.uop == UOps.GEP for y in x) and all_same([y.vin[0] for y in x]) and all(y.arg == i for i,y in enumerate(x)):
+    return x[0].vin[0]
+  return None
+
+def get_grouped_maybe_float4(*values:List[UOp], grouping_allowed=True):
+  assert all_same([len(x) for x in values]), f"all values are not the same length {values}"
+  # these use accumulators, we can only fold if the acc is a float4
+  idxs = get_grouped_float4_idxs(values[-1]) if grouping_allowed else None
+  if idxs is not None:
+    new_idxs = []
+    new_values = []
+    for i in range(0, len(idxs), 4):
+      nv = tuple(to_float4([v[j] for j in idxs[i:i+4]]) for v in values)
+      if any(x is None for x in nv): break
+      new_idxs.append(idxs[i:i+4])
+      new_values.append(nv)
+    if len(new_values) == len(idxs)//4:
+      return zip(new_idxs, new_values)
+  return zip([[i] for i in range(len(values[0]))], zip(*values))
 
 class UOp(NamedTuple):
   uop: UOps
@@ -409,6 +451,8 @@ class Linearizer(OptimizedKernel):
   def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=False) -> UOp:
     key = (uop, dtype, vin, arg)
     if uop == UOps.STORE and len(vin) == 2 and vin[0] == vin[1]: return vin[0]   # self store is noop
+    if uop == UOps.CAST and all(x.uop == UOps.GEP for x in vin) and all_same([x.vin[0] for x in vin]) and all(x.arg == i for i,x in enumerate(vin)):
+      return vin[0].vin[0]
     if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.uop(UOps.CONST, dtype, (), vin[0].arg, cachable=True)
     if uop == UOps.ALU:
       # rewrites. NOTE: the rewritten NEG op is still around...
@@ -440,13 +484,13 @@ class Linearizer(OptimizedKernel):
     values = [self.ast_parse(v, acc, loaded_buffers) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:
-      ret = [(idx, self.uop(UOps.STORE, dtypes.float32, (val[-1], self.uop(UOps.ALU, dtypes.float32, val, ops[x.op])))) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values, acc))]
+      ret = [(idx, self.uop(UOps.STORE, val[0].dtype, (val[-1], self.uop(UOps.ALU, val[0].dtype, val, ops[x.op])))) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.opts.supports_float4_alu)]
     else:
-      ret = [(idx, self.uop(UOps.ALU, dtypes.float32, val, x.op, cachable=True)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
+      ret = [(idx, self.uop(UOps.ALU, val[0].dtype, val, x.op, cachable=True)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.opts.supports_float4_alu and x.op not in {BinaryOps.CMPLT, TernaryOps.WHERE})]
     ordered_ret: List[Optional[UOp]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
-      for k in i:
-        ordered_ret[k] = j
+      for o,k in enumerate(i):
+        ordered_ret[k] = self.uop(UOps.GEP, dtypes.float32, (j,), o) if j.dtype == dtypes._float4 else j
     assert all(isinstance(x, UOp) for x in ordered_ret), "some tokens didn't get scattered?"
     return cast(List[UOp], ordered_ret)
