@@ -484,9 +484,10 @@ class Linearizer(OptimizedKernel):
     values = [self.ast_parse(v, acc, loaded_buffers) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:
-      ret = [(idx, self.uop(UOps.STORE, val[0].dtype, (val[-1], self.uop(UOps.ALU, val[0].dtype, val, ops[x.op])))) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.opts.supports_float4_alu)]
+      ret = [(idx, self.uop(UOps.STORE, dtypes._float4 if any(x.dtype == dtypes._float4 for x in val) else dtypes.float32,
+           (val[-1], self.uop(UOps.ALU, dtypes._float4 if any(x.dtype == dtypes._float4 for x in val) else dtypes.float32, val, ops[x.op])))) for idx, val in get_grouped_maybe_float4(*values, acc, grouping_allowed=self.opts.supports_float4_alu)]
     else:
-      ret = [(idx, self.uop(UOps.ALU, val[0].dtype, val, x.op, cachable=True)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.opts.supports_float4_alu and x.op not in {BinaryOps.CMPLT, TernaryOps.WHERE})]
+      ret = [(idx, self.uop(UOps.ALU, dtypes._float4 if any(x.dtype == dtypes._float4 for x in val) else dtypes.float32, val, x.op, cachable=True)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.opts.supports_float4_alu and x.op not in {BinaryOps.CMPLT, TernaryOps.WHERE})]
     ordered_ret: List[Optional[UOp]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
