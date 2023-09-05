@@ -31,56 +31,70 @@ def boxlist_iou(boxlist1: BoxList, boxlist2: BoxList) -> Tensor:
 
 
 def test_match_eval():
-  fn1 = make_match_evaluation_fn(0.7, 0.4)
-
-  match_quality_matrix = Tensor([[0.9, 0.7, 0.8, 0.9], # gt 1, .9
-                                [0.1, 0.5, 0.1, 0.2],  # gt 2, .5
-                                [0.1, 0.2, 0.2, 0.3]]) # gt 3, .3
-  # 1. test that it works
+  fn1, _ = make_match_fn(0.7, 0.4)
+  match_quality_matrix = Tensor([[0.9, 0.7, 0.8, 0.9, .1],
+                                [0.1, 0.5, 0.1, 0.2, .1],
+                                [0.1, 0.2, 0.85, 0.3, .1],
+                                [0.1, 0.9, 0.2, 0.3, .3],
+                                [0.1, 0.9, 0.2, 0.8, .1]])
   a = fn1(match_quality_matrix)
-  assert all(((a == Tensor([[ 0.9],[-2.],[-1.]]))[:, 0]).numpy())
+  assert all(((a == Tensor([0, 4, 2, 0, -1]))).numpy())
 
 def test_low_qual_match():
   matches = Tensor([
     [.3, .4, .1], #gt 1
-    [.5, .5, .2],
+    [.4, .5, .2],
     [.5, .8, .7],
-    [.2, .1, .0]
+    [.6, .1, .0]
   ])
-  fn = make_hq_match_fn(.7, .3)
-  first_pass = fn(matches)
-  second_pass = add_low_quality_matches(first_pass, matches)
-  assert all(((second_pass == Tensor([[ 0.4],[.5],[.8],[-1.0]]))[:, 0]).numpy())
+  hq_fn, lq_fn = make_match_fn(.7, .3)
+  first_pass = hq_fn(matches)
+  second_pass = (first_pass == -1).where(lq_fn(matches), first_pass) # merges in low quality matches
+  assert all(((second_pass == Tensor([3, 2, 2]))).numpy())
 
 # mutes matches, adds best pred for each gt that had no matches
 def add_low_quality_matches(matches: Tensor, preds: Tensor) -> Tensor:
   return (matches == -2).where(preds.max(axis=1)[:, None], matches)
 
-def make_hq_match_fn(high: float, low: float) -> Callable[[Tensor], Tensor]:
+# returns the indices of nonzero elements. [[0,2], [0,3], [1,2]]
+def nonzeros(t: Tensor, **kwargs):
+  ones = Tensor.ones_like(t)
+  indm, indn = ones.cumsum(), ones.cumsum(axis=1)
+  inds = Tensor.stack([(indm * t),(indn * t)],dim=1)
+  res = []
+  for x in range(inds.shape[0]):
+    xy = inds[x]
+    for z in range(inds.shape[2]): # for however many preds per gt
+      if xy[0][z].numpy() != 0:
+        res.append([xy[0][z].numpy() - 1, xy[1][z].numpy() - 1])
+  return Tensor(res).cast(dtypes.int32)
+
+def make_match_fn(high: float, low: float) -> Callable[[Tensor], Tensor]:
   # for the tensor of M*N
   # where M is the index of the gt and N is the prediction's quality for that gt
   # returns a tensor of N length, where N[i] is the gt that best matched this prediction
   # N[i] is a negative value if there is no match
   def hq_match_fn(preds: Tensor) -> Tensor:
     assert preds.numel() > 0, "must be scoring something"
-     # drops lq matches early, drops 0
-    best_matches = ((preds >= high) * preds).max(axis=1, keepdim=True).maximum(low) == preds
-    nonzero()
-    print("bm")
-    print(best_matches.numpy())
-    best_matches
-
-    # these are potential "low quality"
-    between_thresholds = (preds >= low) * (preds < high)
-
-    (preds >= high)*preds - between_thresholds*2 - (preds < low)*1
-    print("bm")
-    print(best_matches.numpy())
-    
-    
-    print(((preds >= high)*preds - between_thresholds*2 - (preds < low)*1).numpy())
-    return (preds >= high)*preds - between_thresholds*2 - (preds < low)*1
-  return hq_match_fn
+    # drops lq+mid matches early
+    hq = (preds >= high) * preds
+    max_vals = hq.max(axis=0)
+    max_vals = (max_vals == 0).where(-1, max_vals) # -1 when pred == 0 for all gt
+    best_matches = (hq == max_vals).float()
+    best_gt = (best_matches * Tensor.ones_like(best_matches).cumsum(axis=0)).max(axis=0)
+    return best_gt - 1
+  
+  # Returns matches that were greater than low and less than high
+  def lq_match_fn(preds: Tensor) -> Tensor:
+    assert preds.numel() > 0, "must be scoring something"
+    # drops lq+mid matches early
+    lq = (preds < high) * (preds >= low) * preds
+    max_vals = lq.max(axis=0)
+    max_vals = (max_vals == 0).where(-1, max_vals) # -1 when pred == 0 for all gt
+    best_matches = (lq == max_vals).float()
+    best_gt = (best_matches * Tensor.ones_like(best_matches).cumsum(axis=0)).max(axis=0)
+    return best_gt - 1
+  return hq_match_fn, lq_match_fn
 
 def test_rind():
   x = rind(Tensor([1, 1, 1, 1, 0, 0, 0, 0, 1, 1]).numpy(), 3)
@@ -295,6 +309,7 @@ class RPNLossComputation:
     return objectness_loss, box_loss
 
 if __name__ == "__main__":
+  test_match_eval()
   test_low_qual_match()
   #PLAYGROUND
   data = Tensor([[1, 2, 3],
@@ -305,7 +320,6 @@ if __name__ == "__main__":
   result = data.gather(idx, dim=1)
   test_rind()
   test_boxlist_iou()
-  test_match_eval()
   test_balanced_sampler()
   
 
