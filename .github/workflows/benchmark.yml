@@ -35,12 +35,12 @@ jobs:
     - name: Run LLaMA
       run: |
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
-        python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        JIT=0 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
         JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
       shell: bash
     - name: Run GPT2
       run: |
-        python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
+        JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
         JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
       shell: bash
     - name: Run 10 CIFAR training steps
@@ -62,9 +62,37 @@ jobs:
           matmul.txt
           sd.txt
 
+  testnvidiabenchmark:
+    name: NVIDIA Benchmark
+    runs-on: [self-hosted, Linux, CUDA]
+    if: github.repository_owner == 'tinygrad'
+    env:
+      PYTHONPATH: .
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Run model inference benchmark
+      run: CUDA=1 python3 test/external/external_model_benchmark.py
+    - name: Test speed vs torch
+      run: CUDA=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+      shell: bash
+    - name: Run GPT2
+      run: |
+        CUDA=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
+        CUDA=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
+      shell: bash
+    - uses: actions/upload-artifact@v3
+      with:
+        name: Speed (NVIDIA)
+        path: |
+          onnx_inference_speed.csv
+          torch_speed.txt
+          gpt2_unjitted.txt
+          gpt2_jitted.txt
+
   testamdbenchmark:
     name: AMD Benchmark
-    runs-on: [self-hosted, Linux]
+    runs-on: [self-hosted, Linux, ROCM]
     if: github.repository_owner == 'tinygrad'
     env:
       PYTHONPATH: .
@@ -88,12 +116,12 @@ jobs:
     - name: Run LLaMA
       run: |
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
-        python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        JIT=0 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
         JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
       shell: bash
     - name: Run GPT2
       run: |
-        python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
+        JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
         JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
       shell: bash
     - name: Run 10 CIFAR training steps

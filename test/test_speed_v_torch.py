@@ -151,7 +151,7 @@ class TestBigSpeed(unittest.TestCase):
     helper_test_generic_square('gemm', 4096, f, f)
   def test_large_conv_1x1(self): helper_test_conv(bs=32, in_chans=128, out_chans=128, kernel_size=1, img_size_y=128, img_size_x=128)
   def test_large_conv_3x3(self): helper_test_conv(bs=4, in_chans=128, out_chans=128, kernel_size=3, img_size_y=130, img_size_x=130)
-  def test_large_conv_5x5(self): helper_test_conv(bs=4, in_chans=128, out_chans=128, kernel_size=5, img_size_y=130, img_size_x=130)
+  def test_large_conv_5x5(self): helper_test_conv(bs=4, in_chans=128, out_chans=128, kernel_size=5, img_size_y=132, img_size_x=132)
   def test_matvec_4096_16384(self): helper_test_matvec('matvec_4096_16384', 4096, 16384)
   def test_matvec_16384_4096(self): helper_test_matvec('matvec_16384_4096', 16384, 4096)
 

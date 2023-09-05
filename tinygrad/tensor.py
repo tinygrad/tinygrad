@@ -1,6 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, math
+from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
@@ -147,17 +148,12 @@ class Tensor:
     return Tensor.full((math.ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
 
   @staticmethod
-  def full_like(tensor, fill_value, **kwargs):
-    return Tensor.full(tensor.shape, fill_value=fill_value, dtype=kwargs.pop("dtype", tensor.dtype), device=kwargs.pop("device", tensor.device), **kwargs)
-
-  @staticmethod
-  def zeros_like(tensor, **kwargs): return Tensor.full_like(tensor, 0, **kwargs)
-
-  @staticmethod
-  def ones_like(tensor, **kwargs): return Tensor.full_like(tensor, 1, **kwargs)
-
-  @staticmethod
   def eye(dim:int, **kwargs): return Tensor.full((dim,1),1,**kwargs).pad(((0,0),(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
+
+  def full_like(self, fill_value, **kwargs):
+    return Tensor.full(self.shape, fill_value=fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
+  def zeros_like(self, **kwargs): return self.full_like(0, **kwargs)
+  def ones_like(self, **kwargs): return self.full_like(1, **kwargs)
 
   # ***** rng hlops *****
 
@@ -243,7 +239,7 @@ class Tensor:
   #    - If omitted, i and j will default to 0 and N, respectively, where N is the length of the sequence
   #    - Negative values for i and j are taken relative to the end of the sequence
   #    - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
-  # - Indexing with np.newaxis or None on a given axis will add a new dimension of size one before that axis
+  # - Indexing with None on a given axis will add a new dimension of size one before that axis
   # - Empty slices are not allowed (tensors with 0s in shape have to be supported first, for all backends).
   # - For a slice [i:j:k] finding the correct indices is delegated to slice.indices(len).
   # - Strides > 1 and < 0 are now allowed!:
@@ -259,78 +255,72 @@ class Tensor:
   #    - Combined indexing works by letting regular slicing finish first -> computing the resulting dims w.r.t to Tensors passed in -> fancy indexing
   #    - Any Tensors passed in __getitem__ will perform (CMPEQ with arange -> MUL with self -> SUM_REDUCE) iteratively
   #        - The first iteration will expand the dim of self while consecutive iterations will reduce the dim
-  #        - The dims are reduced at sum_dim for each Tensor passed in
   #    - There's a special case where a permute is needed at the end:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
-  def __getitem__(self, val):
+  def __getitem__(self, val): # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
+
     orig_slices = list(val) if isinstance(val, tuple) else [val]
-    if (num_slices := sum(isinstance(v, (slice, int, Tensor)) for v in orig_slices)) > len(self.shape):
-      raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
-    ellipses_found = [i for i, v in enumerate(orig_slices) if v is Ellipsis]
-    if len(ellipses_found) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
-    ellipsis_idx = ellipses_found[0] if ellipses_found else len(orig_slices)
+    count = defaultdict(list)
+    for i,v in enumerate(orig_slices): count[type(v)].append(i)
+
+    if (num_slices := len(count[int]) + len(count[slice]) + len(count[Tensor])) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    if len(ellipsis_found := count[type(Ellipsis)]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
+
+    ellipsis_idx = ellipsis_found[0] if ellipsis_found else len(orig_slices)
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
 
-    tensor_found = [(i,v) for i, v in enumerate(orig_slices) if isinstance(v, Tensor)]
-    orig_slices = [slice(None) if isinstance(v, Tensor) else v for v in orig_slices]
-    valid_slices = [s for s in orig_slices if s is not None]
-    valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
+    valid_slices = [v for v in orig_slices if v is not None]
+    valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), y_+1) if isinstance(v, int) else slice(None) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
+
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     new_slice = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
-    # Shrink
-    sliced_tensor = self.shrink(new_slice)
+    sliced_tensor = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
     new_shape = sliced_tensor.shape
-    # Flip
-    if (flip_axes := tuple(i for i, s in enumerate(strides) if s < 0)):
-      sliced_tensor = sliced_tensor.flip(axis=flip_axes)
-    if any(s > 1 or s < 0 for s in strides):
-      # normalize if negative strides
+    if any(abs(s) != 1 for s in strides):
       strides = tuple(abs(s) for s in strides)
-      def num_zeros(step, dim_sz): return 0 if step == 1 or (y := dim_sz % step) == 0 else (step - y)
       # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
-      paddings = tuple((0, num_zeros(s, dim_sz)) for s, dim_sz in zip(strides, sliced_tensor.shape))
-      padded_tensor = sliced_tensor.pad(paddings)
+      padded_tensor = sliced_tensor.pad(tuple((0, s-(dim_sz % s) if dim_sz % s != 0 else 0) for s, dim_sz in zip(strides, sliced_tensor.shape)))
       # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
-      new_shape = flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides))
-      reshaped_tensor = padded_tensor.reshape(new_shape)
+      reshaped_tensor = padded_tensor.reshape(flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides)))
+      new_shape = reshaped_tensor.shape[::2]
       # Shrink: do [:, 0]
-      new_shape = new_shape[::2]
-      final_slice = tuple(flatten(((0, sh), (0, 1)) for sh in new_shape))
-      sliced_tensor = reshaped_tensor.shrink(final_slice)
-    final_shape, it_shape = [], iter(new_shape)
-    sub = [0] * len(tensor_found)
+      sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
+
+    final_shape, it_shape, dim, tensors, dim_collapsed = [], iter(new_shape), [], [], 0
     for i,s in enumerate(orig_slices):
-      if isinstance(s, (int, slice)):
+      if s is None: final_shape.append(1)
+      else: # s is int or slice or Tensor
         dim_shape = next(it_shape)
-        if isinstance(s, slice): final_shape.append(dim_shape)
-        elif tensor_found:
-          for i_ in range(len(tensor_found)):
-            if tensor_found[i_][0] > i: sub[i_] -= 1
-      else: # s is None
-        final_shape.append(1)
-    ret = sliced_tensor.reshape(tuple(final_shape))  # Reshape
-    if tensor_found: # Fancy/tensor indexing
-      for i,s in enumerate(sub): tensor_found[i] = (tensor_found[i][0]+s, tensor_found[i][1])
-      dim = [i[0] for i in tensor_found]
-      idx = [i[1].sign().contiguous().__neg__().contiguous().relu() * ret.shape[i[0]] + i[1] for i in tensor_found] # TODO first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
+        if isinstance(s, int):
+          dim_collapsed += 1
+        else:
+          final_shape.append(dim_shape)
+          if isinstance(s, Tensor):
+            tensors.append(s)
+            dim.append(i-dim_collapsed)
+    ret = sliced_tensor.reshape(tuple(final_shape))
+
+    if tensors: # Fancy/tensor indexing
+      # normalize idx
+      idx = [t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[d] + t for d,t in zip(dim, tensors)] # TODO first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
       max_dim = max(i.ndim for i in idx)
-      idx = [i.reshape(*[1]*(max_dim-i.ndim), *i.shape) for i in idx]
-      sum_dim = [d+max_dim-n for n,d in enumerate(dim)]
-      new_idx = idx[0].reshape(*[1]*dim[0], 1,*idx[0].shape, *[1]*(ret.ndim-dim[0]-1))
-      arange = Tensor.arange(ret.shape[dim[0]], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*dim[0], ret.shape[dim[0]], *[1]*idx[0].ndim, *[1]*(ret.ndim-dim[0]-1))
-      ret = (ret.reshape(*ret.shape[:dim[0]+1], *[1]*idx[0].ndim, *ret.shape[dim[0]+1:]) * (arange == new_idx)).sum(dim[0])
-      for idx_,d in zip(idx[1:],sum_dim[1:]):
-        new_idx = idx_.reshape(*[1]*dim[0], *idx_.shape, *[1]*(ret.ndim-dim[0]-idx_.ndim))
-        arange = Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*(d), ret.shape[d], *[1]*(ret.ndim-d-1))
-        ret = ((new_idx == arange) * ret).sum(d)
-      if dim[0] != 0 and dim != list(range(dim[0], dim[-1]+1)) and len(dim) != 1: # special permute case
-        order = list(range(ret.ndim))
-        order = order[dim[0]:dim[0]+idx[0].ndim] + order[:dim[0]] + order[dim[0]+idx[0].ndim:]
-        ret = ret.permute(order=order)
+      # compute sum_dim, arange, and idx
+      sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(dim)]
+      arange = [Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, dim))]
+      first_idx = [idx[0].reshape(*[1]*dim[0], *[1]*(1 + max_dim - idx[0].ndim), *idx[0].shape, *[1]*(ret.ndim - dim[0] - 1))]
+      rest_idx = [i.reshape(*[1]*dim[0], *[1]*(max_dim - i.ndim), *i.shape, *[1]*(ret.ndim - dim[0] - n)) for n,i in enumerate(idx[1:], 1)]
+      idx = first_idx + rest_idx
+      ret = ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*max_dim, *ret.shape[sum_dim[0]+1:])
+      # iteratively fancy index
+      for a,i,sd in zip(arange, idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
+      # special permute case
+      if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1]+1)):
+        ret_dims = list(range(ret.ndim))
+        ret = ret.permute(ret_dims[dim[0]:dim[0]+max_dim] + ret_dims[:dim[0]] + ret_dims[dim[0]+max_dim:])
     return ret
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
@@ -488,6 +478,7 @@ class Tensor:
     padding = flatten((((k-1)*d-p,(k-1)*d-p+op) for k,d,p,op in reversed(list(zip(HW, make_pair(dilation, len(HW)), make_pair(padding, len(HW)), make_pair(output_padding, len(HW)))))))
     return x.conv2d(w.reshape(w.shape[0]*w.shape[1],*w.shape[2:]), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
+  wino = int(getenv("WINO", "0"))
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
@@ -497,11 +488,39 @@ class Tensor:
     # conv2d is a pooling op (with padding)
     x = self.pad2d(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout//groups, x.shape[2:-len(HW)]
-    x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW).permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
+    if not all(x == 3 for x in HW) or stride != 1 or dilation != 1 or not Tensor.wino:
+      # normal conv
+      x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW).permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
 
-    # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
-    ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
-    return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
+      # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
+      ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
+      return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
+
+    # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
+    def apply_matrix(mat, t, dim=0): return t if dim == len(HW) else Tensor.stack([apply_matrix(mat, sum(mat[i][j] * t[j] for j in range(len(mat[i])) if mat[i][j]), dim=dim+1) for i in range(len(mat))])
+    HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
+    winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
+    winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
+    winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]]  # applying At in pre-order almost doubles compilation time
+
+    # todo: stride == dilation
+    # use padding to round up to 4x4 output tiles
+    d = self.pad2d(sum([[padding_[i*2], padding_[i*2+1] + (-(dim + sum(padding_[i * 2:(i + 1) * 2]) - 2) % 4)] for i, dim in enumerate(self.shape[-len(HW):])], []))._pool(HWI, HWO)  # (bs, cin_, tyx, HWI)
+    d = d.permute(*range(len(d.shape)-len(HW),len(d.shape)), *range(len(d.shape)-len(HW))).contiguous_backward()  # move HW to the front: # (HWI, bs, cin_, tyx)
+    tyx = d.shape[-len(HWI):]  # dim of tiling
+
+    g = weight.permute(*range(len(weight.shape)-len(HW),len(weight.shape)), *range(len(weight.shape)-len(HW)))  # move HW to the front
+
+    # compute 6x6 winograd tiles: GgGt, BtdB
+    gfactors = apply_matrix(winograd_G, g).contiguous().reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))  # (HWI, groups * rcout, cin) -> (HWI, bs=1, groups, rcout, cin, tyx=(1,1))
+    dfactors = apply_matrix(winograd_Bt, d).contiguous().reshape(*HWI, bs, groups, 1, cin, *tyx)  # (HWI, bs, cin_, tyx) -> (HWI, bs, groups, 1 ,cin, *tyx)
+
+    ret = apply_matrix(winograd_At, (gfactors * dfactors).sum(axis=-1-len(HW)))  # matmul; sum across cin: (HWI, bs, groups, rcout, *tyx); then HWI -> HWO: (HWO, bs, groups, rcout, *tyx)
+
+    ret = ret.permute([*range(len(HW), len(ret.shape)-len(HW)), *[i+o for i in range(len(HW)) for o in [len(ret.shape)-len(HW),0]]])  # interleave tyx and HWO: (bs, groups, rcout, oy, HO, ox, WO)
+    ret = ret.reshape(bs, cout, *[c * HWO[i] for i, c in enumerate(tyx)]).shrink(tuple((0, s) for s in [bs, cout, *oyx]))  # merge groups and rcout, tyx and HWO: (bs, groups, cout, *yx), shrink to final
+
+    return (ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))).contiguous().contiguous_backward()
 
   def dot(self, w:Tensor) -> Tensor:
     n1, n2 = len(self.shape), len(w.shape)
@@ -515,7 +534,9 @@ class Tensor:
 
   # ***** mlops (unary) *****
 
+  def __neg__(self): return mlops.Neg.apply(self)
   def contiguous(self): return mlops.Contiguous.apply(self)
+  def contiguous_backward(self): return mlops.ContiguousBackward.apply(self)
   def log(self): return mlops.Log.apply(self)
   def log2(self): return mlops.Log.apply(self)/math.log(2)
   def exp(self): return mlops.Exp.apply(self)
@@ -537,7 +558,6 @@ class Tensor:
   def ceil(self: Tensor) -> Tensor: return (self > (b := self.trunc())).where(b+1, b)
   def floor(self: Tensor) -> Tensor: return (self < (b := self.trunc())).where(b-1, b)
 
-  def __neg__(self): return 0.0-self
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
   def abs(self): return self.relu() + (-self).relu()
@@ -581,7 +601,10 @@ class Tensor:
 
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return mlops.Add.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else self
   def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return mlops.Sub.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x or reverse else self
-  def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return mlops.Mul.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x != 1.0 else self
+  def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+    if x.__class__ is not Tensor and x == 0.0: return mlops.Zero.apply(self)
+    if x.__class__ is not Tensor and x == -1.0: return -self
+    return mlops.Mul.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x != 1.0 else self
   def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return mlops.Div.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or reverse or not x or not dtypes.is_float(self.dtype) else self.mul(1/x)
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     if x.__class__ is not Tensor and not reverse:

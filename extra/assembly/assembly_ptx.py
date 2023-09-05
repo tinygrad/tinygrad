@@ -15,7 +15,10 @@ def render_cast(ins, inp, out):
   if inp.dtype == dtypes.bool and (dtypes.is_float(out.dtype) or dtypes.is_int(out.dtype)):
     ins.append(f"selp.{dtype_to_nvtype[out.dtype]} {out}, {'0f3F800000, 0f00000000' if dtypes.is_float(out.dtype) else '1, 0'}, {inp};")
   elif out.dtype == dtypes.bool:
-    ins.append(f"setp.ne.{dtype_to_nvtype[inp.dtype]} {out}, {'0f00000000' if dtypes.is_float(inp.dtype) else '0'}, {inp};")
+    if inp.dtype == dtypes.bool:
+      ins.append(f"mov.pred {out}, {inp};")
+    else:
+      ins.append(f"setp.ne.{dtype_to_nvtype[inp.dtype]} {out}, {'0f00000000' if dtypes.is_float(inp.dtype) else '0'}, {inp};")
   else:
     round_mod = ".rzi" if dtypes.is_int(out.dtype) and dtypes.is_float(inp.dtype) else '.rz' if dtypes.is_float(out.dtype) and (dtypes.is_int(inp.dtype) or dtypes.is_float(inp.dtype) and inp.dtype.itemsize > out.dtype.itemsize) else ''
     ins.append(f"cvt{round_mod}.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[inp.dtype]} {out}, {inp};")
@@ -30,7 +33,8 @@ def specialize_to_ptx(lang, function_name):
   ins = []
   alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
          BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", UnaryOps.SQRT: "sqrt.approx",
-         UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
+         UnaryOps.NOOP: "mov", UnaryOps.NEG: "neg",
+         UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
          TernaryOps.MULACC: "fma.rn", TernaryOps.WHERE: "selp"}
   for uop, out, vin, arg in lang.ins:
     if uop == UOps.ENDLOOP:
@@ -53,8 +57,11 @@ def specialize_to_ptx(lang, function_name):
       else:
         otype = vin[0].dtype if arg in [BinaryOps.CMPLT] else out.dtype
         if arg == TernaryOps.WHERE:
-          reg = lang.newreg((vin[0], 'bool'), dtypes.bool)
-          ins.append(f"setp.ne.{dtype_to_nvtype[vin[0].dtype]} {reg}, {'0f00000000' if dtypes.is_float(vin[0].dtype) else '0'}, {vin[0]};")
+          if vin[0].dtype == dtypes.bool:
+            reg = vin[0]
+          else:
+            reg = lang.newreg((vin[0], 'bool'), dtypes.bool)
+            ins.append(f"setp.ne.{dtype_to_nvtype[vin[0].dtype]} {reg}, {'0f00000000' if dtypes.is_float(vin[0].dtype) else '0'}, {vin[0]};")
           vin = vin[1:] + [reg]
         ins.append(f"{alu[arg]}{'.lo' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''}{'.rn' if arg == BinaryOps.DIV and out.dtype == dtypes.float32 else ''}.{dtype_to_nvtype[otype]} {out}, {', '.join(str(x) for x in vin)};")
     elif uop == UOps.LOAD:
