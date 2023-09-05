@@ -231,7 +231,9 @@ class RedNode(Node):
   def vars(self): return functools.reduce(lambda l,x: l+x.vars(), self.nodes, [])
 
 class SumNode(RedNode):
+  @functools.lru_cache(maxsize=None)
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
+  @functools.lru_cache(maxsize=None)
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     fully_divided: List[Node] = []
     rest: List[Node] = []
@@ -264,6 +266,7 @@ class SumNode(RedNode):
     if divisor > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(divisor) // (b//divisor)
     return Node.sum(fully_divided) + Node.__floordiv__(Node.sum(rest), b)
 
+  @functools.lru_cache(maxsize=None)
   def __mod__(self, b: Union[Node, int]):
     if isinstance(b, SumNode):
       nu_num = sum(node.b for node in self.flat_components if node.__class__ is NumNode)
