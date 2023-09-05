@@ -3,7 +3,9 @@ import math
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import ImageDType, dtypes, prod, DType, strip_parens
+from tinygrad.helpers import ImageDType, dtypes, prod, DType, strip_parens, getenv
+
+NATIVE_EXPLOG = getenv("NATIVE_EXPLOG")
 
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
@@ -27,10 +29,11 @@ class CStyleLanguage(NamedTuple):
   launch_bounds: bool = False
   code_for_op: Dict = {
     UnaryOps.NEG: lambda x: f"(-{x})",
-    UnaryOps.EXP2: lambda x: f"exp2({x})",
-    UnaryOps.LOG2: lambda x: f"log2({x})",
-    UnaryOps.SIN: lambda x: f"sin({x})",
-    UnaryOps.SQRT: lambda x: f"sqrt({x})",
+    UnaryOps.RECIP: lambda x: f"native_recip({x})" if NATIVE_EXPLOG else f"(1.0/{x})",
+    UnaryOps.EXP2: lambda x: f"native_exp2({x})" if NATIVE_EXPLOG else f"exp2({x})",
+    UnaryOps.LOG2: lambda x: f"native_log2({x})" if NATIVE_EXPLOG else f"log2({x})",
+    UnaryOps.SQRT: lambda x: f"native_sqrt({x})" if NATIVE_EXPLOG else f"sqrt({x})",
+    UnaryOps.SIN: lambda x: f"native_sin({x})" if NATIVE_EXPLOG else f"sin({x})",
     BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
     BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
     BinaryOps.MAX: lambda a,b: f"max({a},{b})", BinaryOps.MOD: lambda a,b: f"({a}%{b})",
