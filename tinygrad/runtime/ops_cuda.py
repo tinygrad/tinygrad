@@ -1,11 +1,12 @@
-import subprocess, time, re, hashlib, tempfile, os, functools
+import subprocess, time, re, hashlib, tempfile, functools
+from pathlib import Path
 from typing import Optional
 import numpy as np
 from pycuda.compiler import compile as cuda_compile # type: ignore
 from tinygrad.helpers import DEBUG, getenv, colored, fromimport, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
-from tinygrad.codegen.linearizer import LinearizerOptions
+from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 def pretty_ptx(s):
@@ -66,7 +67,7 @@ class CUDAProgram:
     if DEBUG >= 5: print(pretty_ptx(prg))
     if DEBUG >= 6:
       try:
-        fn = os.path.join(tempfile.gettempdir(), f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}")
+        fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}").as_posix()
         with open(fn + ".ptx", "wb") as f: f.write(prg.encode('utf-8'))
         subprocess.run(["ptxas", f"-arch={arch()}", "-o", fn, fn+".ptx"], check=True)
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))

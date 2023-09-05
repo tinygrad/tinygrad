@@ -41,6 +41,7 @@ class View(ViewInternal):
     contiguous = offset == 0 and is_contiguous(shape, strides) and mask is None
     return super().__new__(cls, shape, strides, offset, mask, contiguous, to_shape_strides(shape, strides))
   def __init__(self, shape, strides=None, offset=0, mask=None, contiguous=False, shape_strides=()): super().__init__()
+  def __repr__(self): return f"View(shape={self.shape}, strides={self.strides}, offset={self.offset}, mask={self.mask})"
 
   def expr_node_mask(self, idx, valid=None) -> Node:
     expr = [valid] if valid is not None else []
@@ -139,7 +140,7 @@ class ShapeTracker:
   def shape(self) -> Tuple[int, ...]: return self.views[-1].shape # NOTE: real type is Tuple[Union[Node, int], ...] but mypy complains about prod(shape)
 
   @property
-  def key(self) -> Tuple[View, ...]: return tuple(self.views)
+  def key(self) -> Tuple[Tuple[View, ...], Tuple[Variable, ...]]: return tuple(self.views), tuple(sorted(self.var_vals.keys()))
 
   # this is the real size (ish)
   def size(self): return prod([s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])
@@ -169,7 +170,7 @@ class ShapeTracker:
     return tuple(ret)
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
-  def _expr_idx(self, idx, valid):
+  def _expr_idx(self, idx, valid) -> Tuple[Node, Node]:
     for v in reversed(self.views[0:-1]):
       valid = v.expr_node_mask(idx, valid)
       idx = v.expr_node(idx)
@@ -228,6 +229,7 @@ class ShapeTracker:
     return self
 
   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
+    if self.views[-1].shape == new_shape: return self
     new_ints, new_nodes = partition(new_shape, lambda s: isinstance(s, int))
     if new_nodes and all(isinstance(s, int) for s in self.shape):
       # reshape from all int shape into shape with a variable, update the variable value
@@ -238,7 +240,6 @@ class ShapeTracker:
         self.var_vals[new_var] = new_val
       else: assert self.var_vals[new_var] == new_val, f"value conflicts, was {self.var_vals[new_var]}, set to {new_val}"
     elif not new_nodes: self.var_vals = {}
-    if self.views[-1].shape == new_shape: return self
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
     if all(isinstance(s, int) for s in self.shape) and all(isinstance(s, int) for s in new_shape):

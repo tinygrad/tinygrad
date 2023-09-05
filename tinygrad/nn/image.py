@@ -46,7 +46,7 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
     added_output_channels = 4 - (rcout % 4)
     rcout += added_output_channels
     cout = groups * rcout
-    w = w.slice(tuple((0, rcout) if i == 1 else (0, w.shape[i]) for i in range(len(w.shape))))
+    w = w.slice(tuple((0, rcout) if i == 1 else (0, s) for i,s in enumerate(w.shape)))
 
   # packed (note: flipping bs and iy would make the auto-padding work)
   x = x.permute(0,2,3,1).reshape(bs * iy, ix * groups * cin//4, 4)

@@ -2,7 +2,7 @@
 
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d, BatchNorm2d
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 
 if __name__ == "__main__":
   Tensor.training = True

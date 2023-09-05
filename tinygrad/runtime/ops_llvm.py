@@ -3,7 +3,7 @@ from typing import ClassVar
 from tinygrad.ops import Compiled
 from tinygrad.helpers import getenv, DEBUG, dtypes
 from ctypes import CFUNCTYPE
-from tinygrad.codegen.linearizer import LinearizerOptions
+from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
 from tinygrad.runtime.lib import RawMallocBuffer
 
@@ -61,7 +61,7 @@ class LLVMProgram:
   def __call__(self, unused_global_size, unused_local_size, *bufs, wait=False):
     cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_void_p for _ in bufs])(self.fxn)
     if wait: st = time.monotonic()
-    cfunc(*[x._buf for x in bufs])
+    cfunc(*[x._buf if not isinstance(x, int) else x for x in bufs])
     if wait: return time.monotonic()-st
 
 LLVMBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supported_vector_sizes={dtypes.float: []},

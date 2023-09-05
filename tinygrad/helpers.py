@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib
 import numpy as np
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any, Iterable
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any
 from math import prod # noqa: F401 # pylint:disable=unused-import
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
@@ -14,7 +14,6 @@ def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https
 def all_same(items): return all(x == items[0] for x in items)
 def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
 def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
-def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if not fxn(x)]
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterator): return [item for sublist in l for item in sublist]
 def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
@@ -23,6 +22,11 @@ def merge_dicts(ds:Iterable[Dict]) -> Dict:
   kvs = set([(k,v) for d in ds for k,v in d.items()])
   assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for k,v in kvs}
+def partition(lst, fxn):
+  a: list[Any] = []
+  b: list[Any] = []
+  for s in lst: (a if fxn(s) else b).append(s)
+  return a,b
 
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
@@ -79,6 +83,10 @@ class ImageDType(DType):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
     super().__init__()
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
+
+class PtrDType(DType):
+  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.np, dt.sz)
+  def __repr__(self): return f"ptr.{super().__repr__()}"
 
 class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
@@ -138,6 +146,5 @@ class GlobalCounters:
   kernel_count: ClassVar[int] = 0
   mem_used: ClassVar[int] = 0   # NOTE: this is not reset
   mem_cached: ClassVar[int] = 0 # NOTE: this is not reset
-  cache: ClassVar[Optional[List[Tuple[Callable, Any, Dict[Any, int]]]]] = None  # List[Tuple[Callable, List[RawBuffer], Dict[Variable, int]]]
   @staticmethod
-  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
+  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0

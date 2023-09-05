@@ -22,7 +22,7 @@ from abc import ABC
 # let's trace an addition down through the layers of abstraction.
 
 # we will be using the clang backend
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 Device.DEFAULT = "CLANG"
 
 # first, 2+3 as a Tensor, the highest level
@@ -270,7 +270,8 @@ result = Tensor(2).realize() + Tensor(3).realize()
 result.lazydata.realized = Device[Device.DEFAULT].buffer(prod(result.shape), result.dtype)
 
 # use the real Linearizer to linearize 2+3
-from tinygrad.codegen.linearizer import Linearizer, LinearizerOptions
+from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.kernel import LinearizerOptions
 linearizer = Linearizer(result.lazydata.op, result.lazydata, LinearizerOptions())
 linearizer.linearize()
 
@@ -299,11 +300,10 @@ result = Tensor(2) + Tensor(3)
 
 # we have a global cache used by the JIT
 # from there, we can see the generated clang code
-from tinygrad.helpers import GlobalCounters
-GlobalCounters.cache = []    # enables the cache
+from tinygrad.jit import CacheCollector
+CacheCollector.start()       # enables the cache
 result.realize()             # create the program and runs it
-cache_saved = GlobalCounters.cache
-GlobalCounters.cache = None  # disable the cache
+cache_saved = CacheCollector.finish()  # disable the cache
 
 # there's one ASTRunner in the cache
 assert len(cache_saved) == 1

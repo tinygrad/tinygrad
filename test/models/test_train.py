@@ -1,7 +1,7 @@
 import unittest
 import time
 import numpy as np
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.tensor import Device
 from tinygrad.helpers import getenv

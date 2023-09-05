@@ -6,14 +6,14 @@ from typing import Optional, List
 from tinygrad.helpers import DEBUG, CI, getenv, prod, ImageDType, OSX, fromimport, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
-from tinygrad.codegen.linearizer import LinearizerOptions
+from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
 ROCM_LLVM_PATH = pathlib.Path("/opt/rocm/llvm/bin")
-#ROCM_LLVM_PATH = pathlib.Path(__file__).parent.parent.parent.parent / "extra/rocm/build/llvm-project/bin"
+#ROCM_LLVM_PATH = pathlib.Path(__file__).parents[3] / "extra/rocm/build/llvm-project/bin"
 if DEBUG >= 5:
   early_exec = fromimport("extra.helpers", "enable_early_exec")()
 
@@ -62,7 +62,7 @@ class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
 
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
-    self.name, self.argdtypes, self.clprograms = name, argdtypes, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) if binary else cl.Program(ctx, prg) for ctx in CL.cl_ctxs]  # type: ignore
+    self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) if binary else cl.Program(ctx, prg) for ctx in CL.cl_ctxs]  # type: ignore
     try:
       self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
     except cl.RuntimeError as e:
@@ -78,16 +78,23 @@ class CLProgram:
       else:
         # print the PTX for NVIDIA. TODO: probably broken for everything else
         print(self.binary().decode('utf-8'))
-    if self.argdtypes is not None: _ = [clprg.set_scalar_arg_dtypes(self.argdtypes) for clprg in self.clprgs]
+    if argdtypes is not None: self.set_argdtypes(argdtypes)
 
   def binary(self): return self.clprograms[0].get_info(cl.program_info.BINARIES)[0]
+  def set_argdtypes(self, argdtypes): self.argdtypes, _ = argdtypes, [clprg.set_scalar_arg_dtypes(argdtypes) for clprg in self.clprgs]
 
   @staticmethod
   def max_work_group_size(): return CL.cl_ctxs[0].devices[0].max_work_group_size
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
-    cl_bufs = [x._buf if isinstance(x, CLBuffer) else np.int32(x) if isinstance(x, int) else x for x in bufs]
-    e = self.clprgs[cl_bufs[0].device](CL.cl_queue[cl_bufs[0].device], [g*l for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *cl_bufs, wait_for=[x.event for x in bufs if isinstance(x, CLBuffer) and hasattr(x, "event")])
+    if not hasattr(self, 'argdtypes'): self.set_argdtypes(tuple(None if x.__class__ is CLBuffer else np.int32 for x in bufs))
+    cl_bufs, wait_for = [], []
+    for x in bufs:
+      if x.__class__ is CLBuffer:
+        cl_bufs.append(x._buf)
+        if hasattr(x, "event"): wait_for.append(x.event)
+      else: cl_bufs.append(x)
+    e = self.clprgs[cl_bufs[0].device](CL.cl_queue[cl_bufs[0].device], [g*l for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *cl_bufs, wait_for=wait_for)
     if wait:
       e.wait()
       try:

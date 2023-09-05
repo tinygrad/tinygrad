@@ -1,9 +1,10 @@
 import numpy as np
 from PIL import Image
-import os
+from pathlib import Path
 import sys
-sys.path.append(os.getcwd())
-sys.path.append(os.path.join(os.getcwd(), 'test'))
+cwd = Path.cwd()
+sys.path.append(cwd.as_posix())
+sys.path.append((cwd / 'test').as_posix())
 from extra.datasets import fetch_mnist
 from tqdm import trange
 

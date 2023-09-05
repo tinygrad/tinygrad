@@ -4,7 +4,7 @@ from wgpu.utils._device import get_default_device  # type: ignore
 from tinygrad.runtime.lib import RawBufferCopyIn, LRUAllocator
 from tinygrad.helpers import dtypes, DType
 from tinygrad.ops import Compiled
-from tinygrad.codegen.linearizer import LinearizerOptions
+from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle
 from tinygrad.renderer.wgsl import WGSLLanguage
 import wgpu  # type: ignore
