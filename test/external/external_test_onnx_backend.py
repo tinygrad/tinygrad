@@ -20,7 +20,7 @@ class TinygradModel(BackendRep):
   def run(self, inputs: Any, **kwargs: Any) -> Tuple[Any, ...]:
     real_inputs = {k:v for k,v in zip(self.input_names, inputs)}
     ret = self.fxn(real_inputs, debug=True)
-    return tuple(x.numpy() if isinstance(x, Tensor) else np.array(x) for x in ret.values())
+    return tuple(x.numpy() if isinstance(x, Tensor) else [i.numpy() for i in x] if isinstance(x, list) else np.array(x) for x in ret.values())
 
 class TinygradBackend(Backend):
   @classmethod
@@ -38,20 +38,13 @@ class TinygradBackend(Backend):
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
-# add support for SoftmaxCrossEntropyLoss and NegativeLogLikelihoodLoss
-backend_test.exclude('test_sce_*')
-
 # no support for reduce with multiply (needs llop)
 backend_test.exclude('test_reduce_prod_*')
 
-# no optimizers (add them?)
-backend_test.exclude('test_adagrad_*')
-backend_test.exclude('test_adam_*')
-backend_test.exclude('test_nesterov_momentum_*')
-backend_test.exclude('test_momentum_*')
-
-# disable some creation ops
-backend_test.exclude('test_eyelike_*')
+# TODO figure out why it's returning wrong values, geohotstan's uneducated guess is it's due to imprecision from float64 (double) -> float32
+# see Type Constraints: https://onnx.ai/onnx/operators/onnx_aionnxpreviewtraining_Adam.html#type-constraints
+backend_test.exclude('test_adam_multiple_cpu')
+backend_test.exclude('test_nesterov_momentum_cpu')
 
 # we only support float32
 backend_test.exclude('uint8')
@@ -69,40 +62,25 @@ backend_test.exclude('test_castlike_*')
 backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
 
-# we don't support rounding
-backend_test.exclude('test_round_*')
+backend_test.exclude('test_reduce_log_sum_exp*') # dependent on actual float64 implementation for backends
+backend_test.exclude('test_operator_add*') # dependent on float64 math. Without it values default to 0 or inf
 
 # we don't support indexes
-backend_test.exclude('test_argmax_*')
-backend_test.exclude('test_argmin_*')
+# backend_test.exclude('test_argmax_*') # Needs more work #select_last_index
+# backend_test.exclude('test_argmin_*') # Needs more work #select_last_index
 backend_test.exclude('test_nonzero_*')
-
-# no support for nan or inf
-backend_test.exclude('test_isinf_*')
-backend_test.exclude('test_isnan_*')
 
 # no support for mod
 backend_test.exclude('test_mod_*')
 
-# no trig ops
-backend_test.exclude('test_acos_*')
-backend_test.exclude('test_acosh_*')
-backend_test.exclude('test_asin_*')
-backend_test.exclude('test_asinh_*')
-backend_test.exclude('test_atan_*')
-backend_test.exclude('test_atanh_*')
-
 # no boolean ops (2d, 3d, 4d)
 backend_test.exclude('test_bitshift_*')
 
-# no scatter gather
-backend_test.exclude('test_gather_*')
+# no scatternd gathernd
 backend_test.exclude('test_gathernd_*')
-backend_test.exclude('test_scatter_*')
 backend_test.exclude('test_scatternd_*')
 
 # no quantize
-backend_test.exclude('test_dequantizelinear_*')
 backend_test.exclude('test_dynamicquantizelinear_*')
 backend_test.exclude('test_qlinearmatmul_*')
 backend_test.exclude('test_qlinearconv_*')
@@ -117,12 +95,14 @@ backend_test.exclude('test_simple_rnn_*')
 # no control flow
 backend_test.exclude('test_if_*')
 backend_test.exclude('test_loop*')
+backend_test.exclude('test_range_float_type_positive_delta_expanded_cpu') # requires loop
 
 # unsupported (strange) ops
 backend_test.exclude('test_bitwise_*')
 backend_test.exclude('test_blackmanwindow_*')
 backend_test.exclude('test_bernoulli_*')
 backend_test.exclude('test_cumsum_*')
+backend_test.exclude('test_det_*')
 
 backend_test.exclude('test_tril_zero_cpu') # TODO: zero array support
 backend_test.exclude('test_triu_zero_cpu') # TODO: zero array support
@@ -132,11 +112,8 @@ backend_test.exclude('test_hammingwindow_*')
 backend_test.exclude('test_hannwindow_*')
 backend_test.exclude('test_hardmax_*')
 backend_test.exclude('test_gridsample_*')
-backend_test.exclude('test_compress_*')
-backend_test.exclude('test_det_*')
 backend_test.exclude('test_dft_*')
 backend_test.exclude('test_einsum_*')
-backend_test.exclude('test_erf_*')
 backend_test.exclude('test_strnorm_*')
 backend_test.exclude('test_unique_*')
 backend_test.exclude('test_sequence_*')
@@ -149,15 +126,91 @@ backend_test.exclude('test_stft_*')
 backend_test.exclude('test_melweightmatrix_*')
 
 # more strange ops
-backend_test.exclude('test_center_crop_pad_crop_*')
 backend_test.exclude('test_basic_deform_conv_*')
 backend_test.exclude('test_deform_conv_*')
 backend_test.exclude('test_lppool_*')
 backend_test.exclude('test_depthtospace_*')
 backend_test.exclude('test_spacetodepth_*')
 backend_test.exclude('test_scan*')
-backend_test.exclude('test_ai_onnx_ml_array_feature_extractor_*')
 backend_test.exclude('test_split_to_sequence_*')
+backend_test.exclude('test_resize_downsample_scales_cubic_*') # unsure how to implement cubic
+backend_test.exclude('test_resize_downsample_sizes_cubic_*') # unsure how to implement cubic
+backend_test.exclude('test_resize_upsample_scales_cubic_*') # unsure how to implement cubic
+backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to implement cubic
+
+# rest of the failing tests
+backend_test.exclude('test_averagepool_2d_dilations_cpu') # dilations != 1 not supported for avgpool
+backend_test.exclude('test_convtranspose_autopad_same_cpu') # TODO geohotstan has no idea how this is done, autopad requires output_shape but output_shape requires pads from autopad
+backend_test.exclude('test_optional_has_element_empty_optional_input_cpu') # Attempts to create Tensor from None
+backend_test.exclude('test_range_int32_type_negative_delta_expanded_cpu') # AttributeProto.GRAPH not implemented
+backend_test.exclude('test_reshape_allowzero_reordered_cpu') # reshaping to 0 shape
+backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
+backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
+backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
+backend_test.exclude('test_operator_addconstant_cpu') # bad data type
+
+# 1556
+backend_test.exclude('test_isinf_cpu')
+backend_test.exclude('test_isinf_negative_cpu')
+backend_test.exclude('test_isinf_positive_cpu')
+backend_test.exclude('test_isnan_cpu')
+
+if getenv("CPU") or getenv("ARM64"):
+  # not too sure
+  backend_test.exclude('test_dequantizelinear_axis_cpu')
+  backend_test.exclude('test_dequantizelinear_cpu')
+
+if getenv("TORCH"): # 1562
+  backend_test.exclude('test_and2d_cpu')
+  backend_test.exclude('test_and3d_cpu')
+  backend_test.exclude('test_and4d_cpu')
+  backend_test.exclude('test_and_bcast3v1d_cpu')
+  backend_test.exclude('test_and_bcast3v2d_cpu')
+  backend_test.exclude('test_and_bcast4v2d_cpu')
+  backend_test.exclude('test_and_bcast4v3d_cpu')
+  backend_test.exclude('test_and_bcast4v4d_cpu')
+  backend_test.exclude('test_dequantizelinear_axis_cpu')
+  backend_test.exclude('test_dequantizelinear_cpu')
+  backend_test.exclude('test_greater_equal_bcast_expanded_cpu')
+  backend_test.exclude('test_greater_equal_expanded_cpu')
+  backend_test.exclude('test_isinf_cpu')
+  backend_test.exclude('test_isinf_negative_cpu')
+  backend_test.exclude('test_isinf_positive_cpu')
+  backend_test.exclude('test_isnan_cpu')
+  backend_test.exclude('test_less_equal_bcast_expanded_cpu')
+  backend_test.exclude('test_less_equal_expanded_cpu')
+  backend_test.exclude('test_or2d_cpu')
+  backend_test.exclude('test_or3d_cpu')
+  backend_test.exclude('test_or4d_cpu')
+  backend_test.exclude('test_or_bcast3v1d_cpu')
+  backend_test.exclude('test_or_bcast3v2d_cpu')
+  backend_test.exclude('test_or_bcast4v2d_cpu')
+  backend_test.exclude('test_or_bcast4v3d_cpu')
+  backend_test.exclude('test_or_bcast4v4d_cpu')
+  backend_test.exclude('test_xor2d_cpu')
+  backend_test.exclude('test_xor3d_cpu')
+  backend_test.exclude('test_xor4d_cpu')
+  backend_test.exclude('test_xor_bcast3v1d_cpu')
+  backend_test.exclude('test_xor_bcast3v2d_cpu')
+  backend_test.exclude('test_xor_bcast4v2d_cpu')
+  backend_test.exclude('test_xor_bcast4v3d_cpu')
+  backend_test.exclude('test_xor_bcast4v4d_cpu')
+
+if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or getenv('MPS'):
+  # compiled backends cannot reshape to 0 or from 0
+  backend_test.exclude('test_slice_start_out_of_bounds_cpu')
+  backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
+
+if getenv('GPU') or getenv('METAL') or getenv('MPS'):
+  backend_test.exclude('test_mish_cpu') # weird inaccuracy
+  backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
+  backend_test.exclude('test_eyelike_with_dtype_cpu') # I'm not sure about this...
+
+if getenv('METAL') or getenv('MPS'):
+  # (((Tensor([0,1,2,3,4,5])+0.5)/3.5 - 0.5)) Try this with METAL and LLVM, weird weird inaccuracy
+  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
+  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
+  backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):
