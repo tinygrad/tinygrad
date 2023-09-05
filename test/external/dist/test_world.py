@@ -43,6 +43,8 @@ def run():
     elif rank == 1:
       send_jit(t2, 0, cache_id="test2")
 
+    print(t.numpy(), t2.numpy())
+
     # check that the received tensor is the same as the sent tensor
     if rank == 0:
       assert np.allclose(t.numpy(), t2.numpy())
@@ -50,7 +52,8 @@ def run():
   print(f"rank {rank} passed")
 
 if __name__ == "__main__":
-  devices = ["gpu:0", "gpu:1" if not CI else "gpu:0"]
+  # devices = ["gpu:0", "gpu:1" if not CI else "gpu:0"]
+  devices = ["hip:0", "hip:1"]
   world_size = len(devices)
 
   dist.init_oob(world_size)
