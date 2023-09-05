@@ -231,9 +231,9 @@ class RedNode(Node):
   def vars(self): return functools.reduce(lambda l,x: l+x.vars(), self.nodes, [])
 
 class SumNode(RedNode):
-  @functools.lru_cache(maxsize=None)
+  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
-  @functools.lru_cache(maxsize=None)
+  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     fully_divided: List[Node] = []
     rest: List[Node] = []
@@ -266,7 +266,7 @@ class SumNode(RedNode):
     if divisor > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(divisor) // (b//divisor)
     return Node.sum(fully_divided) + Node.__floordiv__(Node.sum(rest), b)
 
-  @functools.lru_cache(maxsize=None)
+  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __mod__(self, b: Union[Node, int]):
     if isinstance(b, SumNode):
       nu_num = sum(node.b for node in self.flat_components if node.__class__ is NumNode)
@@ -315,10 +315,9 @@ def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
 def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
   if isinstance(a, int): return a
-  else:
-    ret = a.substitute(var_vals)
-    assert isinstance(ret, NumNode)
-    return ret.b
+  ret = a.substitute(var_vals)
+  assert isinstance(ret, NumNode)
+  return ret.b
 
 render_python: Dict[Type, Callable] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}]" if ctx == "DEBUG" else f"{self.expr}",
