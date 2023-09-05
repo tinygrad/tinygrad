@@ -9,7 +9,7 @@ import numpy as np
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple, Dict
 
-from tinygrad.helpers import Timing, getenv, DEBUG, dtypes
+from tinygrad.helpers import Timing, getenv, DEBUG, dtypes, CI
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
@@ -18,7 +18,7 @@ from tinygrad.ops import GlobalCounters
 from tinygrad.jit import TinyJit
 from tinygrad.shape.symbolic import Variable, sym_infer
 
-JIT = getenv("JIT", 1)
+JIT = getenv("JIT", 0 if CI else 1)
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
