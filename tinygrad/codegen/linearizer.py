@@ -132,7 +132,10 @@ class Linearizer(OptimizedKernel):
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx, valid_rendered, self.const(invalid_value, localtype)))
           else:
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx))
-      ret.append(self.uop(UOps.GEP, dtypes.float32, (self.load_cache[key],), expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
+      if localtype != dtypes.float:
+        ret.append(self.uop(UOps.GEP, dtypes.float32, (self.load_cache[key],), expanded_nodes[dim].index(_idx[dim]), cachable=True))
+      else:
+        ret.append(self.load_cache[key])
     return ret
 
   def global_store(self, i:int, idxs:List[VariableOrNum], store:List[UOp]) -> None:
@@ -401,6 +404,7 @@ class Linearizer(OptimizedKernel):
   def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=False) -> UOp:
     key = (uop, dtype, vin, arg)
     if uop == UOps.STORE and len(vin) == 2 and vin[0] == vin[1]: return vin[0]   # self store is noop
+    if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.uop(UOps.CONST, dtype, (), vin[0].arg, cachable=True)
     if uop == UOps.ALU:
       # rewrites. NOTE: the rewritten NEG op is still around...
       if arg == BinaryOps.ADD and vin[1].uop == UOps.ALU and vin[1].arg == UnaryOps.NEG: return self.uop(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable=cachable)
