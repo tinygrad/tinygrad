@@ -92,18 +92,18 @@ class Linearizer(OptimizedKernel):
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
     # give names to each anonymous upcast variable
-    idxs = [Variable(f"uidx{i}", idx.min, idx.max) if isinstance(idx, Variable) and idx.expr is None else idx for i, idx in enumerate(idxs)]
+    fake_idxs = [idx if isinstance(idx, NumNode) else Variable(f"uidx{i}", idx.min, idx.max) for i, idx in enumerate(idxs)]
 
     amt = 1
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
-    g_idx, g_valid = self.sts[i].expr_idxs(idxs)
+    g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
 
     ret = []
     invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
     for _idx in _idxs:
-      substitute = {a: b.b for a, b in zip(idxs, _idx) if isinstance(b, NumNode)}
+      substitute = {a: b for a, b in zip(fake_idxs, _idx) if isinstance(a, Variable)}
       if amt > 1:
         float4_substitute = {**substitute, idxs[dim]: idxs[dim].min}
         idx, valid = g_idx.substitute(float4_substitute), g_valid.substitute(float4_substitute)
