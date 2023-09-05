@@ -187,6 +187,15 @@ def hipIpcOpenMemHandle(handle, flags):
   return ptr.value
 
 
+_libhip.hipIpcCloseMemHandle.restype = int
+_libhip.hipIpcCloseMemHandle.argtypes = [ctypes.c_void_p]
+
+
+def hipIpcCloseMemHandle(ptr):
+  status = _libhip.hipIpcCloseMemHandle(ptr)
+  hipCheckStatus(status)
+
+
 _libhip.hipSetDevice.restype = int
 _libhip.hipSetDevice.argtypes = [ctypes.c_int]
 

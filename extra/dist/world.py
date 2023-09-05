@@ -15,8 +15,7 @@ import numpy as np
 def __send_rb(args, variables=None, jit=False, force_wait=False):
   x, target_rank, y, extra = args
   if y is None:
-    if isinstance(x, RawHIPBuffer):
-      extra = hip.hipIpcGetMemHandle(x._buf)
+    if isinstance(x, RawHIPBuffer): extra = hip.hipIpcGetMemHandle(x._buf)
   else:
     if isinstance(x, RawBufferCopyInOut): x._copyout(np.frombuffer(y._buffer(), dtype=x.dtype.np))
     else: y.fromCPU(x.toCPU())
@@ -28,7 +27,8 @@ def __recv_rb(args, variables=None, jit=False, force_wait=False):
   extra = dist.OOB.recv(target_rank)
   if isinstance(x, RawHIPBuffer):
     y._buf = hip.hipIpcOpenMemHandle(extra, 0)
-    x._transfer(cast(RawHIPBuffer, y))
+    x._transfer(y)
+    hip.hipIpcCloseMemHandle(y._buf)
   elif isinstance(x, RawBufferCopyIn): x._copyin(y.toCPU())
   else: x.fromCPU(y.toCPU())
   if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}  rank {getenv('RANK')} recv {x} from rank {target_rank}")
@@ -39,7 +39,6 @@ def _send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
     # send ipc handle
     handle = hip.hipIpcGetMemHandle(x._buf)
     dist.OOB.send(handle, target_rank)
-
     CacheCollector.add(__send_rb, [x, target_rank, None, None], {})
   else:
     # cache the shared memory so we don't have to create it every time
@@ -70,7 +69,8 @@ def _recv_rb(x:RawBuffer, target_rank:int):
     ptr = hip.hipIpcOpenMemHandle(handle, 0)
     # build a new buffer
     y = RawBuffer(x.size, x.dtype, buf=ptr)
-    x._transfer(cast(RawHIPBuffer, y))
+    x._transfer(y)
+    hip.hipIpcCloseMemHandle(y._buf)
 
     if DEBUG >= 2: print(f"****  rank {getenv('RANK')} got {x} from rank {target_rank}")
 
