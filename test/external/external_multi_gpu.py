@@ -14,7 +14,7 @@ if __name__ == "__main__":
   sz = 1024*1024*256  # 1 GB
   #sz = 1024*64
 
-  with Timing("CPU creation: ", on_exit=lambda x: f", {(sz*4*2)/x:.2f} GB/sec"):
+  with ("CPU creation: ", on_exit=lambda x: f", {(sz*4*2)/x:.2f} GB/sec"):
     c0 = Tensor.ones(sz, device="cpu").realize()
     c1 = (Tensor.ones(sz, device="cpu")/2).realize()
 

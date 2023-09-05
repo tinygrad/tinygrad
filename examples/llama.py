@@ -18,6 +18,8 @@ from tinygrad.ops import GlobalCounters
 from tinygrad.jit import TinyJit
 from tinygrad.shape.symbolic import Variable, sym_infer
 
+JIT = getenv("JIT", 1)
+
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
   freqs = 1.0 / (theta ** (np.arange(0, dim, 2, dtype=np.float32)[:(dim // 2)] / dim))
@@ -113,7 +115,7 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor], jit_ctx:Optional[Dict[Variable,int]]=None):
     bsz, seqlen, _ = x.shape
-    if getenv("JIT") and mask is None:
+    if JIT and mask is None:
       assert cache_k is not None and cache_v is not None, "no cache"
       pos = Variable("pos", 1, 1024)
       cache_k = cache_k.reshape(cache_k.shape[0], pos, cache_k.shape[2], cache_k.shape[3])
@@ -153,7 +155,7 @@ class Transformer:
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
-    if seqlen == 1 and getenv("JIT"):
+    if seqlen == 1 and JIT:
       pos = Variable("pos", 1, 1024)
       freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (pos, pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
       freqs_cis.lazydata.st.var_vals[pos] = start_pos
@@ -351,12 +353,12 @@ class LLaMa:
 
 # **** main code ****
 """
-test: 
+test:
 python3 examples/llama.py  --temperature=0 --count=50 --prompt="Hello."
 output:
 Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
 
-test: 
+test:
 python3 examples/llama.py --gen='2' --temperature=0 --count=50 --prompt="Hello."
 output:
 Hello. I'm a 20 year old girl who is looking for a good lay in Palm Coast. I don't care whether it's at your place or not, as long as it's clean.
@@ -565,11 +567,11 @@ After you are done speaking, output [EOS]. You are not Chad.
 
       if args.timing: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU"+
-                  f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                  f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s") if DEBUG else None, enabled=args.timing):
-        probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
-      with Timing("sync in ", enabled=args.timing):
+      with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
+        with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU"+
+                    f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                    f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s") if DEBUG else None, enabled=args.timing):
+          probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
         probs_np = probs.numpy()
         tok = int(np.random.choice(len(probs_np), p=probs_np))
 
