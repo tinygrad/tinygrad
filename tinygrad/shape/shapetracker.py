@@ -198,9 +198,6 @@ class ShapeTracker:
     if idx.__class__ is str: idx = Variable(idx, 0, prod(self.shape)-1)
     return self._expr_idx(self.views[-1].expr_node(idx), self.views[-1].expr_node_mask(idx))
 
-  def needs_valid(self) -> bool:
-    return any(v.mask is not None for v in self.views)
-
   def axis_is_masked(self, axis) -> bool:
     _, valid = self.expr_idxs()
     return f'idx{axis}' in [v.expr for v in valid.vars()]

@@ -1,16 +1,14 @@
 from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
-from tinygrad.helpers import dtypes, getenv, DType
+from tinygrad.helpers import dtypes, getenv, DType, PtrDType
 from tinygrad.tensor import Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ASTRunner, Compiled
-from tinygrad.codegen.linearizer import UOps, MemOp, UOp
-from tinygrad.shape.symbolic import Variable
+from tinygrad.codegen.linearizer import UOps, UOp
 
 def _uops_to_prg(uops):
-  ret = Device[Device.DEFAULT].renderer("test", uops)
-  src, global_size, local_size, binary = ret if len(ret) == 4 else ret + (False,)
-  return ASTRunner("test", src, global_size, local_size, runtime_args={"binary": binary}).build(Device[Device.DEFAULT].runtime)
+  src = Device[Device.DEFAULT].renderer("test", uops)
+  return ASTRunner("test", src, [1], [1], runtime_args={"binary": False}).build(Device[Device.DEFAULT].runtime)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(vin), arg, len(uops)))
@@ -18,11 +16,11 @@ def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], ar
 
 def _test_single_value(vals, op, dtype):
   uops = []
-  uop(uops, UOps.DEFINE_GLOBAL, None, (), ('data0', dtype))
-  for i in range(len(vals)): uop(uops, UOps.DEFINE_GLOBAL, None, (), (f'data{i+1}', dtype))
-  loads = (uop(uops, UOps.LOAD, dtype, [], MemOp(f'data{i+1}', Variable.num(0), False, dtype, Variable.ands([]))) for i in range(len(vals)))
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), ('data0', dtype))
+  buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), (f'data{i+1}', dtype)) for i in range(len(vals))]
+  loads = (uop(uops, UOps.LOAD, dtype, [buf_loads[i], uop(uops, UOps.CONST, dtypes.int32, (), 0)]) for i in range(len(vals)))
   alu = uop(uops, UOps.ALU, dtype, loads, op)
-  uop(uops, UOps.STORE, None, (alu, ), MemOp('data0', Variable.num(0), False, dtype, Variable.ands([])))
+  uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Device[Device.DEFAULT].buffer(1, dtype)
   buf2 = [Device[Device.DEFAULT].buffer.fromCPU(np.array([a], dtype=dtype.np)) for a in vals]
   prg = _uops_to_prg(uops)
@@ -31,10 +29,10 @@ def _test_single_value(vals, op, dtype):
 
 def _test_single_value_const(vals, op, dtype):
   uops = []
-  uop(uops, UOps.DEFINE_GLOBAL, None, (), ('data0', dtype))
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), ('data0', dtype))
   loads = (uop(uops, UOps.CONST, dtype, [], a) for a in vals)
   alu = uop(uops, UOps.ALU, dtype, loads, op)
-  uop(uops, UOps.STORE, None, (alu, ), MemOp('data0', Variable.num(0), False, dtype, Variable.ands([])))
+  uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Device[Device.DEFAULT].buffer(1, dtype)
   prg = _uops_to_prg(uops)
   prg([buf])

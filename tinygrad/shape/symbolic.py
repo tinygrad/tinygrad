@@ -15,12 +15,10 @@ class Node(ABC):
   b: Union[Node, int]
   min: int
   max: int
-  def render(self, ops=None, ctx=None, strip_parens=False) -> str:
+  def render(self, ops=None, ctx=None) -> str:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
-    ret = ops[type(self)](self, ops, ctx)
-    if strip_parens and ret[0] == '(' and ret[-1] == ')': ret = ret[1:-1]
-    return ret
+    return ops[type(self)](self, ops, ctx)
   def vars(self): return []
   # expand a Node into List[Node] that enumerates the underlying Variables from min to max
   def expand(self) -> List[Node]: raise NotImplementedError(self.__class__.__name__)
