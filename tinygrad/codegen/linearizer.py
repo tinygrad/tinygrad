@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod, PtrDType
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod, PtrDType, getenv
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
@@ -123,7 +123,12 @@ class Linearizer(OptimizedKernel):
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           if isinstance(self.bufs[i].dtype, ImageDType):
-            idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+            if getenv("VALIDHACKS"):
+              # TODO: this may very well be wrong
+              idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid, validhacks=True)
+              valid = Variable.num(1)
+            else:
+              idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
             rendered_idx = self.uop(UOps.CAST, dtypes._int2, (idx[0].render(self.render_ops, self), idx[1].render(self.render_ops, self)))
           else:
             rendered_idx = idx.render(self.render_ops, self)
