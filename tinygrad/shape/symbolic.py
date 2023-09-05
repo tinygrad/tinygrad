@@ -154,7 +154,7 @@ class Variable(Node):
     self.expr, self.min, self.max = expr, nmin, nmax
   def vars(self): return [self]
   def expand(self) -> List[Node]: return [self] if self.expr is not None else [Variable.num(j) for j in range(self.min, self.max+1)]
-  def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return var_vals[self]
+  def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return var_vals[self] if self in var_vals else self
 
 class NumNode(Node):
   def __init__(self, num:int):
