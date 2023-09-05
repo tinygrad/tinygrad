@@ -19,7 +19,7 @@ setup(name='tinygrad',
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
       ],
-      install_requires=['numpy', 'requests', 'pillow', 'tqdm', 'networkx', 'pyopencl', 'PyYAML'],
+      install_requires=["numpy", "requests", "pillow", "tqdm", "networkx", "pyopencl", "PyYAML", "pyobjc-framework-Metal;platform_system=='Darwin'", "pyobjc-framework-Cocoa;platform_system=='Darwin'", "pyobjc-framework-libdispatch;platform_system=='Darwin'"],
       python_requires='>=3.8',
       extras_require={
         'llvm': ["llvmlite"],
@@ -27,7 +27,6 @@ setup(name='tinygrad',
         'arm': ["unicorn"],
         'triton': ["triton>=2.0.0.dev20221202"],
         'webgpu': ["wgpu"],
-        'metal': ["pyobjc-framework-Metal", "pyobjc-framework-Cocoa", "pyobjc-framework-libdispatch"],
         'linting': [
             "flake8",
             "pylint",
