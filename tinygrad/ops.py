@@ -151,12 +151,12 @@ class ASTRunner:
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
     if var_vals is None: var_vals = {}
-    global_size = [sym_infer(sz, var_vals).b for sz in self.global_size] if self.global_size is not None else self.global_size
-    local_size = [sym_infer(sz, var_vals).b for sz in self.local_size] if self.local_size is not None else self.local_size
+    global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
+    local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else self.local_size
     if et := self.clprg((global_size + [1]*(3-len(global_size))) if global_size is not None else None,
                         (local_size + [1]*(3-len(local_size))) if local_size is not None else None,
                         *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
-    op_estimate = sym_infer(self.op_estimate, var_vals).b
+    op_estimate = sym_infer(self.op_estimate, var_vals)
     if DEBUG >= 2:
       print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(33-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(global_size):18s} {str(local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {self.mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))

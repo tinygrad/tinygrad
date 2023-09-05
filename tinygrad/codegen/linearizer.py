@@ -120,16 +120,16 @@ class Linearizer(OptimizedKernel):
     ret = []
     invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
     for _idx in _idxs:
-      substitute = {a: b for a, b in zip(idxs, _idx)}
+      substitute = {a: b.b for a, b in zip(idxs, _idx) if isinstance(b, NumNode)}
       if amt > 1:
-        float4_substitute = {**substitute, idxs[dim]: Variable.num(idxs[dim].min)}
-        idx, valid = g_idx.infer(float4_substitute), g_valid.infer(float4_substitute)
+        float4_substitute = {**substitute, idxs[dim]: idxs[dim].min}
+        idx, valid = g_idx.substitute(float4_substitute), g_valid.substitute(float4_substitute)
         localtype = dtypes._float4 if amt == 4 else dtypes._float2
         if idx.render() != ((idx//amt)*amt).render():
-          idx, valid = g_idx.infer(substitute), g_valid.infer(substitute)
+          idx, valid = g_idx.substitute(substitute), g_valid.substitute(substitute)
           localtype = dtypes.float32
       else:
-        idx, valid = g_idx.infer(substitute), g_valid.infer(substitute)
+        idx, valid = g_idx.substitute(substitute), g_valid.substitute(substitute)
         localtype = dtypes.float32
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
