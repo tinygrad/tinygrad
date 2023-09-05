@@ -161,7 +161,7 @@ class GPT2:
 
     if getenv("FP16"):
       for k,v in weights.items():
-        weights[k] = v.cast(dtypes.float16).realize()
+        weights[k] = v.cpu().cast(dtypes.float16).realize()
     load_state_dict(model, weights)
     return GPT2(model, tokenizer)
 
