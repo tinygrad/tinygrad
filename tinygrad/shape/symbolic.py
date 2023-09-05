@@ -45,6 +45,7 @@ class Node(ABC):
   def __gt__(self, b:Union[Node,int]): return (-self) < (-b)
   def __ge__(self, b:Union[Node,int]): return (-self) < (-b+1)
   def __lt__(self, b:Union[Node,int]):
+    #if self.min >= (b.max if isinstance(b, Node) else b): return Variable.num(0)
     lhs = self
     if isinstance(lhs, SumNode) and isinstance(b, int):
       muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
@@ -105,6 +106,9 @@ class Node(ABC):
     if self.min < 0: return (self - ((self.min//b)*b)) % b
     return create_node(ModNode(self, b))
 
+  @property
+  def range(self): return self.max - self.min + 1
+
   @staticmethod
   def num(num:int) -> NumNode: return NumNode(num)
 
@@ -155,7 +159,7 @@ class Variable(Node):
     self.expr, self.min, self.max = expr, nmin, nmax
   def vars(self): return [self]
   def expand(self) -> List[Node]: return [self] if self.expr is not None else [Variable.num(j) for j in range(self.min, self.max+1)]
-  def infer(self, var_vals: Dict[Variable, int]) -> int: return var_vals[self]
+  def infer(self, var_vals: Dict[Variable, int]) -> int: return var_vals[self] if self in var_vals else self
 
 class NumNode(Node):
   def __init__(self, num:int):
@@ -167,7 +171,7 @@ class NumNode(Node):
   def __eq__(self, other): return self.b == other
   def __hash__(self): return self.hash  # needed with __eq__ override
   def expand(self) -> List[Node]: return [self]
-  def infer(self, var_vals: Dict[Variable, int]) -> int: return self.b
+  def infer(self, var_vals: Dict[Variable, int]) -> int: return self
 
 def create_node(ret:Node):
   assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {type(ret)} {ret}"
@@ -188,6 +192,7 @@ class LtNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
     if isinstance(self.b, int): return int(self.a.max < self.b), int(self.a.min < self.b)
     return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min > self.b.max else (0, 1)
+  def infer(self, var_vals: Dict[Variable, int]) -> int: return self.a.infer(var_vals) < sym_infer(self.b, var_vals)
 
 class MulNode(OpNode):
   def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul
@@ -209,6 +214,7 @@ class DivNode(OpNode):
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
   def expand(self) -> List[Node]: return [x//self.b for x in self.a.expand()]
+  def infer(self, var_vals: Dict[Variable, int]) -> int: return self.a.infer(var_vals) // sym_infer(self.b, var_vals)
 
 class ModNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
@@ -218,6 +224,7 @@ class ModNode(OpNode):
     assert self.a.min >= 0 and isinstance(self.b, int)
     return (0, self.b-1) if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b) else (self.a.min%self.b, self.a.max%self.b)
   def expand(self) -> List[Node]: return [x%self.b for x in self.a.expand()]
+  def infer(self, var_vals: Dict[Variable, int]) -> int: return self.a.infer(var_vals) % self.b
 
 class RedNode(Node):
   def __init__(self, nodes:List[Node]): self.nodes = nodes
@@ -281,7 +288,7 @@ class SumNode(RedNode):
     return Node.__lt__(self, b)
 
   def expand(self) -> List[Node]: return [Variable.sum(list(it)) for it in itertools.product(*[x.expand() for x in self.nodes])]
-  def infer(self, var_vals: Dict[Variable, int]) -> int: return sum([node.infer(var_vals) for node in self.nodes])
+  def infer(self, var_vals: Dict[Variable, int]) -> int: return Variable.sum([node.infer(var_vals) for node in self.nodes])
 
   @property
   def flat_components(self): # recursively expand sumnode components
@@ -292,6 +299,7 @@ class SumNode(RedNode):
 class AndNode(RedNode):
   def __mul__(self, b: Union[Node, int]): Variable.ands([x*b for x in self.nodes])
   def __floordiv__(self, b: Union[Node, int], _=True): return Variable.ands([x//b for x in self.nodes])
+  def infer(self, var_vals: Dict[Variable, int]) -> int: return Variable.ands([node.infer(var_vals) for node in self.nodes])
 
 def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   ret = typ(nodes)
@@ -302,7 +310,7 @@ def create_rednode(typ:Type[RedNode], nodes:List[Node]):
 @functools.lru_cache(maxsize=None)
 def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
-def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int: return a if isinstance(a, int) else a.infer(var_vals)
+def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int: return Variable.num(a) if isinstance(a, int) else a.infer(var_vals)
 
 render_python: Dict[Type, Callable] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}]" if ctx == "DEBUG" else f"{self.expr}",
