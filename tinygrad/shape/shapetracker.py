@@ -173,9 +173,7 @@ class ShapeTracker:
 
   def _expr_idx(self, idx, valid) -> Tuple[Node, Node]:
     for v in reversed(self.views[0:-1]):
-      if valid.max == 0:
-        idx = Variable.num(-1)
-        break
+      if valid.max == 0: return Variable.num(-1), valid
       valid = v.expr_node_mask(idx, valid)
       idx = v.expr_node(idx)
     return idx, valid

@@ -104,9 +104,6 @@ class Node(ABC):
     if self.min < 0: return (self - ((self.min//b)*b)) % b
     return create_node(ModNode(self, b))
 
-  @property
-  def range(self): return self.max - self.min + 1
-
   @staticmethod
   def num(num:int) -> NumNode: return NumNode(num)
 
@@ -157,7 +154,7 @@ class Variable(Node):
     self.expr, self.min, self.max = expr, nmin, nmax
   def vars(self): return [self]
   def expand(self) -> List[Node]: return [self] if self.expr is not None else [Variable.num(j) for j in range(self.min, self.max+1)]
-  def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return var_vals[self] if self in var_vals else self
+  def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return var_vals[self]
 
 class NumNode(Node):
   def __init__(self, num:int):
@@ -312,8 +309,7 @@ def create_rednode(typ:Type[RedNode], nodes:List[Node]):
 def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
 def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
-  if isinstance(a, int): return a
-  ret = a.substitute({k:Variable.num(v) for k, v in var_vals.items()})
+  ret = (Variable.num(a) if isinstance(a, int) else a).substitute({k:Variable.num(v) for k, v in var_vals.items()})
   assert isinstance(ret, NumNode)
   return ret.b
 

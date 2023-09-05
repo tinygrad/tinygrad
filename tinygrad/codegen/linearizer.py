@@ -91,13 +91,13 @@ class Linearizer(OptimizedKernel):
     expanded_nodes = [idx.expand() for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
-    # give names to each anonymous upcast variable
-    fake_idxs = [idx if isinstance(idx, NumNode) else Variable(f"uidx{i}", idx.min, idx.max) for i, idx in enumerate(idxs)]
 
     amt = 1
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
+    # calculate expr_idxs using placeholder variables
+    fake_idxs = [idx if isinstance(idx, NumNode) else Variable(f"uidx{i}", idx.min, idx.max) for i, idx in enumerate(idxs)]
     g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
 
     ret = []
