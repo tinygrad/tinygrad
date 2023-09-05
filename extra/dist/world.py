@@ -1,7 +1,7 @@
 from typing import Any, Optional, Tuple, cast
 from extra import dist
 from multiprocessing import shared_memory
-from tinygrad.helpers import DEBUG, colored
+from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawBuffer, RawBufferCopyIn, RawBufferCopyInOut, RawBufferTransfer
 from tinygrad.runtime.ops_hip import RawHIPBuffer
@@ -14,20 +14,24 @@ import numpy as np
 # fake the function signature of ASTRunner so we can put it in the cache
 def __send_rb(args, variables=None, jit=False, force_wait=False):
   x, target_rank, y, extra = args
-  if y is not None:
+  if y is None:
+    if isinstance(x, RawHIPBuffer):
+      extra = hip.hipIpcGetMemHandle(x._buf)
+  else:
     if isinstance(x, RawBufferCopyInOut): x._copyout(np.frombuffer(y._buffer(), dtype=x.dtype.np))
     else: y.fromCPU(x.toCPU())
   dist.OOB.send(extra, target_rank)
-  if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}   sent {x} to rank {target_rank}")
+  if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}  rank {getenv('RANK')} sent {x} to rank {target_rank}")
 
 def __recv_rb(args, variables=None, jit=False, force_wait=False):
   x, target_rank, y = args
-  dist.OOB.recv(target_rank)
+  extra = dist.OOB.recv(target_rank)
   if isinstance(x, RawHIPBuffer):
+    y._buf = hip.hipIpcOpenMemHandle(extra, 0)
     x._transfer(cast(RawHIPBuffer, y))
   elif isinstance(x, RawBufferCopyIn): x._copyin(y.toCPU())
   else: x.fromCPU(y.toCPU())
-  if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}   recv {x} from rank {target_rank}")
+  if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}  rank {getenv('RANK')} recv {x} from rank {target_rank}")
 
 # send a rawbuffer from out rank to the target rank
 def _send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
@@ -68,7 +72,7 @@ def _recv_rb(x:RawBuffer, target_rank:int):
     y = RawBuffer(x.size, x.dtype, buf=ptr)
     x._transfer(cast(RawHIPBuffer, y))
 
-    if DEBUG >= 2: print(f"****   got {x} from rank {target_rank}")
+    if DEBUG >= 2: print(f"****  rank {getenv('RANK')} got {x} from rank {target_rank}")
 
     CacheCollector.add(__recv_rb, [x, target_rank, y], {})
   else:
@@ -79,7 +83,7 @@ def _recv_rb(x:RawBuffer, target_rank:int):
     # fast path when we can directly copyin
     if isinstance(x, RawBufferCopyIn): x._copyin(y.toCPU())
     else: x.fromCPU(y.toCPU())
-    if DEBUG >= 2: print(f"****   got {x} from rank {target_rank}")
+    if DEBUG >= 2: print(f"****  rank {getenv('RANK')} got {x} from rank {target_rank}")
 
     if extra[1] is None:
       (s := shared_memory.SharedMemory(name=extra[0])).close()
