@@ -479,6 +479,7 @@ class Tensor:
     return x.conv2d(w.reshape(w.shape[0]*w.shape[1],*w.shape[2:]), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
   wino = int(getenv("WINO", "0"))
+  conv_cache = {}
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
@@ -497,7 +498,19 @@ class Tensor:
       return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
 
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
-    def apply_matrix(mat, t, dim=0): return t if dim == len(HW) else Tensor.stack([apply_matrix(mat, sum(mat[i][j] * t[j] for j in range(len(mat[i])) if mat[i][j]), dim=dim+1) for i in range(len(mat))])
+    def apply_matrix(mat, t):
+      tmat = Tensor(mat).realize()
+      fmat = None
+      for dim in range(len(HW)):
+        rmat = tmat.reshape([1] * dim + [tmat.shape[0]] + [1] * (len(HW) - 1) + [tmat.shape[1]] + [1] * (len(HW) - dim - 1) + [1] * (len(t.shape) - len(HW)))
+        rmat = rmat.expand((tmat.shape[0],) * len(HW) + (tmat.shape[1],) * len(HW) + t.shape[len(HW):])
+        if fmat is None:
+          fmat = rmat
+        else:
+          fmat = fmat * rmat
+      rt = t.reshape((1,) * len(HW) + t.shape)
+      return (rt * fmat).sum(list(range(len(HW), 2 * len(HW))))
+
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
     winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
     winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
