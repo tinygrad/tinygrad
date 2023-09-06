@@ -224,5 +224,17 @@ class TestTinygrad(unittest.TestCase):
     Tensor([]).realize()
     Tensor([]).numpy()
 
+  def test_tensor_ndarray_dtype(self):
+    arr = np.array([1]) # where dtype is implicitly int64
+    assert Tensor(arr).dtype == dtypes.int64
+    assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32 # check if ndarray correctly casts to Tensor dtype
+    assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64 # check that it works for something else
+
+  def test_tensor_list_dtype(self):
+    arr = [1]
+    assert Tensor(arr).dtype == Tensor.default_type
+    assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
+    assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+
 if __name__ == '__main__':
   unittest.main()

@@ -8,7 +8,7 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
-if DEBUG >= 5:
+if DEBUG >= 6:
   from extra.helpers import enable_early_exec
   early_exec = enable_early_exec()
 
@@ -45,7 +45,7 @@ class HIPProgram:
     except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
-    if DEBUG >= 5:
+    if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
