@@ -501,14 +501,11 @@ class Tensor:
       tmat = Tensor(mat).realize()
       fmat = None
       for dim in range(len(HW)):
+        # reshape and expand to full shape to avoid multiple kernels
         rmat = tmat.reshape([1] * dim + [tmat.shape[0]] + [1] * (len(HW) - 1) + [tmat.shape[1]] + [1] * (len(HW) - dim - 1) + [1] * (len(t.shape) - len(HW)))
         rmat = rmat.expand((tmat.shape[0],) * len(HW) + (tmat.shape[1],) * len(HW) + t.shape[len(HW):])
-        if fmat is None:
-          fmat = rmat
-        else:
-          fmat = fmat * rmat
-      rt = t.reshape((1,) * len(HW) + t.shape)
-      return (rt * fmat).sum(list(range(len(HW), 2 * len(HW))))
+        fmat = rmat if fmat is None else fmat * rmat
+      return (t.reshape((1,) * len(HW) + t.shape) * fmat).sum(list(range(len(HW), 2 * len(HW))))
 
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
     winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
