@@ -415,7 +415,7 @@ class Linearizer(OptimizedKernel):
       if arg == BinaryOps.DIV and vin[1].uop == UOps.CONST and vin[1].arg == 1.0: return vin[0]
     if cachable and key in self.saved_exprs: return self.saved_exprs[key]
     self.uops.append(UOp(uop, dtype, vin, arg, len(self.uops)))
-    if DEBUG >= 4: print(self.uops[-1])
+    if DEBUG >= 5: print(self.uops[-1])
     if cachable: self.saved_exprs[key] = self.uops[-1]
     return self.uops[-1]
 

@@ -402,7 +402,7 @@ class OptimizedKernel(Kernel):
       to_local: List[Tuple[int, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
         local_size = prod(sz for _, sz in to_local)
-        local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)
+        local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)
         if local_sz is not None: to_local.append((axis, local_sz))
       for axis, local_sz in sorted(to_local[:3]):
         self.shift_to(axis, local_sz, insert_before=self.first_reduce)
