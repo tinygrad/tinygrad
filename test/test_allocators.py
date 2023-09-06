@@ -12,7 +12,7 @@ def check_gc():
     from extra.introspection import print_objects
     assert print_objects() == 0
 
-class FakeDeviceBuffer():
+class FakeDeviceBuffer:
   def __init__(self, sz, dt, device):
     self.id = 1
     self.size = sz

@@ -210,7 +210,7 @@ class MultiHeadAttention:
     ret =  self.out_proj(wv).transpose(0,1)  # BxTxC -> TxBxC
     return ret
 
-class ConvFeatureExtractionModel():
+class ConvFeatureExtractionModel:
   def __init__(self, conv_layers, dropout=.0, mode="default", conv_bias=False):
     assert mode in {"default", "group_norm_masked", "layer_norm"}
     def block(n_in, n_out, k, stride, is_layer_norm=False, is_group_norm=False, conv_bias=False):
@@ -352,7 +352,7 @@ class Upsample:
     new_shape = (*x.shape[:-1], x.shape[-1] * self.scale)
     return x.unsqueeze(-1).repeat(repeats).reshape(new_shape)
 
-class SineGen():
+class SineGen:
   def __init__(self, samp_rate, harmonic_num=0, sine_amp=0.1, noise_std=0.003, voice_threshold=0, flag_for_pulse=False):
     self.sine_amp, self.noise_std, self.harmonic_num, self.sampling_rate, self.voiced_threshold, self.flag_for_pulse = sine_amp, noise_std, harmonic_num, samp_rate, voice_threshold, flag_for_pulse
     self.dim = self.harmonic_num + 1
