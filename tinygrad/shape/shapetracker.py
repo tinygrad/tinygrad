@@ -48,8 +48,9 @@ class View(ViewInternal):
     if self.mask is not None:
       acc = 1
       for ns,(x,y) in reversed(list(zip(self.shape, self.mask))):
-        base = ((idx//acc) % ns)
-        expr += [base >= x, base < y]
+        if x != 0 or y != ns:
+          base = ((idx//acc) % ns)
+          expr += [base >= x, base < y]
         acc *= ns
     return Variable.ands(expr)
 
@@ -172,6 +173,7 @@ class ShapeTracker:
 
   def _expr_idx(self, idx, valid) -> Tuple[Node, Node]:
     for v in reversed(self.views[0:-1]):
+      if valid.max == 0: return Variable.num(-1), valid
       valid = v.expr_node_mask(idx, valid)
       idx = v.expr_node(idx)
     return idx, valid
