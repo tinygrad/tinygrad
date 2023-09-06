@@ -69,7 +69,7 @@ class Thneed:
         o['data'] = weights[ptr:nptr]
         ptr = nptr
 
-      if o['arg_type'] == "image2d_t" or o['arg_type'] == "image1d_t":
+      if o['arg_type'] in ["image2d_t", "image1d_t"]:
         tfmt = image_fmt_32 if 'float32' in o and o['float32'] else image_fmt
         if o['arg_type'] == "image2d_t":
           if 'buffer_id' in o and o['height'] == 1 and not bufs_loaded[o['buffer_id']]:

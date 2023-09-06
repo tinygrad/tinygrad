@@ -19,7 +19,7 @@ def init_dataset():
       doc_tokens = []
       prev_is_whitespace = True
       for c in text:
-        if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
+        if c in (" ", "\t", "\r", "\n", "\u202F"):
           prev_is_whitespace = True
         else:
           if prev_is_whitespace:

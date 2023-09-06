@@ -41,12 +41,12 @@ def _is_punctuation(char):
   return unicodedata.category(char).startswith("P")
 
 def _is_whitespace(char):
-  if char == " " or char == "\t" or char == "\n" or char == "\r":
+  if char in (" ", "\t", "\n", "\r"):
     return True
   return unicodedata.category(char) == "Zs"
 
 def _is_control(char):
-  if char == "\t" or char == "\n" or char == "\r":
+  if char in ("\t", "\n", "\r"):
     return False
   return unicodedata.category(char).startswith("C")
 

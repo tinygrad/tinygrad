@@ -134,7 +134,7 @@ class TestOnnxModel(unittest.TestCase):
 
     cls = run(chicken_img)
     print(cls, _LABELS[cls])
-    assert _LABELS[cls] == "hen" or _LABELS[cls] == "cock"
+    assert _LABELS[cls] in ["hen", "cock"]
     cls = run(car_img)
     print(cls, _LABELS[cls])
     assert "car" in _LABELS[cls] or _LABELS[cls] == "convertible"

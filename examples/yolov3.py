@@ -337,8 +337,8 @@ class Darknet:
     outputs = {} # Cached outputs for route layer
     detections, write = None, False
     for i, module in enumerate(modules):
-      module_type = (module["type"])
-      if module_type == "convolutional" or module_type == "upsample":
+      module_type = module["type"]
+      if module_type in ("convolutional", "upsample"):
         for layer in self.module_list[i]:
           x = layer(x)
       elif module_type == "route":
