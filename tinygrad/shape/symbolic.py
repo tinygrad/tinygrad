@@ -297,7 +297,12 @@ class SumNode(RedNode):
 class AndNode(RedNode):
   def __mul__(self, b: Union[Node, int]): Variable.ands([x*b for x in self.nodes])
   def __floordiv__(self, b: Union[Node, int], _=True): return Variable.ands([x//b for x in self.nodes])
-  def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return Variable.ands([node.substitute(var_vals) for node in self.nodes])
+  def substitute(self, var_vals: Dict[Variable, Node]) -> Node:
+    subed = []
+    for node in self.nodes:
+      if not (sub:=node.substitute(var_vals)): return NumNode(0)
+      subed.append(sub)
+    return Variable.ands(subed)
 
 def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   ret = typ(nodes)
