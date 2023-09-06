@@ -65,7 +65,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     TernaryOps.MULACC: lambda x,y,z,: f"(({x}*{y})+{z})",
     TernaryOps.WHERE: lambda x,y,z,: f"tl.where({x},{y},{z})",
   }
-  int_div = lambda x,y: f"({x}//{y})"
+  def int_div(x,y): return f"({x}//{y})"
   triton_dtypes = {dtypes.double: "tl.float64", dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.bool: "tl.int1", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64"}
   signature_dtypes = {dtypes.double: "*fp64",dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.bool: "*i8", dtypes.int8: "*i1", dtypes.uint8: "*u8", dtypes._arg_int32: "i32", dtypes.int32: "*i32", dtypes.int64: "*i64"}
   for u in uops:
