@@ -172,11 +172,10 @@ class Compiled:
 
   def to_program(self, k):
     k.linearize()
-    ret = self.renderer(k.function_name, k.uops)
-    src, global_size, local_size, binary = ret if len(ret) == 4 else ret + (False,)
-    return ASTRunner(k.function_name, src, global_size, local_size,
+    src = self.renderer(k.function_name, k.uops)
+    return ASTRunner(k.function_name, src, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
-                     display_name=k.display_name, runtime_args={"binary": binary}).build(self.runtime)
+                     display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime)
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):
     # all movementops do nothing in a Compiled buffer!

@@ -70,6 +70,9 @@ class Kernel:
     self.exclude_local_upcast: int = 0
     self.reverse_upcast_dir: bool = False
 
+    self.global_size: Optional[List[int]] = None
+    self.local_size: Optional[List[int]] = None
+
   def has_variable_shape(self) -> bool:
     for b in self.bufs:
       if any(not isinstance(x, int) for x in b.st.shape): return True
