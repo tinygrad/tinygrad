@@ -244,7 +244,7 @@ class Upsample:
     tmp = x.reshape([b, c, -1] + [1] * _lens) * Tensor.ones(*[1, 1, 1] + [self.scale_factor] * _lens)
     return tmp.reshape(list(x.shape) + [self.scale_factor] * _lens).permute([0, 1] + list(chain.from_iterable([[y+2, y+2+_lens] for y in range(_lens)]))).reshape([b, c] + [x * self.scale_factor for x in x.shape[2:]])
 
-class Conv_Block():
+class Conv_Block:
   def __init__(self, c1, c2, kernel_size=1, stride=1, groups=1, dilation=1, padding=None):
     self.conv = Conv2d(c1,c2, kernel_size, stride, padding=autopad(kernel_size, padding, dilation), bias=False, groups=groups, dilation=dilation)
     self.bn = BatchNorm2d(c2, eps=0.001)

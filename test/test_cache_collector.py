@@ -5,7 +5,7 @@ from tinygrad.helpers import dtypes
 from tinygrad.jit import CacheCollector
 from weakref import ref
 
-class FakeDeviceBuffer():
+class FakeDeviceBuffer:
   def __init__(self, sz, dt, device):
     self.size = sz
     self.dtype = dt
