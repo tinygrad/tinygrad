@@ -59,7 +59,7 @@ class Tensor:
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
       data = LazyBuffer.fromCPU(np.array(data, dtype=(dtype or Tensor.default_type).np))
     elif isinstance(data, np.ndarray):
-      data = LazyBuffer.fromCPU(data.astype((dtype or Tensor.default_type).np))
+      data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data)
     else: raise RuntimeError(f"can't create Tensor from {data}")
 
     self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
