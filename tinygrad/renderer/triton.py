@@ -73,24 +73,10 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   for u in uops:
     uop,newvar,vin,args,_ = u
     if uop == UOps.LOOP:
-      for i,var in enumerate(args[0]):
-        if isinstance(var, NumNode): continue # python doesnt have block scope
-        dims.append(var.expr)
-        if args[1] == "global" or args[1] == "local": valid.append(f"{var.expr}<{get_max(var+1)}")
-        if args[1] == "global":
-          global_size.append(var.max+1)
-          kk(f"{var.expr} = {gid[i]} # {get_max(var+1)}")
-        elif args[1] == "local":
-          assert var.min == 0, "local loop must start at 0"
-          kk(f"{var.expr} = tl.arange({0}, {next_power_of_2(var.max+1)})[{', '.join([':' if i == j else 'None' for j in range(len(args[0]))])}]")
-          local_size.append(var.max+1)
-        else:
-          kk(f"for {var.expr} in range({var.min}, {get_max(var+1)}):")
-          depth += 1
-    elif uop == UOps.ENDLOOP:
-      if args[1] not in ["global", "local", "global+local"] and len(args[0]):
-        depth -= len(args[0])
-        kk(f"# end {args[1]}")
+      r[u] = ssa("ridx")
+      kk(f"for {r[u]} in range({r[vin[0]]}, {r[vin[1]]}):")
+      depth += 1
+    elif uop == UOps.END: depth -= 1
     elif uop == UOps.ALU:
       assert newvar is not None
       val = code_for_op[args](*[r[x] for x in vin])
@@ -119,10 +105,24 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       signatures.append(signature_dtypes[args[1]])
       r[u] = args[0]
     elif uop == UOps.SPECIAL:
-      r[u] = args.expr
+        dims.append(args[1])
+        valid.append(f"{args[1]}<{args[2]+1}")
+        if args[1].startswith("g"):
+          global_size.append(args[2]+1)
+          kk(f"{args[1]} = {gid[args[0]]} # {args[2]+1}")
+        elif args[1].startswith("l"):
+          kk(f"{args[1]} = tl.arange({0}, {next_power_of_2(args[2]+1)})")
+          local_size.append(args[2]+1)
+        r[u] = args[1]
     else: raise NotImplementedError(f"unimplemented: {uop}")  
   
   prg = f"@triton.jit\ndef {function_name}("+','.join(f"{buf[0]}" for buf in bufs)+"):\n"
+  local_idx = 0
+  for i, line in enumerate(kernel):
+    if "tl.arange" in line:
+      line +=  f"[{', '.join([':' if local_idx == i else 'None' for i in range(len(local_size))])}]"
+      local_idx += 1
+    kernel[i] = line
   prg += '\n'.join(kernel)
   acc_local_size = 1
   for x in local_size: acc_local_size *= next_power_of_2(x)
