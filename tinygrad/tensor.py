@@ -519,21 +519,21 @@ class Tensor:
     # todo: stride == dilation
     # use padding to round up to 4x4 output tiles
     d = self.pad2d(sum([[padding_[i*2], padding_[i*2+1] + (-(dim + sum(padding_[i * 2:(i + 1) * 2]) - 2) % 4)] for i, dim in enumerate(self.shape[-len(HW):])], []))._pool(HWI, HWO)  # (bs, cin_, tyx, HWI)
-    d = d.permute(*range(len(d.shape)-len(HW),len(d.shape)), *range(len(d.shape)-len(HW))).contiguous_backward()  # move HW to the front: # (HWI, bs, cin_, tyx)
+    d = d.permute(*range(len(d.shape)-len(HW),len(d.shape)), *range(len(d.shape)-len(HW)))  # move HW to the front: # (HWI, bs, cin_, tyx)
     tyx = d.shape[-len(HWI):]  # dim of tiling
 
     g = weight.permute(*range(len(weight.shape)-len(HW),len(weight.shape)), *range(len(weight.shape)-len(HW)))  # move HW to the front
 
     # compute 6x6 winograd tiles: GgGt, BtdB
-    gfactors = apply_matrix(winograd_G, g).contiguous().reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))  # (HWI, groups * rcout, cin) -> (HWI, bs=1, groups, rcout, cin, tyx=(1,1))
-    dfactors = apply_matrix(winograd_Bt, d).contiguous().reshape(*HWI, bs, groups, 1, cin, *tyx)  # (HWI, bs, cin_, tyx) -> (HWI, bs, groups, 1 ,cin, *tyx)
+    gfactors = apply_matrix(winograd_G, g).reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))  # (HWI, groups * rcout, cin) -> (HWI, bs=1, groups, rcout, cin, tyx=(1,1))
+    dfactors = apply_matrix(winograd_Bt, d).reshape(*HWI, bs, groups, 1, cin, *tyx)  # (HWI, bs, cin_, tyx) -> (HWI, bs, groups, 1 ,cin, *tyx)
 
     ret = apply_matrix(winograd_At, (gfactors * dfactors).sum(axis=-1-len(HW)))  # matmul; sum across cin: (HWI, bs, groups, rcout, *tyx); then HWI -> HWO: (HWO, bs, groups, rcout, *tyx)
 
     ret = ret.permute([*range(len(HW), len(ret.shape)-len(HW)), *[i+o for i in range(len(HW)) for o in [len(ret.shape)-len(HW),0]]])  # interleave tyx and HWO: (bs, groups, rcout, oy, HO, ox, WO)
     ret = ret.reshape(bs, cout, *[c * HWO[i] for i, c in enumerate(tyx)]).shrink(tuple((0, s) for s in [bs, cout, *oyx]))  # merge groups and rcout, tyx and HWO: (bs, groups, cout, *yx), shrink to final
 
-    return (ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))).contiguous().contiguous_backward()
+    return ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))
 
   def dot(self, w:Tensor) -> Tensor:
     n1, n2 = len(self.shape), len(w.shape)
