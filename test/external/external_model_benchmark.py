@@ -37,8 +37,7 @@ def benchmark(mnm, nm, fxn):
   tms = []
   for _ in range(3):
     st = time.perf_counter_ns()
-    try: ret = fxn()
-    except: raise NotImplementedError
+    ret = fxn()
     tms.append(time.perf_counter_ns() - st)
   print(f"{mnm:15s} {nm:25s} {min(tms)*1e-6:7.2f} ms")
   CSV[nm] = min(tms)*1e-6
@@ -85,7 +84,7 @@ def benchmark_model(m, validate_outs=False):
     torch_mps_model = torch_model.to(torch_device)
     torch_mps_inputs = [x.to(torch_device) for x in torch_inputs]
     benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs))
-  except NotImplementedError:
+  except (NotImplementedError, RuntimeError):
     print(f"{m:16s}onnx2torch doesn't support this model")
 
   # bench onnxruntime
