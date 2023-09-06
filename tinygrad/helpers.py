@@ -16,12 +16,11 @@ def colored(st, color, background=False): return f"\u001b[{10*background+60*(col
 def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterator): return [item for sublist in l for item in sublist]
-def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
+def strip_parens(fst): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def merge_dicts(ds:Iterable[Dict]) -> Dict:
-  kvs = set([(k,v) for d in ds for k,v in d.items()])
-  assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
-  return {k:v for k,v in kvs}
+  assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
+  return {k:v for d in ds for k,v in d.items()}
 def partition(lst, fxn):
   a: list[Any] = []
   b: list[Any] = []
@@ -118,6 +117,7 @@ class dtypes:
   bfloat16: Final[DType] = DType(0, 2, "__bf16", None)
 
   # NOTE: these are internal dtypes, should probably check for that
+  _int2: Final[DType] = DType(2, 4*2, "int2", None, 2)
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
   _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)

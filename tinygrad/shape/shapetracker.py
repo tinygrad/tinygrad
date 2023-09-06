@@ -1,7 +1,7 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
 import functools
-from typing import Dict, Tuple, Union, List, Optional, cast, NamedTuple
+from typing import Dict, Tuple, Union, List, Optional, NamedTuple
 from tinygrad.helpers import prod, DEBUG, partition
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, is_sym_int
 
@@ -48,8 +48,9 @@ class View(ViewInternal):
     if self.mask is not None:
       acc = 1
       for ns,(x,y) in reversed(list(zip(self.shape, self.mask))):
-        base = ((idx//acc) % ns)
-        expr += [base >= x, base < y]
+        if x != 0 or y != ns:
+          base = ((idx//acc) % ns)
+          expr += [base >= x, base < y]
         acc *= ns
     return Variable.ands(expr)
 
@@ -128,7 +129,7 @@ def get_unsafe_resize_offset(strides, arg):
 class ShapeTracker:
   __slots__ = "views", "var_vals"
   def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node,int], ...]], views:Optional[List[View]]=None):
-    self.views: List[View] = views if views is not None else ([*cast(ShapeTracker, shape).views] if shape.__class__ is ShapeTracker else [View(shape)])
+    self.views: List[View] = views if views is not None else [*shape.views] if isinstance(shape, ShapeTracker) else [View(shape)]
     self.var_vals: Dict[Variable, int] = shape.var_vals if isinstance(shape, ShapeTracker) else {}
   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views}, var_vals={self.var_vals})"
   def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
@@ -172,6 +173,7 @@ class ShapeTracker:
 
   def _expr_idx(self, idx, valid) -> Tuple[Node, Node]:
     for v in reversed(self.views[0:-1]):
+      if valid.max == 0: return Variable.num(-1), valid
       valid = v.expr_node_mask(idx, valid)
       idx = v.expr_node(idx)
     return idx, valid
@@ -193,9 +195,6 @@ class ShapeTracker:
   def expr_node(self, idx='idx'):
     if idx.__class__ is str: idx = Variable(idx, 0, prod(self.shape)-1)
     return self._expr_idx(self.views[-1].expr_node(idx), self.views[-1].expr_node_mask(idx))
-
-  def needs_valid(self) -> bool:
-    return any(v.mask is not None for v in self.views)
 
   def axis_is_masked(self, axis) -> bool:
     _, valid = self.expr_idxs()
