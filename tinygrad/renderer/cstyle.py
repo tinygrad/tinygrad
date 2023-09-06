@@ -199,7 +199,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       bufs.append(args)
       r[u] = args[0]
     elif uop == UOps.GEP:
-      r[u] = f"{r[vin[0]]}.{'xyzw'[args]}"
+      r[u] = f"({r[vin[0]]}).{'xyzw'[args]}"
     else:
       raise RuntimeError(f"failed to render {uop}")
 

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from abc import abstractmethod, ABC
+from abc import abstractmethod
 import functools
 import itertools
 from math import gcd
@@ -11,7 +11,7 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
 
 def is_sym_int(x: Any) -> bool: return isinstance(x, (int, Node))
 
-class Node(ABC):
+class Node:
   b: Union[Node, int]
   min: int
   max: int
@@ -21,9 +21,9 @@ class Node(ABC):
     return ops[type(self)](self, ops, ctx)
   def vars(self): return []
   # expand a Node into List[Node] that enumerates the underlying Variables from min to max
-  def expand(self) -> List[Node]: raise NotImplementedError(self.__class__.__name__)
-  # infer the value of a Node given Variable values in var_vals
-  def substitute(self, var_vals: Dict[Variable, Node]) -> Node: raise NotImplementedError(self.__class__.__name__)
+  def expand(self) -> List[Node]: raise RuntimeError(self.__class__.__name__)
+  # substitute Variables with the values in var_vals
+  def substitute(self, var_vals: Dict[Variable, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
   @functools.cached_property
