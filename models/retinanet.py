@@ -83,8 +83,8 @@ class RetinaNet:
       obj.assign(dat)
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
-  def postprocess_detections(self, predictions, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
-    anchors = self.anchor_gen(input_size)
+  def postprocess_detections(self, predictions, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5, anchors = None):
+    if anchors is None: anchors = self.anchor_gen(input_size)
     grid_sizes = self.backbone.compute_grid_sizes(input_size)
     split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
     detections = []

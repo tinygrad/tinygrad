@@ -12,24 +12,20 @@ from tinygrad.nn import optim
 from tinygrad.state import get_parameters
 from tqdm import trange
 import numpy as np
-import torch
-from examples.hlb_cifar10 import cross_entropy
 from typing import List, Tuple
 from extra.training import focal_loss, smooth_l1_loss
-from torchvision.ops.focal_loss import sigmoid_focal_loss
-from torch.nn import SmoothL1Loss
 from torch import tensor
-
+from contextlib import redirect_stdout
 
 NUM = getenv("NUM", 18)
-BS = getenv("BS", 8)
+BS = getenv("BS", 3)
 CNT = getenv("CNT", 10)
 BACKWARD = getenv("BACKWARD", 1)
 TRAINING = getenv("TRAINING", 1)
-ADAM = getenv("ADAM", 0)
 CLCACHE = getenv("CLCACHE", 0)
-IMAGE_SIZES = {"debug" : (100,100), "mlperf" : (800,800)}
 GRAPH = getenv("GRAPH", 1)
+IMAGE_SIZES = {"debug" : (100,100), "mlperf" : (800,800)}
+
 
 def resize_box_based_on_new_image_size(box: List[float], img_old_size: Tuple[int], img_new_size: Tuple[int]) -> List[float]:
   ratio_height, ratio_width = [new / orig for new, orig in zip(img_new_size[:2], img_old_size[:2])]
@@ -100,15 +96,14 @@ def bbox_transform(proposals, reference_boxes):
 
 class RetinaNetTrainer:
     def __init__(self, model : RetinaNet = RetinaNet(ResNeXt50_32X4D(num_classes=None))):
-        Warning("Resnet numclasses = 1000 is ok? check this")
         self.model = model
-        self.optimizer = optim.SGD(get_parameters(model), lr=0.001)   
         self.input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
         self.input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
         self.dataset = COCO(openimages())
+        self.coco_eval = COCOeval(self.dataset, iouType="bbox")
         self.image_size = IMAGE_SIZES["debug"]
     def get_ground_truths(self, anchors, annotations, n_classes):
-        #TODO tensorize this function for lazyness exploitation
+        #TODO tensorize this function for further lazyness exploitation
         #TODO rescale bboxes to transformed size
         batch_size = len(annotations)
         regression_targets = np.zeros((batch_size, len(anchors), 4), dtype=np.float32)
@@ -125,40 +120,31 @@ class RetinaNetTrainer:
                                 img_new_size=self.image_size) for box in ann_boxes])
             fg_bg_mat = foreground_background_matrix(anchors, ann_boxes)
             #fg_bg_mat[anchor_idx, ann_box_idx]
-            
-            foreground_idxs = np.argwhere(fg_bg_mat==1,)
-            background_idxs = np.argwhere(fg_bg_mat==-1,)
+            foreground_idxs, background_idxs = np.argwhere(fg_bg_mat==1,), np.argwhere(fg_bg_mat==-1,)
             #fg_bg_mat==0 is skipped as paper states
-            matched_anchor_idxs = foreground_idxs[:,0]
-            matched_ann_box_idxs = foreground_idxs[:,1]
+            matched_anchor_idxs, matched_ann_box_idxs  = foreground_idxs[:,0], foreground_idxs[:,1]
             unmatched_anchor_idxs = background_idxs[:,0]
-            #[iou(anch,ann_box)>=0.5 for (anch, ann_box) in zip(anchors[matched_anchor_idxs], ann_boxes[matched_ann_box_idxs, :])].sum()
+            
+            
             regression_targets[i, matched_anchor_idxs, :] = bbox_transform(anchors[matched_anchor_idxs], ann_boxes[matched_ann_box_idxs, :])
             classification_targets[i, matched_anchor_idxs, ann_labels[matched_ann_box_idxs].astype(int)] = 1
             regression_masks[i, matched_anchor_idxs] = 1
             classification_masks[i, np.concatenate((matched_anchor_idxs,unmatched_anchor_idxs))] = 1
                    
         return {"regression_targets": regression_targets, "classification_targets": classification_targets, "regression_masks": regression_masks, "classification_masks": classification_masks}
+    
     def freeze_selected_backbone_layers(self, layers):
         """(MLPerf) The weights of the first two stages are frozen (code). In addition, all batch norm layers in the backbone are frozen (code)."""
         raise NotImplementedError
     
     def train(self):
-        NUM = getenv("NUM", 18)
-        BS = getenv("BS", 3)
-        CNT = getenv("CNT", 10)
-        BACKWARD = getenv("BACKWARD", 1)
-        TRAINING = getenv("TRAINING", 1)
-        ADAM = getenv("ADAM", 0)
-        CLCACHE = getenv("CLCACHE", 0)
-        GRAPH = getenv("GRAPH", 1)
-        backbone = self.model.backbone
+
         retina = self.model 
         retina.load_from_pretrained()
 
         #self.freeze_selected_backbone_layers()
-
-        anchors_flattened_levels = np.concatenate(retina.anchor_gen(self.image_size))
+        anchors_orig = retina.anchor_gen(self.image_size) #TODO: get them just with reshape of flattened?
+        anchors_flattened_levels = np.concatenate(anchors_orig)
         optimizer = optim.SGD(get_parameters(retina), lr=0.001)
 
         Tensor.training = TRAINING
@@ -166,7 +152,6 @@ class RetinaNetTrainer:
         Tensor.no_grad = not BACKWARD
         for x, annotations in iterate(self.dataset, BS):
             targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
-            #self.resize_images_and_bboxes(x, annotations, self.image_size)
             resized = [Image.fromarray(image) for image in x]
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
             images = Tensor(resized, requires_grad=False)
@@ -178,17 +163,29 @@ class RetinaNetTrainer:
             #batchwise_loss = self._batchwise_compute_loss(BS, targets, head_outputs)
             imgwise_loss = self._imgwise_compute_loss(BS, targets, head_outputs)
             
-            print("step loss: ", imgwise_loss.numpy())
             optimizer.zero_grad()
             imgwise_loss.backward()
             optimizer.step()
             
+            predictions = retina.postprocess_detections(head_outputs.numpy(),input_size=self.image_size,orig_image_sizes=[t["image_size"] for t in annotations],anchors=anchors_orig)
+            print(self.mAP_compute(annotations, predictions))
 
-
+    def mAP_compute(self, annotations, predictions):
+        coco_results  = [{"image_id": annotations[i]["image_id"], "category_id": label, "bbox": box, "score": score}
+      for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
+        coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(self.coco_eval.params.catIds), len(self.coco_eval.params.areaRng)
+        img_ids = [t["image_id"] for t in annotations]
+        with redirect_stdout(None):
+            self.coco_eval.cocoDt = self.dataset.loadRes(coco_results)
+            self.coco_eval.params.imgIds = img_ids
+            self.coco_eval.evaluate()
+        evaluated_imgs.extend(img_ids)
+        coco_evalimgs.append(np.array(self.coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
+        return coco_evalimgs, evaluated_imgs
 
     def _batchwise_compute_loss(self, BS, targets, head_outputs):
+        #TODO is this possible with tensor mul only?
         total_loss = Tensor(0)
-        
         box_regs = head_outputs[:, :, :4]
         cls_preds = head_outputs[:, :, 4:]
         ground_truth_boxes, ground_truth_clss = targets["regression_targets"], targets["classification_targets"]
@@ -217,17 +214,17 @@ class RetinaNetTrainer:
             box_regs = head_outputs[img_idx, :, :4]
             cls_preds = head_outputs[img_idx, :, 4:]
             ground_truth_boxes, ground_truth_clss = targets["regression_targets"][img_idx], targets["classification_targets"][img_idx]
-            print(box_regs.requires_grad, "< grads should be true >" ,cls_preds.requires_grad)
+
             def generate_mtx_mask(targs_mask, preds):
                 #DEBUG and replace below
                 return Tensor(targs_mask).reshape(targs_mask.shape[0],1).expand(targs_mask.shape[0],targs_mask.shape[1])
             reg_mask_mtx = Tensor(targets["regression_masks"][img_idx], requires_grad=False).reshape(box_regs.shape[0],1).expand(box_regs.shape[0],4)
             cls_mask_mtx = Tensor(targets["classification_masks"][img_idx], requires_grad=False).reshape(cls_preds.shape[0],1).expand(cls_preds.shape[0],self.model.num_classes)
-            print(reg_mask_mtx.requires_grad, "< grads should be false >" ,reg_mask_mtx.requires_grad)
+
             focal_losses = focal_loss((cls_preds * cls_mask_mtx).sigmoid(), Tensor(ground_truth_clss, requires_grad=False) * cls_mask_mtx, reduction="sum").div(cls_preds.shape[0])
             #TODO box regs are very sparse, maybe matmul makes training slower?
             box_reg_losses = smooth_l1_loss(box_regs * reg_mask_mtx, Tensor(ground_truth_boxes, requires_grad=False) * reg_mask_mtx, beta = 0.11, reduction="sum")
-            print(focal_losses.requires_grad, "< grads should be true >" ,box_reg_losses.requires_grad)
+
             regression_losses.append(box_reg_losses)
             classification_losses.append(focal_losses)
 
@@ -254,17 +251,6 @@ class RetinaNetTrainer:
             #TODO is zero regression targets possible?
             box_reg_losses = smooth_l1_loss(Tensor(box_regs[reg_targets_idxs]), Tensor(ground_truth_boxes[reg_targets_idxs]), beta = 0.11, reduction="sum")
             focal_losses = focal_loss(Tensor(cls_preds[cls_targets_idxs]).sigmoid(), Tensor(ground_truth_clss[cls_targets_idxs]), reduction="sum").div(len(cls_preds))
-            
-            #box_reg_losses_elt = [smooth_l1_loss(Tensor(box_regs[target_box_idx]), Tensor(ground_truth_boxes[target_box_idx]), beta = 0.11, reduction="sum").numpy() for target_box_idx in reg_targets_idxs]
-            #focal_losses_elt = [focal_loss(Tensor(cls_preds[target_cls_idx]).sigmoid(), Tensor(ground_truth_clss[target_cls_idx])).numpy() for target_cls_idx in cls_targets_idxs]
-            #pt_loss = sigmoid_focal_loss(tensor(cls_preds[cls_targets_idxs]),tensor(ground_truth_clss[cls_targets_idxs]), reduction="sum")
-            #breakpoint()
-            #print("imgwise focal: ", focal_losses.numpy(), " eltwise_focal: ",  sum(focal_losses_elt), " torch focal: ", pt_loss)
-            #print("imgwise box_reg: ", box_reg_losses.numpy(), " eltwise_box_reg: ",  sum(box_reg_losses_elt))
-
-            #breakpoint()
-            #focal_losses_pt = sigmoid_focal_loss(torch.tensor(cls_preds[cls_targets_idxs]), torch.tensor(ground_truth_clss[cls_targets_idxs]),reduction="sum") 
-            #box_reg_losses_pt = SmoothL1Loss(reduction="sum", beta=0.11).forward(torch.tensor(box_regs[reg_targets_idxs]), torch.tensor(ground_truth_boxes[reg_targets_idxs]))
             #TODO use reductions instead
             total_loss += focal_losses + box_reg_losses
         print(total_loss.numpy() , " batch loss")
