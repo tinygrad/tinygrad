@@ -230,5 +230,11 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32 # check if ndarray correctly casts to Tensor dtype
     assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64 # check that it works for something else
 
+  def test_tensor_list_dtype(self):
+    arr = [1]
+    assert Tensor(arr).dtype == Tensor.default_type
+    assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
+    assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+
 if __name__ == '__main__':
   unittest.main()
