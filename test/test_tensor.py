@@ -223,7 +223,7 @@ class TestTinygrad(unittest.TestCase):
   def test_zerosized_tensors(self):
     Tensor([]).realize()
     Tensor([]).numpy()
-  
+
   def test_tensor_ndarray_dtype(self):
     arr = np.array([1]) # where dtype is implicitly int64
     assert Tensor(arr).dtype == dtypes.int64
