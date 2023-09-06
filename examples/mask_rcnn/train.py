@@ -5,7 +5,8 @@ import datetime
 from tinygrad.tensor import Tensor
 import tinygrad.nn.optim as optim
 from torchvision import transforms as T
-from models.mask_rcnn import MaskRCNN, Resize, Normalize
+from models.mask_rcnn import MaskRCNN, Resize, Normalize, to_image_list
+from infer_mask_rcnn import Resize, Normalize, to_image_list
 from models.resnet import ResNet
 from util import FileLoader
 from PIL import Image
@@ -39,38 +40,53 @@ def build_transforms(is_train=True):
   )
 
 def do_train(
-  model: MaskRCNN,
-  file_loader: FileLoader
+    model: MaskRCNN,
+    file_loader: FileLoader
 ):
-  print("Start training")
-  start_training_time = time.time()
-  iteration = 0
+    print("Start training")
+    start_training_time = time.time()
+    iteration = 0
 
-  transform = build_transforms(is_train=True)
-  optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0005)
-  for batch in file_loader: 
-    iteration = iteration + len(batch)
+    transform = build_transforms(is_train=True)
 
-    imgs = []
-    targets = []
-    for img,tg in batch:
-      imgs.append(Tensor(transform(img).numpy(), requires_grad=False))
-      targets.append(tg)
-    loss_dict = model(imgs, targets)
-    del imgs
-    del targets
-    losses = sum(loss for loss in loss_dict.values())
-    losses.backward()
-    optimizer.step()
-    optimizer.zero_grad()
+    # Consider using only backbone and RPN parameters
+    params_to_optimize = list(model.backbone.parameters()) + list(model.rpn.parameters())
+    optimizer = optim.SGD(params_to_optimize, lr=0.001, momentum=0.9, weight_decay=0.0005)
 
-    if iteration % 20 == 0:
-      print(f"iter {iteration}")
-    # TODO checkpointer
-    # TODO: early-exit
-  total_training_time = time.time() - start_training_time
-  total_time_str = str(datetime.timedelta(seconds=total_training_time))
-  print("Total training time: {} ({:.4f} s / it)".format(total_time_str, total_training_time / (file_loader.num_files)))
+    for batch in file_loader:
+        iteration = iteration + len(batch)
+
+        imgs = []
+        targets = []
+        for img, tg in batch:
+            imgs.append(Tensor(transform(img).numpy(), requires_grad=False))
+            targets.append(tg)
+
+        # Forward pass only through backbone and RPN
+        images = to_image_list(imgs)
+        features = model.backbone(images.tensors)
+        proposals, proposal_losses = model.rpn(images, features, targets)
+
+        # Compute losses
+        losses = sum(loss for loss in proposal_losses.values())
+        
+        # Backward pass and optimize
+        optimizer.zero_grad()
+        losses.backward()
+        optimizer.step()
+
+        # Release unneeded variables to save memory
+        del imgs
+        del targets
+        del features
+        del proposals
+
+        if iteration % 20 == 0:
+            print(f"iter {iteration}")
+
+    total_training_time = time.time() - start_training_time
+    total_time_str = str(datetime.timedelta(seconds=total_training_time))
+    print(f"Total training time: {total_time_str} ({total_training_time / file_loader.num_files:.4f} s / it)")
 
 ## loads the image and the target
 def load_image(image_path):

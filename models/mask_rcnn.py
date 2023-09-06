@@ -530,7 +530,7 @@ class BoxCoder(object):
     targets = Tensor.stack((targets_dx, targets_dy, targets_dw, targets_dh), dim=1)
     return targets
 
-  def decode(self, rel_codes, boxes):
+  def decode(self, rel_codes: Tensor, boxes: Tensor):
     boxes = boxes.cast(rel_codes.dtype)
     rel_codes = rel_codes
 
@@ -689,7 +689,6 @@ class RPN:
   def __init__(self, in_channels):
     self.anchor_generator = AnchorGenerator()
 
-    in_channels = 256
     head = RPNHead(
       in_channels, self.anchor_generator.num_anchors_per_location()[0]
     )
