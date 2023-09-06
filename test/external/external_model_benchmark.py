@@ -37,10 +37,8 @@ def benchmark(mnm, nm, fxn):
   tms = []
   for _ in range(3):
     st = time.perf_counter_ns()
-    try:
-      ret = fxn()
-    except:
-      raise NotImplementedError
+    try: ret = fxn()
+    except: raise NotImplementedError
     tms.append(time.perf_counter_ns() - st)
   print(f"{mnm:15s} {nm:25s} {min(tms)*1e-6:7.2f} ms")
   CSV[nm] = min(tms)*1e-6
