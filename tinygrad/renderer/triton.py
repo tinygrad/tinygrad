@@ -3,7 +3,6 @@ from collections import defaultdict
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
 from tinygrad.helpers import dtypes, ImageDType, DEBUG, getenv
 from tinygrad.codegen.linearizer import  UOp, UOps
-from tinygrad.shape.symbolic import NumNode
 from triton.compiler import compile as triton_compile
 import hashlib
 import math
@@ -16,11 +15,11 @@ def render_valid(valid):
 
 #NOTE triton requires matching dimensions for load/store, disable this and see TestOps::test_output_padded_conv_transpose2d fail to compile
 def fill_dims_for_idx(idx, dims):
-  return "(" + idx + "+ (" + (f"0 * ({'+'.join(d for d in dims)})))") if len(dims) else idx
+  return "(" + idx + "+ (" + (f"0*({'+'.join(d for d in dims)})))") if len(dims) else idx
 
 def get_max(var):
-  if isinstance(var.max, int): return var.max
-  return re.sub(r'\[(.*?)\]', '', str(var.max))[1:-1]
+  if isinstance(var, int): return var
+  return re.sub(r'\[(.*?)\]', '', str(var))[1:-1]
 
 #NOTE can be removed after https://github.com/gpuocelot/gpuocelot/issues/8 gets resolved
 def remove_single_scalar_curly_braces(ptx_code):
@@ -37,7 +36,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   global_size: List[int] = []
   local_size: List[int] = []
   depth = 1
-  signatures, dims, bufs, kernel, valid = [], [], [], [], []
+  signatures, dims, bufs, kernel, valid = [], [], [], [], [] #type: ignore
 
   c: DefaultDict[str, int] = defaultdict(int)
   def ssa(prefix="t"):
@@ -51,8 +50,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       child_count[v] += 1
   
   r: Dict[UOp, str] = {}
-  def kk(s): kernel.append("  "*depth+s)  
-  gid = [f"tl.program_id({i})" for i in range(3)]
+  def kk(s): kernel.append("  "*depth+s)
   code_for_op: Final[Dict[Op, Callable]] = {
     UnaryOps.EXP2: lambda x,: f"tl.math.exp2({x})",
     UnaryOps.LOG2: lambda x,: f"tl.math.log2({x})",
@@ -74,28 +72,26 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     uop,newvar,vin,args,_ = u
     if uop == UOps.LOOP:
       r[u] = ssa("ridx")
-      kk(f"for {r[u]} in range({r[vin[0]]}, {r[vin[1]]}):")
+      kk(f"for {r[u]} in range({vin[0].arg}, {r[vin[1]]}+{define_scalar([], 'tl.int32', 1)}):")
       depth += 1
     elif uop == UOps.END: depth -= 1
     elif uop == UOps.ALU:
       assert newvar is not None
       val = code_for_op[args](*[r[x] for x in vin])
-      types = [x.dtype for x in vin]
-      if(len(set(types)) != 1): print("WARNING: mixed types", types, "in", u)
-      if child_count[u] <=1 or dtypes.is_int(newvar): r[u] = val#(int_div(*[r[x] for x in vin]) if args == BinaryOps.DIV else val)#f"{code_for_op[args](*[r[x] if x.uop != UOps.CONST else render_const(x.arg) for x in vin])}".replace("/", "//")#).to({triton_dtypes[newvar]})" # type: ignore x.uop != UOps.CONST
+      if child_count[u] <=1 or dtypes.is_int(newvar): r[u] = int_div(*[r[x] for x in vin]) if args == BinaryOps.DIV and dtypes.is_int(newvar) else val
       else:
         r[u] = ssa("alu")
-        kk(f"{r[u]} = ({val.replace('//', '/')}).to({triton_dtypes[newvar]})")
+        kk(f"{r[u]} = ({val}).to({triton_dtypes[newvar]})")
     elif uop == UOps.LOAD:
       assert newvar is not None
       r[u] = ssa("val")
-      if len(vin) == 2: kk(f"{r[u]} = tl.load({r[vin[0]]} + ({ fill_dims_for_idx(r[vin[1]] if True else str(vin[1].arg), dims)}).to(tl.int32), mask = {render_valid(valid)}).to({triton_dtypes[vin[0].dtype]})")
-      else: kk(f"{r[u]} = tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+({fill_dims_for_idx(r[vin[1]],dims)}).to(tl.int32) , mask={render_valid(valid+[r[vin[2]]])}), 0.0).to({triton_dtypes[vin[0].dtype]})")
+      if len(vin) == 2: kk(f"{r[u]} = tl.load({r[vin[0]]} + ({ fill_dims_for_idx(r[vin[1]], dims)}).to(tl.int32), mask = {render_valid(valid)}).to({triton_dtypes[vin[0].dtype]})")# type: ignore
+      else: kk(f"{r[u]} = tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+({fill_dims_for_idx(r[vin[1]],dims)}).to(tl.int32) , mask={render_valid(valid+[r[vin[2]]])}), 0.0).to({triton_dtypes[vin[0].dtype]})")# type: ignore
     elif uop == UOps.DEFINE_ACC:
       r[u] = ssa("acc")
       kk(f"{r[u]} = {define_scalar(local_size, triton_dtypes[newvar], args).replace('//', '/')}") # type: ignore
     elif uop == UOps.CONST:
-      r[u] = define_scalar(local_size, triton_dtypes[newvar], args) # type: ignore
+      r[u] = define_scalar([], triton_dtypes[newvar], args) # type: ignore
     elif uop == UOps.STORE:
       assert not isinstance(newvar, ImageDType), "unimplemented: image store"
       if len(vin) == 2: kk(f"{r[vin[0]]} =  {r[vin[1]].replace('//', '/')}")
@@ -105,15 +101,15 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       signatures.append(signature_dtypes[args[1]])
       r[u] = args[0]
     elif uop == UOps.SPECIAL:
-        dims.append(args[1])
-        valid.append(f"{args[1]}<{args[2]+1}")
-        if args[1].startswith("g"):
-          global_size.append(args[2]+1)
-          kk(f"{args[1]} = {gid[args[0]]} # {args[2]+1}")
-        elif args[1].startswith("l"):
-          kk(f"{args[1]} = tl.arange({0}, {next_power_of_2(args[2]+1)})")
-          local_size.append(args[2]+1)
-        r[u] = args[1]
+      dims.append(args[1])
+      valid.append(f"{args[1]}<{get_max(args[2])}")
+      if args[1].startswith("g"):
+        kk(f"{args[1]} = tl.program_id({len(global_size)}) # {args[2]}")
+        global_size.append(args[2])
+      elif args[1].startswith("l"):
+        kk(f"{args[1]} = tl.arange({0}, {next_power_of_2(args[2])})")
+        local_size.append(args[2])
+      r[u] = args[1]
     else: raise NotImplementedError(f"unimplemented: {uop}")  
   
   prg = f"@triton.jit\ndef {function_name}("+','.join(f"{buf[0]}" for buf in bufs)+"):\n"
@@ -122,8 +118,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     if "tl.arange" in line:
       line +=  f"[{', '.join([':' if local_idx == i else 'None' for i in range(len(local_size))])}]"
       local_idx += 1
-    kernel[i] = line
-  prg += '\n'.join(kernel)
+    prg += line +"\n"
   acc_local_size = 1
   for x in local_size: acc_local_size *= next_power_of_2(x)
   local_size = [acc_local_size] + [1] * (len(local_size) - 1)  
