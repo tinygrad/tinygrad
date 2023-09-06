@@ -223,6 +223,12 @@ class TestTinygrad(unittest.TestCase):
   def test_zerosized_tensors(self):
     Tensor([]).realize()
     Tensor([]).numpy()
+  
+  def test_tensor_ndarray_dtype(self):
+    arr = np.array([1]) # where dtype is implicitly int64
+    assert Tensor(arr).dtype == dtypes.int64
+    assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32 # check if ndarray correctly casts to Tensor dtype
+    assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64 # check that it works for something else
 
 if __name__ == '__main__':
   unittest.main()
