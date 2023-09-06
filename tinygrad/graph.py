@@ -26,14 +26,9 @@ if GRAPH:
     for k,v in cnts.items(): print(k, v)
     if PRUNEGRAPH: prune_graph()
     print("saving", G)
-    a = r'(bmp|cgimage|canon|dot|gv|xdot|eps|exr|fig|gd|gd2|gif|gtk|ico|imap|imap_np|ismap|cmap|cmapx|cmapx_np|jpg|jpeg|jpe|jp2|json|json0|dot_json|xdot_json|pdf|pic|pct|pict|plain|plain-ext|png|pov|ps|ps2|psd|sgi|svg|svgz|tga|tif|tiff|tk|vml|vmlz|vrml|wbmp|webp|xlib|x11)' # dot -Tv
-    p = os.path.dirname(GRAPHPATH)+"/"
-    f = [i for i in re.split(r'[^\w\-_]+', GRAPHPATH.replace(p,"")) if i != ""]
-    fn = f[0] if len(f)>0 and not re.fullmatch(a, f[0]) else "tiny_graph" 
-    nx.drawing.nx_pydot.write_dot(G, f'{p}{fn}.dot')
+    nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
     # -Gnslimit=100 can make it finish, but you won't like results
-    ex = [os.system(f'dot -T{fmt} {p}{fn}.dot -o {p}{fn}.{fmt}') if re.fullmatch(a, fmt.lower()) else 0 for fmt in f ]
-    if len(f) <= 1 or len(ex) == len(f): os.system(f'dot -Tsvg {p}{fn}.dot -o {p}{fn}.svg')#to keep legacy behavior and a default option if no match
+    os.system(f'dot -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
   atexit.register(save_graph_exit)
 
 node_count = 0
