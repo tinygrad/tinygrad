@@ -1,5 +1,6 @@
 from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
 from weakref import ref
+from collections import defaultdict
 import functools, itertools
 from tinygrad.helpers import DEBUG, DType, merge_dicts
 from tinygrad.ops import Device
@@ -64,17 +65,18 @@ class TinyJit:
 
 class _CacheCollector:
   class _Placeholder:
-    def __init__(self, buf): self.size, self.dtype, self.device, self.ref, self.buftype = buf.size, buf.dtype, getattr(buf, '_device', None), ref(buf), type(buf)
+    def __init__(self, buf): self.size, self.dtype, self._device, self.ref, self.buftype = buf.size, buf.dtype, getattr(buf, '_device', None), ref(buf), type(buf)
     def alive(self): return self.ref() is not None
-    def alloc_rawbuf(self): return self.buftype(self.size, self.dtype, **({'device':self.device} if self.device is not None else dict()))
+    def alloc_rawbuf(self): return self.buftype(self.size, self.dtype, **({'device':self._device} if self._device is not None else dict()))
 
   def __init__(self):
     self.cache: Optional[List[Tuple[Callable, List[Any], Dict[Any,Any]]]] = None
     self.placeholders: Dict[RawBuffer, _CacheCollector._Placeholder] = {} # Rawbuffers are replaced with placeholders to allow freeing of the real buffer while collecting cache.
     self.last_buftype: Dict[Tuple[int,...], int] = {} # Last index of the cached entry where a buffer with the shape (shape is a key) is used as input to the prog.
     self.last_placeholder_index: Dict[_CacheCollector._Placeholder, int] = {} # Last index where the placeholder is used as output. This allows tracking when we need to stick to the original buffer if it is still alive.
+    self.freed_placeholders: Dict[Tuple[int,...], List[_CacheCollector._Placeholder]] = defaultdict(list)
   def start(self):
-    self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index = [], {}, {}, {}
+    self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index, self.freed_buffers = [], {}, {}, {}, defaultdict(list)
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
 
@@ -92,7 +94,11 @@ class _CacheCollector:
 
     # Creating/updating a placeholder for the current output buffer. If we update output, set the ref to point to the new RawBuffer,
     # since the previous RawBuffer is dead (overwise we won't get a new RawBuffer with the same signature). Do not care about dead buffers, they 100% could be replaced with any other buffer.
-    self.placeholders.setdefault(get_signature(rawbufs[0]), _CacheCollector._Placeholder(rawbufs[0])).ref = ref(rawbufs[0])
+    if get_signature(rawbufs[0]) in self.placeholders: self.placeholders[get_signature(rawbufs[0])].ref = ref(rawbufs[0])
+    else:
+      # This is a new buffer, if we have any free placeholders to overwrite, let's do this, since this results into one buffer.
+      plh = self.freed_placeholders[self._buftype_key(rawbufs[0])].pop() if self.freed_placeholders[self._buftype_key(rawbufs[0])] else _CacheCollector._Placeholder(rawbufs[0])
+      self.placeholders.setdefault(get_signature(rawbufs[0]), plh).ref = ref(rawbufs[0])
     self.last_placeholder_index[self.placeholders[get_signature(rawbufs[0])]] = len(self.cache)
     self.cache.append((prg,[self.placeholders.get(get_signature(x), x) for x in rawbufs],var_vals))
   def finish(self):
@@ -111,7 +117,11 @@ class _CacheCollector:
         elif cached_bufs[0] not in placeholder_mapper:
           placeholder_mapper[cached_bufs[0]] = cached_bufs[0].alloc_rawbuf()
       cache_result.append((p, [placeholder_mapper.get(buf, buf) for buf in cached_bufs], var_vals))
-    self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index = None, {}, {}, {}
+    self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index, self.freed_buffers = None, {}, {}, {}, defaultdict(list)
     return cache_result
-  def _buftype_key(self, buf): return (buf.size, buf.dtype, buf.dtype.shape if hasattr(buf.dtype, 'shape') else None)
+  def _on_buf_free(self, underlying_buf):
+    if underlying_buf not in self.placeholders: return
+    self.freed_placeholders[self._buftype_key(self.placeholders[underlying_buf])].append(self.placeholders[underlying_buf])
+    self.placeholders.pop(underlying_buf)
+  def _buftype_key(self, buf): return (buf.size, buf.dtype, buf._device, buf.dtype.shape if hasattr(buf.dtype, 'shape') else None)
 CacheCollector = _CacheCollector()
