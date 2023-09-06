@@ -300,8 +300,7 @@ class AndNode(RedNode):
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node:
     subed = []
     for node in self.nodes:
-      sub = node.substitute(var_vals)
-      if sub == 0: return NumNode(0)
+      if not (sub:=node.substitute(var_vals)): return NumNode(0)
       subed.append(sub)
     return Variable.ands(subed)
 
