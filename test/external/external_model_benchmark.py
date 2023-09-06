@@ -84,8 +84,7 @@ def benchmark_model(m, validate_outs=False):
     torch_mps_model = torch_model.to(torch_device)
     torch_mps_inputs = [x.to(torch_device) for x in torch_inputs]
     benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs))
-  except (NotImplementedError, RuntimeError):
-    print(f"{m:16s}onnx2torch doesn't support this model")
+  except Exception as e: print(f"{m:16s}onnx2torch {type(e).__name__:>25}")
 
   # bench onnxruntime
   ort_options = ort.SessionOptions()
