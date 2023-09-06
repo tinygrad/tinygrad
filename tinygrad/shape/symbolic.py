@@ -11,7 +11,7 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any
 
 def is_sym_int(x: Any) -> bool: return isinstance(x, (int, Node))
 
-class Node():
+class Node:
   b: Union[Node, int]
   min: int
   max: int
