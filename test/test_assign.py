@@ -70,7 +70,7 @@ class TestAssign(unittest.TestCase):
     oba1 = a.lazydata.output_buffer
     a.assign(a.cast(dtypes.float16).realize())
     oba2 = a.lazydata.output_buffer
-    assert oba1 == None and oba2 == None
+    assert oba1 is None and oba2 is None
     np.testing.assert_allclose(a.numpy(), np.arange(N*N,dtype=np.float16).reshape((N,N)))
 
 if __name__ == "__main__":
