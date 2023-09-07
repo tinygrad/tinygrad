@@ -71,4 +71,4 @@ For any questions or discussions, you can use GitHub issues or email us at georg
 
 ## Code of Conduct
 
-Please adhere to the [Code of Conduct](../CODE_OF_CONDUCT.md) to ensure an inclusive and friendly environment for all contributors.
+Please adhere to the [Code of Conduct](/CODE_OF_CONDUCT.md) to ensure an inclusive and friendly environment for all contributors.
