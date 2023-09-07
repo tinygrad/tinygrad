@@ -89,7 +89,7 @@ class CStyleLanguage(NamedTuple):
       return f"write_imagef({buf_name}, {idx}, {var_name});"
     if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
-    if var_dtype.sz > 1:
+    if var_dtype.sz > 1 and ',' in var_name:
       return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
 
@@ -151,6 +151,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       else:
         val = lang.code_for_op[args](*[r[x] for x in vin])
       assert child_count[u] != 0, f"childless ALU op found {u}"
+      val = lang.render_cast([val], dtype)
       if child_count[u] <= 1 or dtypes.is_int(dtype):  # fix index rendering issue
         r[u] = val
       else:

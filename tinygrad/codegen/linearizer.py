@@ -443,9 +443,6 @@ class Linearizer(OptimizedKernel):
     highest_priority = max([v.dtype.priority for val in values for v in val] + [cast_dtype.priority])
     buf_cast_dtype = [dtypes.get_normal_type(v.dtype) for val in values for v in val if v.dtype.priority == highest_priority]
     if len(buf_cast_dtype) > 0: cast_dtype = buf_cast_dtype[0]
-
-    # TODO: cast 
-
     if use_accum: values = values + [acc]
     ret = []
     for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values)):
