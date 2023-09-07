@@ -97,13 +97,16 @@ class Linearizer(OptimizedKernel):
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     # calculate expr_idxs using placeholder variables
-    fake_idxs = [idx if isinstance(idx, NumNode) else Variable(f"_uidx{i}", idx.min, idx.max) for i, idx in enumerate(idxs)]
+    fake_idxs = [idx if (isinstance(idx, NumNode) or (isinstance(idx, Variable) and idx.expr)) else Variable(f"_uidx{i}", idx.min, idx.max) for i, idx in enumerate(idxs)]
     g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
+    g_idx_vars = set(v for v in g_idx.vars() if v.expr.startswith("_uidx"))
+    g_valid_vars = set(v for v in g_valid.vars() if v.expr.startswith("_uidx"))
+    expand_vars = g_idx_vars | g_valid_vars
 
     ret = []
     invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
     for _idx in _idxs:
-      substitute: Dict[VariableOrNum, Node] = {a: b for a, b in zip(fake_idxs, _idx) if isinstance(a, Variable)}
+      substitute: Dict[VariableOrNum, Node] = {a: b for a, b in zip(fake_idxs, _idx) if a in expand_vars} if expand_vars else {}
       if amt > 1:
         float4_substitute = {**substitute, fake_idxs[dim]: expanded_nodes[dim][0]}
         idx, valid = g_idx.substitute(float4_substitute), g_valid.substitute(float4_substitute)
@@ -112,7 +115,8 @@ class Linearizer(OptimizedKernel):
           idx, valid = g_idx.substitute(substitute), g_valid.substitute(substitute)
           localtype = dtypes.float32
       else:
-        idx, valid = g_idx.substitute(substitute), g_valid.substitute(substitute)
+        valid = g_valid.substitute(substitute) if g_valid_vars else g_valid
+        idx = g_idx.substitute(substitute) if valid.max == 1 and g_idx_vars else g_idx
         localtype = dtypes.float32
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
