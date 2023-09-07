@@ -76,7 +76,7 @@ class CStyleLanguage(NamedTuple):
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 self.arg_int_prefix if dtype == dtypes._arg_int32 else
                 ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix) for i,(name,dtype) in enumerate(bufs)]
-    prg = ''.join([f"{self.kernel_prefix} void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
+    prg = ''.join([f"{self.kernel_prefix}void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
@@ -98,7 +98,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
   kernel,prekernel = [],[]
   #pend_close = None
   bufs = []
-  depth = 0
+  depth = 1
   def kk(s): kernel.append("  "*depth+s)
 
   c: DefaultDict[str, int] = defaultdict(int)
@@ -197,8 +197,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       bufs.append(args)
       r[u] = args[0]
     elif uop == UOps.GEP:
-      selector = f".{'xyzw'[args]}" if args < 4 else f".s{'0123456789aAbBcCdDeEfF'[args]}"
-      r[u] = f"{r[vin[0]]}{selector}"
+      r[u] = f"({r[vin[0]]}).s{'0123456789aAbBcCdDeEfF'[args]}"
     else:
       raise RuntimeError(f"failed to render {uop}")
 

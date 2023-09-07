@@ -31,6 +31,8 @@ jobs:
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with flake8
       run: python -m flake8 . --statistics -j4
+    - name: Lint with ruff
+      run: ruff .
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
