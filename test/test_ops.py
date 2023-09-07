@@ -769,7 +769,6 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
-  @unittest.skipIf(getenv("TRITON") and getenv("CUDACPU"), "Broken in ocelot")
   def test_simple_conv2d_1x1_m4(self):
     helper_test_op([(1,16,32,32), (16,16,1,1)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
@@ -1043,7 +1042,6 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
       lambda x: Tensor.max_pool2d(x, kernel_size=ksz))
 
-  @unittest.skipIf(getenv("TRITON") and getenv("CUDACPU"), "Broken in ocelot")
   def test_maxpool2d(self):
     for ksz in [(2,2), (3,3), 2, 3, (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
@@ -1051,7 +1049,6 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.max_pool2d(x, kernel_size=ksz))
 
-  @unittest.skipIf(getenv("TRITON") and getenv("CUDACPU"), "Broken in ocelot")
   def test_maxpool2d_bigger_stride(self):
     for stride in [(2,3), (3,2), 2, 3]:
       with self.subTest(stride=stride):
@@ -1065,7 +1062,6 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=1),
       lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=1))
 
-  @unittest.skipIf(getenv("TRITON") and getenv("CUDACPU"), "Broken in ocelot")
   def test_maxpool2d_smaller_stride(self):
     for stride in [(2,3), (3,2), 2, 3]:
       with self.subTest(stride=stride):
@@ -1073,7 +1069,6 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=stride))
 
-  @unittest.skipIf(getenv("TRITON") and getenv("CUDACPU"), "Broken in ocelot")
   def test_maxpool2d_dilation(self):
     for dilation in [(2, 3), (3, 2), 2, 3]:
       helper_test_op([(32,2,110,28)],

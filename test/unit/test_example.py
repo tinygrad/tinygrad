@@ -51,7 +51,6 @@ class TestExample(unittest.TestCase):
     assert x.grad.device == device
     assert y.grad.device == device
 
-  @unittest.skipIf(getenv("TRITON") and getenv("CUDACPU"), "Broken in ocelot")
   @multidevice_test
   def test_example_matmul(self, device):
     try:
