@@ -31,8 +31,8 @@ from tinygrad.tensor import Tensor
 os.environ["NOOPT"] = "1"
 
 # define the compute
-A = Tensor.rand(M, K, device="clang").realize()
-B = Tensor.rand(K, N, device="clang").realize()
+A = Tensor.rand(M, K, device="clang")
+B = Tensor.rand(K, N, device="clang")
 C = (A.reshape(M, 1, K) * B.permute(1,0).reshape(1, N, K)).sum(axis=2)
 
 # capture the kernel. TODO: https://github.com/tinygrad/tinygrad/issues/1812
