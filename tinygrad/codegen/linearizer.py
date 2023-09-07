@@ -103,7 +103,7 @@ class Linearizer(OptimizedKernel):
     ret = []
     invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
     for _idx in _idxs:
-      substitute: Dict[VariableOrNum, Node] = {a: b for a, b in zip(fake_idxs, _idx) if isinstance(a, Variable)}
+      substitute: Dict[VariableOrNum, Node] = dict(zip(fake_idxs, _idx))
       if amt > 1:
         float4_substitute = {**substitute, fake_idxs[dim]: expanded_nodes[dim][0]}
         idx, valid = g_idx.substitute(float4_substitute), g_valid.substitute(float4_substitute)

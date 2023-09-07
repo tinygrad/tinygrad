@@ -33,7 +33,7 @@ class Node:
   def __bool__(self): return not (self.max == self.min == 0)
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
-    return self.key == other.key
+    return self.hash == other.hash
   def __neg__(self): return self*-1
   def __add__(self, b:Union[Node,int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __radd__(self, b:int): return self+b
@@ -290,9 +290,9 @@ class SumNode(RedNode):
 
   @property
   def flat_components(self): # recursively expand sumnode components
-    new_nodes = []
-    for x in self.nodes: new_nodes += (x.flat_components if isinstance(x, SumNode) else [x])
-    return new_nodes
+    for x in self.nodes:
+      if isinstance(x, SumNode): yield from x.flat_components
+      else: yield x
 
 class AndNode(RedNode):
   def __mul__(self, b: Union[Node, int]): Variable.ands([x*b for x in self.nodes])
