@@ -137,14 +137,17 @@ class LazyBuffer:
 
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
 
+  def _prerealize(self):
+    if self.optype is BinaryOps: self.op = _ast_binaryops(self)
+    elif self.optype is ReduceOps:
+      self.op = _ast_reduceops(self)
+      if self.op.op in BinaryOps: self.op = _ast_binaryops(self)
+
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
+      self._prerealize()
       # get real ops first
-      if self.optype is BinaryOps: self.op = _ast_binaryops(self)
-      elif self.optype is ReduceOps:
-        self.op = _ast_reduceops(self)
-        if self.op.op in BinaryOps: self.op = _ast_binaryops(self)
-      elif self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
+      if self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
       # run the ast if we still have to, and log the op
       if not self.realized:
         for x in self.op.buffers: x.realize()

@@ -15,9 +15,9 @@ class LocalBuffer(NamedTuple):
 
 class LinearizerOptions(NamedTuple):
   # TODO: make this generic with a list of supported types
-  supports_float4: bool = True
-  supports_float4_alu: bool = True
-  has_local: bool = True
+  supports_float4: bool = False
+  supports_float4_alu: bool = False
+  has_local: bool = False
   # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
   global_max: Optional[List[int]] = None
   local_max: Optional[List[int]] = None
