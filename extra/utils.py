@@ -209,12 +209,13 @@ def get_child(parent, key):
       obj = getattr(obj, k)
   return obj
 
-from tinygrad.lazy import LazyBuffer
+from tinygrad.lazy import LazyBuffer, LazyOp
+from typing import Union
 
 ctr = 0
 circle_tracker:dict[int,tuple[int,any]] = {}
 
-def _tree(lazydata):
+def _tree(lazydata:Union[LazyBuffer, LazyOp]):
   global ctr
   ctr += 1
   if type(lazydata) == LazyBuffer and not (lazydata.realized): lazydata = lazydata.op
@@ -237,4 +238,4 @@ def tree(tensor:Tensor):
 
 def print_tree(tensor:Tensor):print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(tree(tensor))]))
 
-def get_tree(root:Tensor,number:int): return [circle_tracker[key] for key in circle_tracker if circle_tracker[key][0] == number][0][1]
+def get_tree(root:Tensor,number:int)->Union[LazyBuffer, LazyOp]: return [circle_tracker[key] for key in circle_tracker if circle_tracker[key][0] == number][0][1]
