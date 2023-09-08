@@ -218,10 +218,10 @@ def _tree(lazydata):
   global ctr
   ctr += 1
   if type(lazydata) == LazyBuffer and not (lazydata.realized): lazydata = lazydata.op
-  if type(lazydata) == LazyBuffer : return [f"━━ realized {lazydata.dtype.name} {lazydata.shape} "]  
+  if type(lazydata) == LazyBuffer : return [f"━━ realized {lazydata.dtype.name} {lazydata.shape} "]
 
   if id(lazydata) in circle_tracker: return [f"━⬆︎ goto {circle_tracker[id(lazydata)]}: {lazydata.op.name}"]
-  circle_tracker[id(lazydata)] = ctr 
+  circle_tracker[id(lazydata)] = ctr
   if len(lazydata.src) == 0: return [f"━━ {lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
 
   lines = [f"━┳ {lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
