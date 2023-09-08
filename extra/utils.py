@@ -229,7 +229,7 @@ def _tree(lazydata):
   for c in childs[:-1]: lines +=[f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [f" ┗{childs[-1][0]} "] + ["  "+l for l in childs[-1][1:]]
 
-def printtree(tensor:Tensor):
+def print_tree(tensor:Tensor):
   global ctr, circle_tracker
   ctr = -1
   circle_tracker = {}
