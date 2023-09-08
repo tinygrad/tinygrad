@@ -102,7 +102,7 @@ class Linearizer(OptimizedKernel):
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     # calculate expr_idxs using placeholder variables
-    fake_idxs = [(Variable(f"_uidx{j}", idx.min, idx.max) // (1 if j != dim else amt)) if None in [v.expr for v in idx.vars()] else idx for j, idx in enumerate(idxs)]
+    fake_idxs = [(Variable(f"_uidx{j}", idx.min, idx.max) // (1 if j != dim else amt)) if any(v.expr is None for v in idx.vars()) else idx for j, idx in enumerate(idxs)]
     g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
     if amt > 1 and (g_idx // amt * amt).render() != g_idx.render():
       amt, dim = 1, None
