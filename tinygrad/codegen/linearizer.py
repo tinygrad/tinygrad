@@ -86,11 +86,6 @@ class Linearizer(OptimizedKernel):
     AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[UOp]:
-    for idx in idxs:
-      if any([v.expr is None for v in idx.vars() if not isinstance(idx, Variable)]):
-        print('wtf', idxs)
-        assert False
-
     const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
 
     expanded_nodes = [idx.expand() for idx in idxs]
@@ -102,15 +97,16 @@ class Linearizer(OptimizedKernel):
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     # calculate expr_idxs using placeholder variables
-    fake_idxs = [(Variable(f"_uidx{j}", idx.min, idx.max) // (1 if j != dim else amt)) if any(v.expr is None for v in idx.vars()) else idx for j, idx in enumerate(idxs)]
-    g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
-    if amt > 1 and (g_idx // amt * amt).render() != g_idx.render():
-      amt, dim = 1, None
-      fake_idxs = [Variable(f"_uidx{j}", idx.min, idx.max) if None in [v.expr for v in idx.vars()] else idx for j, idx in enumerate(idxs)]
+    def get_upcast_idx(idx): return next((v for v in idx.vars() if v.expr is None), None)
+    fake_idxs = [idx.substitute({uidx: Variable(f"_uidx{j}", uidx.min, uidx.max)}) if (uidx := get_upcast_idx(idx)) is not None else idx for j, idx in enumerate(idxs)]
+    if amt > 1:
+      g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + [idxs[dim].expand()[0]] + fake_idxs[dim+1:])
+      if (g_idx // amt * amt).render() != g_idx.render(): (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
+    else:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
     localtype = dtypes.float32 if amt == 1 else dtypes._float4 if amt == 4 else dtypes._float2
 
-    to_expand = tuple([Variable(f"_uidx{j}", idx.min, idx.max) for j, idx in enumerate(idxs) if None in [v.expr for v in idx.vars()]])
+    to_expand = tuple([Variable(f"_uidx{j}", uidx.min, uidx.max) for j, idx in enumerate(idxs) if (uidx := get_upcast_idx(idx)) is not None])
     e_idxs, e_valids = g_idx.expand(to_expand), g_valid.expand(to_expand)
     assert len(_idxs) == len(e_idxs) and len(_idxs) == len(e_valids)
 
