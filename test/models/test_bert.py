@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 import torch
 
 def get_question_samp(bsz, seq_len, vocab_size, seed):

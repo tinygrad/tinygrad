@@ -60,7 +60,7 @@ class RNNT:
     return out.realize()
 
   def load_from_pretrained(self):
-    fn = Path(__file__).parent.parent / "weights/rnnt.pt"
+    fn = Path(__file__).parents[1] / "weights/rnnt.pt"
     download_file("https://zenodo.org/record/3662521/files/DistributedDataParallel_1576581068.9962234-epoch-100.pt?download=1", fn)
 
     import torch

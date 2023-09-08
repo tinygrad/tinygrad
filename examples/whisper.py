@@ -136,7 +136,7 @@ LANGUAGES = {
   "as": "assamese", "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa", "ba": "bashkir", "jw": "javanese", "su": "sundanese",
 }
 
-BASE = pathlib.Path(__file__).parent.parent / "weights"
+BASE = pathlib.Path(__file__).parents[1] / "weights"
 def get_encoding(n_vocab_in):
   download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/gpt2.tiktoken", BASE / "gpt2.tiktoken")
   ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(BASE / "gpt2.tiktoken") if line)}

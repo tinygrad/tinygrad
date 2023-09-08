@@ -3,7 +3,7 @@ from functools import partial, reduce
 from tinygrad.ops import Compiled
 from tinygrad.helpers import fromimport, getenv, DEBUG, CI
 from tinygrad.runtime.lib import RawMallocBuffer
-from tinygrad.codegen.linearizer import LinearizerOptions
+from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 import struct
 import numpy as np
@@ -12,7 +12,7 @@ ARM64 = getenv('ARM64', False)
 if CI and ARM64: from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, arm64_const   # type: ignore
 
 args = {
-  'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
+  'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport) '},
   'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'exp':''},
   'Darwin': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'dylib', 'exp':''}
 }[platform.system()]
@@ -48,7 +48,8 @@ class ClangProgram:
           prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n'])
           subprocess.check_output(args=('aarch64-linux-gnu-as -o '+tmp).split(), input=prg.encode('utf-8'))
           subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+tmp+' '+fn+'.bin').split())
-          self.prg = open(fn + '.bin', 'rb').read()
+          with open(fn + '.bin', 'rb') as f:
+            self.prg = f.read()
           return
         subprocess.check_output(args=('as -o' + tmp).split(), input=prg.encode('utf-8'))
         subprocess.check_output(args=('clang -lm -shared '+tmp+' -o'+fn).split())
@@ -77,5 +78,5 @@ class ClangProgram:
       self.fxn(*[x._buf if isinstance(x, RawMallocBuffer) else x for x in args])
     if wait: return time.monotonic()-st
 
-renderer = fromimport("tinygrad.codegen.assembly_arm64", "uops_to_arm64_asm") if ARM64 else functools.partial(uops_to_cstyle, CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict", arg_int_prefix="const int"))
+renderer = fromimport("tinygrad.renderer.assembly_arm64", "uops_to_arm64_asm") if ARM64 else functools.partial(uops_to_cstyle, CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict", arg_int_prefix="const int"))
 ClangBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False), renderer, ClangProgram)

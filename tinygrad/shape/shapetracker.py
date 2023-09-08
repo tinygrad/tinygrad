@@ -1,7 +1,7 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
 import functools
-from typing import Dict, Tuple, Union, List, Optional, cast, NamedTuple
+from typing import Dict, Tuple, Union, List, Optional, NamedTuple
 from tinygrad.helpers import prod, DEBUG, partition
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, is_sym_int
 
@@ -41,14 +41,16 @@ class View(ViewInternal):
     contiguous = offset == 0 and is_contiguous(shape, strides) and mask is None
     return super().__new__(cls, shape, strides, offset, mask, contiguous, to_shape_strides(shape, strides))
   def __init__(self, shape, strides=None, offset=0, mask=None, contiguous=False, shape_strides=()): super().__init__()
+  def __repr__(self): return f"View(shape={self.shape}, strides={self.strides}, offset={self.offset}, mask={self.mask})"
 
   def expr_node_mask(self, idx, valid=None) -> Node:
     expr = [valid] if valid is not None else []
     if self.mask is not None:
       acc = 1
       for ns,(x,y) in reversed(list(zip(self.shape, self.mask))):
-        base = ((idx//acc) % ns)
-        expr += [base >= x, base < y]
+        if x != 0 or y != ns:
+          base = ((idx//acc) % ns)
+          expr += [base >= x, base < y]
         acc *= ns
     return Variable.ands(expr)
 
@@ -113,7 +115,7 @@ def _reshape(view: View, new_shape:Tuple[int, ...]) -> Tuple[View, bool]:
   new_view = View(new_shape)
   if view.contiguous: return new_view, False # NOTE: if it's contiguous it can't have an offset
   if (merged_view := merge_views(view, new_view)) is not None: return merged_view, False
-  if DEBUG >= 4: print(f"WARNING: creating new view with reshape {view} -> {new_shape}")
+  if DEBUG >= 5: print(f"WARNING: creating new view with reshape {view} -> {new_shape}")
   return new_view, True
 
 @functools.lru_cache(maxsize=None)
@@ -127,7 +129,7 @@ def get_unsafe_resize_offset(strides, arg):
 class ShapeTracker:
   __slots__ = "views", "var_vals"
   def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node,int], ...]], views:Optional[List[View]]=None):
-    self.views: List[View] = views if views is not None else ([*cast(ShapeTracker, shape).views] if shape.__class__ is ShapeTracker else [View(shape)])
+    self.views: List[View] = views if views is not None else [*shape.views] if isinstance(shape, ShapeTracker) else [View(shape)]
     self.var_vals: Dict[Variable, int] = shape.var_vals if isinstance(shape, ShapeTracker) else {}
   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views}, var_vals={self.var_vals})"
   def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
@@ -139,7 +141,7 @@ class ShapeTracker:
   def shape(self) -> Tuple[int, ...]: return self.views[-1].shape # NOTE: real type is Tuple[Union[Node, int], ...] but mypy complains about prod(shape)
 
   @property
-  def key(self) -> Tuple[View, ...]: return tuple(self.views)
+  def key(self) -> Tuple[Tuple[View, ...], Tuple[Variable, ...]]: return tuple(self.views), tuple(sorted(self.var_vals.keys()))
 
   # this is the real size (ish)
   def size(self): return prod([s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])
@@ -169,8 +171,9 @@ class ShapeTracker:
     return tuple(ret)
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
-  def _expr_idx(self, idx, valid):
+  def _expr_idx(self, idx, valid) -> Tuple[Node, Node]:
     for v in reversed(self.views[0:-1]):
+      if valid.max == 0: return Variable.num(-1), valid
       valid = v.expr_node_mask(idx, valid)
       idx = v.expr_node(idx)
     return idx, valid
@@ -193,8 +196,9 @@ class ShapeTracker:
     if idx.__class__ is str: idx = Variable(idx, 0, prod(self.shape)-1)
     return self._expr_idx(self.views[-1].expr_node(idx), self.views[-1].expr_node_mask(idx))
 
-  def needs_valid(self) -> bool:
-    return any(v.mask is not None for v in self.views)
+  def axis_is_masked(self, axis) -> bool:
+    _, valid = self.expr_idxs()
+    return f'idx{axis}' in [v.expr for v in valid.vars()]
 
   # *** under this line are the movement ops ***
 
@@ -228,6 +232,7 @@ class ShapeTracker:
     return self
 
   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
+    if self.views[-1].shape == new_shape: return self
     new_ints, new_nodes = partition(new_shape, lambda s: isinstance(s, int))
     if new_nodes and all(isinstance(s, int) for s in self.shape):
       # reshape from all int shape into shape with a variable, update the variable value
@@ -238,7 +243,6 @@ class ShapeTracker:
         self.var_vals[new_var] = new_val
       else: assert self.var_vals[new_var] == new_val, f"value conflicts, was {self.var_vals[new_var]}, set to {new_val}"
     elif not new_nodes: self.var_vals = {}
-    if self.views[-1].shape == new_shape: return self
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
     if all(isinstance(s, int) for s in self.shape) and all(isinstance(s, int) for s in new_shape):
