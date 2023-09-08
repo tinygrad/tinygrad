@@ -187,7 +187,10 @@ class LtNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
     if isinstance(self.b, int): return int(self.a.max < self.b), int(self.a.min < self.b)
     return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min > self.b.max else (0, 1)
-  def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return self.a.substitute(var_vals) < (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
+  def substitute(self, var_vals: Dict[Variable, Node]) -> Node:
+    lhs = self.a.substitute(var_vals)
+    if isinstance(self.b, int): return NumNode(1) if lhs.max < self.b else NumNode(0) if lhs.min >= self.b else lhs < self.b
+    return NumNode(1) if lhs.max < self.b.min else NumNode(0) if lhs.min >= self.b.max else lhs < self.b.substitute(var_vals)
 
 class MulNode(OpNode):
   def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul
