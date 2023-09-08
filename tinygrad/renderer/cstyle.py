@@ -165,7 +165,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
       xid = lang.gid if args[1].startswith("g") else lang.lid
-      kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]};")
+      kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
       if args[1].startswith("l"): local_size.append(args[2])
       r[u] = args[1]
     elif uop == UOps.CONST:
