@@ -209,12 +209,28 @@ def get_child(parent, key):
       obj = getattr(obj, k)
   return obj
 
+from tinygrad.lazy import LazyBuffer
+
+ctr = 0
+circle_tracker = {}
+
 def _tree(lazydata):
-  if type(lazydata).__name__ == "LazyBuffer": return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op)
+  global ctr
+  ctr += 1
+  if type(lazydata) == LazyBuffer and not (lazydata.realized): lazydata = lazydata.op
+  if type(lazydata) == LazyBuffer : return [f"━━ realized {lazydata.dtype.name} {lazydata.shape} "]  
+
+  if id(lazydata) in circle_tracker: return [f"━⬆︎ goto {circle_tracker[id(lazydata)]}: {lazydata.op.name}"]
+  circle_tracker[id(lazydata)] = ctr 
   if len(lazydata.src) == 0: return [f"━━ {lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
+
   lines = [f"━┳ {lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
   childs = [_tree(c) for c in lazydata.src[:]]
-  for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
-  return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
+  for c in childs[:-1]: lines +=[f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
+  return lines + [f" ┗{childs[-1][0]} "] + ["  "+l for l in childs[-1][1:]]
 
-def printtree(tensor:Tensor):print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(tensor.lazydata))]))
+def printtree(tensor:Tensor):
+  global ctr, circle_tracker
+  ctr = -1
+  circle_tracker = {}
+  print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(tensor.lazydata))]))
