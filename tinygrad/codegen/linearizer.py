@@ -86,34 +86,37 @@ class Linearizer(OptimizedKernel):
     AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[UOp]:
+    for idx in idxs:
+      if any([v.expr is None for v in idx.vars() if not isinstance(idx, Variable)]):
+        print('wtf', idxs)
+        assert False
+
     const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
 
     expanded_nodes = [idx.expand() for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     upcast_dim = self.get_upcast_dim(i)
 
-    amt = 1
+    amt, dim = 1, None
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
     # calculate expr_idxs using placeholder variables
-    fake_idxs = [idx if isinstance(idx, NumNode) else Variable(f"_uidx{i}", idx.min, idx.max) for i, idx in enumerate(idxs)]
+    fake_idxs = [(Variable(f"_uidx{j}", idx.min, idx.max) // (1 if j != dim else amt)) if None in [v.expr for v in idx.vars()] else idx for j, idx in enumerate(idxs)]
     g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
+    if amt > 1 and (g_idx // amt * amt).render() != g_idx.render():
+      amt, dim = 1, None
+      fake_idxs = [Variable(f"_uidx{j}", idx.min, idx.max) if None in [v.expr for v in idx.vars()] else idx for j, idx in enumerate(idxs)]
+      g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
+    localtype = dtypes.float32 if amt == 1 else dtypes._float4 if amt == 4 else dtypes._float2
+
+    to_expand = tuple([Variable(f"_uidx{j}", idx.min, idx.max) for j, idx in enumerate(idxs) if None in [v.expr for v in idx.vars()]])
+    e_idxs, e_valids = g_idx.expand(to_expand), g_valid.expand(to_expand)
+    assert len(_idxs) == len(e_idxs) and len(_idxs) == len(e_valids)
 
     ret = []
     invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
-    for _idx in _idxs:
-      substitute: Dict[VariableOrNum, Node] = dict(zip(fake_idxs, _idx))
-      if amt > 1:
-        float4_substitute = {**substitute, fake_idxs[dim]: expanded_nodes[dim][0]}
-        idx, valid = g_idx.substitute(float4_substitute), g_valid.substitute(float4_substitute)
-        localtype = dtypes._float4 if amt == 4 else dtypes._float2
-        if idx.render() != ((idx//amt)*amt).render():
-          idx, valid = g_idx.substitute(substitute), g_valid.substitute(substitute)
-          localtype = dtypes.float32
-      else:
-        idx, valid = g_idx.substitute(substitute), g_valid.substitute(substitute)
-        localtype = dtypes.float32
+    for idx, valid, _idx in zip(e_idxs, e_valids, _idxs):
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:

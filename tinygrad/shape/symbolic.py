@@ -21,7 +21,11 @@ class Node:
     return ops[type(self)](self, ops, ctx)
   def vars(self): return []
   # expand a Node into List[Node] that enumerates the underlying Variables from min to max
-  def expand(self) -> List[Node]: raise RuntimeError(self.__class__.__name__)
+  @functools.lru_cache(maxsize=None)
+  def expand(self, ctx:Tuple[Variable, ...]=None) -> List[Node]:
+    if ctx is None: ctx = tuple(v for v in set(self.vars()) if v.expr is None)
+    replacements = itertools.product(*[[NumNode(x) for x in range(v.min, v.max + 1)] for v in ctx[::-1]])
+    return [self.substitute(dict(zip(ctx[::-1], rep))) for rep in replacements]
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
   @functools.cached_property
@@ -153,7 +157,6 @@ class Variable(Node):
   def __init__(self, expr:Optional[str], nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
   def vars(self): return [self]
-  def expand(self) -> List[Node]: return [self] if self.expr is not None else [Variable.num(j) for j in range(self.min, self.max+1)]
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return var_vals[self] if self in var_vals else self
 
 class NumNode(Node):
@@ -165,7 +168,6 @@ class NumNode(Node):
   def __index__(self): return self.b
   def __eq__(self, other): return self.b == other
   def __hash__(self): return self.hash  # needed with __eq__ override
-  def expand(self) -> List[Node]: return [self]
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return self
 
 def create_node(ret:Node):
@@ -200,7 +202,6 @@ class MulNode(OpNode):
     return Node.__mod__(a, b)
   def get_bounds(self) -> Tuple[int, int]:
     return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
-  def expand(self) -> List[Node]: return [x*self.b for x in self.a.expand()]
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return self.a.substitute(var_vals) * (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class DivNode(OpNode):
@@ -208,7 +209,6 @@ class DivNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
-  def expand(self) -> List[Node]: return [x//self.b for x in self.a.expand()]
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return self.a.substitute(var_vals) // (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class ModNode(OpNode):
@@ -218,7 +218,6 @@ class ModNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return (0, self.b-1) if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b) else (self.a.min%self.b, self.a.max%self.b)
-  def expand(self) -> List[Node]: return [x%self.b for x in self.a.expand()]
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return self.a.substitute(var_vals) % self.b
 
 class RedNode(Node):
@@ -285,7 +284,6 @@ class SumNode(RedNode):
       return Node.__lt__(Node.sum(new_sum), b)
     return Node.__lt__(self, b)
 
-  def expand(self) -> List[Node]: return [Variable.sum(list(it)) for it in itertools.product(*[x.expand() for x in self.nodes])]
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return Variable.sum([node.substitute(var_vals) for node in self.nodes])
 
   @property
@@ -318,6 +316,17 @@ def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
   ret = a.substitute({k:Variable.num(v) for k, v in var_vals.items()})
   assert isinstance(ret, NumNode)
   return ret.b
+
+expand_ops: Dict[Type, Callable] = {
+  Variable: lambda self,ctx: [self] if not (self.expr in ctx or self.expr is None) else [Variable.num(j) for j in range(self.min, self.max+1)],
+  NumNode: lambda self,ctx: [self],
+  MulNode: lambda self,ctx: [x*(self.b if self.b.__class__ is int else self.b.expand(ctx)) for x in self.a.expand(ctx)],
+  DivNode: lambda self,ctx: [x//self.b for x in self.a.expand(ctx)],
+  ModNode: lambda self,ctx: [x%self.b for x in self.a.expand(ctx)],
+  LtNode: lambda self,ctx:  [x<(self.b if self.b.__class__ is int else self.b.expand(ctx)) for x in self.a.expand(ctx)],
+  SumNode: lambda self,ctx: [Variable.sum(list(it)) for it in itertools.product(*[x.expand(ctx) for x in self.nodes])],
+  AndNode: lambda self,ctx: [Variable.ands(list(it)) for it in itertools.product(*[x.expand(ctx) for x in self.nodes])],
+}
 
 render_python: Dict[Type, Callable] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}]" if ctx == "DEBUG" else f"{self.expr}",
