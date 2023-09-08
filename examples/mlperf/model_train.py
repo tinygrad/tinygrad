@@ -12,7 +12,7 @@ def train_retinanet():
   from examples.mlperf.train_retinanet import RetinaNetTrainer
   backbone = ResNeXt50_32X4D(num_classes=None)
   retina = RetinaNet(backbone) #remember num_classes = 600 for openimages
-  trainer = RetinaNetTrainer(retina)
+  trainer = RetinaNetTrainer(retina, debug=True)
   trainer.train()
   # reference torch implementation https://github.com/mlcommons/training/blob/master/object_detection/pytorch/maskrcnn_benchmark/modeling/rpn/retinanet
 

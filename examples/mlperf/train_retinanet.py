@@ -4,7 +4,7 @@ from typing import Any
 from models.retinanet import RetinaNet
 from models.resnet import ResNeXt50_32X4D
 from extra.datasets import openimages
-from PIL import Image
+from PIL import Image, ImageDraw
 from extra.datasets.openimages import openimages, iterate
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
@@ -22,9 +22,9 @@ BS = getenv("BS", 3)
 CNT = getenv("CNT", 10)
 BACKWARD = getenv("BACKWARD", 1)
 TRAINING = getenv("TRAINING", 1)
-CLCACHE = getenv("CLCACHE", 0)
+CLCACHE = getenv("CLCACHE", 1)
 GRAPH = getenv("GRAPH", 1)
-IMAGE_SIZES = {"debug" : (100,100), "mlperf" : (800,800)}
+IMAGE_SIZES = {"debug" : (200,200), "mlperf" : (800,800)}
 
 
 def resize_box_based_on_new_image_size(box: List[float], img_old_size: Tuple[int], img_new_size: Tuple[int]) -> List[float]:
@@ -95,13 +95,14 @@ def bbox_transform(proposals, reference_boxes):
   return targets
 
 class RetinaNetTrainer:
-    def __init__(self, model : RetinaNet = RetinaNet(ResNeXt50_32X4D(num_classes=None))):
+    def __init__(self, model : RetinaNet = RetinaNet(ResNeXt50_32X4D(num_classes=None)), debug = False):
         self.model = model
         self.input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
         self.input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
         self.dataset = COCO(openimages())
         self.coco_eval = COCOeval(self.dataset, iouType="bbox")
-        self.image_size = IMAGE_SIZES["debug"]
+        self.debug = debug
+        self.image_size = IMAGE_SIZES["debug"] if debug else IMAGE_SIZES["mlperf"]
     def get_ground_truths(self, anchors, annotations, n_classes):
         #TODO tensorize this function for further lazyness exploitation
         #TODO rescale bboxes to transformed size
@@ -167,11 +168,23 @@ class RetinaNetTrainer:
             imgwise_loss.backward()
             optimizer.step()
             
-            predictions = retina.postprocess_detections(head_outputs.numpy(),input_size=self.image_size,orig_image_sizes=[t["image_size"] for t in annotations],anchors=anchors_orig)
-            print(self.mAP_compute(annotations, predictions))
+            #TODO input_size=self.image_size? WATCH OUT PARAMETERS AND USAGE
+            if self.debug:
+                predictions = retina.postprocess_detections(head_outputs.numpy(),input_size=self.image_size,orig_image_sizes=[t["image_size"] for t in annotations],anchors=anchors_orig)
+
+                for image, image_preds in zip(x, predictions):
+                    img = Image.fromarray(image)
+                    draw = ImageDraw.Draw(img)
+                    for box in image_preds["boxes"]:
+                        draw.rectangle(box, outline="red")
+                    img.show()
+
+                #TODO this should be done on validation split predictions (no grad)
+                self.mAP_compute(annotations, predictions)
+            
 
     def mAP_compute(self, annotations, predictions):
-        coco_results  = [{"image_id": annotations[i]["image_id"], "category_id": label, "bbox": box, "score": score}
+        coco_results  = [{"image_id": annotations[i]["image_id"], "category_id": label, "bbox": box.tolist(), "score": score}
       for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
         coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(self.coco_eval.params.catIds), len(self.coco_eval.params.areaRng)
         img_ids = [t["image_id"] for t in annotations]
@@ -179,9 +192,10 @@ class RetinaNetTrainer:
             self.coco_eval.cocoDt = self.dataset.loadRes(coco_results)
             self.coco_eval.params.imgIds = img_ids
             self.coco_eval.evaluate()
+            self.coco_eval.accumulate()
+            self.coco_eval.summarize()
         evaluated_imgs.extend(img_ids)
         coco_evalimgs.append(np.array(self.coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
-        return coco_evalimgs, evaluated_imgs
 
     def _batchwise_compute_loss(self, BS, targets, head_outputs):
         #TODO is this possible with tensor mul only?
@@ -310,6 +324,6 @@ class RetinaNetTrainer:
 
 
 if __name__ == "__main__":
-    trainer = RetinaNetTrainer()
+    trainer = RetinaNetTrainer(debug=True)
     #trainer._dummy_test_sigmoid_focal_loss()
     trainer.train()
