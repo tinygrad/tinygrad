@@ -231,13 +231,16 @@ def _tree(lazydata:Union[LazyBuffer, LazyOp]):
   return lines + [f" ┗{childs[-1][0]} "] + ["  "+l for l in childs[-1][1:]]
 
 def tree(tensor:Tensor):
-  global ctr, circle_tracker
+  global ctr
   ctr = -1
-  circle_tracker = {}
   return _tree(tensor.lazydata)
 
-def print_tree(tensor:Tensor):print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(tree(tensor))]))
+def print_tree(tensor:Tensor):
+  print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(tree(tensor))]))
+  circle_tracker.clear()
 
 def get_tree(root:Tensor,number:int)->Union[LazyBuffer, LazyOp]:
   tree(root)
-  return [circle_tracker[key] for key in circle_tracker if circle_tracker[key][0] == number][0][1]
+  res = [circle_tracker[key] for key in circle_tracker if circle_tracker[key][0] == number][0][1]
+  circle_tracker.clear()
+  return res
