@@ -317,17 +317,6 @@ def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
   assert isinstance(ret, NumNode)
   return ret.b
 
-expand_ops: Dict[Type, Callable] = {
-  Variable: lambda self,ctx: [self] if not (self.expr in ctx or self.expr is None) else [Variable.num(j) for j in range(self.min, self.max+1)],
-  NumNode: lambda self,ctx: [self],
-  MulNode: lambda self,ctx: [x*(self.b if self.b.__class__ is int else self.b.expand(ctx)) for x in self.a.expand(ctx)],
-  DivNode: lambda self,ctx: [x//self.b for x in self.a.expand(ctx)],
-  ModNode: lambda self,ctx: [x%self.b for x in self.a.expand(ctx)],
-  LtNode: lambda self,ctx:  [x<(self.b if self.b.__class__ is int else self.b.expand(ctx)) for x in self.a.expand(ctx)],
-  SumNode: lambda self,ctx: [Variable.sum(list(it)) for it in itertools.product(*[x.expand(ctx) for x in self.nodes])],
-  AndNode: lambda self,ctx: [Variable.ands(list(it)) for it in itertools.product(*[x.expand(ctx) for x in self.nodes])],
-}
-
 render_python: Dict[Type, Callable] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}]" if ctx == "DEBUG" else f"{self.expr}",
   NumNode: lambda self,ops,ctx: f"{self.b}",
