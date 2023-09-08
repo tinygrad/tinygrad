@@ -154,7 +154,9 @@ class Variable(Node):
     self.expr, self.min, self.max = expr, nmin, nmax
   def vars(self): return [self]
   def expand(self) -> List[Node]: return [self] if self.expr is not None else [Variable.num(j) for j in range(self.min, self.max+1)]
-  def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return var_vals[self] if self in var_vals else self
+  def substitute(self, var_vals: Dict[Variable, Node]) -> Node:
+    try: return var_vals[self]
+    except KeyError: return self
 
 class NumNode(Node):
   def __init__(self, num:int):
@@ -212,7 +214,7 @@ class DivNode(OpNode):
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
   def expand(self) -> List[Node]: return [x//self.b for x in self.a.expand()]
-  def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return self.a.substitute(var_vals) // (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
+  def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return self.a.substitute(var_vals) // self.b
 
 class ModNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):

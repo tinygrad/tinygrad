@@ -102,11 +102,12 @@ class Linearizer(OptimizedKernel):
     g_idx_vars = set(v for v in g_idx.vars() if v.expr.startswith("_uidx"))
     g_valid_vars = set(v for v in g_valid.vars() if v.expr.startswith("_uidx"))
     expand_vars = g_idx_vars | g_valid_vars
+    substitute_dim = [i for i,v in enumerate(fake_idxs) if v in expand_vars]
 
     ret = []
     invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
     for _idx in _idxs:
-      substitute: Dict[VariableOrNum, Node] = {a: b for a, b in zip(fake_idxs, _idx) if a in expand_vars} if expand_vars else {}
+      substitute: Dict[VariableOrNum, Node] = {fake_idxs[i]:_idx[i] for i in substitute_dim}
       if amt > 1:
         float4_substitute = {**substitute, fake_idxs[dim]: expanded_nodes[dim][0]}
         idx, valid = g_idx.substitute(float4_substitute), g_valid.substitute(float4_substitute)
