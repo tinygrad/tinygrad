@@ -212,7 +212,7 @@ def get_child(parent, key):
 from tinygrad.lazy import LazyBuffer
 
 ctr = 0
-circle_tracker = {}
+circle_tracker:dict[int,tuple[int,any]] = {}
 
 def _tree(lazydata):
   global ctr
@@ -220,8 +220,8 @@ def _tree(lazydata):
   if type(lazydata) == LazyBuffer and not (lazydata.realized): lazydata = lazydata.op
   if type(lazydata) == LazyBuffer : return [f"━━ realized {lazydata.dtype.name} {lazydata.shape} "]
 
-  if id(lazydata) in circle_tracker: return [f"━⬆︎ goto {circle_tracker[id(lazydata)]}: {lazydata.op.name}"]
-  circle_tracker[id(lazydata)] = ctr
+  if id(lazydata) in circle_tracker: return [f"━⬆︎ goto {circle_tracker[id(lazydata)][0]}: {lazydata.op.name}"]
+  circle_tracker[id(lazydata)] = (ctr, lazydata)
   if len(lazydata.src) == 0: return [f"━━ {lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
 
   lines = [f"━┳ {lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
@@ -229,8 +229,12 @@ def _tree(lazydata):
   for c in childs[:-1]: lines +=[f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [f" ┗{childs[-1][0]} "] + ["  "+l for l in childs[-1][1:]]
 
-def print_tree(tensor:Tensor):
+def tree(tensor:Tensor):
   global ctr, circle_tracker
   ctr = -1
   circle_tracker = {}
-  print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(tensor.lazydata))]))
+  return _tree(tensor.lazydata)
+
+def print_tree(tensor:Tensor):print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(tree(tensor))]))
+
+def get_tree(root:Tensor,number:int): return [circle_tracker[key] for key in circle_tracker if circle_tracker[key][0] == number][0][1]
