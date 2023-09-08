@@ -68,7 +68,7 @@ class TestAssign(unittest.TestCase):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
     a.realize()
     oba1 = a.lazydata.output_buffer
-    a.assign(a.cast(dtypes.float64).realize())
+    a.assign(a.cast(dtypes.int32).realize())
     a.realize()
     oba2 = a.lazydata.output_buffer
     assert oba1 is None and oba2 is None
