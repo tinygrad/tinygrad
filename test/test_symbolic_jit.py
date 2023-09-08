@@ -171,7 +171,7 @@ class TestSymbolicJit(unittest.TestCase):
     for i in range(1, 5):
       a = Tensor.rand(7, 11)
       symbolic = a.shrink(((3,5),(vi,vi+2)))
-      symbolic.lazydata.st.var_vals[vi] = i
+      symbolic.lazydata.var_vals[vi] = i
       symbolic = jf(symbolic).numpy()
       expected = f(a.shrink(((3,5),(i,i+2)))).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)

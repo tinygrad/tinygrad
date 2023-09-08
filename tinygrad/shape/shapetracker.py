@@ -1,8 +1,8 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
 import functools
-from typing import Dict, Tuple, Union, List, Optional, NamedTuple
-from tinygrad.helpers import prod, DEBUG, partition
+from typing import Tuple, Union, List, Optional, NamedTuple
+from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, is_sym_int
 
 @functools.lru_cache(maxsize=None)
@@ -127,11 +127,10 @@ def get_unsafe_resize_offset(strides, arg):
   return sum([s * x[0] for s, x in zip(strides,arg)])
 
 class ShapeTracker:
-  __slots__ = "views", "var_vals"
+  __slots__ = "views"
   def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node,int], ...]], views:Optional[List[View]]=None):
     self.views: List[View] = views if views is not None else [*shape.views] if isinstance(shape, ShapeTracker) else [View(shape)]
-    self.var_vals: Dict[Variable, int] = shape.var_vals if isinstance(shape, ShapeTracker) else {}
-  def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views}, var_vals={self.var_vals})"
+  def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
   def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
 
   @property
@@ -141,7 +140,7 @@ class ShapeTracker:
   def shape(self) -> Tuple[int, ...]: return self.views[-1].shape # NOTE: real type is Tuple[Union[Node, int], ...] but mypy complains about prod(shape)
 
   @property
-  def key(self) -> Tuple[Tuple[View, ...], Tuple[Variable, ...]]: return tuple(self.views), tuple(sorted(self.var_vals.keys()))
+  def key(self) -> Tuple[View, ...]: return tuple(self.views)
 
   # this is the real size (ish)
   def size(self): return prod([s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])
@@ -233,16 +232,6 @@ class ShapeTracker:
 
   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
     if self.views[-1].shape == new_shape: return self
-    new_ints, new_nodes = partition(new_shape, lambda s: isinstance(s, int))
-    if new_nodes and all(isinstance(s, int) for s in self.shape):
-      # reshape from all int shape into shape with a variable, update the variable value
-      assert len(new_nodes) == 1 and isinstance(new_nodes[0], Variable), "only support adding one Variable to the int shape"
-      new_var, new_val = new_nodes[0], prod(self.shape) // prod(new_ints)
-      if new_var not in self.var_vals:
-        assert new_var.min <= new_val <= new_var.max, f"variable value {new_val} out of range [{new_var.min}, {new_var.max}]"
-        self.var_vals[new_var] = new_val
-      else: assert self.var_vals[new_var] == new_val, f"value conflicts, was {self.var_vals[new_var]}, set to {new_val}"
-    elif not new_nodes: self.var_vals = {}
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
     if all(isinstance(s, int) for s in self.shape) and all(isinstance(s, int) for s in new_shape):
