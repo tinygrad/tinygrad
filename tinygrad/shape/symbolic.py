@@ -37,7 +37,7 @@ class Node:
   def __bool__(self): return not (self.max == self.min == 0)
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
-    return self.hash == other.hash
+    return self.key == other.key
   def __neg__(self): return self*-1
   def __add__(self, b:Union[Node,int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __radd__(self, b:int): return self+b
