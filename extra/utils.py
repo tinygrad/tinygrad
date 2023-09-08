@@ -238,6 +238,6 @@ def tree(tensor:Tensor):
 
 def print_tree(tensor:Tensor):print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(tree(tensor))]))
 
-def get_tree(root:Tensor,number:int)->Union[LazyBuffer, LazyOp]: 
+def get_tree(root:Tensor,number:int)->Union[LazyBuffer, LazyOp]:
   tree(root)
   return [circle_tracker[key] for key in circle_tracker if circle_tracker[key][0] == number][0][1]
