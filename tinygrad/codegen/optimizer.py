@@ -302,6 +302,28 @@ class OptimizedKernel(Kernel):
         # early exit
         return
 
+    # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
+    MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
+    if self.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
+        self.reduceop and self.reduceop.op == ReduceOps.SUM and len(self.full_shape) >= 2 and \
+        isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
+        isinstance(self.reduceop.src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[1], LazyBuffer):
+      buf0_strides = self.sts[self.bufs.index(self.reduceop.src[0].src[0])].real_strides()
+      if buf0_strides[self.first_reduce] == 1:
+        for global_idx in range(self.global_dims):
+          if self.full_shape[self.first_reduce]%MV_THREADS_PER_ROW == 0 and self.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
+            if DEBUG >= 3: print(f"MATVEC: full_shape={self.full_shape} first_reduce={self.first_reduce} buf0_strides={buf0_strides} blocksize={MV_BLOCKSIZE} threads_per_row={MV_THREADS_PER_ROW} rows_per_thread{MV_ROWS_PER_THREAD}")
+            if MV_THREADS_PER_ROW > 1:
+              self.shift_to(self.first_reduce, MV_THREADS_PER_ROW, top=False, insert_before=self.first_reduce + len(self.group_for_reduce))
+              self.group_for_reduce.append(MV_THREADS_PER_ROW)
+            if MV_BLOCKSIZE > 1:
+              self.shift_to(global_idx, MV_BLOCKSIZE, insert_before=self.first_reduce)
+              self.local_dims += 1
+            if MV_ROWS_PER_THREAD > 1:
+              self.shift_to(global_idx, MV_ROWS_PER_THREAD)
+              self.upcast()
+            return
+
     if self.opts.has_local and all(isinstance(s, int) for s in self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
       if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
