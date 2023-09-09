@@ -134,7 +134,7 @@ class Node:
     if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes):
       new_nodes = Node.factorize(new_nodes)
     if num_node_sum: new_nodes.append(NumNode(num_node_sum))
-    return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
+    return SumNode(new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
 
   @staticmethod
   def ands(nodes:List[Node]) -> Node:
@@ -144,7 +144,7 @@ class Node:
 
     # filter 1s
     nodes = [x for x in nodes if x.min != x.max]
-    return create_rednode(AndNode, nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
+    return AndNode(nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
 
 # 4 basic node types
 
@@ -221,10 +221,15 @@ class ModNode(OpNode):
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return self.a.substitute(var_vals) % self.b
 
 class RedNode(Node):
-  def __init__(self, nodes:List[Node]): self.nodes = nodes
+  def __init__(self, nodes:List[Node]):
+    self.nodes = nodes
+    self.min, self.max = self.get_bounds()
   def vars(self): return functools.reduce(lambda l,x: l+x.vars(), self.nodes, [])
+  @abstractmethod
+  def get_bounds(self) -> Tuple[int, int]: pass
 
 class SumNode(RedNode):
+  def get_bounds(self) -> Tuple[int, int]: return (sum([x.min for x in self.nodes]), sum([x.max for x in self.nodes]))
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
@@ -239,7 +244,7 @@ class SumNode(RedNode):
       for x in self.flat_components:
         if x % b == 0: fully_divided.append(x // b)
         else: rest.append(x)
-      if (sum_fully_divided:=create_rednode(SumNode, fully_divided)) != 0: return sum_fully_divided + create_rednode(SumNode, rest) // b
+      if (sum_fully_divided:=SumNode(fully_divided)) != 0: return sum_fully_divided + SumNode(rest) // b
       return Node.__floordiv__(self, b, False)
     if b == 1: return self
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
@@ -293,6 +298,7 @@ class SumNode(RedNode):
       else: yield x
 
 class AndNode(RedNode):
+  def get_bounds(self) -> Tuple[int, int]: return (min([x.min for x in self.nodes]), max([x.max for x in self.nodes]))
   def __mul__(self, b: Union[Node, int]): Variable.ands([x*b for x in self.nodes])
   def __floordiv__(self, b: Union[Node, int], _=True): return Variable.ands([x//b for x in self.nodes])
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node:
@@ -301,12 +307,6 @@ class AndNode(RedNode):
       if not (sub:=node.substitute(var_vals)): return NumNode(0)
       subed.append(sub)
     return Variable.ands(subed)
-
-def create_rednode(typ:Type[RedNode], nodes:List[Node]):
-  ret = typ(nodes)
-  if typ == SumNode: ret.min, ret.max = (sum([x.min for x in nodes]), sum([x.max for x in nodes]))
-  elif typ == AndNode: ret.min, ret.max = (min([x.min for x in nodes]), max([x.max for x in nodes]))
-  return create_node(ret)
 
 @functools.lru_cache(maxsize=None)
 def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"

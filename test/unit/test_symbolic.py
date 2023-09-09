@@ -415,29 +415,6 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     s2 = SumNode([a, c])
     assert s2.expand() == [Variable.sum([NumNode(i),NumNode(j)]) for (i,j) in [(1,5), (1,6), (1,7), (2,5), (2,6), (2,7), (3,5), (3,6), (3,7)]]
 
-  @unittest.skip("these nodes are expandable now")
-  def test_non_expandable_nodes(self):
-    expandable_nodes = [Variable, NumNode, MulNode, SumNode]
-
-    def test_non_expandable_nodes_recursive(node_cls: Node):
-      for node_subcls in node_cls.__subclasses__():
-        # skip expandable classes
-        if node_subcls in expandable_nodes:
-          continue
-
-        # recurse over subclasses
-        test_non_expandable_nodes_recursive(node_subcls)
-
-        # skip classes with abstract methods
-        if len(node_subcls.__abstractmethods__) > 0:
-          continue
-
-        # test that node expand is not implemented
-        node = node_subcls.__new__(node_subcls)
-        self.assertRaises(NotImplementedError, node.expand)
-
-    test_non_expandable_nodes_recursive(Node)
-
 
 if __name__ == '__main__':
   unittest.main()
