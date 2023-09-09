@@ -134,7 +134,7 @@ class Node:
     if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes):
       new_nodes = Node.factorize(new_nodes)
     if num_node_sum: new_nodes.append(NumNode(num_node_sum))
-    return SumNode(new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
+    return create_node(create_node(SumNode(new_nodes))) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
 
   @staticmethod
   def ands(nodes:List[Node]) -> Node:
@@ -144,7 +144,7 @@ class Node:
 
     # filter 1s
     nodes = [x for x in nodes if x.min != x.max]
-    return AndNode(nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
+    return create_node(AndNode(nodes)) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
 
 # 4 basic node types
 
@@ -244,7 +244,7 @@ class SumNode(RedNode):
       for x in self.flat_components:
         if x % b == 0: fully_divided.append(x // b)
         else: rest.append(x)
-      if (sum_fully_divided:=SumNode(fully_divided)) != 0: return sum_fully_divided + SumNode(rest) // b
+      if (sum_fully_divided:=create_node(SumNode(fully_divided))) != 0: return sum_fully_divided + create_node(SumNode(rest)) // b
       return Node.__floordiv__(self, b, False)
     if b == 1: return self
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
@@ -308,7 +308,7 @@ class AndNode(RedNode):
       subed.append(sub)
     return Variable.ands(subed)
 
-@functools.lru_cache(maxsize=None)
+@functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
 def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
 def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
