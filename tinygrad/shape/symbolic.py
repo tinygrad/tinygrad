@@ -1,8 +1,8 @@
 from __future__ import annotations
 from abc import abstractmethod
 import functools
-from itertools import product
 from math import gcd
+from itertools import product
 from tinygrad.helpers import partition
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Iterator
 
@@ -31,9 +31,9 @@ class Node:
   @staticmethod
   def iter_idxs(idxs:Tuple[VariableOrNum, ...]) -> Iterator[Tuple[int,...]]:
     yield from (x[::-1] for x in product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
-
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
+
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
   @functools.cached_property
@@ -52,22 +52,7 @@ class Node:
   def __le__(self, b:Union[Node,int]): return self < (b+1)
   def __gt__(self, b:Union[Node,int]): return (-self) < (-b)
   def __ge__(self, b:Union[Node,int]): return (-self) < (-b+1)
-  def __lt__(self, b:Union[Node,int]):
-    #if self.min >= (b.max if isinstance(b, Node) else b): return Variable.num(0)
-    lhs = self
-    if isinstance(lhs, SumNode) and isinstance(b, int):
-      muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
-      if muls:
-        # NOTE: gcd in python 3.8 takes exactly 2 args
-        mul_gcd = muls[0].b
-        for x in muls[1:]: mul_gcd = gcd(mul_gcd, x.b)
-        if b%mul_gcd == 0:
-          all_others = Variable.sum(others)
-          #print(mul_gcd, muls, all_others)
-          if all_others.min >= 0 and all_others.max < mul_gcd:
-            # TODO: should we divide both by mul_gcd here?
-            lhs = Variable.sum(muls)
-    return create_node(LtNode(lhs, b))
+  def __lt__(self, b:Union[Node,int]): return create_node(LtNode(self, b))
   def __mul__(self, b:Union[Node, int]):
     if b == 0: return NumNode(0)
     if b == 1: return self
@@ -281,14 +266,26 @@ class SumNode(RedNode):
     return Node.__mod__(Node.sum(new_nodes), b)
 
   def __lt__(self, b:Union[Node,int]):
+    lhs: Node = self
     if isinstance(b, int):
       new_sum = []
       for x in self.nodes:
         # TODO: should we just force the last one to always be the number
         if isinstance(x, NumNode): b -= x.b
         else: new_sum.append(x)
-      return Node.__lt__(Node.sum(new_sum), b)
-    return Node.__lt__(self, b)
+      lhs = Node.sum(new_sum)
+      if isinstance(lhs, SumNode):
+        muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
+        if muls:
+          # NOTE: gcd in python 3.8 takes exactly 2 args
+          mul_gcd = muls[0].b
+          for x in muls[1:]: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell x.b is int here
+          if b%mul_gcd == 0:
+            all_others = Variable.sum(others)
+            if all_others.min >= 0 and all_others.max < mul_gcd:
+              # TODO: should we divide both by mul_gcd here?
+              lhs = Variable.sum(muls)
+    return Node.__lt__(lhs, b)
 
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return Variable.sum([node.substitute(var_vals) for node in self.nodes])
 
