@@ -24,8 +24,9 @@ class Node:
   # expand increments earlier variables faster than later variables (as specified in the argument)
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def expand(self, idxs:Optional[Tuple[Variable, ...]]=None) -> List[Node]:
-    if idxs is None: idxs = tuple(v for v in set(self.vars()) if v.expr is None)
-    return [self.substitute(dict(zip(idxs, (NumNode(x) for x in rep)))) for rep in self.iter_idxs(idxs)]
+    if idxs is None: idxs = tuple(self.expand_idx())
+    return [self.substitute(dict(zip(idxs, (NumNode(x) for x in rep)))) for rep in Node.iter_idxs(idxs)]
+  def expand_idx(self): return next((v for v in self.vars() if v.expr is None), NumNode(0))
   @staticmethod
   def iter_idxs(idxs:Tuple[Variable, ...]):
     yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
