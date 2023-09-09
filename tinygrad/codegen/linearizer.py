@@ -99,7 +99,8 @@ class Linearizer(OptimizedKernel):
     fake_idxs = [idx.substitute({idx.expand_idx(): ev}) for idx, ev in zip(idxs, expand_vars)]
     if dim is not None:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + [idxs[dim].expand()[0]] + fake_idxs[dim+1:])
-      if (g_idx // amt * amt).render() != g_idx.render(): (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
+      if (g_idx // amt * amt).render() != g_idx.render():
+        (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
     else:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
     localtype = dtypes.float32 if amt == 1 else dtypes._float4 if amt == 4 else dtypes._float2
