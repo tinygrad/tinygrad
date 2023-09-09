@@ -21,6 +21,7 @@ class Node:
     return ops[type(self)](self, ops, ctx)
   def vars(self): return []
   # expand a Node into List[Node] that enumerates the underlying Variables from min to max
+  # expand increments earlier variables faster than later variables (as specified in the argument)
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def expand(self, ctx:Optional[Tuple[Variable, ...]]=None) -> List[Node]:
     if ctx is None: ctx = tuple(v for v in set(self.vars()) if v.expr is None)

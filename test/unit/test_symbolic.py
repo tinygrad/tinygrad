@@ -415,6 +415,14 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     s2 = create_rednode(SumNode, [a, c])
     assert s2.expand() == [Variable.sum([NumNode(i),NumNode(j)]) for (i,j) in [(1,5), (1,6), (1,7), (2,5), (2,6), (2,7), (3,5), (3,6), (3,7)]]
 
+  def test_multi_expand(self):
+    a = Variable("a", 1, 3)
+    b = Variable("b", 14, 17)
+    s1 = create_rednode(SumNode, [a, b])
+    # expand increments earlier variables faster than later variables (as specified in the argument)
+    # this behavior was just copied from before, no idea why this should be true
+    assert s1.expand((a, b)) == [NumNode(x + y) for x in range(b.min, b.max + 1) for y in range(a.min, a.max + 1)]
+
 
 if __name__ == '__main__':
   unittest.main()
