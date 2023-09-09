@@ -91,13 +91,13 @@ class Linearizer(OptimizedKernel):
 
     amt, dim = 1, None
     upcast_dim = self.get_upcast_dim(i)
-    if len(upcast_dim) == 1 and idxs[upcast_dim[0]].expand_idx().range in [4,2]:
-      dim, amt = upcast_dim[0], idxs[upcast_dim[0]].expand_idx().range
+    if len(upcast_dim) == 1 and len(float4_expand := idxs[upcast_dim[0]].expand()) in [4,2]:
+      dim, amt = upcast_dim[0], len(float4_expand)
 
     expand_vars = tuple([rename_var(idx.expand_idx(), f"_uidx{j}") for j, idx in enumerate(idxs)])
     fake_idxs = [idx.substitute({idx.expand_idx(): ev}) for idx, ev in zip(idxs, expand_vars)]
     if dim is not None:
-      g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + [idxs[dim].expand()[0]] + fake_idxs[dim+1:])
+      g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + [float4_expand[0]] + fake_idxs[dim+1:])
       if (g_idx // amt * amt).render() != g_idx.render():
         (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
     else:
