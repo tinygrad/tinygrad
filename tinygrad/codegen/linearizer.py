@@ -457,6 +457,9 @@ class Linearizer(OptimizedKernel):
     if self.opts.is_nvidia and x.op in {UnaryOps.EXP2, UnaryOps.LOG2, BinaryOps.MAX, ReduceOps.MAX}:
       uses_cast = True
       cast_dtype = dtypes.float
+    elif x.op in {BinaryOps.MAX, ReduceOps.MAX}:
+      uses_cast = True
+      cast_dtype = dtypes.float
       
     ret = []
     for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values)):
