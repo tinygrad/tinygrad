@@ -88,49 +88,29 @@ class Linearizer(OptimizedKernel):
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[UOp]:
     const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
 
-    expanded_nodes = [idx.expand() for idx in idxs]
-    _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
-    upcast_dim = self.get_upcast_dim(i)
+    def get_upcast_idx(idx): return next((v for v in idx.vars() if v.expr is None), None)
 
     amt, dim = 1, None
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
-      dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
+    upcast_dim = self.get_upcast_dim(i)
+    if len(upcast_dim) == 1 and get_upcast_idx(idxs[upcast_dim[0]]).range in [4,2]:
+      dim, amt = upcast_dim[0], get_upcast_idx(idxs[upcast_dim[0]]).range
 
     # calculate expr_idxs using placeholder variables
-    def get_upcast_idx(idx): return next((v for v in idx.vars() if v.expr is None), None)
     fake_idxs = [idx.substitute({uidx: Variable(f"_uidx{j}", uidx.min, uidx.max)}) if (uidx := get_upcast_idx(idx)) is not None else idx for j, idx in enumerate(idxs)]
-    fake_idxs_sub = [Variable(f"_uidx{j}", idx.min, idx.max) for j, idx in enumerate(idxs)]
     if dim is not None:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + [idxs[dim].expand()[0]] + fake_idxs[dim+1:])
       if (g_idx // amt * amt).render() != g_idx.render(): (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
     else:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
-    g_idx_, g_valid_ = self.sts[i].expr_idxs(fake_idxs_sub)
     localtype = dtypes.float32 if amt == 1 else dtypes._float4 if amt == 4 else dtypes._float2
 
     to_expand = tuple([Variable(f"_uidx{j}", uidx.min, uidx.max) for j, idx in enumerate(idxs) if (uidx := get_upcast_idx(idx)) is not None])
     if dim is not None: float4_pos = [v.expr for v in to_expand].index(f"_uidx{dim}")
     e_idxs, e_valids = g_idx.expand(to_expand), g_valid.expand(to_expand)
-    assert len(_idxs) == len(e_idxs) and len(_idxs) == len(e_valids)
 
     ret = []
     invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
-    for idx, valid, _idx, rep_idx in zip(e_idxs, e_valids, _idxs, Node.iter_idxs(to_expand)):
-      substitute: Dict[VariableOrNum, Node] = dict(zip(fake_idxs_sub, _idx))
-      if dim is not None:
-        float4_substitute = {**substitute, fake_idxs_sub[dim]: expanded_nodes[dim][0]}
-        idx_, valid_ = g_idx_.substitute(float4_substitute), g_valid_.substitute(float4_substitute)
-        localtype_ = dtypes._float4 if amt == 4 else dtypes._float2
-        if idx.render() != ((idx//amt)*amt).render():
-          idx_, valid_ = g_idx_.substitute(substitute), g_valid_.substitute(substitute)
-          localtype_ = dtypes.float32
-      else:
-        idx_, valid_ = g_idx_.substitute(substitute), g_valid_.substitute(substitute)
-        localtype_ = dtypes.float32
-      if idx.render() != idx_.render(): print(idx.render(), idx_.render())
-      if valid.render() != valid_.render(): print(valid.render(), valid_.render())
-      if localtype != localtype_: print(localtype, localtype_)
-      assert idx.render() == idx_.render() and valid.render() == valid_.render() and localtype == localtype_
+    for idx, valid, rep_idx in zip(e_idxs, e_valids, Node.iter_idxs(to_expand)):
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
@@ -155,8 +135,6 @@ class Linearizer(OptimizedKernel):
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx, valid_rendered, self.const(invalid_value, localtype)))
           else:
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx))
-      if dim is not None:
-        assert expanded_nodes[dim].index(_idx[dim]) == rep_idx[float4_pos], f"{expanded_nodes[dim].index(_idx[dim])} {rep_idx} {float4_pos}"
       ret.append(self.uop(UOps.GEP, dtypes.float32, (self.load_cache[key],), rep_idx[float4_pos]) if dim is not None else self.load_cache[key])
     return ret
 
