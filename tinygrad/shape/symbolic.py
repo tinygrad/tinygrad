@@ -291,9 +291,9 @@ class SumNode(RedNode):
 
   @property
   def flat_components(self): # recursively expand sumnode components
-    for x in self.nodes:
-      if isinstance(x, SumNode): yield from x.flat_components
-      else: yield x
+    new_nodes = []
+    for x in self.nodes: new_nodes += (x.flat_components if isinstance(x, SumNode) else [x])
+    return new_nodes
 
 class AndNode(RedNode):
   def __mul__(self, b: Union[Node, int]): Variable.ands([x*b for x in self.nodes])
