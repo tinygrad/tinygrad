@@ -55,7 +55,6 @@ class View(ViewInternal):
     return Variable.ands(expr)
 
   # generate an expression if you have a single idx variable
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def expr_node(self, idx=None) -> Node:
     if idx is None: idx = Variable('idx', 0, prod(self.shape)-1)
     ret: List[Node] = [Variable.num(self.offset) if isinstance(self.offset, int) else self.offset] if self.offset else []
@@ -66,7 +65,6 @@ class View(ViewInternal):
     return Variable.sum(ret)
 
   # generate an expression if you have a variable or expression for each index
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def expr_idxs(self, idxs) -> Node:
     assert len(idxs) == len(self.shape), f"need an idx for all dimensions {idxs} vs {self.shape}"
     return Variable.sum([Variable.num(self.offset) if isinstance(self.offset, int) else self.offset] + [idx*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
