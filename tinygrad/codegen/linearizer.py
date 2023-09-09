@@ -25,7 +25,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=T
 
   idy = (idxy//(4*base_shape[1]))
 
-  if validhacks and valid.min == 0:
+  if validhacks and valid.min == 0 and valid.vars() == 1:
     print(valid)
     a = [n for n in valid.nodes]
     gts, lts = partition(valid.nodes, lambda x: isinstance(x.a, MulNode))
