@@ -267,9 +267,11 @@ class BoxList:
   def __getitem__(self, item):
     if isinstance(item, list):
       if len(item) == 0:
-        return []
+        return BoxList([], self.size, self.mode)
       if sum(item) == len(item) and isinstance(item[0], bool):
         return self
+    if isinstance(item, int) and item >= self.bbox.shape[0]:
+      raise IndexError("exceeds box list length")
     bbox = BoxList(tensor_gather(self.bbox, item), self.size, self.mode)
     for k, v in self.extra_fields.items():
       bbox.add_field(k, tensor_gather(v, item))
@@ -279,7 +281,7 @@ class BoxList:
     return self.bbox.shape[0]
 
 
-def cat_boxlist(bboxes):
+def cat_boxlist(bboxes: BoxList):
   size = bboxes[0].size
   mode = bboxes[0].mode
   fields = set(bboxes[0].fields())

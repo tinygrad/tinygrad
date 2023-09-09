@@ -210,6 +210,26 @@ def test_prepare_targets():
     atol=1e-6 ## TODO currently drift is 1e-7, why?
   )
 
+def test_loss():
+  hq_fn, _ = make_match_fn(0.7, 0.4)
+  sampler = make_balanced_sampler_fn(10, 0.5)
+  rpn = RPNLossComputation(hq_fn, sampler, BoxCoder(weights=(1.0, 1.0, 1.0, 1.0)), generate_rpn_labels)
+  rpn(
+    anchors=[BoxList([
+      [10, 10, 20, 20], [0, 0, 5, 5], [12, 12, 18, 18],
+      [15, 10, 25, 18], [22, 5, 30, 25], [12, 12, 16, 16]
+    ], image_size=(50, 50))],
+    objectness=[Tensor([0.3, 0.8, 0.1, 0.5, 0.7, 0.2])],
+    box_regression=[Tensor([
+      [0, 0, 1, 1], [1, 1, 1, 1], [0, 0, 2, 2],
+      [0, 0, 1, 2], [0, 0, 3, 1], [1, 0, 2, 1]
+    ])],
+    targets=[BoxList([
+      [0, 0, 5, 5], [5, 5, 10, 10], [15, 15, 20, 20],
+      [25, 25, 30, 30]
+    ], image_size=(50, 50))]
+  )
+
 # one way this differs from reference is it doesn't rely on boxlist mutables
 class RPNLossComputation:
   def __init__(self, proposal_matcher, fg_bg_sampler, box_coder,
@@ -322,9 +342,9 @@ if __name__ == "__main__":
   test_balanced_sampler()
   test_match_targets_to_anchors()
   test_prepare_targets()
+  test_loss()
   
-
-    # ind = Tensor.arange(mask.shape[0])
-    # nz = mask.sum().numpy().item()
-    # mask = mask * ind
-    # idx = mask.numpy().argsort()[-int(nz):]
+  # ind = Tensor.arange(mask.shape[0])
+  # nz = mask.sum().numpy().item()
+  # mask = mask * ind
+  # idx = mask.numpy().argsort()[-int(nz):]
