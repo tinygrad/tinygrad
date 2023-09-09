@@ -109,12 +109,13 @@ class Linearizer(OptimizedKernel):
     localtype = dtypes.float32 if amt == 1 else dtypes._float4 if amt == 4 else dtypes._float2
 
     to_expand = tuple([Variable(f"_uidx{j}", uidx.min, uidx.max) for j, idx in enumerate(idxs) if (uidx := get_upcast_idx(idx)) is not None])
+    if dim is not None: float4_pos = [v.expr for v in to_expand].index(f"_uidx{dim}")
     e_idxs, e_valids = g_idx.expand(to_expand), g_valid.expand(to_expand)
     assert len(_idxs) == len(e_idxs) and len(_idxs) == len(e_valids)
 
     ret = []
     invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
-    for idx, valid, _idx in zip(e_idxs, e_valids, _idxs):
+    for idx, valid, _idx, rep_idx in zip(e_idxs, e_valids, _idxs, Node.iter_idxs(to_expand)):
       substitute: Dict[VariableOrNum, Node] = dict(zip(fake_idxs_sub, _idx))
       if dim is not None:
         float4_substitute = {**substitute, fake_idxs_sub[dim]: expanded_nodes[dim][0]}
@@ -154,7 +155,9 @@ class Linearizer(OptimizedKernel):
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx, valid_rendered, self.const(invalid_value, localtype)))
           else:
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx))
-      ret.append(self.uop(UOps.GEP, dtypes.float32, (self.load_cache[key],), expanded_nodes[dim].index(_idx[dim])) if dim is not None else self.load_cache[key])
+      if dim is not None:
+        assert expanded_nodes[dim].index(_idx[dim]) == rep_idx[float4_pos], f"{expanded_nodes[dim].index(_idx[dim])} {rep_idx} {float4_pos}"
+      ret.append(self.uop(UOps.GEP, dtypes.float32, (self.load_cache[key],), rep_idx[float4_pos]) if dim is not None else self.load_cache[key])
     return ret
 
   def global_store(self, i:int, idxs:List[VariableOrNum], store:List[UOp]) -> None:

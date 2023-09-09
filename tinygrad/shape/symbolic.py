@@ -23,10 +23,13 @@ class Node:
   # expand a Node into List[Node] that enumerates the underlying Variables from min to max
   # expand increments earlier variables faster than later variables (as specified in the argument)
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def expand(self, ctx:Optional[Tuple[Variable, ...]]=None) -> List[Node]:
-    if ctx is None: ctx = tuple(v for v in set(self.vars()) if v.expr is None)
-    replacements = itertools.product(*[[NumNode(x) for x in range(v.min, v.max + 1)] for v in ctx[::-1]])
-    return [self.substitute(dict(zip(ctx[::-1], rep))) for rep in replacements]
+  def expand(self, idxs:Optional[Tuple[Variable, ...]]=None) -> List[Node]:
+    if idxs is None: idxs = tuple(v for v in set(self.vars()) if v.expr is None)
+    return [self.substitute(dict(zip(idxs, (NumNode(x) for x in rep)))) for rep in self.iter_idxs(idxs)]
+  @staticmethod
+  def iter_idxs(idxs:Optional[Tuple[Variable, ...]]=None):
+    yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
+
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
   @functools.cached_property
