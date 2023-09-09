@@ -26,42 +26,32 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=T
   idy = (idxy//(4*base_shape[1]))
 
   if validhacks and valid.min == 0:
-    nodes = [valid] if isinstance(valid, LtNode) else valid.nodes
+
+    nodes = [] if isinstance(valid, LtNode) else valid.nodes
+
     for nd in nodes:
-      var = valid.vars()[0]
-      if isinstance(nd.a, MulNode):
-        var.min = nd.b + 1
-      else:
-        var.max = nd.b - 1
-      valid.substitute({var:var})
+      var = nd.vars()[0]
+      if isinstance(nd, LtNode):
+        if isinstance(nd.a, MulNode):
+          if nd.a.b == -1:
+            var.min = (-nd.b) + 1 if var.max != ((-nd.b)+1) else var.min
+          elif nd.a.b < 0:
+            var.min = abs(nd.b//nd.a.b) + 1 if nd.b%nd.a.b == 0 else abs(nd.b//nd.a.b)
+          elif nd.a.b > 0:
+            var.max = nd.b//nd.a.b - 1 if nd.b%nd.a.b == 0 else nd.b//nd.a.b
+        elif isinstance(nd.a, Variable):
+          var.max = nd.b - 1 if var.min != (nd.b-1) else var.max
+
+      valid = valid.substitute({var:var})
       idxy = idxy.substitute({var:var})
 
     idx = (idxy//4)%base_shape[1]
     idy = (idxy // (4 * base_shape[1]))
-    return idx, idy
-    a = [n for n in valid.nodes]
-    gts, lts = partition(valid.nodes, lambda x: isinstance(x.a, MulNode))
-    mx = max([x.b for x in gts]) + 1
-    mn = min([x.b for x in lts]) - 1
-    print(mx, mn)
-    print(gts, lts)
-    var = idxy.vars()[0]
-    var.min = mx
-    var.max = mn
-
-    idxy = idxy.substitute({var: var})
-    print(idxy)
-    idx = (idxy//4)%base_shape[1]
-    idy = (idxy // (4 * base_shape[1]))
-
-
-
-    return idx, idy
+    return (idx, idy), valid
   else:
     idx = (idxy//4)%base_shape[1]
-
   #print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
-  return idx, idy
+  return (idx, idy), valid
 
 class UOp(NamedTuple):
   uop: UOps
@@ -151,7 +141,7 @@ class Linearizer(OptimizedKernel):
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           if isinstance(self.bufs[i].dtype, ImageDType):
-            idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+            idx, valid = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
             rendered_idx = self.uop(UOps.CAST, dtypes._int2, (idx[0].render(self.render_ops, self), idx[1].render(self.render_ops, self)))
           else:
             rendered_idx = idx.render(self.render_ops, self)
@@ -190,7 +180,7 @@ class Linearizer(OptimizedKernel):
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType):
-        idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+        idx, valid = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         rendered_idx = self.uop(UOps.CAST, dtypes._int2, tuple(x.render(self.render_ops, self) for x in idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
