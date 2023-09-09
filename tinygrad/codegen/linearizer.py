@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod, PtrDType, all_same
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
@@ -21,12 +21,9 @@ class UOps(Enum):
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
-def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
+def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=True) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
-  if validhacks and valid.min == 0:
-        idx = (idxy // 4) - 2
-  else:
-        idx = (idxy // 4) % base_shape[1]  # No change
+  idx = (idxy // 4) - 2 if validhacks and valid.min == 0 else (idxy // 4) % base_shape[1]
   if DEBUG >= 5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return idx, idy
 
