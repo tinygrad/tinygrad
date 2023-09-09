@@ -109,7 +109,6 @@ class Linearizer(OptimizedKernel):
     localtype = dtypes.float32 if amt == 1 else dtypes._float4 if amt == 4 else dtypes._float2
 
     to_expand = tuple([Variable(f"_uidx{j}", uidx.min, uidx.max) for j, idx in enumerate(idxs) if (uidx := get_upcast_idx(idx)) is not None])
-    print(to_expand, g_idx, g_valid)
     e_idxs, e_valids = g_idx.expand(to_expand), g_valid.expand(to_expand)
     assert len(_idxs) == len(e_idxs) and len(_idxs) == len(e_valids)
 
