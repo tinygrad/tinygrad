@@ -126,7 +126,7 @@ class Linearizer(OptimizedKernel):
         localtype_ = dtypes.float32
       if idx.render() != idx_.render(): print(idx.render(), idx_.render())
       if valid.render() != valid_.render(): print(valid.render(), valid_.render())
-      if localtype == localtype_: print(localtype, localtype_)
+      if localtype != localtype_: print(localtype, localtype_)
       assert idx.render() == idx_.render() and valid.render() == valid_.render() and localtype == localtype_
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
