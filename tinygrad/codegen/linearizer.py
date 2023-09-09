@@ -454,10 +454,7 @@ class Linearizer(OptimizedKernel):
     if uses_accum and getenv('ACCUM_FLOAT', 1): cast_dtype = dtypes.float
     if uses_accum: values = values + [acc]
 
-    if self.opts.is_nvidia and x.op in {UnaryOps.EXP2, UnaryOps.LOG2, BinaryOps.MAX, ReduceOps.MAX}:
-      uses_cast = True
-      cast_dtype = dtypes.float
-    elif x.op in {BinaryOps.MAX, ReduceOps.MAX}:
+    if x.op in {BinaryOps.MAX, ReduceOps.MAX} or (self.opts.is_nvidia and x.op in {UnaryOps.EXP2, UnaryOps.LOG2}):
       uses_cast = True
       cast_dtype = dtypes.float
       
