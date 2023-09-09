@@ -23,10 +23,10 @@ class LinearizerOptions(NamedTuple):
   local_max: Optional[List[int]] = None
 
 class Kernel:
-  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, opts:LinearizerOptions):
+  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, opts:Optional[LinearizerOptions]=None):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
-    self.opts = opts
+    self.opts = opts if opts else LinearizerOptions()
 
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)

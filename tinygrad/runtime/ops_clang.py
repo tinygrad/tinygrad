@@ -12,7 +12,7 @@ ARM64 = getenv('ARM64', False)
 if CI and ARM64: from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, arm64_const   # type: ignore
 
 args = {
-  'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport)'},
+  'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport) '},
   'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'exp':''},
   'Darwin': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'dylib', 'exp':''}
 }[platform.system()]
