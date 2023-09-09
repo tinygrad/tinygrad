@@ -22,24 +22,8 @@ class UOps(Enum):
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=True) -> Tuple[Node, Node]:
-    idy = (idxy//(4*base_shape[1]))
-    if validhacks and valid.min == 0:
-        idx = (idxy//4) + (idy*-base_shape[1])
-        if isinstance(idx, SumNode):
-            unfactored, idx_nodes = partition(idx.nodes, lambda x: isinstance(x, MulNode) and x.b == -base_shape[1])
-            assert len(unfactored) <= 1
-            idx = Variable.sum(idx_nodes)
-            unfactored = (Variable.sum(unfactored) // base_shape[1])
-            idy += unfactored
-            if idx.min >= (base_shape[1]*3)//4:
-                idx -= base_shape[1]
-                idy += 1
-    else:
-        idx = ((idxy//4)-2)
-    if DEBUG >= 5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
-    # Make sure the index is within the base_shape bounds
-    idx = max(0, min(idx, base_shape[1]-1))
-    return idx, 0
+  idx = (idxy // 4)
+  return idx, Variable.num(0)
 
 class UOp(NamedTuple):
   uop: UOps
