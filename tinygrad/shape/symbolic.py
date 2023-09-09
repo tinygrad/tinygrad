@@ -27,7 +27,7 @@ class Node:
     if idxs is None: idxs = tuple(v for v in set(self.vars()) if v.expr is None)
     return [self.substitute(dict(zip(idxs, (NumNode(x) for x in rep)))) for rep in self.iter_idxs(idxs)]
   @staticmethod
-  def iter_idxs(idxs:Tuple[Variable, ...]=None):
+  def iter_idxs(idxs:Tuple[Variable, ...]):
     yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
 
   # substitute Variables with the values in var_vals
