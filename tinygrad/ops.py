@@ -198,7 +198,7 @@ class Compiled:
       from tinygrad.jit import CacheCollector
       CacheCollector._mark_output_buffer(output.output_buffer)
     # update the output var_vals from src
-    output.st.var_vals = dict(sorted(merge_dicts([buf.st.var_vals for buf in ast.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+    output.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in ast.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 
     from tinygrad.codegen.linearizer import Linearizer
     k = Linearizer(ast, output, self.linearizer_opts)
@@ -218,5 +218,5 @@ class Compiled:
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
-    prg.exec(k.bufs, var_vals=output.st.var_vals)
+    prg.exec(k.bufs, var_vals=output.var_vals)
     return output.realized

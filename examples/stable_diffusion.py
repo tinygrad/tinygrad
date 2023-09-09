@@ -579,9 +579,7 @@ if __name__ == "__main__":
 
   if args.fp16:
     for l in get_state_dict(model).values():
-      fp16_buf = l.cast(dtypes.float16).realize()
-      l.lazydata.realized = None   # TODO: why is this needed in order to trigger the free?
-      l.assign(fp16_buf)
+      l.assign(l.cast(dtypes.float16).realize())
 
   # run through CLIP to get context
   tokenizer = ClipTokenizer()
