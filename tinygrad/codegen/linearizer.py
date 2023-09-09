@@ -88,15 +88,16 @@ class Linearizer(OptimizedKernel):
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[UOp]:
     const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
 
-    def get_upcast_idx(idx): return next((v for v in idx.vars() if v.expr is None), None)
+    def get_upcast_idx(idx): return next((v for v in idx.vars() if v.expr is None), NumNode(0))
+    def rename_var(v, expr): return v if isinstance(v, NumNode) else Variable(expr, v.min, v.max)
 
     amt, dim = 1, None
     upcast_dim = self.get_upcast_dim(i)
     if len(upcast_dim) == 1 and get_upcast_idx(idxs[upcast_dim[0]]).range in [4,2]:
       dim, amt = upcast_dim[0], get_upcast_idx(idxs[upcast_dim[0]]).range
 
-    # calculate expr_idxs using placeholder variables
-    fake_idxs = [idx.substitute({uidx: Variable(f"_uidx{j}", uidx.min, uidx.max)}) if (uidx := get_upcast_idx(idx)) is not None else idx for j, idx in enumerate(idxs)]
+    expand_vars = tuple([rename_var(get_upcast_idx(idx), f"_uidx{j}") for j, idx in enumerate(idxs)])
+    fake_idxs = [idx.substitute({get_upcast_idx(idx): ev}) for idx, ev in zip(idxs, expand_vars)]
     if dim is not None:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + [idxs[dim].expand()[0]] + fake_idxs[dim+1:])
       if (g_idx // amt * amt).render() != g_idx.render(): (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
@@ -104,13 +105,11 @@ class Linearizer(OptimizedKernel):
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
     localtype = dtypes.float32 if amt == 1 else dtypes._float4 if amt == 4 else dtypes._float2
 
-    to_expand = tuple([Variable(f"_uidx{j}", uidx.min, uidx.max) for j, idx in enumerate(idxs) if (uidx := get_upcast_idx(idx)) is not None])
-    if dim is not None: float4_pos = [v.expr for v in to_expand].index(f"_uidx{dim}")
-    e_idxs, e_valids = g_idx.expand(to_expand), g_valid.expand(to_expand)
+    e_idxs, e_valids = g_idx.expand(expand_vars), g_valid.expand(expand_vars)
 
     ret = []
     invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
-    for idx, valid, rep_idx in zip(e_idxs, e_valids, Node.iter_idxs(to_expand)):
+    for idx, valid, rep_idx in zip(e_idxs, e_valids, Node.iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
@@ -135,7 +134,7 @@ class Linearizer(OptimizedKernel):
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx, valid_rendered, self.const(invalid_value, localtype)))
           else:
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx))
-      ret.append(self.uop(UOps.GEP, dtypes.float32, (self.load_cache[key],), rep_idx[float4_pos]) if dim is not None else self.load_cache[key])
+      ret.append(self.uop(UOps.GEP, dtypes.float32, (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
 
   def global_store(self, i:int, idxs:List[VariableOrNum], store:List[UOp]) -> None:
