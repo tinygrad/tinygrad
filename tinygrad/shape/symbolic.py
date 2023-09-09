@@ -22,7 +22,7 @@ class Node:
   def vars(self): return []
   # expand a Node into List[Node] that enumerates the underlying Variables from min to max
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def expand(self, ctx:Tuple[Variable, ...]=None) -> List[Node]:
+  def expand(self, ctx:Optional[Tuple[Variable, ...]]=None) -> List[Node]:
     if ctx is None: ctx = tuple(v for v in set(self.vars()) if v.expr is None)
     replacements = itertools.product(*[[NumNode(x) for x in range(v.min, v.max + 1)] for v in ctx[::-1]])
     return [self.substitute(dict(zip(ctx[::-1], rep))) for rep in replacements]

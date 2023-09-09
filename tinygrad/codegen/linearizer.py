@@ -99,7 +99,7 @@ class Linearizer(OptimizedKernel):
     # calculate expr_idxs using placeholder variables
     def get_upcast_idx(idx): return next((v for v in idx.vars() if v.expr is None), None)
     fake_idxs = [idx.substitute({uidx: Variable(f"_uidx{j}", uidx.min, uidx.max)}) if (uidx := get_upcast_idx(idx)) is not None else idx for j, idx in enumerate(idxs)]
-    if amt > 1:
+    if dim is not None:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + [idxs[dim].expand()[0]] + fake_idxs[dim+1:])
       if (g_idx // amt * amt).render() != g_idx.render(): (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
     else:
@@ -114,18 +114,20 @@ class Linearizer(OptimizedKernel):
     invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
     for idx, valid, _idx in zip(e_idxs, e_valids, _idxs):
       substitute: Dict[VariableOrNum, Node] = {a: b for a, b in zip(fake_idxs, _idx) if isinstance(a, Variable)}
-      if amt > 1:
+      if dim is not None:
         float4_substitute = {**substitute, fake_idxs[dim]: expanded_nodes[dim][0]}
         idx_, valid_ = g_idx.substitute(float4_substitute), g_valid.substitute(float4_substitute)
-        localtype = dtypes._float4 if amt == 4 else dtypes._float2
+        localtype_ = dtypes._float4 if amt == 4 else dtypes._float2
         if idx.render() != ((idx//amt)*amt).render():
           idx_, valid_ = g_idx.substitute(substitute), g_valid.substitute(substitute)
-          localtype = dtypes.float32
+          localtype_ = dtypes.float32
       else:
         idx_, valid_ = g_idx.substitute(substitute), g_valid.substitute(substitute)
-        localtype = dtypes.float32
+        localtype_ = dtypes.float32
       if idx.render() != idx_.render(): print(idx.render, idx_.render())
       if valid.render() != valid_.render(): print(valid.render, valid_.render())
+      if localtype == localtype_: print(localtype, localtype)
+      assert idx.render() == idx_.render() and valid.render() == valid_.render() and localtype == localtype_
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
@@ -150,7 +152,7 @@ class Linearizer(OptimizedKernel):
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx, valid_rendered, self.const(invalid_value, localtype)))
           else:
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx))
-      ret.append(self.uop(UOps.GEP, dtypes.float32, (self.load_cache[key],), expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
+      ret.append(self.uop(UOps.GEP, dtypes.float32, (self.load_cache[key],), expanded_nodes[dim].index(_idx[dim])) if dim is not None else self.load_cache[key])
     return ret
 
   def global_store(self, i:int, idxs:List[VariableOrNum], store:List[UOp]) -> None:
