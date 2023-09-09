@@ -1,7 +1,7 @@
 from __future__ import annotations
 from abc import abstractmethod
 import functools
-import itertools
+from itertools import product
 from math import gcd
 from tinygrad.helpers import partition
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Iterator
@@ -20,16 +20,17 @@ class Node:
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
   def vars(self): return []
+
+  def expand_idx(self) -> VariableOrNum: return next((v for v in self.vars() if v.expr is None), NumNode(0))
   # expand a Node into List[Node] that enumerates the underlying Variables from min to max
   # expand increments earlier variables faster than later variables (as specified in the argument)
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def expand(self, idxs:Optional[Tuple[VariableOrNum, ...]]=None) -> List[Node]:
     if idxs is None: idxs = (self.expand_idx(),)
     return [self.substitute(dict(zip(idxs, (NumNode(x) for x in rep)))) for rep in Node.iter_idxs(idxs)]
-  def expand_idx(self) -> VariableOrNum: return next((v for v in self.vars() if v.expr is None), NumNode(0))
   @staticmethod
   def iter_idxs(idxs:Tuple[VariableOrNum, ...]) -> Iterator[Tuple[int,...]]:
-    yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
+    yield from (x[::-1] for x in product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
 
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
