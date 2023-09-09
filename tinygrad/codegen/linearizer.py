@@ -25,8 +25,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=T
 
   idy = (idxy//(4*base_shape[1]))
 
-  if validhacks and valid.min == 0 and valid.vars() == 1:
-    print(valid)
+  if validhacks and valid.min == 0 and len(set(valid.vars())) == 1:
     a = [n for n in valid.nodes]
     gts, lts = partition(valid.nodes, lambda x: isinstance(x.a, MulNode))
     mx = max([x.b for x in gts]) + 1
@@ -41,7 +40,9 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=T
 
     idx = (idxy//4)%base_shape[1]
     idy = (idxy // (4 * base_shape[1]))
-    print(idx, idy)
+
+
+
     return idx, idy
   else:
     idx = (idxy//4)%base_shape[1]
