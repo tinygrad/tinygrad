@@ -9,10 +9,9 @@ from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
+from tinygrad.shape.symbolic import Variable, NumNode, VariableOrNum, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.codegen.kernel import LocalBuffer
-VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
 class UOps(Enum):
@@ -85,10 +84,10 @@ class Linearizer(OptimizedKernel):
     SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops,ctx)),
     AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-  def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[UOp]:
+  def global_load(self, i:int, idxs:Sequence[Node], acc=None) -> List[UOp]:
     const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
 
-    def rename_var(v, expr): return v if isinstance(v, NumNode) else Variable(expr, v.min, v.max)
+    def rename_var(v: VariableOrNum, expr: str): return v if isinstance(v, NumNode) else Variable(expr, v.min, v.max)
 
     amt, dim = 1, None
     upcast_dim = self.get_upcast_dim(i)
@@ -137,7 +136,7 @@ class Linearizer(OptimizedKernel):
       ret.append(self.uop(UOps.GEP, dtypes.float32, (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
 
-  def global_store(self, i:int, idxs:List[VariableOrNum], store:List[UOp]) -> None:
+  def global_store(self, i:int, idxs:List[Node], store:List[UOp]) -> None:
     buf_uop = self.buf_uops[i]
     assert buf_uop is not None, f"buffer {i} wasn't UOped"
 
