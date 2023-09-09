@@ -5,6 +5,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.lazy import LAZY
 from tinygrad.ops import GlobalCounters
 from tinygrad.graph import nm
+from tinygrad.helpers import dtypes
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -62,6 +63,16 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
+
+  def test_cast_assignment(self):
+    a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
+    a.realize()
+    oba1 = a.lazydata.output_buffer
+    a.assign(a.cast(dtypes.int32).realize())
+    a.realize()
+    oba2 = a.lazydata.output_buffer
+    assert oba1 is None and oba2 is None
+    np.testing.assert_allclose(a.numpy(), np.arange(N*N,dtype=np.int32).reshape((N,N)))
 
 if __name__ == "__main__":
   unittest.main()

@@ -10,9 +10,9 @@ class BertForQuestionAnswering:
     self.qa_outputs = Linear(hidden_size, 2)
 
   def load_from_pretrained(self):
-    fn = Path(__file__).parent.parent / "weights/bert_for_qa.pt"
+    fn = Path(__file__).parents[1] / "weights/bert_for_qa.pt"
     download_file("https://zenodo.org/record/3733896/files/model.pytorch?download=1", fn)
-    fn_vocab = Path(__file__).parent.parent / "weights/bert_vocab.txt"
+    fn_vocab = Path(__file__).parents[1] / "weights/bert_vocab.txt"
     download_file("https://zenodo.org/record/3733896/files/vocab.txt?download=1", fn_vocab)
 
     import torch

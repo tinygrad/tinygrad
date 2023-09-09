@@ -6,12 +6,12 @@ from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.ops import GlobalCounters, LazyOp, LoadOps
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, prod
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 
 from examples.llama import Transformer
 
 ALLOCATED_DEV_BUFS = 0
-class FakeDeviceBuffer():
+class FakeDeviceBuffer:
   def __init__(self, sz, dt, device):
     self.id = 1
     self.size = sz

@@ -1,18 +1,15 @@
 from __future__ import annotations
-import time
+import time, importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup, merge_dicts
-from tinygrad.shape.symbolic import Variable, sym_infer
-from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg
-if TYPE_CHECKING:
-  from tinygrad.lazy import LazyBuffer
+if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
 # NOTE: MOD, CMPLT don't have to be implemented on vectors, just scalars
 # NOTE: rdna3 only has RECIP and not DIV. DIV and POW are on the chopping block
-class UnaryOps(Enum): NOOP = auto(); EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto() # noqa: E702
+class UnaryOps(Enum): NOOP = auto(); EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class TernaryOps(Enum): MULACC = auto(); WHERE = auto() # noqa: E702
@@ -28,22 +25,14 @@ class LazyOp:
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Any
   buffers: Tuple[LazyBuffer, ...]
-
   def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None):
-    self.op = op
-    self.src = src
-    self.arg = arg
-    try:
-      self.buffers = tuple([y for x in src for y in x.buffers])
-    except AttributeError:
-      # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
-      pass
+    self.op, self.src, self.arg, self.buffers = op, src, arg, ()
+    try:  # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
+      for x in src: self.buffers += x.buffers
+    except AttributeError: self.buffers = ()
 
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
-  def __eq__(self, __value: object) -> bool:
-    if __value.__class__ is not LazyOp: return False
-    __value = cast(LazyOp, __value)
-    return self.op == __value.op and self.src == __value.src and self.arg == __value.arg
+  def __eq__(self, __value: object) -> bool: return isinstance(__value, LazyOp) and self.op is __value.op and self.src == __value.src and self.arg == __value.arg
   def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
@@ -77,6 +66,26 @@ class LazyOp:
   def shrink(self, _): raise NotImplementedError
   def stride(self, _): raise NotImplementedError
 
+# **************** Device ****************
+
+class _Device:
+  def __init__(self) -> None: self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
+  def canonicalize(self, device:Optional[str]) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "") if device is not None else self.DEFAULT
+  @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
+  def __getitem__(self, x:str) -> Union[Interpreted, Compiled]:
+    x = x.split(":")[0].upper()
+    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
+  @functools.cached_property
+  def DEFAULT(self) -> str:
+    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)
+    if device_from_env: return device_from_env
+    for device in ["METAL", "CUDA", "GPU"]:
+      try:
+        if self[device]: return device
+      except Exception: pass
+    return "CPU"
+Device = _Device()
+
 # **************** for Interpreted Buffers ****************
 
 class Interpreted:
@@ -87,22 +96,24 @@ class Interpreted:
     self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, context=None, **kwargs):
-    if TernaryOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and ast.src[0].__class__ is LazyOp and ast.src[0].op == BinaryOps.MUL:
-      ast = LazyOp(TernaryOps.MULACC, cast(LazyOp, ast.src[0]).src, ast.arg)
+    if TernaryOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
+      ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
     created_context = context is None
     if context is None: context = dict()
     if not created_context and ast in context: return context[ast]
-    srcs = [self.exec_ast(cast(LazyOp, x), context=context, **kwargs) if x.__class__ is LazyOp else self.from_lazybuffer(x) for x in ast.src]
+    srcs = [self.exec_ast(x, context=context, **kwargs) if isinstance(x, LazyOp) else self.from_lazybuffer(x) for x in ast.src]
     if DEBUG >= 3: st = time.perf_counter()
     ret = self.from_underlying(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
     if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op: ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.to_underlying(ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
-    if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(time.perf_counter()-st)*1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape) if hasattr(ret._buf, 'shape') else str(len(ret._buf)):30s} in({len(srcs)}):", list(set(x._buf.shape if hasattr(x._buf, 'shape') else len(x._buf) for x in srcs)), ast.arg if ast.arg is not None else "")
+    if DEBUG >= 5 or (self.buffer != FlopCounter and DEBUG >= 3): print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(time.perf_counter()-st)*1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape) if hasattr(ret._buf, 'shape') else str(len(ret._buf)):30s} in({len(srcs)}):", list(set(x._buf.shape if hasattr(x._buf, 'shape') else len(x._buf) for x in srcs)), ast.arg if ast.arg is not None else "")
     if not created_context: context[ast] = ret
     if output is not None and output.output_buffer is not None:
       assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
       output.output_buffer._buf = ret._buf
       return output.output_buffer
     return ret
+
+# --teenygrad--
 
 class FlopCounter:
   def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops, self._buf = *tup, self
@@ -120,6 +131,9 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 
 # **************** for Compiled Buffers ****************
 
+from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg
+from tinygrad.shape.symbolic import Variable, sym_infer
+
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
     if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args or not runtime_args['binary']): print(prg)
@@ -130,8 +144,9 @@ class ASTRunner:
     return self
 
   def exec(self, bufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False, optimizing=False) -> Optional[float]:
+    from tinygrad.jit import CacheCollector
     rawbufs = dedup([x.realized for x in bufs if buf_is_kernel_arg(x)])
-    if GlobalCounters.cache is not None and not optimizing: GlobalCounters.cache.append((self, rawbufs, var_vals if var_vals is not None else {}))
+    if not optimizing: CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return self(rawbufs, var_vals, force_wait=force_wait)
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
@@ -148,7 +163,6 @@ class ASTRunner:
     GlobalCounters.kernel_count += 1
     GlobalCounters.global_ops += op_estimate
     GlobalCounters.global_mem += self.mem_estimate
-    if getenv("EARLY_STOPPING") and GlobalCounters.kernel_count == getenv("EARLY_STOPPING"): exit(0)
     return et
 
 class Compiled:
@@ -158,12 +172,10 @@ class Compiled:
 
   def to_program(self, k):
     k.linearize()
-    ret = self.renderer(k.function_name, k.uops)
-    src, global_size, local_size, binary = ret if len(ret) == 4 else ret + (False,)
-    #TODO: I need to find a better way to select ARM64
-    return ASTRunner(k.function_name, src, global_size, local_size,
-                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
-                      display_name=k.display_name, runtime_args={"binary": binary}).build(self.runtime)
+    src = self.renderer(k.function_name, k.uops)
+    return ASTRunner(k.function_name, src, k.global_size, k.local_size,
+                     op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
+                     display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime)
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):
     # all movementops do nothing in a Compiled buffer!
@@ -181,19 +193,21 @@ class Compiled:
           break
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-    if not output.realized:
-      output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
+    if not output.realized: output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
+    else:
+      from tinygrad.jit import CacheCollector
+      CacheCollector._mark_output_buffer(output.output_buffer)
     # update the output var_vals from src
-    output.st.var_vals = dict(sorted(merge_dicts([buf.st.var_vals for buf in ast.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+    output.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in ast.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 
     from tinygrad.codegen.linearizer import Linearizer
     k = Linearizer(ast, output, self.linearizer_opts)
 
     # compilation time
     def get_program():
-      from tinygrad.codegen.optimizer import kernel_optimize, hand_coded_optimizations
+      from tinygrad.codegen.search import kernel_optimize
       if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, output, self.linearizer_opts), self.to_program)
-      elif not getenv("NOOPT"): hand_coded_optimizations(k)
+      elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
@@ -204,5 +218,5 @@ class Compiled:
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
-    prg.exec(k.bufs, var_vals=output.st.var_vals)
+    prg.exec(k.bufs, var_vals=output.var_vals)
     return output.realized

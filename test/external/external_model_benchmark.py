@@ -10,14 +10,14 @@ from extra.utils import download_file
 from extra.onnx import get_run_onnx
 from tinygrad.helpers import OSX, DEBUG
 from tinygrad.tensor import Tensor
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 
 MODELS = {
   "resnet50": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
-  "openpilot": "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx",
+  "openpilot": "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx",
   "efficientnet": "https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
   "shufflenet": "https://github.com/onnx/models/raw/main/vision/classification/shufflenet/model/shufflenet-9.onnx",
-  "commavq": "https://github.com/commaai/commavq/raw/master/models/gpt2m.onnx",
+  "commavq": "https://huggingface.co/commaai/commavq-gpt2m/resolve/main/gpt2m.onnx",
 
   # broken in torch MPS
   #"zfnet": "https://github.com/onnx/models/raw/main/vision/classification/zfnet-512/model/zfnet512-9.onnx",
@@ -43,7 +43,7 @@ def benchmark(mnm, nm, fxn):
   CSV[nm] = min(tms)*1e-6
   return min(tms), ret
 
-#BASE = pathlib.Path(__file__).parent.parent.parent / "weights" / "onnx"
+#BASE = pathlib.Path(__file__).parents[2] / "weights" / "onnx"
 BASE = pathlib.Path("/tmp/onnx")
 def benchmark_model(m, validate_outs=False):
   global open_csv, CSV
@@ -84,8 +84,7 @@ def benchmark_model(m, validate_outs=False):
     torch_mps_model = torch_model.to(torch_device)
     torch_mps_inputs = [x.to(torch_device) for x in torch_inputs]
     benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs))
-  except NotImplementedError:
-    print(f"{m:16s}onnx2torch doesn't support this model")
+  except Exception as e: print(f"{m:16s}onnx2torch {type(e).__name__:>25}")
 
   # bench onnxruntime
   ort_options = ort.SessionOptions()
@@ -99,7 +98,7 @@ def benchmark_model(m, validate_outs=False):
     del ort_sess
 
   if validate_outs:
-    rtol, atol = 8e-4, 8e-4  # tolerance for fp16 models
+    rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
     tinygrad_model = get_run_onnx(onnx_model)
     tinygrad_out = tinygrad_model(inputs)

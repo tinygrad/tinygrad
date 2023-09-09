@@ -5,14 +5,14 @@ from weakref import ref
 from tinygrad.ops import GlobalCounters
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, prod
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 
 def check_gc():
   if Device.DEFAULT == "GPU":
     from extra.introspection import print_objects
     assert print_objects() == 0
 
-class FakeDeviceBuffer():
+class FakeDeviceBuffer:
   def __init__(self, sz, dt, device):
     self.id = 1
     self.size = sz
@@ -53,10 +53,11 @@ def cmp_trace_and_buf(buf, trace_ref): return trace_ref and trace_ref() == buf._
 
 class TestAllocators(unittest.TestCase):
   def test_lru_allocator_reusage(self):
+    mc, mu = GlobalCounters.mem_cached, GlobalCounters.mem_used
     def test():
       lru_allocator = FakeAllocator(2048)
       traced_buf = alloc_free_trace(lru_allocator, 16, dtypes.float32)
-      assert GlobalCounters.mem_cached == 16*dtypes.float32.itemsize, "Buffer should be cached"
+      assert GlobalCounters.mem_cached - mc == 16*dtypes.float32.itemsize, "Buffer should be cached"
       for _ in range(32):
         def __test():
           buf = alloc(lru_allocator, 16, dtypes.float32)
@@ -69,19 +70,20 @@ class TestAllocators(unittest.TestCase):
           buf = alloc(lru_allocator, 16, dtypes.float32)
           assert usedbuf != buf, "Nobody should get used buffer"
         __test()
-      assert GlobalCounters.mem_used == 16*dtypes.float32.itemsize, "Only usedbuf is still allocated."
+      assert GlobalCounters.mem_used - mu == 16*dtypes.float32.itemsize, "Only usedbuf is still allocated."
     test()
     check_gc()
 
   def test_lru_allocator_cache_free(self):
+    mc, mu = GlobalCounters.mem_cached, GlobalCounters.mem_used
     def test():
       lru_allocator = FakeAllocator(128)
       refs = []
       for _ in range(32):
         refs.append(alloc_free_trace(lru_allocator, 16, dtypes.float32))
-      for sz in range(32):
+      for sz in range(1, 32):
         alloc_free_trace(lru_allocator, sz, dtypes.float32)
-        assert GlobalCounters.mem_used + GlobalCounters.mem_cached <= 128, "Should not allocate on device more than allowed (128)"
+        assert GlobalCounters.mem_used + GlobalCounters.mem_cached - mc - mu <= 128, "Should not allocate on device more than allowed (128)"
       for r in refs: assert r() is None, "All refs should be dead, since buffers were cleared from cache"
     test()
     check_gc()

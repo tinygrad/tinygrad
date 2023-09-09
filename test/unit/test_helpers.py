@@ -1,5 +1,6 @@
 import unittest
-from tinygrad.helpers import Context, ContextVar, merge_dicts
+import numpy as np
+from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens
 
 VARIABLE = ContextVar("VARIABLE", 0)
 
@@ -117,6 +118,17 @@ class TestMergeDicts(unittest.TestCase):
     assert merge_dicts([a, b, c]) == {"a": 1, "b": 2, "c": 3}
     with self.assertRaises(AssertionError):
       merge_dicts([a, d])
+
+class TestDtypes(unittest.TestCase):
+  def test_dtypes_fields(self):
+    fields = dtypes.fields()
+    self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
+    self.assertTrue(all(issubclass(value.np, np.generic) for value in fields.values() if value.np is not None))
+
+class TestStripParens(unittest.TestCase):
+  def test_simple(self): self.assertEqual("1+2", strip_parens("(1+2)"))
+  def test_nested(self): self.assertEqual("1+(2+3)", strip_parens("(1+(2+3))"))
+  def test_casted_no_strip(self): self.assertEqual("(int)(1+2)", strip_parens("(int)(1+2)"))
 
 if __name__ == '__main__':
   unittest.main()

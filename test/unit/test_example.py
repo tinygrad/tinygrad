@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, CI
 

@@ -1,17 +1,18 @@
 import pickle
 import numpy as np
 from tqdm import tqdm
-import tempfile, platform, os
+import tempfile, platform
+from pathlib import Path
 from collections import defaultdict
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 from tinygrad.shape.shapetracker import strides_for_shape
 OSX = platform.system() == "Darwin"
 WINDOWS = platform.system() == "Windows"
 
-def temp(x:str) -> str: return os.path.join(tempfile.gettempdir(), x)
+def temp(x:str) -> str: return (Path(tempfile.gettempdir()) / x).as_posix()
 
 def fetch(url):
   if url.startswith("/") or url.startswith("."):
@@ -33,19 +34,18 @@ def fetch_as_file(url):
   return fp
 
 def download_file(url, fp, skip_if_exists=True):
-  import requests, pathlib
-  if skip_if_exists and os.path.isfile(fp) and os.stat(fp).st_size > 0:
+  import requests
+  if skip_if_exists and Path(fp).is_file() and Path(fp).stat().st_size > 0:
     return
   r = requests.get(url, stream=True)
   assert r.status_code == 200
   progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
-  (path := pathlib.Path(fp).parent).mkdir(parents=True, exist_ok=True)
+  (path := Path(fp).parent).mkdir(parents=True, exist_ok=True)
   with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
     for chunk in r.iter_content(chunk_size=16384):
       progress_bar.update(f.write(chunk))
     f.close()
-    os.rename(f.name, fp)
-
+    Path(f.name).rename(fp)
 
 def my_unpickle(fb0):
   key_prelookup = defaultdict(list)
@@ -208,3 +208,13 @@ def get_child(parent, key):
     else:
       obj = getattr(obj, k)
   return obj
+
+def _tree(lazydata):
+  if type(lazydata).__name__ == "LazyBuffer": return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op)
+  if len(lazydata.src) == 0: return [f"━━ {lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
+  lines = [f"━┳ {lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
+  childs = [_tree(c) for c in lazydata.src[:]]
+  for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
+  return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
+
+def print_tree(tensor:Tensor):print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(tensor.lazydata))]))
