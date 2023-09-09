@@ -146,6 +146,7 @@ jobs:
           onnx_inference_speed.csv
           torch_speed.txt
           train_cifar.txt
+          train_cifar_wino.txt
           llama_unjitted.txt
           llama_jitted.txt
           gpt2_unjitted.txt
