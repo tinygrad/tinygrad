@@ -65,6 +65,7 @@ class View(ViewInternal):
     return Variable.sum(ret)
 
   # generate an expression if you have a variable or expression for each index
+  @functools.lru_cache(maxsize=None)
   def expr_idxs(self, idxs) -> Node:
     assert len(idxs) == len(self.shape), f"need an idx for all dimensions {idxs} vs {self.shape}"
     return Variable.sum([Variable.num(self.offset) if isinstance(self.offset, int) else self.offset] + [idx*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
