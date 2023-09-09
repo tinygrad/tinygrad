@@ -115,6 +115,9 @@ hipMemcpyDefault = 4
 _libhip.hipMemcpy.restype = int
 _libhip.hipMemcpy.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
 
+def hipMemcpy(dst, src, count, direction):
+  status = _libhip.hipMemcpy(dst, src, ctypes.c_size_t(count), direction)
+  hipCheckStatus(status)
 
 def hipMemcpy_htod(dst, src, count):
   status = _libhip.hipMemcpy(dst, src, ctypes.c_size_t(count), hipMemcpyHostToDevice)
@@ -176,6 +179,16 @@ def hipGetDevice():
   status = _libhip.hipGetDevice(ctypes.byref(dev))
   hipCheckStatus(status)
   return dev.value
+
+
+_libhip.hipGetDeviceCount.restype = int
+_libhip.hipGetDeviceCount.argtypes = [ctypes.POINTER(ctypes.c_int)]
+
+def hipGetDeviceCount():
+  count = ctypes.c_int()
+  status = _libhip.hipGetDeviceCount(ctypes.byref(count))
+  hipCheckStatus(status)
+  return count.value
 
 
 class hipDeviceArch(ctypes.Structure):

@@ -46,7 +46,7 @@ class UNet3D:
     return x
 
   def load_from_pretrained(self):
-    fn = Path(__file__).parent.parent / "weights" / "unet-3d.ckpt"
+    fn = Path(__file__).parents[1] / "weights" / "unet-3d.ckpt"
     download_file("https://zenodo.org/record/5597155/files/3dunet_kits19_pytorch.ptc?download=1", fn)
     state_dict = torch.jit.load(fn, map_location=torch.device("cpu")).state_dict()
     for k, v in state_dict.items():

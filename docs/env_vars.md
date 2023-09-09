@@ -42,7 +42,9 @@ CLANG               | [1]        | enable Clang backend
 LLVM                | [1]        | enable LLVM backend
 LLVMOPT             | [1]        | enable slightly more expensive LLVM optimizations
 LAZY                | [1]        | enable lazy operations (this is the default)
-OPT                 | [1-4]      | optimization level
+OPT                 | [1-3]      | optimization level
+KOPT                | [1-2]      | kernel optimization, 1 turns it on, 2 caches the found optimizations
+BUDGET              | [#]        | kernel optimization search budget
 GRAPH               | [1]        | create a graph of all operations (requires graphviz)
 GRAPHPATH           | [/path/to] | where to put the generated graph
 PRUNEGRAPH          | [1]        | prune MovementOps and LoadOps from the graph
@@ -130,19 +132,14 @@ Variable | Possible Value(s) | Description
 ---|---|---
 TORCHWEIGHTS     | [1] | use torch to initialize weights
 DISABLE_BACKWARD | [1] | don't do backward pass
+DIST             | [1] | enable distributed training
+STEPS            | [#] | number of steps
 
 ### examples/benchmark_train_efficientnet.py & examples/hlb_cifar10.py
 
 Variable | Possible Value(s) | Description
 ---|---|---
 ADAM | [1] | use the Adam optimizer
-
-### examples/hlb_cifar10.py & xamples/hlb_cifar10_torch.py
-
-Variable | Possible Value(s) | Description
----|---|---
-STEPS    | [0-10] | number of steps
-FAKEDATA | [1]    | enable to use random data
 
 ### examples/train_efficientnet.py
 

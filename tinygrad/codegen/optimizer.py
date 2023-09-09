@@ -1,5 +1,5 @@
-from typing import Tuple, List, cast
-import itertools, math
+from typing import Tuple, List, cast, Optional
+import itertools, math, os
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp
 from tinygrad.codegen.kernel import Kernel, LocalBuffer
@@ -92,14 +92,7 @@ class OptimizedKernel(Kernel):
           new_shape[next_idx] = new_shape[next_idx] * 2
     return tuple(new_shape)
 
-  def limit_global_dims(self, limit: int, global_max: List[int], local_max: List[int]):
-    # sometimes, there's more dimensions than len(self.lang.gid).
-    # compact all the dimensions into the first
-    # NOTE: this might make multiview shapetrackers
-    if (self.first_reduce-self.local_dims) > limit:
-      num_to_merge = ((self.first_reduce-self.local_dims) - limit)+1
-      self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
-      if DEBUG >= 3: print("reshaped to", self.full_shape, "due to too many global dimensions")
+  def limit_dims_to_max(self, global_max: List[int], local_max: List[int]):
     # Check the global allocation limit, current the global_size will be flipped during codegen
     # and then padded right with 1s if its length < 3 which makes this part a bit awkward to write
     global_dims = self.first_reduce-self.local_dims
@@ -137,14 +130,19 @@ class OptimizedKernel(Kernel):
   def apply_auto_opt(self, x):
     for axis, amt, typ in x:
       if axis is None or amt == 1: continue
+      if typ == "G":
+        assert self.full_shape[self.first_reduce+axis] % amt == 0, "no longer valid shift"
+        self.shift_to(self.first_reduce+axis, amt, top=True, insert_before=self.first_reduce+axis+len(self.group_for_reduce))
+        self.group_for_reduce.append(amt)
       if typ == "R":
         typ = "U"
         axis += self.first_reduce
-      assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-      if typ == "U":
+      if typ == "U" and (len(self.group_for_reduce) == 0 or self.first_reduce != axis):
+        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
         self.shift_to(axis, amt)
         self.upcast()
-      elif typ == "L":
+      elif typ == "L" and len(self.group_for_reduce) == 0: # TODO: Cannot mix local+group_for_reduce, codegen need to be fixed.
+        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
         self.shift_to(axis, amt, insert_before=self.first_reduce)
         self.local_dims += 1
     self.simplify_ones()
@@ -228,7 +226,7 @@ class OptimizedKernel(Kernel):
 
     # should use METAL tensor cores?
     # first, confirm it's a straightforward mulacc on a device with real locals
-    tensor_cores_allowed = getenv("TC", 1) != 0 and (getenv("TC", 1) == 2 or (self.bufs[0].device == "METAL" and getenv("CI", "") != "true"))
+    tensor_cores_allowed = getenv("TC", 1) != 0 and (getenv("TC", 1) == 2 or (self.bufs[0].device == "METAL" and os.uname().machine == "arm64"))
     if tensor_cores_allowed and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
         isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
         isinstance(self.reduceop.src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[1], LazyBuffer) and self.opts.has_local:
@@ -239,7 +237,8 @@ class OptimizedKernel(Kernel):
       buf1_strides = self.sts[buf1].real_strides()
       axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
       axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
-      if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce) == 1:
+      optim_conv2d = (self.shape_len-self.first_reduce) == 3 and self.full_shape[self.first_reduce+1]%2 == 1 and self.full_shape[self.first_reduce+2]%2 == 1 and max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 21
+      if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce == 1 or optim_conv2d):
         if DEBUG >= 3: print("METAL TENSOR CORES", axis_buf0, axis_buf1)
         self.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
 
@@ -262,18 +261,36 @@ class OptimizedKernel(Kernel):
         self.upcast()
 
         # final global upcast
-        for ax in [s1, s0]:
-          for upc in [4,3,2]:
-            if self.full_shape[ax]%upc == 0:
-              self.shift_to(ax, upc)
-              self.upcast()
-              break
+        if not optim_conv2d:
+          for ax in [s1, s0]:
+            for upc in [4,3,2]:
+              if self.full_shape[ax]%upc == 0:
+                self.shift_to(ax, upc)
+                self.upcast()
+                break
 
         # alias buffer
         self.local_dims = self.first_reduce - global_count
         alias_pattern = [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2)
         self.alias_buffer(buf0, alias_pattern)
         self.alias_buffer(buf1, alias_pattern)
+
+        if self.use_tensor_cores and optim_conv2d:
+          self.upcast()
+
+          if max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 5:
+            self.upcast()
+            for upc in range(8, 1, -1):
+              if self.full_shape[global_count-2]%upc == 0:
+                self.shift_to(global_count-2, upc)
+                self.upcast()
+                break
+          else:
+            for upc in range(16, 1, -1):
+              if self.full_shape[global_count-1]%upc == 0:
+                self.shift_to(global_count-1, upc)
+                self.upcast()
+                break
 
         # very late upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
         if self.use_tensor_cores and self.full_shape[s0] % 2 == 0:
@@ -325,13 +342,27 @@ class OptimizedKernel(Kernel):
 
     # **** below this line need to be optional and benchmarked ****
 
+    # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
+    # this can be made much smarter
+    to_upcast = []
+    # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
+    for axis in range(self.first_reduce):
+      # we might want to be able to split axes that are masked, or refuse to merge them in simplify_merge_adjacent
+      if self.full_shape[axis] <= 7 and any(st.axis_is_masked(axis) for st in self.sts) and prod(self.full_shape[self.shape_len - self.upcasted:]) * self.full_shape[axis] <= 7 * 7:
+        if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
+        to_upcast.append(axis)
+    for axis in to_upcast[::-1]:
+      self.shift_to(axis, amount=self.full_shape[axis])
+      self.upcast()
+      self.simplify_ones()
+
     # potentially do more upcasts of non reduce axes based on a heuristic
     upcasted_axis = set()
     while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
         # if we haven't upcasted it, it's not symbolic, it mods, and some buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
-        if axis not in upcasted_axis and isinstance(self.full_shape[axis], int) and self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
+        if axis not in upcasted_axis and isinstance(self.full_shape[axis], int) and self.full_shape[axis]%upcast_amount == 0 and any(st.views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index, st in enumerate(self.sts)):
           xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in self.sts), sum(st.views[-1].strides[axis] for st in self.sts), axis, upcast_amount))
       if xb_choices:
         xb_choices = sorted(xb_choices)
@@ -366,14 +397,14 @@ class OptimizedKernel(Kernel):
     # **** local groups ****
 
     if self.opts.has_local:
-      for axis in range(self.first_reduce - self.local_dims - 1, -1, -1):
-        local_size = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
-        if self.full_shape[axis] == 1: continue
-        last_try = self.local_dims == 0 and axis == 0
-        if any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))) or last_try:
-          for sz in [x for x in (([32] if last_try else []) + [16,8,4,3]) if self.full_shape[axis] % x == 0 and local_size*x <= 128]:
-            self.shift_to(axis, sz, insert_before=self.first_reduce-self.local_dims)
-            self.local_dims += 1
-            break
-        if self.local_dims >= 3: break
+      # prioritize making expand axes local
+      local_axis_ranking = [(any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))), axis) for axis in range(len(self.full_shape[:self.first_reduce]))]
+      to_local: List[Tuple[int, int]] = []
+      for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
+        local_size = prod(sz for _, sz in to_local)
+        local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)
+        if local_sz is not None: to_local.append((axis, local_sz))
+      for axis, local_sz in sorted(to_local[:3]):
+        self.shift_to(axis, local_sz, insert_before=self.first_reduce)
+        self.local_dims += 1
     self.simplify_ones()

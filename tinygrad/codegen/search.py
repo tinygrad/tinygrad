@@ -3,8 +3,25 @@ import time
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.helpers import DEBUG, prod, getenv
 
-UPCASTS = [1,2,3,4,5,6,7,8]
-LOCALS = [1,2,3,4,5,6,7,8,16,24,32]
+def get_divisors(n, min_div = 1, max_div = 512):
+  if min_div > 1: yield 1
+  for d in range(min_div, min(max_div, n//2) + 1):
+    if n % d == 0: yield d
+
+def kernel_optimize_opts(k:Linearizer):
+  import nevergrad as ng
+  opts = []
+  if k.first_reduce < k.shape_len: # TODO: Grouped reduces do not work with other locals. More chances to mutate to 1, so locals can be used.
+    opts.append(ng.p.TransitionChoice([(0,s,"G") for s in get_divisors(k.full_shape[k.first_reduce], min_div=16) if all(st.shape[k.first_reduce] % s == 0 or st.shape[k.first_reduce] == 1 for st in k.sts)], transitions=(0.8, 0.2)))
+  for i in range(k.first_reduce):
+    # TODO: the upcast always happen first, you might want to reverse this?
+    # TODO: the order of the locals might improve things too
+    opts.append(ng.p.TransitionChoice([(i,s,"U") for s in get_divisors(k.full_shape[i], max_div=32)]))
+    opts.append(ng.p.TransitionChoice([(i,s,"L") for s in get_divisors(k.full_shape[i])]))
+  for i in range(k.shape_len-k.first_reduce):
+    opts.append(ng.p.TransitionChoice([(i,s,"R") for s in get_divisors(k.full_shape[k.first_reduce+i], max_div=32)]))
+  return opts
+
 def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, baseline):
   import nevergrad as ng
   def opt(x):
@@ -22,18 +39,12 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
         import traceback
         traceback.print_exc()
       return 10000_000   # 10000 seconds is infinity
-  opts = []
-  for i in range(k.first_reduce):
-    # TODO: the upcast always happen first, you might want to reverse this?
-    # TODO: the order of the locals might improve things too
-    opts.append(ng.p.TransitionChoice([(i,s,"U") for s in UPCASTS if k.full_shape[i]%s == 0]))
-    opts.append(ng.p.TransitionChoice([(i,s,"L") for s in LOCALS if k.full_shape[i]%s == 0]))
-  for i in range(k.shape_len-k.first_reduce):
-    opts.append(ng.p.TransitionChoice([(i,s,"R") for s in UPCASTS if k.full_shape[k.first_reduce+i]%s == 0]))
+  opts = kernel_optimize_opts(k)
   if not opts: return "BASELINE"
   search_space = prod([len(x.choices) for x in opts])
   st = time.perf_counter()
-  optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, 200))
+  budget = getenv("BUDGET", 200)
+  optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, budget))
   recommendation = optimizer.minimize(opt)
   et = time.perf_counter() - st
   if DEBUG >= 1: print(f"optimizer({et:6.2f} s to search) space {search_space:8d} with tm {recommendation.loss:5.2f} ms vs baseline {baseline:5.2f} ms, a {baseline/recommendation.loss:5.2f}x gain : {k.colored_shape()}")
