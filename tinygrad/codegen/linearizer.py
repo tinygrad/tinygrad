@@ -446,24 +446,23 @@ class Linearizer(OptimizedKernel):
 
     values = [self.ast_parse(v, acc, loaded_buffers) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
-    uses_accum = x.op in ops
-    uses_reduce =  x.op in {ReduceOps.SUM, ReduceOps.MAX}  
+    uses_accum = x.op in ops.keys()
+    uses_cast =  x.op in {ReduceOps.SUM, ReduceOps.MAX, BinaryOps.ADD, BinaryOps.MAX}  
 
     dtypes_priority = {v.dtype: v.dtype.priority for val in values for v in val}
-    if uses_accum and getenv('ACCUM_FLOAT', 1): dtypes_priority.update({dtypes.float: dtypes.float.priority}) 
     cast_dtype = dtypes.get_normal_type(sorted(dtypes_priority.items(), key=lambda x: -x[1])[0][0])
-
+    if uses_accum and getenv('ACCUM_FLOAT', 1): cast_dtype = dtypes.float
     if uses_accum: values = values + [acc]
     ret = []
     for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values)):
+      casted_val = [self.uop(UOps.CAST, dtypes.get_vector_type(cast_dtype, amt=v.dtype.sz) if v.dtype.is_vector_type and v.uop != UOps.GEP else cast_dtype, [v])
+              if dtypes.get_normal_type(v.dtype) != cast_dtype else v for v in val]
       if uses_accum:
-        casted_val = [self.uop(UOps.CAST, dtypes.get_vector_type(cast_dtype, amt=v.dtype.sz) if v.dtype.is_vector_type and v.uop != UOps.GEP else cast_dtype, [v])
-                      if dtypes.get_normal_type(v.dtype) != cast_dtype else v for v in val]
         ret.append((idx, self.uop(UOps.CAST, val[-1].dtype, [self.uop(
-          UOps.STORE, cast_dtype, [val[-1], self.uop(UOps.ALU, cast_dtype, casted_val if uses_reduce else val, ops[x.op])]
+          UOps.STORE, cast_dtype, [val[-1], self.uop(UOps.ALU, cast_dtype, casted_val if uses_cast else val, ops[x.op])]
           )])))
       else:
-        ret.append((idx, self.uop(UOps.ALU, cast_dtype, val, x.op, cachable=True)))
+        ret.append((idx, self.uop(UOps.ALU, cast_dtype, casted_val if uses_cast else val, x.op, cachable=not uses_cast)))
 
     ordered_ret: List[Optional[UOp]] = [None]*len(values[0])
     # scatter
