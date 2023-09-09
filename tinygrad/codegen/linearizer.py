@@ -165,7 +165,7 @@ class Linearizer(OptimizedKernel):
         idx, valid = self.sts[i].expr_idxs(k)
         assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
         assert valid.min == 1, "stores are always valid"
-        dt = dtypes.get_vector_type(dtypes.get_normal_type(dtypes.float if self.opts.uses_float32_calculations else self.bufs[i].dtype), amt=amt) 
+        dt = dtypes.get_vector_type(dtypes.get_normal_type(dtypes.float if self.opts.uses_float32_calculations else self.bufs[i].dtype), amt=amt)
         store_offset_new[k] = self.uop(UOps.CAST, dt, tuple(out_tokens))
       store_offset = store_offset_new
 
@@ -184,8 +184,6 @@ class Linearizer(OptimizedKernel):
 
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
-    # Casts cache
-    self.casts = {}
 
     # limit dims if we need to
     # TODO: broken, and doesn't really belong here
@@ -415,7 +413,7 @@ class Linearizer(OptimizedKernel):
   def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=False) -> UOp:
     key = (uop, dtype, vin, arg)
     if uop == UOps.STORE and len(vin) == 2 and vin[0] == vin[1]: return vin[0]   # self store is noop
-    if uop == UOps.CAST and all(x.uop == UOps.GEP for x in vin) and all_same([x.vin[0] for x in vin]) and all(x.arg == i for i,x in enumerate(vin)): return vin[0].vin[0]
+    if uop == UOps.CAST and all(x.uop == UOps.GEP for x in vin) and vin[0].vin[0].dtype == dtype and all_same([x.vin[0] for x in vin]) and all(x.arg == i for i,x in enumerate(vin)): return vin[0].vin[0]
     if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype)
     if uop == UOps.ALU:
       # rewrites. NOTE: the rewritten NEG op is still around...
@@ -444,18 +442,25 @@ class Linearizer(OptimizedKernel):
       x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL:
       x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
+
     values = [self.ast_parse(v, acc, loaded_buffers) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     uses_accum = x.op in ops
-    cast_dtype = dtypes.float if uses_accum and getenv('ACCUM_FLOAT', 1) else dtypes.float16
-    highest_priority = max([v.dtype.priority for val in values for v in val] + [cast_dtype.priority])
-    buf_cast_dtype = [dtypes.get_normal_type(v.dtype) for val in values for v in val if v.dtype.priority == highest_priority]
-    if len(buf_cast_dtype) > 0: cast_dtype = buf_cast_dtype[0]
+    uses_reduce =  x.op in {ReduceOps.SUM, ReduceOps.MAX}  
+
+    dtypes_priority = {v.dtype: v.dtype.priority for val in values for v in val}
+    if uses_accum and getenv('ACCUM_FLOAT', 1): dtypes_priority.update({dtypes.float: dtypes.float.priority}) 
+    cast_dtype = dtypes.get_normal_type(sorted(dtypes_priority.items(), key=lambda x: -x[1])[0][0])
+
     if uses_accum: values = values + [acc]
     ret = []
     for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values)):
       if uses_accum:
-        ret.append((idx, self.uop(UOps.STORE, cast_dtype, [val[-1], self.uop(UOps.ALU, cast_dtype, val, ops[x.op])])))
+        casted_val = [self.uop(UOps.CAST, dtypes.get_vector_type(cast_dtype, amt=v.dtype.sz) if v.dtype.is_vector_type and v.uop != UOps.GEP else cast_dtype, [v])
+                      if dtypes.get_normal_type(v.dtype) != cast_dtype else v for v in val]
+        ret.append((idx, self.uop(UOps.CAST, val[-1].dtype, [self.uop(
+          UOps.STORE, cast_dtype, [val[-1], self.uop(UOps.ALU, cast_dtype, casted_val if uses_reduce else val, ops[x.op])]
+          )])))
       else:
         ret.append((idx, self.uop(UOps.ALU, cast_dtype, val, x.op, cachable=True)))
 
