@@ -453,6 +453,11 @@ class Linearizer(OptimizedKernel):
     cast_dtype = dtypes.get_normal_type(sorted(dtypes_priority.items(), key=lambda x: -x[1])[0][0])
     if uses_accum and getenv('ACCUM_FLOAT', 1): cast_dtype = dtypes.float
     if uses_accum: values = values + [acc]
+
+    if self.opts.is_nvidia and x.op in {UnaryOps.EXP2, UnaryOps.LOG2, BinaryOps.MAX, ReduceOps.MAX}:
+      uses_cast = True
+      cast_dtype = dtypes.float
+      
     ret = []
     for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values)):
       casted_val = [self.uop(UOps.CAST, dtypes.get_vector_type(cast_dtype, amt=v.dtype.sz) if v.dtype.is_vector_type and v.uop != UOps.GEP else cast_dtype, [v])
