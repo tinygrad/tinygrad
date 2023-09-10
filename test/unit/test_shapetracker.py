@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction, strides_for_shape
+from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction
 from tinygrad.shape.symbolic import Variable
 from itertools import product
 
@@ -126,7 +126,7 @@ class TestIndexExpressions2d(unittest.TestCase):
   def setUp(self):
     shapes = [(30, 5), (15, 10), (15, 1), (5, 10), (5, 1)] # Make sure dim0 is a multiple of 5, one of the tests divides this dimension by 5
     offsets = [0, 1, 15, 28, 10000]
-    self.sts = [ShapeTracker(base_shape, [View(base_shape, strides_for_shape(base_shape), offset=offset)]) for base_shape in shapes for offset in offsets]
+    self.sts = [ShapeTracker(base_shape, [View.from_shape(base_shape, offset=offset)]) for base_shape in shapes for offset in offsets]
     self.offset = [Variable.num(offset) for base_shape in shapes for offset in offsets]
     self.shapes = [shape for shape in shapes for offset in offsets]
     self.node_exprs = []

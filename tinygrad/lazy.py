@@ -189,7 +189,7 @@ class LazyBuffer:
 
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
-    return LazyBuffer("CPU", ShapeTracker(x.shape, [View(x.shape, tuple(st//x.itemsize if s != 1 else 0 for s,st in zip(x.shape, x.strides)))]), LoadOps, LazyOp(LoadOps.EMPTY, (), None), dtypes.from_np(x.dtype), {}, RawNumpyBuffer.fromCPU(x))
+    return LazyBuffer("CPU", ShapeTracker(x.shape, [View.from_shape_strides(x.shape, tuple(st//x.itemsize for st in x.strides))]), LoadOps, LazyOp(LoadOps.EMPTY, (), None), dtypes.from_np(x.dtype), {}, RawNumpyBuffer.fromCPU(x))
 
   def toCPU(self) -> np.ndarray:
     assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
