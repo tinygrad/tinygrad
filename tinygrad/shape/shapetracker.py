@@ -25,7 +25,6 @@ def is_contiguous(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> bool: retur
 def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
   return tuple(stride if shp != 1 else 0 for stride, shp in zip(strides, shape))
 
-@functools.lru_cache(maxsize=None)
 class View(NamedTuple):
   shape:Tuple[int, ...]
   strides:Tuple[int, ...]
@@ -33,15 +32,11 @@ class View(NamedTuple):
   mask:Optional[Tuple[Tuple[int, int]]] = None
 
   @staticmethod
+  @functools.lru_cache(maxsize=None)
   def create(shape, strides=None, offset=0, mask=None): return View(shape, filter_strides(shape, strides) if strides else strides_for_shape(shape), offset, mask)
-
-  def __repr__(self): return f"View(shape={self.shape}, strides={self.strides}, offset={self.offset}, mask={self.mask})"
 
   @property
   def contiguous(self): return self.offset == 0 and is_contiguous(self.shape, self.strides) and self.mask is None
-
-  @property
-  def shape_strides(self): return to_shape_strides(self.shape, self.strides)
 
   def expr_node_mask(self, idx, valid=None) -> Node:
     expr = [valid] if valid is not None else []
@@ -59,7 +54,7 @@ class View(NamedTuple):
     if idx is None: idx = Variable('idx', 0, prod(self.shape)-1)
     ret: List[Node] = [Variable.num(self.offset) if isinstance(self.offset, int) else self.offset] if self.offset else []
     acc = 1
-    for d,s in reversed(self.shape_strides):
+    for d,s in reversed(to_shape_strides(self.shape, self.strides)):
       ret.append(((idx//acc)%d)*s)
       acc *= d
     return Variable.sum(ret)

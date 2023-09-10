@@ -120,7 +120,7 @@ class OptimizedKernel(Kernel):
           stride[j] = bst
           bst *= shp[j]
 
-    self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
+    self.sts.append(ShapeTracker(tuple(shp), [View.create(tuple(shp), tuple(stride))]))
     self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
