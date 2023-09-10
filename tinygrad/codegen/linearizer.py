@@ -24,7 +24,7 @@ class UOps(Enum):
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=True) -> Tuple[Node, Node]:
 
   idy = (idxy//(4*base_shape[1]))
-
+  orig = valid
   if validhacks and valid.min == 0:
 
     nodes = [] if isinstance(valid, LtNode) else valid.nodes
@@ -47,6 +47,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=T
 
     idx = (idxy//4)%base_shape[1]
     idy = (idxy // (4 * base_shape[1]))
+    if valid.min == 1: valid = orig
     return (idx, idy), valid
   else:
     idx = (idxy//4)%base_shape[1]
