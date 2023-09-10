@@ -37,6 +37,7 @@ package.json
 package-lock.json
 temp
 *.csv
+**/.DS_Store
 .coverage
 coverage.xml
 htmlcov
