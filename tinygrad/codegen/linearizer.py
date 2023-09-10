@@ -21,7 +21,7 @@ class UOps(Enum):
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
-def to_image_idx(base_shape: Tuple[int, ...], idxy: Node) -> Tuple[Node, Node]:
+def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
     # Calculate idy and idx directly without validhacks
     idy = idxy // (4 * base_shape[1])
     idx = (idxy // 4) % base_shape[1]
