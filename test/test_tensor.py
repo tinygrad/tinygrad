@@ -238,6 +238,6 @@ class TestTinygrad(unittest.TestCase):
 
   def test_tensor_copy(self):
     copy.deepcopy(Tensor.ones((3,3,3)))
-    
+
 if __name__ == '__main__':
   unittest.main()
