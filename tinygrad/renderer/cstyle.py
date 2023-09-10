@@ -88,8 +88,8 @@ class CStyleLanguage(NamedTuple):
       assert var_dtype == dtypes._float4, "images must be float4"
       return f"write_imagef({buf_name}, {idx}, {var_name});"
     if self.uses_vload and buf_dtype == dtypes.float16:
-      return f"vstore_half{'' if (var_dtype.sz == 1 or '.' in var_name) else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
-    if var_dtype.sz > 1 and not dtypes.is_unsigned(buf_dtype) and buf_dtype not in [dtypes.bool, dtypes.double]:
+      return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
+    if var_dtype.sz > 1:
       return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = {var_name};"
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
 

@@ -141,7 +141,7 @@ class Linearizer(OptimizedKernel):
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx, valid_rendered, self.const(invalid_value, localtype)))
           else:
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx))
-      ret.append(self.uop(UOps.GEP, localtype, (self.load_cache[key],), expanded_nodes[dim].index(_idx[dim])) if localtype.is_vector_type else self.load_cache[key])
+      ret.append(self.uop(UOps.GEP, dtypes.get_normal_type(localtype), (self.load_cache[key],), expanded_nodes[dim].index(_idx[dim])) if localtype.is_vector_type else self.load_cache[key])
     return ret
 
   def global_store(self, i:int, idxs:List[VariableOrNum], store:List[UOp]) -> None:
