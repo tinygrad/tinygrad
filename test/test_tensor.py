@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import unittest
+import unittest, copy
 from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
@@ -236,5 +236,8 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
     assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
 
+  def test_tensor_copy(self):
+    copy.deepcopy(Tensor.ones((3,3,3)))
+    
 if __name__ == '__main__':
   unittest.main()
