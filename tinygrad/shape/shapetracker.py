@@ -25,23 +25,23 @@ def is_contiguous(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> bool: retur
 def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
   return tuple(stride if shp != 1 else 0 for stride, shp in zip(strides, shape))
 
-class ViewInternal(NamedTuple):
+@functools.lru_cache(maxsize=None)
+class View(NamedTuple):
   shape:Tuple[int, ...]
   strides:Tuple[int, ...]
-  offset:int
-  mask:Optional[Tuple[Tuple[int, int]]]
-  contiguous:bool
-  shape_strides:Tuple[Tuple[int, int], ...]
+  offset:int = 0
+  mask:Optional[Tuple[Tuple[int, int]]] = None
 
-@functools.lru_cache(maxsize=None)
-class View(ViewInternal):
-  def __new__(cls, shape, strides=None, offset=0, mask=None):
-    strides_from_shape = strides_for_shape(shape)
-    strides = strides_from_shape if not strides else filter_strides(shape, strides)
-    contiguous = offset == 0 and is_contiguous(shape, strides) and mask is None
-    return super().__new__(cls, shape, strides, offset, mask, contiguous, to_shape_strides(shape, strides))
-  def __init__(self, shape, strides=None, offset=0, mask=None, contiguous=False, shape_strides=()): super().__init__()
+  @staticmethod
+  def create(shape, strides=None, offset=0, mask=None): return View(shape, filter_strides(shape, strides) if strides else strides_for_shape(shape), offset, mask)
+
   def __repr__(self): return f"View(shape={self.shape}, strides={self.strides}, offset={self.offset}, mask={self.mask})"
+
+  @property
+  def contiguous(self): return self.offset == 0 and is_contiguous(self.shape, self.strides) and self.mask is None
+
+  @property
+  def shape_strides(self): return to_shape_strides(self.shape, self.strides)
 
   def expr_node_mask(self, idx, valid=None) -> Node:
     expr = [valid] if valid is not None else []
@@ -91,7 +91,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   mst = ShapeTracker(vm1.shape, [vm2, vm1])
   strides = mst.real_strides()
   if None in strides: return None
-  return View(vm1.shape, strides, mst.real_offset(), vm1.mask)
+  return View.create(vm1.shape, strides, mst.real_offset(), vm1.mask)
 
 @functools.lru_cache(maxsize=None)
 def _reshape(view: View, new_shape:Tuple[int, ...]) -> Tuple[View, bool]:
@@ -110,9 +110,9 @@ def _reshape(view: View, new_shape:Tuple[int, ...]) -> Tuple[View, bool]:
       else:
         new_mask: List[Tuple[int, int]] = [y for x,y in zip(shape, mask) if x != 1]
         new_mask_tuple = tuple([(0,1) if x == 1 else new_mask.pop(0) for x in new_shape])
-    return View(new_shape, new_strides_tuple, offset, new_mask_tuple), False
+    return View.create(new_shape, new_strides_tuple, offset, new_mask_tuple), False
 
-  new_view = View(new_shape)
+  new_view = View.create(new_shape)
   if view.contiguous: return new_view, False # NOTE: if it's contiguous it can't have an offset
   if (merged_view := merge_views(view, new_view)) is not None: return merged_view, False
   if DEBUG >= 5: print(f"WARNING: creating new view with reshape {view} -> {new_shape}")
@@ -129,7 +129,7 @@ def get_unsafe_resize_offset(strides, arg):
 class ShapeTracker:
   __slots__ = "views"
   def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node,int], ...]], views:Optional[List[View]]=None):
-    self.views: List[View] = views if views is not None else [*shape.views] if isinstance(shape, ShapeTracker) else [View(shape)]
+    self.views: List[View] = views if views is not None else [*shape.views] if isinstance(shape, ShapeTracker) else [View.create(shape)]
   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
   def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
 
@@ -208,7 +208,7 @@ class ShapeTracker:
       nmask = tuple([(max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.views[-1].mask, arg)])
       # merge the masks if we have two
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
-    self.views[-1] = View(tuple([y-x for x,y in arg]), self.views[-1].strides, self.views[-1].offset+offset, mask)
+    self.views[-1] = View.create(tuple([y-x for x,y in arg]), self.views[-1].strides, self.views[-1].offset+offset, mask)
 
   def pad(self, arg: Tuple[Tuple[int, int], ...]):
     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
@@ -227,7 +227,7 @@ class ShapeTracker:
     assert all(is_sym_int(x) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)]) if self.views[-1].mask else None
-    self.views[-1] = View(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
+    self.views[-1] = View.create(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
     return self
 
   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
@@ -244,7 +244,7 @@ class ShapeTracker:
   def permute(self, axis: Tuple[int, ...]):
     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
-    self.views[-1] = View(tuple([self.views[-1].shape[a] for a in axis]), tuple([self.views[-1].strides[a] for a in axis]), self.views[-1].offset, tuple([self.views[-1].mask[a] for a in axis]) if self.views[-1].mask is not None else None)
+    self.views[-1] = View.create(tuple([self.views[-1].shape[a] for a in axis]), tuple([self.views[-1].strides[a] for a in axis]), self.views[-1].offset, tuple([self.views[-1].mask[a] for a in axis]) if self.views[-1].mask is not None else None)
     return self
 
   # except for the negative case, you can build this from the others. invertible in the negative case
@@ -254,7 +254,7 @@ class ShapeTracker:
     new_shape = tuple([(s+(abs(m)-1))//abs(m) for s,m in zip(self.views[-1].shape, mul)])
     offset = sum([(s-1)*z for s,z,m in zip(self.views[-1].shape, self.views[-1].strides, mul) if m < 0])
     mask = tuple([(((mx if m > 0 else s-my)+(abs(m)-1))//abs(m), ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(self.views[-1].mask, self.views[-1].shape, mul)]) if self.views[-1].mask is not None else None
-    self.views[-1] = View(new_shape, strides, self.views[-1].offset + offset, mask)
+    self.views[-1] = View.create(new_shape, strides, self.views[-1].offset + offset, mask)
     return self
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
