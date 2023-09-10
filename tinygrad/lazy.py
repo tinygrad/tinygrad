@@ -195,6 +195,8 @@ class LazyBuffer:
     assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
     self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
     realized = self_casted.contiguous().realize().realized
+    # TODO: how does this work with numpy and a symbolic shape?
+    #assert all(isinstance(x, int) for x in self.shape), "no toCPU if shape is symbolic"
     return cast(RawBuffer, realized).toCPU().reshape(self.shape)
 
   def e(self:LazyBuffer, op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
