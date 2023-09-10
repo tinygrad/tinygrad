@@ -41,9 +41,7 @@ class Node:
   def __repr__(self): return "<"+self.key+">"
   def __hash__(self): return self.hash
   def __bool__(self): return not (self.max == self.min == 0)
-  def __eq__(self, other:object) -> bool:
-    if not isinstance(other, Node): return NotImplemented
-    return self.key == other.key
+  def __eq__(self, other:object) -> bool: return self.__class__ is other.__class__ and self.key == other.key
   def __neg__(self): return self*-1
   def __add__(self, b:Union[Node,int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __radd__(self, b:int): return self+b
@@ -157,7 +155,7 @@ class NumNode(Node):
     self.min, self.max = num, num
   def __int__(self): return self.b
   def __index__(self): return self.b
-  def __eq__(self, other): return self.b == other
+  def __eq__(self, other): return (other.__class__ is NumNode and self.b == other.b) or (other.__class__ is int and self.b == other)
   def __hash__(self): return self.hash  # needed with __eq__ override
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self
 
