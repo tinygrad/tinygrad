@@ -34,9 +34,11 @@ class Node:
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
 
-  @functools.cached_property
+  #@functools.cached_property
+  @property
   def key(self) -> str: return self.render(ctx="DEBUG")
-  @functools.cached_property
+  #@functools.cached_property
+  @property
   def hash(self) -> int: return hash(self.key)
   def __repr__(self): return "<"+self.key+">"
   def __hash__(self): return self.hash
@@ -95,8 +97,7 @@ class Node:
       raise RuntimeError(f"not supported: {self} % {b}")
     assert b > 0
     if b == 1: return NumNode(0)
-    if self.min//b >= 0 and self.min//b == self.max//b: return self - (b * (self.min//b))
-    if self.min >= b and self.max < 2*b: return self - b
+    if self.min >= 0 and self.max < b: return self
     if self.min < 0: return (self - ((self.min//b)*b)) % b
     return create_node(ModNode(self, b))
 

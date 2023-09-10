@@ -4,12 +4,12 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod, PtrDType, all_same
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
+from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename, sym_render
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.codegen.kernel import LocalBuffer
 VariableOrNum = Union[Variable, NumNode, Node]
@@ -21,37 +21,36 @@ class UOps(Enum):
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
-def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=True) -> Tuple[Node, Node]:
+def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Node, Node]:
 
   idy = (idxy//(4*base_shape[1]))
-  orig = valid
-  if validhacks and valid.min == 0:
 
-    nodes = [] if isinstance(valid, LtNode) else valid.nodes
-
+  if valid.min == 0:
+    nodes = [valid] if isinstance(valid, LtNode) else valid.nodes
+    var_dict = dict()
     for nd in nodes:
-      var = nd.vars()[0]
-      if isinstance(nd, LtNode):
-        if isinstance(nd.a, MulNode):
-          if nd.a.b == -1:
-            var.min = (-nd.b) + 1 if var.max != ((-nd.b)+1) else var.min
-          elif nd.a.b < 0:
-            var.min = abs(nd.b//nd.a.b) + 1 if nd.b%nd.a.b == 0 else abs(nd.b//nd.a.b)
-          elif nd.a.b > 0:
-            var.max = nd.b//nd.a.b - 1 if nd.b%nd.a.b == 0 else nd.b//nd.a.b
-        elif isinstance(nd.a, Variable):
-          var.max = nd.b - 1 if var.min != (nd.b-1) else var.max
+      init_var = nd.vars()[0]
+      if (anan := sym_render(init_var)) not in var_dict: var_dict[anan] = (init_var, Variable(anan, init_var.min, init_var.max))
+      var = var_dict[anan][1]
+      if isinstance(nd.a, MulNode):
+        if nd.a.b == -1:
+          var.min = nd.b + 1 if var.max != ((-nd.b) + 1) else var.min
+        elif nd.a.b < 0:
+          var.min = abs(nd.b // nd.a.b) + 1 if nd.b % nd.a.b == 0 else abs(nd.b // nd.a.b)
+        elif nd.a.b > 0:
+          var.max = nd.b // nd.a.b - 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
+      elif isinstance(nd.a, Variable):
+        var.max = nd.b - 1 if var.min != (nd.b - 1) else var.max
 
-      valid = valid.substitute({var:var})
-      idxy = idxy.substitute({var:var})
-
-    idx = (idxy//4)%base_shape[1]
+    valid = valid.substitute({v:n for v, n in var_dict.values()})
+    idxy = idxy.substitute({v:n for v, n in var_dict.values()})
+    mid_var, b = (idxy//4), base_shape[1]
+    idx = mid_var - b*(mid_var//b)
     idy = (idxy // (4 * base_shape[1]))
-    if valid.min == 1: valid = orig
     return (idx, idy), valid
-  else:
-    idx = (idxy//4)%base_shape[1]
-  #print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
+
+  idx = (idxy//4)%base_shape[1]
+  if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
 class UOp(NamedTuple):
@@ -146,6 +145,7 @@ class Linearizer(OptimizedKernel):
             rendered_idx = self.uop(UOps.CAST, dtypes._int2, (idx[0].render(self.render_ops, self), idx[1].render(self.render_ops, self)))
           else:
             rendered_idx = idx.render(self.render_ops, self)
+
           if valid.min == 0:
             valid_rendered = valid.render(self.render_ops, self)
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx, valid_rendered, self.const(invalid_value, localtype)))
