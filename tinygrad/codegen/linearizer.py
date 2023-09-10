@@ -21,26 +21,15 @@ class UOps(Enum):
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
-def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
-  idy = (idxy//(4*base_shape[1]))
-  if validhacks and valid.min == 0:
-    idx = (idxy//4) + (idy*-base_shape[1])
-    # find the ones in idx that didn't factorize and remove them (TODO: this is not universal)
-    if isinstance(idx, SumNode):
-      unfactored, idx_nodes = partition(idx.nodes, lambda x: isinstance(x, MulNode) and x.b == -base_shape[1])
-      assert len(unfactored) <= 1
-      idx = Variable.sum(idx_nodes)
-      unfactored = (Variable.sum(unfactored) // base_shape[1])
-      idy += unfactored
-      # ugh really...handtuned garbage
-      if idx.min >= (base_shape[1]*3)//4:
-        idx -= base_shape[1]
-        idy += 1
-  else:
-    idx = (idxy//4)%base_shape[1]
-  if DEBUG >= 5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
-  return idx, idy
-
+def to_image_idx(base_shape: Tuple[int, ...], idxy: Node) -> Tuple[Node, Node]:
+    # Calculate idy and idx directly without validhacks
+    idy = idxy // (4 * base_shape[1])
+    idx = (idxy // 4) % base_shape[1]
+    
+    if DEBUG >= 5:
+        print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
+    
+    return idx, idy
 class UOp(NamedTuple):
   uop: UOps
   dtype: Optional[DType]
