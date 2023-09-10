@@ -56,7 +56,7 @@ class Node:
   def __mul__(self, b:Union[Node, int]):
     if b == 0: return NumNode(0)
     if b == 1: return self
-    return create_node(MulNode(self, b.b)) if isinstance(b, NumNode) else create_node(MulNode(self, b))
+    return create_node(MulNode(self, b.b if isinstance(b, NumNode) else b))
   def __rmul__(self, b:int): return self*b
 
   # *** complex ops ***
