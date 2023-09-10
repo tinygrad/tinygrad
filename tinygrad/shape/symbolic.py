@@ -56,7 +56,6 @@ class Node:
   def __mul__(self, b:Union[Node, int]):
     if b == 0: return NumNode(0)
     if b == 1: return self
-    if self.__class__ is NumNode: return NumNode(self.b*b) if isinstance(b, int) else b*self.b
     return create_node(MulNode(self, b.b)) if isinstance(b, NumNode) else create_node(MulNode(self, b))
   def __rmul__(self, b:int): return self*b
 
@@ -159,6 +158,7 @@ class NumNode(Node):
   def __index__(self): return self.b
   def __eq__(self, other): return self.b == other
   def __hash__(self): return self.hash  # needed with __eq__ override
+  def __mul__(self, b): return Node.num(self.b*b) if b.__class__ is int else b*self.b
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self
 
 def create_node(ret:Node):
@@ -220,6 +220,7 @@ class SumNode(RedNode):
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
+    if b.__class__ in (int, NumNode) and b == 1: return self
     fully_divided: List[Node] = []
     rest: List[Node] = []
     if isinstance(b, SumNode):
@@ -232,7 +233,6 @@ class SumNode(RedNode):
         else: rest.append(x)
       if (sum_fully_divided:=create_rednode(SumNode, fully_divided)) != 0: return sum_fully_divided + create_rednode(SumNode, rest) // b
       return Node.__floordiv__(self, b, False)
-    if b == 1: return self
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
     fully_divided, rest = [], []
     _gcd = b
