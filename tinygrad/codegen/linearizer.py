@@ -445,16 +445,17 @@ class Linearizer(OptimizedKernel):
       x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
 
     values = [self.ast_parse(v, acc, loaded_buffers) for v in x.src]
-    ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
-    uses_accum = x.op in ops.keys()
-    uses_cast =  x.op in {ReduceOps.SUM, ReduceOps.MAX, BinaryOps.ADD, BinaryOps.MAX}  
+    accum_ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
+    uses_accum = x.op in accum_ops
+    uses_cast =  accum_ops.get(x.op, x.op) in {BinaryOps.MAX}  
 
     dtypes_priority = {v.dtype: v.dtype.priority for val in values for v in val}
     cast_dtype = dtypes.get_normal_type(sorted(dtypes_priority.items(), key=lambda x: -x[1])[0][0])
     if uses_accum and getenv('ACCUM_FLOAT', 1): cast_dtype = dtypes.float
     if uses_accum: values = values + [acc]
 
-    if x.op in {BinaryOps.MAX, ReduceOps.MAX} or (self.opts.is_nvidia and x.op in {UnaryOps.EXP2, UnaryOps.LOG2}):
+    # Some ops need explicit casts to float
+    if accum_ops.get(x.op, x.op) in {BinaryOps.MAX} or (self.opts.is_nvidia and x.op in {UnaryOps.EXP2, UnaryOps.LOG2}) or self.opts.uses_float32_calculations:
       uses_cast = True
       cast_dtype = dtypes.float
       
@@ -464,7 +465,7 @@ class Linearizer(OptimizedKernel):
               if dtypes.get_normal_type(v.dtype) != cast_dtype else v for v in val]
       if uses_accum:
         ret.append((idx, self.uop(UOps.CAST, val[-1].dtype, [self.uop(
-          UOps.STORE, cast_dtype, [val[-1], self.uop(UOps.ALU, cast_dtype, casted_val if uses_cast else val, ops[x.op])]
+          UOps.STORE, cast_dtype, [val[-1], self.uop(UOps.ALU, cast_dtype, casted_val if uses_cast else val, accum_ops[x.op])]
           )])))
       else:
         ret.append((idx, self.uop(UOps.ALU, cast_dtype, casted_val if uses_cast else val, x.op, cachable=not uses_cast)))

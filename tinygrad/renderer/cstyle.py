@@ -49,7 +49,7 @@ class CStyleLanguage(NamedTuple):
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     else: val = f"{x}f" if dtypes.is_float(var_dtype) and isinstance(x, float) else f"{int(x)}"
-    return self.render_cast([val]*var_dtype.sz, var_dtype)
+    return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype not in [dtypes.int, dtypes.float] else val
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
@@ -88,7 +88,7 @@ class CStyleLanguage(NamedTuple):
       assert var_dtype == dtypes._float4, "images must be float4"
       return f"write_imagef({buf_name}, {idx}, {var_name});"
     if self.uses_vload and buf_dtype == dtypes.float16:
-      return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
+      return f"vstore_half{'' if (var_dtype.sz == 1 or '.' in var_name) else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.sz > 1 and not dtypes.is_unsigned(buf_dtype) and buf_dtype not in [dtypes.bool, dtypes.double]:
       return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = {var_name};"
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
@@ -196,7 +196,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       bufs.append(args)
       r[u] = args[0]
     elif uop == UOps.GEP:
-      r[u] = f"({r[vin[0]]}).s{'0123456789aAbBcCdDeEfF'[args]}"
+      r[u] = f"({r[vin[0]]})" + (f".s{'0123456789aAbBcCdDeEfF'[args]}" if args > 3 else f".{'xyzw'[args]}")
     else:
       raise RuntimeError(f"failed to render {uop}")
 

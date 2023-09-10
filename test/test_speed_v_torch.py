@@ -53,7 +53,7 @@ def helper_test_speed(f1, *args):
     del ret
 
     # operation cache defeats
-    args = [(x+1e-1).realize() if isinstance(x, Tensor) else (None if x is None else (x+1e-1)) for x in args]
+    args = [(x+1e-2).realize() if isinstance(x, Tensor) else (None if x is None else (x+1e-2)) for x in args]
 
     # force syncing
     [x.numpy() if isinstance(x, Tensor) or str(torch_device) == "cpu" else x.cpu().numpy() for x in args if x is not None]
