@@ -101,14 +101,14 @@ class Interpreted:
         else:
           ret = self.fxn_for_op[MovementOps.AS_STRIDED](ret, (v.shape, v.strides, v.offset))
       return self.from_underlying(ret)
-    self.from_lazybuffer = from_lazybuffer if from_lazybuffer is not None else from_lazybuffer_function
+    self.from_lazybuffer, self.uses_movement = (from_lazybuffer, True) if from_lazybuffer is not None else (from_lazybuffer_function, False)
     self.from_underlying = buffer if from_underlying is None else from_underlying
     self.synchronize = lambda: None
     self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, context=None, **kwargs):
     # all movementops do nothing in a Compiled buffer!
-    if ast.op in MovementOps and ast.src[0].__class__ is not LazyOp and ast.src[0].realized: return ast.src[0].realized
+    if not self.uses_movement and ast.op in MovementOps and ast.src[0].__class__ is not LazyOp and ast.src[0].realized: return ast.src[0].realized
 
     if TernaryOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
