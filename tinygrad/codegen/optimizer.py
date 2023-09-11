@@ -4,7 +4,8 @@ from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp
 from tinygrad.codegen.kernel import Kernel, LocalBuffer
 from tinygrad.lazy import LazyBuffer
-from tinygrad.shape.shapetracker import ShapeTracker, View
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import View
 
 class OptimizedKernel(Kernel):
   def process(self) -> None:

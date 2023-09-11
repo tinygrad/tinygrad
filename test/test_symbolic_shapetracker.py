@@ -142,7 +142,7 @@ class TestSymbolicShapeExpr(unittest.TestCase):
     idx = (gidx0, lidx1, Variable.num(1))
     shape = (i+1, 8, 4)
     strides = (1, (i*4)+4, i+1)
-    view = View(shape, strides)
+    view = View.create(shape, strides)
     st = ShapeTracker(shape, [view])
     idx, valid = st.expr_idxs(idx)
     assert idx.render() == "((lidx1*((i*4)+4))+1+gidx0+i)"
