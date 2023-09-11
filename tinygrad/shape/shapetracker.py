@@ -43,7 +43,7 @@ class ShapeTracker:
   def key(self) -> Tuple[View, ...]: return tuple(self.views)
 
   # this is the real size (ish)
-  def size(self): return prod([s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])
+  def size(self): return self.views[-1].size()
 
   # these are multiview strides, value is None if it's not a simple strided dimension
   # TODO: this can be shared code between simplify and merge_views
