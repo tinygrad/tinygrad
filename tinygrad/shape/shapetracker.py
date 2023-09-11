@@ -183,7 +183,7 @@ def real_strides(views: Tuple[View], ignore_valid=False) -> Tuple[Optional[Union
 def unit_stride_axes(views: Tuple[View], ignore_valid=False) -> List[int]: return [i for i,st in enumerate(real_strides(views, ignore_valid)) if st == 1]
 
 @functools.lru_cache(maxsize=None)
-def _expr_idx(views, idx, valid) -> Tuple[Node, Node]:
+def _expr_idx(views: Tuple[View], idx, valid) -> Tuple[Node, Node]:
   for v in reversed(views[:-1]):
     if valid.max == 0: return Variable.num(-1), valid
     valid = v.expr_node_mask(idx, valid)
@@ -191,7 +191,7 @@ def _expr_idx(views, idx, valid) -> Tuple[Node, Node]:
   return idx, valid
 
 @functools.lru_cache(maxsize=None)
-def simplify(views):
+def simplify(views: Tuple[View]):
   if len(views) >= 2:
     new_view = merge_views(views[-2], views[-1])
     if new_view:
@@ -214,8 +214,8 @@ def expr_node(views: Tuple[View], idx='idx'):
   return _expr_idx(views, views[-1].expr_node(idx), views[-1].expr_node_mask(idx))
 
 @functools.lru_cache(maxsize=None)
-def axis_is_masked(view, axis) -> bool: 
-  _, valid = expr_idxs(view)
+def axis_is_masked(views: Tuple[View], axis) -> bool: 
+  _, valid = expr_idxs(views)
   return f'idx{axis}' in [v.expr for v in valid.vars()]
   # *** under this line are the movement ops ***
 
