@@ -30,7 +30,6 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
 # symbolic int
 sint = Union[Node, int]
 
-@functools.lru_cache(maxsize=None)
 class View(NamedTuple):
   shape:Tuple[sint, ...]
   strides:Tuple[sint, ...]
@@ -39,12 +38,11 @@ class View(NamedTuple):
   contiguous:bool
 
   @staticmethod
+  @functools.lru_cache(maxsize=None)
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
     strides = filter_strides(shape, strides) if strides else strides_for_shape(shape)
     contiguous = offset == 0 and mask is None and all(s1 == s2 for s1,s2 in zip(strides, strides_for_shape(shape)))
     return View(shape, strides, offset, mask, contiguous)
-
-  def __repr__(self): return f"View(shape={self.shape}, strides={self.strides}, offset={self.offset}, mask={self.mask})"
 
   def expr_node_mask(self, idx, valid=None) -> Node:
     expr = [valid] if valid is not None else []
