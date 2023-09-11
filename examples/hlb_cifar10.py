@@ -9,8 +9,7 @@ if __name__ == "__main__":
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
-import time
-import random
+import random, time, copy
 import numpy as np
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from tinygrad import nn
@@ -44,6 +43,13 @@ hyp = {
       'cutmix_size': 3,
       'cutmix_steps': 490,          # different from original repo which used epoch > 12.1 - 6 which is roughly 7*98=686 STEPS
       'pad_amount': 2
+  },
+  'ema': {
+      'epochs': 5,
+      # 'epochs': 196, 
+      'decay_base': .95,
+      'decay_pow': 3.,
+      'every_n_steps': 5,
   }
 }
 
@@ -208,6 +214,35 @@ transform = [
   lambda x: x.reshape((-1,3,32,32))
 ]
 
+class modelEMA():
+  def __init__(self, w, net):
+    # self.model_ema = copy.deepcopy(net) # won't work for opencl due to unpickeable pyopencl._cl.Buffer
+    self.net_ema = SpeedyResNet(w)
+    for net_ema_param, net_param in zip(get_state_dict(self.net_ema).values(), get_state_dict(net).values()):
+      net_ema_param.requires_grad = False
+      net_ema_param.assign(net_param.detach().realize())
+
+  def __call__(self, x:Tensor)
+    return self.net_ema(x)
+
+  @TinyJit
+  def update(self, net_current, decay):
+    # TODO with Tensor.no_grad()
+    Tensor.no_grad = True
+    for net_ema_param, (param_name, current_net_param) in zip(get_state_dict(self.net_ema).values(), get_state_dict(net_current).items()):
+      if not ("num_batches_tracked" in param_name) and not ("running" in param_name):
+        net_ema_param.assign(net_ema_param.detach()*decay + current_net_param.detach()*(1-decay)).realize()
+    Tensor.no_grad = False
+
+# @TinyJit
+# def model_ema_update(net_ema, net_current, decay):
+#   # TODO with Tensor.no_grad()
+#   Tensor.no_grad = True
+#   for net_ema_param, (param_name, current_net_param) in zip(net_ema, get_state_dict(net_current).items()):
+#     if not ("num_batches_tracked" in param_name) and not ("running" in param_name):
+#       net_ema_param.assign(net_ema_param.detach()*decay + current_net_param.detach()*(1-decay)).realize()
+#   Tensor.no_grad = False
+
 def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   # this import needs to be done here because this is running in a subprocess
   from extra.dist import OOB
@@ -248,7 +283,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
 
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
   initial_div_factor = 1e16
-  final_lr_ratio = 0.02199
+  final_lr_ratio = 0.0215
   pct_start = hyp['opt']['percent_start']
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']     ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'] ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
@@ -299,6 +334,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   # https://www.anandtech.com/show/16727/nvidia-announces-geforce-rtx-3080-ti-3070-ti-upgraded-cards-coming-in-june
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
 
+  model_ema = None
   best_eval = -1
   i = 0
   batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
@@ -343,6 +379,18 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
     loss = train_step_jitted(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
     et = time.monotonic()
     loss_cpu = loss.numpy()
+    # EMA for network weights
+    if i > hyp['ema']['epochs']:
+      if model_ema is None:
+        model_ema = modelEMA(W, model)
+        # print(get_state_dict(model).values(), sep='\n')
+        continue
+      model_ema.update(model, 0.9)
+      # model_ema.update(get_state_dict(model_ema.net_ema).values(), model, 0.9)
+        # print("current")
+        # print(model.net[0].weight.numpy().ravel())
+        # print("ema")
+        # print(model_ema.net_ema.net[0].weight.numpy().ravel())
     cl = time.monotonic()
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
