@@ -45,8 +45,7 @@ hyp = {
       'pad_amount': 2
   },
   'ema': {
-      'epochs': 5,
-      # 'epochs': 196,
+      'epochs': 196,
       'decay_base': .95,
       'decay_pow': 3.,
       'every_n_steps': 5,
@@ -308,12 +307,13 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
       lr_scheduler[1].step()
     return loss.realize()
 
-  @TinyJit
-  def eval_step_jitted(model, X, Y):
+  def eval_step_jit(model, X, Y):
     out = model(X, training=False)
     loss = cross_entropy(out, Y, reduction='mean')
     correct = out.argmax(axis=1) == Y.argmax(axis=1)
     return correct.realize(), loss.realize()
+  eval_jitted     = TinyJit(eval_step_jit)
+  eval_ema_jitted = TinyJit(eval_step_jit)
 
   # 97 steps in 2 seconds = 20ms / step  Tensor.training = True
 
@@ -341,17 +341,17 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
         if getenv("DIST"):
           Xt, Yt = Xt.chunk(min(world_size, 5), 0)[min(rank, 4)], Yt.chunk(min(world_size, 5), 0)[min(rank, 4)]
 
-        correct, loss = eval_step_jitted(model, Xt, Yt)
+        correct, loss = eval_jitted(model, Xt, Yt)
         losses.append(loss.numpy().tolist())
         corrects.extend(correct.numpy().tolist())
-
-        correct, loss = eval_step_jitted(model_ema, Xt, Yt)
-        losses_ema.append(loss.numpy().tolist())
-        corrects_ema.extend(correct.numpy().tolist())
+        if model_ema:
+          correct, loss = eval_ema_jitted(model_ema, Xt, Yt)
+          losses_ema.append(loss.numpy().tolist())
+          corrects_ema.extend(correct.numpy().tolist())
 
       # collect accuracy across ranks
       correct_sum, correct_len = sum(corrects), len(corrects)
-      correct_sum_ema, correct_len_ema = sum(corrects_ema), len(corrects_ema)
+      if model_ema: correct_sum_ema, correct_len_ema = sum(corrects_ema), len(corrects_ema)
       if getenv("DIST"):
         if rank == 0:
           for j in range(1, min(world_size, 5)):
@@ -364,11 +364,12 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
       # only rank 0 prints
       if rank == 0:
         acc = correct_sum/correct_len*100.0
-        acc_ema = correct_sum_ema/correct_len_ema*100.0
+        if model_ema: acc_ema = correct_sum_ema/correct_len_ema*100.0
         if acc > best_eval:
           best_eval = acc
           print(f"eval     {correct_sum}/{correct_len} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
-          print(f"eval ema {correct_sum_ema}/{correct_len_ema} {acc_ema:.2f}%, {(sum(losses_ema)/len(losses_ema)):7.2f} val_loss STEP={i}")
+          if model_ema: print(f"eval ema {correct_sum_ema}/{correct_len_ema} {acc_ema:.2f}%, {(sum(losses_ema)/len(losses_ema)):7.2f} val_loss STEP={i}")
+
     if STEPS == 0 or i==STEPS: break
     X, Y = next(batcher)
     # further split batch if distributed
@@ -380,11 +381,10 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
     et = time.monotonic()
     loss_cpu = loss.numpy()
     # EMA for network weights
-    if i > hyp['ema']['epochs']:
+    if i > hyp['ema']['epochs'] and i % hyp['ema']['every_n_steps'] == 0:
       if model_ema is None:
         model_ema = modelEMA(W, model)
-        continue
-      model_ema.update(model, 0.9)
+      model_ema.update(model, 0.5)
     cl = time.monotonic()
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
