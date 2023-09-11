@@ -17,7 +17,9 @@ torch_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
   TernaryOps.MULACC: einsum_mulacc(lambda s,a,b: torch.einsum(s, a.float(), b.float()).type(torch.promote_types(a.dtype, b.dtype)), lambda x: x.stride(), lambda x,s: x.expand(s)),
   TernaryOps.WHERE: lambda x, y, z: torch.where(x != 0, y, z),
   MovementOps.STRIDE: lambda x, arg: x[tuple(slice(None, None, abs(i)) for i in arg)].flip([i for i,a in enumerate(arg) if a < 0]),
-  MovementOps.EXPAND: lambda x, arg: x.expand(arg), MovementOps.PERMUTE: lambda x, arg: x.permute(arg)
+  MovementOps.EXPAND: lambda x, arg: x.expand(arg), MovementOps.PERMUTE: lambda x, arg: x.permute(arg),
+  MovementOps.AS_STRIDED: lambda x, arg: torch.as_strided(x.contiguous(), arg[0], tuple(abs(i) for i in arg[1]),
+                                                          arg[2] + sum((s-1)*a if a < 0 else 0 for (s,a) in zip(arg[0], arg[1]))).flip([i for i,a in enumerate(arg[1]) if a < 0])
 }}
 
 class RawTorchBuffer(RawBuffer):

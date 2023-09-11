@@ -13,7 +13,7 @@ class UnaryOps(Enum): NOOP = auto(); EXP2 = auto(); LOG2 = auto(); CAST = auto()
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class TernaryOps(Enum): MULACC = auto(); WHERE = auto() # noqa: E702
-class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
+class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
 class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto() # noqa: E702
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps]
@@ -88,8 +88,20 @@ Device = _Device()
 # **************** for Interpreted Buffers ****************
 
 class Interpreted:
-  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_lazybuffer=lambda x: x.realized, to_underlying=lambda x: x._buf, from_underlying=None):
-    self.buffer, self.fxn_for_op, self.from_lazybuffer, self.to_underlying = buffer, fxn_for_op, from_lazybuffer, to_underlying
+  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_lazybuffer=None, to_underlying=lambda x: x._buf, from_underlying=None):
+    self.buffer, self.fxn_for_op, self.to_underlying = buffer, fxn_for_op, to_underlying
+    def from_lazybuffer_function(x):
+      real, st = x.realized, x.st
+      st.simplify()   # TODO: this is generic for Compiled too
+      ret = self.to_underlying(real)
+      for v in st.views:
+        if v.mask is not None:
+          ret = self.fxn_for_op[MovementOps.AS_STRIDED](ret, (tuple(y-x for x,y in v.mask), v.strides, v.offset + sum(x*st for (x,_),st in zip(v.mask, v.strides))))
+          ret = self.fxn_for_op[MovementOps.PAD](ret, tuple((x,s-y) for (x,y),s in zip(v.mask, v.shape)))
+        else:
+          ret = self.fxn_for_op[MovementOps.AS_STRIDED](ret, (v.shape, v.strides, v.offset))
+      return self.from_underlying(ret)
+    self.from_lazybuffer = from_lazybuffer if from_lazybuffer is not None else from_lazybuffer_function
     self.from_underlying = buffer if from_underlying is None else from_underlying
     self.synchronize = lambda: None
     self.codegen = None

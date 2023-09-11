@@ -38,6 +38,7 @@ numpy_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
   BinaryOps.DIV: lambda x, y: np.divide(*match_types(x, y)), UnaryOps.SQRT: np.sqrt,
   MovementOps.PERMUTE: lambda x, order: x.transpose(order), MovementOps.PAD: np.pad, MovementOps.EXPAND: np.broadcast_to,
   MovementOps.STRIDE: lambda x, arg: x[tuple(slice(None, None, i) for i in arg)],
+  MovementOps.AS_STRIDED: lambda x, arg: np.ndarray(arg[0], buffer=np.require(x, requirements='C'), dtype=x.dtype, offset=arg[2]*x.dtype.itemsize, strides=tuple(y*x.dtype.itemsize for y in arg[1])),
   TernaryOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, *match_types(a.copy(), b.copy()), optimize=True), lambda x: x.strides, np.broadcast_to),
   TernaryOps.WHERE: np.where,
 }}
@@ -47,19 +48,4 @@ class RawNumpyBuffer(RawBuffer):
   @classmethod
   def fromCPU(cls, x): return cls(x.size, dtypes.from_np(x.dtype), x)
   def toCPU(self): return self._buf
-def apply_shapetracker(x) -> RawNumpyBuffer:
-  real, st = x.realized, x.st
-  st.simplify()   # TODO: this is generic
-  ret = real._buf
-  for v in st.views:
-    real_buf = np.require(ret, requirements='C')  # if this is non contig on the first one, how did it happen?
-    if v.mask is not None:
-      ret = np.ndarray(tuple(y-x for x,y in v.mask), buffer=real_buf, dtype=real.dtype.np,
-                       offset=(v.offset + sum(x*st for (x,_),st in zip(v.mask, v.strides)))*real.dtype.itemsize,
-                       strides=tuple(x*real.dtype.itemsize for x in v.strides))
-      ret = np.pad(ret, tuple((x,s-y) for (x,y),s in zip(v.mask, v.shape)))
-    else:
-      ret = np.ndarray(v.shape, buffer=real_buf, dtype=real.dtype.np,
-                       offset=v.offset*real.dtype.itemsize, strides=tuple(x*real.dtype.itemsize for x in v.strides))
-  return RawNumpyBuffer.fromCPU(ret)
-CPUBuffer = Interpreted(RawNumpyBuffer, numpy_fxn_for_op, from_lazybuffer=apply_shapetracker, from_underlying=RawNumpyBuffer.fromCPU)
+CPUBuffer = Interpreted(RawNumpyBuffer, numpy_fxn_for_op, from_underlying=RawNumpyBuffer.fromCPU)
