@@ -148,6 +148,8 @@ class LazyBuffer:
         self.op = _ast_reduceops(self)
         if self.op.op in BinaryOps: self.op = _ast_binaryops(self)
       elif self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
+      # TODO: prerealize MovementOps to share the underlying buffer
+      elif self.optype is MovementOps: self.realized = self.op.src[0].realize().realized
       # run the ast if we still have to, and log the op
       if not self.realized:
         for x in self.op.buffers: x.realize()
