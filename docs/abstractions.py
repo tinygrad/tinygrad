@@ -326,10 +326,10 @@ void E_1(float* data0) {
 # remember how I said you don't have to write the MovementOps for CompiledBuffers?
 # that's all thanks to ShapeTracker!
 # ShapeTracker tracks the indices into the RawBuffer
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.shapetracker import ShapeTracker, View
 
 # create a virtual (10, 10) Tensor. this is just a shape, there's no actual tensor
-a = ShapeTracker((10, 10))
+a = ShapeTracker((View.create((10, 10)),))
 
 # you'll see it has one view. the (10, 1 are the strides)
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (10, 1), 0)])
