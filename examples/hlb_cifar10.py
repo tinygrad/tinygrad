@@ -46,7 +46,7 @@ hyp = {
   },
   'ema': {
       'epochs': 5,
-      # 'epochs': 196, 
+      # 'epochs': 196,
       'decay_base': .95,
       'decay_pow': 3.,
       'every_n_steps': 5,
@@ -222,7 +222,7 @@ class modelEMA():
       net_ema_param.requires_grad = False
       net_ema_param.assign(net_param.detach().realize())
 
-  def __call__(self, x:Tensor)
+  def __call__(self, x:Tensor, training=False):
     return self.net_ema(x)
 
   @TinyJit
@@ -233,15 +233,6 @@ class modelEMA():
       if not ("num_batches_tracked" in param_name) and not ("running" in param_name):
         net_ema_param.assign(net_ema_param.detach()*decay + current_net_param.detach()*(1-decay)).realize()
     Tensor.no_grad = False
-
-# @TinyJit
-# def model_ema_update(net_ema, net_current, decay):
-#   # TODO with Tensor.no_grad()
-#   Tensor.no_grad = True
-#   for net_ema_param, (param_name, current_net_param) in zip(net_ema, get_state_dict(net_current).items()):
-#     if not ("num_batches_tracked" in param_name) and not ("running" in param_name):
-#       net_ema_param.assign(net_ema_param.detach()*decay + current_net_param.detach()*(1-decay)).realize()
-#   Tensor.no_grad = False
 
 def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   # this import needs to be done here because this is running in a subprocess
@@ -342,7 +333,9 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
     if i%100 == 0 and i > 1:
       # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
       corrects = []
+      corrects_ema = []
       losses = []
+      losses_ema = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed, is_train=False):
         # further split batch if distributed
         if getenv("DIST"):
@@ -352,8 +345,13 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
         losses.append(loss.numpy().tolist())
         corrects.extend(correct.numpy().tolist())
 
+        correct, loss = eval_step_jitted(model_ema, Xt, Yt)
+        losses_ema.append(loss.numpy().tolist())
+        corrects_ema.extend(correct.numpy().tolist())
+
       # collect accuracy across ranks
       correct_sum, correct_len = sum(corrects), len(corrects)
+      correct_sum_ema, correct_len_ema = sum(corrects_ema), len(corrects_ema)
       if getenv("DIST"):
         if rank == 0:
           for j in range(1, min(world_size, 5)):
@@ -366,9 +364,11 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
       # only rank 0 prints
       if rank == 0:
         acc = correct_sum/correct_len*100.0
+        acc_ema = correct_sum_ema/correct_len_ema*100.0
         if acc > best_eval:
           best_eval = acc
-          print(f"eval {correct_sum}/{correct_len} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
+          print(f"eval     {correct_sum}/{correct_len} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
+          print(f"eval ema {correct_sum_ema}/{correct_len_ema} {acc_ema:.2f}%, {(sum(losses_ema)/len(losses_ema)):7.2f} val_loss STEP={i}")
     if STEPS == 0 or i==STEPS: break
     X, Y = next(batcher)
     # further split batch if distributed
@@ -383,14 +383,8 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
     if i > hyp['ema']['epochs']:
       if model_ema is None:
         model_ema = modelEMA(W, model)
-        # print(get_state_dict(model).values(), sep='\n')
         continue
       model_ema.update(model, 0.9)
-      # model_ema.update(get_state_dict(model_ema.net_ema).values(), model, 0.9)
-        # print("current")
-        # print(model.net[0].weight.numpy().ravel())
-        # print("ema")
-        # print(model_ema.net_ema.net[0].weight.numpy().ravel())
     cl = time.monotonic()
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
