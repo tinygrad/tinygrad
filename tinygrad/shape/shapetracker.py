@@ -9,7 +9,7 @@ from tinygrad.shape.view import View, sint
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if vm2.mask: return None  # this isn't supported yet
-  mst = ShapeTracker(vm1.shape, [vm2, vm1])
+  mst = ShapeTracker(vm1.shape, (vm2, vm1))
   strides = mst.real_strides()
   if None in strides: return None
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), mst.real_offset(), vm1.mask)
@@ -26,10 +26,10 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
 
 class ShapeTracker:
   __slots__ = "views"
-  def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node,int], ...]], views:Optional[List[View]]=None):
-    self.views: List[View] = views if views is not None else [*shape.views] if isinstance(shape, ShapeTracker) else [View.create(shape)]
+  def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node,int], ...]], views:Optional[Tuple[View, ...]]=None):
+    self.views: Tuple[View, ...] = tuple(views) if views is not None else tuple([*shape.views]) if isinstance(shape, ShapeTracker) else (View.create(shape),)
   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
-  def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
+  def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, tuple([*self.views]))
 
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
@@ -40,7 +40,7 @@ class ShapeTracker:
   def shape(self) -> Tuple[int, ...]: return self.views[-1].shape # type: ignore
 
   @property
-  def key(self) -> Tuple[View, ...]: return tuple(self.views)
+  def key(self) -> Tuple[View, ...]: return self.views
 
   # this is the real size (ish)
   def size(self): return prod([s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])
@@ -82,7 +82,7 @@ class ShapeTracker:
       new_view = merge_views(self.views[-2], self.views[-1])
       if new_view:
         if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
-        self.views = self.views[:-2] + [new_view]
+        self.views = self.views[:-2] + (new_view,)
         self.simplify()
 
   def expr_idxs(self, idxs=None):
@@ -102,36 +102,36 @@ class ShapeTracker:
   # *** under this line are the movement ops ***
 
   def pad(self, arg: Tuple[Tuple[int, int], ...]):
-    self.views[-1] = self.views[-1].pad(arg)
+    self.views = self.views[:-1] + (self.views[-1].pad(arg),)
     return self
 
   def shrink(self, arg: Tuple[Tuple[int, int], ...]):
-    self.views[-1] = self.views[-1].shrink(arg)
+    self.views = self.views[:-1] + (self.views[-1].shrink(arg),)
     return self
 
   def expand(self, new_shape: Tuple[sint, ...]):
-    self.views[-1] = self.views[-1].expand(new_shape)
+    self.views = self.views[:-1] + (self.views[-1].expand(new_shape),)
     return self
 
   def permute(self, axis: Tuple[int, ...]):
-    self.views[-1] = self.views[-1].permute(axis)
+    self.views = self.views[:-1] + (self.views[-1].permute(axis),)
     return self
 
   def stride(self, mul: Tuple[int, ...]):
-    self.views[-1] = self.views[-1].stride(mul)
+    self.views = self.views[:-1] + (self.views[-1].stride(mul),)
     return self
 
   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
     new_view = self.views[-1].reshape(new_shape)
     if new_view is None:
-      extra_view = View.create(new_shape)
+      extra_view: View = View.create(new_shape)
       # last chance to merge. TODO: move into View
       if (merged_view := merge_views(self.views[-1], extra_view)) is not None:
-        self.views[-1] = merged_view
+        self.views = self.views[:-1] + (merged_view,)
       else:
-        self.views.append(extra_view)
+        self.views = self.views + (extra_view,)
     else:
-      self.views[-1] = new_view
+      self.views = self.views[:-1] + (new_view,)
     return self
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
