@@ -9,6 +9,13 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if geten
 type_map = {torch.float64: dtypes.float64, torch.float16: dtypes.float16, torch.float32: dtypes.float32, torch.int8: dtypes.int8, torch.int32: dtypes.int32, torch.int64: dtypes.int64, torch.uint8: dtypes.uint8, torch.bool: dtypes.bool}
 inverse_type_map = {v:k for k,v in type_map.items()}
 
+def as_strided(x, arg):
+  if any(i < 0 for i in arg[1]):
+    return torch.as_strided(x.contiguous(), arg[0], tuple(abs(i) for i in arg[1]),
+      arg[2] + sum((s-1)*a if a < 0 else 0 for (s,a) in zip(arg[0], arg[1]))).flip([i for i,a in enumerate(arg[1]) if a < 0])
+  return torch.as_strided(x.contiguous(), arg[0], arg[1], arg[2])
+
+
 torch_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
   UnaryOps.NOOP: lambda x: x.contiguous(), UnaryOps.SQRT: lambda x: x.sqrt(), UnaryOps.EXP2: lambda x: x.exp2(), UnaryOps.LOG2: lambda x: x.log2(), UnaryOps.SIN: torch.sin,
   UnaryOps.CAST: lambda x,y: (x.view if y[1] else x.type)(next(k for k,v in type_map.items() if v==y[0])),
@@ -18,8 +25,7 @@ torch_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
   TernaryOps.WHERE: lambda x, y, z: torch.where(x != 0, y, z),
   MovementOps.STRIDE: lambda x, arg: x[tuple(slice(None, None, abs(i)) for i in arg)].flip([i for i,a in enumerate(arg) if a < 0]),
   MovementOps.EXPAND: lambda x, arg: x.expand(arg), MovementOps.PERMUTE: lambda x, arg: x.permute(arg),
-  MovementOps.AS_STRIDED: lambda x, arg: torch.as_strided(x.contiguous(), arg[0], tuple(abs(i) for i in arg[1]),
-                                                          arg[2] + sum((s-1)*a if a < 0 else 0 for (s,a) in zip(arg[0], arg[1]))).flip([i for i,a in enumerate(arg[1]) if a < 0])
+  MovementOps.AS_STRIDED: as_strided
 }}
 
 class RawTorchBuffer(RawBuffer):
