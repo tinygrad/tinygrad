@@ -34,7 +34,7 @@ class TestSymbolic(unittest.TestCase):
     st = t.lazydata.st
     assert st.shape == (3, i+j+k)
     assert st.real_strides() == (i+j+k, 1)
-    t = Tensor.rand(i, 3).reshape(i, 3).cat(Tensor.rand(3, 3).reshape(i, 3), dim=0).cat(Tensor.rand(3, 3), dim=0)
+    t = Tensor.rand(3, 3).reshape(i, 3).cat(Tensor.rand(3, 3).reshape(i, 3), dim=0).cat(Tensor.rand(3, 3), dim=0)
     st = t.lazydata.st
     assert st.shape == (2*i+3, 3)
     assert st.real_strides() == (3, 1)

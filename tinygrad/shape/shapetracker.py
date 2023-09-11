@@ -3,8 +3,8 @@ from __future__ import annotations
 import functools
 from typing import Tuple, Union, List, Optional, cast
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode
-from tinygrad.shape.view import View, sint
+from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, sint
+from tinygrad.shape.view import View
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
@@ -26,7 +26,7 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
 
 class ShapeTracker:
   __slots__ = "views"
-  def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node,int], ...]], views:Optional[List[View]]=None):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[sint, ...]], views:Optional[List[View]]=None):
     self.views: List[View] = views if views is not None else [*shape.views] if isinstance(shape, ShapeTracker) else [View.create(shape)]
   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
   def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
@@ -34,10 +34,8 @@ class ShapeTracker:
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
 
-  # NOTE: real type is Tuple[Union[Node, int], ...] but mypy complains about prod(shape)
-  # TODO: this needs to be fixed
   @property
-  def shape(self) -> Tuple[int, ...]: return self.views[-1].shape # type: ignore
+  def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
 
   @property
   def key(self) -> Tuple[View, ...]: return tuple(self.views)
@@ -53,11 +51,11 @@ class ShapeTracker:
     return real_offset.b
 
   # NOTE: if a stride is not always valid, it will be None
-  def real_strides(self, ignore_valid=False) -> Tuple[Optional[Union[Node, int]], ...]:
+  def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx, valid = self.expr_idxs(idxs)
-    ret: List[Optional[Union[Node, int]]] = [None] * len(self.views[-1].shape)
+    ret: List[Optional[sint]] = [None] * len(self.views[-1].shape)
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
       if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable) and this_dim.a in idxs:
         ret[idxs.index(this_dim.a)] = this_dim.b
@@ -121,7 +119,7 @@ class ShapeTracker:
     self.views[-1] = self.views[-1].stride(mul)
     return self
 
-  def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
+  def reshape(self, new_shape: Tuple[sint, ...]):
     new_view = self.views[-1].reshape(new_shape)
     if new_view is None:
       extra_view = View.create(new_shape)
@@ -136,7 +134,7 @@ class ShapeTracker:
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 # TODO: if we remove movementops from lazy.py we can delete this
-def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Optional[List[List[int]]]:
+def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> Optional[List[List[int]]]:
   # Pre-allocate all groups.
   axis_groups: List[List[int]] = [[] for _ in range(len(new_shape))]
   # Index for new_shape and axis_groups.
