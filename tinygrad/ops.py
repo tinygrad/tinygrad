@@ -87,28 +87,27 @@ Device = _Device()
 
 # **************** for Interpreted Buffers ****************
 
+def apply_shapetracker(fxn_for_op, ret, st):
+  st.simplify()   # TODO: this is generic for Compiled too
+  for v in st.views:
+    if v.mask is not None:
+      ret = fxn_for_op[MovementOps.AS_STRIDED](ret, (tuple(y-x for x,y in v.mask), v.strides, v.offset + sum(x*st for (x,_),st in zip(v.mask, v.strides))))
+      ret = fxn_for_op[MovementOps.PAD](ret, tuple((x,s-y) for (x,y),s in zip(v.mask, v.shape)))
+    else:
+      ret = fxn_for_op[MovementOps.AS_STRIDED](ret, (v.shape, v.strides, v.offset))
+  return ret
+
 class Interpreted:
   def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_lazybuffer=None, to_underlying=lambda x: x._buf, from_underlying=None):
     self.buffer, self.fxn_for_op, self.to_underlying = buffer, fxn_for_op, to_underlying
-    def from_lazybuffer_function(x):
-      real, st = x.realized, x.st
-      st.simplify()   # TODO: this is generic for Compiled too
-      ret = self.to_underlying(real)
-      for v in st.views:
-        if v.mask is not None:
-          ret = self.fxn_for_op[MovementOps.AS_STRIDED](ret, (tuple(y-x for x,y in v.mask), v.strides, v.offset + sum(x*st for (x,_),st in zip(v.mask, v.strides))))
-          ret = self.fxn_for_op[MovementOps.PAD](ret, tuple((x,s-y) for (x,y),s in zip(v.mask, v.shape)))
-        else:
-          ret = self.fxn_for_op[MovementOps.AS_STRIDED](ret, (v.shape, v.strides, v.offset))
-      return self.from_underlying(ret)
-    self.from_lazybuffer, self.uses_movement = (from_lazybuffer, True) if from_lazybuffer is not None else (from_lazybuffer_function, False)
+    self.from_lazybuffer = from_lazybuffer if from_lazybuffer is not None else lambda x: self.from_underlying(apply_shapetracker(self.fxn_for_op, self.to_underlying(x.realized), x.st))
     self.from_underlying = buffer if from_underlying is None else from_underlying
     self.synchronize = lambda: None
     self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, context=None, **kwargs):
     # all movementops do nothing in a Compiled buffer!
-    if not self.uses_movement and ast.op in MovementOps and ast.src[0].__class__ is not LazyOp and ast.src[0].realized: return ast.src[0].realized
+    if ast.op in MovementOps and ast.src[0].__class__ is not LazyOp and ast.src[0].realized: return ast.src[0].realized
 
     if TernaryOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
