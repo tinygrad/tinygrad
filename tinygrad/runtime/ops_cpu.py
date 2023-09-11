@@ -52,11 +52,12 @@ def apply_st(x):
   st.simplify()
   ret = real._buf
   for v in st.views:
-    #assert v.mask is None
     real_buf = np.require(ret, requirements='C')  # if this is non contig, how did it happen?
     real_strides = tuple(x*real.dtype.itemsize for x in v.strides)
     real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-    ret = np.ndarray(real_shape, buffer=real_buf, dtype=real.dtype.np, offset=v.offset, strides=real_strides)
+    real_offset = v.offset * real.dtype.itemsize
+    if v.mask is not None: real_offset += sum(x*st for (x,_),st in zip(v.mask, real_strides))
+    ret = np.ndarray(real_shape, buffer=real_buf, dtype=real.dtype.np, offset=real_offset, strides=real_strides)
     if v.mask is not None: ret = np.pad(ret, tuple((x,s-y) for (x,y),s in zip(v.mask, v.shape)))
   return RawNumpyBuffer.fromCPU(ret)
 CPUBuffer = Interpreted(RawNumpyBuffer, numpy_fxn_for_op, from_lazybuffer=apply_st, from_underlying=RawNumpyBuffer.fromCPU)
