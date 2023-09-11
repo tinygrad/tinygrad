@@ -100,8 +100,8 @@ def apply_shapetracker(fxn_for_op, ret, st):
 class Interpreted:
   def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_lazybuffer=None, to_underlying=lambda x: x._buf, from_underlying=None):
     self.buffer, self.fxn_for_op, self.to_underlying = buffer, fxn_for_op, to_underlying
-    self.from_lazybuffer = from_lazybuffer if from_lazybuffer is not None else lambda x: self.from_underlying(apply_shapetracker(self.fxn_for_op, self.to_underlying(x.realized), x.st))
     self.from_underlying = buffer if from_underlying is None else from_underlying
+    self.from_lazybuffer = from_lazybuffer if from_lazybuffer is not None else lambda x: self.from_underlying(apply_shapetracker(self.fxn_for_op, self.to_underlying(x.realized), x.st))
     self.synchronize = lambda: None
     self.codegen = None
 
