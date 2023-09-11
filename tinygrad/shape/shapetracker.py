@@ -9,7 +9,7 @@ from tinygrad.shape.view import View, sint
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if vm2.mask: return None  # this isn't supported yet
-  mst = ShapeTracker(vm1.shape, [vm2, vm1])
+  mst = ShapeTracker((vm2, vm1))
   strides = mst.real_strides()
   if None in strides: return None
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), mst.real_offset(), vm1.mask)
@@ -26,10 +26,8 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
 
 class ShapeTracker:
   __slots__ = "views"
-  def __init__(self, shape:Union[ShapeTracker, Tuple[Union[Node,int], ...]], views:Optional[List[View]]=None):
-    self.views: List[View] = views if views is not None else [*shape.views] if isinstance(shape, ShapeTracker) else [View.create(shape)]
+  def __init__(self, views:Tuple[View,...]): self.views: List[View] = list(views)
   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
-  def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
 
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
