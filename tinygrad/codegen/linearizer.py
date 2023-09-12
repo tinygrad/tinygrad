@@ -21,30 +21,31 @@ class UOps(Enum):
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
-def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Node, Node]:
+def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtNode]) -> Tuple[Tuple[Node, Node], Node]:
 
   idy = (idxy//(4*base_shape[1]))
 
   if valid.min == 0:
     nodes = [valid] if isinstance(valid, LtNode) else valid.nodes
-
     var_dict = dict()
+
     for nd in nodes:
-      init_var = nd.vars()[0]
+      init_var: Variable = nd.vars()[0]
       if (name := sym_render(init_var)) not in var_dict: var_dict[name] = (init_var, [init_var.min, init_var.max])
       var = var_dict[name][1]
       if isinstance(nd.a, MulNode):
         if nd.a.b == -1:
-          var[0] = nd.b + 1 if var[1] != ((-nd.b) + 1) else var[0]
+          var[0] = -nd.b + 1
         elif nd.a.b < 0:
           var[0] = abs(nd.b // nd.a.b) + 1 if nd.b % nd.a.b == 0 else abs(nd.b // nd.a.b)
         elif nd.a.b > 0:
           var[1] = nd.b // nd.a.b - 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
       elif isinstance(nd.a, Variable):
-        var[1] = nd.b - 1 if var[0] != (nd.b - 1) else var[1]
+        var[1] = nd.b - 1
 
-    valid = valid.substitute({v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items()})
-    idxy = idxy.substitute({v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items()})
+    sub_dict = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items() if mn != mx}
+    valid = valid.substitute(sub_dict)
+    idxy = idxy.substitute(sub_dict)
     mid_var, b = (idxy//4), base_shape[1]
     idx = mid_var - b*(mid_var//b)
     idy = (idxy // (4 * base_shape[1]))
