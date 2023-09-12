@@ -27,23 +27,24 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Nod
 
   if valid.min == 0:
     nodes = [valid] if isinstance(valid, LtNode) else valid.nodes
+
     var_dict = dict()
     for nd in nodes:
       init_var = nd.vars()[0]
-      if (anan := sym_render(init_var)) not in var_dict: var_dict[anan] = (init_var, Variable(anan, init_var.min, init_var.max))
-      var = var_dict[anan][1]
+      if (name := sym_render(init_var)) not in var_dict: var_dict[name] = (init_var, [init_var.min, init_var.max])
+      var = var_dict[name][1]
       if isinstance(nd.a, MulNode):
         if nd.a.b == -1:
-          var.min = nd.b + 1 if var.max != ((-nd.b) + 1) else var.min
+          var[0] = nd.b + 1 if var[1] != ((-nd.b) + 1) else var[0]
         elif nd.a.b < 0:
-          var.min = abs(nd.b // nd.a.b) + 1 if nd.b % nd.a.b == 0 else abs(nd.b // nd.a.b)
+          var[0] = abs(nd.b // nd.a.b) + 1 if nd.b % nd.a.b == 0 else abs(nd.b // nd.a.b)
         elif nd.a.b > 0:
-          var.max = nd.b // nd.a.b - 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
+          var[1] = nd.b // nd.a.b - 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
       elif isinstance(nd.a, Variable):
-        var.max = nd.b - 1 if var.min != (nd.b - 1) else var.max
+        var[1] = nd.b - 1 if var[0] != (nd.b - 1) else var[1]
 
-    valid = valid.substitute({v:n for v, n in var_dict.values()})
-    idxy = idxy.substitute({v:n for v, n in var_dict.values()})
+    valid = valid.substitute({v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items()})
+    idxy = idxy.substitute({v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items()})
     mid_var, b = (idxy//4), base_shape[1]
     idx = mid_var - b*(mid_var//b)
     idy = (idxy // (4 * base_shape[1]))
@@ -181,7 +182,7 @@ class Linearizer(OptimizedKernel):
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType):
-        idx, valid = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+        idx, _ = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         rendered_idx = self.uop(UOps.CAST, dtypes._int2, tuple(x.render(self.render_ops, self) for x in idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)

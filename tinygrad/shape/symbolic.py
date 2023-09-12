@@ -34,11 +34,9 @@ class Node:
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
 
-  #@functools.cached_property
-  @property
+  @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
-  #@functools.cached_property
-  @property
+  @functools.cached_property
   def hash(self) -> int: return hash(self.key)
   def __repr__(self): return "<"+self.key+">"
   def __hash__(self): return self.hash
