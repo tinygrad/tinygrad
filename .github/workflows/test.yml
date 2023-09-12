@@ -251,9 +251,8 @@ jobs:
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
-          git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
+          git clone --recurse-submodules --single-branch --branch tinygrad https://github.com/SzymonOzog/gpuocelot.git ${{ github.workspace }}/gpuocelot
           cd ${{ github.workspace }}/gpuocelot/ocelot
-          git checkout 19626fc00b6ee321638c3111074269c69050e091
           mkdir build
           cd build
           cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
