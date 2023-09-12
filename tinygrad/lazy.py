@@ -167,14 +167,11 @@ class LazyBuffer:
         count_kernel_args = lambda lz : len(list(filter(buf_is_kernel_arg, dedup(lz.buffers))))
 
         if  count_kernel_args(self.op) > MAXBUFFERS:
-          print("to many kernel args")
 
           target_idx,target = sorted(enumerate([data for data in self.op.src]),key=lambda x: -count_kernel_args(x[1]))[0]
           st = ShapeTracker(get_lazyop_info(target).shape)
-          print(target)
           op = target if target.__class__ == LazyOp else target.op
           res = LazyBuffer(self.device,st,type(op),op,self.dtype,self.var_vals)
-          res.realize()
           self.op.src = tuple(res if i == target_idx else x for i,x in enumerate(self.op.src))
           return self.realize()
 
