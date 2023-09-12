@@ -22,9 +22,9 @@ JIT = getenv("JIT", 0 if CI else 1)
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
-  freqs = 1.0 / (theta ** (np.arange(0, dim, 2, dtype=np.float32)[:(dim // 2)] / dim))
-  freqs = np.outer(np.arange(end, dtype=np.float32), freqs)
-  return np.stack([np.cos(freqs), np.sin(freqs)], axis=-1).reshape(1, end, 1, dim//2, 2)
+  freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
+  freqs = Tensor.arange(end).unsqueeze(dim=1)*freqs.unsqueeze(dim=0)
+  return Tensor.stack([Tensor.cos(freqs), Tensor.sin(freqs)], dim=-1).reshape(1, end, 1, dim//2, 2)
 
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
 def complex_mult(A, c, d):
@@ -82,7 +82,7 @@ class Attention:
       keys, values = xk, xv
     else:
       assert cache_k is not None and cache_v is not None, "no cache"
-      assert start_pos == sym_infer(cache_k.shape[1], cache_k.lazydata.st.var_vals) == sym_infer(cache_v.shape[1], cache_v.lazydata.st.var_vals), f"cache has wrong shape, not ({start_pos} == {sym_infer(cache_k.shape[1], cache_k.lazydata.st.var_vals)} == {sym_infer(cache_v.shape[1], cache_v.lazydata.st.var_vals)})"
+      assert start_pos == sym_infer(cache_k.shape[1], cache_k.lazydata.var_vals) == sym_infer(cache_v.shape[1], cache_v.lazydata.var_vals), f"cache has wrong shape, not ({start_pos} == {sym_infer(cache_k.shape[1], cache_k.lazydata.var_vals)} == {sym_infer(cache_v.shape[1], cache_v.lazydata.var_vals)})"
       assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
       keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
 
@@ -121,12 +121,12 @@ class TransformerBlock:
       cache_k = cache_k.reshape(cache_k.shape[0], pos, cache_k.shape[2], cache_k.shape[3])
       cache_v = cache_v.reshape(cache_v.shape[0], pos, cache_v.shape[2], cache_v.shape[3])
       # need this because we don't reshape back to int shape in the jitted path and we don't have the correct var_vars in cache
-      cache_k.lazydata.st.var_vals[pos] = start_pos
-      cache_v.lazydata.st.var_vals[pos] = start_pos
+      cache_k.lazydata.var_vals[pos] = start_pos
+      cache_v.lazydata.var_vals[pos] = start_pos
 
       # get only the part of freqs_cis that we are using.
       freqs_cis = freqs_cis.shrink(((0, freqs_cis.shape[0]), (pos, pos+seqlen), (0, freqs_cis.shape[2]), (0, freqs_cis.shape[3]), (0, freqs_cis.shape[4])))
-      freqs_cis.lazydata.st.var_vals[pos] = start_pos
+      freqs_cis.lazydata.var_vals[pos] = start_pos
     else:
       freqs_cis = freqs_cis.shrink(((0, freqs_cis.shape[0]), (start_pos, start_pos+seqlen), (0, freqs_cis.shape[2]), (0, freqs_cis.shape[3]), (0, freqs_cis.shape[4])))
 
@@ -141,7 +141,7 @@ class Transformer:
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = Embedding(vocab_size, dim)
     self.output = linear(dim, vocab_size, bias=False)
-    self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2, rope_theta))
+    self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_seq_len * 2, rope_theta)
     self.norm_output = lambda x: self.output(self.norm(x))
 
     self.tok_embeddings_jitted = TinyJit(lambda x: self.tok_embeddings(x).realize())
@@ -158,7 +158,7 @@ class Transformer:
     if seqlen == 1 and JIT:
       pos = Variable("pos", 1, 1024)
       freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (pos, pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
-      freqs_cis.lazydata.st.var_vals[pos] = start_pos
+      freqs_cis.lazydata.var_vals[pos] = start_pos
       h = self.tok_embeddings_jitted(tokens)
       for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.layers_jitted, self.kv_caches)):
         h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=self.freqs_cis, mask=None, jit_ctx={pos: start_pos})

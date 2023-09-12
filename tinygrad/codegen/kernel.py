@@ -4,7 +4,8 @@ from tinygrad.ops import LazyOp, MovementOps, FlopCounter, get_lazyop_info, Redu
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType
 from tinygrad.runtime.lib import buf_is_kernel_arg
-from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import strides_for_shape
 
 class LocalBuffer(NamedTuple):
   name: str
@@ -24,10 +25,10 @@ class LinearizerOptions(NamedTuple):
   local_max: Optional[List[int]] = None
 
 class Kernel:
-  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, opts:LinearizerOptions):
+  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, opts:Optional[LinearizerOptions]=None):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
-    self.opts = opts
+    self.opts = opts if opts else LinearizerOptions()
 
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)

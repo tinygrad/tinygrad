@@ -61,9 +61,10 @@ class CStyleLanguage(NamedTuple):
       return f"read_imagef({buf_name}, smp, {idx})"
     if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx})"
+    cast = f"({output_dtype.name})" if output_dtype != buf_dtype else ""
     if output_dtype.sz > 1:
-      return f"({output_dtype.name})(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx})))"
-    return f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
+      return f"{cast}(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx})))"
+    return f"{cast}(*({buf_name}+{idx}))" if self.uses_ptr_arithmetic else f"{cast}({buf_name}[{idx}])"
 
   def render_local(self, name:str, size:int):
     return self.smem_prefix + f"float {name}[{size}];"
@@ -79,7 +80,7 @@ class CStyleLanguage(NamedTuple):
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 self.arg_int_prefix if dtype == dtypes._arg_int32 else
                 ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix) for i,(name,dtype) in enumerate(bufs)]
-    prg = ''.join([f"{self.kernel_prefix} void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
+    prg = ''.join([f"{self.kernel_prefix}void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
@@ -101,7 +102,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
   kernel,prekernel = [],[]
   #pend_close = None
   bufs = []
-  depth = 0
+  depth = 1
   def kk(s): kernel.append("  "*depth+s)
 
   c: DefaultDict[str, int] = defaultdict(int)
@@ -165,7 +166,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {r[u]} = {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
       xid = lang.gid if args[1].startswith("g") else lang.lid
-      kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]};")
+      kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
       if args[1].startswith("l"): local_size.append(args[2])
       r[u] = args[1]
     elif uop == UOps.CONST:

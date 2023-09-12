@@ -5,7 +5,7 @@ from tinygrad.helpers import dtypes
 from tinygrad.jit import CacheCollector
 from weakref import ref
 
-class FakeDeviceBuffer():
+class FakeDeviceBuffer:
   def __init__(self, sz, dt, device):
     self.size = sz
     self.dtype = dt
@@ -162,6 +162,46 @@ class TestCacheCollector(unittest.TestCase):
     assert cache[0][1][1] == inps[0], "Input should be on its place."
     assert cache[1][1][2] == inps[1], "Input should be on its place."
     assert get_bufs_count(cache) == 7
+    FAKE_GLOBAL_ALLOCATOR = None
+
+  def test_cache_collector_optimize_when_not_cached_anymore(self):
+    global FAKE_GLOBAL_ALLOCATOR
+    FAKE_GLOBAL_ALLOCATOR = FakeAllocator(256)
+    inps = [FakeBuffer(64, dtypes.float32) for _ in range(2)]
+    CacheCollector.start()
+    # Output buffer here cannot be shared with final output buffer, since we could get a cycle the next step as inps[1] has the same shape and dtype.
+    out = add_to_cache([FakeBuffer(240, dtypes.float32), inps[0]])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), out, inps[1]])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), out])
+    out = add_to_cache([FakeBuffer(240, dtypes.float32), out])
+    out = add_to_cache([FakeBuffer(64, dtypes.float32), out])
+    cache = CacheCollector.finish()
+    assert cache[0][1][1] == inps[0], "Input should be on its place."
+    assert cache[1][1][2] == inps[1], "Input should be on its place."
+    assert cache[-1][1][0] == out, "Output does not match."
+    assert get_bufs_count(cache) == 6, "Should have 6 buffers in total"
+    assert cache[0][1][0] == cache[3][1][0], "Output buffers from 1st and 4th should be the same"
+    FAKE_GLOBAL_ALLOCATOR = None
+
+  def test_cache_collector_mark_output_buffer(self):
+    global FAKE_GLOBAL_ALLOCATOR
+    FAKE_GLOBAL_ALLOCATOR = FakeAllocator(256)
+    output_buffer = FakeBuffer(240, dtypes.float32)
+    inps = [FakeBuffer(64, dtypes.float32) for _ in range(2)]
+    CacheCollector.start()
+    # Output buffer here cannot be shared with final output buffer, since we could get a cycle the next step as inps[1] has the same shape and dtype.
+    out = add_to_cache([FakeBuffer(240, dtypes.float32), inps[0]])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), out, inps[1]])
+    out = add_to_cache([FakeBuffer(32, dtypes.float32), out])
+    CacheCollector._mark_output_buffer(output_buffer)
+    out = add_to_cache([output_buffer, out])
+    out = add_to_cache([FakeBuffer(64, dtypes.float32), out])
+    cache = CacheCollector.finish()
+    assert cache[0][1][1] == inps[0], "Input should be on its place."
+    assert cache[1][1][2] == inps[1], "Input should be on its place."
+    assert cache[-1][1][0] == out, "Output does not match."
+    assert cache[0][1][0] != cache[3][1][0], "Cannot reuse 4th output buffer, it's an output buffer which might ovewrite itself"
+    assert get_bufs_count(cache) == 7, "Should have 7 buffers in total"
     FAKE_GLOBAL_ALLOCATOR = None
 
 if __name__ == "__main__":

@@ -641,7 +641,7 @@ if __name__ == "__main__":
   for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
     GlobalCounters.reset()
     t.set_description("%3d %3d" % (index, timestep))
-    with Timing("step in ", enabled=args.timing):
+    with Timing("step in ", enabled=args.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
       latent = do_step(latent, Tensor([timestep]), Tensor([index]))
       if args.timing: Device[Device.DEFAULT].synchronize()
   del do_step

@@ -1,8 +1,11 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib
+import os, functools, platform, time, re, contextlib, operator
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any
-from math import prod # noqa: F401 # pylint:disable=unused-import
+
+# TODO: fix types for prod
+#from math import prod # noqa: F401 # pylint:disable=unused-import
+def prod(x:Iterable): return functools.reduce(operator.__mul__, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
