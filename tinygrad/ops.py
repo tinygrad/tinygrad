@@ -174,7 +174,7 @@ class Compiled:
     k.linearize()
     src = self.renderer(k.function_name, k.uops)
     if len(src) == 4:
-      return ASTRunner(k.function_name, src[0], src[1], src[2],display_name=k.display_name, runtime_args={"binary": src[3]}).build(self.runtime)
+      return ASTRunner(k.function_name, src[0], src[1], src[2],display_name=k.display_name, runtime_args=src[3]).build(self.runtime)
     return ASTRunner(k.function_name, src, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                      display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime)
