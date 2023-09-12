@@ -164,7 +164,7 @@ class LazyBuffer:
           self.dtype = dtypes.float32
 
         MAXBUFFERS = 30 if self.device == "METAL" else float("inf")
-        count_kernel_args = lambda lz : len(list(filter(buf_is_kernel_arg, dedup(lz.buffers))))
+        def count_kernel_args (lz) : return len(list(filter(buf_is_kernel_arg, dedup(lz.buffers))))
 
         if  count_kernel_args(self.op) > MAXBUFFERS:
 
