@@ -247,7 +247,7 @@ jobs:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
+          key: ubuntu22.04-gpuocelot-szymonozog-tinygrad
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
