@@ -162,11 +162,11 @@ class LazyBuffer:
           else:
             self.op = LazyOp(UnaryOps.CAST, (self.op,), (dtypes.float32, False))
           self.dtype = dtypes.float32
-          
-        MAXBUFFERS = 30
+
+        MAXBUFFERS = 30 if self.device == "METAL" else float("inf")
         count_kernel_args = lambda lz : len(list(filter(buf_is_kernel_arg, dedup(lz.buffers))))
 
-        if count_kernel_args(self.op) > MAXBUFFERS:
+        if  count_kernel_args(self.op) > MAXBUFFERS:
           print("to many kernel args")
 
           target_idx,target = sorted(enumerate([data for data in self.op.src]),key=lambda x: -count_kernel_args(x[1]))[0]
@@ -175,7 +175,7 @@ class LazyBuffer:
           op = target if target.__class__ == LazyOp else target.op
           res = LazyBuffer(self.device,st,type(op),op,self.dtype,self.var_vals)
           res.realize()
-          self.op.src = tuple(res if i == target_idx else x for i,x in enumerate(self.op.src))        
+          self.op.src = tuple(res if i == target_idx else x for i,x in enumerate(self.op.src))
           return self.realize()
 
         self.realized = Device[self.device].exec_ast(self.op, output=self, **self._device_extra_args())
