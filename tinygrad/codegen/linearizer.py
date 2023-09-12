@@ -23,8 +23,6 @@ class UOps(Enum):
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtNode]) -> Tuple[Tuple[Node, Node], Node]:
 
-  idy = (idxy//(4*base_shape[1]))
-
   if valid.min == 0:
     nodes = [valid] if isinstance(valid, LtNode) else valid.nodes
     var_dict = dict()
@@ -46,12 +44,10 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
     sub_dict = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items() if mn != mx}
     valid = valid.substitute(sub_dict)
     idxy = idxy.substitute(sub_dict)
-    mid_var, b = (idxy//4), base_shape[1]
-    idx = mid_var - b*(mid_var//b)
-    idy = (idxy // (4 * base_shape[1]))
-    return (idx, idy), valid
 
-  idx = (idxy//4)%base_shape[1]
+  mid_var, b = (idxy//4), base_shape[1]
+  idx = mid_var - b*(mid_var//b) # Using "Mod" breaks the thing because idx cant go out of bounds.
+  idy = (idxy // (4 * b))
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
@@ -183,7 +179,7 @@ class Linearizer(OptimizedKernel):
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType):
-        idx, _ = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+        idx, valid = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         rendered_idx = self.uop(UOps.CAST, dtypes._int2, tuple(x.render(self.render_ops, self) for x in idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
