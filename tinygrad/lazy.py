@@ -6,16 +6,14 @@ from weakref import ref, WeakSet, WeakValueDictionary
 import numpy as np
 from tinygrad.graph import log_op
 from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, partition
+from tinygrad.helpers import dedup
 from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction
 from tinygrad.shape.symbolic import Node, Variable
 
-from tinygrad.runtime.lib import RawConst, RawBuffer, RawBufferMapped, RawBufferTransfer
+from tinygrad.runtime.lib import RawConst, RawBuffer, RawBufferMapped, RawBufferTransfer,buf_is_kernel_arg
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
-
-from tinygrad.helpers import dedup
-from tinygrad.runtime.lib import buf_is_kernel_arg
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
