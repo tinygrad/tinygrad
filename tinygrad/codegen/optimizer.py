@@ -131,7 +131,7 @@ class OptimizedKernel(Kernel):
   def apply_auto_opt(self, x):
     for axis, amt, typ in x:
       if axis is None or amt == 1: continue
-      if typ == "G":
+      if typ == "G" and self.opts.has_shared:
         assert self.full_shape[self.first_reduce+axis+len(self.group_for_reduce)] % amt == 0, "no longer valid shift"
         self.shift_to(self.first_reduce+axis+len(self.group_for_reduce), amt, top=True, insert_before=self.first_reduce+len(self.group_for_reduce))
         self.group_for_reduce.append(amt)
