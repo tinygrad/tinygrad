@@ -3,7 +3,7 @@
 This guide assumes no prior knowledge of pytorch or any other deep learning framework, but does assume some basic knowledge of neural networks.
 It is intended to be a very quick overview of the high level API that tinygrad provides.
 
-This guide is also structured as a tutorial which at the end of it you will have a working model that can classify handwritten digits.
+This guide is also structured as a tutorial and at the end of it you will have a working model that can classify handwritten digits.
 
 We need some imports to get started:
 
@@ -82,7 +82,7 @@ Additionally reading through [abstractions.py](/docs/abstractions.py) will help 
 
 Neural networks in tinygrad are really just represented by the operations performed on tensors.
 These operations are commonly grouped into the `__call__` method of a class which allows modularization and reuse of these groups of operations.
-These classes do not need to inherit from any base class, in fact if they don't need any trainable parameters they don't even need to be a class!
+These classes do not need to inherit from any base class, in fact, if they don't need any trainable parameters they don't even need to be a class!
 
 An example of this would be the `nn.Linear` class which represents a linear layer in a neural network.
 
@@ -148,8 +148,8 @@ def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
     return self.log_softmax().mul(y).sum() / loss_mask.sum()
 ```
 
-As we can see in this implementation of cross entropy loss, there are certain operations that tinygrad does not support.
-Namely, operations that are load/store or assigning a value to a tensor at a certain index.
+As we can see in this implementation of cross-entropy loss, there are certain operations that tinygrad does not support.
+Namely, operations that are load/store or assign a value to a tensor at a certain index.
 Load/store ops are not supported in tinygrad because they add complexity when trying to port to different backends and 90% of the models out there don't use/need them.
 
 For our optimizer we will be using the traditional stochastic gradient descent optimizer with a learning rate of 3e-4.
@@ -160,10 +160,10 @@ from tinygrad.nn.optim import SGD
 opt = SGD([net.l1.weight, net.l2.weight], lr=3e-4)
 ```
 
-We can see that we are passing in the parameters of our neural network to the optimizer.
+We can see that we are passing the parameters of our neural network to the optimizer.
 This is due to the fact that the optimizer needs to know which parameters to update.
 There is a simpler way to do this just by using `get_parameters(net)` from `tinygrad.nn.state` which will return a list of all the parameters in the neural network.
-The parameters are just listed out explicitly here for clarity.
+The parameters are just listed explicitly here for clarity.
 
 Now that we have our network, loss function, and optimizer defined all we are missing is the data to train on!
 There are a couple of dataset loaders in tinygrad located in [/extra/datasets](/extra/datasets).
@@ -212,7 +212,7 @@ for step in range(1000):
 ## Evaluation
 
 Now that we have trained our neural network we can evaluate it on the test set.
-We will be using the same batch size of 64 and will be evaluating for 1000 of those batches.
+We will be using the same batch size of 64 and will be evaluating 1000 of those batches.
 
 ```python
 # set training flag to false
@@ -253,7 +253,7 @@ Additionally, it is possible to speed up the computation of certain neural netwo
 Currently, this does not support models with varying input sizes and non tinygrad operations.
 
 To use the JIT we just need to add a function decorator to the forward pass of our neural network and ensure that the input and output are realized tensors.
-Or in this case we will create a wrapper function and decorate the wrapper function to speed up the evaluation of our neural network.
+Or in this case, we will create a wrapper function and decorate the wrapper function to speed up the evaluation of our neural network.
 
 ```python
 from tinygrad.jit import TinyJit
@@ -306,7 +306,7 @@ Many of the models in the [models/](/models) folder have a `load_from_pretrained
 ### Environment Variables
 
 There exist a bunch of environment variables that control the runtime behavior of tinygrad.
-Some of the commons ones are `DEBUG` and the different backend enablement variables.
+Some of the common ones are `DEBUG` and the different backend enablement variables.
 
 You can find a full list and their descriptions in [env_vars.md](/docs/env_vars.md).
 
