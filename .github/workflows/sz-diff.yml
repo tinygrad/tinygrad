@@ -1,4 +1,4 @@
-Name: Sz Diff
+name: Sz Diff
 
 on:
   pull_request_target:
