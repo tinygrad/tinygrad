@@ -22,14 +22,13 @@ class TestBinaryOperations(unittest.TestCase):
       actual = op_func(tensor_a, tensor_b).numpy()[0]
       desired = op_func(val_a, val_b)
       self.assertEqual(actual, desired, msg=f"For operation {op_name} with values {val_a} and {val_b}")
-    
-    def test_eq(self):        self.check_operation(ops_dict["eq"], "eq")
-    def test_lt(self):        self.check_operation(ops_dict["lt"], "lt")    def test_gt(self):        self.check_operation(ops_dict["gt"], "gt")
-    def test_le(self):        self.check_operation(ops_dict["le"], "le")
-  
+
+  def test_eq(self):        self.check_operation(ops_dict["eq"], "eq")
+  def test_lt(self):        self.check_operation(ops_dict["lt"], "lt")
+  def test_gt(self):        self.check_operation(ops_dict["gt"], "gt")
+  def test_le(self):        self.check_operation(ops_dict["le"], "le")
   def test_ge(self):        self.check_operation(ops_dict["ge"], "ge")
-  def test_ne(self):
-        self.check_operation(ops_dict["ne"], "ne")
-    
+  def test_ne(self):        self.check_operation(ops_dict["ne"], "ne")
+
 if __name__ == '__main__':
-    unittest.main()
+  unittest.main()
