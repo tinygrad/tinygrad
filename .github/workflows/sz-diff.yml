@@ -48,7 +48,7 @@ jobs:
         PR="$GITHUB_WORKSPACE/pr/tinygrad"
 
         #store diff
-        OUT=$(DIFF=1 python3 $BASE/sz_diff.py $PR)
+        OUT=$(DIFF=1 python3 $BASE/sz.py $PR)
     - name: Comment / edit diff
       uses: marocchino/sticky-pull-request-comment@v2
       with:
