@@ -11,8 +11,8 @@ from torch.nn import functional as F
 # with slight modifications
 
 def test_boxlist_iou():
-  a = boxlist_iou(BoxList(Tensor([[0, 0, 10, 10]]), image_size = (50, 50)), BoxList(Tensor([[0, 0, 5, 5]]), image_size = (50, 50)))
-  assert all(((a == .25)[0]).numpy())
+  a = boxlist_iou(BoxList(Tensor([[0, 0, 10, 10], [5, 5, 10, 10]]), image_size = (50, 50)), BoxList(Tensor([[0, 0, 5, 5], [0, 0, 10, 10], [4, 4, 8, 8]]), image_size = (50, 50)))
+  assert np.allclose(a.numpy(), Tensor([[0.25, 1., 0.16], [0., 0.25, 0.28125]]).numpy())
 
 
 def boxlist_iou(boxlist1: BoxList, boxlist2: BoxList) -> Tensor:
@@ -38,23 +38,25 @@ def test_match_eval():
                                 [0.1, 0.9, 0.2, 0.3, .3],
                                 [0.1, 0.9, 0.2, 0.8, .1]])
   a = fn1(match_quality_matrix)
-  assert all(((a == Tensor([0, 4, 2, 0, -1]))).numpy())
+  assert all(((a == Tensor([3, -1, 2, 1, 1]))).numpy())
 
 def test_low_qual_match():
   matches = Tensor([
     [.3, .4, .1], #gt 1
-    [.4, .5, .2],
+    [.4, .5, .6],
     [.5, .8, .7],
-    [.6, .1, .0]
+    [.6, .1, .0],
+    [.2, .1, .0],
+    [.8, .0, .9]
   ])
   hq_fn, lq_fn = make_match_fn(.7, .3)
   first_pass = hq_fn(matches)
   second_pass = (first_pass == -1).where(lq_fn(matches), first_pass) # merges in low quality matches
-  assert all(((second_pass == Tensor([3, 2, 2]))).numpy())
+  assert all(((second_pass == Tensor([1, 2, 1, 0, -1, 2]))).numpy())
   # tests where matches are either hq or negative (weak signals filtered)
-  low_signal = ((matches >= .3) * (matches <= .7)).sum(axis=0) == matches.shape[0]
+  low_signal = ((matches >= .3) * (matches <= .7)).sum(axis=1) == matches.shape[1]
   res = low_signal.where(-2, first_pass)
-  assert all(res == Tensor([-2, 2, 2]).numpy())
+  assert all(res == Tensor([-1, -2, 1, -1, -1, 2]).numpy())
 
 def make_match_fn(high: float, low: float) -> Callable[[Tensor], Tensor]:
   # for the tensor of M*N
@@ -65,10 +67,10 @@ def make_match_fn(high: float, low: float) -> Callable[[Tensor], Tensor]:
     assert preds.numel() > 0, "must be scoring something"
     # drops lq+mid matches early
     hq = (preds >= high) * preds
-    max_vals = hq.max(axis=0)
-    max_vals = (max_vals == 0).where(-1, max_vals) # -1 when pred == 0 for all gt
+    max_vals = hq.max(axis=1)
+    max_vals = (max_vals == 0).where(-1, max_vals).unsqueeze(1) # -1 when pred == 0 for all gt
     best_matches = (hq == max_vals).float()
-    best_gt = (best_matches * Tensor.ones_like(best_matches).cumsum(axis=0)).max(axis=0)
+    best_gt = (best_matches * Tensor.ones_like(best_matches).cumsum(axis=1)).max(axis=1)
     return best_gt - 1
   
   # Returns matches that were greater than low and less than high
@@ -77,10 +79,10 @@ def make_match_fn(high: float, low: float) -> Callable[[Tensor], Tensor]:
     assert preds.numel() > 0, "must be scoring something"
     # drops lq+mid matches early
     lq = (preds < high) * (preds >= low) * preds
-    max_vals = lq.max(axis=0)
-    max_vals = (max_vals == 0).where(-1, max_vals) # -1 when pred == 0 for all gt
+    max_vals = lq.max(axis=1)
+    max_vals = (max_vals == 0).where(-1, max_vals).unsqueeze(1) # -1 when pred == 0 for all gt
     best_matches = (lq == max_vals).float()
-    best_gt = (best_matches * Tensor.ones_like(best_matches).cumsum(axis=0)).max(axis=0)
+    best_gt = (best_matches * Tensor.ones_like(best_matches).cumsum(axis=1)).max(axis=1)
     return best_gt - 1
 
   return hq_match_fn, lq_match_fn
@@ -116,11 +118,11 @@ def make_balanced_sampler_fn(batch_size_per_image: int, positive_fraction: float
       # expected that positive samples are amped to 1
       positive, negative = matches == 1, matches == 0 
       num_pos = int(batch_size_per_image * positive_fraction)
-      
+
       # protect against not enough positive examples
       pos_numel, neg_numel = positive.sum().numpy().item(), negative.sum().numpy().item()
       num_pos = int(min(pos_numel, num_pos))
-      num_neg = int(min(neg_numel, batch_size_per_image - num_pos))
+      num_neg = int(min(neg_numel, int(batch_size_per_image * (1 - positive_fraction))))
       
       # option .. return a mask or return gather indices, which is more efficient?
       pos_inds.append(rind(positive.numpy(), num_pos).astype(int))
@@ -133,12 +135,6 @@ def make_balanced_sampler_fn(batch_size_per_image: int, positive_fraction: float
 def generate_rpn_labels(matched_idxs: Tensor) -> Tensor:
     labels_per_image = matched_idxs >= 0
     return labels_per_image
-
-def permute_and_flatten(layer, N, A, C, H, W):
-  layer = layer.view(N, -1, C, H, W)
-  layer = layer.permute(0, 3, 4, 1, 2)
-  layer = layer.reshape(N, -1, C)
-  return layer
 
 def concat_box_prediction_layers(box_cls, box_regression):
   box_cls_flattened = []
@@ -214,21 +210,22 @@ def test_loss():
   hq_fn, _ = make_match_fn(0.7, 0.4)
   sampler = make_balanced_sampler_fn(10, 0.5)
   rpn = RPNLossComputation(hq_fn, sampler, BoxCoder(weights=(1.0, 1.0, 1.0, 1.0)), generate_rpn_labels)
+  objectness = [Tensor([[[[0.3, 0.2], [0.7, 0.6]]]])]  # shape is [1, 1, 2, 2]
+  box_regression = [Tensor([[[[0, 0.1, 0, 0.1], [0, -0.1, 0, -0.1]],
+                            [[0.1, 0, 0.1, 0], [-0.1, 0, -0.1, 0]]]])]  # shape is [1, 4, 2, 2]
   rpn(
-    anchors=[BoxList([
-      [10, 10, 20, 20], [0, 0, 5, 5], [12, 12, 18, 18],
-      [15, 10, 25, 18], [22, 5, 30, 25], [12, 12, 16, 16]
-    ], image_size=(50, 50))],
-    objectness=[Tensor([0.3, 0.8, 0.1, 0.5, 0.7, 0.2])],
-    box_regression=[Tensor([
-      [0, 0, 1, 1], [1, 1, 1, 1], [0, 0, 2, 2],
-      [0, 0, 1, 2], [0, 0, 3, 1], [1, 0, 2, 1]
-    ])],
-    targets=[BoxList([
-      [0, 0, 5, 5], [5, 5, 10, 10], [15, 15, 20, 20],
-      [25, 25, 30, 30]
-    ], image_size=(50, 50))]
+      anchors=[BoxList([
+        [10, 10, 20, 20], [0, 0, 5, 5], [12, 12, 18, 18],
+        [15, 10, 25, 18], [22, 5, 30, 25]
+      ], image_size=(50, 50))],
+      objectness=objectness,
+      box_regression=box_regression,
+      targets=[BoxList([
+        [0, 0, 5, 5], [5, 5, 10, 10], [15, 15, 20, 20],
+        [25, 25, 30, 30]
+      ], image_size=(50, 50))]
   )
+
 
 # one way this differs from reference is it doesn't rely on boxlist mutables
 class RPNLossComputation:
@@ -248,7 +245,7 @@ class RPNLossComputation:
     self.discard_cases = ['not_visibility', 'between_thresholds']
 
   def match_targets_to_anchors(self, anchors: BoxList, targets: BoxList):
-    match_quality_matrix = boxlist_iou(targets, anchors)
+    match_quality_matrix = boxlist_iou(anchors, targets)
     matched_idxs = self.proposal_matcher(match_quality_matrix)
     matched_targets = targets[matched_idxs.maximum(0)] # drop negatives
     return matched_targets, matched_idxs
@@ -301,11 +298,9 @@ class RPNLossComputation:
     anchors = [cat_boxlist(anchors_per_image) for anchors_per_image in anchors] # what this doin
     labels, regression_targets = self.prepare_targets(anchors, targets)
     sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
-    sampled_pos_inds = Tensor.nonzero(Tensor.cat(sampled_pos_inds, dim=0)).squeeze(1)
-    sampled_neg_inds = Tensor.nonzero(Tensor.cat(sampled_neg_inds, dim=0)).squeeze(1)
+    sampled_pos_inds, sampled_neg_inds = Tensor(sampled_pos_inds).squeeze(0), Tensor(sampled_neg_inds).squeeze(0)
 
-    sampled_inds = Tensor.cat([sampled_pos_inds, sampled_neg_inds], dim=0)
-
+    sampled_inds = Tensor.cat(sampled_pos_inds, sampled_neg_inds, dim=0)
     objectness, box_regression = \
             concat_box_prediction_layers(objectness, box_regression)
 
@@ -328,6 +323,14 @@ class RPNLossComputation:
     return objectness_loss, box_loss
 
 if __name__ == "__main__":
+  test_prepare_targets()
+  test_boxlist_iou()
+  test_match_eval()
+  test_low_qual_match()
+  test_rind()
+  test_balanced_sampler()
+  test_match_targets_to_anchors()
+  test_loss()
   #PLAYGROUND
   data = Tensor([[1, 2, 3],
                [4, 5, 6],
@@ -335,14 +338,6 @@ if __name__ == "__main__":
                [10, 11, 12]])
   idx = Tensor([0, 2, 1, 1]).reshape(4, 1)
   result = data.gather(idx, dim=1)
-  test_boxlist_iou()
-  test_match_eval()
-  test_low_qual_match()
-  test_rind()
-  test_balanced_sampler()
-  test_match_targets_to_anchors()
-  test_prepare_targets()
-  test_loss()
   
   # ind = Tensor.arange(mask.shape[0])
   # nz = mask.sum().numpy().item()
