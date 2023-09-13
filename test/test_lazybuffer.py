@@ -68,5 +68,9 @@ class TestLazyBuffer(unittest.TestCase):
     assert cache[1][0].name.startswith("E_")
     assert cache[2][0].name.startswith("E_")
 
+  @unittest.skipUnless(Device.DEFAULT == "METAL", "testing metal backend kernel fuse buffer limits")
+  def test_big_metal_cat(self):
+    Tensor.cat(*[Tensor([1]) for _ in range(40)]).realize()
+
 if __name__ == "__main__":
   unittest.main()
