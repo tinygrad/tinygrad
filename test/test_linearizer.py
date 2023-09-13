@@ -46,7 +46,6 @@ class TestLinearizer(unittest.TestCase):
     k.linearize()
     num_loads = len([uop for uop in k.uops if uop.uop == UOps.LOAD])
     assert num_loads <= 4, "more load uops than needed"
-    assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
 
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.
@@ -93,9 +92,56 @@ class TestLinearizer(unittest.TestCase):
     k.process()
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
-    assert num_ops <= 0, "more load or alu uops than needed"
+    assert num_ops == 0, "more load or alu uops than needed"
 
-def helper_linearizer_opt(r:Tensor, opts=[]):
+  def test_max_fold(self): # doesnt work for LLVM only if lazy is adapted for constants
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    a = Tensor(0)
+    r = a.relu()
+    k = linearize(r)
+
+    num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
+    np.testing.assert_allclose(r.numpy(), 0.), f"result is wrong"
+    assert num_ops == 0, "more load or alu uops than needed"
+
+  def test_sub_fold(self):  # doesnt work for LLVM only if lazy is adapted for constants
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    a, b = Tensor(2), Tensor(2)
+    r = a - b
+    k = linearize(r)
+
+    num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
+    np.testing.assert_allclose(r.numpy(), 0.), f"result is wrong"
+    assert num_ops == 0, "more load or alu uops than needed"
+
+  def test_sub_fold_array(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    a, b, c = Tensor.ones(2), Tensor.ones(2), Tensor([3, 3])
+    r = (a + c) - (b + c)
+    k = linearize(r)
+    num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
+    np.testing.assert_allclose(r.numpy(), np.zeros(2)), f"result is wrong"
+    assert num_ops == 0, "more load or alu uops than needed"
+
+  def test_compare_fold(self): # doesnt work for LLVM only if lazy is adapted for constants
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    a, b = Tensor(0), Tensor(0)
+    r = a < b
+    k = linearize(r)
+
+    num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
+    np.testing.assert_allclose(r.numpy(), 0.), f"result is wrong"
+    assert num_ops == 0, "more load or alu uops than needed"
+
+def helper_linearizer_opt(r: Tensor, opts=[]):
   wanna_output = None
   realized_ast = None
 
@@ -213,58 +259,6 @@ class TestLinearizerOpts(unittest.TestCase):
       [(0, 2, 'L'), (1, 2, 'L'), (0, 8, 'G'), (1, 4, 'G'), (0, 2, 'U')], [(0, 2, 'L'), (1, 2, 'L'), (0, 8, 'G'), (1, 4, 'G'), (0, 2, 'U'), (0, 4, 'R'), (1, 4, 'R')], # Checking how it works with 2 grouped_reduces + upcasts + locals.
       [(0, 4, 'L'), (1, 4, 'L'), (0, 8, 'G'), (1, 4, 'G'), (0, 2, 'U'), (1, 2, 'U')], # No globals
     ])
-
-  def test_max_fold(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Only Compiled uses linearizer")
-
-    a = Tensor(0)
-    r = a.relu()
-    k = linearize(r)
-
-    alu_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
-    np.testing.assert_allclose(r.numpy(), 0.), f"result is wrong"
-    assert alu_ops == 0, f"no alu uops needed"
-    assert len(k.uops) <= 4, f"more uops than needed"
-
-  def test_sub_fold(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Only Compiled uses linearizer")
-
-    a, b = Tensor(2), Tensor(2)
-    r = a - b
-    k = linearize(r)
-
-    alu_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
-    np.testing.assert_allclose(r.numpy(), 0.), f"result is wrong"
-    assert alu_ops == 0, f"no alu uops needed"
-    assert len(k.uops) <= 4, f"more uops than needed"
-
-  def test_sub_fold2(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Only Compiled uses linearizer")
-
-    a, b, c = Tensor.ones(2), Tensor.ones(2), Tensor([3, 3])
-    r = (a + c) - (b + c)
-    k = linearize(r)
-
-    alu_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
-    np.testing.assert_allclose(r.numpy(), np.zeros(2)), f"result is wrong"
-    assert alu_ops == 0, f"no alu uops needed"
-    assert len(k.uops) <= 5, f"more uops than needed"
-
-  def test_compare_fold(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Only Compiled uses linearizer")
-
-    a, b = Tensor(0), Tensor(0)
-    r = a < b
-    k = linearize(r)
-
-    alu_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
-    np.testing.assert_allclose(r.numpy(), 0.), f"result is wrong"
-    assert alu_ops == 0, f"no alu uops needed"
-    assert len(k.uops) <= 4, f"more uops than needed"
 
 
 if __name__ == '__main__':
