@@ -223,7 +223,7 @@ class LazyBuffer:
     if MERGE_ELEMENTWISE_OPS:
       # remove the buffers from any (childless) BinaryOps that feed into this
       _srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
-      if len({b for b in chain(*[src.buffers for src in _srcs]) if b.realized or b.op.op is not LoadOps.CONST}) <= max_kernel_args:srcs = _srcs
+      if len({b for b in chain(*[src.buffers for src in _srcs]) if b.realized or b.op.op is not LoadOps.CONST}) <= max_kernel_args:srcs = _srcs # type: ignore
 
     return create_lazybuffer(out_device, ShapeTracker(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype, self.var_vals)
 
