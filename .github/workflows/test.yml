@@ -50,14 +50,14 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Set up Python 3.11
+    - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
-        python-version: 3.11
+        python-version: 3.8
     - name: Cache python packages
       uses: actions/cache@v3
       with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
         key: testing-packages-${{ hashFiles('*/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
