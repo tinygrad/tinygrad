@@ -36,10 +36,10 @@ jobs:
       with:
         ref: ${{ github.event.pull_request.base.sha }}
         path: base
-    - name: Set up Python 3.10
+    - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
-        python-version: 3.10
+        python-version: '3.11'
     - name: Calculate diff
       run: |
         pip install tabulate
