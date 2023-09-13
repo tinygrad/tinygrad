@@ -9,7 +9,7 @@ import numpy as np
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple, Dict
 
-from tinygrad.helpers import Timing, getenv, DEBUG, dtypes
+from tinygrad.helpers import Timing, getenv, DEBUG, dtypes, CI
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
@@ -18,11 +18,13 @@ from tinygrad.ops import GlobalCounters
 from tinygrad.jit import TinyJit
 from tinygrad.shape.symbolic import Variable, sym_infer
 
+JIT = getenv("JIT", 0 if CI else 1)
+
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
-  freqs = 1.0 / (theta ** (np.arange(0, dim, 2, dtype=np.float32)[:(dim // 2)] / dim))
-  freqs = np.outer(np.arange(end, dtype=np.float32), freqs)
-  return np.stack([np.cos(freqs), np.sin(freqs)], axis=-1).reshape(1, end, 1, dim//2, 2)
+  freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
+  freqs = Tensor.arange(end).unsqueeze(dim=1)*freqs.unsqueeze(dim=0)
+  return Tensor.stack([Tensor.cos(freqs), Tensor.sin(freqs)], dim=-1).reshape(1, end, 1, dim//2, 2)
 
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
 def complex_mult(A, c, d):
@@ -80,7 +82,7 @@ class Attention:
       keys, values = xk, xv
     else:
       assert cache_k is not None and cache_v is not None, "no cache"
-      assert start_pos == sym_infer(cache_k.shape[1], cache_k.lazydata.st.var_vals) == sym_infer(cache_v.shape[1], cache_v.lazydata.st.var_vals), f"cache has wrong shape, not ({start_pos} == {sym_infer(cache_k.shape[1], cache_k.lazydata.st.var_vals)} == {sym_infer(cache_v.shape[1], cache_v.lazydata.st.var_vals)})"
+      assert start_pos == sym_infer(cache_k.shape[1], cache_k.lazydata.var_vals) == sym_infer(cache_v.shape[1], cache_v.lazydata.var_vals), f"cache has wrong shape, not ({start_pos} == {sym_infer(cache_k.shape[1], cache_k.lazydata.var_vals)} == {sym_infer(cache_v.shape[1], cache_v.lazydata.var_vals)})"
       assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
       keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
 
@@ -113,18 +115,18 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor], jit_ctx:Optional[Dict[Variable,int]]=None):
     bsz, seqlen, _ = x.shape
-    if getenv("JIT") and mask is None:
+    if JIT and mask is None:
       assert cache_k is not None and cache_v is not None, "no cache"
       pos = Variable("pos", 1, 1024)
       cache_k = cache_k.reshape(cache_k.shape[0], pos, cache_k.shape[2], cache_k.shape[3])
       cache_v = cache_v.reshape(cache_v.shape[0], pos, cache_v.shape[2], cache_v.shape[3])
       # need this because we don't reshape back to int shape in the jitted path and we don't have the correct var_vars in cache
-      cache_k.lazydata.st.var_vals[pos] = start_pos
-      cache_v.lazydata.st.var_vals[pos] = start_pos
+      cache_k.lazydata.var_vals[pos] = start_pos
+      cache_v.lazydata.var_vals[pos] = start_pos
 
       # get only the part of freqs_cis that we are using.
       freqs_cis = freqs_cis.shrink(((0, freqs_cis.shape[0]), (pos, pos+seqlen), (0, freqs_cis.shape[2]), (0, freqs_cis.shape[3]), (0, freqs_cis.shape[4])))
-      freqs_cis.lazydata.st.var_vals[pos] = start_pos
+      freqs_cis.lazydata.var_vals[pos] = start_pos
     else:
       freqs_cis = freqs_cis.shrink(((0, freqs_cis.shape[0]), (start_pos, start_pos+seqlen), (0, freqs_cis.shape[2]), (0, freqs_cis.shape[3]), (0, freqs_cis.shape[4])))
 
@@ -139,7 +141,7 @@ class Transformer:
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = Embedding(vocab_size, dim)
     self.output = linear(dim, vocab_size, bias=False)
-    self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2, rope_theta))
+    self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_seq_len * 2, rope_theta)
     self.norm_output = lambda x: self.output(self.norm(x))
 
     self.tok_embeddings_jitted = TinyJit(lambda x: self.tok_embeddings(x).realize())
@@ -153,10 +155,10 @@ class Transformer:
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
-    if seqlen == 1 and getenv("JIT"):
+    if seqlen == 1 and JIT:
       pos = Variable("pos", 1, 1024)
       freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (pos, pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
-      freqs_cis.lazydata.st.var_vals[pos] = start_pos
+      freqs_cis.lazydata.var_vals[pos] = start_pos
       h = self.tok_embeddings_jitted(tokens)
       for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.layers_jitted, self.kv_caches)):
         h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=self.freqs_cis, mask=None, jit_ctx={pos: start_pos})
@@ -351,12 +353,12 @@ class LLaMa:
 
 # **** main code ****
 """
-test: 
+test:
 python3 examples/llama.py  --temperature=0 --count=50 --prompt="Hello."
 output:
 Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
 
-test: 
+test:
 python3 examples/llama.py --gen='2' --temperature=0 --count=50 --prompt="Hello."
 output:
 Hello. I'm a 20 year old girl who is looking for a good lay in Palm Coast. I don't care whether it's at your place or not, as long as it's clean.
@@ -565,11 +567,11 @@ After you are done speaking, output [EOS]. You are not Chad.
 
       if args.timing: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU"+
-                  f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                  f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s") if DEBUG else None, enabled=args.timing):
-        probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
-      with Timing("sync in ", enabled=args.timing):
+      with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
+        with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU"+
+                    f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                    f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s") if DEBUG else None, enabled=args.timing):
+          probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
         probs_np = probs.numpy()
         tok = int(np.random.choice(len(probs_np), p=probs_np))
 

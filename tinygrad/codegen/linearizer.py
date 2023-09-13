@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod, PtrDType
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod, PtrDType, all_same
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
@@ -96,17 +96,23 @@ class Linearizer(OptimizedKernel):
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
       dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
 
+    # calculate expr_idxs using placeholder variables
+    fake_idxs = [idx if isinstance(idx, NumNode) else Variable(f"_uidx{i}", idx.min, idx.max) for i, idx in enumerate(idxs)]
+    g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
+
     ret = []
     invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
     for _idx in _idxs:
+      substitute: Dict[VariableOrNum, Node] = {a: b for a, b in zip(fake_idxs, _idx) if isinstance(a, Variable)}
       if amt > 1:
-        idx, valid = self.sts[i].expr_idxs((_idx[:dim] + (expanded_nodes[dim][0],) + _idx[dim+1:]))
+        float4_substitute = {**substitute, fake_idxs[dim]: expanded_nodes[dim][0]}
+        idx, valid = g_idx.substitute(float4_substitute), g_valid.substitute(float4_substitute)
         localtype = dtypes._float4 if amt == 4 else dtypes._float2
         if idx.render() != ((idx//amt)*amt).render():
-          idx, valid = self.sts[i].expr_idxs(_idx)
+          idx, valid = g_idx.substitute(substitute), g_valid.substitute(substitute)
           localtype = dtypes.float32
       else:
-        idx, valid = self.sts[i].expr_idxs(_idx)
+        idx, valid = g_idx.substitute(substitute), g_valid.substitute(substitute)
         localtype = dtypes.float32
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
@@ -191,7 +197,7 @@ class Linearizer(OptimizedKernel):
     for i,b in enumerate(self.bufs):
       if b.realized in arg_bufs: self.buf_uops[i] = arg_bufs[b.realized]
     # add variables from symbolic shapes
-    for var in sorted(set(v for buf in self.ast.buffers for v in buf.st.var_vals), key=lambda k: k.key):
+    for var in sorted(set(v for buf in self.ast.buffers for v in buf.var_vals), key=lambda k: k.key):
       assert var.expr is not None
       self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), (var.expr, dtypes._arg_int32))
     # define local buffers
@@ -200,7 +206,7 @@ class Linearizer(OptimizedKernel):
     # add a local buffer for multistage reduce. # TODO: use local alias
     if self.group_for_reduce:
       # TODO: the strides of this can be controlled
-      self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      self.sts.append(ShapeTracker(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+len(self.group_for_reduce)]) + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.buf_uops.append(self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), ("temp", self.sts[-1].size())))
 
@@ -341,8 +347,9 @@ class Linearizer(OptimizedKernel):
         self.uop(UOps.BARRIER, None, ())
         end_loop(loop_local_idxs)
 
-        # local indexs are over, 0 them out
-        local_idxs = [x*0 for x in local_idxs]
+        # create new late reduce local loops and replace local_idxs that have been used
+        end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce and i not in self.upcast_in_mid_reduce_axes else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
+        local_idxs = local_idxs[:self.local_dims] + end_local_idxs[self.global_dims + self.local_dims:]
 
         # if any group_for_reduce items aren't reduces, upcast them here
         for j in self.upcast_in_mid_reduce_axes:
@@ -350,6 +357,7 @@ class Linearizer(OptimizedKernel):
           self.upcast()
           self.group_for_reduce.pop()
           local_idxs = local_idxs[:-1]
+          end_local_idxs = end_local_idxs[:-1]
           # regenerate upcast_idxs
           upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
 
@@ -359,11 +367,10 @@ class Linearizer(OptimizedKernel):
         acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
 
         # late reduce loop
-        end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
         render_loop(end_local_idxs)
 
         # load localbufs
-        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs+upcast_idxs)
+        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
         self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, do_reduce=True) # type: ignore
@@ -401,11 +408,13 @@ class Linearizer(OptimizedKernel):
   def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=False) -> UOp:
     key = (uop, dtype, vin, arg)
     if uop == UOps.STORE and len(vin) == 2 and vin[0] == vin[1]: return vin[0]   # self store is noop
+    if uop == UOps.CAST and all(x.uop == UOps.GEP for x in vin) and all_same([x.vin[0] for x in vin]) and all(x.arg == i for i,x in enumerate(vin)): return vin[0].vin[0]
+    if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype)
     if uop == UOps.ALU:
       # rewrites. NOTE: the rewritten NEG op is still around...
       if arg == BinaryOps.ADD and vin[1].uop == UOps.ALU and vin[1].arg == UnaryOps.NEG: return self.uop(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable=cachable)
       # constant folding
-      if arg == UnaryOps.NEG and vin[0].uop == UOps.CONST: return self.uop(UOps.CONST, dtype, (), -vin[0].arg, cachable=True)
+      if arg == UnaryOps.NEG and vin[0].uop == UOps.CONST: return self.const(-vin[0].arg, dtype)
       # zero folding
       for x in [0,1]:
         if arg == BinaryOps.ADD and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
@@ -420,7 +429,7 @@ class Linearizer(OptimizedKernel):
 
     if cachable and key in self.saved_exprs: return self.saved_exprs[key]
     self.uops.append(UOp(uop, dtype, vin, arg, len(self.uops)))
-    if DEBUG >= 4: print(self.uops[-1])
+    if DEBUG >= 5: print(self.uops[-1])
     if cachable: self.saved_exprs[key] = self.uops[-1]
     return self.uops[-1]
 

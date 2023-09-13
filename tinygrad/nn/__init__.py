@@ -67,6 +67,8 @@ class ConvTranspose2d:
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
     self.weight = Tensor.kaiming_uniform(out_features, in_features, a=math.sqrt(5))
+    # TODO: remove this once we can represent Tensor with int shape in typing
+    assert isinstance(self.weight.shape[1], int), "does not support symbolic shape"
     bound = 1 / math.sqrt(self.weight.shape[1])
     self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
 

@@ -1,8 +1,11 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib
+import os, functools, platform, time, re, contextlib, operator
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any
-from math import prod # noqa: F401 # pylint:disable=unused-import
+
+# TODO: fix types for prod
+#from math import prod # noqa: F401 # pylint:disable=unused-import
+def prod(x:Iterable): return functools.reduce(operator.__mul__, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
@@ -19,9 +22,8 @@ def flatten(l:Iterator): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def merge_dicts(ds:Iterable[Dict]) -> Dict:
-  kvs = set([(k,v) for d in ds for k,v in d.items()])
-  assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
-  return {k:v for k,v in kvs}
+  assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
+  return {k:v for d in ds for k,v in d.items()}
 def partition(lst, fxn):
   a: list[Any] = []
   b: list[Any] = []

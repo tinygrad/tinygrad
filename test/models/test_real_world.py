@@ -16,7 +16,7 @@ from examples.stable_diffusion import UNetModel
 
 def kopt_search_hook(k, create_k, to_prg, baseline):
   import nevergrad as ng
-  wanna_output = k.bufs[0].toCPU()
+  wanna_output = k.bufs[0].toCPU().copy()
   def check_opt(x):
     try:
       k = create_k()
