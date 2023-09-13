@@ -26,7 +26,7 @@ def file_sz(path="tinygrad"):
 def diff_sz(master_sz, branch_sz):
   diff = []
   master_files, branch_files = [set(master_sz.keys()), set(branch_sz.keys())]
-  duplicate_files = master_files.intersetion(branch_files)
+  duplicate_files = master_files.intersection(branch_files)
   for file in master_files.union(branch_files):
     if file in duplicate_files: 
       diff.append([file, master_sz[file][0] - branch_sz[file][0]])
