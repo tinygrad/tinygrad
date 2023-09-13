@@ -25,46 +25,46 @@ jobs:
       pull-requests: write
     runs-on: ubuntu-latest
     steps:
-     - name: Checkout code
-        uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          path: pr
-      - name: Checkout base code
-        uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: base
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.10
-      - name: Calculate diff
-        run:
-          pip install tabulate
+    - name: Checkout code
+      uses: actions/checkout@v2
+      with:
+        ref: ${{ github.event.pull_request.head.ref }}
+        repository: ${{ github.event.pull_request.head.repo.full_name }}
+        path: pr
+    - name: Checkout base code
+      uses: actions/checkout@v2
+      with:
+        ref: ${{ github.event.pull_request.base.sha }}
+        path: base
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.10
+    - name: Calculate diff
+      run:
+        pip install tabulate
 
-          CI=1
-          BASE="$GITHUB_WORKSPACE/base"
-          PR="$GITHUB_WORKSPACE/pr"
+        CI=1
+        BASE="$GITHUB_WORKSPACE/base"
+        PR="$GITHUB_WORKSPACE/pr"
 
-          BASE_SZ=$(python3 $BASE/sz.py)
+        BASE_SZ=$(python3 $BASE/sz.py)
 
-          #copy master sz.py in case of changes
-          echo $BASE/sz.py > $PR/sz.py
-          PR_SZ=$(python3 $PR/sz.py)
+        #copy master sz.py in case of changes
+        cat $BASE/sz.py > $PR/sz.py
+        PR_SZ=$(python3 $PR/sz.py)
 
-          #store diff
-          DIFF=$(python3 $BASE/sz_diff.py $BASE_SZ $PRSZ)
-      - name: Comment / edit diff
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          recreate: true
-          header: Sz Diff
-          message: |
-            ### Changes
-            ```
-            ${{ env.loc_content }}
-            ```
+        #store diff
+        DIFF=$(python3 $BASE/sz_diff.py $BASE_SZ $PRSZ)
+    - name: Comment / edit diff
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        recreate: true
+        header: Sz Diff
+        message: |
+          ### Changes
+          ```
+          ${{ env.loc_content }}
+          ```
 
