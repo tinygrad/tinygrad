@@ -101,6 +101,7 @@ class TestLinearizer(unittest.TestCase):
     k = linearize(r)
 
     alu_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
+    np.testing.assert_allclose(r.numpy(), 0.), f"result is wrong"
     assert alu_ops == 0, f"no alu uops needed"
     assert len(k.uops) <= 4, f"more uops than needed"
 
@@ -113,6 +114,7 @@ class TestLinearizer(unittest.TestCase):
     k = linearize(r)
 
     alu_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
+    np.testing.assert_allclose(r.numpy(), 0.), f"result is wrong"
     assert alu_ops == 0, f"no alu uops needed"
     assert len(k.uops) <= 4, f"more uops than needed"
 
@@ -125,6 +127,7 @@ class TestLinearizer(unittest.TestCase):
     k = linearize(r)
 
     alu_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
+    np.testing.assert_allclose(r.numpy(), np.zeros(2)), f"result is wrong"
     assert alu_ops == 0, f"no alu uops needed"
     assert len(k.uops) <= 5, f"more uops than needed"
 
@@ -137,6 +140,7 @@ class TestLinearizer(unittest.TestCase):
     k = linearize(r)
 
     alu_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
+    np.testing.assert_allclose(r.numpy(), 0.), f"result is wrong"
     assert alu_ops == 0, f"no alu uops needed"
     assert len(k.uops) <= 4, f"more uops than needed"
 
