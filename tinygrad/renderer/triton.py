@@ -33,7 +33,6 @@ def define_scalar(local_size, triton_type, args):
   return f"(tl.where(1, {render_const(args)}, {render_const(args)}).to({triton_type}))"
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
-  global_size: List[int] = []
   local_size: List[int] = []
   depth = 1
   signatures, dims, bufs, kernel, valid = [], [], [], [], [] #type: ignore
@@ -103,9 +102,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     elif uop == UOps.SPECIAL:
       dims.append(args[1])
       valid.append(f"{args[1]}<{get_max(args[2])}")
-      if args[1].startswith("g"):
-        kk(f"{args[1]} = tl.program_id({len(global_size)}) # {args[2]}")
-        global_size.append(args[2])
+      if args[1].startswith("g"): kk(f"{args[1]} = tl.program_id({args[0]}) # {args[2]}")
       elif args[1].startswith("l"):
         kk(f"{args[1]} = tl.arange({0}, {next_power_of_2(args[2])})")
         local_size.append(args[2])
@@ -136,4 +133,4 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   if getenv("CUDACPU"): prg = remove_single_scalar_curly_braces(prg.split(".file")[0].split(".visible .func")[0])
   max_local_size =  [int(x) for x in prg.split(".maxntid ")[1].split("\n")[0].split(", ")]
   for i in range(len(local_size)): local_size[i] = min(local_size[i], max_local_size[i])
-  return prg, global_size, local_size, {"binary":True, "shared":compiled.metadata["shared"]}
+  return prg, local_size, {"binary":True, "shared":compiled.metadata["shared"]}

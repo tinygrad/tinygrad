@@ -173,8 +173,8 @@ class Compiled:
   def to_program(self, k):
     k.linearize()
     src = self.renderer(k.function_name, k.uops)
-    if len(src) == 4:
-      return ASTRunner(k.function_name, src[0], src[1], src[2],display_name=k.display_name, runtime_args=src[3]).build(self.runtime)
+    if len(src) == 3:
+      return ASTRunner(k.function_name, src[0], k.global_size, src[1],display_name=k.display_name, runtime_args=src[2]).build(self.runtime)
     return ASTRunner(k.function_name, src, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                      display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime)
