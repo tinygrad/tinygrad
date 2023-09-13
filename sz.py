@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import os
-import pickle
 import sys
 from pathlib import Path
 import token
