@@ -6,6 +6,16 @@ from tinygrad.ops import Compiled, Device
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 
+
+def linearize(r):
+  ast = r.lazydata.op
+  r = r.realize()  # realize an output buffer
+  k = Linearizer(ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts)
+  k.process()
+  k.linearize()
+  return k
+
+
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
     if not isinstance(Device[Device.DEFAULT], Compiled):
@@ -77,13 +87,59 @@ class TestLinearizer(unittest.TestCase):
 
     a, b = Tensor(2), Tensor(3)
     r = a * b
-    ast = r.lazydata.op
-    r = r.realize()  # realize an output buffer
-    k = Linearizer(ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts)
-    k.process()
-    k.linearize()
+    k = linearize(r)
+
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
     assert num_ops <= 0, "more load or alu uops than needed"
+
+  def test_max_fold(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    a = Tensor(0)
+    r = a.relu()
+    k = linearize(r)
+
+    alu_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
+    assert alu_ops == 0, f"no alu uops needed"
+    assert len(k.uops) <= 4, f"more uops than needed"
+
+  def test_sub_fold(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    a, b = Tensor(2), Tensor(2)
+    r = a - b
+    k = linearize(r)
+
+    alu_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
+    assert alu_ops == 0, f"no alu uops needed"
+    assert len(k.uops) <= 4, f"more uops than needed"
+
+  def test_sub_fold2(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    a, b, c = Tensor.ones(2), Tensor.ones(2), Tensor([3, 3])
+    r = (a + c) - (b + c)
+    k = linearize(r)
+
+    alu_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
+    assert alu_ops == 0, f"no alu uops needed"
+    assert len(k.uops) <= 5, f"more uops than needed"
+
+  def test_compare_fold(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    a, b = Tensor(0), Tensor(0)
+    r = a < b
+    k = linearize(r)
+
+    alu_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
+    assert alu_ops == 0, f"no alu uops needed"
+    assert len(k.uops) <= 4, f"more uops than needed"
+
 
 if __name__ == '__main__':
   unittest.main()
