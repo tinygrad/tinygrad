@@ -43,17 +43,12 @@ jobs:
     - name: Calculate diff
       run: |
         pip install tabulate
-        CI=1
-        BASE="$GITHUB_WORKSPACE/base"
-        PR="$GITHUB_WORKSPACE/pr"
-        BASE_SZ=$(python3 $BASE/sz.py)
 
-        #copy master sz.py in case of changes
-        cat $BASE/sz.py > $PR/sz.py
-        PR_SZ=$(python3 $PR/sz.py)
+        BASE="$GITHUB_WORKSPACE/base"
+        PR="$GITHUB_WORKSPACE/pr/tinygrad"
 
         #store diff
-        DIFF=$(python3 $BASE/sz_diff.py $BASE_SZ $PR_SZ)
+        OUT=$(DIFF=1 python3 $BASE/sz_diff.py $PR)
     - name: Comment / edit diff
       uses: marocchino/sticky-pull-request-comment@v2
       with:
@@ -63,6 +58,6 @@ jobs:
         message: |
           ### Changes
           ```
-          ${{ env.DIFF }}
+          ${{ env.OUT }}
           ```
 

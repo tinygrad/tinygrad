@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import os
+import pickle
+import sys
 from pathlib import Path
 import token
 import tokenize
@@ -8,9 +10,9 @@ from tabulate import tabulate
 
 TOKEN_WHITELIST = [token.OP, token.NAME, token.NUMBER, token.STRING]
 
-def file_sz():
+def file_sz(path="tinygrad"):
   table = {}
-  for path, subdirs, files in os.walk("tinygrad"):
+  for path, subdirs, files in os.walk(path):
     for name in files:
       if not name.endswith(".py"): continue
       filepath = Path(path) / name
@@ -21,10 +23,27 @@ def file_sz():
 
   return table
 
+def diff_sz(master_sz, branch_sz):
+  diff = []
+  master_files, branch_files = [set(master_sz.keys()), set(branch_sz.keys())]
+  duplicate_files = master_files.intersetion(branch_files)
+  for file in master_files.union(branch_files):
+    if file in duplicate_files: 
+      diff.append([file, master_sz[file][0] - branch_sz[file][0]])
+    else:
+      diff.append([file, master_sz[file][0]]) if file in master_files else diff.append([file, -branch_sz[file][0]])
+      
+  return diff
+
 if __name__ == "__main__":
   headers = ["Name", "Lines", "Tokens/Line"]
-  if os.getenv("CI") == 1: 
-    print(file_sz())
+  if os.getenv('DIFF') == '1': 
+    assert sys.argv[1] is not None, "Require path to PR"
+
+    headers = ["Name", "Line diff"]
+    diff = diff_sz(file_sz(), file_sz(sys.argv[1]))
+
+    print(tabulate([headers] + sorted(diff, key=lambda x: -x[1]), headers="firstrow", floatfmt=".1f")+"\n")
   else:
     table = [[key] + value for key, value in file_sz().items()]
 
