@@ -4,8 +4,9 @@ from models.mask_rcnn import *
 from tinygrad.tensor import Tensor
 from tinygrad.tensor import dtypes
 import numpy as np
-from typing import List, Callable, Tuple
+from typing import List, Callable, Tuple, Optional
 from torch.nn import functional as F
+import torch
 
 # implementation from https://github.com/kuangliu/torchcv/blob/master/torchcv/utils/box.py
 # with slight modifications
@@ -162,8 +163,8 @@ def concat_box_prediction_layers(box_cls, box_regression):
   # concatenate on the first dimension (representing the feature levels), to
   # take into account the way the labels were generated (with all feature maps
   # being concatenated as well)
-  box_cls = Tensor.cat(box_cls_flattened, dim=1).reshape(-1, C)
-  box_regression = Tensor.cat(box_regression_flattened, dim=1).reshape(-1, 4)
+  box_cls = Tensor.cat(*box_cls_flattened, dim=1).reshape(-1, C)
+  box_regression = Tensor.cat(*box_regression_flattened, dim=1).reshape(-1, 4)
   return box_cls, box_regression
 
 # TODO maybe push this to nn?
@@ -210,10 +211,9 @@ def test_loss():
   hq_fn, _ = make_match_fn(0.7, 0.4)
   sampler = make_balanced_sampler_fn(10, 0.5)
   rpn = RPNLossComputation(hq_fn, sampler, BoxCoder(weights=(1.0, 1.0, 1.0, 1.0)), generate_rpn_labels)
-  objectness = [Tensor([[[[0.3, 0.2], [0.7, 0.6]]]])]  # shape is [1, 1, 2, 2]
-  box_regression = [Tensor([[[[0, 0.1, 0, 0.1], [0, -0.1, 0, -0.1]],
-                            [[0.1, 0, 0.1, 0], [-0.1, 0, -0.1, 0]]]])]  # shape is [1, 4, 2, 2]
-  rpn(
+  objectness = [Tensor([[[[0.3, 0.2, 0.7, 0.6]]]])]
+  box_regression = [Tensor([[[[0, 0.1, 0, 0.1]], [[0, -0.1, 0, -0.1]], [[0.1, 0, 0.1, 0]], [[-0.1, 0, -0.1, 0]]]])]
+  objectness_loss, box_loss = rpn(
       anchors=[BoxList([
         [10, 10, 20, 20], [0, 0, 5, 5], [12, 12, 18, 18],
         [15, 10, 25, 18], [22, 5, 30, 25]
@@ -225,6 +225,16 @@ def test_loss():
         [25, 25, 30, 30]
       ], image_size=(50, 50))]
   )
+  assert np.allclose(objectness_loss.numpy(), 0.85726)
+  assert np.allclose(box_loss.numpy(), 0.018)
+
+def binary_cross_entropy(pred: Tensor, y: Tensor): return -(pred.log()*y + (1-y)*(1-pred).log()).mean()
+def binary_cross_entropy_with_logits(x: Tensor, y: Tensor): return binary_cross_entropy(x.sigmoid(), y)
+
+def test_binary_cross_entropy():
+  x = Tensor([[ 2.3611, -0.8813, -0.5006, -0.2178],[0.0419, 0.0763, -1.0457, -1.6692]])
+  y = Tensor([[0., 1., 0., 0.],[0., 1., 0., 0.]])
+  assert np.allclose(binary_cross_entropy_with_logits(x, y).numpy(), 0.8233704)
 
 
 # one way this differs from reference is it doesn't rely on boxlist mutables
@@ -306,8 +316,8 @@ class RPNLossComputation:
 
     objectness = objectness.squeeze()
 
-    labels = Tensor.cat(labels, dim=0)
-    regression_targets = Tensor.cat(regression_targets, dim=0)
+    labels = Tensor.cat(*labels, dim=0)
+    regression_targets = Tensor.cat(*regression_targets, dim=0)
 
     box_loss = smooth_l1_loss(
         box_regression[sampled_pos_inds],
@@ -316,13 +326,14 @@ class RPNLossComputation:
         size_average=False,
     ) / (sampled_inds.numel())
 
-    objectness_loss = F.binary_cross_entropy_with_logits(
+    objectness_loss = binary_cross_entropy_with_logits(
         objectness[sampled_inds], labels[sampled_inds]
     )
 
     return objectness_loss, box_loss
 
 if __name__ == "__main__":
+  test_binary_cross_entropy()
   test_prepare_targets()
   test_boxlist_iou()
   test_match_eval()
