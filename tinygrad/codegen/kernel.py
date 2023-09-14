@@ -5,6 +5,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType
 from tinygrad.runtime.lib import buf_is_kernel_arg
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
 
 class LocalBuffer(NamedTuple):
@@ -102,13 +103,13 @@ class Kernel:
   def first_reduce(self) -> int: return [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True)
 
   @property
-  def output_shape(self) -> Tuple[int, ...]: return self.sts[0].shape
+  def output_shape(self) -> Tuple[sint, ...]: return self.sts[0].shape
 
   @property
-  def full_shape(self) -> Tuple[int, ...]: return self.sts[self.full_buf_index].shape
+  def full_shape(self) -> Tuple[sint, ...]: return self.sts[self.full_buf_index].shape
 
   @property
-  def full_unupcasted_shape(self) -> Tuple[int, ...]: return self.full_shape[:self.shape_len-self.upcasted]
+  def full_unupcasted_shape(self) -> Tuple[sint, ...]: return self.full_shape[:self.shape_len-self.upcasted]
 
   @property
   def shape_len(self) -> int: return len(self.sts[0].shape)

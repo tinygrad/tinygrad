@@ -1,8 +1,8 @@
 from __future__ import annotations
 import functools
-from typing import Tuple, List, Optional, NamedTuple, Union
+from typing import Tuple, List, Optional, NamedTuple
 from tinygrad.helpers import prod
-from tinygrad.shape.symbolic import Variable, Node, is_sym_int
+from tinygrad.shape.symbolic import Variable, Node, is_sym_int, sint, all_int
 
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
@@ -26,9 +26,6 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   strides = [1] if shape else []
   for d in shape[::-1][:-1]: strides = [d*strides[0]] + strides
   return filter_strides(shape, tuple(strides))
-
-# symbolic int
-sint = Union[Node, int]
 
 class View(NamedTuple):
   shape:Tuple[sint, ...]
@@ -128,8 +125,8 @@ class View(NamedTuple):
 
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
-    if all(isinstance(s, int) for s in self.shape) and all(isinstance(s, int) for s in new_shape):
-      assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
+    if all_int(self.shape) and all_int(new_shape):
+      assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
 
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)
