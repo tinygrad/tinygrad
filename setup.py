@@ -52,6 +52,7 @@ setup(name='tinygrad',
             "cloudpickle",
             "transformers",
             "nevergrad",
+            "tiktoken",
         ],
       },
       include_package_data=True)
