@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools
 from typing import Tuple, List, Optional, NamedTuple
 from tinygrad.helpers import prod
-from tinygrad.shape.symbolic import Variable, Node, is_sym_int, sint, all_int
+from tinygrad.shape.symbolic import Variable, Node, NumNode, is_sym_int, sint, all_int
 
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
@@ -72,14 +72,15 @@ class View(NamedTuple):
 
   # MovementOps live here now
 
-  def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...], mask=None) -> View:
+  def __unsafe_resize(self, arg: Tuple[Tuple[sint, sint], ...], mask=None) -> View:
     offset = sum([s * x[0] for s, x in zip(self.strides,arg)])
     if self.mask:
       # move the old mask
       nmask = tuple([(max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.mask, arg)])
       # merge the masks if we have two
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
-    return View.create(tuple([y-x for x,y in arg]), self.strides, self.offset+offset, mask)
+    shape = [y-x for x,y in arg]
+    return View.create(tuple(s.b if isinstance(s, NumNode) else s for s in shape), self.strides, self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: Tuple[Tuple[int, int], ...]) -> View:
@@ -91,7 +92,7 @@ class View(NamedTuple):
     return self
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def shrink(self, arg: Tuple[Tuple[int, int], ...]) -> View:
+  def shrink(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
     assert all((b>=0 and e<=s) for s,(b,e) in zip(self.shape,arg)) and len(arg) == len(self.shape)
     return self.__unsafe_resize(arg)
 
