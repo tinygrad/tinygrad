@@ -18,7 +18,7 @@ from torch import tensor
 from contextlib import redirect_stdout
 
 NUM = getenv("NUM", 18)
-BS = getenv("BS", 3)
+BS = getenv("BS", 4)
 CNT = getenv("CNT", 10)
 BACKWARD = getenv("BACKWARD", 1)
 TRAINING = getenv("TRAINING", 1)
@@ -97,6 +97,8 @@ def bbox_transform(proposals, reference_boxes):
 class RetinaNetTrainer:
     def __init__(self, model : RetinaNet = RetinaNet(ResNeXt50_32X4D(num_classes=None)), debug = False):
         self.model = model
+        Warning("TODO: at training, ResNet weights should be loaded and most of its layers should be frozen.")
+        #self.model.backbone.load_from_pretrained()
         self.input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
         self.input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
         self.dataset = COCO(openimages())
@@ -115,7 +117,6 @@ class RetinaNetTrainer:
         for i in range(batch_size):
             ann_boxes, ann_labels = annotations[i]['boxes'], annotations[i]['labels']
             assert len(ann_boxes) > 0
-            print(ann_boxes)
             ann_boxes = np.array([resize_box_based_on_new_image_size(box, 
                                 img_old_size=annotations[i]['image_size'], 
                                 img_new_size=self.image_size) for box in ann_boxes])
@@ -134,16 +135,25 @@ class RetinaNetTrainer:
                    
         return {"regression_targets": regression_targets, "classification_targets": classification_targets, "regression_masks": regression_masks, "classification_masks": classification_masks}
     
-    def freeze_selected_backbone_layers(self, layers):
-        """(MLPerf) The weights of the first two stages are frozen (code). In addition, all batch norm layers in the backbone are frozen (code)."""
-        raise NotImplementedError
+    def freeze_spec_backbone_layers(self, layers_to_train = ["layer2", "layer3", "layer4"]):
+        from tinygrad.state import get_state_dict
+        """(MLPerf) The weights of the first two stages are frozen (code). 
+        In addition, all batch norm layers in the backbone are frozen (code)."""
+        for (key,val) in get_state_dict(self.model.backbone).items():
+            if any([layer in key for layer in layers_to_train]):
+                val.requires_grad = True
+            else:
+                val.requires_grad = False
+            if("bn" in key):
+                val.requires_grad = False
+            
+
+
     
     def train(self):
 
         retina = self.model 
-        retina.load_from_pretrained()
-
-        #self.freeze_selected_backbone_layers()
+        self.freeze_spec_backbone_layers()
         anchors_orig = retina.anchor_gen(self.image_size) #TODO: get them just with reshape of flattened?
         anchors_flattened_levels = np.concatenate(anchors_orig)
         optimizer = optim.SGD(get_parameters(retina), lr=0.001)
@@ -170,13 +180,13 @@ class RetinaNetTrainer:
             
             #TODO input_size=self.image_size? WATCH OUT PARAMETERS AND USAGE
             if self.debug:
-                predictions = retina.postprocess_detections(head_outputs.numpy(),input_size=self.image_size,orig_image_sizes=[t["image_size"] for t in annotations],anchors=anchors_orig)
+                predictions = retina.postprocess_detections(head_outputs.numpy(),input_size=self.image_size,anchors=anchors_orig,orig_image_sizes=[t["image_size"] for t in annotations])
 
                 for image, image_preds in zip(x, predictions):
                     img = Image.fromarray(image)
                     draw = ImageDraw.Draw(img)
                     for box in image_preds["boxes"]:
-                        draw.rectangle(box, outline="red")
+                        draw.rectangle([box[0], box[1],box[0]+box[2], box[1]+box[3]], outline="red")
                     img.show()
 
                 #TODO this should be done on validation split predictions (no grad)
@@ -321,9 +331,11 @@ class RetinaNetTrainer:
         x /= self.input_std
         return x
 
-
+class RetinaNetStateTracker:
+    def __init__(self, models_to_compare : tuple) -> None:
+        pass
 
 if __name__ == "__main__":
-    trainer = RetinaNetTrainer(debug=True)
+    trainer = RetinaNetTrainer()
     #trainer._dummy_test_sigmoid_focal_loss()
     trainer.train()
