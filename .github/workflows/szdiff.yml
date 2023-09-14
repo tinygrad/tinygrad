@@ -36,7 +36,6 @@ jobs:
           PR="$GITHUB_WORKSPACE/pr"
           cp "$PR/sz.py" .
           echo "loc_content<<EOF" >> "$GITHUB_ENV"
-          echo "python sz.py '$BASE'"
           python sz.py "$BASE" "$PR" >> "$GITHUB_ENV"
           echo "EOF" >> "$GITHUB_ENV"
       - name: Comment Code Lines

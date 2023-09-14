@@ -27,18 +27,18 @@ def gen_diff(table_old, table_new):
   added, deleted, unchanged = files_new - files_old, files_old - files_new, files_new & files_old
   if added:
     for file in added:
-      line_new = [line for line in table_new if file in line]
-      table.append([line_new[0][0], line_new[0][1], line_new[0][1]-0, line_new[0][2], line_new[0][2]-0])
+      file_stat = [stats for stats in table_new if file in stats]
+      table.append([file_stat[0][0], file_stat[0][1], file_stat[0][1]-0, file_stat[0][2], file_stat[0][2]-0])
   if deleted:
     for file in deleted:
-      line_old = [line for line in table_old if file in line]
-      table.append([line_old[0][0], line_old[0][1], 0 - line_old[0][1], line_old[0][2], 0-line_old[0][2]])
+      file_stat = [stats for stats in table_old if file in stats]
+      table.append([file_stat[0][0], 0, 0 - file_stat[0][1], 0, 0-file_stat[0][2]])
   if unchanged:
     for file in unchanged:
-      line_old = [line for line in table_old if file in line]
-      line_new = [line for line in table_new if file in line]
-      if line_new[0][1]-line_old[0][1] != 0 or line_new[0][2]-line_old[0][2] != 0: 
-        table.append([line_new[0][0], line_new[0][1], line_new[0][1]-line_old[0][1], line_new[0][2], line_new[0][2]-line_old[0][2]])
+      file_stat_old = [stats for stats in table_old if file in stats]
+      file_stat_new = [stats for stats in table_new if file in stats]
+      if file_stat_new[0][1]-file_stat_old[0][1] != 0 or file_stat_new[0][2]-file_stat_old[0][2] != 0: 
+        table.append([file_stat_new[0][0], file_stat_new[0][1], file_stat_new[0][1]-file_stat_old[0][1], file_stat_new[0][2], file_stat_new[0][2]-file_stat_old[0][2]])
   return table
 
 def display_diff(diff): return "+"+str(diff) if diff > 0 else str(diff)
