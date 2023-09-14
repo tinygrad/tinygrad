@@ -22,7 +22,7 @@ class UOps(Enum):
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtNode]) -> Tuple[Tuple[Node, Node], Node]:
-
+  orig = idxy
   if valid.min == 0:
     nodes: List = [valid] if isinstance(valid, LtNode) else valid.nodes
     var_dict = dict()
@@ -32,12 +32,10 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
       if (name := sym_render(init_var)) not in var_dict: var_dict[name] = (init_var, [init_var.min, init_var.max])
       var = var_dict[name][1]
       if isinstance(nd.a, MulNode):
-        if nd.a.b == -1:
-          var[0] = -nd.b + 1
-        elif nd.a.b < 0:
-          var[0] = abs(nd.b // nd.a.b) + 1 if nd.b % nd.a.b == 0 else abs(nd.b // nd.a.b)
+        if nd.a.b < 0:
+          var[0] = (nd.b // nd.a.b) + 1
         elif nd.a.b > 0:
-          var[1] = nd.b // nd.a.b - 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
+          var[1] = (nd.b // nd.a.b) - 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
       elif isinstance(nd.a, Variable):
         var[1] = nd.b - 1
     # We do not allow NumNode as it is constant
@@ -49,6 +47,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
   b = base_shape[1]
   idx = (idxy//4)%b
   idy = (idxy // (4 * b))
+  if valid.min == 0: print(valid)
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
