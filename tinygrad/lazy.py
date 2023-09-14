@@ -2,6 +2,7 @@ from __future__ import annotations
 import sys, operator, math
 from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast
 from weakref import ref, WeakSet, WeakValueDictionary
+from itertools import chain
 
 import numpy as np
 from tinygrad.graph import log_op
@@ -221,9 +222,11 @@ class LazyBuffer:
           new_srcs.append(x)
       return new_srcs[0].e(op, *new_srcs[1:], arg=arg).contiguous()
 
+    max_kernel_args = 30 if out_device == "METAL" else float('inf')
     if MERGE_ELEMENTWISE_OPS:
       # remove the buffers from any (childless) BinaryOps that feed into this
-      srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
+      _srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
+      if len({b for b in chain(*[src.buffers for src in _srcs]) if b.realized or b.op.op is not LoadOps.CONST}) <= max_kernel_args:srcs = _srcs # type: ignore
 
     return create_lazybuffer(out_device, ShapeTracker(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype, self.var_vals)
 
