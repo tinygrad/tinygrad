@@ -28,33 +28,31 @@ BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 
 bias_scaler = 56
 hyp = {
   'opt': {
-    'bias_lr':        1.64 * bias_scaler/512,
-    'non_bias_lr':    1.64 / 512,
-    'bias_decay':     1.08 * 6.45e-4 * BS/bias_scaler,
-    'non_bias_decay': 1.08 * 6.45e-4 * BS,
-    'momentum':       0.85,
-    'percent_start':  0.25,
-    'scaling_factor': 1./9,
-    'loss_scale_scaler': 1./512,    # (range: ~1/512 - 16+) was 1/128 from original repo w/ FP16
+    'bias_lr':           1.65 * bias_scaler/512,
+    'non_bias_lr':       1.65 / 512,
+    'bias_decay':        1.08 * 6.45e-4 * BS/bias_scaler,
+    'non_bias_decay':    1.08 * 6.45e-4 * BS,
+    'final_lr_ratio':    0.07,
+    'label_smoothing':   0.2,
+    'momentum':          0.85,
+    'percent_start':     0.23,
+    'scaling_factor':    1./9,
+    'loss_scale_scaler': 1./512,    # (range: ~1/512 - 16+, 1/128 w/ FP16)
   },
   'net': {
       'kernel_size': 2,             # kernel size for the whitening layer
       'batch_norm_momentum': .5,
       'cutmix_size': 3,
-      'cutmix_steps': 490,          # different from original repo which used epoch > 12.1 - 6 which is roughly 7*98=686 STEPS
+      'cutmix_steps': 599, 
       'pad_amount': 2
   },
   'ema': {
-      'epochs': 196,
+      'epochs': 199,
       'decay_base': .95,
-      'decay_pow': 3.,
+      'decay_pow': 2.,
       'every_n_steps': 5,
   }
 }
-
-def set_seed(seed):
-  Tensor.manual_seed(getenv('SEED', seed)) # Deterministic
-  random.seed(getenv('SEED', seed))
 
 # ========== Model ==========
 def whitening(X, kernel_size=hyp['net']['kernel_size']):
@@ -152,16 +150,13 @@ def make_square_mask(shape, mask_size):
   is_even = int(mask_size % 2 == 0)
   center_max = shape[-2]-mask_size//2-is_even
   center_min = mask_size//2-is_even
-  center = Tensor.rand(shape[0])*(center_max-center_min)+center_min
-
-  d_y = Tensor.arange(0, shape[-2]).reshape((1,1,shape[-2],1))
-  d_x = Tensor.arange(0, shape[-1]).reshape((1,1,1,shape[-1]))
-  d_y = d_y - center.reshape((-1,1,1,1))
-  d_x = d_x - center.reshape((-1,1,1,1))
-  d_y =(d_y >= -(mask_size / 2)) * (d_y <= mask_size / 2)
-  d_x =(d_x >= -(mask_size / 2)) * (d_x <= mask_size / 2)
+  center_x = (Tensor.rand(shape[0])*(center_max-center_min)+center_min).floor()
+  center_y = (Tensor.rand(shape[0])*(center_max-center_min)+center_min).floor()
+  d_x = Tensor.arange(0, shape[-1]).reshape((1,1,1,shape[-1])) - center_x.reshape((-1,1,1,1))
+  d_y = Tensor.arange(0, shape[-2]).reshape((1,1,shape[-2],1)) - center_y.reshape((-1,1,1,1))
+  d_x =(d_x >= -(mask_size // 2) + is_even) * (d_x <= mask_size // 2)
+  d_y =(d_y >= -(mask_size // 2) + is_even) * (d_y <= mask_size // 2)
   mask = d_y * d_x
-
   return mask
 
 def random_crop(X, crop_size=32):
@@ -184,10 +179,10 @@ def cutmix(X, Y, mask_size=3):
   return X_cutmix, Y_cutmix
 
 # the operations that remain inside batch fetcher is the ones that involves random operations
-def fetch_batches(X_in, Y_in, BS, seed, is_train):
+def fetch_batches(X_in, Y_in, BS, is_train):
   step = 0
   while True:
-    set_seed(seed)
+    # set_seed(seed)
     X, Y = X_in, Y_in
     order = list(range(0, X.shape[0]))
     random.shuffle(order)
@@ -205,7 +200,7 @@ def fetch_batches(X_in, Y_in, BS, seed, is_train):
       yield x, y
 
     if not is_train: break
-    seed += 1
+    # seed += 1
 
 transform = [
   lambda x: x / 255.0,
@@ -228,15 +223,20 @@ class modelEMA():
   def update(self, net_current, decay):
     # TODO with Tensor.no_grad()
     Tensor.no_grad = True
-    for net_ema_param, (param_name, current_net_param) in zip(get_state_dict(self.net_ema).values(), get_state_dict(net_current).items()):
+    for net_ema_param, (param_name, net_current_param) in zip(get_state_dict(self.net_ema).values(), get_state_dict(net_current).items()):
+      # batchnorm currently is not being tracked 
       if not ("num_batches_tracked" in param_name) and not ("running" in param_name):
-        net_ema_param.assign(net_ema_param.detach()*decay + current_net_param.detach()*(1-decay)).realize()
+        net_ema_param.assign(net_ema_param.detach()*decay + net_current_param.detach()*(1.-decay)).realize()
+        if not ('norm' in param_name and 'weight' in param_name) and not 'whiten' in param_name:
+          net_current_param.requires_grad = False
+          net_current_param.assign(net_ema_param.detach())
+          net_current_param.requires_grad = True
     Tensor.no_grad = False
 
-def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
+def train_cifar():
   # this import needs to be done here because this is running in a subprocess
   from extra.dist import OOB
-  set_seed(seed)
+  # set_seed(seed)
   Tensor.training = True
   rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
 
@@ -273,7 +273,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
 
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
   initial_div_factor = 1e16
-  final_lr_ratio = 0.0215
+  final_lr_ratio = hyp['opt']['final_lr_ratio']
   pct_start = hyp['opt']['percent_start']
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']     ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'] ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
@@ -282,7 +282,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   @TinyJit
   def train_step_jitted(model, optimizer, lr_scheduler, X, Y):
     out = model(X)
-    loss = cross_entropy(out, Y, reduction='none' ,label_smoothing=0.2).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
+    loss = cross_entropy(out, Y, reduction='none' ,label_smoothing=hyp['opt']['label_smoothing']).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
     if not getenv("DISABLE_BACKWARD"):
       # index 0 for bias and 1 for non-bias
@@ -326,9 +326,10 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
 
   model_ema = None
+  projected_ema_decay_val = hyp['ema']['decay_base'] ** hyp['ema']['every_n_steps']
   best_eval = -1
   i = 0
-  batcher = fetch_batches(X_train, Y_train, BS=BS, seed=seed, is_train=True)
+  batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
   while i <= STEPS:
     if i%100 == 0 and i > 1:
       # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
@@ -336,7 +337,7 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
       corrects_ema = []
       losses = []
       losses_ema = []
-      for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, seed=seed, is_train=False):
+      for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
         # further split batch if distributed
         if getenv("DIST"):
           Xt, Yt = Xt.chunk(min(world_size, 5), 0)[min(rank, 4)], Yt.chunk(min(world_size, 5), 0)[min(rank, 4)]
@@ -381,10 +382,10 @@ def train_cifar(bs=BS, eval_bs=EVAL_BS, steps=STEPS, seed=32):
     et = time.monotonic()
     loss_cpu = loss.numpy()
     # EMA for network weights
-    if i > hyp['ema']['epochs'] and i % hyp['ema']['every_n_steps'] == 0:
+    if i > hyp['ema']['epochs'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
       if model_ema is None:
         model_ema = modelEMA(W, model)
-      model_ema.update(model, 0.5)
+      model_ema.update(model, decay=projected_ema_decay_val*(i/STEPS)**hyp['ema']['decay_pow'])
     cl = time.monotonic()
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
