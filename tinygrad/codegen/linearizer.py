@@ -42,7 +42,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
         var[1] = nd.b - 1
     # We do not allow NumNode as it is constant
     sub_dict = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items() if mn != mx}
-    valid = valid.substitute(sub_dict)
+    valid = valid.substitute(sub_dict) #type: ignore
     sub_dict = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items()}
     idxy = idxy.substitute(sub_dict) #type: ignore
 
