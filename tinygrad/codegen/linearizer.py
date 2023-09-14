@@ -24,7 +24,7 @@ class UOps(Enum):
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtNode]) -> Tuple[Tuple[Node, Node], Node]:
 
   if valid.min == 0:
-    nodes = [valid] if isinstance(valid, LtNode) else valid.nodes
+    nodes: List = [valid] if isinstance(valid, LtNode) else valid.nodes
     var_dict = dict()
 
     for nd in nodes:
@@ -42,8 +42,8 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
         var[1] = nd.b - 1
 
     sub_dict = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items() if mn != mx}
-    valid = valid.substitute(sub_dict)
-    idxy = idxy.substitute(sub_dict)
+    valid = valid.substitute(sub_dict) #type: ignore
+    idxy = idxy.substitute(sub_dict) #type: ignore
 
   mid_var, b = (idxy//4), base_shape[1]
   idx = mid_var - b*(mid_var//b) # Using "Mod" breaks the thing because idx cant go out of bounds.
