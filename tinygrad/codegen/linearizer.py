@@ -46,8 +46,8 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
     sub_dict = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items()}
     idxy = idxy.substitute(sub_dict) #type: ignore
 
-  mid_var, b = (idxy//4), base_shape[1]
-  idx = mid_var - b*(mid_var//b) # Using "Mod" breaks the thing because idx cant go out of bounds.
+  b = base_shape[1]
+  idx = (idxy//4)%b
   idy = (idxy // (4 * b))
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
