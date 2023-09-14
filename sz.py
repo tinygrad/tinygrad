@@ -27,20 +27,18 @@ def gen_diff(table_old, table_new):
   added, deleted, unchanged = files_new - files_old, files_old - files_new, files_new & files_old
   if added:
     for file in added:
-      for line in table_new:
-        if file in line: table.append([line[0], line[1], line[1] - 0, line[2], line[2]-0]) 
+      line_new = [line for line in table_new if file in line]
+      table.append([line_new[0][0], line_new[0][1], line_new[0][1]-0, line_new[0][2], line_new[0][2]-0])
   if deleted:
     for file in deleted:
-      for line in table_old: 
-        if file in line: table.append([line[0], 0, 0 - line[1], 0, 0-line[2]])
+      line_old = [line for line in table_old if file in line]
+      table.append([line_old[0][0], line_old[0][1], 0 - line_old[0][1], line_old[0][2], 0-line_old[0][2]])
   if unchanged:
     for file in unchanged:
-      for line in table_old: 
-        if file in line: line_old = line 
-      for line in table_new: 
-        if file in line: line_new = line
-      if line_new[1]-line_old[1] != 0 or line_new[2]-line_old[2] != 0: 
-        table.append([line_new[0], line_new[1], line_new[1]-line_old[1], line_new[2], line_new[2]-line_old[2]])
+      line_old = [line for line in table_old if file in line]
+      line_new = [line for line in table_new if file in line]
+      if line_new[0][1]-line_old[0][1] != 0 or line_new[0][2]-line_old[0][2] != 0: 
+        table.append([line_new[0][0], line_new[0][1], line_new[0][1]-line_old[0][1], line_new[0][2], line_new[0][2]-line_old[0][2]])
   return table
 
 def display_diff(diff): return "+"+str(diff) if diff > 0 else str(diff)
