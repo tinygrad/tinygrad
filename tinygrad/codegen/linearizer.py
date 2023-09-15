@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same, partition
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
@@ -22,7 +22,7 @@ class UOps(Enum):
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtNode]) -> Tuple[Tuple[Node, Node], Node]:
-  orig = idxy
+
   if valid.min == 0:
     nodes: List = [valid] if isinstance(valid, LtNode) else valid.nodes
     var_dict = dict()
@@ -41,13 +41,15 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
     # We do not allow NumNode as it is constant
     sub_dict = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items() if mn != mx}
     valid = valid.substitute(sub_dict) #type: ignore
-    sub_dict = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items()}
+    #sub_dict = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items()}
     idxy = idxy.substitute(sub_dict) #type: ignore
 
   b = base_shape[1]
   idx = (idxy//4)%b
   idy = (idxy // (4 * b))
-  if valid.min == 0: print(valid)
+
+  if not isinstance(idx, ModNode): valid = NumNode(1)
+
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
