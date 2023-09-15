@@ -94,7 +94,7 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
     assert num_ops == 0, "more load or alu uops than needed"
 
-  def test_max_fold(self): # doesnt work for LLVM only if lazy is adapted for constants
+  def test_max_fold(self):
     if not isinstance(Device[Device.DEFAULT], Compiled):
       self.skipTest("Only Compiled uses linearizer")
 
@@ -106,7 +106,7 @@ class TestLinearizer(unittest.TestCase):
     np.testing.assert_allclose(r.numpy(), 0.), f"result is wrong"
     assert num_ops == 0, "more load or alu uops than needed"
 
-  def test_sub_fold(self):  # doesnt work for LLVM only if lazy is adapted for constants
+  def test_sub_fold(self):
     if not isinstance(Device[Device.DEFAULT], Compiled):
       self.skipTest("Only Compiled uses linearizer")
 
