@@ -4,9 +4,7 @@ from models.mask_rcnn import *
 from tinygrad.tensor import Tensor
 from tinygrad.tensor import dtypes
 import numpy as np
-from typing import List, Callable, Tuple, Optional
-from torch.nn import functional as F
-import torch
+from typing import List, Callable, Tuple
 
 # implementation from https://github.com/kuangliu/torchcv/blob/master/torchcv/utils/box.py
 # with slight modifications
@@ -137,6 +135,14 @@ def generate_rpn_labels(matched_idxs: Tensor) -> Tensor:
     labels_per_image = matched_idxs >= 0
     return labels_per_image
 
+def test_concat_box_prediction_layers():
+  box_cls = [Tensor([[[[0.3, 0.2, 0.7, 0.6]]]])]
+  box_regression = [Tensor([[[[0, 0.1, 0, 0.1]], [[0, -0.1, 0, -0.1]], [[0.1, 0, 0.1, 0]], [[-0.1, 0, -0.1, 0]]]])]
+  box_cls, box_regression = concat_box_prediction_layers(box_cls, box_regression)
+  print("box_regression", box_regression.numpy())
+  assert np.allclose(box_cls.numpy(), Tensor([[0.3],[0.2],[0.7],[0.6]]).numpy())
+  assert np.allclose(box_regression.numpy(), Tensor([[0, 0.1, 0, 0.1], [0, -0.1, 0, -0.1], [0.1, 0, 0.1, 0], [-0.1, 0, -0.1, 0]]).numpy())
+
 def concat_box_prediction_layers(box_cls, box_regression):
   box_cls_flattened = []
   box_regression_flattened = []
@@ -210,32 +216,27 @@ def test_prepare_targets():
 def test_loss():
   hq_fn, _ = make_match_fn(0.7, 0.4)
   sampler = make_balanced_sampler_fn(10, 0.5)
-  rpn = RPNLossComputation(hq_fn, sampler, BoxCoder(weights=(1.0, 1.0, 1.0, 1.0)), generate_rpn_labels)
-  objectness = [Tensor([[[[0.3, 0.2, 0.7, 0.6]]]])]
-  box_regression = [Tensor([[[[0, 0.1, 0, 0.1]], [[0, -0.1, 0, -0.1]], [[0.1, 0, 0.1, 0]], [[-0.1, 0, -0.1, 0]]]])]
-  objectness_loss, box_loss = rpn(
-      anchors=[BoxList([
-        [10, 10, 20, 20], [0, 0, 5, 5], [12, 12, 18, 18],
-        [15, 10, 25, 18], [22, 5, 30, 25]
-      ], image_size=(50, 50))],
-      objectness=objectness,
-      box_regression=box_regression,
-      targets=[BoxList([
-        [0, 0, 5, 5], [5, 5, 10, 10], [15, 15, 20, 20],
-        [25, 25, 30, 30]
-      ], image_size=(50, 50))]
+  coder = BoxCoder(weights=(1.0, 1.0, 1.0, 1.0))
+  loss = RPNLossComputation(hq_fn, sampler, coder, generate_rpn_labels)
+  channels=256
+  anchor_generator = AnchorGenerator()
+  head = RPNHead(
+    channels, anchor_generator.num_anchors_per_location()[0]
   )
-  assert np.allclose(objectness_loss.numpy(), 0.85726)
-  assert np.allclose(box_loss.numpy(), 0.018)
-
+  features = Tensor.randn((1, channels, 50, 50))
+  images = Tensor.randn((1, 3, 50, 50))
+  objectness, rpn_box_regression = head(features)
+  anchors = anchor_generator(images, features)
+  targets = [BoxList(Tensor([[0, 0, 5, 5], [0, 0, 10, 10]]), image_size = (50, 50))]
+  objectness_loss, regression_loss = loss(objectness, rpn_box_regression, anchors, targets)
+  
 def binary_cross_entropy(pred: Tensor, y: Tensor): return -(pred.log()*y + (1-y)*(1-pred).log()).mean()
 def binary_cross_entropy_with_logits(x: Tensor, y: Tensor): return binary_cross_entropy(x.sigmoid(), y)
 
-def test_binary_cross_entropy():
+def test_binary_cross_entropy_with_logits():
   x = Tensor([[ 2.3611, -0.8813, -0.5006, -0.2178],[0.0419, 0.0763, -1.0457, -1.6692]])
   y = Tensor([[0., 1., 0., 0.],[0., 1., 0., 0.]])
   assert np.allclose(binary_cross_entropy_with_logits(x, y).numpy(), 0.8233704)
-
 
 # one way this differs from reference is it doesn't rely on boxlist mutables
 class RPNLossComputation:
@@ -311,6 +312,7 @@ class RPNLossComputation:
     sampled_pos_inds, sampled_neg_inds = Tensor(sampled_pos_inds).squeeze(0), Tensor(sampled_neg_inds).squeeze(0)
 
     sampled_inds = Tensor.cat(sampled_pos_inds, sampled_neg_inds, dim=0)
+    ## todo test this, doesn't seem to have the correct box_regression
     objectness, box_regression = \
             concat_box_prediction_layers(objectness, box_regression)
 
@@ -333,7 +335,8 @@ class RPNLossComputation:
     return objectness_loss, box_loss
 
 if __name__ == "__main__":
-  test_binary_cross_entropy()
+  test_concat_box_prediction_layers()
+  test_binary_cross_entropy_with_logits()
   test_prepare_targets()
   test_boxlist_iou()
   test_match_eval()

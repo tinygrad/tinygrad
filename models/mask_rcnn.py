@@ -108,11 +108,14 @@ FLIP_TOP_BOTTOM = 1
 
 
 def permute_and_flatten(layer:Tensor, N, A, C, H, W):
+  print("input", layer.numpy())
   layer = layer.reshape(N, -1, C, H, W)
+  print("reshape", layer.numpy())
   layer = layer.permute(0, 3, 4, 1, 2)
+  print("permute", layer.numpy())
   layer = layer.reshape(N, -1, C)
+  print("reshape", layer.numpy())
   return layer
-
 
 class BoxList:
   def __init__(self, bbox, image_size, mode="xyxy"):
@@ -421,7 +424,7 @@ class AnchorGenerator:
       inds_inside = Tensor.ones(anchors.shape[0], dtype=dtypes.uint8, device=device)
     boxlist.add_field("visibility", inds_inside)
 
-  def __call__(self, image_list, feature_maps):
+  def __call__(self, image_list: ImageList, feature_maps: list[Tensor]) -> list[BoxList]:
     grid_sizes = [feature_map.shape[-2:] for feature_map in feature_maps]
     anchors_over_all_feature_maps = self.grid_anchors(grid_sizes)
     anchors = []
