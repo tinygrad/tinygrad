@@ -25,29 +25,30 @@ from extra.dist import collectives
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
 # hyper-parameters were exactly the same as the original repo
-bias_scaler = 56
+bias_scaler = 55
 hyp = {
   'opt': {
-    'bias_lr':           1.65 * bias_scaler/512,
-    'non_bias_lr':       1.65 / 512,
-    'bias_decay':        1.08 * 6.45e-4 * BS/bias_scaler,
-    'non_bias_decay':    1.08 * 6.45e-4 * BS,
-    'final_lr_ratio':    0.07,
-    'label_smoothing':   0.2,
-    'momentum':          0.85,
-    'percent_start':     0.23,
-    'scaling_factor':    1./9,
-    'loss_scale_scaler': 1./512,    # (range: ~1/512 - 16+, 1/128 w/ FP16)
+    'bias_lr':            1.70 * bias_scaler/512,
+    'non_bias_lr':        1.70 / 512,
+    'bias_decay':         1.08 * 6.45e-4 * BS/bias_scaler,
+    'non_bias_decay':     1.08 * 6.45e-4 * BS,
+    'final_lr_ratio':     0.025,
+    'initial_div_factor': 1e15, 
+    'label_smoothing':    0.20,
+    'momentum':           0.85,
+    'percent_start':      0.23,
+    'scaling_factor':     1./9,
+    'loss_scale_scaler':  1./512,   # (range: ~1/512 - 16+, 1/128 w/ FP16)
   },
   'net': {
       'kernel_size': 2,             # kernel size for the whitening layer
-      'batch_norm_momentum': .5,
+      'batch_norm_momentum': .85,
       'cutmix_size': 3,
       'cutmix_steps': 599, 
       'pad_amount': 2
   },
   'ema': {
-      'epochs': 199,
+      'steps': 199,
       'decay_base': .95,
       'decay_pow': 2.,
       'every_n_steps': 5,
@@ -236,7 +237,6 @@ class modelEMA():
 def train_cifar():
   # this import needs to be done here because this is running in a subprocess
   from extra.dist import OOB
-  # set_seed(seed)
   Tensor.training = True
   rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
 
@@ -272,7 +272,7 @@ def train_cifar():
   opt_non_bias = optim.SGD(params_non_bias, lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['non_bias_decay'])
 
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
-  initial_div_factor = 1e16
+  initial_div_factor = 1e15
   final_lr_ratio = hyp['opt']['final_lr_ratio']
   pct_start = hyp['opt']['percent_start']
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']     ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
@@ -382,7 +382,7 @@ def train_cifar():
     et = time.monotonic()
     loss_cpu = loss.numpy()
     # EMA for network weights
-    if i > hyp['ema']['epochs'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
+    if i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
       if model_ema is None:
         model_ema = modelEMA(W, model)
       model_ema.update(model, decay=projected_ema_decay_val*(i/STEPS)**hyp['ema']['decay_pow'])
