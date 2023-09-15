@@ -47,7 +47,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
   b = base_shape[1]
   idx = (idxy//4)%b
   idy = (idxy // (4 * b))
-  if not isinstance(idx, ModNode): valid = NumNode(1)
+
   if False and getenv("VALIDHACKS") == 1:
     if not isinstance(idx, ModNode):
       valid = NumNode(1)
