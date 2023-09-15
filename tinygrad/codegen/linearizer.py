@@ -48,18 +48,11 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
   idx = (idxy//4)%b
   idy = (idxy // (4 * b))
 
-  if False and getenv("VALIDHACKS") == 1:
-    if not isinstance(idx, ModNode):
-      valid = NumNode(1)
-    else:
-      if idx.a.min >= (base_shape[1]*3)//4:
-        idx = idx.a - b
-      else:
-        if idx.b == 1024:
-          idx = idx.a
-        else:
-          print(idx, valid)
-      valid = NumNode(1)
+  if valid.min == 0 and isinstance(idx, ModNode):
+    idx = idx.a - b if idx.a.min >= (b - idx.a.min) else idx.a
+
+  valid = NumNode(1)
+
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
