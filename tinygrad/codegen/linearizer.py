@@ -416,7 +416,7 @@ class Linearizer(OptimizedKernel):
       # constant folding
       if arg == UnaryOps.NEG and vin[0].uop == UOps.CONST: return self.const(-vin[0].arg, dtype)
       if arg in BinaryOps and vin[0].uop == UOps.CONST and vin[1].uop == UOps.CONST:
-        fs = {BinaryOps.ADD: lambda a, b: a + b, BinaryOps.SUB: lambda a, b: a - b, BinaryOps.MUL:lambda a, b: a * b, BinaryOps.DIV:lambda a, b: a / b, BinaryOps.MAX: lambda a,b: max(a,b), BinaryOps.CMPLT: lambda a,b: int(a < b), BinaryOps.MOD: lambda a,b: a % b}
+        fs = {BinaryOps.ADD: lambda a, b: a + b, BinaryOps.SUB: lambda a, b: a - b, BinaryOps.MUL:lambda a, b: a * b, BinaryOps.DIV:lambda a, b: a / b, BinaryOps.MAX: lambda a,b: max(a,b), BinaryOps.CMPLT: lambda a,b: int(a < b), BinaryOps.MOD: lambda a,b: a % b} #pylint: disable=unnecessary-lambda
         return self.const(fs[arg](vin[0].arg, vin[1].arg), dtype)
       # zero folding
       for x in [0,1]:
