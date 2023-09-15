@@ -411,12 +411,13 @@ class Linearizer(OptimizedKernel):
     if uop == UOps.CAST and all(x.uop == UOps.GEP for x in vin) and all_same([x.vin[0] for x in vin]) and all(x.arg == i for i,x in enumerate(vin)): return vin[0].vin[0]
     if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype)
     if uop == UOps.ALU:
+      assert dtype is not None # for linter
       # rewrites. NOTE: the rewritten NEG op is still around...
       if arg == BinaryOps.ADD and vin[1].uop == UOps.ALU and vin[1].arg == UnaryOps.NEG: return self.uop(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable=cachable)
       # constant folding
       if arg == UnaryOps.NEG and vin[0].uop == UOps.CONST: return self.const(-vin[0].arg, dtype)
       if arg in BinaryOps and vin[0].uop == UOps.CONST and vin[1].uop == UOps.CONST:
-        fs = {BinaryOps.ADD: lambda a, b: a + b, BinaryOps.SUB: lambda a, b: a - b, BinaryOps.MUL:lambda a, b: a * b, BinaryOps.DIV:lambda a, b: a / b, BinaryOps.MAX: lambda a,b: max(a,b), BinaryOps.CMPLT: lambda a,b: int(a < b), BinaryOps.MOD: lambda a,b: a % b} #pylint: disable=unnecessary-lambda
+        fs = {BinaryOps.ADD: lambda a, b: a + b, BinaryOps.SUB: lambda a, b: a - b, BinaryOps.MUL:lambda a, b: a * b, BinaryOps.DIV:lambda a, b: a / b if b != 0. else float('nan'), BinaryOps.MAX: lambda a,b: max(a,b), BinaryOps.CMPLT: lambda a,b: int(a < b), BinaryOps.MOD: lambda a,b: a % b} #pylint: disable=unnecessary-lambda
         return self.const(fs[arg](vin[0].arg, vin[1].arg), dtype)
       # zero folding
       for x in [0,1]:
