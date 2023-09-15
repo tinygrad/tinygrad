@@ -83,7 +83,7 @@ class TestLinearizer(unittest.TestCase):
     if not isinstance(Device[Device.DEFAULT], Compiled):
       self.skipTest("Only Compiled uses linearizer")
 
-    fs = [lambda a,b: a*b,lambda a,b:a-b,lambda a,b: a/b,lambda a,b: a<b] # tensor.__mod__ is not yet implemented
+    fs = [lambda a,b: a+b, lambda a,b: a*b,lambda a,b:a-b,lambda a,b: a/b,lambda a,b: a<b] # tensor.__mod__ is not yet implemented
 
     for f in fs:
       a, b = 2,3

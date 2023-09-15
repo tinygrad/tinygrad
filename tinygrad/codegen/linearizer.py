@@ -415,14 +415,9 @@ class Linearizer(OptimizedKernel):
       if arg == BinaryOps.ADD and vin[1].uop == UOps.ALU and vin[1].arg == UnaryOps.NEG: return self.uop(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable=cachable)
       # constant folding
       if arg == UnaryOps.NEG and vin[0].uop == UOps.CONST: return self.const(-vin[0].arg, dtype)
-      if arg in BinaryOps and vin[0].uop == UOps.CONST and vin[0].uop == UOps.CONST:
-        if arg == BinaryOps.ADD: return self.const(vin[0].arg + vin[1].arg, dtype)
-        if arg == BinaryOps.SUB: return self.const(vin[0].arg - vin[1].arg, dtype)
-        if arg == BinaryOps.MUL: return self.const(vin[0].arg * vin[1].arg, dtype)
-        if arg == BinaryOps.DIV: return self.const(vin[0].arg / vin[1].arg, dtype)
-        if arg == BinaryOps.MAX: return self.const(max(vin[0].arg, vin[1].arg), dtype)
-        if arg == BinaryOps.CMPLT: return self.const(int(vin[0].arg < vin[1].arg), dtype)
-        if arg == BinaryOps.MOD: return self.const(vin[0].arg % vin[1].arg, dtype)
+      if arg in BinaryOps and vin[0].uop == UOps.CONST and vin[1].uop == UOps.CONST:
+        fs = {BinaryOps.ADD: lambda a, b: a + b, BinaryOps.SUB: lambda a, b: a - b, BinaryOps.MUL:lambda a, b: a * b, BinaryOps.DIV:lambda a, b: a / b, BinaryOps.MAX: lambda a,b: max(a,b), BinaryOps.CMPLT: lambda a,b: int(a < b), BinaryOps.MOD: lambda a,b: a % b}
+        return self.const(fs[arg](vin[0].arg, vin[1].arg), dtype)
       # zero folding
       for x in [0,1]:
         if arg == BinaryOps.ADD and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
@@ -433,7 +428,7 @@ class Linearizer(OptimizedKernel):
       # equal folding
       if arg == BinaryOps.SUB and vin[0] == vin[1]: return self.const(0, dtype)
       if arg == BinaryOps.CMPLT and vin[0] == vin[1]: return self.const(0, dtype)
-      # BinaryOps.Max not needed is only used for relu. Which is handled in constant folding
+      # check BinaryOps.Max not needed it is only used for relu. Which is handled in constant folding
 
     if cachable and key in self.saved_exprs: return self.saved_exprs[key]
     self.uops.append(UOp(uop, dtype, vin, arg, len(self.uops)))
