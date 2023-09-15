@@ -6,14 +6,14 @@ from typing import Optional, List
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
-from tinygrad.codegen.linearizer import LinearizerOptions
+from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
 ROCM_LLVM_PATH = pathlib.Path("/opt/rocm/llvm/bin")
-#ROCM_LLVM_PATH = pathlib.Path(__file__).parent.parent.parent.parent / "extra/rocm/build/llvm-project/bin"
+#ROCM_LLVM_PATH = pathlib.Path(__file__).parents[3] / "extra/rocm/build/llvm-project/bin"
 if DEBUG >= 5:
   early_exec = fromimport("extra.helpers", "enable_early_exec")()
 
@@ -87,9 +87,14 @@ class CLProgram:
   def max_work_group_size(): return CL.cl_ctxs[0].devices[0].max_work_group_size
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
-    if not hasattr(self, 'argdtypes'): self.set_argdtypes(tuple(None if isinstance(x, CLBuffer) else np.int32 for x in bufs))
-    cl_bufs = [x._buf if isinstance(x, CLBuffer) else x for x in bufs]
-    e = self.clprgs[cl_bufs[0].device](CL.cl_queue[cl_bufs[0].device], [g*l for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *cl_bufs, wait_for=[x.event for x in bufs if isinstance(x, CLBuffer) and hasattr(x, "event")])
+    if not hasattr(self, 'argdtypes'): self.set_argdtypes(tuple(None if x.__class__ is CLBuffer else np.int32 for x in bufs))
+    cl_bufs, wait_for = [], []
+    for x in bufs:
+      if x.__class__ is CLBuffer:
+        cl_bufs.append(x._buf)
+        if hasattr(x, "event"): wait_for.append(x.event)
+      else: cl_bufs.append(x)
+    e = self.clprgs[cl_bufs[0].device](CL.cl_queue[cl_bufs[0].device], [g*l for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *cl_bufs, wait_for=wait_for)
     if wait:
       e.wait()
       try:
@@ -99,7 +104,7 @@ class CLProgram:
     return None
 
 renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
-  kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ", arg_int_prefix = "const int",
+  kernel_prefix = "__kernel ", buffer_prefix = "__global ", smem_prefix = "__local ", arg_int_prefix = "const int",
   half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
   gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True))

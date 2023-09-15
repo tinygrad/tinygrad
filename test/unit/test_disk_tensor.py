@@ -28,7 +28,7 @@ class TestTorchLoad(unittest.TestCase):
   # TODO: support pytorch tar format with minimal lines
   #def test_load_resnet(self): compare_weights_both('https://download.pytorch.org/models/resnet50-19c8e357.pth')
 
-test_fn = pathlib.Path(__file__).parent.parent.parent / "weights/LLaMA/7B/consolidated.00.pth"
+test_fn = pathlib.Path(__file__).parents[2] / "weights/LLaMA/7B/consolidated.00.pth"
 #test_size = test_fn.stat().st_size
 test_size = 1024*1024*1024*2
 

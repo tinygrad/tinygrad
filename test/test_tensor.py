@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import unittest
+import unittest, copy
 from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
@@ -219,6 +219,26 @@ class TestTinygrad(unittest.TestCase):
     x.dot(layer).mean().backward()
     x = Tensor.randn(1, 1, 1)
     x.dot(layer).mean().backward()
+
+  def test_zerosized_tensors(self):
+    Tensor([]).realize()
+    Tensor([]).numpy()
+
+  def test_tensor_ndarray_dtype(self):
+    arr = np.array([1]) # where dtype is implicitly int64
+    assert Tensor(arr).dtype == dtypes.int64
+    assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32 # check if ndarray correctly casts to Tensor dtype
+    assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64 # check that it works for something else
+
+  def test_tensor_list_dtype(self):
+    arr = [1]
+    assert Tensor(arr).dtype == Tensor.default_type
+    assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
+    assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+
+  def test_tensor_copy(self):
+    x = copy.deepcopy(Tensor.ones((3,3,3)))
+    np.testing.assert_allclose(x.numpy(), np.ones((3,3,3)))
 
 if __name__ == '__main__':
   unittest.main()
