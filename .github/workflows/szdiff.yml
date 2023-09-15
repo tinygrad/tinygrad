@@ -1,4 +1,4 @@
-name: szdiff.yml
+name: Check Line Counts
 on:
   pull_request:
 
@@ -9,6 +9,7 @@ concurrency:
 
 jobs:
   szdiff:
+    name: Core Library Line Difference
     permissions:
       contents: read
       pull-requests: write
