@@ -26,13 +26,35 @@ class _HIP:
     self.device_count = hip.hipGetDeviceCount()
     self.default_device = getenv("HIP_DEFAULT_DEVICE")
     self.allocator = HIPAllocator(hip.hipGetDeviceProperties(self.default_device).totalGlobalMem)
+
+    for i in range(self.device_count):
+      hip.hipSetDevice(i)
+      hip.hipDeviceReset()
+
+    # enable peer-to-peer access
+    for i in range(self.device_count):
+      for j in range(self.device_count):
+        if i != j:
+          hip.hipSetDevice(i)
+          hip.hipDeviceEnablePeerAccess(j, 0)
+  def synchronize(self):
+    for i in range(self.device_count):
+      hip.hipSetDevice(i)
+      hip.hipDeviceSynchronize()
 HIP = _HIP()
 
 class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
-  def __init__(self, size, dtype, device=str(HIP.default_device), buf=None): super().__init__(size, dtype, buf=buf, allocator=HIP.allocator, **{'device': int(device)})
-  def _copyin(self, x:np.ndarray): hip.hipMemcpyAsync_htod(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, 0)
-  def _copyout(self, x:np.ndarray): hip.hipMemcpy_dtoh(x.ctypes.data, self._buf, self.size * self.dtype.itemsize)
-  def _transfer(self, x): hip.hipMemcpy(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice)
+  def __init__(self, size, dtype, device=str(HIP.default_device), buf=None, allocator=HIP.allocator): super().__init__(size, dtype, buf=buf, allocator=allocator, **{'device': int(device)})
+  def _copyin(self, x:np.ndarray):
+    hip.hipSetDevice(self._device)
+    hip.hipMemcpyAsync_htod(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, 0)
+  def _copyout(self, x:np.ndarray):
+    hip.hipSetDevice(self._device)
+    hip.hipMemcpy_dtoh(x.ctypes.data, self._buf, self.size * self.dtype.itemsize)
+  def _transfer(self, x):
+    print("TRANSFER", self._device, x._device, getenv("RANK"))
+    hip.hipSetDevice(x._device)
+    hip.hipMemcpy(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice)
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
@@ -91,4 +113,4 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset
   """,
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]))
-HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(), renderer, HIPProgram, hip.hipDeviceSynchronize)
+HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(), renderer, HIPProgram, HIP.synchronize)

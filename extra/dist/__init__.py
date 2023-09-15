@@ -47,6 +47,8 @@ def _process_wrap(rank:int, device:str, oob:_OOB, fn:Callable, args=()):
     CL.post_init(device_num)
   elif "HIP" in device:
     import extra.hip_wrapper as hip
+    from tinygrad.runtime.ops_hip import HIP
+    HIP.default_device = device_num
     hip.hipSetDevice(device_num)
   if DEBUG >= 1: print(f"distributed process {rank} initialized runtime for device {device}")
 

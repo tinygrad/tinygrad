@@ -34,6 +34,15 @@ def hipDeviceSynchronize():
   hipCheckStatus(status)
 
 
+_libhip.hipStreamSynchronize.restype = int
+_libhip.hipStreamSynchronize.argtypes = [ctypes.c_void_p]
+
+
+def hipStreamSynchronize(stream):
+  status = _libhip.hipStreamSynchronize(stream)
+  hipCheckStatus(status)
+
+
 _libhip.hipEventCreate.restype = int
 _libhip.hipEventCreate.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
 
@@ -146,6 +155,45 @@ def hipMemcpyAsync_dtoh(dst, src, count, stream):
 
 def hipMemcpyAsync(dst, src, count, direction, stream):
   status = _libhip.hipMemcpyAsync(dst, src, ctypes.c_size_t(count), direction, stream)
+  hipCheckStatus(status)
+
+
+_libhip.hipMemcpyPeer.restype = int
+_libhip.hipMemcpyPeer.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p,
+                                  ctypes.c_int, ctypes.c_size_t]
+
+
+def hipMemcpyPeer(dst, dstDevice, src, srcDevice, count):
+  status = _libhip.hipMemcpyPeer(dst, dstDevice, src, srcDevice, ctypes.c_size_t(count))
+  hipCheckStatus(status)
+
+
+_libhip.hipDeviceReset.restype = int
+_libhip.hipDeviceReset.argtypes = []
+
+
+def hipDeviceReset():
+  status = _libhip.hipDeviceReset()
+  hipCheckStatus(status)
+
+
+_libhip.hipDeviceCanAccessPeer.restype = int
+_libhip.hipDeviceCanAccessPeer.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_int, ctypes.c_int]
+
+
+def hipDeviceCanAccessPeer(srcDevice, dstDevice):
+  canAccess = ctypes.c_int()
+  status = _libhip.hipDeviceCanAccessPeer(ctypes.byref(canAccess), srcDevice, dstDevice)
+  hipCheckStatus(status)
+  return canAccess.value
+
+
+_libhip.hipDeviceEnablePeerAccess.restype = int
+_libhip.hipDeviceEnablePeerAccess.argtypes = [ctypes.c_int, ctypes.c_uint]
+
+
+def hipDeviceEnablePeerAccess(peerDevice, flags):
+  status = _libhip.hipDeviceEnablePeerAccess(peerDevice, flags)
   hipCheckStatus(status)
 
 

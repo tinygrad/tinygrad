@@ -43,8 +43,6 @@ def run():
     elif rank == 1:
       send_jit(t2, 0, cache_id="test2")
 
-    print(t.numpy(), t2.numpy())
-
     # check that the received tensor is the same as the sent tensor
     if rank == 0:
       assert np.allclose(t.numpy(), t2.numpy())

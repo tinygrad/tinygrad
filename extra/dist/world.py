@@ -1,3 +1,4 @@
+import time
 from typing import Any, Optional, Tuple, cast
 from extra import dist
 from multiprocessing import shared_memory
@@ -15,7 +16,10 @@ import numpy as np
 def __send_rb(args, variables=None, jit=False, force_wait=False):
   x, target_rank, y, extra = args
   if y is None:
-    if isinstance(x, RawHIPBuffer): extra = hip.hipIpcGetMemHandle(x._buf)
+    if isinstance(x, RawHIPBuffer):
+      hip.hipSetDevice(x._device)
+      hip.hipDeviceSynchronize()
+      extra = (hip.hipIpcGetMemHandle(x._buf), x._device)
   else:
     if isinstance(x, RawBufferCopyInOut): x._copyout(np.frombuffer(y._buffer(), dtype=x.dtype.np))
     else: y.fromCPU(x.toCPU())
@@ -26,8 +30,10 @@ def __recv_rb(args, variables=None, jit=False, force_wait=False):
   x, target_rank, y = args
   extra = dist.OOB.recv(target_rank)
   if isinstance(x, RawHIPBuffer):
-    y._buf = hip.hipIpcOpenMemHandle(extra, 0)
+    hip.hipSetDevice(extra[1])
+    y._buf = hip.hipIpcOpenMemHandle(extra[0], 0)
     x._transfer(y)
+    hip.hipSetDevice(extra[1])
     hip.hipIpcCloseMemHandle(y._buf)
   elif isinstance(x, RawBufferCopyIn): x._copyin(y.toCPU())
   else: x.fromCPU(y.toCPU())
@@ -37,8 +43,13 @@ def __recv_rb(args, variables=None, jit=False, force_wait=False):
 def _send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
   if isinstance(x, RawHIPBuffer):
     # send ipc handle
+    hip.hipSetDevice(x._device)
     handle = hip.hipIpcGetMemHandle(x._buf)
-    dist.OOB.send(handle, target_rank)
+    dist.OOB.send((handle, x._device), target_rank)
+
+    print(target_rank, "x_ internal", x.toCPU())
+
+    # jit support
     CacheCollector.add(__send_rb, [x, target_rank, None, None], {})
   else:
     # cache the shared memory so we don't have to create it every time
@@ -65,16 +76,28 @@ setattr(_send_rb, "shared_memory_cache", {})
 def _recv_rb(x:RawBuffer, target_rank:int):
   if isinstance(x, RawHIPBuffer):
     # open ipc handle
-    handle = dist.OOB.recv(target_rank)
+    handle, y_device = dist.OOB.recv(target_rank)
+    hip.hipSetDevice(y_device)
     ptr = hip.hipIpcOpenMemHandle(handle, 0)
+
     # build a new buffer
-    y = RawBuffer(x.size, x.dtype, buf=ptr)
+    y = RawHIPBuffer(x.size, x.dtype, device=str(y_device), buf=ptr, allocator=None)
+    print(target_rank, "y  internal", y.toCPU())
     x._transfer(y)
+
+    print(target_rank, "x  internal", x.toCPU())
+    print(target_rank, "y_ internal", y.toCPU())
+
+    # close ipc handle
+    hip.hipSetDevice(y._device)
     hip.hipIpcCloseMemHandle(y._buf)
 
     if DEBUG >= 2: print(f"****  rank {getenv('RANK')} got {x} from rank {target_rank}")
 
     CacheCollector.add(__recv_rb, [x, target_rank, y], {})
+
+    # tell other side that we're done
+    dist.OOB.send(None, target_rank)
   else:
     extra = dist.OOB.recv(target_rank)
     device = f"{extra[0]},{extra[1]}" if extra[1] is not None else f"{extra[0]}"
@@ -113,3 +136,4 @@ class Recv(Function):
 
 def send(x:Tensor, target_rank:int, cache_id:Optional[str]=None) -> Tensor: return Send.apply(x, target_rank=target_rank, cache_id=cache_id)
 def recv(x:Tensor, target_rank:int, cache_id:Optional[str]=None) -> Tensor: return Recv.apply(x, target_rank=target_rank, cache_id=cache_id)
+def wait(target_rank:int) -> None: dist.OOB.recv(target_rank)

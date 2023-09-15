@@ -2,6 +2,7 @@ from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import getenv
 
 from extra.dist import world
+import extra.hip_wrapper as hip
 
 def allreduce(t:Tensor, cache_id=None) -> Tensor:
   RANK, WORLD_SIZE = getenv("RANK"), getenv("WORLD_SIZE")
@@ -27,7 +28,10 @@ def allreduce(t:Tensor, cache_id=None) -> Tensor:
     current_chunk_index = ((current_chunk_index - 1) + WORLD_SIZE) % WORLD_SIZE
     recv_buf = Tensor.empty(*chunks[current_chunk_index].shape)
     world.recv(recv_buf, prev_rank)
+    world.wait(next_rank)
     chunks[current_chunk_index] += recv_buf
+
+  Device[Device.DEFAULT].synchronize()
 
   # gather
   current_chunk_index = (RANK + 1) % WORLD_SIZE
@@ -36,6 +40,7 @@ def allreduce(t:Tensor, cache_id=None) -> Tensor:
     current_chunk_index = ((current_chunk_index - 1) + WORLD_SIZE) % WORLD_SIZE
     recv_buf = Tensor.empty(*chunks[current_chunk_index].shape)
     world.recv(recv_buf, prev_rank)
+    world.wait(next_rank)
     chunks[current_chunk_index].assign(recv_buf)
 
   return Tensor.cat(*chunks, dim=0).shrink(((0, t.numel()),)).reshape(*t.shape)
