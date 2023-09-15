@@ -357,6 +357,7 @@ def _realize_from(buffer: LazyBuffer) -> None:
   if DEBUG >= 3: print(f"*** copy {buffer.device} <- {rawbuf.device} size {rawbuf.realized.size} dtype {rawbuf.realized.dtype}")
   # TODO: make this generic
   if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
+    assert all_int(buffer.shape), "does not support symbolic shape"
     buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
     rawbuf.realized.readinto(cast(RawBufferMapped, buffer.realized)._buffer())
   elif isinstance(rawbuf.realized, RawBufferTransfer) and issubclass(Device[buffer.device].buffer, RawBufferTransfer) and P2P >= 1:
@@ -365,6 +366,7 @@ def _realize_from(buffer: LazyBuffer) -> None:
     buffer.realized = Device[buffer.device].buffer.fromCPU(rawbuf.toCPU(), **buffer._device_extra_args())
 
 def _realize_empty(buffer: LazyBuffer) -> None:
+  assert all_int(buffer.shape), "does not support symbolic shape"
   buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
 
 def _realize_rand(buffer: LazyBuffer) -> None:

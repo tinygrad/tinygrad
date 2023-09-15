@@ -416,9 +416,11 @@ class Tensor:
   def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
 
   def mean(self, axis=None, keepdim=False):
+    assert all_int(self.shape), "does not support symbolic shape"
     out = self.sum(axis=axis, keepdim=keepdim)
     return out * (prod(out.shape)/prod(self.shape))
   def std(self, axis=None, keepdim=False, correction=1):
+    assert all_int(self.shape), "does not support symbolic shape"
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
     return (square_sum / (prod(self.shape)/prod(square_sum.shape)-correction)).sqrt()
   def _softmax(self, axis):
@@ -730,7 +732,7 @@ class Tensor:
 
   @property
   def ndim(self) -> int: return len(self.shape)
-  def numel(self) -> int: return prod(self.shape)
+  def numel(self) -> sint: return prod(self.shape)
   def element_size(self) -> int: return self.dtype.itemsize
   def nbytes(self) -> int: return self.numel() * self.element_size()
   def is_floating_point(self) -> bool: return dtypes.is_float(self.dtype)
