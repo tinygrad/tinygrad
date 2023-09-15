@@ -426,8 +426,8 @@ class Linearizer(OptimizedKernel):
       if arg == BinaryOps.SUB and vin[1].uop == UOps.CONST and vin[1].arg == 0.0: return vin[0]
       if arg == BinaryOps.DIV and vin[1].uop == UOps.CONST and vin[1].arg == 1.0: return vin[0]
       # equal folding
-      if arg == BinaryOps.SUB and vin[0] == vin[1]: return self.const(0, dtype)
-      if arg == BinaryOps.CMPLT and vin[0] == vin[1]: return self.const(0, dtype)
+      if arg == BinaryOps.SUB and vin[0] == vin[1]: return self.const(0., dtype)
+      if arg == BinaryOps.CMPLT and vin[0] == vin[1]: return self.const(0., dtype)
       # check BinaryOps.Max not needed it is only used for relu. Which is handled in constant folding
 
     if cachable and key in self.saved_exprs: return self.saved_exprs[key]
