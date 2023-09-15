@@ -2,9 +2,11 @@ from typing import NamedTuple, Optional, List, Tuple, cast, Dict
 import itertools
 from tinygrad.ops import LazyOp, MovementOps, FlopCounter, get_lazyop_info, ReduceOps
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import dedup, dtypes, colored, prod, ImageDType, DType
+from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType
 from tinygrad.runtime.lib import buf_is_kernel_arg
-from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.symbolic import sint
+from tinygrad.shape.view import strides_for_shape
 
 class LocalBuffer(NamedTuple):
   name: str
@@ -23,10 +25,10 @@ class LinearizerOptions(NamedTuple):
   local_max: Optional[List[int]] = None
 
 class Kernel:
-  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, opts:LinearizerOptions):
+  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, opts:Optional[LinearizerOptions]=None):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
-    self.opts = opts
+    self.opts = opts if opts else LinearizerOptions()
 
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)
@@ -42,7 +44,7 @@ class Kernel:
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
-    self.mem_estimate: int = sum(x.dtype.itemsize*(x.realized.size if x.realized is not None else prod(x.shape)) for x in self.bufs if x is not None)
+    self.mem_estimate: int = sum(x.dtype.itemsize*x.size for x in self.arg_bufs.keys())
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
@@ -68,6 +70,9 @@ class Kernel:
     self.use_tensor_cores: bool = False
     self.exclude_local_upcast: int = 0
     self.reverse_upcast_dir: bool = False
+
+    self.global_size: Optional[List[int]] = None
+    self.local_size: Optional[List[int]] = None
 
   def has_variable_shape(self) -> bool:
     for b in self.bufs:
@@ -97,19 +102,22 @@ class Kernel:
   def first_reduce(self) -> int: return [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True)
 
   @property
-  def output_shape(self) -> Tuple[int, ...]: return self.sts[0].shape
+  def output_shape(self) -> Tuple[sint, ...]: return self.sts[0].shape
 
   @property
-  def full_shape(self) -> Tuple[int, ...]: return self.sts[self.full_buf_index].shape
+  def full_shape(self) -> Tuple[sint, ...]: return self.sts[self.full_buf_index].shape
 
   @property
-  def full_unupcasted_shape(self) -> Tuple[int, ...]: return self.full_shape[:self.shape_len-self.upcasted]
+  def full_unupcasted_shape(self) -> Tuple[sint, ...]: return self.full_shape[:self.shape_len-self.upcasted]
 
   @property
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
   @property
   def upcast_in_mid_reduce_axes(self) -> List[int]: return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)) if self.full_shape[j] == self.sts[0].shape[j]]
+
+  @property
+  def global_dims(self) -> int: return self.first_reduce-self.local_dims
 
   # there's seven chunks of the shape
   # blue   -- global dims
@@ -123,9 +131,9 @@ class Kernel:
   # yellow -- normal upcasted dimensions
   def colors(self) -> List[str]:
     # up to first_reduce, they are all global (blue)
-    colors = ["blue"] * (self.first_reduce-self.local_dims)
+    colors = ["blue"] * self.global_dims
     # except the local_dims, these are non-reduce locals (cyan)
-    colors += ["cyan"] * (self.local_dims)
+    colors += ["cyan"] * self.local_dims
     # between first_reduce and first_reduce + group_for_reduce, they are either local (cyan), or late upcasted (green)
     colors += ["white" if i in self.upcast_in_mid_reduce_axes else "green" for i in range(self.first_reduce, self.first_reduce + len(self.group_for_reduce))]
     # between first_reduce + group_for_reduce and upcasted, they are reduce (red)
@@ -137,7 +145,7 @@ class Kernel:
 
   def colored_shape(self) -> str: return ' '.join(colored(s, color) for s,color in zip([f"{s:4d}" if isinstance(s, int) else s for s in self.full_shape], self.colors()))
   def printbufs(self, prefix=""):
-    for i in range(len(self.sts)):
-      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i].realized is not None else str(self.bufs[i]):47s}", self.sts[i].views)
+    for i,st in enumerate(self.sts):
+      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i].realized is not None else str(self.bufs[i]):47s}", st.views)
     print(self.colored_shape())
 

@@ -1,6 +1,6 @@
 from tinygrad.tensor import Tensor
 import numpy
-import os
+from pathlib import Path
 
 # Format Details:
 #  A KINNE parameter set is stored as a set of files named "snoop_bin_*.bin",
@@ -35,8 +35,8 @@ class KinneDir:
     It is important that if you wish to save in the current directory,
      you use ".", not the empty string.
     """
-    if save and not os.path.isdir(base):
-      os.mkdir(base)
+    if save:
+      Path(base).mkdir(exist_ok=True)
     self.base = base + "/snoop_bin_"
     self.next_part_index = 0
     self.save = save

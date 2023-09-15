@@ -11,7 +11,7 @@ from tinygrad.ops import Device
 from examples.llama import Transformer
 
 ALLOCATED_DEV_BUFS = 0
-class FakeDeviceBuffer():
+class FakeDeviceBuffer:
   def __init__(self, sz, dt, device):
     self.id = 1
     self.size = sz

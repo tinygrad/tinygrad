@@ -2,6 +2,7 @@ import math
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
+from tinygrad.shape.symbolic import all_int
 
 class BatchNorm2d:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
@@ -44,6 +45,7 @@ class Conv2d:
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
     self.weight = Tensor.kaiming_uniform(out_channels, in_channels//groups, *self.kernel_size, a=math.sqrt(5))
+    assert all_int(self.weight.shape), "does not support symbolic shape"
     bound = 1 / math.sqrt(prod(self.weight.shape[1:]))
     self.bias = Tensor.uniform(out_channels, low=-bound, high=bound) if bias else None
 
@@ -58,6 +60,7 @@ class ConvTranspose2d:
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     self.stride, self.padding, self.output_padding, self.dilation, self.groups = stride, padding, output_padding, dilation, groups
     self.weight = Tensor.kaiming_uniform(in_channels, out_channels//groups, *self.kernel_size, a=math.sqrt(5))
+    assert all_int(self.weight.shape), "does not support symbolic shape"
     bound = 1 / math.sqrt(prod(self.weight.shape[1:]))
     self.bias = Tensor.uniform(out_channels, low=-bound, high=bound) if bias else None
 
@@ -67,6 +70,8 @@ class ConvTranspose2d:
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
     self.weight = Tensor.kaiming_uniform(out_features, in_features, a=math.sqrt(5))
+    # TODO: remove this once we can represent Tensor with int shape in typing
+    assert isinstance(self.weight.shape[1], int), "does not support symbolic shape"
     bound = 1 / math.sqrt(self.weight.shape[1])
     self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
 

@@ -12,6 +12,7 @@ class RawBuffer:  # pylint: disable=abstract-method
     self._buf = buf if buf is not None else (allocator.alloc(size, dtype, **kwargs) if allocator else None) # If buf is provided, use it. Otherwise try to allocate from the allocator.
     self._memsz: int = size*dtype.itemsize
     self._allocator = allocator
+    self._device = kwargs.get('device', None)
     GlobalCounters.mem_used += self._memsz
   def __del__(self):  # NOTE: if it fails on init (bad dtype), it won't have a _memsz
     if hasattr(self, '_memsz'): GlobalCounters.mem_used -= self._memsz
@@ -41,13 +42,13 @@ class RawBufferCopyIn(RawBuffer):
   @classmethod
   def fromCPU(cls, x:np.ndarray, **kwargs):
     ret = cls(prod(x.shape), dtypes.from_np(x.dtype), **kwargs)
-    ret._copyin(x)
+    if x.size > 0: ret._copyin(x)
     return ret
 
 class RawBufferMapped(RawBufferCopyIn):
   def _buffer(self) -> memoryview: raise NotImplementedError("must be implemented")
   # NOTE: this metadata prevents the backing buffer from being freed. hack can be removed with PEP688
-  def toCPU(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=np.dtype(self.dtype.np, metadata={"backing": self}))  # type: ignore
+  def toCPU(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=np.dtype(self.dtype.np, metadata={"backing": self}), count=self.size)  # type: ignore
   def _copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
 
 # this one is simple enough that i moved it out of the runtimes
@@ -60,7 +61,7 @@ class RawBufferCopyInOut(RawBufferCopyIn):
 
   def toCPU(self) -> np.ndarray:
     x: np.ndarray = np.empty(self.size, dtype=self.dtype.np)
-    self._copyout(x)
+    if x.size > 0: self._copyout(x)
     return x
 
 class RawBufferTransfer(RawBuffer):
@@ -90,10 +91,12 @@ class LRUAllocator:
     while len(self.aging_order[device]) and self.free_space[device] < 0: # When OOM removing lru buffers.
       bucket, epoch = self.aging_order[device].popleft()
       if self.cached_buffers[bucket] and self.cached_buffers[bucket][-1][1] == epoch: self._free_buffer(self.cached_buffers[bucket].pop()[0]) # Free cached buffer if it is still in cache.
-    newbuf = self._do_alloc(size, dtype, device, **kwargs)
+    newbuf = self._do_alloc(max(1, size), dtype, device, **kwargs)
     self.buffer_info[newbuf] = (size, dtype, device)
     return newbuf
   def _free_buffer(self, buf_to_free):
+    from tinygrad.jit import CacheCollector
+    CacheCollector._on_buf_free(buf_to_free)
     self.free_space[self.buffer_info[buf_to_free][2]] += self._underlying_buf_memsz(buf_to_free)
     GlobalCounters.mem_cached -= self._underlying_buf_memsz(buf_to_free)
     self.buffer_info.pop(buf_to_free)

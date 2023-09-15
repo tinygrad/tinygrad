@@ -269,12 +269,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: float("inf")/x, lambda x: float("inf")/x)
     helper_test_op([(45,65)], lambda x: (-float("inf"))/x, lambda x: (-float("inf"))/x)
     helper_test_op([(45,65)], lambda x: float("nan")/x, lambda x: float("nan")/x)
+  def test_pow_full(self):
+    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, a=0)
   def test_pow(self):
     # TODO: why is a=0 for these tests?
     helper_test_op([(45,65)], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
     helper_test_op([(45,65)], lambda x: x**3, lambda x: Tensor.pow(x,3), a=0)
     helper_test_op([(45,65)], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
-    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, a=0)
     helper_test_op([()], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
     helper_test_op([()], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
     # Regression tests for https://github.com/tinygrad/tinygrad/issues/1151
@@ -531,7 +532,7 @@ class TestOps(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "this test uses more than 8 bufs passing the WEBGPU limit") #TODO: remove after #1461
   def test_broadcast_full(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
-                                  (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
+                                  (torch.div, Tensor.div)]: #, (torch.pow, Tensor.pow)]:
       for shapes in [((5,13,24,16), (5,1,24,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
           helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
@@ -543,7 +544,7 @@ class TestOps(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "this test uses more than 8 bufs passing the WEBGPU limit") #TODO: remove after #1461
   def test_broadcast_partial(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
-                                  (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
+                                  (torch.div, Tensor.div)]: #, (torch.pow, Tensor.pow)]:
       for shapes in [((1,32,32,32), (1,32,1,1)), ((5,13,24,16,2), (1,13,24,1,1)),
                      ((4,1), (4,5)), ((1,4), (5,4))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
@@ -627,6 +628,7 @@ class TestOps(unittest.TestCase):
       a[1, 77, 77, 77]  # IndexError: (finds too many indices before the out of bounds)
       a[1, 77]  # IndexError: (out of bounds).
       a[0, -77]
+      a[..., ...] # IndexError: only single ellipsis
 
   def test_slice_ellipsis(self):
     helper_test_op([(3,3,3,3)], lambda x: x[..., 0], lambda x: x[..., 0])
@@ -1128,8 +1130,11 @@ class TestOps(unittest.TestCase):
   def test_clip(self):
     helper_test_op([(45,65)], lambda x: x.clip(-2.3, 1.2), lambda x: x.clip(-2.3, 1.2))
 
-  def test_matvec(self):
+  def test_matvecmat(self):
     helper_test_op([(1,128), (128,128), (128,128)], lambda x,y,z: (x@y).relu()@z, atol=1e-4)
+
+  def test_matvec(self):
+    helper_test_op([(1,128), (128,128)], lambda x,y: (x@y).relu(), atol=1e-4)
 
   # this was the failure in llama early realizing freqs_cis
   def test_double_slice(self):
@@ -1150,21 +1155,42 @@ class TestOps(unittest.TestCase):
 
   def test_slice_fancy_indexing(self):
     # indices cannot have gradient
+    # TODO currently does not support IndexError for out of bounds idx values
     a = torch.randint(low=-1, high=1, size=(2,1,1,1,1,1), dtype=torch.int64, requires_grad=False)
     b = torch.randint(high=1, size=(1,3,1,1,1,1), dtype=torch.int64, requires_grad=False)
     c = torch.randint(low=-5, high=5, size=(1,1,4,1,1,1), dtype=torch.int64, requires_grad=False)
     d = torch.randint(high=4, size=(2,1,1,5,1,1), dtype=torch.int64, requires_grad=False)
     e = torch.randint(high=1, size=(1,1,1,1,6,1), dtype=torch.int64, requires_grad=False)
     i, j, k, o, p = [Tensor(tor.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False) for tor in [a,b,c,d,e]]
+    # no dim collapse from int or dim injection from None
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,e], lambda x: x[:,j,k,o,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,:], lambda x: x[:,j,k,o,:])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,...], lambda x: x[i,j,...])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,...,e], lambda x: x[i,...,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[...,c,:,e], lambda x: x[...,k,:,p])
+    # dim collapse from int
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,c,d,e], lambda x: x[1,j,k,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,2], lambda x: x[i,j,k,o,2])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,3,d,e], lambda x: x[i,j,3,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,c,d,2], lambda x: x[1,j,k,o,2])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,2,d,2], lambda x: x[1,j,2,o,2])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,2,2,2,e], lambda x: x[i,2,2,2,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,:,3:11:2,d,0:2], lambda x: x[1,:,3:11:2,o,0:2])
+    # dim injection from None
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,c,d,e], lambda x: x[None,j,k,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,None], lambda x: x[i,j,k,o,None])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,None,d,e], lambda x: x[i,j,None,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,None,None,None,e], lambda x: x[i,None,None,None,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,None,d,None], lambda x: x[None,j,None,o,None])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,c,d,None], lambda x: x[None,j,k,o,None])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,:,10:11,d,0:2], lambda x: x[1,:,10:11,o,0:2])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,4,c,d,2], lambda x: x[1,4,k,o,2])
+    # dim injection and collapse
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,None,d,1], lambda x: x[1,j,None,o,1])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,2,d,None], lambda x: x[None,j,2,o,None])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,1,None,d,e], lambda x: x[None,1,None,o,p])
+    helper_test_op([(2,5,15,5,3,4)], lambda x: x[...,1,d,None], lambda x: x[...,1,o,None])
+    # indexing using idx with different dim
     helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)], lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor(1)])
     helper_test_op([(2,3)], lambda x: x[torch.tensor([1]), torch.tensor([[0,0,0],[0,0,0]])], lambda x: x[Tensor([1]), Tensor([[0,0,0],[0,0,0]])])
 

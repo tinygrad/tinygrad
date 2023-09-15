@@ -1,10 +1,11 @@
 from typing import Any, Optional, Tuple
 from extra import dist
 from multiprocessing import shared_memory
-from tinygrad.helpers import DEBUG, GlobalCounters, colored
+from tinygrad.helpers import DEBUG, colored
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawBufferCopyIn, RawBufferCopyInOut
 from tinygrad.runtime.ops_shm import RawShmBuffer
+from tinygrad.jit import CacheCollector
 from tinygrad.tensor import Tensor, Function
 import numpy as np
 
@@ -35,7 +36,7 @@ def _send_rb(x:RawBufferCopyInOut, target_rank:int, cache_id:Optional[str]=None)
   __send_rb((x, rb, target_rank, (shm_name, cache_id)))
 
   # jit support
-  if GlobalCounters.cache is not None: GlobalCounters.cache.append((__send_rb, [x, rb, target_rank, None], {}))
+  CacheCollector.add(__send_rb, [x, rb, target_rank, None], {})
 setattr(_send_rb, "shared_memory_cache", {})
 
 # receive a rawbuffer from the target rank
@@ -52,7 +53,7 @@ def _recv_rb(x:RawBufferCopyIn, target_rank:int):
     s.unlink()
 
   # jit support
-  if GlobalCounters.cache is not None: GlobalCounters.cache.append((__recv_rb, [x, rb, target_rank], {}))
+  CacheCollector.add(__recv_rb, [x, rb, target_rank], {})
 
 # sends a lazybuffer from our rank to the target rank
 def _send_lb(x:LazyBuffer, target_rank:int, cache_id:Optional[str]=None) -> None: _send_rb(x.contiguous().realize().realized, target_rank, cache_id=cache_id)

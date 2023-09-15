@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, Device
 import pytest
 
 pytestmark = [pytest.mark.exclude_cuda]
@@ -62,6 +62,19 @@ class TestConv(unittest.TestCase):
     r1, r2 = out.relu(), out.elu()
     np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
     np.testing.assert_allclose(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)), atol=1e-5)
+    Tensor.no_grad = False
+
+  @unittest.skipIf(Device.DEFAULT != "TORCH", "Takes too long to compile for Compiled backends")
+  def test_two_overlapping_binops_no_rerun_wino(self):
+    Tensor.no_grad = True
+    Tensor.wino = True
+    x = Tensor.randn(1,4,16,16)
+    w = Tensor.randn(6,4,3,3)
+    out = x.conv2d(w, padding=(1,1))
+    r1, r2 = out.relu(), out.elu()
+    np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
+    np.testing.assert_allclose(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)), atol=1e-5)
+    Tensor.wino = False
     Tensor.no_grad = False
 
   def test_first_three(self):

@@ -9,6 +9,10 @@ class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output
 
+class ContiguousBackward(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer: return x
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.contiguous()
+
 class Cast(Function):
   def forward(self, x:LazyBuffer, dtype:DType, bitcast:bool=False) -> LazyBuffer:
     self.input_dtype, self.bitcast = x.dtype, bitcast
@@ -18,6 +22,14 @@ class Cast(Function):
     return grad_output.e(UnaryOps.CAST, arg=(self.input_dtype, self.bitcast))
 
 # ************* unary ops *************
+
+class Zero(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer: return x.const(0)
+  def backward(self, grad:LazyBuffer) -> LazyBuffer: return grad.const(0)
+
+class Neg(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer: return x.e(UnaryOps.NEG)
+  def backward(self, grad:LazyBuffer) -> LazyBuffer: return grad.e(UnaryOps.NEG)
 
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
@@ -112,7 +124,7 @@ class Sub(Function):
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output if self.needs_input_grad[0] else None, \
-           grad_output.const(0).e(BinaryOps.SUB, grad_output) if self.needs_input_grad[1] else None
+           grad_output.e(UnaryOps.NEG) if self.needs_input_grad[1] else None
 
 class Mul(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
@@ -130,7 +142,7 @@ class Div(Function):
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output.e(BinaryOps.DIV, self.y) if self.needs_input_grad[0] else None, \
-           grad_output.const(0).e(BinaryOps.SUB, grad_output).e(BinaryOps.MUL, self.x).e(BinaryOps.DIV, self.y.e(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None
+           grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.x).e(BinaryOps.DIV, self.y.e(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None
 
 # ************* ternary ops *************
 
