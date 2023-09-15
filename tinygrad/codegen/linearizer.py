@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same, getenv, partition
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
@@ -33,7 +33,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
       var = var_dict[name][1]
       if isinstance(nd.a, MulNode):
         if nd.a.b < 0:
-          var[0] = (nd.b // nd.a.b) + 1
+          var[0] = (nd.b // nd.a.b) + 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
         elif nd.a.b > 0:
           var[1] = (nd.b // nd.a.b) - 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
       elif isinstance(nd.a, Variable):
@@ -47,7 +47,19 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
   b = base_shape[1]
   idx = (idxy//4)%b
   idy = (idxy // (4 * b))
-
+  if not isinstance(idx, ModNode): valid = NumNode(1)
+  if False and getenv("VALIDHACKS") == 1:
+    if not isinstance(idx, ModNode):
+      valid = NumNode(1)
+    else:
+      if idx.a.min >= (base_shape[1]*3)//4:
+        idx = idx.a - b
+      else:
+        if idx.b == 1024:
+          idx = idx.a
+        else:
+          print(idx, valid)
+      valid = NumNode(1)
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
