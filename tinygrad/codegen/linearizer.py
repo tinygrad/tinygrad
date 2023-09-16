@@ -4,12 +4,12 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same, getenv, partition
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same, partition
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename, sym_render, sym_infer
+from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename, sym_render
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.codegen.kernel import LocalBuffer
 VariableOrNum = Union[Variable, NumNode, Node]
@@ -56,7 +56,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
         if isinstance(index, SumNode):
           if any(isinstance(i, DivNode) for i in index.flat_components): continue
 
-          _, flat = partition(index.flat_components, lambda x : isinstance(x, NumNode))
+          _, flat = partition(index.flat_components, lambda x: isinstance(x, NumNode))
           neg_v_flat = (-nd.a).flat_components
           if sorted(flat) == sorted(neg_v_flat): ones.append(nd)
 
@@ -109,7 +109,6 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
 
     nds = [i for i in nds if i not in ones]
     valid = Variable.ands(nds)
-
 
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
