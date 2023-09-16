@@ -115,6 +115,10 @@ class Tensor:
     if self.grad: ret.grad = self.grad.to(device)
     return ret
 
+  def to_copy(self, device:str) -> Tensor:
+    ret = Tensor(self.lazydata, device)
+    if self.grad: ret.grad = self.grad.to(device)
+
   # ***** creation llop entrypoint *****
 
   @staticmethod
