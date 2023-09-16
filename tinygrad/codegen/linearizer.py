@@ -46,27 +46,9 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
   b = base_shape[1]
   idx = (idxy // 4) % b
   idy = (idxy // (4 * b))
-
-  if valid.min == 0:
-    nds = [valid] if isinstance(valid, LtNode) else valid.nodes
-    ones = []
-    for nd in nds:
-      if not isinstance(nd.a, SumNode): continue
-      for index in (idx, idy):
-        if isinstance(index, SumNode):
-          if any(isinstance(i, DivNode) for i in index.flat_components): continue
-
-          _, flat = partition(index.flat_components, lambda x: isinstance(x, NumNode))
-          neg_v_flat = (-nd.a).flat_components
-          if sorted(flat) == sorted(neg_v_flat): ones.append(nd)
-
-          v_flat = nd.a.flat_components
-          if sorted(flat) == sorted(v_flat): ones.append(nd)
-
-    nds = [i for i in nds if i not in ones]
-    valid = Variable.ands(nds)
+  # Simplify ModNode if possibe
   if valid.min == 0 and isinstance(idx, ModNode):
-    nds = [valid] if not isinstance(valid, AndNode) else valid.nodes
+    nds = [valid] if isinstance(valid, LtNode) else valid.nodes
     ones = []
     for nd in nds:
       if not isinstance(idx, ModNode): break
@@ -77,7 +59,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
             if k < 0 and nd.b == 0:
               sum_nd = -nd.a
               mnn = min([lal.b if isinstance(lal, MulNode) else lal for lal in sum_nd.nodes])
-              if ((left_sum.min + (-k)*mnn) > b):
+              if (2*b> (left_sum.min + (-k)*mnn) > b):
                 ones.append(nd)
                 idx = idx.a - b
                 break
@@ -91,25 +73,42 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
     nds = [i for i in nds if i not in ones]
     valid = Variable.ands(nds)
 
+  if valid.min == 0:
+    nds = [valid] if isinstance(valid, LtNode) else valid.nodes
+    ones = []
+    for nd in nds:
+      if not isinstance(nd.a, SumNode): continue
+      for index in (idx, idy):
+        if isinstance(index, SumNode):
+
+          _, flat = partition(index.flat_components, lambda x: isinstance(x, NumNode))
+          neg_v_flat = (-nd.a).flat_components
+          if sorted(flat) == sorted(neg_v_flat): ones.append(nd)
+
+          v_flat = nd.a.flat_components
+          if sorted(flat) == sorted(v_flat): ones.append(nd)
+
+    nds = [i for i in nds if i not in ones]
+    valid = Variable.ands(nds)
+
   if valid.min == 0 and isinstance(idy, SumNode) and not isinstance(idx, ModNode):
     nds = [valid] if not isinstance(valid, AndNode) else valid.nodes
     ones = []
     for nd in nds:
 
-      if all(v in idy.vars() for v in nd.vars()) and any(isinstance(x, DivNode) for x in idy.flat_components) and len(set(idx.vars()) - set(idy.vars())) != 0:
+      if any(isinstance(x, DivNode) for x in idy.flat_components) and len(set(idx.vars()) - set(idy.vars())) != 0:
 
         flat = idy.flat_components
 
         nd_flat = nd.a.flat_components
-        if flat[:len(nd_flat)] == nd_flat:
-          ones.append(nd)
+        if flat[:len(nd_flat)] == nd_flat: ones.append(nd)
 
         nd_flat = (-nd.a).flat_components
         if flat[:len(nd_flat)] == nd_flat: ones.append(nd)
 
     nds = [i for i in nds if i not in ones]
     valid = Variable.ands(nds)
-
+  if valid.min == 0:print("a")
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
