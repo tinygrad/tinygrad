@@ -68,31 +68,31 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   triton_dtypes = {dtypes.double: "tl.float64", dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.bool: "tl.int1", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64"}
   signature_dtypes = {dtypes.double: "*fp64",dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.bool: "*i8", dtypes.int8: "*i1", dtypes.uint8: "*u8", dtypes._arg_int32: "i32", dtypes.int32: "*i32", dtypes.int64: "*i64"}
   for u in uops:
-    uop,newvar,vin,args,_ = u
+    uop,dtype,vin,args,_ = u
     if uop == UOps.LOOP:
       r[u] = ssa("ridx")
       kk(f"for {r[u]} in range({vin[0].arg}, {r[vin[1]]}+{define_scalar([], 'tl.int32', 1)}):")
       depth += 1
     elif uop == UOps.END: depth -= 1
     elif uop == UOps.ALU:
-      assert newvar is not None
+      assert dtype is not None
       val = code_for_op[args](*[r[x] for x in vin])
-      if child_count[u] <=1 or dtypes.is_int(newvar): r[u] = int_div(*[r[x] for x in vin]) if args == BinaryOps.DIV and dtypes.is_int(newvar) else val
+      if child_count[u] <=1 or dtypes.is_int(dtype): r[u] = int_div(*[r[x] for x in vin]) if args == BinaryOps.DIV and dtypes.is_int(dtype) else val
       else:
         r[u] = ssa("alu")
-        kk(f"{r[u]} = ({val}).to({triton_dtypes[newvar]})")
+        kk(f"{r[u]} = ({val}).to({triton_dtypes[dtype]})")
     elif uop == UOps.LOAD:
-      assert newvar is not None
+      assert dtype is not None
       r[u] = ssa("val")
       if len(vin) == 2: kk(f"{r[u]} = tl.load({r[vin[0]]} + ({ fill_dims_for_idx(r[vin[1]], dims)}).to(tl.int32), mask = {render_valid(valid)}).to({triton_dtypes[vin[0].dtype]})")# type: ignore
       else: kk(f"{r[u]} = tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+({fill_dims_for_idx(r[vin[1]],dims)}).to(tl.int32) , mask={render_valid(valid+[r[vin[2]]])}), 0.0).to({triton_dtypes[vin[0].dtype]})")# type: ignore
     elif uop == UOps.DEFINE_ACC:
       r[u] = ssa("acc")
-      kk(f"{r[u]} = {define_scalar(local_size, triton_dtypes[newvar], args).replace('//', '/')}") # type: ignore
+      kk(f"{r[u]} = {define_scalar(local_size, triton_dtypes[dtype], args).replace('//', '/')}") # type: ignore
     elif uop == UOps.CONST:
-      r[u] = define_scalar([], triton_dtypes[newvar], args) # type: ignore
+      r[u] = define_scalar([], triton_dtypes[dtype], args) # type: ignore
     elif uop == UOps.STORE:
-      assert not isinstance(newvar, ImageDType), "unimplemented: image store"
+      assert not isinstance(dtype, ImageDType), "unimplemented: image store"
       if len(vin) == 2: kk(f"{r[vin[0]]} =  {r[vin[1]].replace('//', '/')}")
       else: kk(f"tl.store({r[vin[0]]} + ({r[vin[1]]}).to(tl.int32), {r[vin[2]].replace('//', '/')}, mask = {render_valid(valid)}) ")
     elif uop == UOps.DEFINE_GLOBAL:
