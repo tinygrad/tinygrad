@@ -8,7 +8,7 @@ from tinygrad.graph import log_op
 from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, partition
 from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp
 from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction
-from tinygrad.shape.symbolic import Node, Variable
+from tinygrad.shape.symbolic import Variable, NumNode, sint, all_int
 
 from tinygrad.runtime.lib import RawConst, RawBuffer, RawBufferMapped, RawBufferTransfer
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
@@ -69,7 +69,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
   psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and not x.realized and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
-  intermediate_shape: Tuple[int, ...] = self.shape
+  intermediate_shape: Tuple[sint, ...] = self.shape
   if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and psrcs:
     psrc = psrcs[0] # NOTE: right now we can't handle multiple, as we'd have to check for loop
     if psrc[1].optype == ReduceOps:
@@ -189,13 +189,16 @@ class LazyBuffer:
 
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
-    return LazyBuffer("CPU", ShapeTracker(x.shape, [View(x.shape, tuple(st//x.itemsize for st in x.strides))]), LoadOps, LazyOp(LoadOps.EMPTY, (), None), dtypes.from_np(x.dtype), {}, RawNumpyBuffer.fromCPU(x))
+    return LazyBuffer("CPU", ShapeTracker(x.shape, [View.create(x.shape, tuple(st//x.itemsize for st in x.strides))]), LoadOps, LazyOp(LoadOps.EMPTY, (), None), dtypes.from_np(x.dtype), {}, RawNumpyBuffer.fromCPU(x))
 
   def toCPU(self) -> np.ndarray:
     assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
     self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
     realized = self_casted.contiguous().realize().realized
-    return cast(RawBuffer, realized).toCPU().reshape(self.shape)
+    # TODO: replace NumNode with int in shape
+    output_shape = tuple(s.b if isinstance(s, NumNode) else s for s in self.shape)
+    assert all_int(output_shape), f"no toCPU if shape is symbolic, {output_shape=}"
+    return cast(RawBuffer, realized).toCPU().reshape(output_shape)
 
   def e(self:LazyBuffer, op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     # srcs includes self
@@ -224,7 +227,7 @@ class LazyBuffer:
 
     return create_lazybuffer(out_device, ShapeTracker(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype, self.var_vals)
 
-  def shuffle_and_prune_movement_ops(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[Union[Node,int], ...], Tuple[Tuple[int, int], ...]]) -> LazyBuffer:
+  def shuffle_and_prune_movement_ops(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[sint, ...], Tuple[Tuple[int, int], ...]]) -> LazyBuffer:
     if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and (op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and self.op.op in UnaryOps)) and not self.children:
       return self.op.replace_with_movement_ops([(op, arg)])
     if REMOVE_MOVEMENT_NOPS and not self.realized and st.contiguous:
@@ -234,19 +237,19 @@ class LazyBuffer:
         return root.reshape(st.shape)
     return create_lazybuffer(self.device, st, MovementOps, LazyOp(op, (self,), arg), self.dtype, self.var_vals)
 
-  def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
+  def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
     srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
     return create_lazybuffer(self.device, ShapeTracker(new_shape), ReduceOps, LazyOp(op, srcs, new_shape), self.dtype, self.var_vals)
 
-  def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
+  def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if any(not isinstance(s, int) for s in self.shape) or prod(self.shape) // prod(new_shape) < 32768: return self._reduce_op(op, new_shape) # The amount of work should be big enough to take the benefit of "2 kernels" approach.
     heuristic, divisor, dim_to_split = max(((divisor := math.gcd(256, old))/(stride or math.inf), divisor, i) for i, (old, new, stride) in enumerate(zip(self.shape, new_shape, self.st.real_strides())) if old != new) # type: ignore
     if divisor < 16 or heuristic < 0.125: return self._reduce_op(op, new_shape) # Choose largest divisor (>=16) to split on, penalize large strides.
     def splitted_shape(dim_aft_div): return self.shape[:dim_to_split] + (self.shape[dim_to_split]//divisor,) + dim_aft_div + self.shape[dim_to_split+1:]
     return self.reshape(splitted_shape((divisor,)))._reduce_op(op, splitted_shape((1,))).reshape(splitted_shape(()))._reduce_op(op, new_shape)
 
-  def reshape(self:LazyBuffer, arg:Tuple[Union[Node, int], ...]) -> LazyBuffer:
+  def reshape(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == arg: return self
     new_ints, new_nodes = partition(arg, lambda s: isinstance(s, int))
     if new_nodes and all(isinstance(s, int) for s in self.shape):
@@ -269,7 +272,7 @@ class LazyBuffer:
     if not self.realized and self.op.op == MovementOps.PAD: return self.op.src[0].pad(tuple([(b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)]))
     return self.shuffle_and_prune_movement_ops(ShapeTracker(self.st).pad(arg), MovementOps.PAD, arg)
 
-  def expand(self: LazyBuffer, arg:Tuple[Union[Node,int], ...]) -> LazyBuffer:
+  def expand(self: LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == arg: return self
     if not self.realized and self.op.op == MovementOps.EXPAND:
       return self.op.src[0].expand(arg)
@@ -292,7 +295,7 @@ class LazyBuffer:
         return self.op.src[0].permute(arg).expand(tuple([self.op.arg[a] for a in arg]))
 
       # move permutes before reshapes if we can
-      if PUSH_PERMUTES and self.op.op == MovementOps.RESHAPE and self.op.src[0].__class__ is LazyBuffer:
+      if PUSH_PERMUTES and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], LazyBuffer):
         if shape_idx_groups := get_contraction(self.op.src[0].shape, self.shape):
           self.op.src[0].children.discard(self) # NOTE: this is only required in reshape and when pushing permutes, why??
           return self.op.src[0].permute(tuple(flatten(shape_idx_groups[i] for i in arg))).reshape(ShapeTracker(self.st).permute(arg).shape)
@@ -354,6 +357,7 @@ def _realize_from(buffer: LazyBuffer) -> None:
   if DEBUG >= 3: print(f"*** copy {buffer.device} <- {rawbuf.device} size {rawbuf.realized.size} dtype {rawbuf.realized.dtype}")
   # TODO: make this generic
   if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
+    assert all_int(buffer.shape), "does not support symbolic shape"
     buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
     rawbuf.realized.readinto(cast(RawBufferMapped, buffer.realized)._buffer())
   elif isinstance(rawbuf.realized, RawBufferTransfer) and issubclass(Device[buffer.device].buffer, RawBufferTransfer) and P2P >= 1:
@@ -362,6 +366,7 @@ def _realize_from(buffer: LazyBuffer) -> None:
     buffer.realized = Device[buffer.device].buffer.fromCPU(rawbuf.toCPU(), **buffer._device_extra_args())
 
 def _realize_empty(buffer: LazyBuffer) -> None:
+  assert all_int(buffer.shape), "does not support symbolic shape"
   buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
 
 def _realize_rand(buffer: LazyBuffer) -> None:

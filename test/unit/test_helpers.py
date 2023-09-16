@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
-from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens
+from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod
+from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
 
@@ -129,6 +130,13 @@ class TestStripParens(unittest.TestCase):
   def test_simple(self): self.assertEqual("1+2", strip_parens("(1+2)"))
   def test_nested(self): self.assertEqual("1+(2+3)", strip_parens("(1+(2+3))"))
   def test_casted_no_strip(self): self.assertEqual("(int)(1+2)", strip_parens("(int)(1+2)"))
+
+class TestProd(unittest.TestCase):
+  def test_empty(self): self.assertEqual(1, prod(tuple()))
+  def test_ints(self): self.assertEqual(30, prod((2, 3, 5)))
+  def test_variable(self): self.assertEqual("(a*12)", prod((Variable("a", 1, 5), 3, 4)).render())
+  def test_variable_order(self): self.assertEqual("(a*12)", prod((3, 4, Variable("a", 1, 5))).render())
+  def test_num_nodes(self): self.assertEqual(NumNode(6), prod((NumNode(2), NumNode(3))))
 
 if __name__ == '__main__':
   unittest.main()

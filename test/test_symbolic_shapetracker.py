@@ -34,7 +34,7 @@ class TestSymbolic(unittest.TestCase):
     st = t.lazydata.st
     assert st.shape == (3, i+j+k)
     assert st.real_strides() == (i+j+k, 1)
-    t = Tensor.rand(i, 3).reshape(i, 3).cat(Tensor.rand(3, 3).reshape(i, 3), dim=0).cat(Tensor.rand(3, 3), dim=0)
+    t = Tensor.rand(3, 3).reshape(i, 3).cat(Tensor.rand(3, 3).reshape(i, 3), dim=0).cat(Tensor.rand(3, 3), dim=0)
     st = t.lazydata.st
     assert st.shape == (2*i+3, 3)
     assert st.real_strides() == (3, 1)
@@ -142,7 +142,7 @@ class TestSymbolicShapeExpr(unittest.TestCase):
     idx = (gidx0, lidx1, Variable.num(1))
     shape = (i+1, 8, 4)
     strides = (1, (i*4)+4, i+1)
-    view = View(shape, strides)
+    view = View.create(shape, strides)
     st = ShapeTracker(shape, [view])
     idx, valid = st.expr_idxs(idx)
     assert idx.render() == "((lidx1*((i*4)+4))+1+gidx0+i)"

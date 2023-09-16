@@ -4,7 +4,8 @@ from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp
 from tinygrad.codegen.kernel import Kernel, LocalBuffer
 from tinygrad.lazy import LazyBuffer
-from tinygrad.shape.shapetracker import ShapeTracker, View
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import View
 
 class OptimizedKernel(Kernel):
   def process(self) -> None:
@@ -120,7 +121,7 @@ class OptimizedKernel(Kernel):
           stride[j] = bst
           bst *= shp[j]
 
-    self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
+    self.sts.append(ShapeTracker(tuple(shp), [View.create(tuple(shp), tuple(stride))]))
     self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]

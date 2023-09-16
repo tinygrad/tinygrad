@@ -5,6 +5,7 @@ from math import gcd
 from itertools import product
 from tinygrad.helpers import partition
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Iterator
+from typing_extensions import TypeGuard
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
@@ -201,7 +202,7 @@ class DivNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
-  def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) // (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
+  def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) // self.b
 
 class ModNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
@@ -320,6 +321,11 @@ def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
   ret = a.substitute({k:Variable.num(v) for k, v in var_vals.items()})
   assert isinstance(ret, NumNode)
   return ret.b
+
+# symbolic int
+sint = Union[Node, int]
+
+def all_int(t: Tuple[sint, ...]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 
 VariableOrNum = Union[Variable, NumNode]
 

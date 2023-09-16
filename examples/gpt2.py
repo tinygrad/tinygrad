@@ -199,7 +199,12 @@ if __name__ == "__main__":
   parser.add_argument('--temperature', type=float, default=0.8, help="Temperature in the softmax")
   parser.add_argument('--model_size', type=str, default="gpt2-medium", help="Size of model to use [gpt2, gpt2-medium, gpt2-large, gpt2-xl]")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
+  parser.add_argument('--seed', type=int, help="Set the random seed")
   args = parser.parse_args()
+
+  if args.seed is not None:
+    Tensor._seed = args.seed
+    np.random.seed(args.seed)
 
   print(f"using {args.model_size}")
   gpt2 = GPT2.build(args.model_size)
