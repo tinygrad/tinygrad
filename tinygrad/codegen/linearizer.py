@@ -21,7 +21,7 @@ class UOps(Enum):
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
-def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtNode]) -> Tuple[Tuple[Node, Node], Node]:
+def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtNode, NumNode]) -> Tuple[Tuple[Node, Node], Node]:
 
   if valid.min == 0:
     nodes: List = [valid] if isinstance(valid, LtNode) else valid.nodes
@@ -33,7 +33,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
       var = var_dict[name][1]
       if isinstance(nd.a, MulNode):
         if nd.a.b < 0:
-          var[0] = (nd.b // nd.a.b) + 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
+          var[0] = (nd.b // nd.a.b) + 1 #if nd.b % nd.a.b == 0 else nd.b // nd.a.b
         elif nd.a.b > 0:
           var[1] = (nd.b // nd.a.b) - 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
       elif isinstance(nd.a, Variable):
@@ -45,13 +45,17 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
     idxy = idxy.substitute(sub_dict) #type: ignore
 
   b = base_shape[1]
-  idx = (idxy//4)%b
+  idx = (idxy // 4) % b
   idy = (idxy // (4 * b))
 
-  if getenv("VALIDHACKS") == 1:
-    if valid.min == 0 and isinstance(idx, ModNode):
-      idx = idx.a - b if idx.a.min >= ((b*3)//4) else idx.a
+  val_vars = valid.vars()
+  idx_vars = idx.vars()
+  for i in idx_vars:
+    if i in val_vars:
+      break
+  else:
     valid = NumNode(1)
+  #if valid.min == 0: print(idx, valid)
 
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
