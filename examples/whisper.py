@@ -232,15 +232,15 @@ class GreedyDecoder:
   def __init__(self, eot): self.eot = eot
 
   def update(self, tokens, logits, sum_logprobs):
-    tokens = tokens.numpy()
-    next_tokens = logits.argmax(-1).numpy()
-    logprobs = logits.log_softmax(-1).numpy()
-    current_logprobs = logprobs[np.arange(0, logprobs.shape[0]), next_tokens]
+    tokens = tokens
+    next_tokens = logits.argmax(-1)
+    logprobs = logits.log_softmax(-1)
+    current_logprobs = logprobs[Tensor.arange(0, logprobs.shape[0]), next_tokens]
     sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)
-    next_tokens[tokens[:, -1] == self.eot] = self.eot
-    tokens = np.concatenate([tokens, next_tokens[:, None]], axis=-1)
-    completed = (tokens[:, -1] == self.eot).all()
-    return Tensor(tokens), completed
+    next_tokens = Tensor.where(tokens[:, -1] == self.eot, self.eot, next_tokens)
+    tokens = Tensor.cat(tokens, next_tokens[:, None], dim=-1)
+    completed = (tokens[:, -1] == self.eot).numpy().all()
+    return tokens.realize(), completed
 
   def finalize(self, tokens, sum_logprobs):
     tokens = np.pad(tokens.numpy(), [(0, 0), (0, 0), (0, 1)], constant_values=self.eot)
@@ -299,7 +299,7 @@ def decode_segment(segment, initial_tokens, model, sample_len=224, n_audio=1, n_
   selected = sequence_ranker.rank(tokens, sum_logprobs)
   tokens = [t[i].tolist() for i, t in zip(selected, tokens)]
   # remove special tokens
-  tokens = [[t for t in s if t not in model.tokenizer._special_tokens.values()] for s in tokens]
+  tokens = [[int(t) for t in s if int(t) not in model.tokenizer._special_tokens.values()] for s in tokens]
   texts.extend([model.tokenizer.decode(t).strip() for t in tokens])
   return texts
 
