@@ -91,6 +91,26 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
     nds = [i for i in nds if i not in ones]
     valid = Variable.ands(nds)
 
+  if valid.min == 0 and isinstance(idy, SumNode) and not isinstance(idx, ModNode):
+    nds = [valid] if not isinstance(valid, AndNode) else valid.nodes
+    ones = []
+    for nd in nds:
+
+      if all(v in idy.vars() for v in nd.vars()) and any(isinstance(x, DivNode) for x in idy.flat_components) and len(set(idx.vars()) - set(idy.vars())) != 0:
+
+        flat = idy.flat_components
+
+        nd_flat = nd.a.flat_components
+        if flat[:len(nd_flat)] == nd_flat:
+          ones.append(nd)
+
+        nd_flat = (-nd.a).flat_components
+        if flat[:len(nd_flat)] == nd_flat: ones.append(nd)
+
+    nds = [i for i in nds if i not in ones]
+    valid = Variable.ands(nds)
+
+
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
