@@ -21,12 +21,10 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr
-        # the base must be from tinygrad master for security purpose
+        # the base default to tinygrad master and cannot be other fork branch for security purpose
       - name: Checkout code from tinygrad master
         uses: actions/checkout@v4
         with:
-          # repository: tinygrad/tinygrad
-          # ref: master
           path: base
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
