@@ -22,7 +22,6 @@ class UOps(Enum):
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtNode, NumNode]) -> Tuple[Tuple[Node, Node], Node]:
-
   if valid.min == 0:
     nodes: List = [valid] if isinstance(valid, LtNode) else valid.nodes
     var_dict = dict()
@@ -47,6 +46,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
   b = base_shape[1]
   idx = (idxy // 4) % b
   idy = (idxy // (4 * b))
+
   if valid.min == 0:
     nds = [valid] if isinstance(valid, LtNode) else valid.nodes
     ones = []
@@ -67,31 +67,30 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
     valid = Variable.ands(nds)
   if valid.min == 0 and isinstance(idx, ModNode):
     nds = [valid] if not isinstance(valid, AndNode) else valid.nodes
-    found = False
-    for n, i in enumerate(nds):
-      if found: break
-      if all(v in idx.vars() for v in i.vars()):
+    ones = []
+    for nd in nds:
+      if not isinstance(idx, ModNode): break
+      if all(v in idx.vars() for v in nd.vars()):
         for k in range(-9, 9):
-          if isinstance(i.a, SumNode) and (k*i.a) == Variable.sum(idx.a.nodes[:len(i.a.nodes)]):
-            left_sum = Variable.sum(idx.a.nodes[len(i.a.nodes):])
-            if k < 0 and i.b == 0:
-              b_i = i.b
-              mnn = -sym_infer(i.a, {anan:1 for anan in i.a.vars()})
-              if (left_sum.min + mnn > b):
-                found = True
+          if isinstance(nd.a, SumNode) and (k*nd.a) == Variable.sum(idx.a.nodes[:len(nd.a.nodes)]):
+            left_sum = Variable.sum(idx.a.nodes[len(nd.a.nodes):])
+            if k < 0 and nd.b == 0:
+              sum_nd = -nd.a
+              mnn = min([lal.b if isinstance(lal, MulNode) else lal for lal in sum_nd.nodes])
+              if ((left_sum.min + (-k)*mnn) > b):
+                ones.append(nd)
                 idx = idx.a - b
                 break
             elif k > 0:
-              mxn = (i.b - 1)*k
+              mxn = (nd.b - 1)*k
               if (mxn + left_sum.max) < b:
-                found = True
+                ones.append(nd)
                 idx = idx.a
                 break
-    if found == True:
-      nds.pop(n-1)
-      valid = Variable.ands(nds)
 
-  if valid.min == 0: print(idy, valid)
+    nds = [i for i in nds if i not in ones]
+    valid = Variable.ands(nds)
+
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
@@ -223,7 +222,7 @@ class Linearizer(OptimizedKernel):
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType):
-        idx, valid = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+        idx, _ = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         rendered_idx = self.uop(UOps.CAST, dtypes._int2, tuple(x.render(self.render_ops, self) for x in idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
