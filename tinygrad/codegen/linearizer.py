@@ -9,7 +9,7 @@ from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename, sym_render
+from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename, sym_render, sym_infer
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.codegen.kernel import LocalBuffer
 VariableOrNum = Union[Variable, NumNode, Node]
@@ -47,10 +47,51 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
   b = base_shape[1]
   idx = (idxy // 4) % b
   idy = (idxy // (4 * b))
+  if valid.min == 0:
+    nds = [valid] if isinstance(valid, LtNode) else valid.nodes
+    ones = []
+    for nd in nds:
+      if not isinstance(nd.a, SumNode): continue
+      for index in (idx, idy):
+        if isinstance(index, SumNode):
+          if any(isinstance(i, DivNode) for i in index.flat_components): continue
 
+          _, flat = partition(index.flat_components, lambda x : isinstance(x, NumNode))
+          neg_v_flat = (-nd.a).flat_components
+          if sorted(flat) == sorted(neg_v_flat): ones.append(nd)
 
-  #if valid.min == 0: print(idx, valid)
+          v_flat = nd.a.flat_components
+          if sorted(flat) == sorted(v_flat): ones.append(nd)
 
+    nds = [i for i in nds if i not in ones]
+    valid = Variable.ands(nds)
+  if valid.min == 0 and isinstance(idx, ModNode):
+    nds = [valid] if not isinstance(valid, AndNode) else valid.nodes
+    found = False
+    for n, i in enumerate(nds):
+      if found: break
+      if all(v in idx.vars() for v in i.vars()):
+        for k in range(-9, 9):
+          if isinstance(i.a, SumNode) and (k*i.a) == Variable.sum(idx.a.nodes[:len(i.a.nodes)]):
+            left_sum = Variable.sum(idx.a.nodes[len(i.a.nodes):])
+            if k < 0 and i.b == 0:
+              b_i = i.b
+              mnn = -sym_infer(i.a, {anan:1 for anan in i.a.vars()})
+              if (left_sum.min + mnn > b):
+                found = True
+                idx = idx.a - b
+                break
+            elif k > 0:
+              mxn = (i.b - 1)*k
+              if (mxn + left_sum.max) < b:
+                found = True
+                idx = idx.a
+                break
+    if found == True:
+      nds.pop(n-1)
+      valid = Variable.ands(nds)
+
+  if valid.min == 0: print(idy, valid)
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
