@@ -48,13 +48,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
   idx = (idxy // 4) % b
   idy = (idxy // (4 * b))
 
-  val_vars = valid.vars()
-  idx_vars = idx.vars()
-  for i in idx_vars:
-    if i in val_vars:
-      break
-  else:
-    valid = NumNode(1)
+
   #if valid.min == 0: print(idx, valid)
 
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
