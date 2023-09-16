@@ -4,7 +4,8 @@ from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp
 from tinygrad.codegen.kernel import Kernel, LocalBuffer
 from tinygrad.lazy import LazyBuffer
-from tinygrad.shape.shapetracker import ShapeTracker, View
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import View
 
 class OptimizedKernel(Kernel):
   def process(self) -> None:
@@ -120,7 +121,7 @@ class OptimizedKernel(Kernel):
           stride[j] = bst
           bst *= shp[j]
 
-    self.sts.append(ShapeTracker(tuple(shp), [View(tuple(shp), tuple(stride))]))
+    self.sts.append(ShapeTracker(tuple(shp), [View.create(tuple(shp), tuple(stride))]))
     self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
@@ -131,17 +132,17 @@ class OptimizedKernel(Kernel):
     for axis, amt, typ in x:
       if axis is None or amt == 1: continue
       if typ == "G":
-        assert self.full_shape[self.first_reduce+axis] % amt == 0, "no longer valid shift"
-        self.shift_to(self.first_reduce+axis, amt, top=True, insert_before=self.first_reduce+axis+len(self.group_for_reduce))
+        assert self.full_shape[self.first_reduce+axis+len(self.group_for_reduce)] % amt == 0, "no longer valid shift"
+        self.shift_to(self.first_reduce+axis+len(self.group_for_reduce), amt, top=True, insert_before=self.first_reduce+len(self.group_for_reduce))
         self.group_for_reduce.append(amt)
       if typ == "R":
         typ = "U"
-        axis += self.first_reduce
-      if typ == "U" and (len(self.group_for_reduce) == 0 or self.first_reduce != axis):
+        axis += self.first_reduce + len(self.group_for_reduce)
+      if typ == "U":
         assert self.full_shape[axis] % amt == 0, "no longer valid shift"
         self.shift_to(axis, amt)
         self.upcast()
-      elif typ == "L" and len(self.group_for_reduce) == 0: # TODO: Cannot mix local+group_for_reduce, codegen need to be fixed.
+      elif typ == "L":
         assert self.full_shape[axis] % amt == 0, "no longer valid shift"
         self.shift_to(axis, amt, insert_before=self.first_reduce)
         self.local_dims += 1

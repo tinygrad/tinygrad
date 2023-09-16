@@ -50,14 +50,14 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Set up Python 3.11
+    - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
-        python-version: 3.11
+        python-version: 3.8
     - name: Cache python packages
       uses: actions/cache@v3
       with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
         key: testing-packages-${{ hashFiles('*/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
@@ -106,8 +106,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [optimage, openpilot, multigpu, kopt]
-    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'|| matrix.task=='openpilot'&&'openpilot (OpenCL) Tests'|| matrix.task=='multigpu'&&'MultiGPU Tests' || matrix.task=='kopt'&&'Kernel OPT Tests'}}
+        task: [optimage, openpilot, multigpu, realworld]
+    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'|| matrix.task=='openpilot'&&'openpilot (OpenCL) Tests'|| matrix.task=='multigpu'&&'MultiGPU Tests' || matrix.task=='realworld'&&'Real World Tests'}}
     runs-on: ubuntu-20.04
     timeout-minutes: 20
 
@@ -160,9 +160,14 @@ jobs:
         run: |
           PYTHONPATH="." python test/external/dist/test_world.py
           PYTHONPATH="." python test/external/dist/test_collectives.py
-      - if: ${{ matrix.task == 'kopt' }}
+      - if: ${{ matrix.task == 'realworld' }}
         name: Test KOPT
         run: PYTHONPATH="." KOPT=1 BUDGET=20 GPU=1 DEBUG=1 python -m pytest -rA -n=auto test/models/test_real_world.py
+      - if: ${{ matrix.task == 'realworld' }}
+        name: Run GPT2
+        run: |
+          PYTHONPATH="." JIT=0 python examples/gpt2.py --model_size=gpt2 --prompt "Hello." --count 10 --temperature 0 --timing
+          PYTHONPATH="." JIT=1 python examples/gpt2.py --model_size=gpt2 --prompt "Hello." --count 10 --temperature 0 --timing
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests
