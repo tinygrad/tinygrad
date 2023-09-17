@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same, partition
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
@@ -80,7 +80,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     valid = Variable.ands([i for i in nds if i not in ones])
 
   # Simplify sumnodes
-  if valid.min == 0:
+  if valid.min == 0 and not isinstance(idx, ModNode):
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
     ones = []
     for nd in nds:
@@ -103,33 +103,6 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
               ones.append(nd)
 
     valid = Variable.ands([i for i in nds if i not in ones])
-
-  """
-  _, flat = partition(index.flat_components, lambda x: isinstance(x, NumNode))
-  neg_v_flat = (-nd.a).flat_components
-  if sorted(flat) == sorted(neg_v_flat): ones.append(nd)
-
-  v_flat = nd.a.flat_components
-  if sorted(flat) == sorted(v_flat): ones.append(nd)
-
-  if False and valid.min == 0 and isinstance(idy, SumNode) and not isinstance(idx, ModNode):
-    nds = valid.nodes if isinstance(valid, AndNode) else [valid]
-    ones = []
-    for nd in nds:
-
-      if any(isinstance(x, DivNode) for x in idy.flat_components) and len(set(idx.vars()) - set(idy.vars())) != 0:
-        flat = idy.flat_components
-
-        nd_flat = nd.a.flat_components
-        if flat[:len(nd_flat)] == nd_flat: ones.append(nd)
-
-        nd_flat = (-nd.a).flat_components
-        if flat[:len(nd_flat)] == nd_flat: ones.append(nd)
-
-    valid = Variable.ands([i for i in nds if i not in ones])
-  """
-
-  #if isinstance(idx, ModNode): idx = idx.a
 
   if valid.min == 0:
     print(idx, idy, valid)
