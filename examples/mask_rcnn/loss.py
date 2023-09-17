@@ -233,7 +233,7 @@ def test_loss():
   images = to_image_list(img)
   features = backbone(images.tensors)
   objectness, rpn_box_regression = head(features)
-  anchors = [anchor[3:6] for anchor in anchor_generator(images, features)] # drops the big tensors for my '18 macbook
+  anchors = [anchor for anchor in anchor_generator(images, features)]
   coco = COCO(os.path.join(BASEDIR, 'annotations', 'instances_train2017.json'))
   annotations = coco.loadAnns(coco.getAnnIds(imgIds=[img_id]))
   gt = []

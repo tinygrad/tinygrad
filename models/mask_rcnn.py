@@ -118,7 +118,7 @@ def permute_and_flatten(layer:Tensor, N, A, C, H, W):
   return layer
 
 class BoxList:
-  def __init__(self, bbox, image_size, mode="xyxy"):
+  def __init__(self, bbox, image_size: (int, int), mode="xyxy"):
     if not isinstance(bbox, Tensor):
       bbox = Tensor(bbox)
     if bbox.ndim != 2:
