@@ -24,12 +24,11 @@ class UOps(Enum):
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
   if valid.min == 0:
     nodes: List = valid.nodes if isinstance(valid, AndNode) else [valid]
-    var_dict = dict()
+    var_dict = {sym_render(var):(var, [var.min, var.max]) for var in valid.vars()}
 
     for nd in nodes:
       init_var: Variable = nd.vars()[0]
-      if (name := sym_render(init_var)) not in var_dict: var_dict[name] = (init_var, [init_var.min, init_var.max])
-      var = var_dict[name][1]
+      var = var_dict[sym_render(init_var)][1]
       if isinstance(nd.a, MulNode):
         if nd.a.b < 0:
           var[0] = (nd.b // nd.a.b) + 1
@@ -38,10 +37,11 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       elif isinstance(nd.a, Variable):
         var[1] = nd.b - 1
     # We do not allow NumNode because it is constant
-    sub_dict = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items() if mn != mx}
-    valid = valid.substitute(sub_dict) #type: ignore
+    # TODO: Remove mx != mn
+    sub_dict: dict[Union[Variable, NumNode], Node] = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items() if mx != mn}
+    valid = valid.substitute(sub_dict)
     #sub_dict = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items()}
-    idxy = idxy.substitute(sub_dict) #type: ignore
+    idxy = idxy.substitute(sub_dict)
 
   b = base_shape[1]
   idx = (idxy // 4) % b
@@ -51,53 +51,68 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
     ones = []
     assert isinstance(idx.a, SumNode)
-    idx_nodes = idx.a.nodes
+    idx_nodes = set(idx.a.flat_components)
     for nd in nds:
       if idx.__class__ is not ModNode: break
       if all(v in idx.vars() for v in nd.vars()) and isinstance(nd.a, SumNode):
-        nd_nodes = nd.a.nodes
-        sum_var = Variable.sum(idx_nodes[:len(nd_nodes)])
-        left_sum = Variable.sum(idx_nodes[len(nd_nodes):])
-        for k in range(-9, 9):
-          if (k*nd.a) == sum_var:
+        for k in range(-9, 10): #Arbitrary
+          if k == 0: continue
+          nd_nodes = set((k*nd.a).flat_components)
+          diff = idx_nodes - nd_nodes
+          if len(nd_nodes - idx_nodes) == 0:
+            left_sum = Variable.sum(list(diff))
             if k < 0 and nd.b == 0:
               mnn = max(1, min([-lal.b if isinstance(lal, MulNode) else lal for lal in nd_nodes]))
               if (2*b> (left_sum.min + (-k)*mnn) >= b):
                 ones.append(nd)
                 idx = idx.a - b
-                break
             elif k > 0:
               if ((nd.b - 1)*k + left_sum.max) < b:
                 ones.append(nd)
                 idx = idx.a
-                break
-
+            break
     valid = Variable.ands([i for i in nds if i not in ones])
 
+  # Simplify sumnodes
   if valid.min == 0:
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
     ones = []
     for nd in nds:
       if not isinstance(nd.a, SumNode): continue
+      if isinstance(idx, ModNode) or isinstance(idy, ModNode): break
+      if any(isinstance(x, DivNode) for x in idy.flat_components) or len(set(idx.vars()) - set(idy.vars())) != 0: break
       for index in (idx, idy):
         if isinstance(index, SumNode):
+          index_nodes = set(index.flat_components)
 
-          _, flat = partition(index.flat_components, lambda x: isinstance(x, NumNode))
-          neg_v_flat = (-nd.a).flat_components
-          if sorted(flat) == sorted(neg_v_flat): ones.append(nd)
+          nd_nodes = set(nd.a.flat_components)
+          diff = index_nodes - nd_nodes
+          if len(nd_nodes - index_nodes) == 0:
+            print(nd, idx, idy)
+            ones.append(nd)
 
-          v_flat = nd.a.flat_components
-          if sorted(flat) == sorted(v_flat): ones.append(nd)
+          nd_nodes = set((-nd.a).flat_components)
+          diff = index_nodes - nd_nodes
+          if len(nd_nodes - index_nodes) == 0:
+            print(nd, idx, idy)
+            ones.append(nd)
 
     valid = Variable.ands([i for i in nds if i not in ones])
 
-  if valid.min == 0 and isinstance(idy, SumNode) and not isinstance(idx, ModNode):
+  """
+  _, flat = partition(index.flat_components, lambda x: isinstance(x, NumNode))
+  neg_v_flat = (-nd.a).flat_components
+  if sorted(flat) == sorted(neg_v_flat): ones.append(nd)
+
+  v_flat = nd.a.flat_components
+  if sorted(flat) == sorted(v_flat): ones.append(nd)
+  """
+  if False and valid.min == 0 and isinstance(idy, SumNode) and not isinstance(idx, ModNode):
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
     ones = []
     for nd in nds:
 
       if any(isinstance(x, DivNode) for x in idy.flat_components) and len(set(idx.vars()) - set(idy.vars())) != 0:
-
         flat = idy.flat_components
 
         nd_flat = nd.a.flat_components
@@ -106,9 +121,11 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
         nd_flat = (-nd.a).flat_components
         if flat[:len(nd_flat)] == nd_flat: ones.append(nd)
 
-    nds = [i for i in nds if i not in ones]
-    valid = Variable.ands(nds)
-  if valid.min == 0: print(valid)
+    valid = Variable.ands([i for i in nds if i not in ones])
+
+  #if isinstance(idx, ModNode): idx = idx.a
+
+  #if valid.min == 0: print(idx, idy, valid)
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
@@ -240,7 +257,7 @@ class Linearizer(OptimizedKernel):
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType):
-        idx, _ = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+        idx, valid = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         rendered_idx = self.uop(UOps.CAST, dtypes._int2, tuple(x.render(self.render_ops, self) for x in idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
