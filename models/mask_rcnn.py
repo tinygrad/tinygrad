@@ -307,6 +307,15 @@ def cat_boxlist(bboxes: BoxList):
   return cat_boxes
 
 
+class ImageList(object):
+  def __init__(self, tensors, image_sizes):
+    self.tensors = tensors
+    self.image_sizes = image_sizes
+
+  def to(self, *args, **kwargs):
+    cast_tensor = self.tensors.to(*args, **kwargs)
+    return ImageList(cast_tensor, self.image_sizes)
+
 class FPN:
   def __init__(self, in_channels_list, out_channels):
     self.inner_blocks, self.layer_blocks = [], []
@@ -1190,16 +1199,6 @@ class RoIHeads:
     x, detections, _ = self.mask(features, detections, targets)
     # TODO: Mask-RCNN Training, return losses
     return x, detections, {}
-
-
-class ImageList(object):
-  def __init__(self, tensors, image_sizes):
-    self.tensors = tensors
-    self.image_sizes = image_sizes
-
-  def to(self, *args, **kwargs):
-    cast_tensor = self.tensors.to(*args, **kwargs)
-    return ImageList(cast_tensor, self.image_sizes)
 
 
 def to_image_list(tensors, size_divisible=32):

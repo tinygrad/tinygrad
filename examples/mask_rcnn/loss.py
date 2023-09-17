@@ -5,7 +5,11 @@ from tinygrad.tensor import Tensor
 from tinygrad.tensor import dtypes
 import numpy as np
 from typing import List, Callable, Tuple
-
+from train import build_transforms
+from pycocotools.coco import COCO
+from PIL import Image
+from extra.datasets.coco import BASEDIR
+import os
 # implementation from https://github.com/kuangliu/torchcv/blob/master/torchcv/utils/box.py
 # with slight modifications
 
@@ -223,12 +227,22 @@ def test_loss():
   head = RPNHead(
     channels, anchor_generator.num_anchors_per_location()[0]
   )
-  features = Tensor.randn((1, channels, 50, 50))
-  images = Tensor.randn((1, 3, 50, 50))
+  backbone = ResNetFPN(ResNet(50, num_classes=None, stride_in_1x1=True), out_channels=256)
+  img_id = 387655
+  img = [Tensor(build_transforms()(Image.open(BASEDIR/f'train2017/000000{img_id}.jpg').convert("RGB")).numpy())] # TODO this uses torch to transform
+  images = to_image_list(img)
+  features = backbone(images.tensors)
   objectness, rpn_box_regression = head(features)
-  anchors = anchor_generator(images, features)
-  targets = [BoxList(Tensor([[0, 0, 5, 5], [0, 0, 10, 10]]), image_size = (50, 50))]
-  objectness_loss, regression_loss = loss(objectness, rpn_box_regression, anchors, targets)
+  anchors = [anchor[3:6] for anchor in anchor_generator(images, features)] # drops the big tensors for my '18 macbook
+  coco = COCO(os.path.join(BASEDIR, 'annotations', 'instances_train2017.json'))
+  annotations = coco.loadAnns(coco.getAnnIds(imgIds=[img_id]))
+  gt = []
+  for annotation in annotations:
+      bbox = annotation['bbox']  # [x,y,width,height]
+      x, y, width, height = bbox
+      gt.append([x, y, x + width, y + height])
+  targets = [BoxList(Tensor(gt), image_size=anchors[0][0].size)]
+  objectness_loss, regression_loss = loss(anchors, objectness, rpn_box_regression, targets)
   
 def binary_cross_entropy(pred: Tensor, y: Tensor): return -(pred.log()*y + (1-y)*(1-pred).log()).mean()
 def binary_cross_entropy_with_logits(x: Tensor, y: Tensor): return binary_cross_entropy(x.sigmoid(), y)
@@ -238,7 +252,24 @@ def test_binary_cross_entropy_with_logits():
   y = Tensor([[0., 1., 0., 0.],[0., 1., 0., 0.]])
   assert np.allclose(binary_cross_entropy_with_logits(x, y).numpy(), 0.8233704)
 
-# one way this differs from reference is it doesn't rely on boxlist mutables
+# the version of this function in models.mask_rcnn has changed the parameter type to `Boxlist`, not `list[Boxlist]`
+def cat_boxlist(bboxes: list[BoxList]):
+  """Concatenates a list of BoxList (having the same image size) into a single BoxList"""
+  assert isinstance(bboxes, (list, tuple))
+  assert all(isinstance(bbox, BoxList) for bbox in bboxes)
+
+  size = bboxes[0].size
+  assert all(bbox.size == size for bbox in bboxes)
+  mode = bboxes[0].mode
+  assert all(bbox.mode == mode for bbox in bboxes)
+  fields = set(bboxes[0].fields())
+  assert all(set(bbox.fields()) == fields for bbox in bboxes)
+
+  cat_boxes = BoxList(Tensor.cat(*[bbox.bbox for bbox in bboxes], dim=0), size, mode)
+  for field in fields:
+      data = Tensor.cat(*[bbox.get_field(field) for bbox in bboxes], dim=0)
+      cat_boxes.add_field(field, data)
+  return cat_boxes
 class RPNLossComputation:
   def __init__(self, proposal_matcher, fg_bg_sampler, box_coder,
               generate_labels_func):
@@ -292,12 +323,12 @@ class RPNLossComputation:
 
     return labels, regression_targets
 
-
-  def __call__(self, anchors: list[BoxList], objectness: list[Tensor],
+  def __call__(self, anchors: list[list[BoxList]], objectness: list[Tensor],
                box_regression: list[Tensor], targets: list[BoxList]):
     """
     Arguments:
-        anchors (list[BoxList])
+        anchors (list[list[BoxList]]) 
+          - For each image, the anchors separated into different boxlists of different aspect ratios
         objectness (list[Tensor])
         box_regression (list[Tensor])
         targets (list[BoxList])
@@ -306,21 +337,18 @@ class RPNLossComputation:
         objectness_loss (Tensor)
         box_loss (Tensor
     """
-    anchors = [cat_boxlist(anchors_per_image) for anchors_per_image in anchors] # what this doin
+    anchors = [cat_boxlist(anchors_per_image) for anchors_per_image in anchors]
     labels, regression_targets = self.prepare_targets(anchors, targets)
     sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
-    sampled_pos_inds, sampled_neg_inds = Tensor(sampled_pos_inds).squeeze(0), Tensor(sampled_neg_inds).squeeze(0)
-
+    sampled_pos_inds, sampled_neg_inds = Tensor([]) if len(sampled_pos_inds[0]) == 0 else Tensor(sampled_pos_inds).squeeze(0), Tensor([]) if len(sampled_neg_inds) == 0 else Tensor(sampled_neg_inds).squeeze(0)
     sampled_inds = Tensor.cat(sampled_pos_inds, sampled_neg_inds, dim=0)
     ## todo test this, doesn't seem to have the correct box_regression
     objectness, box_regression = \
             concat_box_prediction_layers(objectness, box_regression)
 
     objectness = objectness.squeeze()
-
-    labels = Tensor.cat(*labels, dim=0)
-    regression_targets = Tensor.cat(*regression_targets, dim=0)
-
+    labels, regression_targets = Tensor.cat(*labels, dim=0), Tensor.cat(*regression_targets, dim=0)
+    
     box_loss = smooth_l1_loss(
         box_regression[sampled_pos_inds],
         regression_targets[sampled_pos_inds],
@@ -335,6 +363,7 @@ class RPNLossComputation:
     return objectness_loss, box_loss
 
 if __name__ == "__main__":
+  test_loss()
   test_concat_box_prediction_layers()
   test_binary_cross_entropy_with_logits()
   test_prepare_targets()
@@ -344,7 +373,6 @@ if __name__ == "__main__":
   test_rind()
   test_balanced_sampler()
   test_match_targets_to_anchors()
-  test_loss()
   #PLAYGROUND
   data = Tensor([[1, 2, 3],
                [4, 5, 6],

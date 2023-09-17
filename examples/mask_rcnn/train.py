@@ -5,8 +5,8 @@ import datetime
 from tinygrad.tensor import Tensor
 import tinygrad.nn.optim as optim
 from torchvision import transforms as T
-from models.mask_rcnn import MaskRCNN, Resize, Normalize, to_image_list
-from infer_mask_rcnn import Resize, Normalize, to_image_list
+from models.mask_rcnn import MaskRCNN, to_image_list
+from infer import Resize, Normalize
 from models.resnet import ResNet
 from util import FileLoader
 from PIL import Image
