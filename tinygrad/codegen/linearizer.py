@@ -61,11 +61,17 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
           diff = idx_nodes - nd_nodes
           if len(nd_nodes - idx_nodes) == 0:
             left_sum = Variable.sum(list(diff))
-            if k < 0 and nd.b == 0:
-              mnn = max(1, min([-lal.b if isinstance(lal, MulNode) else lal for lal in nd_nodes]))
-              if (2*b> (left_sum.min + (-k)*mnn) >= b):
-                ones.append(nd)
-                idx = idx.a - b
+            if k < 0:
+              if nd.b == 0:
+                mnn = max(1, min([-lal.b if isinstance(lal, MulNode) else lal for lal in nd_nodes]))
+                if (2*b> (left_sum.min + (-k)*mnn) >= b):
+                  ones.append(nd)
+                  idx = idx.a - b
+              else:
+                mnn = (-nd.b) + 1
+                if (2*b> (left_sum.min + (-k)*mnn) >= b):
+                  ones.append(nd)
+                  idx = idx.a - b
             elif k > 0:
               if ((nd.b - 1)*k + left_sum.max) < b:
                 ones.append(nd)
@@ -79,8 +85,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     ones = []
     for nd in nds:
       if not isinstance(nd.a, SumNode): continue
-      if isinstance(idx, ModNode) or isinstance(idy, ModNode): break
-      if any(isinstance(x, DivNode) for x in idy.flat_components) or len(set(idx.vars()) - set(idy.vars())) != 0: break
+
       for index in (idx, idy):
         if isinstance(index, SumNode):
           index_nodes = set(index.flat_components)
@@ -88,14 +93,14 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
           nd_nodes = set(nd.a.flat_components)
           diff = index_nodes - nd_nodes
           if len(nd_nodes - index_nodes) == 0:
-            print(nd, idx, idy)
+            if any(not isinstance(d, (DivNode, NumNode)) for d in diff): break
             ones.append(nd)
-
-          nd_nodes = set((-nd.a).flat_components)
-          diff = index_nodes - nd_nodes
-          if len(nd_nodes - index_nodes) == 0:
-            print(nd, idx, idy)
-            ones.append(nd)
+          else:
+            nd_nodes = set((-nd.a).flat_components)
+            diff = index_nodes - nd_nodes
+            if len(nd_nodes - index_nodes) == 0:
+              if any(not isinstance(d, (DivNode, NumNode)) for d in diff): break
+              ones.append(nd)
 
     valid = Variable.ands([i for i in nds if i not in ones])
 
@@ -106,7 +111,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
 
   v_flat = nd.a.flat_components
   if sorted(flat) == sorted(v_flat): ones.append(nd)
-  """
+
   if False and valid.min == 0 and isinstance(idy, SumNode) and not isinstance(idx, ModNode):
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
     ones = []
@@ -122,10 +127,12 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
         if flat[:len(nd_flat)] == nd_flat: ones.append(nd)
 
     valid = Variable.ands([i for i in nds if i not in ones])
+  """
 
   #if isinstance(idx, ModNode): idx = idx.a
 
-  #if valid.min == 0: print(idx, idy, valid)
+  if valid.min == 0:
+    print(idx, idy, valid)
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
