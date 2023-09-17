@@ -1,9 +1,10 @@
 import math
-from typing import Tuple, Optional
+from typing import Tuple, Optional, cast
 from tinygrad.helpers import argsort, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
+from tinygrad.shape.symbolic import sint
 
 class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
@@ -192,12 +193,14 @@ class Pad(Function):
     return grad_output.shrink(self.narg)
 
 class Shrink(Function):
-  def forward(self, x:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, arg:Tuple[Tuple[sint, sint], ...]) -> LazyBuffer:
     self.narg = tuple([(p[0], s-p[1]) for s,p in zip(x.shape, arg)])
     return x.shrink(arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.pad(self.narg)
+    assert all(isinstance(x[0], int) and isinstance(x[1], int) for x in self.narg), "symbolic shrink does not support backward"
+    # need this cast because mypy cannot narrow the type even with assert
+    return grad_output.pad(cast(Tuple[Tuple[int, int], ...], self.narg))
 
 class Flip(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
