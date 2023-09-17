@@ -23,7 +23,7 @@ class UOps(Enum):
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtNode, NumNode]) -> Tuple[Tuple[Node, Node], Node]:
   if valid.min == 0:
-    nodes: List = [valid] if isinstance(valid, LtNode) else valid.nodes
+    nodes: List = valid.nodes if isinstance(valid, AndNode) else [valid]
     var_dict = dict()
 
     for nd in nodes:
@@ -32,7 +32,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
       var = var_dict[name][1]
       if isinstance(nd.a, MulNode):
         if nd.a.b < 0:
-          var[0] = (nd.b // nd.a.b) + 1 #if nd.b % nd.a.b == 0 else nd.b // nd.a.b
+          var[0] = (nd.b // nd.a.b) + 1
         elif nd.a.b > 0:
           var[1] = (nd.b // nd.a.b) - 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
       elif isinstance(nd.a, Variable):
@@ -48,33 +48,33 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
   idy = (idxy // (4 * b))
   # Simplify ModNode if possibe
   if valid.min == 0 and isinstance(idx, ModNode):
-    nds = [valid] if isinstance(valid, LtNode) else valid.nodes
+    nds = valid.nodes if isinstance(valid, AndNode) else [valid]
     ones = []
+    idx_nodes = idx.a.nodes
     for nd in nds:
-      if not isinstance(idx, ModNode): break
-      if all(v in idx.vars() for v in nd.vars()):
+      if idx.__class__ is not ModNode: break
+      if all(v in idx.vars() for v in nd.vars()) and isinstance(nd.a, SumNode):
+        nd_nodes = nd.a.nodes
+        sum_var = Variable.sum(idx_nodes[:len(nd_nodes)])
+        left_sum = Variable.sum(idx_nodes[len(nd_nodes):])
         for k in range(-9, 9):
-          if isinstance(nd.a, SumNode) and (k*nd.a) == Variable.sum(idx.a.nodes[:len(nd.a.nodes)]):
-            left_sum = Variable.sum(idx.a.nodes[len(nd.a.nodes):])
+          if (k*nd.a) == sum_var:
             if k < 0 and nd.b == 0:
-              sum_nd = -nd.a
-              mnn = min([lal.b if isinstance(lal, MulNode) else lal for lal in sum_nd.nodes])
-              if (2*b> (left_sum.min + (-k)*mnn) > b):
+              mnn = max(1, min([-lal.b if isinstance(lal, MulNode) else lal for lal in nd_nodes]))
+              if (2*b> (left_sum.min + (-k)*mnn) >= b):
                 ones.append(nd)
                 idx = idx.a - b
                 break
             elif k > 0:
-              mxn = (nd.b - 1)*k
-              if (mxn + left_sum.max) < b:
+              if ((nd.b - 1)*k + left_sum.max) < b:
                 ones.append(nd)
                 idx = idx.a
                 break
 
-    nds = [i for i in nds if i not in ones]
-    valid = Variable.ands(nds)
+    valid = Variable.ands([i for i in nds if i not in ones])
 
   if valid.min == 0:
-    nds = [valid] if isinstance(valid, LtNode) else valid.nodes
+    nds = valid.nodes if isinstance(valid, AndNode) else [valid]
     ones = []
     for nd in nds:
       if not isinstance(nd.a, SumNode): continue
@@ -88,11 +88,10 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
           v_flat = nd.a.flat_components
           if sorted(flat) == sorted(v_flat): ones.append(nd)
 
-    nds = [i for i in nds if i not in ones]
-    valid = Variable.ands(nds)
+    valid = Variable.ands([i for i in nds if i not in ones])
 
   if valid.min == 0 and isinstance(idy, SumNode) and not isinstance(idx, ModNode):
-    nds = [valid] if not isinstance(valid, AndNode) else valid.nodes
+    nds = valid.nodes if isinstance(valid, AndNode) else [valid]
     ones = []
     for nd in nds:
 
@@ -108,7 +107,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
 
     nds = [i for i in nds if i not in ones]
     valid = Variable.ands(nds)
-  if valid.min == 0:print("a")
+  if valid.min == 0: print(valid)
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
