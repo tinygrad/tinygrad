@@ -8,7 +8,7 @@ from typing import List, Callable, Tuple
 from train import build_transforms
 from pycocotools.coco import COCO
 from PIL import Image
-from extra.datasets.coco import BASEDIR
+from extra.datasets.coco import BASEDIR, download_train
 import os
 # implementation from https://github.com/kuangliu/torchcv/blob/master/torchcv/utils/box.py
 # with slight modifications
@@ -363,6 +363,7 @@ class RPNLossComputation:
     return objectness_loss, box_loss
 
 if __name__ == "__main__":
+  download_train()
   test_loss()
   test_concat_box_prediction_layers()
   test_binary_cross_entropy_with_logits()
