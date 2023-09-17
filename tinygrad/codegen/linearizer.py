@@ -46,6 +46,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
   b = base_shape[1]
   idx = (idxy // 4) % b
   idy = (idxy // (4 * b))
+
   # Simplify ModNode if possibe
   if valid.min == 0 and isinstance(idx, ModNode):
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
@@ -62,16 +63,11 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
           if len(nd_nodes - idx_nodes) == 0:
             left_sum = Variable.sum(list(diff))
             if k < 0:
-              if nd.b == 0:
-                mnn = max(1, min([-lal.b if isinstance(lal, MulNode) else lal for lal in nd_nodes]))
-                if (2*b> (left_sum.min + (-k)*mnn) >= b):
-                  ones.append(nd)
-                  idx = idx.a - b
-              else:
-                mnn = (-nd.b) + 1
-                if (2*b> (left_sum.min + (-k)*mnn) >= b):
-                  ones.append(nd)
-                  idx = idx.a - b
+              # TODO: More thought on this
+              mnn = max((-nd.b) + 1, min([-lal.b if isinstance(lal, MulNode) else lal for lal in nd_nodes]))
+              if (left_sum.min + (-k)*mnn) >= b:
+                ones.append(nd)
+                idx = idx.a - b
             elif k > 0:
               if ((nd.b - 1)*k + left_sum.max) < b:
                 ones.append(nd)
@@ -85,7 +81,6 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     ones = []
     for nd in nds:
       if not isinstance(nd.a, SumNode): continue
-
       for index in (idx, idy):
         if isinstance(index, SumNode):
           index_nodes = set(index.flat_components)
