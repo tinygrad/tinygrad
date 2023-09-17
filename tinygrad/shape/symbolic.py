@@ -157,7 +157,6 @@ class NumNode(Node):
     self.b:int = num
     self.min, self.max = num, num
   def __int__(self): return self.b
-  def __index__(self): return self.b
   def __eq__(self, other): return self.b == other
   def __hash__(self): return self.hash  # needed with __eq__ override
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self
