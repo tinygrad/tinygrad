@@ -21,7 +21,7 @@ class UOps(Enum):
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
-def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtNode, NumNode]) -> Tuple[Tuple[Node, Node], Node]:
+def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
   if valid.min == 0:
     nodes: List = valid.nodes if isinstance(valid, AndNode) else [valid]
     var_dict = dict()
@@ -50,6 +50,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Union[AndNode, LtN
   if valid.min == 0 and isinstance(idx, ModNode):
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
     ones = []
+    assert isinstance(idx.a, SumNode)
     idx_nodes = idx.a.nodes
     for nd in nds:
       if idx.__class__ is not ModNode: break
