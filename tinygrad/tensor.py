@@ -10,7 +10,7 @@ from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Seque
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device, LoadOps
-from tinygrad.shape.symbolic import NumNode, sint, all_int
+from tinygrad.shape.symbolic import sint, all_int
 
 # An instantiation of the Function is the Context
 class Function:
@@ -303,9 +303,8 @@ class Tensor:
         if isinstance(s, int):
           dim_collapsed += 1
         else:
-          # TODO: replace NumNode with int in shape
-          assert isinstance(dim_shape, (int, NumNode)), f"does not support symbolic shape {dim_shape}"
-          final_shape.append(int(dim_shape))
+          assert isinstance(dim_shape, int), f"does not support symbolic shape {dim_shape}"
+          final_shape.append(dim_shape)
           if isinstance(s, Tensor):
             tensors.append(s)
             dim.append(i-dim_collapsed)
