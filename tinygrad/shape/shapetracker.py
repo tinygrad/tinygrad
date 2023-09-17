@@ -45,10 +45,9 @@ class ShapeTracker:
 
   # these are multiview strides, value is None if it's not a simple strided dimension
   # TODO: this can be shared code between simplify and merge_views
-  def real_offset(self) -> int:
-    real_offset, mask = self.expr_node(Variable('zero', 0, 0))
-    assert real_offset.__class__ is NumNode, f"how is the offset not a number? {real_offset} {mask}"
-    return real_offset.b
+  def real_offset(self) -> sint:
+    real_offset, _ = self.expr_node(Variable('zero', 0, 0))
+    return real_offset.b if isinstance(real_offset, NumNode) else real_offset
 
   # NOTE: if a stride is not always valid, it will be None
   def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
@@ -59,7 +58,7 @@ class ShapeTracker:
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
       if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable) and this_dim.a in idxs:
         ret[idxs.index(this_dim.a)] = this_dim.b
-      elif isinstance(this_dim, Variable):
+      elif isinstance(this_dim, Variable) and this_dim in idxs:
         ret[idxs.index(this_dim)] = 1
     idx_vars, valid_vars = idx.vars(), valid.vars()
     for i,tidx in enumerate(idxs):
@@ -103,7 +102,7 @@ class ShapeTracker:
     self.views[-1] = self.views[-1].pad(arg)
     return self
 
-  def shrink(self, arg: Tuple[Tuple[int, int], ...]):
+  def shrink(self, arg: Tuple[Tuple[sint, sint], ...]):
     self.views[-1] = self.views[-1].shrink(arg)
     return self
 
