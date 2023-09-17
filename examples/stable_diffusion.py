@@ -567,6 +567,7 @@ if __name__ == "__main__":
   parser.add_argument('--noshow', action='store_true', help="Don't show the image")
   parser.add_argument('--fp16', action='store_true', help="Cast the weights to float16")
   parser.add_argument('--timing', action='store_true', help="Print timing per step")
+  parser.add_argument('--seed', type=int, help="Set the random latent seed")
   args = parser.parse_args()
 
   Tensor.no_grad = True
@@ -633,13 +634,14 @@ if __name__ == "__main__":
     return x_prev.realize()
 
   # start with random noise
+  if args.seed is not None: Tensor._seed = args.seed
   latent = Tensor.randn(1,4,64,64)
 
   # this is diffusion
   for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
     GlobalCounters.reset()
     t.set_description("%3d %3d" % (index, timestep))
-    with Timing("step in ", enabled=args.timing):
+    with Timing("step in ", enabled=args.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
       latent = do_step(latent, Tensor([timestep]), Tensor([index]))
       if args.timing: Device[Device.DEFAULT].synchronize()
   del do_step

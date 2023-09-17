@@ -1,5 +1,6 @@
-from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
+from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional, Set
 from weakref import ref
+from collections import defaultdict
 import functools, itertools
 from tinygrad.helpers import DEBUG, DType, merge_dicts
 from tinygrad.ops import Device
@@ -29,7 +30,7 @@ class TinyJit:
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
     if self.cnt >= 2:
       try: var_vals: Dict[Variable, int] = kwargs["jit_ctx"]
-      except KeyError: var_vals = merge_dicts([arg.lazydata.st.var_vals for arg in args if arg.__class__ is Tensor])
+      except KeyError: var_vals = merge_dicts([arg.lazydata.var_vals for arg in args if arg.__class__ is Tensor])
       if len(var_vals) > 1: var_vals = dict(sorted(var_vals.items(), key=lambda kv: kv[0].key))
       for (j,i),(input_name, expected_st, expected_type) in self.input_replace.items():
         assert input_rawbuffers[input_name][0].dtype == expected_type, f"type mismatch in JIT, {input_rawbuffers[input_name][0].dtype} != {expected_type}"
@@ -64,37 +65,41 @@ class TinyJit:
 
 class _CacheCollector:
   class _Placeholder:
-    def __init__(self, buf): self.size, self.dtype, self.device, self.ref, self.buftype = buf.size, buf.dtype, getattr(buf, '_device', None), ref(buf), type(buf)
+    def __init__(self, buf): self.size, self.dtype, self._device, self.ref, self.buftype = buf.size, buf.dtype, getattr(buf, '_device', None), ref(buf), type(buf)
     def alive(self): return self.ref() is not None
-    def alloc_rawbuf(self): return self.buftype(self.size, self.dtype, **({'device':self.device} if self.device is not None else dict()))
+    def alloc_rawbuf(self): return self.buftype(self.size, self.dtype, **({'device':self._device} if self._device is not None else dict()))
 
   def __init__(self):
     self.cache: Optional[List[Tuple[Callable, List[Any], Dict[Any,Any]]]] = None
     self.placeholders: Dict[RawBuffer, _CacheCollector._Placeholder] = {} # Rawbuffers are replaced with placeholders to allow freeing of the real buffer while collecting cache.
     self.last_buftype: Dict[Tuple[int,...], int] = {} # Last index of the cached entry where a buffer with the shape (shape is a key) is used as input to the prog.
     self.last_placeholder_index: Dict[_CacheCollector._Placeholder, int] = {} # Last index where the placeholder is used as output. This allows tracking when we need to stick to the original buffer if it is still alive.
+    self.freed_placeholders: Dict[Tuple[int,...], List[_CacheCollector._Placeholder]] = defaultdict(list)
+    self.circular_signatures: Set[Any] = set()
   def start(self):
-    self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index = [], {}, {}, {}
+    self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index, self.freed_buffers, self.circular_signatures = [], {}, {}, {}, defaultdict(list), set()
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
-
     # When we got buffers with the same signature, we can use just 1(max 2, see cycle avoidance below) buffer insted of all of them.
     # Current implementation of a signature is an underlying buffer, because if 2 or more different RawBuffers shares the same, all but the very last are dead.
-    def get_signature(buf): return buf._buf if getattr(buf, '_buf', None) is not None and getattr(buf, '_allocator', None) is not None else buf
-
     for buf in rawbufs[1:]:
       # Check if the input matches any of placeholder to determine if it's existing or newly created input.
       # In case of newly created input remove placeholder and capture the whole buffer.
-      if isinstance(buf, RawBuffer) and get_signature(buf) in self.placeholders and self.placeholders[get_signature(buf)].ref != ref(buf):
-        self.placeholders.pop(get_signature(buf))
-      if isinstance(buf, RawBuffer) and get_signature(buf) not in self.placeholders:
+      if isinstance(buf, RawBuffer) and self._get_signature(buf) in self.placeholders and self.placeholders[self._get_signature(buf)].ref != ref(buf):
+        self.placeholders.pop(self._get_signature(buf))
+      if isinstance(buf, RawBuffer) and self._get_signature(buf) not in self.placeholders:
         self.last_buftype[self._buftype_key(buf)] = len(self.cache)
 
     # Creating/updating a placeholder for the current output buffer. If we update output, set the ref to point to the new RawBuffer,
     # since the previous RawBuffer is dead (overwise we won't get a new RawBuffer with the same signature). Do not care about dead buffers, they 100% could be replaced with any other buffer.
-    self.placeholders.setdefault(get_signature(rawbufs[0]), _CacheCollector._Placeholder(rawbufs[0])).ref = ref(rawbufs[0])
-    self.last_placeholder_index[self.placeholders[get_signature(rawbufs[0])]] = len(self.cache)
-    self.cache.append((prg,[self.placeholders.get(get_signature(x), x) for x in rawbufs],var_vals))
+    if self._get_signature(rawbufs[0]) in self.placeholders: self.placeholders[self._get_signature(rawbufs[0])].ref = ref(rawbufs[0])
+    else:
+      # This is a new output buffer. Try to reuse any freed placeholders with the same type to "merge" these buffers.
+      # If this output buffer is "output_buffer", reusage of the output buffer is scary.
+      plh = self.freed_placeholders[self._buftype_key(rawbufs[0])].pop() if self._get_signature(rawbufs[0]) not in self.circular_signatures and self.freed_placeholders[self._buftype_key(rawbufs[0])] else _CacheCollector._Placeholder(rawbufs[0])
+      self.placeholders.setdefault(self._get_signature(rawbufs[0]), plh).ref = ref(rawbufs[0])
+    self.last_placeholder_index[self.placeholders[self._get_signature(rawbufs[0])]] = len(self.cache)
+    self.cache.append((prg,[self.placeholders.get(self._get_signature(x), x) for x in rawbufs],var_vals))
   def finish(self):
     if self.cache is None: return []
     placeholder_mapper, cache_result = {}, []
@@ -111,7 +116,13 @@ class _CacheCollector:
         elif cached_bufs[0] not in placeholder_mapper:
           placeholder_mapper[cached_bufs[0]] = cached_bufs[0].alloc_rawbuf()
       cache_result.append((p, [placeholder_mapper.get(buf, buf) for buf in cached_bufs], var_vals))
-    self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index = None, {}, {}, {}
+    self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index, self.freed_buffers, self.circular_signatures = None, {}, {}, {}, defaultdict(list), set()
     return cache_result
-  def _buftype_key(self, buf): return (buf.size, buf.dtype, buf.dtype.shape if hasattr(buf.dtype, 'shape') else None)
+  def _mark_output_buffer(self, output_buffer): self.circular_signatures.add(self._get_signature(output_buffer))
+  def _on_buf_free(self, underlying_buf):
+    if underlying_buf not in self.placeholders: return
+    self.freed_placeholders[self._buftype_key(self.placeholders[underlying_buf])].append(self.placeholders[underlying_buf])
+    self.placeholders.pop(underlying_buf)
+  def _get_signature(self, buf): return buf._buf if getattr(buf, '_buf', None) is not None and getattr(buf, '_allocator', None) is not None else buf
+  def _buftype_key(self, buf): return (buf.size, buf.dtype, buf._device, buf.dtype.shape if hasattr(buf.dtype, 'shape') else None)
 CacheCollector = _CacheCollector()
