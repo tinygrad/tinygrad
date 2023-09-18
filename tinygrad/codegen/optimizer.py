@@ -388,13 +388,6 @@ class OptimizedKernel(Kernel):
             self.upcast()
             break
 
-    # if nothing at all is upcasted and it's easy to, do an upcast
-    # TODO: this is breaking the tests
-    for splits in [4]:
-      if self.upcasted == 0 and self.full_unupcasted_shape and self.full_unupcasted_shape[-1] % splits == 0:
-        self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
-        self.upcast()
-
     # **** local groups ****
 
     if self.opts.has_local:
