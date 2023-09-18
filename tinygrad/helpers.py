@@ -58,7 +58,7 @@ class ContextVar:
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
 
-DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
+DEBUG, NOSTAT, IMAGE = ContextVar("DEBUG", 0), ContextVar("NOSTAT", 0), ContextVar("IMAGE", 0)
 GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 
 class Timing(contextlib.ContextDecorator):

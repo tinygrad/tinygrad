@@ -2,10 +2,9 @@ from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional, Set
 from weakref import ref
 from collections import defaultdict
 import functools, itertools
-from tinygrad.helpers import DEBUG, DType, merge_dicts
-from tinygrad.ops import Device
+from tinygrad.helpers import DEBUG, NOSTAT, DType, merge_dicts
+from tinygrad.ops import RawBuffer, Device, ASTRunner, BatchExecutor
 from tinygrad.tensor import Tensor
-from tinygrad.ops import RawBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
 
@@ -15,9 +14,10 @@ class TinyJit:
   def __init__(self, fxn:Callable):
     self.fxn: Callable = fxn
     self.cnt: int = 0
-    self.jit_cache: List[Tuple[Callable, List[Optional[RawBuffer]], Dict[Variable, int]]] = []
+    self.jit_cache: List[Tuple[Any, List[Optional[RawBuffer]], Dict[Variable, int]]] = []
     self.ret: Any = None
     self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], ShapeTracker, DType]]= {}   # (kernel_number, buffer_number) -> (input_name, expected_shapetracker, expected_type)
+    self.batch_executor: Optional[BatchExecutor] = None
 
   # add support for instance methods
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
@@ -29,6 +29,7 @@ class TinyJit:
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
     if self.cnt >= 2:
+      nodes_to_update = set()
       try: var_vals: Dict[Variable, int] = kwargs["jit_ctx"]
       except KeyError: var_vals = merge_dicts([arg.lazydata.var_vals for arg in args if arg.__class__ is Tensor])
       if len(var_vals) > 1: var_vals = dict(sorted(var_vals.items(), key=lambda kv: kv[0].key))
@@ -37,11 +38,24 @@ class TinyJit:
         # NOTE: if we pass jit_ctx instead of using reshape to update the var_vals, we cannot compare the shapetracker directly
         if "jit_ctx" not in kwargs: assert input_rawbuffers[input_name][1].views == expected_st.views, f"ShapeTracker.views mismatch in JIT, {input_rawbuffers[input_name][1].views} != {expected_st.views}"
         self.jit_cache[j][1][i] = input_rawbuffers[input_name][0]
-      for prg, pargs, variables in self.jit_cache: # type: Callable, List[Optional[RawBuffer]], Dict[Variable, int]
-        for k in variables.keys():
-          try: variables[k] = var_vals[k]
-          except KeyError: pass
-        prg(pargs, variables, jit=True)
+        nodes_to_update.add(j)
+
+      if self.batch_executor:
+        for j,(prg, pargs, variables) in enumerate(self.jit_cache): # type: ignore
+          if len(variables) == 0 and j not in nodes_to_update: continue
+          for k in variables.keys():
+            try: variables[k] = var_vals[k]
+            except KeyError: pass
+          self.batch_executor.update(j, *self.__launch_bounds(prg, variables), *pargs, *variables.values())
+        self.batch_executor.exec()
+        if not NOSTAT:
+          for j,(prg, pargs, variables) in enumerate(self.jit_cache): prg.update_stat_after_call(var_vals=variables) # type: ignore
+      else:
+        for prg, pargs, variables in self.jit_cache: # type: ignore
+          for k in variables.keys():
+            try: variables[k] = var_vals[k]
+            except KeyError: pass
+          prg(pargs, variables, jit=True)
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 1:
       CacheCollector.start()
@@ -57,11 +71,31 @@ class TinyJit:
             self.input_replace[(j_,i)] = [(k, v[1], v[0].dtype) for k,v in input_rawbuffers.items() if v[0] == a][0]
         #if prg.local_size is None: prg.local_size = prg.optimize_local_size(args, preserve_output=True)  # the JIT can optimize local
       assert set([x[0] for x in self.input_replace.values()]) == set(input_rawbuffers.keys()), "some input tensors not found"
+
+      # Determine if we can use batched execution
+      can_use_batched_execution, backend_exec_type = (DEBUG<1), None
+      for prg, pargs, variables in self.jit_cache: # type: ignore
+        if not isinstance(prg, ASTRunner): can_use_batched_execution = False # TODO: Calls to _recv_rb, _send_rb are not supported.
+        else:
+          if backend_exec_type is None: backend_exec_type = prg.batch_exec
+          if prg.batch_exec != backend_exec_type: can_use_batched_execution = False # Different backends could not be executed together.
+      # Init batched execution if can use it
+      if can_use_batched_execution and backend_exec_type is not None:
+        self.batch_executor = backend_exec_type()
+        assert self.batch_executor is not None
+        for j,(prg, pargs, variables) in enumerate(self.jit_cache): # type: ignore
+          nodeid = self.batch_executor.capture(prg.clprg, *self.__launch_bounds(prg, variables), *pargs, *variables.values())
+          assert nodeid == j, "Each node should be captured"
+        if not self.batch_executor.instantiate(): self.batch_executor = None # Batch executor init failed, don't use it.
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 0:
       self.ret = self.fxn(*args, **kwargs)
     self.cnt += 1
     return self.ret
+
+  def __launch_bounds(self, prg, var_vals):
+    global_size, local_size = prg.global_and_local_sizes(var_vals)
+    return [global_size, local_size]
 
 class _CacheCollector:
   class _Placeholder:

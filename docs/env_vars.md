@@ -31,6 +31,7 @@ These control the behavior of core tinygrad even when used as a library.
 Variable | Possible Value(s) | Description
 ---|---|---
 DEBUG               | [1-4]      | enable debugging output, with 4 you get operations, timings, speed, generated code and more
+NOSTAT              | [1]        | disable collecting statistics (flops, mem usage, kernels count)
 GPU                 | [1]        | enable the GPU backend
 CUDA                | [1]        | enable CUDA backend
 CPU                 | [1]        | enable CPU backend

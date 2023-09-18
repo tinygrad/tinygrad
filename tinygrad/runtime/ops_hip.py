@@ -1,8 +1,9 @@
 import numpy as np
 import ctypes, functools
 import extra.hip_wrapper as hip
+from typing import Tuple, Any, List
 from tinygrad.helpers import DEBUG, getenv
-from tinygrad.ops import Compiled
+from tinygrad.ops import Compiled, BatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
@@ -27,6 +28,47 @@ class _HIP:
     self.default_device = getenv("HIP_DEFAULT_DEVICE")
     self.allocator = HIPAllocator(hip.hipGetDeviceProperties(self.default_device).totalGlobalMem)
 HIP = _HIP()
+
+class HIPGraph(BatchExecutor):
+  def __init__(self):
+    self.info: List[Tuple[Any, ...]] = []
+    self.capture_stream, self.last_devid, self.graph, self.instance, self.failed = None, None, None, None, False
+
+  def __del__(self):
+    if self.capture_stream: hip.hipStreamDestroy(self.capture_stream)
+    if self.instance: hip.hipGraphExecDestroy(self.instance)
+    if self.graph: hip.hipGraphDestroy(self.graph)
+
+  def capture(self, prg, global_size, local_size, *args) -> int: # Returns nodeid
+    devid = args[0]._device
+    if self.capture_stream is None:
+      self.capture_stream = hip.hipStreamCreate()
+      hip.hipStreamBeginCapture(self.capture_stream)
+
+    # TODO: Support multidevice graph. Need to add manual sync between graphs and copy support (_send_rb, _recv_rb)
+    if self.last_devid is not None and devid != self.last_devid: self.failed = True
+    self.last_devid = devid
+
+    # Adding new node to graph
+    hip.hipSetDevice(devid)
+    _, _, graph, deps = hip.hipStreamGetCaptureInfo_v2(self.capture_stream)
+    struct_type_cached = hip.getStructTypeForArgs(*args)
+    params = hip.buildKernelNodeParams(*args, func=prg.prgs[devid], grid=global_size, block=local_size)
+    graph_node = hip.hipGraphAddKernelNode(graph, deps, params)
+    hip.hipStreamUpdateCaptureDependencies(self.capture_stream, [graph_node], 1)
+
+    self.info.append((prg.prgs[devid], graph_node, struct_type_cached))
+    return len(self.info) - 1
+  def instantiate(self) -> bool: # Returns True if successful
+    assert self.last_devid is not None, "Nothing captured?"
+    self.graph = hip.hipStreamEndCapture(self.capture_stream) # Only one graph is supported now
+    self.instance = hip.hipGraphInstantiate(self.graph)
+    return not self.failed
+  def update(self, nodeid, global_size, local_size, *args):
+    prg, graph_node, struct_type_cached = self.info[nodeid]
+    params = hip.buildKernelNodeParams(*args, func=prg, grid=global_size, block=local_size, argsStructType=struct_type_cached)
+    hip.hipGraphExecKernelNodeSetParams(self.instance, graph_node, params)
+  def exec(self): hip.hipGraphLaunch(self.instance)
 
 class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device=str(HIP.default_device)): super().__init__(size, dtype, allocator=HIP.allocator, **{'device': int(device)})
@@ -93,4 +135,4 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset
   """,
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]))
-HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(device="HIP"), renderer, HIPProgram, hip.hipDeviceSynchronize)
+HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(device="HIP"), renderer, HIPProgram, hip.hipDeviceSynchronize, HIPGraph)
