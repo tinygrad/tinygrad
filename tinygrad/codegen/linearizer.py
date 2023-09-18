@@ -66,15 +66,48 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
               # TODO: More thought on this
               mnn = max((-nd.b) + 1, min([-lal.b if isinstance(lal, MulNode) else lal for lal in nd_nodes]))
               if (left_sum.min + (-k)*mnn) >= b:
-                ones.append(nd)
+                #ones.append(nd)
                 idx = idx.a - b
             elif k > 0:
               if ((nd.b - 1)*k + left_sum.max) < b:
-                ones.append(nd)
+                #ones.append(nd)
                 idx = idx.a
             break
     valid = Variable.ands([i for i in nds if i not in ones])
 
+
+  def recurse(vars, idx, idy, valid, mem):
+    if len(vars) == 0:
+      if valid.min == 0:
+        mem["zeros"].add((idx, idy))
+      else:
+        mem["ones"].add((idx, idy))
+    else:
+      ret = list()
+      var = vars[0]
+      k = 1
+      range_list = list(range(var.min, min(var.min + k, var.max) + 1)) + list(range(max(var.max - k, var.min), var.max + 1))
+      for i in range_list:
+        val_infer = valid.substitute({var:NumNode(i)})
+        idx_infer = idx.substitute({var:NumNode(i)})
+        idy_infer = idy.substitute({var: NumNode(i)})
+        recurse(vars[1:], idx_infer, idy_infer, val_infer, mem)
+
+
+  if valid.min == 0 and not isinstance(idx, ModNode):
+    vars = list(set(valid.vars() + idy.vars() + idx.vars()))
+    mem={"ones": set(), "zeros": set()}
+
+    k = recurse(vars, idx, idy, valid, mem)
+    ones = mem["ones"]
+    zeros = mem["zeros"]
+    if len(set(ones).intersection(zeros)) == 0:
+      valid = NumNode(1)
+
+  """
+  if valid.min == 0:
+    print(idx, idy, valid)
+  return (idx, idy), valid
   # Simplify sumnodes
   if valid.min == 0 and not isinstance(idx, ModNode):
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
@@ -98,7 +131,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
               ones.append(nd)
 
     valid = Variable.ands([i for i in nds if i not in ones])
-
+  """
   if valid.min == 0:
     print(idx, idy, valid)
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
