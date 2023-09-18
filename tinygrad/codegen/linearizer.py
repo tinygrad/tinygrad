@@ -75,24 +75,24 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
             break
     valid = Variable.ands([i for i in nds if i not in ones])
 
-  def recurse(vars, idx, idy, valid, mem):
-    if len(vars) == 0:
+  def recurse(variables, idx, idy, valid, mem):
+    if len(variables) == 0:
       if valid in mem: mem[valid].add((idx, idy))
       else: mem[valid] = set(((idx, idy),))
     else:
-      var = vars[0]
+      var = variables[0]
       k = 1
       range_list = list(range(var.min, min(var.min + k, var.max) + 1)) + list(range(max(var.max - k, var.min), var.max + 1))
       for i in range_list:
         val_infer = valid.substitute({var:NumNode(i)})
         idx_infer = idx.substitute({var:NumNode(i)})
         idy_infer = idy.substitute({var: NumNode(i)})
-        recurse(vars[1:], idx_infer, idy_infer, val_infer, mem)
+        recurse(variables[1:], idx_infer, idy_infer, val_infer, mem)
       return mem
   if valid.min == 0 and not isinstance(idx, ModNode):
-    vars = list(set(valid.vars() + idy.vars() + idx.vars()))
+    variables = list(set(valid.vars() + idy.vars() + idx.vars()))
     mem = {NumNode(1): set(), NumNode(0): set()}
-    mem = recurse(vars, idx, idy, valid, mem)
+    mem = recurse(variables, idx, idy, valid, mem)
     ones = mem[NumNode(1)]
     zeros = mem[NumNode(0)]
     if len(set(ones).intersection(zeros)) == 0:
@@ -123,7 +123,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
 
     valid = Variable.ands([i for i in nds if i not in ones])
   """
-  if False and valid.min == 0:
+  if valid.min == 0:
     print(idx, idy, valid)
 
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
