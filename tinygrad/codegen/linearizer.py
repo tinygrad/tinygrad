@@ -50,7 +50,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
   # Simplify ModNode if possibe
   if valid.min == 0 and isinstance(idx, ModNode):
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
-    ones = []
+    ones: List[Node] = []
     assert isinstance(idx.a, SumNode)
     idx_nodes = set(idx.a.flat_components)
     for nd in nds:
@@ -91,7 +91,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       return mem
   if valid.min == 0 and not isinstance(idx, ModNode):
     variables = list(set(valid.vars() + idy.vars() + idx.vars()))
-    mem = {NumNode(1): set(), NumNode(0): set()}
+    mem: Dict[NumNode, Any] = {NumNode(1): set(), NumNode(0): set()}
     mem = recurse(variables, idx, idy, valid, mem)
     ones = mem[NumNode(1)]
     zeros = mem[NumNode(0)]
