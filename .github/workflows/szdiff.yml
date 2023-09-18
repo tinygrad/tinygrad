@@ -95,5 +95,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           skip_unchanged: true
           message: |
-            This branch currently is behind tinygrad/master.
-            If there is no merge conflicts, please rebase.
+            This branch currently is behind tinygrad/master. The line count difference bot is disabled.
