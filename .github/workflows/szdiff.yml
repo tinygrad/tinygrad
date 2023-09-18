@@ -79,3 +79,21 @@ jobs:
           skip_unchanged: true
           recreate: true
           message: ${{ env.loc_content }}
+
+  rebase:
+    name: Core Library Line Difference
+    permissions:
+      pull-requests: write
+    runs-on: ubuntu-latest
+    needs: checkbranch
+    if: needs.checkbranch.outputs.branchstat == 'true'
+    steps:
+      - name: Comment Rebase
+        continue-on-error: false
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          skip_unchanged: true
+          message: |
+            This branch currently is behind tinygrad/master.
+            If there is no merge conflicts, please rebase.
