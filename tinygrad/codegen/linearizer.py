@@ -75,15 +75,11 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
             break
     valid = Variable.ands([i for i in nds if i not in ones])
 
-
   def recurse(vars, idx, idy, valid, mem):
     if len(vars) == 0:
-      if valid.min == 0:
-        mem["zeros"].add((idx, idy))
-      else:
-        mem["ones"].add((idx, idy))
+      if valid in mem: mem[valid].add((idx, idy))
+      else: mem[valid] = set(((idx, idy),))
     else:
-      ret = list()
       var = vars[0]
       k = 1
       range_list = list(range(var.min, min(var.min + k, var.max) + 1)) + list(range(max(var.max - k, var.min), var.max + 1))
@@ -92,22 +88,17 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
         idx_infer = idx.substitute({var:NumNode(i)})
         idy_infer = idy.substitute({var: NumNode(i)})
         recurse(vars[1:], idx_infer, idy_infer, val_infer, mem)
-
-
+      return mem
   if valid.min == 0 and not isinstance(idx, ModNode):
     vars = list(set(valid.vars() + idy.vars() + idx.vars()))
-    mem={"ones": set(), "zeros": set()}
-
-    k = recurse(vars, idx, idy, valid, mem)
-    ones = mem["ones"]
-    zeros = mem["zeros"]
+    mem = {NumNode(1): set(), NumNode(0): set()}
+    mem = recurse(vars, idx, idy, valid, mem)
+    ones = mem[NumNode(1)]
+    zeros = mem[NumNode(0)]
     if len(set(ones).intersection(zeros)) == 0:
       valid = NumNode(1)
 
   """
-  if valid.min == 0:
-    print(idx, idy, valid)
-  return (idx, idy), valid
   # Simplify sumnodes
   if valid.min == 0 and not isinstance(idx, ModNode):
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
@@ -132,8 +123,9 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
 
     valid = Variable.ands([i for i in nds if i not in ones])
   """
-  if valid.min == 0:
+  if False and valid.min == 0:
     print(idx, idy, valid)
+
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
 
