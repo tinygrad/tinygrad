@@ -110,13 +110,9 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     else: raise NotImplementedError(f"unimplemented: {uop}")  
   
   prg = f"import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n@triton.jit\ndef {function_name}("+','.join(f"{buf[0]}" for buf in bufs)+"):\n"
-  local_idx = 0
-  for i, line in enumerate(kernel):
-    if "tl.arange" in line:
-      line +=  f"[{', '.join([':' if local_idx == i else 'None' for i in range(len(local_size))])}]"
-      local_idx += 1
-    prg += line +"\n"
-
+  for i, line in enumerate(list(filter(lambda line: "tl.arange" in line, kernel))): kernel[kernel.index(line)] +=  f"[{', '.join([':' if i == j else 'None' for j in range(len(local_size))])}]"
+  prg += "\n".join(kernel)
+  
   acc_local_size = 1
   for x in local_size: acc_local_size *= next_power_of_2(x)
   local_size = [acc_local_size] + [1] * (len(local_size) - 1)  
