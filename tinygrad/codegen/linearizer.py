@@ -40,7 +40,6 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     # TODO: Remove mx != mn
     sub_dict: dict[Union[Variable, NumNode], Node] = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items() if mx != mn}
     valid = valid.substitute(sub_dict)
-    #sub_dict = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items()}
     idxy = idxy.substitute(sub_dict)
 
   b = base_shape[1]
@@ -66,11 +65,11 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
               # TODO: More thought on this
               mnn = max((-nd.b) + 1, min([-lal.b if isinstance(lal, MulNode) else lal for lal in nd_nodes]))
               if (left_sum.min + (-k)*mnn) >= b:
-                #ones.append(nd)
+                ones.append(nd)
                 idx = idx.a - b
             elif k > 0:
               if ((nd.b - 1)*k + left_sum.max) < b:
-                #ones.append(nd)
+                ones.append(nd)
                 idx = idx.a
             break
     valid = Variable.ands([i for i in nds if i not in ones])
@@ -81,12 +80,14 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       else: mem[valid] = set(((idx, idy),))
     else:
       var = variables[0]
-      k = 1
-      range_list = list(range(var.min, min(var.min + k, var.max) + 1)) + list(range(max(var.max - k, var.min), var.max + 1))
-      for i in range_list:
-        val_infer = valid.substitute({var:NumNode(i)})
-        idx_infer = idx.substitute({var:NumNode(i)})
-        idy_infer = idy.substitute({var: NumNode(i)})
+      k = 2
+      range_list = list(range(var.min, var.max + 1))
+      range_list = range_list[:k] + range_list[-k:]
+      for i in set(range_list):
+        var_vals = {var:NumNode(i)}
+        val_infer = valid.substitute(var_vals)
+        idx_infer = idx.substitute(var_vals)
+        idy_infer = idy.substitute(var_vals)
         recurse(variables[1:], idx_infer, idy_infer, val_infer, mem)
       return mem
   if valid.min == 0 and not isinstance(idx, ModNode):
@@ -97,7 +98,6 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     zeros = mem[NumNode(0)]
     if len(set(ones).intersection(zeros)) == 0:
       valid = NumNode(1)
-
   """
   # Simplify sumnodes
   if valid.min == 0 and not isinstance(idx, ModNode):
