@@ -26,11 +26,12 @@ if not pathlib.Path(BASEDIR/'val2017').is_dir():
   fn.unlink()
 
 def download_train():
-  fn = BASEDIR/'train2017.zip'
-  download_file('http://images.cocodataset.org/zips/train2017.zip',fn)
-  with zipfile.ZipFile(fn, 'r') as zip_ref:
-    zip_ref.extractall(BASEDIR)
-  fn.unlink()
+  if not pathlib.Path(BASEDIR/'train2017').is_dir():
+    fn = BASEDIR/'train2017.zip'
+    download_file('http://images.cocodataset.org/zips/train2017.zip',fn)
+    with zipfile.ZipFile(fn, 'r') as zip_ref:
+      zip_ref.extractall(BASEDIR)
+    fn.unlink()
 
 if not pathlib.Path(BASEDIR/'annotations').is_dir():
   fn = BASEDIR/'annotations_trainval2017.zip'
