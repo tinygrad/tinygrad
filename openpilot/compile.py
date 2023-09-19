@@ -74,7 +74,6 @@ def compile(dat, output_fn):
     setattr(prg.clprg, 'prg', prg.prg)
 
     if getenv("VALIDTEST") == 1:
-      print(prg.prg)
       src = re.search(r"=.*\?.*?read_image", prg.prg)
       if src is not None: raise Exception("Openpilot has valid checks!")
 

@@ -90,7 +90,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
         idy_infer = idy.substitute(var_vals)
         recurse(variables[1:], idx_infer, idy_infer, val_infer, mem)
       return mem
-  if valid.min == 0 and not isinstance(idx, ModNode):
+  if False and valid.min == 0 and not isinstance(idx, ModNode):
     variables = list(set(valid.vars() + idy.vars() + idx.vars()))
     mem: Dict[NumNode, Any] = {NumNode(1): set(), NumNode(0): set()}
     mem = recurse(variables, idx, idy, valid, mem)
