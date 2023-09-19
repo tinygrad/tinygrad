@@ -339,7 +339,7 @@ class OptimizedKernel(Kernel):
 
     # no more opt if there's non ints in any shapes
     # TODO: this is due to a bug. repro by commenting this one while running GPT-2 with the JIT
-    if self.has_variable_shape(): return
+    # if self.has_variable_shape(): return
 
     # **** below this line need to be optional and benchmarked ****
 
