@@ -52,21 +52,20 @@ class HIPGraph(BatchExecutor):
     # Adding new node to graph
     hip.hipSetDevice(devid)
     _, _, graph, deps = hip.hipStreamGetCaptureInfo_v2(self.capture_stream)
-    struct_type_cached = hip.getStructTypeForArgs(*args)
     params = hip.buildKernelNodeParams(*args, func=prg.prgs[devid], grid=global_size, block=local_size)
     graph_node = hip.hipGraphAddKernelNode(graph, deps, params)
     hip.hipStreamUpdateCaptureDependencies(self.capture_stream, [graph_node], 1)
 
-    self.info.append((prg.prgs[devid], graph_node, struct_type_cached))
+    self.info.append((graph_node, params))
     return len(self.info) - 1
   def instantiate(self) -> bool: # Returns True if successful
     assert self.last_devid is not None, "Nothing captured?"
     self.graph = hip.hipStreamEndCapture(self.capture_stream) # Only one graph is supported now
     self.instance = hip.hipGraphInstantiate(self.graph)
     return not self.failed
-  def update(self, nodeid, global_size, local_size, *args):
-    prg, graph_node, struct_type_cached = self.info[nodeid]
-    params = hip.buildKernelNodeParams(*args, func=prg, grid=global_size, block=local_size, argsStructType=struct_type_cached)
+  def update(self, nodeid, global_size, local_size, *args, updated_args=None):
+    graph_node, params = self.info[nodeid]
+    hip.updateKernelNodeParams(params, *args, grid=global_size, block=local_size, updated_args=updated_args)
     hip.hipGraphExecKernelNodeSetParams(self.instance, graph_node, params)
   def exec(self): hip.hipGraphLaunch(self.instance)
 

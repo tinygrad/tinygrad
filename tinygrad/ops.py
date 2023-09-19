@@ -179,7 +179,7 @@ from tinygrad.shape.symbolic import Variable, sym_infer
 class BatchExecutor:
   def capture(self, prg, global_size, local_size, *args) -> int: raise NotImplementedError("must be implemented")
   def instantiate(self) -> bool: raise NotImplementedError("must be implemented")
-  def update(self, nodeid, global_size, local_size, *args): raise NotImplementedError("must be implemented")
+  def update(self, nodeid, global_size, local_size, *args, updated_args=None): raise NotImplementedError("must be implemented")
   def exec(self): raise NotImplementedError("must be implemented")
 
 class ASTRunner:
@@ -196,14 +196,14 @@ class ASTRunner:
     if not optimizing: CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return self(rawbufs, var_vals, force_wait=force_wait)
 
-  def global_and_local_sizes(self, var_vals):
+  def launch_dims(self, var_vals):
     global_size = ([sym_infer(sz, var_vals) for sz in self.global_size] + [1]*(3-len(self.global_size))) if self.global_size is not None else self.global_size
     local_size = ([sym_infer(sz, var_vals) for sz in self.local_size] + [1]*(3-len(self.local_size))) if self.local_size is not None else self.local_size
     return global_size, local_size
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
     if var_vals is None: var_vals = {}
-    global_size, local_size = self.global_and_local_sizes(var_vals)
+    global_size, local_size = self.launch_dims(var_vals)
     if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
     op_estimate = sym_infer(self.op_estimate, var_vals)
     if DEBUG >= 2:

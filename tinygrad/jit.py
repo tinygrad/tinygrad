@@ -18,6 +18,7 @@ class TinyJit:
     self.ret: Any = None
     self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], ShapeTracker, DType]]= {}   # (kernel_number, buffer_number) -> (input_name, expected_shapetracker, expected_type)
     self.batch_executor: Optional[BatchExecutor] = None
+    self.changed_arguments: Dict[int, List[int]] = defaultdict(list) # (kernel_number) -> list(argument id). These are buffers from input + variables.
 
   # add support for instance methods
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
@@ -29,7 +30,6 @@ class TinyJit:
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
     if self.cnt >= 2:
-      nodes_to_update = set()
       try: var_vals: Dict[Variable, int] = kwargs["jit_ctx"]
       except KeyError: var_vals = merge_dicts([arg.lazydata.var_vals for arg in args if arg.__class__ is Tensor])
       if len(var_vals) > 1: var_vals = dict(sorted(var_vals.items(), key=lambda kv: kv[0].key))
@@ -38,15 +38,14 @@ class TinyJit:
         # NOTE: if we pass jit_ctx instead of using reshape to update the var_vals, we cannot compare the shapetracker directly
         if "jit_ctx" not in kwargs: assert input_rawbuffers[input_name][1].views == expected_st.views, f"ShapeTracker.views mismatch in JIT, {input_rawbuffers[input_name][1].views} != {expected_st.views}"
         self.jit_cache[j][1][i] = input_rawbuffers[input_name][0]
-        nodes_to_update.add(j)
 
       if self.batch_executor:
-        for j,(prg, pargs, variables) in enumerate(self.jit_cache): # type: ignore
-          if len(variables) == 0 and j not in nodes_to_update: continue
+        for j in self.changed_arguments.keys(): # type: ignore
+          prg, pargs, variables = self.jit_cache[j]
           for k in variables.keys():
             try: variables[k] = var_vals[k]
             except KeyError: pass
-          self.batch_executor.update(j, *self.__launch_bounds(prg, variables), *pargs, *variables.values())
+          self.batch_executor.update(j, *prg.launch_dims(variables), *pargs, *variables.values(), updated_args=self.changed_arguments[j])
         self.batch_executor.exec()
         if not NOSTAT:
           for j,(prg, pargs, variables) in enumerate(self.jit_cache): prg.update_stat_after_call(var_vals=variables) # type: ignore
@@ -69,6 +68,8 @@ class TinyJit:
         for i,a in enumerate(cache[1]):
           if a in [v[0] for v in input_rawbuffers.values()]:
             self.input_replace[(j_,i)] = [(k, v[1], v[0].dtype) for k,v in input_rawbuffers.items() if v[0] == a][0]
+            self.changed_arguments[j_].append(i)
+        for i in range(len(cache[2])): self.changed_arguments[j_].append(len(cache[1])+i)
         #if prg.local_size is None: prg.local_size = prg.optimize_local_size(args, preserve_output=True)  # the JIT can optimize local
       assert set([x[0] for x in self.input_replace.values()]) == set(input_rawbuffers.keys()), "some input tensors not found"
 
@@ -84,7 +85,7 @@ class TinyJit:
         self.batch_executor = backend_exec_type()
         assert self.batch_executor is not None
         for j,(prg, pargs, variables) in enumerate(self.jit_cache): # type: ignore
-          nodeid = self.batch_executor.capture(prg.clprg, *self.__launch_bounds(prg, variables), *pargs, *variables.values())
+          nodeid = self.batch_executor.capture(prg.clprg, *prg.launch_dims(variables), *pargs, *variables.values())
           assert nodeid == j, "Each node should be captured"
         if not self.batch_executor.instantiate(): self.batch_executor = None # Batch executor init failed, don't use it.
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
@@ -92,10 +93,6 @@ class TinyJit:
       self.ret = self.fxn(*args, **kwargs)
     self.cnt += 1
     return self.ret
-
-  def __launch_bounds(self, prg, var_vals):
-    global_size, local_size = prg.global_and_local_sizes(var_vals)
-    return [global_size, local_size]
 
 class _CacheCollector:
   class _Placeholder:

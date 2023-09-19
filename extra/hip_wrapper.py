@@ -78,13 +78,11 @@ try:
     hipCheckStatus(status)
     return ptr
 
-
   _libhip.hipStreamDestroy.restype = int
   _libhip.hipStreamDestroy.argtypes = [ctypes.c_void_p]
   def hipStreamDestroy(stream):
     status = _libhip.hipStreamDestroy(stream)
     hipCheckStatus(status)
-
 
   _libhip.hipStreamBeginCapture.restype = int
   _libhip.hipStreamBeginCapture.argtypes = [ctypes.c_void_p, ctypes.c_int]
@@ -92,7 +90,6 @@ try:
     t = ctypes.c_float()
     status = _libhip.hipStreamBeginCapture(stream, mode)
     hipCheckStatus(status)
-
 
   _libhip.hipStreamEndCapture.restype = int
   _libhip.hipStreamEndCapture.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
@@ -127,6 +124,7 @@ try:
     status = _libhip.hipStreamUpdateCaptureDependencies(stream, deps_in, num_deps, flags_in)
     hipCheckStatus(status)
 
+
   ## Graph Management
 
   _libhip.hipGraphInstantiate.restype = int
@@ -148,7 +146,6 @@ try:
   def hipGraphExecDestroy(gexec):
     status = _libhip.hipGraphExecDestroy(gexec)
     hipCheckStatus(status)
-
 
   _libhip.hipGraphLaunch.restype = int
   _libhip.hipGraphLaunch.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
@@ -192,6 +189,21 @@ try:
         fields.append((f'field{idx}', ctypes.c_void_p))
     return __get_struct(types, fields)
 
+  def updateKernelNodeParams(npwrapper:kernelNodeParamsWrapper, *args, grid=(1,1,1), block=(1,1,1), updated_args=None):
+    _, struct, _ = npwrapper.context
+    if updated_args is not None:
+      for i in updated_args:
+        setattr(struct, f'field{i}', (args[i] if args[i].__class__ is int else args[i]._buf))
+    else:
+      for i,d in enumerate(args):
+        setattr(struct, f'field{i}', (d if d.__class__ is int else d._buf))
+    npwrapper.c_struct.blockDimX = block[0]
+    npwrapper.c_struct.blockDimY = block[1]
+    npwrapper.c_struct.blockDimZ = block[2]
+    npwrapper.c_struct.gridDimX = grid[0]
+    npwrapper.c_struct.gridDimY = grid[1]
+    npwrapper.c_struct.gridDimZ = grid[2]
+
   def buildKernelNodeParams(*args, func=None, grid=(1,1,1), block=(1,1,1), sharedMemBytes=0, argsStructType=None):
     data = [d if d.__class__ is int else d._buf for d in args]
     if argsStructType is None: argsStructType = getStructTypeForArgs(*args)
@@ -202,7 +214,7 @@ try:
     config = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), p_struct,
                                   ctypes.c_void_p(2), p_size, ctypes.c_void_p(3))
     params = hipKernelNodeParams(block[0], block[1], block[2], config, func, grid[0], grid[1], grid[2], None, sharedMemBytes)
-    return kernelNodeParamsWrapper(c_struct=params, context=(size, struct))
+    return kernelNodeParamsWrapper(c_struct=params, context=(size, struct, config))
 
   _libhip.hipGraphAddKernelNode.restype = int
   _libhip.hipGraphAddKernelNode.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p]
@@ -220,6 +232,7 @@ try:
   def hipGraphExecKernelNodeSetParams(gexec, node, params:kernelNodeParamsWrapper):
     status = _libhip.hipGraphExecKernelNodeSetParams(gexec, node, ctypes.byref(params.c_struct))
     hipCheckStatus(status)
+
 
   _libhip.hipMalloc.restype = int
   _libhip.hipMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
