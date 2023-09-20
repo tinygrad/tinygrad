@@ -355,11 +355,20 @@ def train_cifar():
       if getenv("DIST"):
         if rank == 0:
           for j in range(1, min(world_size, 5)):
-            recv_sum, recv_len = OOB.recv(j)
+            if model_ema:
+              recv_sum, recv_len, recv_sum_ema, recv_len_ema = OOB.recv(j)
+            else:
+              recv_sum, recv_len = OOB.recv(j)
             correct_sum += recv_sum
             correct_len += recv_len
+            if model_ema:
+              correct_sum_ema += recv_sum_ema
+              correct_len_ema += recv_len_ema
         elif rank < min(world_size, 5):
-          OOB.send((correct_sum, correct_len), 0)
+          if model_ema: 
+            OOB.send((correct_sum, correct_len, correct_sum_ema, correct_len_ema), 0)
+          else:
+            OOB.send((correct_sum, correct_len), 0)
 
       # only rank 0 prints
       if rank == 0:
