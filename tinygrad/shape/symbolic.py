@@ -31,7 +31,7 @@ class Node:
     return [self.substitute(dict(zip(idxs, (NumNode(x) for x in rep)))) for rep in Node.iter_idxs(idxs)]
   @staticmethod
   def iter_idxs(idxs:Tuple[VariableOrNum, ...]) -> Iterator[Tuple[int,...]]:
-    yield from (x[::-1] for x in product(*[[x for x in range(v.min, (v.max if v.max.__class__ != Variable else v.max.max) + 1)] for v in idxs[::-1]]))
+    yield from (x[::-1] for x in product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
 
