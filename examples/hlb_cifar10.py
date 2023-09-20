@@ -24,6 +24,50 @@ from extra.dist import collectives
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 100)
 
+class BatchNorm(nn.BatchNorm2d):
+  def __init__(self, num_features):
+    super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
+    self.weight.requires_grad = False
+    self.bias.requires_grad = True
+
+class ConvGroup:
+  def __init__(self, channels_in, channels_out):
+    self.conv1 = nn.Conv2d(channels_in,  channels_out, kernel_size=3, padding=1, bias=False)
+    self.conv2 = nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
+
+    self.norm1 = BatchNorm(channels_out)
+    self.norm2 = BatchNorm(channels_out)
+
+  def __call__(self, x):
+    x = self.conv1(x)
+    x = x.max_pool2d(2)
+    x = self.norm1(x)
+    x = x.gelu()
+    residual = x
+    x = self.conv2(x)
+    x = self.norm2(x)
+    x = x.gelu()
+
+    return x + residual
+
+class SpeedyResNet:
+  def __init__(self, W):
+    self.whitening = W
+    self.net = [
+      nn.Conv2d(12, 32, kernel_size=1, bias=False),
+      lambda x: x.gelu(),
+      ConvGroup(32, 64),
+      ConvGroup(64, 256),
+      ConvGroup(256, 512),
+      lambda x: x.max((2,3)),
+      nn.Linear(512, 10, bias=False),
+      lambda x: x.mul(1./9)
+    ]
+  def __call__(self, x, training=True):
+    # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
+    forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
+    return forward(x) if training else forward(x)*0.5 + forward(x[..., ::-1])*0.5
+
 def train_cifar():
 
   # hyper-parameters were exactly the same as the original repo
@@ -40,12 +84,10 @@ def train_cifar():
       'label_smoothing':    0.20,
       'momentum':           0.85,
       'percent_start':      0.23,
-      'scaling_factor':     1./9,
       'loss_scale_scaler':  1./512,   # (range: ~1/512 - 16+, 1/128 w/ FP16)
     },
     'net': {
         'kernel_size': 2,             # kernel size for the whitening layer
-        'batch_norm_momentum': .85,
         'cutmix_size': 3,
         'cutmix_steps': 499, 
         'pad_amount': 2
@@ -82,50 +124,6 @@ def train_cifar():
     Λ, V = _eigens(_patches(X.numpy()))
 
     return Tensor(V/np.sqrt(Λ+1e-2)[:,None,None,None], requires_grad=False)
-
-  class BatchNorm(nn.BatchNorm2d):
-    def __init__(self, num_features):
-      super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'], affine=True)
-      self.weight.requires_grad = False
-      self.bias.requires_grad = True
-
-  class ConvGroup:
-    def __init__(self, channels_in, channels_out):
-      self.conv1 = nn.Conv2d(channels_in,  channels_out, kernel_size=3, padding=1, bias=False)
-      self.conv2 = nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
-
-      self.norm1 = BatchNorm(channels_out)
-      self.norm2 = BatchNorm(channels_out)
-
-    def __call__(self, x):
-      x = self.conv1(x)
-      x = x.max_pool2d(2)
-      x = self.norm1(x)
-      x = x.gelu()
-      residual = x
-      x = self.conv2(x)
-      x = self.norm2(x)
-      x = x.gelu()
-
-      return x + residual
-
-  class SpeedyResNet:
-    def __init__(self, W):
-      self.whitening = W
-      self.net = [
-        nn.Conv2d(12, 32, kernel_size=1, bias=False),
-        lambda x: x.gelu(),
-        ConvGroup(32, 64),
-        ConvGroup(64, 256),
-        ConvGroup(256, 512),
-        lambda x: x.max((2,3)),
-        nn.Linear(512, 10, bias=False),
-        lambda x: x.mul(hyp['opt']['scaling_factor'])
-      ]
-    def __call__(self, x, training=True):
-      # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
-      forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
-      return forward(x) if training else forward(x)*0.5 + forward(x[..., ::-1])*0.5
 
   # ========== Loss ==========
   def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
@@ -365,7 +363,7 @@ def train_cifar():
               correct_sum_ema += recv_sum_ema
               correct_len_ema += recv_len_ema
         elif rank < min(world_size, 5):
-          if model_ema: 
+          if model_ema:
             OOB.send((correct_sum, correct_len, correct_sum_ema, correct_len_ema), 0)
           else:
             OOB.send((correct_sum, correct_len), 0)
