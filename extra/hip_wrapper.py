@@ -1,15 +1,15 @@
 import ctypes
-import sys
+from tinygrad.helpers import DEBUG
 
 try:
   _libhip = ctypes.cdll.LoadLibrary('libamdhip64.so')
 except:
-  raise OSError('cant find libamdhip64.so.')
+  if DEBUG >= 1: print("WARNING: libamdhip64.so not found. HIP support will not work.")
 
 try:
   _libhiprtc = ctypes.cdll.LoadLibrary('libhiprtc.so')
 except:
-  raise OSError('cant find libhiprtc.so.')
+  if DEBUG >= 1: print("WARNING: libhiprtc.so not found. HIP support will not work.")
 
 
 def hipCheckStatus(status):
