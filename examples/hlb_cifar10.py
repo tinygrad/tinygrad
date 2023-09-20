@@ -220,23 +220,20 @@ def train_cifar():
       self.net_ema = SpeedyResNet(w)
       for net_ema_param, net_param in zip(get_state_dict(self.net_ema).values(), get_state_dict(net).values()):
         net_ema_param.requires_grad = False
-        net_ema_param.assign(net_param.detach().realize())
-
-    def __call__(self, x:Tensor, training=False):
-      return self.net_ema(x, training=False)
+        net_ema_param.assign(net_param.numpy())
 
     @TinyJit
-    def update(self, net_current, decay):
+    def update(self, net, decay):
       # TODO with Tensor.no_grad()
       Tensor.no_grad = True
-      for net_ema_param, (param_name, net_current_param) in zip(get_state_dict(self.net_ema).values(), get_state_dict(net_current).items()):
+      for net_ema_param, (param_name, net_param) in zip(get_state_dict(self.net_ema).values(), get_state_dict(net).items()):
         # batchnorm currently is not being tracked
         if not ("num_batches_tracked" in param_name) and not ("running" in param_name):
-          net_ema_param.assign(net_ema_param.detach()*decay + net_current_param.detach()*(1.-decay)).realize()
+          net_ema_param.assign(net_ema_param.detach()*decay + net_param.detach()*(1.-decay)).realize()
           # if not ('norm' in param_name and 'weight' in param_name) and not 'whiten' in param_name:
-          #   net_current_param.requires_grad = False
-          #   net_current_param.assign(net_ema_param.detach())
-          #   net_current_param.requires_grad = True
+          #   net_param.requires_grad = False
+          #   net_param.assign(net_ema_param.numpy())
+          #   net_param.requires_grad = True
       Tensor.no_grad = False
 
   set_seed(hyp['seed'])
@@ -352,7 +349,7 @@ def train_cifar():
         losses.append(loss.numpy().tolist())
         corrects.extend(correct.numpy().tolist())
         if model_ema:
-          correct_ema, loss_ema = eval_step(model_ema, Xt, Yt)
+          correct_ema, loss_ema = eval_step_ema_jitted(model_ema.net_ema, Xt, Yt)
           losses_ema.append(loss_ema.numpy().tolist())
           corrects_ema.extend(correct_ema.numpy().tolist())
 
