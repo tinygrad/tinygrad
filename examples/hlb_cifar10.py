@@ -29,7 +29,7 @@ def train_cifar():
   # hyper-parameters were exactly the same as the original repo
   bias_scaler = 58
   hyp = {
-    'seed' : 1000,
+    'seed' : 209,
     'opt': {
       'bias_lr':            1.76 * bias_scaler/512,
       'non_bias_lr':        1.76 / 512,
@@ -51,9 +51,9 @@ def train_cifar():
         'pad_amount': 2
     },
     'ema': {
-        'steps': 199,
+        'steps': 399,
         'decay_base': .95,
-        'decay_pow': 2.,
+        'decay_pow': 1.6,
         'every_n_steps': 5,
     }
   }
@@ -230,10 +230,6 @@ def train_cifar():
         # batchnorm currently is not being tracked
         if not ("num_batches_tracked" in param_name) and not ("running" in param_name):
           net_ema_param.assign(net_ema_param.detach()*decay + net_param.detach()*(1.-decay)).realize()
-          # if not ('norm' in param_name and 'weight' in param_name) and not 'whiten' in param_name:
-          #   net_param.requires_grad = False
-          #   net_param.assign(net_ema_param.numpy())
-          #   net_param.requires_grad = True
       Tensor.no_grad = False
 
   set_seed(hyp['seed'])
@@ -392,8 +388,6 @@ def train_cifar():
     cl = time.monotonic()
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
-
-  return acc
 
 if __name__ == "__main__":
 
