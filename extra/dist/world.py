@@ -14,7 +14,7 @@ import numpy as np
 
 # fake the function signature of ASTRunner so we can put it in the cache
 def __send_rb(args, variables=None, jit=False, force_wait=False):
-  x, target_rank, y, extra = args
+  x, target_rank, y, extra = args[:4]
   if y is None:
     if isinstance(x, RawHIPBuffer):
       hip.hipSetDevice(x._device)
@@ -46,8 +46,6 @@ def _send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
     hip.hipSetDevice(x._device)
     handle = hip.hipIpcGetMemHandle(x._buf)
     dist.OOB.send((handle, x._device), target_rank)
-
-    print(target_rank, "x_ internal", x.toCPU())
 
     # jit support
     CacheCollector.add(__send_rb, [x, target_rank, None, None], {})
@@ -82,11 +80,7 @@ def _recv_rb(x:RawBuffer, target_rank:int):
 
     # build a new buffer
     y = RawHIPBuffer(x.size, x.dtype, device=str(y_device), buf=ptr, allocator=None)
-    print(target_rank, "y  internal", y.toCPU())
     x._transfer(y)
-
-    print(target_rank, "x  internal", x.toCPU())
-    print(target_rank, "y_ internal", y.toCPU())
 
     # close ipc handle
     hip.hipSetDevice(y._device)

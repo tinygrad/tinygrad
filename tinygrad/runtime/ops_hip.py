@@ -27,10 +27,6 @@ class _HIP:
     self.default_device = getenv("HIP_DEFAULT_DEVICE")
     self.allocator = HIPAllocator(hip.hipGetDeviceProperties(self.default_device).totalGlobalMem)
 
-    for i in range(self.device_count):
-      hip.hipSetDevice(i)
-      hip.hipDeviceReset()
-
     # enable peer-to-peer access
     for i in range(self.device_count):
       for j in range(self.device_count):
@@ -52,7 +48,6 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
     hip.hipSetDevice(self._device)
     hip.hipMemcpy_dtoh(x.ctypes.data, self._buf, self.size * self.dtype.itemsize)
   def _transfer(self, x):
-    print("TRANSFER", self._device, x._device, getenv("RANK"))
     hip.hipSetDevice(x._device)
     hip.hipMemcpy(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice)
 
