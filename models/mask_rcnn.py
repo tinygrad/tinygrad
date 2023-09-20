@@ -108,13 +108,9 @@ FLIP_TOP_BOTTOM = 1
 
 
 def permute_and_flatten(layer:Tensor, N, A, C, H, W):
-  print("input", layer.numpy())
   layer = layer.reshape(N, -1, C, H, W)
-  print("reshape", layer.numpy())
   layer = layer.permute(0, 3, 4, 1, 2)
-  print("permute", layer.numpy())
   layer = layer.reshape(N, -1, C)
-  print("reshape", layer.numpy())
   return layer
 
 class BoxList:

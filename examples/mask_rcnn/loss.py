@@ -140,12 +140,38 @@ def generate_rpn_labels(matched_idxs: Tensor) -> Tensor:
     return labels_per_image
 
 def test_concat_box_prediction_layers():
-  box_cls = [Tensor([[[[0.3, 0.2, 0.7, 0.6]]]])]
-  box_regression = [Tensor([[[[0, 0.1, 0, 0.1]], [[0, -0.1, 0, -0.1]], [[0.1, 0, 0.1, 0]], [[-0.1, 0, -0.1, 0]]]])]
-  box_cls, box_regression = concat_box_prediction_layers(box_cls, box_regression)
-  print("box_regression", box_regression.numpy())
-  assert np.allclose(box_cls.numpy(), Tensor([[0.3],[0.2],[0.7],[0.6]]).numpy())
-  assert np.allclose(box_regression.numpy(), Tensor([[0, 0.1, 0, 0.1], [0, -0.1, 0, -0.1], [0.1, 0, 0.1, 0], [-0.1, 0, -0.1, 0]]).numpy())
+  channels=256
+  anchor_generator = AnchorGenerator()
+  head = RPNHead(
+    channels, anchor_generator.num_anchors_per_location()[0]
+  )
+  backbone = ResNetFPN(ResNet(50, num_classes=None, stride_in_1x1=True), out_channels=256)
+  img_id = 387655
+  img = [Tensor(build_transforms()(Image.open(BASEDIR/f'train2017/000000{img_id}.jpg').convert("RGB")).numpy())] # TODO this uses torch to transform
+  images = to_image_list(img)
+  features = backbone(images.tensors)
+  objectness, regression = head(features)
+  print("objectness", objectness)
+  
+  print("objectness", objectness[0][0, :, 0, 0].numpy())
+  print("regression", regression)
+  objectness_concat, regression_concat = concat_box_prediction_layers(objectness, regression)
+  print("objectness_concat_0", objectness_concat)
+  print("objectness_concat", objectness_concat[0:3].squeeze().numpy())
+  assert np.allclose(objectness[0][0, :, 0, 0].numpy(), objectness_concat[0:3].squeeze().numpy())
+  print("1", objectness[0][0, :, 0, 319].numpy())
+  print("2", objectness_concat[957:960].squeeze().numpy())
+  print("1", objectness[0][0, :, 1, 0].numpy())
+  print("2", objectness_concat[960:963].squeeze().numpy())
+  assert np.allclose(objectness[0][0, :, 1, 0].numpy(), objectness_concat[315:330].squeeze().numpy()) # 1 * 320 + 0
+  print("def", objectness[2][0, :, 22, 13].numpy())
+  print("aff", objectness_concat[241760:241790].squeeze().numpy())
+  assert np.allclose(objectness)
+  print("regression_concat", regression_concat)
+
+  anchors = anchor_generator(images, features)
+  print("anchors", anchors)
+  
 
 def concat_box_prediction_layers(box_cls, box_regression):
   box_cls_flattened = []
@@ -224,6 +250,7 @@ def test_loss():
   loss = RPNLossComputation(hq_fn, sampler, coder, generate_rpn_labels)
   channels=256
   anchor_generator = AnchorGenerator()
+  print("anchor_sizes", anchor_generator.num_anchors_per_location())
   head = RPNHead(
     channels, anchor_generator.num_anchors_per_location()[0]
   )
@@ -232,8 +259,12 @@ def test_loss():
   img = [Tensor(build_transforms()(Image.open(BASEDIR/f'train2017/000000{img_id}.jpg').convert("RGB")).numpy())] # TODO this uses torch to transform
   images = to_image_list(img)
   features = backbone(images.tensors)
+  print("features", features)
   objectness, rpn_box_regression = head(features)
-  anchors = [anchor for anchor in anchor_generator(images, features)]
+  print("objectness", objectness)
+  print("rpn_box_regression", rpn_box_regression)
+  anchors = [anchor.bbox for anchor in anchor_generator(images, features)[0]]
+  print("anchors", anchors)
   coco = COCO(os.path.join(BASEDIR, 'annotations', 'instances_train2017.json'))
   annotations = coco.loadAnns(coco.getAnnIds(imgIds=[img_id]))
   gt = []
@@ -250,6 +281,7 @@ def binary_cross_entropy_with_logits(x: Tensor, y: Tensor): return binary_cross_
 def test_binary_cross_entropy_with_logits():
   x = Tensor([[ 2.3611, -0.8813, -0.5006, -0.2178],[0.0419, 0.0763, -1.0457, -1.6692]])
   y = Tensor([[0., 1., 0., 0.],[0., 1., 0., 0.]])
+   # this test was built from a torch example and the numbers match
   assert np.allclose(binary_cross_entropy_with_logits(x, y).numpy(), 0.8233704)
 
 # the version of this function in models.mask_rcnn has changed the parameter type to `Boxlist`, not `list[Boxlist]`
@@ -364,8 +396,9 @@ class RPNLossComputation:
 
 if __name__ == "__main__":
   download_train()
-  test_loss()
   test_concat_box_prediction_layers()
+  raise Exception("")
+  test_loss()
   test_binary_cross_entropy_with_logits()
   test_prepare_targets()
   test_boxlist_iou()
