@@ -9,7 +9,7 @@ if __name__ == "__main__":
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
-import random, time, copy, wandb
+import random, time
 import numpy as np
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from tinygrad import nn
@@ -271,7 +271,7 @@ def train_cifar():
   opt_non_bias = optim.SGD(params_non_bias, lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['non_bias_decay'])
 
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
-  initial_div_factor = 1e15
+  initial_div_factor = hyp['opt']['initial_div_factor']
   final_lr_ratio = hyp['opt']['final_lr_ratio']
   pct_start = hyp['opt']['percent_start']
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']     ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
@@ -393,16 +393,17 @@ def train_cifar():
     if i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
       if model_ema is None:
         model_ema = modelEMA(W, model)
-      model_ema.update(model, decay=projected_ema_decay_val*(i/STEPS)**hyp['ema']['decay_pow'])
+      model_ema.update(model, Tensor([projected_ema_decay_val*(i/STEPS)**hyp['ema']['decay_pow']]))
     cl = time.monotonic()
-    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+    if not getenv("DIST"):
+      print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+    else:
+      print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {world_size*GlobalCounters.mem_used/1e9:.2f} GB used, {world_size*GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
     i += 1
 
 if __name__ == "__main__":
-
   if not getenv("DIST"):
     train_cifar()
-
   else: # distributed
     from tinygrad.runtime.ops_gpu import CL
     devices = [f"gpu:{i}" for i in range(len(CL.devices))]
