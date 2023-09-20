@@ -105,6 +105,7 @@ class RetinaNetTrainer:
         self.coco_eval = COCOeval(self.dataset, iouType="bbox")
         self.debug = debug
         self.image_size = IMAGE_SIZES["debug"] if debug else IMAGE_SIZES["mlperf"]
+    
     def get_ground_truths(self, anchors, annotations, n_classes):
         #TODO tensorize this function for further lazyness exploitation
         #TODO rescale bboxes to transformed size
@@ -152,15 +153,14 @@ class RetinaNetTrainer:
     
     def train(self):
 
-        retina = self.model 
-        self.freeze_spec_backbone_layers()
-        anchors_orig = retina.anchor_gen(self.image_size) #TODO: get them just with reshape of flattened?
-        anchors_flattened_levels = np.concatenate(anchors_orig)
-        optimizer = optim.SGD(get_parameters(retina), lr=0.001)
+        retina, anchors_orig, anchors_flattened_levels, optimizer = self.tg_init_setup()
+        checker = None
+        if self.debug: 
+            checker = RetinaNetMlPerfTrainingChecker(retina)
+            breakpoint()
+            checker.check_model_weights()
+            checker.check_anchors(anchors_orig, anchors_flattened_levels)
 
-        Tensor.training = TRAINING
-        print("training mode ", Tensor.training)
-        Tensor.no_grad = not BACKWARD
         for x, annotations in iterate(self.dataset, BS):
             targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
             resized = [Image.fromarray(image) for image in x]
@@ -168,12 +168,13 @@ class RetinaNetTrainer:
             images = Tensor(resized, requires_grad=False)
 
             head_outputs = retina(self.input_fixup(images))
+            if self.debug: checker.check_head_outputs(head_outputs)
 
             #eltwise_loss = self._eltwise_compute_loss(BS, targets, head_outputs) 
             #imgwise_loss_np = self._imgwise_compute_loss_np(BS, targets, head_outputs)
             #batchwise_loss = self._batchwise_compute_loss(BS, targets, head_outputs)
             imgwise_loss = self._imgwise_compute_loss(BS, targets, head_outputs)
-            
+            if self.debug: checker.check_losses(imgwise_loss)
             optimizer.zero_grad()
             imgwise_loss.backward()
             optimizer.step()
@@ -191,8 +192,38 @@ class RetinaNetTrainer:
 
                 #TODO this should be done on validation split predictions (no grad)
                 self.mAP_compute(annotations, predictions)
-            
 
+    def tg_init_setup(self):
+        retina = self.model 
+        Warning("initial weight setting skipped")
+        #self.set_initial_weights()
+        self.freeze_spec_backbone_layers()
+        anchors_orig = retina.anchor_gen(self.image_size) #TODO: get them just with reshape of flattened?
+        anchors_flattened_levels = np.concatenate(anchors_orig)
+        optimizer = optim.SGD(get_parameters(retina), lr=0.001)
+
+        Tensor.training = TRAINING
+        print("training mode ", Tensor.training)
+        Tensor.no_grad = not BACKWARD
+        return retina,anchors_orig,anchors_flattened_levels,optimizer
+            
+    def set_initial_weights(self):
+        self.set_classification_weights()
+        self.set_regression_weights()
+        self.set_fpn_weights()
+
+    def set_classification_weights(mean : float = 0, std : float = 0.01, conv_bias : float = -4.59511985013459, bias : float = 0):
+        raise NotImplementedError
+
+    def set_regression_weights(mean : float =0, std : float =0.01, bias : float = 0):
+        raise NotImplementedError
+    
+    def set_fpn_weights(self, bias : float =0):
+        """ 
+        The FPN network weights are initialized with uniform Kaiming (also known as He initialization) using negative slope=1. 
+        The biases are initialized with zeros (code).
+        """
+        raise NotImplementedError
     def mAP_compute(self, annotations, predictions):
         coco_results  = [{"image_id": annotations[i]["image_id"], "category_id": label, "bbox": box.tolist(), "score": score}
       for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
@@ -331,11 +362,17 @@ class RetinaNetTrainer:
         x /= self.input_std
         return x
 
-class RetinaNetStateTracker:
-    def __init__(self, models_to_compare : tuple) -> None:
-        pass
+class RetinaNetMlPerfTrainingChecker:
+    def __init__(self, tg_model : RetinaNet) -> None:
+        import sys
+        sys.path.insert(0, r'C:\Users\msoro\Desktop\mlperf\training\single_stage_detector\ssd')
+        from model import retinanet as mlp_retinanet
+
+        self.model = tg_model
+        self.mlperf_model = mlp_retinanet.retinanet_resnext50_32x4d_fpn(num_classes=tg_model.num_classes, image_size = list(IMAGE_SIZES["debug"]))
+        breakpoint()
+        i = 0
 
 if __name__ == "__main__":
-    trainer = RetinaNetTrainer()
-    #trainer._dummy_test_sigmoid_focal_loss()
+    trainer = RetinaNetTrainer(debug=True)
     trainer.train()
