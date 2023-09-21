@@ -48,6 +48,7 @@ def _send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
     dist.OOB.send((handle, x._device), target_rank)
 
     # jit support
+    x._allocator = None # need to disconnect allocator for sent buffers
     CacheCollector.add(__send_rb, [x, target_rank, None, None], {})
   else:
     # cache the shared memory so we don't have to create it every time
@@ -89,9 +90,6 @@ def _recv_rb(x:RawBuffer, target_rank:int):
     if DEBUG >= 2: print(f"****  rank {getenv('RANK')} got {x} from rank {target_rank}")
 
     CacheCollector.add(__recv_rb, [x, target_rank, y], {})
-
-    # tell other side that we're done
-    dist.OOB.send(None, target_rank)
   else:
     extra = dist.OOB.recv(target_rank)
     device = f"{extra[0]},{extra[1]}" if extra[1] is not None else f"{extra[0]}"
@@ -130,4 +128,13 @@ class Recv(Function):
 
 def send(x:Tensor, target_rank:int, cache_id:Optional[str]=None) -> Tensor: return Send.apply(x, target_rank=target_rank, cache_id=cache_id)
 def recv(x:Tensor, target_rank:int, cache_id:Optional[str]=None) -> Tensor: return Recv.apply(x, target_rank=target_rank, cache_id=cache_id)
-def wait(target_rank:int) -> None: dist.OOB.recv(target_rank)
+
+def _wait(args, variables=None, jit=False, force_wait=False): args[0].wait()
+def wait():
+  barrier = dist.OOB.barrier
+  setattr(barrier, "size", None)
+  setattr(barrier, "dtype", None)
+  setattr(barrier, "_device", None)
+  CacheCollector.add(_wait, [barrier], {})
+  barrier.wait()
+
