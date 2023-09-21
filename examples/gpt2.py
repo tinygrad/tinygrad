@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# pip3 install tiktoken
+
 import argparse
 import numpy as np
 from tqdm import trange
