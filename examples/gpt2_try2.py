@@ -3,8 +3,7 @@
 
 import os
 os.environ['JIT'] = '1'
-# os.environ['FP16'] = '1'
-import functools, argparse
+import argparse
 import numpy as np
 from tqdm import trange
 np.set_printoptions(linewidth=200)
@@ -90,9 +89,6 @@ class TransformerBlock:
     if realize:
       return h.realize(), cache_k.realize(), cache_v.realize()
     return h, cache_k, cache_v
-    # return (h + self.mlp(self.ln_2(h))).realize(), cache_k.realize(), cache_v.realize()
-
-from line_profiler_pycharm import profile
 
 class Transformer:
   def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_seq_len=1024):
@@ -134,8 +130,6 @@ class Transformer:
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
-    if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
-
     if getenv("JIT"):
       if seqlen == 1 and start_pos > 0:
         start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
@@ -144,6 +138,7 @@ class Transformer:
         logit_or_softmax, self.kv_caches = self.full_run(tokens, pos, start_pos=start_pos, temperature=temperature, mask=None, jit_ctx={start_pos_var: start_pos}, **self.kv_caches)
         return logit_or_softmax
       else:
+        if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
         self.kv_caches = {**{f'cache_k{i}':None  for i in range(self.n_layers)}, **{f'cache_v{i}':None for i in range(self.n_layers)}}
         pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos, start_pos+seqlen)))
         mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize()

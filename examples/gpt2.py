@@ -3,7 +3,6 @@
 
 import os
 os.environ['JIT'] = '1'
-os.environ['FP16'] = '1'
 import functools, argparse
 import numpy as np
 from tqdm import trange
