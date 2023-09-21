@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same, partition
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
@@ -51,27 +51,35 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
     ones: List[Node] = []
     assert isinstance(idx.a, SumNode)
-    idx_nodes = set(idx.a.flat_components)
+    idx_nodes = idx.a.flat_components
     for nd in nds:
       if idx.__class__ is not ModNode: break
-      if all(v in idx.vars() for v in nd.vars()) and isinstance(nd.a, SumNode):
-        for k in range(-9, 10): #Arbitrary
-          if k == 0: continue
-          nd_nodes = set((k*nd.a).flat_components)
-          diff = idx_nodes - nd_nodes
-          if len(nd_nodes - idx_nodes) == 0:
-            left_sum = Variable.sum(list(diff))
-            if k < 0:
-              # TODO: More thought on this
-              mnn = max((-nd.b) + 1, min([-lal.b if isinstance(lal, MulNode) else lal for lal in nd_nodes]))
-              if (left_sum.min + (-k)*mnn) >= b:
-                ones.append(nd)
-                idx = idx.a - b
-            elif k > 0:
-              if ((nd.b - 1)*k + left_sum.max) < b:
-                ones.append(nd)
-                idx = idx.a
+      if isinstance(nd.a, SumNode):
+        nd_vars = nd.vars()
+        same, others = partition(idx_nodes, lambda x: (x.a if x.__class__ is MulNode else x) in nd_vars)
+        if len(same) != len(nd_vars): continue
+        first = nd.a.flat_components[0]
+        for s in same:
+          var1 = (s.a, s.b) if isinstance(s, MulNode) else (s, 1)
+          var2 = (first.a, first.b) if isinstance(first, MulNode) else (first, 1)
+          if var2[0] == var1[0]:
+            k = var1[1]//var2[1]
             break
+        else:
+          break
+        if Variable.sum(same) != k*(nd.a): break
+        left_sum = Variable.sum(others)
+        if k < 0:
+          # TODO: More thought on this
+          mnn = max((-nd.b) + 1, min([-lal.b if isinstance(lal, MulNode) else lal for lal in same]))
+          if (left_sum.min + (-k)*mnn) >= b:
+            ones.append(nd)
+            idx = idx.a - b
+        elif k > 0:
+          if ((nd.b - 1)*k + left_sum.max) < b:
+            ones.append(nd)
+            idx = idx.a
+        break
     valid = Variable.ands([i for i in nds if i not in ones])
 
   def recurse(variables, idx, idy, valid, mem):
