@@ -48,7 +48,7 @@ class Attention:
       keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
 
     # save the cache
-    cache_k, cache_v = keys.realize(), values.realize()
+    cache_k, cache_v = keys, values
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     output = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1)
     return self.c_proj(output), cache_k, cache_v
@@ -113,6 +113,7 @@ class Transformer:
     logits = self.lm_head(self.ln_f(x))
     if temperature is not None: return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
     return logits.realize()
+
   @TinyJit
   def run_all_layers(self, tokens, pos, start_pos, temperature, jit_ctx:Optional[Dict[Variable,int]]=None, **kwargs):
     h = self.embed(tokens, pos, realize=False)
@@ -121,7 +122,9 @@ class Transformer:
     for i, hi in enumerate(self.h):
       h, kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}'] = hi(h, kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}'], start_pos=start_pos, mask=None, realize=False, jit_ctx=jit_ctx)
     logits = self.lm_head(self.ln_f(h))
+    for v in kv_caches.values(): v.realize()
     if temperature is not None: return (logits[:, -1, :] / (temperature + 1e-10)).softmax().flatten().realize(), kv_caches
+
     return logits.realize(), kv_caches
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
@@ -139,10 +142,11 @@ class Transformer:
 
       embed, hs, postprocess = (self.embed_jitted, self.h_jitted, self.postprocess_jitted) if getenv("JIT") else (self.embed, self.h, self.postprocess)
       pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos, start_pos+seqlen)))
-      mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize()
+      mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float16 if getenv('FP16') else dtypes.float32).triu(start_pos+1).realize()
       h = embed(tokens, pos)
       for i, hi in enumerate(hs):
         h, self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'] = hi(h, self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'], start_pos=start_pos, mask=mask)
+
       return postprocess(h, temperature)
 
 # **** files and arguments ****
@@ -176,9 +180,10 @@ class GPT2:
     # lm head and wte are tied
     weights['lm_head.weight'] = Tensor(weights['wte.weight'].numpy())
 
+    if getenv("FP16"):  # todo create pr for this
+      for k, v in weights.items():
+        weights[k] = v.cpu().half().realize()
     load_state_dict(model, weights)
-    if getenv("FP16"):
-      for v in get_state_dict(model).values(): v.assign(v.cast(dtypes.float16).realize())
     return GPT2(model, tokenizer)
 
   def __init__(self, model, tokenizer):
@@ -192,14 +197,12 @@ class GPT2:
       GlobalCounters.reset()
       if timing: print("")
       st = GlobalCounters.time_sum_s
-      probs = None
       with Timing("total ", enabled=timing):
         with Timing(f"ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU"+
                     f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                     f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s") if DEBUG else None, enabled=timing):
           probs = self.model(Tensor([toks[start_pos:]]), start_pos, temperature)
         probs_np = probs.numpy()
-        # print('sum', probs_np.sum())
         tok = int(np.random.choice(len(probs_np), p=probs_np))
       start_pos = len(toks)
       toks.append(tok)
