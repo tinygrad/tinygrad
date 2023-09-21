@@ -91,7 +91,7 @@ class Tensor:
     # TODO: this is a hack for writing to DISK
     if self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      self.lazydata.realize().realized._copyin(x.numpy())  # type: ignore
+      self.lazydata.contiguous().realize().realized._copyin(x.numpy())  # type: ignore
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
@@ -142,10 +142,10 @@ class Tensor:
   def full(shape:Tuple[sint, ...], fill_value, **kwargs): return Tensor(fill_value, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape)
 
   @staticmethod
-  def zeros(*shape, **kwargs): return Tensor.full(argfix(*shape), 0, **kwargs)
+  def zeros(*shape, **kwargs): return Tensor.full(argfix(*shape), 0, **kwargs).contiguous()
 
   @staticmethod
-  def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
+  def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs).contiguous()
 
   @staticmethod
   def arange(start, stop=None, step=1, **kwargs):
