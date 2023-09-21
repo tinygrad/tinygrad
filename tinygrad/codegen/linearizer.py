@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same, partition
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
 from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
@@ -42,27 +42,27 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     valid = valid.substitute(sub_dict)
     idxy = idxy.substitute(sub_dict)
 
-  b = base_shape[1]
-  idx = (idxy // 4) % b
-  idy = (idxy // (4 * b))
+  idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
+  idx_vars, idy_vars, val_vars = set(idx.vars()), set(idy.vars()), set(valid.vars())
 
   # Simplify ModNode if possibe
-  if valid.min == 0 and isinstance(idx, ModNode):
-    nds = valid.nodes if isinstance(valid, AndNode) else [valid]
-    ones: List[Node] = []
-    assert isinstance(idx.a, SumNode)
+  if valid.min == 0 and isinstance(idx, ModNode) and isinstance(idx.a, SumNode):
+    ones = []
+    nodes = valid.nodes if isinstance(valid, AndNode) else [valid]
     idx_nodes = idx.a.flat_components
-    for nd in nds:
+    for nd in nodes:
       if not isinstance(idx, ModNode) or not isinstance(nd.a, SumNode): continue
       nd_flat = nd.a.flat_components
       if not all(isinstance(node, (MulNode, Variable)) for node in nd_flat): continue
+
       nd_vars = nd.vars()
 
-      same, others = partition(idx_nodes, lambda x: (x.a if isinstance(x, MulNode) else x) in nd_vars)
+      same, others = [], [] # No partition because of pylint error
+      for x in idx_nodes:
+        if (x.a if isinstance(x, MulNode) else x) in nd_vars: same.append(x)
+        else: others.append(x)
 
-      if not all(isinstance(node, (MulNode, Variable)) for node in same): continue
-
-      if len(same) != len(nd_vars): continue
+      if not all(isinstance(node, (MulNode, Variable)) for node in same) or len(same) != len(nd_vars): continue
 
       first = nd_flat[0]
       var2 = (first.a, first.b) if isinstance(first, MulNode) else (first, 1)
@@ -78,98 +78,38 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       if Variable.sum(same) != k*(nd.a): continue
       left_sum = Variable.sum(others)
       if k < 0:
-        # TODO: More thought on this
-        mnn = max((-nd.b) + 1, min([-lal.b if isinstance(lal, MulNode) else lal for lal in same]))
-        if (left_sum.min + (-k)*mnn) >= b:
-          #ones.append(nd)
-          idx = idx.a - b
-      elif k > 0:
-        if ((nd.b - 1)*k + left_sum.max) < b:
-          #ones.append(nd)
-          idx = idx.a
-      break
-    valid = Variable.ands([i for i in nds if i not in ones])
+        # TODO: More thought on this, and thoughts on removing valid nodes
+        mnn = max((-nd.b) + 1, min([-lal.b if isinstance(lal, MulNode) else 1 for lal in same]))
+        node_min = left_sum.min + (-k)*mnn
+        idx = idx.a - idx.b*(node_min//idx.b)
+        ones.append(nd)
+      elif k > 0 and ((nd.b - 1)*k + left_sum.max) < idx.b:
+        ones.append(nd)
+        idx = idx.a
+
+    valid = Variable.ands([i for i in nodes if i not in ones])
 
   # Simplify SumNodes
-  if valid.min == 0:
+  if valid.min == 0 and not idx_vars.intersection(idy_vars):
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
-    ones: List[Node] = []
-    flats = []
-    if isinstance(idx, SumNode): flats.append(idx.flat_components)
-    if isinstance(idy, SumNode): flats.append(idy.flat_components)
-    for node in nds:
-      for flat in flats:
-        syms = [i for i in flat if not isinstance(i, NumNode)]
-        sym_sum = Variable.sum(syms)
-        if node.a == sym_sum: ones.append(node)
-        if -(node.a) == sym_sum: ones.append(node)
-
+    flats = [id.flat_components for id in (idx, idy) if isinstance(id, SumNode)]
+    sym_sums = [Variable.sum([i for i in flat if not isinstance(i, NumNode)]) for flat in flats]
+    ones = [node for sym_sum in sym_sums for node in nds if (node.a == sym_sum) or (-(node.a) == sym_sum)] # type: ignore # AndNode always consists of LtNode
     valid = Variable.ands([i for i in nds if i not in ones])
   # This is basically expand with custom variable range
+  # This is the slow part
   if valid.min == 0 and not isinstance(idx, ModNode):
-    variables = tuple(set(valid.vars() + idy.vars() + idx.vars()))
+    variables = tuple(val_vars | idy_vars | idx_vars)
     val_infer = valid.expand(variables)
     idx_infer = idx.expand(variables)
     idy_infer = idy.expand(variables)
-    ones = set()
-    zeros = set()
-    for i, x, y in zip(val_infer, idx_infer, idy_infer):
-      (zeros if i.min == 0 else ones).add((x, y))
+    val_dict: Dict[int, Set[Tuple[int,int]]] = {0:set(), 1:set()}
 
-    if not ones.intersection(zeros):
-      valid = NumNode(1)
-  """
-  # Simplify sumnodes
-  if valid.min == 0 and not isinstance(idx, ModNode):
-    nds = valid.nodes if isinstance(valid, AndNode) else [valid]
-    ones = []
-    for nd in nds:
-      if not isinstance(nd.a, SumNode): continue
-      for index in (idx, idy):
-        if isinstance(index, SumNode):
-          index_nodes = set(index.flat_components)
+    for v, x, y in zip(val_infer, idx_infer, idy_infer): val_dict[v.min].add((x.min, y.min))
 
-          nd_nodes = set(nd.a.flat_components)
-          diff = index_nodes - nd_nodes
-          if len(nd_nodes - index_nodes) == 0:
-            if any(not isinstance(d, (DivNode, NumNode)) for d in diff): break
-            ones.append(nd)
-          else:
-            nd_nodes = set((-nd.a).flat_components)
-            diff = index_nodes - nd_nodes
-            if len(nd_nodes - index_nodes) == 0:
-              if any(not isinstance(d, (DivNode, NumNode)) for d in diff): break
-              ones.append(nd)
+    if not val_dict[1].intersection(val_dict[0]): valid = NumNode(1)
 
-    valid = Variable.ands([i for i in nds if i not in ones])
-    
-    def recurse(variables, idx, idy, valid, mem):
-    if len(variables) == 0:
-      if valid in mem: mem[valid].add((idx, idy))
-      else: mem[valid] = set(((idx, idy),))
-    else:
-      var = variables[0]
-      k = 2
-      range_list = list(range(var.min, var.max + 1))
-      range_list = range_list[:k] + range_list[-k:]
-      for i in set(range_list):
-        var_vals = {var:NumNode(i)}
-        val_infer = valid.substitute(var_vals)
-        idx_infer = idx.substitute(var_vals)
-        idy_infer = idy.substitute(var_vals)
-        recurse(variables[1:], idx_infer, idy_infer, val_infer, mem)
-      return mem
-  if False and valid.min == 0 and not isinstance(idx, ModNode):
-    variables = list(set(valid.vars() + idy.vars() + idx.vars()))
-    mem: Dict[NumNode, Any] = {NumNode(1): set(), NumNode(0): set()}
-    mem = recurse(variables, idx, idy, valid, mem)
-    ones = mem[NumNode(1)]
-    zeros = mem[NumNode(0)]
-    if len(ones.intersection(zeros)) == 0:
-      valid = NumNode(1)
-  """
-  if valid.min == 0:
-    print(idx, idy, valid)
+  if valid.min == 0: print(idx, idy, valid)
 
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
