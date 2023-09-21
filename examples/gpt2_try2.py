@@ -106,31 +106,7 @@ class Transformer:
     self.embed_jitted = TinyJit(self.embed)
     self.postprocess_jitted = TinyJit(self.postprocess)
     self.h_jitted = [TinyJit(h.__call__) for h in self.h]
-    # self.h_jitted_tiny = [TinyJit(h.__call__) for h in self.h]
     self.n_layers = n_layers
-
-    self.embed_jitted_start = TinyJit(self.embed)
-    self.postprocess_jitted_start = TinyJit(self.postprocess)
-    self.h_jitted_start = [TinyJit(h.__call__) for h in self.h]
-
-    # self.bigger_jit_jit = TinyJit(self.bigger_jit)
-    self.small_tiny_jit1 = TinyJit(self.small_tiny_jit)
-    self.small_tiny_jit2 = TinyJit(self.small_tiny_jit)
-    # self.new_big_jit_jit = TinyJit(self.b)
-
-  # def bigger_jit(self, tokens, pos, start_pos, kv_caches, temperature=None, jit_ctx: Optional[Dict[Variable, int]] = None):
-  #   h = self.embed(tokens, pos, realize=True) # todo
-  #
-  #   for i, (hi, (cache_k, cache_v)) in enumerate(zip(self.h, kv_caches)):
-  #     h, cache_k, cache_v = hi(h, cache_k, cache_v, start_pos=start_pos, mask=None, jit_ctx=jit_ctx, realize=True) # todo
-  #     kv_caches[i] = (cache_k, cache_v)
-  #   logits = self.lm_head(self.ln_f(h)).realize()
-  #
-  #   for i in range(len(kv_caches)):
-  #     kv_caches[i] = (kv_caches[i][0].realize(), kv_caches[i][1].realize())
-  #   # if temperature is not None: return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize(), kv_caches
-  #
-  #   return logits.realize(), kv_caches
 
   def embed(self, tokens, pos, realize=True):
     tok_emb = self.wte(tokens)
@@ -145,40 +121,17 @@ class Transformer:
     logits = self.lm_head(self.ln_f(x))
     if temperature is not None: return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
     return logits.realize()
-
-  def bigger_jit(self, tokens, pos, start_pos, kv_caches, temperature=None, temp_ctx=None):
-    h = self.embed(tokens, pos, realize=True)
-    temp_cache = []
-    cache_k, cache_v = None, None
-    for i, (hi, (_cache_k, _cache_v)) in enumerate(zip(self.h, kv_caches)):
-      h, cache_k, cache_v = hi(h, _cache_k, _cache_v, start_pos=start_pos, mask=None, realize=True)#, jit_ctx=temp_ctx)
-      # temp_cache.append((cache_k.realize(), cache_v.realize()))
-    # return self.postprocess_jitted(h, temperature)
-    logits = self.lm_head(self.ln_f(h)).realize()
-    if temperature is not None: return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize(), (cache_k.realize(), cache_v.realize())
-
-    # return self.postprocess_jitted(h, temperature)
   @TinyJit
-  def small_jit(self, h, start_pos, start_pos_var):
-    for i, (hi, (cache_k, cache_v)) in enumerate(zip(self.h, self.kv_caches)):
-      h, cache_k, cache_v = hi(h, cache_k, cache_v, start_pos=start_pos, mask=None, realize=False, jit_ctx={start_pos_var: start_pos})
-      self.kv_caches[i] = (cache_k.realize(), cache_v.realize())
-    return h.realize()
-  def small_tiny_jit(self, tokens, pos, start_pos, temperature, mask, jit_ctx:Optional[Dict[Variable,int]]=None, **kwargs):
+  def full_run(self, tokens, pos, start_pos, temperature, mask, jit_ctx:Optional[Dict[Variable,int]]=None, **kwargs):
     h = self.embed(tokens, pos, realize=False)
 
-    # caches_k = [kwargs[k] for k in kwargs if 'cache_k' in k]
-    # caches_v = [kwargs[k] for k in kwargs if 'cache_v' in k]
     kv_caches = {k: kwargs[k] for k in kwargs if 'cache' in k}
-    for i, (hi) in enumerate(self.h):
-      cache_k, cache_v = kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}']
-      h, cache_k, cache_v = hi(h, cache_k, cache_v, start_pos=start_pos, mask=None, realize=False, jit_ctx=jit_ctx)
-      kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}'] = cache_k, cache_v
+    for i, hi in enumerate(self.h):
+      h, kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}'] = hi(h, kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}'], start_pos=start_pos, mask=None, realize=False, jit_ctx=jit_ctx)
     logits = self.lm_head(self.ln_f(h))
-    for v in kv_caches.values(): v.realize()
     if temperature is not None: return (logits[:, -1, :] / (temperature + 1e-10)).softmax().flatten().realize(), kv_caches
     return logits.realize(), kv_caches
-  # @profile
+
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
     if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
@@ -188,7 +141,7 @@ class Transformer:
         start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
         pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var + seqlen)))
         pos.lazydata.var_vals[start_pos_var] = start_pos
-        logit_or_softmax, self.kv_caches = self.small_tiny_jit1(tokens, pos, start_pos=start_pos, temperature=temperature, mask=None, jit_ctx={start_pos_var: start_pos}, **self.kv_caches)
+        logit_or_softmax, self.kv_caches = self.full_run(tokens, pos, start_pos=start_pos, temperature=temperature, mask=None, jit_ctx={start_pos_var: start_pos}, **self.kv_caches)
         return logit_or_softmax
       else:
         self.kv_caches = {**{f'cache_k{i}':None  for i in range(self.n_layers)}, **{f'cache_v{i}':None for i in range(self.n_layers)}}
@@ -196,8 +149,7 @@ class Transformer:
         mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize()
         h = self.embed_jitted(tokens, pos)
         for i, hi in enumerate(self.h_jitted):
-          h, cache_k, cache_v = hi(h, None, None, start_pos=start_pos, mask=mask)
-          self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'] = (cache_k, cache_v)
+          h, self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'] = hi(h, None, None, start_pos=start_pos, mask=mask)
         return self.postprocess_jitted(h, temperature)
 
 # **** files and arguments ****
