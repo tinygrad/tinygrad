@@ -98,7 +98,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 
 # %%
-characters = [*" 'abcdefghijklmnopqrstuvwxtz","<skip>"]
+characters = [*" 'abcdefghijklmnopqrstuvwxyz","<skip>"]
 c2i= dict([(c,i) for i,c in enumerate(characters)])
 charn = len(characters)
 
@@ -287,11 +287,11 @@ class Prediction:
 # # training
 
 # %%
-def calc_loss(enc,distribution):
+def calc_loss(enc,distribution,labels):
 
 
     T,U = distribution.shape[2],distribution.shape[1]
-    assert len(labels) == U-1
+    assert len(labels) == U-1, f"len labels {len(labels)} doesnt match U-1 {U-1}"
     assert enc.shape[1] == T, f"{enc.shape}[1] != {T}"
 
     alpha = np.zeros((T,U))
@@ -334,7 +334,8 @@ rnnt= RNNT()
 
 # %%
 opt = LAMB(rnnt.params)
-def train_step():
+def train_step(X,Y):
+    labels = text_encode(Y[0])[0]
     opt.zero_grad()
     enc, enc_lens  = rnnt.encoder(Tensor(X[0]),Tensor(X[1]))
     preds = None
@@ -347,7 +348,7 @@ def train_step():
     distribution_tensor = rnnt.joint.__call__(preds, enc).softmax(3).realize()
     distribution = distribution_tensor.numpy()
 
-    Loss, distribution_grad = calc_loss(enc,distribution)
+    Loss, distribution_grad = calc_loss(enc,distribution,labels)
     distribution_grad = distribution_grad.astype(np.float32)
 
     _loss = (distribution_tensor * Tensor(distribution_grad)).sum()
@@ -355,7 +356,7 @@ def train_step():
     _loss.backward()
     opt.step()
     print(f"Loss: {Loss}")
-    return Loss
+    return Loss,distribution_grad
 
 # %%
 train_step()
@@ -364,4 +365,12 @@ train_step()
 train_step()
 
 # %%
-train_step()
+loss, distribution_grad =  train_step()
+
+# %%
+hist = []
+def epoch ():
+  for X,Y in iterate():
+    Loss,grad = train_step(X,Y)
+    hist.append(Loss)
+
