@@ -11,7 +11,7 @@ import itertools
 from tinygrad.helpers import dtypes
 from tinygrad.ops import Device
 
-Device.DEFAULT = 'TORCH'
+# Device.DEFAULT = 'METAL'
 
 # %% [markdown]
 # # data
@@ -23,19 +23,11 @@ import  numpy as np
 import matplotlib.pyplot as plt
 import librosa
 import soundfile
-
-# %%
 BASEDIR = pathlib.Path("../../../extra/datasets/librispeech")
-
-# %%
 with open(BASEDIR / "dev-clean-wav.json") as f:
   ci = json.load(f)
-
-# %%
 FILTER_BANK = np.expand_dims(librosa.filters.mel(sr=16000, n_fft=512, n_mels=80, fmin=0, fmax=8000), 0)
 WINDOW = librosa.filters.get_window("hann", 320)
-
-# %%
 
 def feature_extract(x, x_lens):
   x_lens = np.ceil((x_lens / 160) / 3).astype(np.int32)
@@ -74,13 +66,9 @@ def feature_extract(x, x_lens):
   features = (features - np.expand_dims(features_mean, 2)) / np.expand_dims(features_std, 2)
 
   return features.transpose(2, 0, 1), x_lens.astype(np.float32)
-
-# %%
 def load_wav(file):
   sample = soundfile.read(file)[0].astype(np.float32)
   return sample, sample.shape[0]
-
-# %%
 def iterate(bs=1, start=0):
   print(f"there are {len(ci)} samples in the dataset")
   for i in range(start, len(ci), bs):
@@ -94,12 +82,10 @@ def iterate(bs=1, start=0):
 
     yield feature_extract(samples, sample_lens), np.array([v["transcript"] for v in ci[i : i + bs]])
 
-# %%
-Tensor.backward
+iter = iterate()
+X, Y = next(iter)
+print(X[0].shape, len(Y[0]))
 
-# %%
-X, Y = next(iterate())
-print(X[0].shape, Y.shape)
 
 # %%
 _=plt.plot(X[0][:,0,2:6])
@@ -198,7 +184,7 @@ class LSTMCell:
     self.weights_hh = Tensor.uniform(hidden_size * 4, hidden_size)
     self.bias_hh = Tensor.uniform(hidden_size * 4)
 
-  def __call__(self, x, hc):
+  def __call__(self, x:Tensor, hc:Tensor):
     gates = x.linear(self.weights_ih.T, self.bias_ih) + hc[:x.shape[0]].linear(self.weights_hh.T, self.bias_hh)
 
     i, f, g, o = gates.chunk(4, 1)
@@ -219,6 +205,12 @@ class LSTM:
 
     self.params = list(itertools.chain(*[[cell.bias_hh,cell.bias_ih,cell.weights_hh,cell.weights_ih] for cell in self.cells]))
 
+  def do_step(self, x, hc):
+    new_hc = [x]
+    for i, cell in enumerate(self.cells):
+      new_hc.append(cell(new_hc[i][:x.shape[0]], hc[i]))
+    return Tensor.stack(new_hc[1:]).realize()
+
   def __call__(self, x, hc):
     @TinyJit
     def _do_step(x_, hc_):
@@ -237,11 +229,6 @@ class LSTM:
 
     return output, hc
 
-  def do_step(self, x, hc):
-    new_hc = [x]
-    for i, cell in enumerate(self.cells):
-      new_hc.append(cell(new_hc[i][:x.shape[0]], hc[i]))
-    return Tensor.stack(new_hc[1:]).realize()
 
 class Joint:
   def __init__(self, vocab_size, pred_hidden_size, enc_hidden_size, joint_hidden_size, dropout):
@@ -267,7 +254,7 @@ class Encoder:
     self.post_rnn = LSTM(stack_time_factor * hidden_size, hidden_size, post_layers, dropout)
     self.params = [*self.pre_rnn.params, *self.post_rnn.params]
 
-  def __call__(self, x, x_lens):
+  def __call__(self, x:Tensor, x_lens):
     x, _ = self.pre_rnn(x, None)
     x, x_lens = self.stack_time(x, x_lens)
     x, _ = self.post_rnn(x, None)
@@ -296,19 +283,16 @@ class Prediction:
     x_, hc = self.rnn(emb.transpose(0, 1), hc)
     return x_.transpose(0, 1), hc
 
-# %%
-rnnt = RNNT()
-
 # %% [markdown]
 # # training
 
 # %%
-def calc_loss(distribution):
+def calc_loss(enc,distribution):
 
 
     T,U = distribution.shape[2],distribution.shape[1]
     assert len(labels) == U-1
-    assert enc.shape[1] == T
+    assert enc.shape[1] == T, f"{enc.shape}[1] != {T}"
 
     alpha = np.zeros((T,U))
     alpha[0,0] = 1.
@@ -346,7 +330,10 @@ def calc_loss(distribution):
     return Loss,distribution_grad
 
 # %%
-opt = Adam(rnnt.params[8:])
+rnnt= RNNT()
+
+# %%
+opt = LAMB(rnnt.params)
 def train_step():
     opt.zero_grad()
     enc, enc_lens  = rnnt.encoder(Tensor(X[0]),Tensor(X[1]))
@@ -356,53 +343,25 @@ def train_step():
         pred,hc = rnnt.prediction.__call__(Tensor([[x]]),hc,1)
         preds = pred if preds is None else preds.cat(pred,dim=1).realize()
 
+
     distribution_tensor = rnnt.joint.__call__(preds, enc).softmax(3).realize()
     distribution = distribution_tensor.numpy()
 
+    Loss, distribution_grad = calc_loss(enc,distribution)
+    distribution_grad = distribution_grad.astype(np.float32)
 
-    Loss, distribution_grad = calc_loss(distribution)
     _loss = (distribution_tensor * Tensor(distribution_grad)).sum()
 
     _loss.backward()
     opt.step()
+    print(f"Loss: {Loss}")
     return Loss
 
 # %%
-old_params = [p.numpy() for p in opt.params]
+train_step()
 
 # %%
 train_step()
 
 # %%
-opt.params[0].grad.numpy()
-
-# %%
-i = -1
-
-opt.params[i].numpy(), old_params[i]
-
-# %%
-opt.params[0].numpy()
-
-# %%
 train_step()
-
-# %%
-opt.params[0].grad.numpy()
-
-# %%
-opt.params[0].numpy()
-
-# %%
-step = opt.params[-1].numpy() - old_params[-1]
-
-# %%
-opt.params[-1].grad.numpy()
-
-# %%
-opt.lr.numpy()
-
-# %%
-step
-
-
