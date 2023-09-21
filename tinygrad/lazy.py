@@ -14,6 +14,8 @@ from tinygrad.runtime.lib import RawConst, RawBuffer, RawBufferMapped, RawBuffer
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 
+from itertools import chain
+
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
 
@@ -219,9 +221,12 @@ class LazyBuffer:
           new_srcs.append(x)
       return new_srcs[0].e(op, *new_srcs[1:], arg=arg).contiguous()
 
+    max_kernel_args = 30 if out_device == "METAL" else float('inf')
     if MERGE_ELEMENTWISE_OPS:
       # remove the buffers from any (childless) BinaryOps that feed into this
-      srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
+      # srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
+      _srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
+      if len({b for b in chain(*[src.buffers for src in _srcs]) if b.realized or b.op.op is not LoadOps.CONST}) <= max_kernel_args:srcs = _srcs # type: ignore
 
     return create_lazybuffer(out_device, ShapeTracker(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype, self.var_vals)
 
