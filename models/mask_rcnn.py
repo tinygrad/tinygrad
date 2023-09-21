@@ -320,6 +320,8 @@ class FPN:
       self.layer_blocks.append(nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1))
     self.top_block = LastLevelMaxPool()
 
+  def parameters(self): return [block.weight for block in self.inner_blocks +  self.layer_blocks]
+
   def __call__(self, x: Tensor):
     last_inner = self.inner_blocks[-1](x[-1])
     results = []
@@ -341,7 +343,7 @@ class FPN:
 
 
 class ResNetFPN:
-  def __init__(self, resnet, out_channels=256):
+  def __init__(self, resnet: ResNet, out_channels=256):
     self.out_channels = out_channels
     self.body = resnet
     in_channels_stage2 = 256
@@ -352,6 +354,9 @@ class ResNetFPN:
       in_channels_stage2 * 8,
     ]
     self.fpn = FPN(in_channels_list, out_channels)
+
+  def parameters(self):
+    return self.body.parameters() + self.fpn.parameters()
 
   def __call__(self, x):
     x = self.body(x)
@@ -503,6 +508,8 @@ class RPNHead:
     self.conv = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
     self.cls_logits = nn.Conv2d(in_channels, num_anchors, kernel_size=1)
     self.bbox_pred = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=1)
+
+  def parameters(self): return [self.conv.weight, self.cls_logits.weight, self.bbox_pred.weight]
 
   def __call__(self, x):
     logits = []

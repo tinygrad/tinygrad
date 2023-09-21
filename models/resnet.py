@@ -17,6 +17,8 @@ class BasicBlock:
         nn.BatchNorm2d(self.expansion*planes)
       ]
 
+  def paramaters(self): return [self.conv1.weight, self.conv2.weight] + ([self.downsample[0].weight] if len(self.downsample) > 0 else [])
+
   def __call__(self, x):
     out = self.bn1(self.conv1(x)).relu()
     out = self.bn2(self.conv2(out))
@@ -44,6 +46,8 @@ class Bottleneck:
         nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
         nn.BatchNorm2d(self.expansion*planes)
       ]
+
+  def parameters(self): return [self.conv1.weight, self.conv2.weight, self.conv3.weight] + ([self.downsample[0].weight] if len(self.downsample) > 0 else [])
 
   def __call__(self, x):
     out = self.bn1(self.conv1(x)).relu()
@@ -83,6 +87,11 @@ class ResNet:
     self.layer3 = self._make_layer(self.block, 256, self.num_blocks[2], stride=2, stride_in_1x1=stride_in_1x1)
     self.layer4 = self._make_layer(self.block, 512, self.num_blocks[3], stride=2, stride_in_1x1=stride_in_1x1)
     self.fc = nn.Linear(512 * self.block.expansion, num_classes) if num_classes is not None else None
+
+  def parameters(self):
+    return [self.conv1.weight, self.bn1.weight] + self._layer_weights(self.layer1) + self._layer_weights(self.layer2) + self._layer_weights(self.layer3) + self._layer_weights(self.layer4) + ([self.fc.weight] if self.fc is not None else [])
+
+  def _layer_weights(self, layer): return [p for l in layer for p in l.parameters()]
 
   def _make_layer(self, block, planes, num_blocks, stride, stride_in_1x1):
     strides = [stride] + [1] * (num_blocks-1)

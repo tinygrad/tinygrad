@@ -3,6 +3,7 @@
 from models.mask_rcnn import *
 from tinygrad.tensor import Tensor
 from tinygrad.tensor import dtypes
+import tinygrad.nn.optim as optim
 import numpy as np
 from typing import List, Callable, Tuple
 from train import build_transforms
@@ -151,27 +152,19 @@ def test_concat_box_prediction_layers():
   images = to_image_list(img)
   features = backbone(images.tensors)
   objectness, regression = head(features)
-  print("objectness", objectness)
-  
-  print("objectness", objectness[0][0, :, 0, 0].numpy())
-  print("regression", regression)
   objectness_concat, regression_concat = concat_box_prediction_layers(objectness, regression)
-  print("objectness_concat_0", objectness_concat)
-  print("objectness_concat", objectness_concat[0:3].squeeze().numpy())
   assert np.allclose(objectness[0][0, :, 0, 0].numpy(), objectness_concat[0:3].squeeze().numpy())
-  print("1", objectness[0][0, :, 0, 319].numpy())
-  print("2", objectness_concat[957:960].squeeze().numpy())
-  print("1", objectness[0][0, :, 1, 0].numpy())
-  print("2", objectness_concat[960:963].squeeze().numpy())
-  assert np.allclose(objectness[0][0, :, 1, 0].numpy(), objectness_concat[315:330].squeeze().numpy()) # 1 * 320 + 0
-  print("def", objectness[2][0, :, 22, 13].numpy())
-  print("aff", objectness_concat[241760:241790].squeeze().numpy())
-  assert np.allclose(objectness)
-  print("regression_concat", regression_concat)
+  x = flat_idx(objectness, 2, 5, 3)
+  assert np.allclose(objectness[2][0, :, 5, 3].numpy(), objectness_concat[flat_idx(objectness, 2, 5, 3):flat_idx(objectness, 2, 5, 3)+3].squeeze().numpy())
+  assert np.allclose(regression[2][0, 0:4, 5, 3].squeeze().numpy(), regression_concat[flat_idx(regression, 2, 5, 3, 4)].numpy())
 
-  anchors = anchor_generator(images, features)
-  print("anchors", anchors)
-  
+def flat_idx(F: list[Tensor], l: int, h: int, w: int, p: int = 1) -> int:
+  acc=0
+  for i in range(0, l):
+    _, A, H, W = F[i].shape
+    acc+=A/p*H*W
+  _, A, _, W = F[l].shape
+  return int(acc+h*A/p*W+w*A/p)
 
 def concat_box_prediction_layers(box_cls, box_regression):
   box_cls_flattened = []
@@ -250,21 +243,17 @@ def test_loss():
   loss = RPNLossComputation(hq_fn, sampler, coder, generate_rpn_labels)
   channels=256
   anchor_generator = AnchorGenerator()
-  print("anchor_sizes", anchor_generator.num_anchors_per_location())
-  head = RPNHead(
+  backbone = ResNetFPN(ResNet(50, num_classes=None, stride_in_1x1=True), out_channels=256)
+  rpn = RPNHead(
     channels, anchor_generator.num_anchors_per_location()[0]
   )
-  backbone = ResNetFPN(ResNet(50, num_classes=None, stride_in_1x1=True), out_channels=256)
+  optimizer = optim.SGD(backbone.parameters() + rpn.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0005)
   img_id = 387655
   img = [Tensor(build_transforms()(Image.open(BASEDIR/f'train2017/000000{img_id}.jpg').convert("RGB")).numpy())] # TODO this uses torch to transform
   images = to_image_list(img)
   features = backbone(images.tensors)
-  print("features", features)
-  objectness, rpn_box_regression = head(features)
-  print("objectness", objectness)
-  print("rpn_box_regression", rpn_box_regression)
-  anchors = [anchor.bbox for anchor in anchor_generator(images, features)[0]]
-  print("anchors", anchors)
+  objectness, rpn_box_regression = rpn(features)
+  anchors = [[anchor for anchor in anchor_generator(images, features)[0]]]
   coco = COCO(os.path.join(BASEDIR, 'annotations', 'instances_train2017.json'))
   annotations = coco.loadAnns(coco.getAnnIds(imgIds=[img_id]))
   gt = []
@@ -274,6 +263,13 @@ def test_loss():
       gt.append([x, y, x + width, y + height])
   targets = [BoxList(Tensor(gt), image_size=anchors[0][0].size)]
   objectness_loss, regression_loss = loss(anchors, objectness, rpn_box_regression, targets)
+  total_loss = objectness_loss + regression_loss
+  print("objectness_loss", objectness_loss)
+  print("regression_loss", regression_loss)
+  print("sum_loss", objectness_loss + regression_loss)
+  optimizer.zero_grad()
+  total_loss.backward()
+  optimizer.step()
   
 def binary_cross_entropy(pred: Tensor, y: Tensor): return -(pred.log()*y + (1-y)*(1-pred).log()).mean()
 def binary_cross_entropy_with_logits(x: Tensor, y: Tensor): return binary_cross_entropy(x.sigmoid(), y)
@@ -397,7 +393,6 @@ class RPNLossComputation:
 if __name__ == "__main__":
   download_train()
   test_concat_box_prediction_layers()
-  raise Exception("")
   test_loss()
   test_binary_cross_entropy_with_logits()
   test_prepare_targets()
