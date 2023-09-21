@@ -118,7 +118,7 @@ class Transformer:
     if temperature is not None: return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
     return logits.realize()
   @TinyJit
-  def full_run(self, tokens, pos, start_pos, temperature, mask, jit_ctx:Optional[Dict[Variable,int]]=None, **kwargs):
+  def full_run(self, tokens, pos, start_pos, temperature, jit_ctx:Optional[Dict[Variable,int]]=None, **kwargs):
     h = self.embed(tokens, pos, realize=False)
 
     kv_caches = {k: kwargs[k] for k in kwargs if 'cache' in k}
@@ -135,7 +135,7 @@ class Transformer:
         start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
         pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var + seqlen)))
         pos.lazydata.var_vals[start_pos_var] = start_pos
-        logit_or_softmax, self.kv_caches = self.full_run(tokens, pos, start_pos=start_pos, temperature=temperature, mask=None, jit_ctx={start_pos_var: start_pos}, **self.kv_caches)
+        logit_or_softmax, self.kv_caches = self.full_run(tokens, pos, start_pos=start_pos, temperature=temperature, jit_ctx={start_pos_var: start_pos}, **self.kv_caches)
         return logit_or_softmax
       else:
         if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
