@@ -75,17 +75,18 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       else:
         continue
 
-      if Variable.sum(same) != k*(nd.a): continue
-      left_sum = Variable.sum(others)
-      if k < 0:
-        # TODO: More thought on this, and thoughts on removing valid nodes
-        mnn = max((-nd.b) + 1, min([-lal.b if isinstance(lal, MulNode) else 1 for lal in same]))
-        node_min = left_sum.min + (-k)*mnn
-        idx = idx.a - idx.b*(node_min//idx.b)
-        ones.append(nd)
-      elif k > 0 and ((nd.b - 1)*k + left_sum.max) < idx.b:
-        ones.append(nd)
-        idx = idx.a
+      same_sum = Variable.sum(same)
+      if same_sum == k*(nd.a):
+        mnn, mxn = same_sum.min, same_sum.max
+
+        if k < 0: mnn = (-k)*max((-nd.b) + 1, min([-lal.b if isinstance(lal, MulNode) else 1 for lal in same]))
+        else: mxn = (nd.b - 1)*k
+
+        fake_var = Variable("valid_fake", mnn, mxn)
+        left_sum = Variable.sum(others)
+        total = (left_sum + fake_var)%idx.b
+        idx = total.substitute({fake_var : same_sum})
+        if not isinstance(idx, ModNode): ones.append(nd)
 
     valid = Variable.ands([i for i in nodes if i not in ones])
 
