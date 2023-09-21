@@ -27,7 +27,7 @@ if GRAPH:
     if PRUNEGRAPH: prune_graph()
     print("saving", G, GRAPHPATH)
     if not os.path.exists(GRAPHPATH): os.makedirs(GRAPHPATH)
-    for op in top_colors: 
+    for op in top_colors:
       G.add_node(op, label=op.__name__, fillcolor=top_colors[op], color='black', style='filled')
       G.add_edge(op, 0, style='invis')
     nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
