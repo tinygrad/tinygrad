@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-import os
-os.environ["JIT"] = '1'
-os.environ["FP16"] = '1'
 import argparse
 import numpy as np
 from tqdm import trange
@@ -74,7 +71,6 @@ class TransformerBlock:
   def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor], realize=True, jit_ctx:Optional[Dict[Variable,int]]=None):
     if start_pos > 0 and mask is None and getenv("JIT"):
       start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
-      # if start_pos_var in cache_k.lazydata.var_vals: del cache_k.lazydata.var_vals[start_pos_var]
 
       cache_k = cache_k.reshape(cache_k.shape[0], start_pos_var, cache_k.shape[2], cache_k.shape[3])
       cache_v = cache_v.reshape(cache_v.shape[0], start_pos_var, cache_v.shape[2], cache_v.shape[3])
@@ -124,11 +120,9 @@ class Transformer:
     kv_caches = {}
     for i, hi in enumerate(self.h):
       h, kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}'] = hi(h, kwargs[f'cache_k{i}'], kwargs[f'cache_v{i}'], start_pos=start_pos, mask=None, realize=False, jit_ctx=jit_ctx)
-    logits = self.lm_head(self.ln_f(h))
     for v in kv_caches.values(): v.realize()
-    if temperature is not None: return (logits[:, -1, :] / (temperature + 1e-10)).softmax().flatten().realize(), kv_caches
 
-    return logits.realize(), kv_caches
+    return self.postprocess(h, temperature), kv_caches
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
@@ -183,7 +177,7 @@ class GPT2:
     # lm head and wte are tied
     weights['lm_head.weight'] = Tensor(weights['wte.weight'].numpy())
 
-    if getenv("FP16"):  # todo create pr for this
+    if getenv("FP16"):
       for k, v in weights.items():
         weights[k] = v.cpu().half().realize()
     load_state_dict(model, weights)
