@@ -209,12 +209,12 @@ def get_child(parent, key):
       obj = getattr(obj, k)
   return obj
 
-def _tree(lazydata):
-  if type(lazydata).__name__ == "LazyBuffer": return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op)
-  if len(lazydata.src) == 0: return [f"━━ {lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
-  lines = [f"━┳ {lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
+def _tree(lazydata, prefix=""):
+  if type(lazydata).__name__ == "LazyBuffer": return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op, "LB ")
+  if len(lazydata.src) == 0: return [f"━━ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
+  lines = [f"━┳ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
   childs = [_tree(c) for c in lazydata.src[:]]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
 
-def print_tree(tensor:Tensor):print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(tensor.lazydata))]))
+def print_tree(tensor:Tensor):print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(tensor if not isinstance(tensor, Tensor) else tensor.lazydata))]))
