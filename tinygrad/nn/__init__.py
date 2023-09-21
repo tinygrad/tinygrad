@@ -11,8 +11,8 @@ class BatchNorm2d:
     if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
     else: self.weight, self.bias = None, None
 
-    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False).contiguous(), Tensor.ones(sz, requires_grad=False).contiguous()
-    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False).contiguous()
+    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
+    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x:Tensor):
     if Tensor.training:
