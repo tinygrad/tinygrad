@@ -37,7 +37,7 @@ def gen_diff(table_old, table_new):
     for file in unchanged:
       file_stat_old = [stats for stats in table_old if file in stats]
       file_stat_new = [stats for stats in table_new if file in stats]
-      if file_stat_new[0][1]-file_stat_old[0][1] != 0 or file_stat_new[0][2]-file_stat_old[0][2] != 0: 
+      if file_stat_new[0][1]-file_stat_old[0][1] != 0 or file_stat_new[0][2]-file_stat_old[0][2] != 0:
         table.append([file_stat_new[0][0], file_stat_new[0][1], file_stat_new[0][1]-file_stat_old[0][1], file_stat_new[0][2], file_stat_new[0][2]-file_stat_old[0][2]])
   return table
 

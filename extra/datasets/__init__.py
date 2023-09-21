@@ -32,7 +32,7 @@ def fetch_cifar(shuffle=False):
       X[idx:idx+bs].assign(x[order,:])
       Y[idx:idx+bs].assign(y[order])
       idx += bs
-    return X, Y  
+    return X, Y
   fn = Path(__file__).parent.resolve() / "cifar-10-python.tar.gz"
   download_file('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz', fn)
   tt = tarfile.open(fn, mode='r:gz')
