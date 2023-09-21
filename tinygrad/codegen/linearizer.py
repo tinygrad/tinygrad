@@ -83,10 +83,9 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
         else: mxn = (nd.b - 1)*k
 
         fake_var = Variable("valid_fake", mnn, mxn)
-        left_sum = Variable.sum(others)
-        total = (left_sum + fake_var)%idx.b
-        idx = total.substitute({fake_var : same_sum})
-        if not isinstance(idx, ModNode): ones.append(nd)
+        total = (Variable.sum(others) + fake_var)%idx.b
+        idx = total.substitute({fake_var: same_sum})
+        # if not isinstance(idx, ModNode): ones.append(nd) # Not sure about this
 
     valid = Variable.ands([i for i in nodes if i not in ones])
 
