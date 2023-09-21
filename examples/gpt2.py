@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import os
+os.environ["JIT"] = '1'
+os.environ["FP16"] = '1'
 import argparse
 import numpy as np
 from tqdm import trange
@@ -103,8 +106,8 @@ class Transformer:
   def embed(self, tokens, pos, realize=True):
     tok_emb = self.wte(tokens)
     pos_emb = self.wpe(pos)
-    if getenv("FP16"): tok_emb, pos_emb = tok_emb.half(), pos_emb.half()
     h = tok_emb + pos_emb
+    if getenv("FP16"): h = h.half()
     if not realize:
       return h
     return h.realize()
@@ -118,9 +121,9 @@ class Transformer:
   def run_all_layers(self, tokens, pos, start_pos, temperature, jit_ctx:Optional[Dict[Variable,int]]=None, **kwargs):
     h = self.embed(tokens, pos, realize=False)
 
-    kv_caches = {k: kwargs[k] for k in kwargs if 'cache' in k}
+    kv_caches = {}
     for i, hi in enumerate(self.h):
-      h, kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}'] = hi(h, kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}'], start_pos=start_pos, mask=None, realize=False, jit_ctx=jit_ctx)
+      h, kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}'] = hi(h, kwargs[f'cache_k{i}'], kwargs[f'cache_v{i}'], start_pos=start_pos, mask=None, realize=False, jit_ctx=jit_ctx)
     logits = self.lm_head(self.ln_f(h))
     for v in kv_caches.values(): v.realize()
     if temperature is not None: return (logits[:, -1, :] / (temperature + 1e-10)).softmax().flatten().realize(), kv_caches
