@@ -12,8 +12,8 @@ def preinit():
 
 # out-of-band communication/synchronization
 class _OOB:
-  def __init__(self, pipes:List[Tuple[Connection, Connection]]):
-    self.pipes = pipes
+  def __init__(self, pipes:List[Tuple[Connection, Connection]], barrier:mp.Barrier):
+    self.pipes, self.barrier = pipes, barrier
 
   # send some data to a target rank, blocks until data is received
   def send(self, data:Any, target_rank:int):
@@ -22,13 +22,16 @@ class _OOB:
   # receive some data from a target rank, blocks until data is received
   def recv(self, target_rank:int) -> Any:
     return self.pipes[target_rank * getenv("WORLD_SIZE") + getenv("RANK")][0].recv()
+
+  # wait for all processes to reach this point
+  def wait(self): self.barrier.wait()
 OOB = None
 
 def init_oob(world_size:int):
   os.environ["WORLD_SIZE"] = str(world_size)
 
   global OOB
-  OOB = _OOB([mp.Pipe(False) for _ in range(world_size * world_size)])
+  OOB = _OOB([mp.Pipe(False) for _ in range(world_size * world_size)], mp.Barrier(world_size))
 
 # this runs in the spawned process so we can do all the delayed runtime initialization
 def _process_wrap(rank:int, device:str, oob:_OOB, fn:Callable, args=()):
@@ -46,9 +49,9 @@ def _process_wrap(rank:int, device:str, oob:_OOB, fn:Callable, args=()):
     from tinygrad.runtime.ops_gpu import CL
     CL.post_init(device_num)
   elif "HIP" in device:
+    os.environ["HIP_DEFAULT_DEVICE"] = str(device_num) # set this before the import happens
     import extra.hip_wrapper as hip
     from tinygrad.runtime.ops_hip import HIP
-    HIP.default_device = device_num
     hip.hipSetDevice(device_num)
   if DEBUG >= 1: print(f"distributed process {rank} initialized runtime for device {device}")
 
