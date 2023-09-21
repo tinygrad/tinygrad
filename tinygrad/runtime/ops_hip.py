@@ -26,13 +26,6 @@ class _HIP:
     self.device_count = hip.hipGetDeviceCount()
     self.default_device = getenv("HIP_DEFAULT_DEVICE")
     self.allocator = HIPAllocator(hip.hipGetDeviceProperties(self.default_device).totalGlobalMem)
-
-    # enable peer-to-peer access
-    for i in range(self.device_count):
-      for j in range(self.device_count):
-        if i != j:
-          hip.hipSetDevice(i)
-          hip.hipDeviceEnablePeerAccess(j, 0)
   def synchronize(self):
     for i in range(self.device_count):
       hip.hipSetDevice(i)
@@ -43,10 +36,10 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device=str(HIP.default_device), buf=None, allocator=HIP.allocator): super().__init__(size, dtype, buf=buf, allocator=allocator, **{'device': int(device)})
   def _copyin(self, x:np.ndarray):
     hip.hipSetDevice(self._device)
-    hip.hipMemcpyAsync_htod(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, 0)
+    hip.hipMemcpy(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, hip.hipMemcpyHostToDevice)
   def _copyout(self, x:np.ndarray):
     hip.hipSetDevice(self._device)
-    hip.hipMemcpy_dtoh(x.ctypes.data, self._buf, self.size * self.dtype.itemsize)
+    hip.hipMemcpy(x.ctypes.data, self._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToHost)
   def _transfer(self, x):
     hip.hipSetDevice(x._device)
     hip.hipMemcpy(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice)
