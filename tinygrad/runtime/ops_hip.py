@@ -22,21 +22,23 @@ class HIPAllocator(LRUAllocator):
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 
 class _HIP:
-  def __init__(self):
+  def post_init(self, device=None):
+    self.default_device = device or getenv("HIP_DEFAULT_DEVICE")
+    hip.hipSetDevice(self.default_device)
     self.device_count = hip.hipGetDeviceCount()
-    self.default_device = getenv("HIP_DEFAULT_DEVICE")
     self.allocator = HIPAllocator(hip.hipGetDeviceProperties(self.default_device).totalGlobalMem)
   def synchronize(self):
     for i in range(self.device_count):
       hip.hipSetDevice(i)
       hip.hipDeviceSynchronize()
 HIP = _HIP()
+if not getenv("DELAYED_RUNTIME_INIT", False): HIP.post_init()
 
 class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
-  def __init__(self, size, dtype, device=str(HIP.default_device), buf=None, allocator=HIP.allocator): super().__init__(size, dtype, buf=buf, allocator=allocator, **{'device': int(device)})
+  def __init__(self, size, dtype, device=None, buf=None, allocator=None): super().__init__(size, dtype, buf=buf, allocator=allocator or HIP.allocator, **{'device': int(device or HIP.default_device)})
   def _copyin(self, x:np.ndarray):
     hip.hipSetDevice(self._device)
-    hip.hipMemcpy(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, hip.hipMemcpyHostToDevice)
+    hip.hipMemcpyAsync(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, hip.hipMemcpyHostToDevice, 0)
   def _copyout(self, x:np.ndarray):
     hip.hipSetDevice(self._device)
     hip.hipMemcpy(x.ctypes.data, self._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToHost)
