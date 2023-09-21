@@ -13,7 +13,7 @@ def next_power_of_2(x):
 def render_valid(valid):
   return '(' * (len(valid) -1) + ') and '.join(valid) if len(valid) else 'True'
 
-#NOTE Triton requires matching dimensions for load/store, disable this and see TestOps::test_output_padded_conv_transpose2d fail to compile
+#NOTE triton requires matching dimensions for load/store, disable this and see TestOps::test_output_padded_conv_transpose2d fail to compile
 def fill_dims_for_idx(idx, dims):
   return "(" + idx + "+ (" + (f"0*({'+'.join(d for d in dims)})))") if len(dims) else idx
 
