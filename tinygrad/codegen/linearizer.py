@@ -53,34 +53,39 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     assert isinstance(idx.a, SumNode)
     idx_nodes = idx.a.flat_components
     for nd in nds:
-      if idx.__class__ is not ModNode: break
-      if isinstance(nd.a, SumNode):
-        nd_vars = nd.vars()
-        same, others = partition(idx_nodes, lambda x: (x.a if x.__class__ is MulNode else x) in nd_vars)
-        if len(same) != len(nd_vars): continue
-        first = nd.a.flat_components[0]
-        for s in same:
-          var1 = (s.a, s.b) if isinstance(s, MulNode) else (s, 1)
-          var2 = (first.a, first.b) if isinstance(first, MulNode) else (first, 1)
-          if var2[0] == var1[0]:
-            k = var1[1]//var2[1]
-            break
-        else:
+      if not isinstance(idx, ModNode) or not isinstance(nd.a, SumNode): continue
+
+      nd_vars = nd.vars()
+      same, others = partition(idx_nodes, lambda x: (x.a if isinstance(x, MulNode) else x) in nd_vars)
+
+      if len(same) != len(nd_vars): continue
+
+      first = nd.a.flat_components[0]
+      var2 = (first.a, first.b) if isinstance(first, MulNode) else (first, 1)
+
+      for s in same:
+        var1 = (s.a, s.b) if isinstance(s, MulNode) else (s, 1)
+        if var2[0] == var1[0]:
+          k = var1[1] // var2[1]
           break
-        if Variable.sum(same) != k*(nd.a): break
-        left_sum = Variable.sum(others)
-        if k < 0:
-          # TODO: More thought on this
-          mnn = max((-nd.b) + 1, min([-lal.b if isinstance(lal, MulNode) else lal for lal in same]))
-          if (left_sum.min + (-k)*mnn) >= b:
-            ones.append(nd)
-            idx = idx.a - b
-        elif k > 0:
-          if ((nd.b - 1)*k + left_sum.max) < b:
-            ones.append(nd)
-            idx = idx.a
-        break
+      else:
+        continue
+
+      if Variable.sum(same) != k*(nd.a): continue
+      left_sum = Variable.sum(others)
+      if k < 0:
+        # TODO: More thought on this
+        mnn = max((-nd.b) + 1, min([-lal.b if isinstance(lal, MulNode) else lal for lal in same]))
+        if (left_sum.min + (-k)*mnn) >= b:
+          ones.append(nd)
+          idx = idx.a - b
+      elif k > 0:
+        if ((nd.b - 1)*k + left_sum.max) < b:
+          ones.append(nd)
+          idx = idx.a
+      break
     valid = Variable.ands([i for i in nds if i not in ones])
+
 
   def recurse(variables, idx, idy, valid, mem):
     if len(variables) == 0:
@@ -106,6 +111,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     zeros = mem[NumNode(0)]
     if len(set(ones).intersection(zeros)) == 0:
       valid = NumNode(1)
+
   """
   # Simplify sumnodes
   if valid.min == 0 and not isinstance(idx, ModNode):
