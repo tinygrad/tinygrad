@@ -165,34 +165,20 @@ class Transformer:
       self.kv_caches[i] = (cache_k.realize(), cache_v.realize())
     return h.realize()
   def small_tiny_jit(self, tokens, pos, start_pos, temperature, mask, jit_ctx:Optional[Dict[Variable,int]]=None, **kwargs):
-    # cache_k, cache_v = caches[0]
     h = self.embed(tokens, pos, realize=False)
 
-    caches_k = [kwargs[k] for k in kwargs if 'cache_k' in k]
-    caches_v = [kwargs[k] for k in kwargs if 'cache_v' in k]
-    # hi = self.h[0]
-    #
-    # h, cache_k, cache_v = hi(h, caches_k[0], caches_v[0], start_pos=start_pos, mask=mask, jit_ctx=jit_ctx)
-    # cache_k, cache_v = cache_k.realize(), cache_v.realize()
-    # if stop == 2:
-    #   hi = self.h[1]
-    #   h, cache_k2, cache_v2 = hi(h, caches_k[1], caches_v[1], start_pos=start_pos, mask=mask, jit_ctx=jit_ctx)
-    #   return h, (cache_k, cache_v), (cache_k2, cache_v2), None
-    # if stop == 3:
-    #   hi = self.h[1]
-    #   h, cache_k2, cache_v2 = hi(h, caches_k[1], caches_v[1], start_pos=start_pos, mask=mask, jit_ctx=jit_ctx)
-    #   hi = self.h[2]
-    #   h, cache_k3, cache_v3 = hi(h, caches_k[2], caches_v[2], start_pos=start_pos, mask=mask, jit_ctx=jit_ctx)
-    #   return h, ((cache_k, cache_v), (cache_k2, cache_v2), (cache_k3, cache_v3))
-    caches = []
-    for i, (hi, cache_k, cache_v) in enumerate(list(zip(self.h, caches_k, caches_v))):
+    # caches_k = [kwargs[k] for k in kwargs if 'cache_k' in k]
+    # caches_v = [kwargs[k] for k in kwargs if 'cache_v' in k]
+    kv_caches = {k: kwargs[k] for k in kwargs if 'cache' in k}
+    for i, (hi) in enumerate(self.h):
+      cache_k, cache_v = kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}']
       h, cache_k, cache_v = hi(h, cache_k, cache_v, start_pos=start_pos, mask=None, realize=False, jit_ctx=jit_ctx)
-      caches.append((cache_k, cache_v))
+      kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}'] = cache_k, cache_v
     logits = self.lm_head(self.ln_f(h))
-    caches = [(c_k.realize(), c_v.realize()) for (c_k, c_v) in caches]
-    if temperature is not None: return (logits[:, -1, :] / (temperature + 1e-10)).softmax().flatten().realize(), caches
-    return logits.realize(), caches
-  @profile
+    for v in kv_caches.values(): v.realize()
+    if temperature is not None: return (logits[:, -1, :] / (temperature + 1e-10)).softmax().flatten().realize(), kv_caches
+    return logits.realize(), kv_caches
+  # @profile
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
     if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
@@ -202,34 +188,17 @@ class Transformer:
         start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
         pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var + seqlen)))
         pos.lazydata.var_vals[start_pos_var] = start_pos
-        logit_or_softmax, self.kv_caches = self.small_tiny_jit1(tokens, pos, start_pos=start_pos, temperature=temperature, mask=None, jit_ctx={start_pos_var: start_pos},
-                                                                **{f'cache_k{i}':cache_k for i, (cache_k, cache_v) in enumerate(self.kv_caches)}, **{f'cache_v{i}':cache_v for i, (cache_k, cache_v) in enumerate(self.kv_caches)})
-        # ran model in 30.67 ms, 20.12 ms on GPU, 0.33 GOPS, 0.68 GB, 34.05 GB/s
-        # total 31.66 ms
+        logit_or_softmax, self.kv_caches = self.small_tiny_jit1(tokens, pos, start_pos=start_pos, temperature=temperature, mask=None, jit_ctx={start_pos_var: start_pos}, **self.kv_caches)
         return logit_or_softmax
       else:
-        self.kv_caches = [(None, None) for _ in range(self.n_layers)]
+        self.kv_caches = {**{f'cache_k{i}':None  for i in range(self.n_layers)}, **{f'cache_v{i}':None for i in range(self.n_layers)}}
         pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos, start_pos+seqlen)))
         mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize()
         h = self.embed_jitted(tokens, pos)
-        for i, (hi, (cache_k, cache_v)) in enumerate(zip(self.h_jitted, self.kv_caches)):
-          h, cache_k, cache_v = hi(h, cache_k, cache_v, start_pos=start_pos, mask=mask)
-          self.kv_caches[i] = (cache_k, cache_v)
+        for i, hi in enumerate(self.h_jitted):
+          h, cache_k, cache_v = hi(h, None, None, start_pos=start_pos, mask=mask)
+          self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'] = (cache_k, cache_v)
         return self.postprocess_jitted(h, temperature)
-
-      # start_pos_var = Variable("start_pos", 0, MAX_CONTEXT)
-      # # pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var + seqlen)))
-      # pos.lazydata.var_vals[start_pos_var] = start_pos
-      #
-      # logit_or_softmax, caches = self.small_tiny_jit2(tokens, pos, start_pos=start_pos, temperature=temperature, mask=mask, jit_ctx={start_pos_var: start_pos},
-      #                                                **{f'cache_k{i}': cache_k for i, (cache_k, cache_v) in enumerate(self.kv_caches)},
-      #                                                **{f'cache_v{i}': cache_v for i, (cache_k, cache_v) in enumerate(self.kv_caches)})
-      # # ran model in 30.67 ms, 20.12 ms on GPU, 0.33 GOPS, 0.68 GB, 34.05 GB/s
-      # # total 31.66 ms
-      #
-      # for i, c in enumerate(caches):
-      #   self.kv_caches[i] = c
-      # return logit_or_softmax
 
 # **** files and arguments ****
 
