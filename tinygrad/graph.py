@@ -12,7 +12,7 @@ from tinygrad.runtime.lib import RawConst
 if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
 
 # **** debugging and graphing ****
-
+top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#ff8080"}
 G = nx.DiGraph() if nx is not None else None
 cnts: Dict[OpType, int] = defaultdict(int)
 if DEBUG >= 2:
@@ -25,7 +25,11 @@ if GRAPH:
   def save_graph_exit():
     for k,v in cnts.items(): print(k, v)
     if PRUNEGRAPH: prune_graph()
-    print("saving", G)
+    print("saving", G, GRAPHPATH)
+    if not os.path.exists(GRAPHPATH): os.makedirs(GRAPHPATH)
+    for op in top_colors: 
+      G.add_node(op, label=op.__name__, fillcolor=top_colors[op], color='black', style='filled')
+      G.add_edge(op, 0, style='invis')
     nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
     # -Gnslimit=100 can make it finish, but you won't like results
     os.system(f'dot -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
@@ -58,7 +62,6 @@ def log_op(ret: 'LazyBuffer', ast: LazyOp, show_graph: Optional[bool] = None, ph
   cnts[optype] += 1
   if DEBUG >= 6: print(f"{op} : {', '.join([f'{x.shape}-<{nm(x)}>' for x in inp])} -> {ret.shape}-<{nm(ret)}>")
   if show_graph:
-    top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#ff8080"}
     dashed = (optype == LoadOps and hasattr(ret, "_backing")) or (hasattr(ret, "st") and not ret.st.contiguous)  # type: ignore
 
     for x in inp:
