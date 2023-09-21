@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-# pip3 install tiktoken
-
-import os
-os.environ['JIT'] = '1'
-import functools, argparse
+import argparse
 import numpy as np
 from tqdm import trange
 np.set_printoptions(linewidth=200)
@@ -72,9 +68,11 @@ class TransformerBlock:
     self.ln_1 = LayerNorm(dim, norm_eps)
     self.ln_2 = LayerNorm(dim, norm_eps)
 
-  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor], jit_ctx:Optional[Dict[Variable,int]]=None):
+  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor], realize=True, jit_ctx:Optional[Dict[Variable,int]]=None):
     if start_pos > 0 and mask is None and getenv("JIT"):
       start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
+      # if start_pos_var in cache_k.lazydata.var_vals: del cache_k.lazydata.var_vals[start_pos_var]
+
       cache_k = cache_k.reshape(cache_k.shape[0], start_pos_var, cache_k.shape[2], cache_k.shape[3])
       cache_v = cache_v.reshape(cache_v.shape[0], start_pos_var, cache_v.shape[2], cache_v.shape[3])
       # need this because we don't reshape back to int shape in the jitted path and we don't have the correct var_vars in cache
@@ -83,7 +81,10 @@ class TransformerBlock:
 
     output, cache_k, cache_v = self.attn(self.ln_1(x), cache_k, cache_v, start_pos, mask, jit_ctx=jit_ctx)
     h = x + output
-    return (h + self.mlp(self.ln_2(h))).realize(), cache_k.realize(), cache_v.realize()
+    h = (h + self.mlp(self.ln_2(h)))
+    if realize:
+      return h.realize(), cache_k.realize(), cache_v.realize()
+    return h, cache_k, cache_v
 
 class Transformer:
   def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_seq_len=1024):
@@ -97,38 +98,52 @@ class Transformer:
     self.embed_jitted = TinyJit(self.embed)
     self.postprocess_jitted = TinyJit(self.postprocess)
     self.h_jitted = [TinyJit(h.__call__) for h in self.h]
+    self.n_layers = n_layers
 
-  def embed(self, tokens, pos):
+  def embed(self, tokens, pos, realize=True):
     tok_emb = self.wte(tokens)
     pos_emb = self.wpe(pos)
+    if getenv("FP16"): tok_emb, pos_emb = tok_emb.half(), pos_emb.half()
     h = tok_emb + pos_emb
+    if not realize:
+      return h
     return h.realize()
 
   def postprocess(self, x, temperature:Optional[float]):
     logits = self.lm_head(self.ln_f(x))
     if temperature is not None: return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
     return logits.realize()
+  @TinyJit
+  def run_all_layers(self, tokens, pos, start_pos, temperature, jit_ctx:Optional[Dict[Variable,int]]=None, **kwargs):
+    h = self.embed(tokens, pos, realize=False)
+
+    kv_caches = {k: kwargs[k] for k in kwargs if 'cache' in k}
+    for i, hi in enumerate(self.h):
+      h, kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}'] = hi(h, kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}'], start_pos=start_pos, mask=None, realize=False, jit_ctx=jit_ctx)
+    logits = self.lm_head(self.ln_f(h))
+    if temperature is not None: return (logits[:, -1, :] / (temperature + 1e-10)).softmax().flatten().realize(), kv_caches
+    return logits.realize(), kv_caches
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
-    if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
     if seqlen == 1 and start_pos > 0 and getenv("JIT"):
       start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
-      pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var+seqlen)))
+      pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var + seqlen)))
       pos.lazydata.var_vals[start_pos_var] = start_pos
-      h = self.embed_jitted(tokens, pos)
-      for i, (hi, (cache_k, cache_v)) in enumerate(zip(self.h_jitted, self.kv_caches)):
-        h, cache_k, cache_v = hi(h, cache_k, cache_v, start_pos=start_pos, mask=None, jit_ctx={start_pos_var: start_pos})
-        self.kv_caches[i] = (cache_k, cache_v)
-      return self.postprocess_jitted(h, temperature)
+      logit_or_softmax, self.kv_caches = self.run_all_layers(tokens, pos, start_pos=start_pos, temperature=temperature, jit_ctx={start_pos_var: start_pos}, **self.kv_caches)
+      return logit_or_softmax
     else:
+      if start_pos == 0:
+        if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
+        self.kv_caches = {**{f'cache_k{i}':None  for i in range(self.n_layers)}, **{f'cache_v{i}':None for i in range(self.n_layers)}}
+
+      embed, hs, postprocess = (self.embed_jitted, self.h_jitted, self.postprocess_jitted) if getenv("JIT") else (self.embed, self.h, self.postprocess)
       pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos, start_pos+seqlen)))
       mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize()
-      h = self.embed(tokens, pos)
-      for i, (hi, (cache_k, cache_v)) in enumerate(zip(self.h, self.kv_caches)):
-        h, cache_k, cache_v = hi(h, cache_k, cache_v, start_pos=start_pos, mask=mask)
-        self.kv_caches[i] = (cache_k, cache_v)
-      return self.postprocess(h, temperature)
+      h = embed(tokens, pos)
+      for i, hi in enumerate(hs):
+        h, self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'] = hi(h, self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'], start_pos=start_pos, mask=mask)
+      return postprocess(h, temperature)
 
 # **** files and arguments ****
 
@@ -175,14 +190,16 @@ class GPT2:
     start_pos = 0
     for _ in trange(max_length, disable=(timing==True)):
       GlobalCounters.reset()
-      if args.timing: print("")
+      if timing: print("")
       st = GlobalCounters.time_sum_s
+      probs = None
       with Timing("total ", enabled=timing):
         with Timing(f"ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU"+
                     f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                     f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s") if DEBUG else None, enabled=timing):
           probs = self.model(Tensor([toks[start_pos:]]), start_pos, temperature)
         probs_np = probs.numpy()
+        # print('sum', probs_np.sum())
         tok = int(np.random.choice(len(probs_np), p=probs_np))
       start_pos = len(toks)
       toks.append(tok)
