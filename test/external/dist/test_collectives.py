@@ -24,7 +24,7 @@ def run():
   # loop 3 times to make sure it works with the jit
   for _ in range(3):
     # create a tensor to send
-    t = Tensor.zeros(SIZE, SIZE) if rank == 0 else Tensor.ones(SIZE, SIZE)
+    t = Tensor.zeros(SIZE, SIZE) if rank != 0 else Tensor.ones(SIZE, SIZE)
     print(t.numpy())
     t2 = allreduce_jit(t.contiguous().realize(), cache_id="test")
     print(t2.numpy())
@@ -37,14 +37,16 @@ def run():
   for _ in range(3):
     # create a tensor to send
     t = Tensor.ones(SIZE_2, SIZE_2, SIZE_2) if rank == 0 else Tensor.zeros(SIZE_2, SIZE_2, SIZE_2)
+    print(t.numpy())
     t2 = allreduce_jit(t.contiguous().realize(), cache_id="test2")
+    print(t2.numpy())
     assert np.allclose(np.ones((SIZE_2, SIZE_2, SIZE_2)), t2.numpy())
 
   print(f"rank {rank} passed")
 
 if __name__ == "__main__":
   # devices = ["gpu:0", "gpu:1" if not CI else "gpu:0"]
-  devices = ["hip:0", "hip:1"]
+  devices = ["hip:0", "hip:1", "hip:2", "hip:3"]
   world_size = len(devices)
 
   dist.init_oob(world_size)
