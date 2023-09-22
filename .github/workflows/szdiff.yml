@@ -94,5 +94,6 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           skip_unchanged: true
+          recreate: true
           message: |
             This branch currently is behind tinygrad/master. The line count difference bot is disabled.
