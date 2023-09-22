@@ -9,8 +9,6 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Iter
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
 
-infer_cache: Dict[Tuple[int, Any], int] = {}
-
 def is_sym_int(x: Any) -> bool: return isinstance(x, (int, Node))
 
 class Node:
@@ -316,12 +314,12 @@ def create_rednode(typ:Type[RedNode], nodes:List[Node]):
 @functools.lru_cache(maxsize=None)
 def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
-def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int], var_vals_hash=None) -> int: # When hash is provided, cache the infered result for the given var_vals
+def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int], infer_cache=None) -> int: # When infer_cache is provided, cache the infered result for **the given var_vals**.
   if isinstance(a, int): return a
-  if var_vals_hash is not None and (id(a),var_vals_hash) in infer_cache: return infer_cache[(id(a),var_vals_hash)]
+  if infer_cache is not None and id(a) in infer_cache: return infer_cache[id(a)]
   ret = a.substitute({k:Variable.num(v) for k, v in var_vals.items()})
   assert isinstance(ret, NumNode)
-  if var_vals_hash is not None: infer_cache[(id(a),var_vals_hash)] = ret.b
+  if infer_cache is not None: infer_cache[id(a)] = ret.b
   return ret.b
 
 # symbolic int

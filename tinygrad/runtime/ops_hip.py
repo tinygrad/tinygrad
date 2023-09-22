@@ -50,14 +50,14 @@ class HIPGraph:
   def __del__(self):
     if hasattr(self, 'instance'): hip.hipGraphExecDestroy(self.instance)
     if hasattr(self, 'graph'): hip.hipGraphDestroy(self.graph)
-  def __update(self, nodeid, prg, pargs, variables, var_vals_hash=None, updated_args=None):
+  def __update(self, nodeid, prg, pargs, variables, infer_cache=None, updated_args=None):
     graph_node, params, _, _ = self.info[nodeid]
-    global_size, local_size = prg.launch_dims(variables, var_vals_hash=var_vals_hash)
+    global_size, local_size = prg.launch_dims(variables, infer_cache=infer_cache)
     hip.updateKernelNodeParams(params, *pargs, *variables.values(), grid=global_size, block=local_size, updated_args=updated_args)
     hip.hipGraphExecKernelNodeSetParams(self.instance, graph_node, params)
-    self.info[nodeid] = (graph_node, params, prg.mem_estimate, sym_infer(prg.op_estimate, variables, var_vals_hash=var_vals_hash))
-  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries, var_vals_hash=None):
-    for j,v in updatable_entries.items(): self.__update(j, jit_cache[j][0], jit_cache[j][1], jit_cache[j][2], var_vals_hash=var_vals_hash, updated_args=v)
+    self.info[nodeid] = (graph_node, params, prg.mem_estimate, sym_infer(prg.op_estimate, variables, infer_cache=infer_cache))
+  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries, infer_cache=None):
+    for j,v in updatable_entries.items(): self.__update(j, jit_cache[j][0], jit_cache[j][1], jit_cache[j][2], infer_cache=infer_cache, updated_args=v)
     hip.hipGraphLaunch(self.instance)
     GlobalCounters.kernel_count += len(self.info)
     GlobalCounters.global_ops += sum(x[3] for x in self.info)

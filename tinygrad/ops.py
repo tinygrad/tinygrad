@@ -190,9 +190,9 @@ class ASTRunner:
     if not optimizing: CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return self(rawbufs, var_vals, force_wait=force_wait)
 
-  def launch_dims(self, var_vals, var_vals_hash=None):
-    global_size = ([sym_infer(sz, var_vals, var_vals_hash) for sz in self.global_size] + [1]*(3-len(self.global_size))) if self.global_size is not None else self.global_size
-    local_size = ([sym_infer(sz, var_vals, var_vals_hash) for sz in self.local_size] + [1]*(3-len(self.local_size))) if self.local_size is not None else self.local_size
+  def launch_dims(self, var_vals, infer_cache=None):
+    global_size = ([sym_infer(sz, var_vals, infer_cache) for sz in self.global_size] + [1]*(3-len(self.global_size))) if self.global_size is not None else self.global_size
+    local_size = ([sym_infer(sz, var_vals, infer_cache) for sz in self.local_size] + [1]*(3-len(self.local_size))) if self.local_size is not None else self.local_size
     return global_size, local_size
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
