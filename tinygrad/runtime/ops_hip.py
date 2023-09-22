@@ -2,7 +2,7 @@ import numpy as np
 import ctypes, functools
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
-from tinygrad.helpers import DEBUG, getenv, NOSTAT, GlobalCounters
+from tinygrad.helpers import DEBUG, getenv, GlobalCounters
 from tinygrad.ops import Compiled, ASTRunner
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -55,14 +55,13 @@ class HIPGraph:
     global_size, local_size = prg.launch_dims(variables, var_vals_hash=var_vals_hash)
     hip.updateKernelNodeParams(params, *pargs, *variables.values(), grid=global_size, block=local_size, updated_args=updated_args)
     hip.hipGraphExecKernelNodeSetParams(self.instance, graph_node, params)
-    if not NOSTAT: self.info[nodeid] = (graph_node, params, prg.mem_estimate, sym_infer(prg.op_estimate, variables, var_vals_hash=var_vals_hash))
+    self.info[nodeid] = (graph_node, params, prg.mem_estimate, sym_infer(prg.op_estimate, variables, var_vals_hash=var_vals_hash))
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries, var_vals_hash=None):
     for j,v in updatable_entries.items(): self.__update(j, jit_cache[j][0], jit_cache[j][1], jit_cache[j][2], var_vals_hash=var_vals_hash, updated_args=v)
     hip.hipGraphLaunch(self.instance)
-    if not NOSTAT:
-      GlobalCounters.kernel_count += len(self.info)
-      GlobalCounters.global_ops += sum(x[3] for x in self.info)
-      GlobalCounters.global_mem += sum(x[2] for x in self.info)
+    GlobalCounters.kernel_count += len(self.info)
+    GlobalCounters.global_ops += sum(x[3] for x in self.info)
+    GlobalCounters.global_mem += sum(x[2] for x in self.info)
 
 class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device=str(HIP.default_device)): super().__init__(size, dtype, allocator=HIP.allocator, **{'device': int(device)})
