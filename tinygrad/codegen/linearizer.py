@@ -75,7 +75,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
 
       fake_var = Variable("valid_fake", mnn, mxn)
       total = (Variable.sum([x for x in idx_nodes if x not in same]) + fake_var) % idx.b
-      idx = total.substitute({fake_var: same_sum})
+      idx = total.substitute({fake_var: key})
       if not isinstance(idx, ModNode):
         ones += [val[1] for val in same_dict[key]]
         break
