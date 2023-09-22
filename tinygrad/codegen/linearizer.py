@@ -48,38 +48,42 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
 
   # Simplify ModNode if possibe # test_padded_conv_transpose2d, Needs much more thinking
   if valid.min == 0 and isinstance(idx, ModNode) and isinstance(idx.a, SumNode):
-    ones = []
     nodes = valid.nodes if isinstance(valid, AndNode) else [valid]
+    ones = []
     idx_nodes = idx.a.flat_components
-    for nd in nodes:
-      if not isinstance(idx, ModNode) or not isinstance(nd.a, SumNode): continue
-      nd_flat = nd.a.flat_components
-      if not all(isinstance(node, (MulNode, Variable)) for node in nd_flat): continue
+    same_dict = {}
+    for node in nodes:
+      if not isinstance(node.a, SumNode): continue
+      nd_flat = node.a.flat_components
+      nd_vars = node.vars()
 
-      nd_vars = nd.vars()
-      # This is partition, can not use helpers.partition because of pylint
       same = [x for x in idx_nodes if (x.a if isinstance(x, MulNode) else x) in nd_vars]
-      others = [x for x in idx_nodes if x not in same]
 
       if len(same) != len(nd_vars): continue
 
       first_b = nd_flat[0].b if isinstance(nd_flat[0], MulNode) else 1
       second_b = same[0].b if isinstance(same[0], MulNode) else 1
-
-      k = second_b // first_b # What if first_b > second_b
+      k = second_b//first_b
       same_sum = Variable.sum(same)
-      if same_sum == k*(nd.a):
+      if k*(node.a) == same_sum:
+        if same_sum in same_dict: same_dict[same_sum].append((k, node))
+        else: same_dict[same_sum] = [(k, node)]
 
-        mnn, mxn = same_sum.min, same_sum.max
+    for key in same_dict.keys():
+      same = key.flat_components
+      others = [x for x in idx_nodes if x not in same]
+      mnn, mxn = key.min, key.max
+      for vals in same_dict[key]:
+        k, node = vals[0], vals[1]
+        if k < 0: mnn = (-k)*max((-node.b) + 1, min([-lal.b if isinstance(lal, MulNode) else 1 for lal in same]))
+        else: mxn = (node.b - 1)*k
 
-        if k < 0: mnn = (-k)*max((-nd.b) + 1, min([-lal.b if isinstance(lal, MulNode) else 1 for lal in same]))
-        else: mxn = (nd.b - 1)*k
-
-        fake_var = Variable("valid_fake", mnn, mxn)
-        total = (Variable.sum(others) + fake_var)%idx.b
-        idx = total.substitute({fake_var: same_sum})
-        # if not isinstance(idx, ModNode): ones.append(nd) # Not sure about this
-
+      fake_var = Variable("valid_fake", mnn, mxn)
+      total = (Variable.sum(others) + fake_var) % idx.b
+      idx = total.substitute({fake_var: same_sum})
+      if not isinstance(idx, ModNode):
+        ones += [val[1] for val in same_dict[key]]
+        break
     valid = Variable.ands([i for i in nodes if i not in ones])
 
   # Simplify SumNodes
