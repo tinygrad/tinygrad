@@ -9,7 +9,7 @@ from tinygrad.ops import LazyOp, UnaryOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename, sym_render
+from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.codegen.kernel import LocalBuffer
 VariableOrNum = Union[Variable, NumNode, Node]
@@ -22,30 +22,31 @@ class UOps(Enum):
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
+  # This part is substituting variables by just looking at single var LtNodes in valid
+  # Basically if var[0-5] < 3 -> var[0-2]
   if valid.min == 0:
     nodes: List = valid.nodes if isinstance(valid, AndNode) else [valid]
-    var_dict = {sym_render(var):(var, [var.min, var.max]) for var in valid.vars()}
+    var_dict = {var:[var.min, var.max] for var in valid.vars()}
 
     for nd in nodes:
-      init_var: Variable = nd.vars()[0]
-      var = var_dict[sym_render(init_var)][1]
+      var_range = var_dict[nd.vars()[0]]
       if isinstance(nd.a, MulNode):
         if nd.a.b < 0:
-          var[0] = (nd.b // nd.a.b) + 1
+          var_range[0] = (nd.b // nd.a.b) + 1
         elif nd.a.b > 0:
-          var[1] = (nd.b // nd.a.b) - 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
+          var_range[1] = (nd.b // nd.a.b) - 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
       elif isinstance(nd.a, Variable):
-        var[1] = nd.b - 1
+        var_range[1] = nd.b - 1
     # We do not allow NumNode because it is constant
     # TODO: Remove mx != mn
-    sub_dict: dict[Union[Variable, NumNode], Node] = {v:Variable(k, mn, mx) for k, (v, (mn, mx)) in var_dict.items() if mx != mn}
+    sub_dict: dict[Union[Variable, NumNode], Node] = {v:Variable(v.expr, mn, mx) for v, (mn, mx) in var_dict.items() if mx != mn}
     valid = valid.substitute(sub_dict)
     idxy = idxy.substitute(sub_dict)
 
   idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
   idx_vars, idy_vars, val_vars = set(idx.vars()), set(idy.vars()), set(valid.vars())
 
-  # Simplify ModNode if possibe
+  # Simplify ModNode if possibe # test_padded_conv_transpose2d, Needs much more thinking
   if valid.min == 0 and isinstance(idx, ModNode) and isinstance(idx.a, SumNode):
     ones = []
     nodes = valid.nodes if isinstance(valid, AndNode) else [valid]
@@ -56,27 +57,19 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       if not all(isinstance(node, (MulNode, Variable)) for node in nd_flat): continue
 
       nd_vars = nd.vars()
+      # This is partition, can not use helpers.partition because of pylint
+      same = [x for x in idx_nodes if (x.a if isinstance(x, MulNode) else x) in nd_vars]
+      others = [x for x in idx_nodes if x not in same]
 
-      same, others = [], [] # No partition because of pylint error
-      for x in idx_nodes:
-        if (x.a if isinstance(x, MulNode) else x) in nd_vars: same.append(x)
-        else: others.append(x)
+      if len(same) != len(nd_vars): continue
 
-      if not all(isinstance(node, (MulNode, Variable)) for node in same) or len(same) != len(nd_vars): continue
+      first_b = nd_flat[0].b if isinstance(nd_flat[0], MulNode) else 1
+      second_b = same[0].b if isinstance(same[0], MulNode) else 1
 
-      first = nd_flat[0]
-      var2 = (first.a, first.b) if isinstance(first, MulNode) else (first, 1)
-
-      for s in same:
-        var1 = (s.a, s.b) if isinstance(s, MulNode) else (s, 1)
-        if var2[0] == var1[0]:
-          k = var1[1] // var2[1]
-          break
-      else:
-        continue
-
+      k = second_b // first_b # What if first_b > second_b
       same_sum = Variable.sum(same)
       if same_sum == k*(nd.a):
+
         mnn, mxn = same_sum.min, same_sum.max
 
         if k < 0: mnn = (-k)*max((-nd.b) + 1, min([-lal.b if isinstance(lal, MulNode) else 1 for lal in same]))
@@ -90,14 +83,19 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     valid = Variable.ands([i for i in nodes if i not in ones])
 
   # Simplify SumNodes
+  # This part just removes valid nodes if node is exactly same as idx or idy
+  # idx = 3*a + b (+ 5), valid = 3*a + b < 10 # Valid will be removed as idx will go out of bounds
+  # Check for var intersection, removing valid can affect other index
   if valid.min == 0 and not idx_vars.intersection(idy_vars):
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
     flats = [id.flat_components for id in (idx, idy) if isinstance(id, SumNode)]
     sym_sums = [Variable.sum([i for i in flat if not isinstance(i, NumNode)]) for flat in flats]
     ones = [node for sym_sum in sym_sums for node in nds if (node.a == sym_sum) or (-(node.a) == sym_sum)] # type: ignore # AndNode always consists of LtNode
     valid = Variable.ands([i for i in nds if i not in ones])
-  # This is basically expand with custom variable range
+
   # This is the slow part
+  # This part is for brute forcing all possible values of idx, idy and valid
+  # If valid is both 0 and 1 for the same (idx, idy) we can not delete the valid
   if valid.min == 0 and not isinstance(idx, ModNode):
     variables = tuple(val_vars | idy_vars | idx_vars)
     val_infer = valid.expand(variables)
