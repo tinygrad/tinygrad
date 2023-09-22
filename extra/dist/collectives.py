@@ -13,7 +13,7 @@ def allreduce(t:Tensor, cache_id=None) -> Tensor:
 
   # pad to evenly divide
   if flattened.shape[0] % WORLD_SIZE != 0:
-    flattened = Tensor.cat(flattened, Tensor.zeros(WORLD_SIZE - (flattened.shape[0] % WORLD_SIZE)))
+    flattened = Tensor.cat(flattened, Tensor.empty(WORLD_SIZE - (flattened.shape[0] % WORLD_SIZE)))
 
   # chunk
   chunks = flattened.chunk(WORLD_SIZE, dim=0)
