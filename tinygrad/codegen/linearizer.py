@@ -47,7 +47,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
 
   # Simplify ModNode if possibe # test_padded_conv_transpose2d, Needs much more thinking
   if valid.min == 0 and isinstance(idx, ModNode) and isinstance(idx.a, SumNode):
-    nodes, ones = valid.nodes if isinstance(valid, AndNode) else [valid], []
+    nodes = valid.nodes if isinstance(valid, AndNode) else [valid]
     same_dict: Dict[Node, List[Tuple[int, Node]]] = {}
     idx_nodes = idx.a.flat_components
 
@@ -74,10 +74,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       fake_var = Variable("valid_fake", mnn, mxn)
       total = (Variable.sum([x for x in idx_nodes if x not in same]) + fake_var) % idx.b
       idx = total.substitute({fake_var: key})
-      if not isinstance(idx, ModNode):
-        ones += [val[1] for val in same_dict[key]] # TODO: This valid can simplify other equations as well.
-        break
-    valid = Variable.ands([i for i in nodes if i not in ones])
+      # TODO: If idx has no ModNode we may can remove the valid node, but removing it needs careful thinking
 
   # Simplify SumNodes
   # This part just removes valid nodes if node is exactly same as idx or idy
@@ -101,8 +98,6 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     for v, x, y in zip(val_infer, idx_infer, idy_infer): val_dict[v.min].add((x.min, y.min))
 
     if not val_dict[1].intersection(val_dict[0]): valid = NumNode(1)
-
-  if valid.min == 0: print(idx, idy, valid)
 
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
