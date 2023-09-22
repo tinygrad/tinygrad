@@ -249,11 +249,11 @@ def test_loss():
   )
   optimizer = optim.SGD(backbone.parameters() + rpn.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0005)
   img_id = 387655
-  img = [Tensor(build_transforms()(Image.open(BASEDIR/f'train2017/000000{img_id}.jpg').convert("RGB")).numpy())] # TODO this uses torch to transform
+  img = [Tensor(build_transforms()(Image.open(BASEDIR/f'train2017/000000{img_id}.jpg').convert("RGB")).numpy(), requires_grad=True)] # TODO this uses torch to transform
   images = to_image_list(img)
   features = backbone(images.tensors)
   objectness, rpn_box_regression = rpn(features)
-  anchors = [[anchor for anchor in anchor_generator(images, features)[0]]]
+  anchors = [anchor[3:5] for anchor in anchor_generator(images, features)]
   coco = COCO(os.path.join(BASEDIR, 'annotations', 'instances_train2017.json'))
   annotations = coco.loadAnns(coco.getAnnIds(imgIds=[img_id]))
   gt = []
@@ -264,9 +264,6 @@ def test_loss():
   targets = [BoxList(Tensor(gt), image_size=anchors[0][0].size)]
   objectness_loss, regression_loss = loss(anchors, objectness, rpn_box_regression, targets)
   total_loss = objectness_loss + regression_loss
-  print("objectness_loss", objectness_loss)
-  print("regression_loss", regression_loss)
-  print("sum_loss", objectness_loss + regression_loss)
   optimizer.zero_grad()
   total_loss.backward()
   optimizer.step()
@@ -377,12 +374,13 @@ class RPNLossComputation:
     objectness = objectness.squeeze()
     labels, regression_targets = Tensor.cat(*labels, dim=0), Tensor.cat(*regression_targets, dim=0)
     
-    box_loss = smooth_l1_loss(
-        box_regression[sampled_pos_inds],
-        regression_targets[sampled_pos_inds],
-        beta=1.0 / 9,
-        size_average=False,
-    ) / (sampled_inds.numel())
+    # box_loss = smooth_l1_loss(
+    #     box_regression[sampled_pos_inds],
+    #     regression_targets[sampled_pos_inds],
+    #     beta=1.0 / 9,
+    #     size_average=False,
+    # ) / (sampled_inds.numel())
+    box_loss = Tensor(0)
 
     objectness_loss = binary_cross_entropy_with_logits(
         objectness[sampled_inds], labels[sampled_inds]
