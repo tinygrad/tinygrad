@@ -73,7 +73,6 @@ class TransformerBlock:
   def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor], realize=True, jit_ctx:Optional[Dict[Variable,int]]=None):
     if start_pos > 0 and mask is None and getenv("JIT"):
       start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
-
       cache_k = cache_k.reshape(cache_k.shape[0], start_pos_var, cache_k.shape[2], cache_k.shape[3])
       cache_v = cache_v.reshape(cache_v.shape[0], start_pos_var, cache_v.shape[2], cache_v.shape[3])
       # need this because we don't reshape back to int shape in the jitted path and we don't have the correct var_vars in cache
@@ -92,16 +91,16 @@ class Transformer:
     self.wte = Embedding(vocab_size, dim)
     self.wpe = Embedding(max_seq_len, dim)
     self.h = [TransformerBlock(dim, n_heads, norm_eps, linear) for _ in range(n_layers)]
-    self.kv_caches = [(None, None) for _ in range(n_layers)]
+    self.kv_caches = None
+    self.n_layers = n_layers
     self.ln_f = LayerNorm(dim, norm_eps)
     self.lm_head = linear(dim, vocab_size, bias=False)
 
     self.embed_jitted = TinyJit(self.embed)
     self.postprocess_jitted = TinyJit(self.postprocess)
     self.h_jitted = [TinyJit(h.__call__) for h in self.h]
-    self.n_layers = n_layers
 
-  def embed(self, tokens, pos, realize=True):
+  def embed(self, tokens:Tensor, pos:Tensor, realize=True):
     tok_emb = self.wte(tokens)
     pos_emb = self.wpe(pos)
     h = tok_emb + pos_emb
@@ -116,15 +115,14 @@ class Transformer:
     return logits.realize()
 
   @TinyJit
-  def run_all_layers(self, tokens, pos, start_pos, temperature, jit_ctx:Optional[Dict[Variable,int]]=None, **kwargs):
+  def run_all_layers(self, tokens:Tensor, pos:Tensor, start_pos:int, temperature:float, jit_ctx:Optional[Dict[Variable,int]]=None, **kv_cache):
     h = self.embed(tokens, pos, realize=False)
 
-    kv_caches = {}
     for i, hi in enumerate(self.h):
-      h, kv_caches[f'cache_k{i}'], kv_caches[f'cache_v{i}'] = hi(h, kwargs[f'cache_k{i}'], kwargs[f'cache_v{i}'], start_pos=start_pos, mask=None, realize=False, jit_ctx=jit_ctx)
-    for v in kv_caches.values(): v.realize()
+      h, kv_cache[f'cache_k{i}'], kv_cache[f'cache_v{i}'] = hi(h, kv_cache[f'cache_k{i}'], kv_cache[f'cache_v{i}'], start_pos=start_pos, mask=None, realize=False, jit_ctx=jit_ctx)
+    for v in kv_cache.values(): v.realize()
 
-    return self.postprocess(h, temperature), kv_caches
+    return self.postprocess(h, temperature), kv_cache
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
@@ -145,7 +143,6 @@ class Transformer:
       h = embed(tokens, pos)
       for i, hi in enumerate(hs):
         h, self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'] = hi(h, self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'], start_pos=start_pos, mask=mask)
-
       return postprocess(h, temperature)
 
 # **** files and arguments ****
@@ -218,7 +215,7 @@ if __name__ == "__main__":
   parser.add_argument('--prompt', type=str, default="What is the answer to life, the universe, and everything?", help="Phrase to start with")
   parser.add_argument('--count', type=int, default=100, help="Max number of tokens to generate")
   parser.add_argument('--temperature', type=float, default=0.8, help="Temperature in the softmax")
-  parser.add_argument('--model_size', type=str, default="gpt2", help="Size of model to use [gpt2, gpt2-medium, gpt2-large, gpt2-xl]")
+  parser.add_argument('--model_size', type=str, default="gpt2-medium", help="Size of model to use [gpt2, gpt2-medium, gpt2-large, gpt2-xl]")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
   parser.add_argument('--seed', type=int, help="Set the random seed")
   args = parser.parse_args()
