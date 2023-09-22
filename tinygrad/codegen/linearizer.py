@@ -40,8 +40,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     # We do not allow NumNode because it is constant
     # TODO: Remove mx != mn
     sub_dict: dict[Union[Variable, NumNode], Node] = {v:Variable(v.expr, mn, mx) for v, (mn, mx) in var_dict.items() if mx != mn}
-    valid = valid.substitute(sub_dict)
-    idxy = idxy.substitute(sub_dict)
+    valid, idxy = valid.substitute(sub_dict), idxy.substitute(sub_dict)
 
   idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
   idx_vars, idy_vars, val_vars = set(idx.vars()), set(idy.vars()), set(valid.vars())
@@ -67,9 +66,8 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       if k*(node.a) == same_sum: same_dict[same_sum] = same_dict.get(same_sum, []) + [(k, node)]
 
     for key in same_dict.keys():
-      same = key.flat_components # type: ignore # Same is sumnode because node.a is SumNode
-      mnn, mxn = key.min, key.max
-      for k, node in same_dict[key]:
+      same, mnn, mxn = key.flat_components, key.min, key.max # type: ignore # Same is sumnode because node.a is SumNode
+      for k, node in same_dict[key]: # TODO: This part may need more thinking
         if k < 0: mnn = (-k)*max((-node.b) + 1, min([-lal.b if isinstance(lal, MulNode) else 1 for lal in same]))
         else: mxn = (node.b - 1)*k
 
@@ -77,7 +75,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       total = (Variable.sum([x for x in idx_nodes if x not in same]) + fake_var) % idx.b
       idx = total.substitute({fake_var: key})
       if not isinstance(idx, ModNode):
-        ones += [val[1] for val in same_dict[key]]
+        ones += [val[1] for val in same_dict[key]] # TODO: This valid can simplify other equations as well.
         break
     valid = Variable.ands([i for i in nodes if i not in ones])
 
@@ -97,9 +95,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
   # If valid is both 0 and 1 for the same (idx, idy) we can not delete the valid
   if valid.min == 0 and not isinstance(idx, ModNode):
     variables = tuple(val_vars | idy_vars | idx_vars)
-    val_infer = valid.expand(variables)
-    idx_infer = idx.expand(variables)
-    idy_infer = idy.expand(variables)
+    val_infer, idx_infer, idy_infer = valid.expand(variables), idx.expand(variables), idy.expand(variables)
     val_dict: Dict[int, Set[Tuple[int,int]]] = {0:set(), 1:set()}
 
     for v, x, y in zip(val_infer, idx_infer, idy_infer): val_dict[v.min].add((x.min, y.min))
