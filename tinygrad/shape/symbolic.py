@@ -97,6 +97,7 @@ class Node:
     assert b > 0
     if b == 1: return NumNode(0)
     if self.min >= 0 and self.max < b: return self
+    if (self.min//b) == (self.max//b): return self - (b*(self.min//b))
     if self.min < 0: return (self - ((self.min//b)*b)) % b
     return create_node(ModNode(self, b))
 
