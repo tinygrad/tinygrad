@@ -25,7 +25,7 @@ def run():
   for _ in range(3):
     # create a tensor to send
     t = Tensor.zeros(SIZE, SIZE) if rank == 0 else Tensor.ones(SIZE, SIZE)
-    t2 = allreduce_jit(t.contiguous().realize(), cache_id="test")
+    t2 = allreduce_jit(t.realize(), cache_id="test")
     assert np.allclose(np.ones((SIZE, SIZE)), t2.numpy())
 
   # reset jit
@@ -35,7 +35,7 @@ def run():
   for _ in range(3):
     # create a tensor to send
     t = Tensor.ones(SIZE_2, SIZE_2, SIZE_2) if rank == 0 else Tensor.zeros(SIZE_2, SIZE_2, SIZE_2)
-    t2 = allreduce_jit(t.contiguous().realize(), cache_id="test2")
+    t2 = allreduce_jit(t.realize(), cache_id="test2")
     assert np.allclose(np.ones((SIZE_2, SIZE_2, SIZE_2)), t2.numpy())
 
   print(f"rank {rank} passed")
