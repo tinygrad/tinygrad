@@ -14,7 +14,7 @@ class RawShmBuffer(RawBufferMapped):
     if self.cache_id is not None and self.cache_id in SHM_CACHE: shm = SHM_CACHE[self.cache_id]
     else:
       if OSX:
-        with open("/tmp/shm_{device}", "r+b") as f:
+        with open(f"/tmp/shm_{device}", "w+b") as f:
           f.truncate(size * dtype.itemsize)
           shm = mmap.mmap(f.fileno(), size * dtype.itemsize, flags=mmap.MAP_SHARED)
       else:
