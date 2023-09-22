@@ -17,7 +17,7 @@ class TinyJit:
     self.jit_cache: List[Tuple[Any, List[Optional[RawBuffer]], Dict[Variable, int]]] = []
     self.ret: Any = None
     self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], ShapeTracker, DType]]= {}   # (kernel_number, buffer_number) -> (input_name, expected_shapetracker, expected_type)
-    self.batch_executor: Optional[Any] = None
+    self.batch_executor: Any = None
     self.updatable_entries: Dict[int, List[int]] = defaultdict(list) # (kernel_number) -> list(argument id). These are buffers from input + variables.
 
   # add support for instance methods
@@ -43,9 +43,7 @@ class TinyJit:
         for k in self.jit_cache[j][2].keys():
           try: self.jit_cache[j][2][k] = var_vals[k]
           except KeyError: pass
-      if self.batch_executor: self.batch_executor.exec(self.jit_cache, self.updatable_entries, var_vals_hash=var_vals_hash)
-      else:
-        for prg, pargs, variables in self.jit_cache: prg(pargs, variables, jit=True) # type: ignore
+      self.batch_executor.exec(self.jit_cache, self.updatable_entries, var_vals_hash=var_vals_hash)
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 1:
       CacheCollector.start()
@@ -66,12 +64,16 @@ class TinyJit:
 
       # init batch_executor
       try: self.batch_executor = cast(Compiled, Device[Device.DEFAULT]).batch_exec(self.jit_cache)
-      except (ValueError, TypeError): self.batch_executor = None
+      except (ValueError, TypeError): self.batch_executor = BasicBatchExecutor()
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 0:
       self.ret = self.fxn(*args, **kwargs)
     self.cnt += 1
     return self.ret
+
+class BasicBatchExecutor:
+  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries, var_vals_hash=None):
+    for prg, pargs, variables in jit_cache: prg(pargs, variables, jit=True) # type: ignore
 
 class _CacheCollector:
   class _Placeholder:
