@@ -92,7 +92,6 @@ def apply_shapetracker(fxn_for_op, ret, st):
   for v in st.views:
     real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
     real_offset = v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
-    #print(real_shape, v.strides, real_offset)
     # first, we apply the offset
     # then, we make it the correct shape
     # then, we apply permutations
@@ -133,6 +132,7 @@ class Interpreted:
     if not created_context: context[ast] = ret
     if output is not None and output.output_buffer is not None:
       # TODO: does this check have any meaning anymore?
+      # It fails on things like batchnorm initted with zeros
       #assert output.output_buffer.size == ret.size, f"size mismatch, {output.output_buffer.size} != {ret.size}"
       assert output.output_buffer.dtype == ret.dtype
       output.output_buffer._buf = ret._buf
