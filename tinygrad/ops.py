@@ -238,11 +238,12 @@ class Compiled:
     # update the output var_vals from src
     output.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in ast.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 
-    #from extra.utils import print_tree
-    #print_tree(ast)
+    if DEBUG >= 4:
+      from extra.utils import print_tree
+      print_tree(ast)
 
     from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(ast, output, self.linearizer_opts)
+    k = Linearizer(ast, self.linearizer_opts)
 
     # compilation time
     def get_program():
