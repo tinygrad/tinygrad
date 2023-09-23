@@ -5,12 +5,12 @@ from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
 from tinygrad.graph import log_op
-from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, partition, all_int
+from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, partition, all_int, dedup
 from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp
 from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
 
-from tinygrad.runtime.lib import RawConst, RawBuffer, RawBufferMapped, RawBufferTransfer
+from tinygrad.runtime.lib import RawConst, RawBuffer, RawBufferMapped, RawBufferTransfer, buf_is_kernel_arg
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 
@@ -162,7 +162,19 @@ class LazyBuffer:
           else:
             self.op = LazyOp(UnaryOps.CAST, (self.op,), (dtypes.float32, False))
           self.dtype = dtypes.float32
-        self.realized = Device[self.device].exec_ast(self.op, output=self, **self._device_extra_args())
+
+        replacements:Dict[LazyBuffer, LazyOp] = {}
+        realized_bufs = dedup([x.realized for x in self.op.buffers if buf_is_kernel_arg(x)])
+        for x in self.op.buffers:
+          assert x.realized, "buffer isn't realized"
+          x.st.simplify()
+          if isinstance(x.realized, RawConst):
+            replacements[x] = LazyOp(LoadOps.CONST, (), (x.realized._buf, x.realized.dtype, tuple(x.st.views)))
+          elif x.realized in realized_bufs:
+            replacements[x] = LazyOp(LoadOps.BUFFER, (), (realized_bufs.index(x.realized), x.realized.dtype, tuple(x.st.views)))
+          else:
+            raise NotImplementedError(f"not handled {x}")
+        self.realized = Device[self.device].exec_ast(self.op.map_buffers(replacements), output=self, inputs=realized_bufs, **self._device_extra_args())
 
       assert self.realized and isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
       # HACK: allow hot casting of images
