@@ -14,7 +14,7 @@ class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); M
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class TernaryOps(Enum): MULACC = auto(); WHERE = auto() # noqa: E702
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
-class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto() # noqa: E702
+class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); BUFFER = auto() # noqa: E702
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps]]
@@ -87,9 +87,8 @@ Device = _Device()
 
 # **************** for Interpreted Buffers ****************
 
-def apply_shapetracker(fxn_for_op, ret, st):
-  st.simplify()   # TODO: this is generic for Compiled too
-  for v in st.views:
+def apply_shapetracker(fxn_for_op, ret, views):
+  for v in views:
     real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
     real_offset = v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
     # first, we apply the offset
@@ -111,20 +110,22 @@ def apply_shapetracker(fxn_for_op, ret, st):
   return ret
 
 class Interpreted:
-  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_lazybuffer=None, to_underlying=lambda x: x._buf, from_underlying=None):
+  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], to_underlying=lambda x: x._buf, from_underlying=None):
     self.buffer, self.fxn_for_op, self.to_underlying = buffer, fxn_for_op, to_underlying
     self.from_underlying = buffer if from_underlying is None else from_underlying
-    self.from_lazybuffer = from_lazybuffer if from_lazybuffer is not None else lambda x: self.from_underlying(apply_shapetracker(self.fxn_for_op, self.to_underlying(x.realized), x.st))
     self.synchronize = lambda: None
     self.codegen = None
 
-  def exec_ast(self, ast:LazyOp, output=None, context=None, **kwargs):
+  def exec_ast(self, ast:LazyOp, output=None, inputs=None, context=None, **kwargs):
+    if ast.op == LoadOps.BUFFER and LoadOps.BUFFER not in self.fxn_for_op:
+      assert inputs[ast.arg[0]].dtype == ast.arg[1], "dtype mismatch"
+      return self.from_underlying(apply_shapetracker(self.fxn_for_op, self.to_underlying(inputs[ast.arg[0]]), ast.arg[2]))
     if TernaryOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
     created_context = context is None
     if context is None: context = dict()
     if not created_context and ast in context: return context[ast]
-    srcs = [self.exec_ast(x, context=context, **kwargs) if isinstance(x, LazyOp) else self.from_lazybuffer(x) for x in ast.src]
+    srcs = [self.exec_ast(x, inputs=inputs, context=context, **kwargs) for x in ast.src]
     if DEBUG >= 3: st = time.perf_counter()
     ret = self.from_underlying(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
     if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op: ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.to_underlying(ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
@@ -147,12 +148,13 @@ class FlopCounter:
     self.flops, ret = 0, self.flops
     return ret
 shape_fxn_for_op: Dict[Op, Callable] = {
+  LoadOps.BUFFER: lambda arg: (arg[2][-1].shape, arg[1], 0),
   UnaryOps.CAST: lambda self,arg: (self.shape, arg[0], self.consume_flops()),   # cast uses no flops
   **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op != UnaryOps.CAST},
   **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
   **{op:lambda self,new_shape: (new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
   TernaryOps.WHERE: lambda self,y,z: (self.shape, self.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape))}
-InterpretedFlopCounter = Interpreted(FlopCounter, shape_fxn_for_op, lambda x: FlopCounter((x.shape, x.dtype, 0)), lambda x: x)
+InterpretedFlopCounter = Interpreted(FlopCounter, shape_fxn_for_op, lambda x: x)
 def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.exec_ast(ast)
 
 # **************** for Compiled Buffers ****************
@@ -205,7 +207,7 @@ class Compiled:
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                      display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime)
 
-  def exec_ast(self, ast:LazyOp, output, **kwargs):
+  def exec_ast(self, ast:LazyOp, output, inputs, **kwargs):
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
