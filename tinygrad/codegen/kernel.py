@@ -1,12 +1,12 @@
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict
 import itertools
-from tinygrad.ops import LazyOp, MovementOps, FlopCounter, get_lazyop_info, ReduceOps
+from tinygrad.ops import LazyOp, MovementOps, FlopCounter, get_lazyop_info, ReduceOps, LoadOps, LoadBuffer
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType
 from tinygrad.runtime.lib import buf_is_kernel_arg
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
-from tinygrad.shape.view import strides_for_shape
+from tinygrad.shape.view import strides_for_shape, View
 
 class LocalBuffer(NamedTuple):
   name: str
@@ -27,9 +27,13 @@ class LinearizerOptions(NamedTuple):
 
 class Kernel:
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, opts:Optional[LinearizerOptions]=None):
+    self.opts = opts if opts else LinearizerOptions()
+    self.ast, self.key = ast, ast
+    #self.bufs = [x.arg for x in self.ast.get_lazyops() if x.op in LoadOps]
+
+    """
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
-    self.opts = opts if opts else LinearizerOptions()
 
     # get the output buffers
     self.bufs = [output_buffer] + dedup(ast.buffers)
@@ -39,28 +43,33 @@ class Kernel:
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
     self.key = (ast.map_buffers({x:self.arg_bufs.get(x.realized,x) for x in self.bufs}).key, tuple([x.key for x in self.bufs]))
+    """
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
-    self.mem_estimate: int = sum(x.dtype.itemsize*x.size for x in self.arg_bufs.keys())
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
     assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None
 
-    # get earlybufs, before the one reduce op
-    self.earlybufs = dedup(self.reduceop.buffers) if self.reduceop else []
-
     # create new shapetrackers inside this kernel, we will permute them
-    self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]
-    for st in self.sts: st.simplify()
+    #self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]
+    #for st in self.sts: st.simplify()
+    #output_shapetracker = ShapeTracker(self.info.shape)
+    self.bufs = [LoadBuffer(0, self.info.dtype, (View.create(self.info.shape),))] + [x.arg for x in self.ast.get_lazyops() if x.op in LoadOps]
+    self.sts: List[ShapeTracker] = [ShapeTracker(x[2][-1].shape, views=list(x[2])) for x in self.bufs]
+
+    self.mem_estimate: int = sum(x.dtype.itemsize*x.views[-1].size() for x in self.bufs)
+
+    # get earlybufs, before the one reduce op
+    self.earlybufs = [x.arg for x in self.reduceop.get_lazyops() if x.op in LoadOps] if self.reduceop else []
 
     # make the output buffer shape correct in here
-    self.sts[0].reshape(self.info.shape)
+    #self.sts[0].reshape(self.info.shape)
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
     # parameters
@@ -147,6 +156,6 @@ class Kernel:
   def colored_shape(self) -> str: return ' '.join(colored(s, color) for s,color in zip([f"{s:4d}" if isinstance(s, int) else s for s in self.full_shape], self.colors()))
   def printbufs(self, prefix=""):
     for i,st in enumerate(self.sts):
-      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i].realized is not None else str(self.bufs[i]):47s}", st.views)
+      print(prefix, f"{i:3d} {str(self.bufs[i]):47s}", st.views)
     print(self.colored_shape())
 

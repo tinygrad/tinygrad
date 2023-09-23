@@ -167,6 +167,7 @@ class OptimizedKernel(Kernel):
     self.simplify_ones()
 
     # should use HIP tensor cores?
+    """
     if getenv("TC", 1) != 0 and self.bufs[0].device == "HIP" and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
         isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == UnaryOps.CAST and \
         isinstance(self.reduceop.src[0].src[0], LazyOp) and self.reduceop.src[0].src[0].op == BinaryOps.MUL and \
@@ -301,6 +302,7 @@ class OptimizedKernel(Kernel):
 
         # early exit
         return
+    """
 
     if self.opts.has_local and self.opts.has_shared and all(isinstance(s, int) for s in self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
