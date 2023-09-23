@@ -14,7 +14,8 @@ from tqdm import trange
 import numpy as np
 from typing import List, Tuple
 from extra.training import focal_loss, smooth_l1_loss
-from torch import tensor
+from torch import tensor as torch_tensor
+import torch
 from contextlib import redirect_stdout
 
 NUM = getenv("NUM", 18)
@@ -157,6 +158,7 @@ class RetinaNetTrainer:
         checker = None
         if self.debug: 
             checker = RetinaNetMlPerfTrainingChecker(retina)
+            checker.check_anchorgen()
             breakpoint()
             checker.check_model_weights()
             checker.check_anchors(anchors_orig, anchors_flattened_levels)
@@ -334,7 +336,7 @@ class RetinaNetTrainer:
         from torch.nn import SmoothL1Loss
 
         a_, b_ = Tensor([[0.7, 0.2,0.1],[0.1,0.5,0.4],[0.3,0.1,0.6]]), Tensor([[1,0,0],[0,0,1],[0,0,1]])
-        pt_loss = sigmoid_focal_loss(tensor(a_.numpy()),tensor(b_.numpy()), reduction="sum")
+        pt_loss = sigmoid_focal_loss(torch_tensor(a_.numpy()),torch_tensor(b_.numpy()), reduction="sum")
         tg_loss = focal_loss(a_,b_, reduction="none").numpy().sum()
 
 
@@ -365,13 +367,35 @@ class RetinaNetTrainer:
 class RetinaNetMlPerfTrainingChecker:
     def __init__(self, tg_model : RetinaNet) -> None:
         import sys
-        sys.path.insert(0, r'C:\Users\msoro\Desktop\mlperf\training\single_stage_detector\ssd')
+        sys.path.insert(0, r'C:\Users\msoro\Desktop\mlperf\training\single_stage_detector\ssd') # modified for people who don't have 16 CPUs + Nvidia P100 
         from model import retinanet as mlp_retinanet
 
+        self.trainer = RetinaNetTrainer(model=tg_model,debug=True)
         self.model = tg_model
-        self.mlperf_model = mlp_retinanet.retinanet_resnext50_32x4d_fpn(num_classes=tg_model.num_classes, image_size = list(IMAGE_SIZES["debug"]))
-        breakpoint()
-        i = 0
+        self.mlperf_model = mlp_retinanet.retinanet_from_backbone(backbone="resnext50_32x4d",num_classes=tg_model.num_classes, image_size = list(IMAGE_SIZES["debug"]))
+        
+    def check_anchorgen(self):
+        #TODO refactor. Make more robust (can it?)
+        model, anchors_orig, anchors_flattened_levels, optimizer = self.trainer.tg_init_setup()
+        cell_anchors = self.mlperf_model.anchor_generator.cell_anchors
+        self.mlperf_model.training = False
+        sample_image_list = [torch_tensor(np.random.rand(3,200,200))]
+        sample_image_list, _ = self.mlperf_model.transform(sample_image_list,None)
+        feature_maps = self.mlperf_model.backbone.double()(sample_image_list.tensors.double())
+        features = list(feature_maps.values())
+        anchors_one_image = self.mlperf_model.anchor_generator(sample_image_list, features)
+        self.mlperf_model.training = True
+        assert torch.equal(torch_tensor(anchors_flattened_levels),anchors_one_image[0])
+    def check_weight_init(self):
+        raise NotImplementedError
+    def check_head_outputs(self):
+        raise NotImplementedError
+    def check_preds(self):
+        raise NotImplementedError
+    def check_losses(self):
+        raise NotImplementedError
+    
+
 
 if __name__ == "__main__":
     trainer = RetinaNetTrainer(debug=True)
