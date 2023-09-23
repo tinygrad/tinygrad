@@ -5,7 +5,7 @@ from collections import defaultdict
 from enum import Enum, auto
 
 from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
-from tinygrad.ops import LazyOp, UnaryOps, LoadOps
+from tinygrad.ops import LazyOp, UnaryOps, LoadOps, ConstBuffer, MemBuffer
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -148,7 +148,7 @@ class Linearizer(OptimizedKernel):
 
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[UOp]:
     #const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
-    const = acc
+    const = self.bufs[i].val if isinstance(self.bufs[i], ConstBuffer) else acc
 
     expanded_nodes = [idx.expand() for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
@@ -256,7 +256,7 @@ class Linearizer(OptimizedKernel):
     # add global buffers
     #arg_bufs = {}
     for i,buf in enumerate(self.bufs):
-      self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (f"data{buf.i}", buf.dtype))
+      if isinstance(buf, MemBuffer): self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (f"data{buf.idx}", buf.dtype))
     #for buf,name in self.arg_bufs.items():
     #  arg_bufs[buf] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (name, buf.dtype))
     #for i,b in enumerate(self.bufs):
@@ -494,8 +494,7 @@ class Linearizer(OptimizedKernel):
     return self.uops[-1]
 
   def ast_parse(self, x, acc, loaded_buffers, do_reduce=False) -> List[UOp]:
-    if x.op == LoadOps.BUFFER: return loaded_buffers[x.arg]
-    #if x.__class__ is not LazyOp: return loaded_buffers[x]
+    if x.op in [LoadOps.BUFFER, LoadOps.CONST]: return loaded_buffers[x.arg]
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
     # MULACC fusion. TODO: this is copied from Interpreted
