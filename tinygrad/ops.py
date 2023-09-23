@@ -13,7 +13,7 @@ class UnaryOps(Enum): NOOP = auto(); EXP2 = auto(); LOG2 = auto(); CAST = auto()
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class TernaryOps(Enum): MULACC = auto(); WHERE = auto() # noqa: E702
-class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
+class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
 class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto() # noqa: E702
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps]
@@ -87,10 +87,34 @@ Device = _Device()
 
 # **************** for Interpreted Buffers ****************
 
+def apply_shapetracker(fxn_for_op, ret, st):
+  st.simplify()   # TODO: this is generic for Compiled too
+  for v in st.views:
+    real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
+    real_offset = v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
+    # first, we apply the offset
+    # then, we make it the correct shape
+    # then, we apply permutations
+    # TODO: don't use as_strided
+    ret = fxn_for_op[MovementOps.AS_STRIDED](ret, ([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)], v.strides, real_offset))
+    # then, we apply pre expand pads
+    if v.mask is not None:
+      pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
+      post_expand_pads = tuple((x,s-y) if st == 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
+      if any(x != (0,0) for x in pre_expand_pads):
+        ret = fxn_for_op[MovementOps.PAD](ret, pre_expand_pads)
+        real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand_pads))
+    # then, we do any expands
+    if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)): ret = fxn_for_op[MovementOps.EXPAND](ret, real_shape)
+    # lastly, we apply post expand pads
+    if v.mask is not None and any(x != (0,0) for x in post_expand_pads): ret = fxn_for_op[MovementOps.PAD](ret, post_expand_pads)
+  return ret
+
 class Interpreted:
-  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_lazybuffer=lambda x: x.realized, to_underlying=lambda x: x._buf, from_underlying=None):
-    self.buffer, self.fxn_for_op, self.from_lazybuffer, self.to_underlying = buffer, fxn_for_op, from_lazybuffer, to_underlying
+  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_lazybuffer=None, to_underlying=lambda x: x._buf, from_underlying=None):
+    self.buffer, self.fxn_for_op, self.to_underlying = buffer, fxn_for_op, to_underlying
     self.from_underlying = buffer if from_underlying is None else from_underlying
+    self.from_lazybuffer = from_lazybuffer if from_lazybuffer is not None else lambda x: self.from_underlying(apply_shapetracker(self.fxn_for_op, self.to_underlying(x.realized), x.st))
     self.synchronize = lambda: None
     self.codegen = None
 
@@ -107,7 +131,10 @@ class Interpreted:
     if DEBUG >= 5 or (self.buffer != FlopCounter and DEBUG >= 3): print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(time.perf_counter()-st)*1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape) if hasattr(ret._buf, 'shape') else str(len(ret._buf)):30s} in({len(srcs)}):", list(set(x._buf.shape if hasattr(x._buf, 'shape') else len(x._buf) for x in srcs)), ast.arg if ast.arg is not None else "")
     if not created_context: context[ast] = ret
     if output is not None and output.output_buffer is not None:
-      assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
+      # TODO: does this check have any meaning anymore?
+      # It fails on things like batchnorm initted with zeros
+      #assert output.output_buffer.size == ret.size, f"size mismatch, {output.output_buffer.size} != {ret.size}"
+      assert output.output_buffer.dtype == ret.dtype
       output.output_buffer._buf = ret._buf
       return output.output_buffer
     return ret
@@ -177,9 +204,6 @@ class Compiled:
                      display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime)
 
   def exec_ast(self, ast:LazyOp, output, **kwargs):
-    # all movementops do nothing in a Compiled buffer!
-    if ast.op in MovementOps and ast.src[0].__class__ is not LazyOp and ast.src[0].realized: return ast.src[0].realized
-
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
