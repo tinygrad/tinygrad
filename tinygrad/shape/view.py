@@ -1,8 +1,8 @@
 from __future__ import annotations
 import functools
 from typing import Tuple, List, Optional, NamedTuple
-from tinygrad.helpers import prod
-from tinygrad.shape.symbolic import NumNode, is_sym_int, sint, all_int
+from tinygrad.helpers import prod, all_int
+from tinygrad.shape.symbolic import NumNode, is_sym_int, sint
 
 @functools.lru_cache(maxsize=None)
 def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:

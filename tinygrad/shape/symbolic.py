@@ -5,7 +5,6 @@ from math import gcd
 from itertools import product
 from tinygrad.helpers import partition
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Iterator
-from typing_extensions import TypeGuard
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
@@ -323,9 +322,6 @@ def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
 
 # symbolic int
 sint = Union[Node, int]
-
-def all_int(t: Tuple[sint, ...]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
-
 VariableOrNum = Union[Variable, NumNode]
 
 render_python: Dict[Type, Callable] = {

@@ -1,8 +1,7 @@
 import math
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
-from tinygrad.shape.symbolic import all_int
+from tinygrad.helpers import prod, all_int
 
 class BatchNorm2d:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):

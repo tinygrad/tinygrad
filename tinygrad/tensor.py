@@ -7,10 +7,10 @@ from itertools import accumulate
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 
-from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod
+from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device, LoadOps
-from tinygrad.shape.symbolic import sint, all_int
+from tinygrad.shape.symbolic import sint
 
 # An instantiation of the Function is the Context
 class Function:
