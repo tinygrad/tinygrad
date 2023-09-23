@@ -42,7 +42,7 @@ class TinyJit:
         for k in self.jit_cache[j][2].keys():
           try: self.jit_cache[j][2][k] = var_vals[k]
           except KeyError: pass
-      self.batch_executor.exec(self.jit_cache, self.updatable_entries, infer_cache=dict())
+      self.batch_executor.exec(self.jit_cache, self.updatable_entries)
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 1:
       CacheCollector.start()
@@ -61,9 +61,7 @@ class TinyJit:
         #if prg.local_size is None: prg.local_size = prg.optimize_local_size(args, preserve_output=True)  # the JIT can optimize local
       assert set([x[0] for x in self.input_replace.values()]) == set(input_rawbuffers.keys()), "some input tensors not found"
 
-      # init batch_executor
-      try: self.batch_executor = self.jit_cache[0][0].batch_exec(self.jit_cache)
-      except (AttributeError, ValueError): self.batch_executor = BasicBatchExecutor(self.jit_cache)
+      self.batch_executor = self.jit_cache[0][0].batch_exec(self.jit_cache) if hasattr(self.jit_cache[0][0], 'batch_exec') else BasicBatchExecutor(self.jit_cache)
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 0:
       self.ret = self.fxn(*args, **kwargs)

@@ -680,9 +680,3 @@ try:
     return e_code
 except:
   if DEBUG >= 1: print("WARNING: libamdhip64.so or libhiprtc.so not found. HIP support will not work.")
-  raise OSError('cant find libamdhip64.so.')
-
-try:
-  _libhiprtc = ctypes.cdll.LoadLibrary('libhiprtc.so')
-except:
-  raise OSError('cant find libhiprtc.so.')

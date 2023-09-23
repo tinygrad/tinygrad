@@ -178,7 +178,7 @@ from tinygrad.shape.symbolic import Variable, sym_infer
 
 class BasicBatchExecutor:
   def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): pass
-  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries, infer_cache=None):
+  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
     for prg, pargs, variables in jit_cache: prg(pargs, variables, jit=True) # type: ignore
 
 class ASTRunner:
@@ -195,9 +195,9 @@ class ASTRunner:
     if not optimizing: CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return self(rawbufs, var_vals, force_wait=force_wait)
 
-  def launch_dims(self, var_vals, infer_cache=None):
-    global_size = ([sym_infer(sz, var_vals, infer_cache) for sz in self.global_size] + [1]*(3-len(self.global_size))) if self.global_size is not None else self.global_size
-    local_size = ([sym_infer(sz, var_vals, infer_cache) for sz in self.local_size] + [1]*(3-len(self.local_size))) if self.local_size is not None else self.local_size
+  def launch_dims(self, var_vals):
+    global_size = ([sym_infer(sz, var_vals) for sz in self.global_size] + [1]*(3-len(self.global_size))) if self.global_size is not None else self.global_size
+    local_size = ([sym_infer(sz, var_vals) for sz in self.local_size] + [1]*(3-len(self.local_size))) if self.local_size is not None else self.local_size
     return global_size, local_size
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:

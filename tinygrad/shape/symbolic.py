@@ -314,12 +314,10 @@ def create_rednode(typ:Type[RedNode], nodes:List[Node]):
 @functools.lru_cache(maxsize=None)
 def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
-def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int], infer_cache=None) -> int: # When infer_cache is provided, cache the infered result for **the given var_vals**.
+def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
   if isinstance(a, int): return a
-  if infer_cache is not None and id(a) in infer_cache: return infer_cache[id(a)]
   ret = a.substitute({k:Variable.num(v) for k, v in var_vals.items()})
   assert isinstance(ret, NumNode)
-  if infer_cache is not None: infer_cache[id(a)] = ret.b
   return ret.b
 
 # symbolic int
