@@ -1,6 +1,6 @@
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict
 import itertools
-from tinygrad.ops import LazyOp, MovementOps, FlopCounter, get_lazyop_info, ReduceOps, LoadOps, LoadBuffer
+from tinygrad.ops import LazyOp, MovementOps, FlopCounter, get_lazyop_info, ReduceOps, LoadOps, MemBuffer
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType
 from tinygrad.runtime.lib import buf_is_kernel_arg
@@ -60,7 +60,7 @@ class Kernel:
     #self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]
     #for st in self.sts: st.simplify()
     #output_shapetracker = ShapeTracker(self.info.shape)
-    self.bufs = [LoadBuffer(0, self.info.dtype, (View.create(self.info.shape),))] + [x.arg for x in self.ast.get_lazyops() if x.op in LoadOps]
+    self.bufs = [MemBuffer(0, self.info.dtype, (View.create(self.info.shape),))] + [x.arg for x in self.ast.get_lazyops() if x.op in LoadOps]
     self.sts: List[ShapeTracker] = [ShapeTracker(x[2][-1].shape, views=list(x[2])) for x in self.bufs]
 
     self.mem_estimate: int = sum(x.dtype.itemsize*x.views[-1].size() for x in self.bufs)

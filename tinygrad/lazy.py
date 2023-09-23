@@ -6,7 +6,7 @@ from weakref import ref, WeakSet, WeakValueDictionary
 import numpy as np
 from tinygrad.graph import log_op
 from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, partition, all_int, dedup
-from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, LoadBuffer
+from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer
 from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
 
@@ -169,9 +169,9 @@ class LazyBuffer:
           assert x.realized, "buffer isn't realized"
           x.st.simplify()
           if isinstance(x.realized, RawConst):
-            replacements[x] = LazyOp(LoadOps.CONST, (), LoadBuffer(x.realized._buf, x.realized.dtype, tuple(x.st.views)))
+            replacements[x] = LazyOp(LoadOps.CONST, (), ConstBuffer(x.realized._buf, x.realized.dtype, tuple(x.st.views)))
           elif x.realized in realized_bufs:
-            replacements[x] = LazyOp(LoadOps.BUFFER, (), LoadBuffer(realized_bufs.index(x.realized)+1, x.realized.dtype, tuple(x.st.views)))
+            replacements[x] = LazyOp(LoadOps.BUFFER, (), MemBuffer(realized_bufs.index(x.realized)+1, x.realized.dtype, tuple(x.st.views)))
           else:
             raise NotImplementedError(f"not handled {x}")
         op = (self.op.src[0] if self.op.op == MovementOps.RESHAPE else self.op).map_buffers(replacements)
