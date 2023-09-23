@@ -90,6 +90,20 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   ast = self.op.map_buffers(cast(Dict[LazyBuffer, Union[LazyOp, LazyBuffer, str]], real_srcs))
   return LazyOp(MovementOps.RESHAPE, (ast, ), self.shape) if intermediate_shape != self.shape else ast
 
+def _replace_loadops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
+  replacements:Dict[LazyBuffer, LazyOp] = {}
+  realized_bufs = dedup([x.realized for x in op.buffers if buf_is_kernel_arg(x)])
+  for x in op.buffers:
+    assert x.realized, "buffer isn't realized"
+    x.st.simplify()
+    if isinstance(x.realized, RawConst):
+      replacements[x] = LazyOp(LoadOps.CONST, (), ConstBuffer(x.realized._buf, x.realized.dtype, tuple(x.st.views)))
+    elif x.realized in realized_bufs:
+      replacements[x] = LazyOp(LoadOps.BUFFER, (), MemBuffer(realized_bufs.index(x.realized)+1, x.realized.dtype, tuple(x.st.views)))
+    else:
+      raise NotImplementedError(f"not handled {x}")
+  return (op.src[0] if op.op == MovementOps.RESHAPE else op).map_buffers(replacements), realized_bufs
+
 # **** lazy operations ****
 
 def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(cast(LazyBuffer, root.op.src[0])) if getattr(root, 'op', None) and len(root.op.src) == 1 else root
@@ -162,19 +176,7 @@ class LazyBuffer:
           else:
             self.op = LazyOp(UnaryOps.CAST, (self.op,), (dtypes.float32, False))
           self.dtype = dtypes.float32
-
-        replacements:Dict[LazyBuffer, LazyOp] = {}
-        realized_bufs = dedup([x.realized for x in self.op.buffers if buf_is_kernel_arg(x)])
-        for x in self.op.buffers:
-          assert x.realized, "buffer isn't realized"
-          x.st.simplify()
-          if isinstance(x.realized, RawConst):
-            replacements[x] = LazyOp(LoadOps.CONST, (), ConstBuffer(x.realized._buf, x.realized.dtype, tuple(x.st.views)))
-          elif x.realized in realized_bufs:
-            replacements[x] = LazyOp(LoadOps.BUFFER, (), MemBuffer(realized_bufs.index(x.realized)+1, x.realized.dtype, tuple(x.st.views)))
-          else:
-            raise NotImplementedError(f"not handled {x}")
-        op = (self.op.src[0] if self.op.op == MovementOps.RESHAPE else self.op).map_buffers(replacements)
+        op, realized_bufs = _replace_loadops(self.op)
         self.realized = Device[self.device].exec_ast(op, output=self, inputs=realized_bufs, **self._device_extra_args())
 
       assert self.realized and isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"

@@ -7,7 +7,6 @@ from enum import Enum, auto
 from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
 from tinygrad.ops import LazyOp, UnaryOps, LoadOps, ConstBuffer, MemBuffer
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
-from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 from tinygrad.codegen.optimizer import OptimizedKernel

@@ -132,8 +132,8 @@ class Interpreted:
 
   def exec_ast(self, ast:LazyOp, output=None, inputs=None, context=None, **kwargs):
     if ast.op == LoadOps.BUFFER and LoadOps.BUFFER not in self.fxn_for_op:
-      assert inputs[ast.arg[0]-1].dtype == ast.arg[1], "dtype mismatch"
-      return self.from_underlying(apply_shapetracker(self.fxn_for_op, self.to_underlying(inputs[ast.arg[0]-1]), ast.arg[2]))
+      assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
+      return self.from_underlying(apply_shapetracker(self.fxn_for_op, self.to_underlying(inputs[ast.arg.idx-1]), ast.arg.views))
     if TernaryOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
     created_context = context is None
