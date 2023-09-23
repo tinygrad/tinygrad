@@ -47,14 +47,10 @@ class BaseConv:
     assert all_int(self.weight.shape), "does not support symbolic shape"
     bound = 1 / math.sqrt(prod(self.weight.shape[1:]))
     self.bias = Tensor.uniform(out_channels, low=-bound, high=bound) if bias else None
-
-  def initialize_weight(self, out_channels, in_channels, groups):
-    raise NotImplementedError
+  def initialize_weight(self, out_channels, in_channels, groups): raise NotImplementedError
+  def __call__(self, x): raise NotImplementedError
 
 class Conv2d(BaseConv):
-  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
-    super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
-
   def __call__(self, x):
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
