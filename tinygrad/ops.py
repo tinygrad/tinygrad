@@ -90,11 +90,25 @@ Device = _Device()
 def apply_shapetracker(fxn_for_op, ret, st):
   st.simplify()   # TODO: this is generic for Compiled too
   for v in st.views:
+    real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
+    real_offset = v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
+    #print(real_shape, v.strides, real_offset)
+    # first, we apply the offset
+    # then, we make it the correct shape
+    # then, we apply permutations
+    # TODO: don't use as_strided
+    ret = fxn_for_op[MovementOps.AS_STRIDED](ret, ([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)], v.strides, real_offset))
+    # then, we apply pre expand pads
     if v.mask is not None:
-      ret = fxn_for_op[MovementOps.AS_STRIDED](ret, (tuple(y-x for x,y in v.mask), v.strides, v.offset + sum(x*st for (x,_),st in zip(v.mask, v.strides))))
-      ret = fxn_for_op[MovementOps.PAD](ret, tuple((x,s-y) for (x,y),s in zip(v.mask, v.shape)))
-    else:
-      ret = fxn_for_op[MovementOps.AS_STRIDED](ret, (v.shape, v.strides, v.offset))
+      pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
+      post_expand_pads = tuple((x,s-y) if st == 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
+      if any(x != (0,0) for x in pre_expand_pads):
+        ret = fxn_for_op[MovementOps.PAD](ret, pre_expand_pads)
+        real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand_pads))
+    # then, we do any expands
+    if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)): ret = fxn_for_op[MovementOps.EXPAND](ret, real_shape)
+    # lastly, we apply post expand pads
+    if v.mask is not None and any(x != (0,0) for x in post_expand_pads): ret = fxn_for_op[MovementOps.PAD](ret, post_expand_pads)
   return ret
 
 class Interpreted:
