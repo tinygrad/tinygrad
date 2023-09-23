@@ -3,7 +3,7 @@ from weakref import ref
 from collections import defaultdict
 import functools, itertools
 from tinygrad.helpers import DEBUG, DType, merge_dicts
-from tinygrad.ops import RawBuffer, Device, Compiled
+from tinygrad.ops import RawBuffer, Device, Compiled, BasicBatchExecutor
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
@@ -63,16 +63,12 @@ class TinyJit:
 
       # init batch_executor
       try: self.batch_executor = cast(Compiled, Device[Device.DEFAULT]).batch_exec(self.jit_cache)
-      except (ValueError, TypeError): self.batch_executor = BasicBatchExecutor()
+      except ValueError: self.batch_executor = BasicBatchExecutor(self.jit_cache)
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 0:
       self.ret = self.fxn(*args, **kwargs)
     self.cnt += 1
     return self.ret
-
-class BasicBatchExecutor:
-  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries, infer_cache=None):
-    for prg, pargs, variables in jit_cache: prg(pargs, variables, jit=True) # type: ignore
 
 class _CacheCollector:
   class _Placeholder:

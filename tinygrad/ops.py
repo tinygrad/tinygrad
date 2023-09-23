@@ -176,6 +176,11 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 from tinygrad.runtime.lib import RawBuffer, RawConst
 from tinygrad.shape.symbolic import Variable, sym_infer
 
+class BasicBatchExecutor:
+  def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): pass
+  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries, infer_cache=None):
+    for prg, pargs, variables in jit_cache: prg(pargs, variables, jit=True) # type: ignore
+
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
     if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args or not runtime_args['binary']): print(prg)
@@ -209,7 +214,7 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, runtime, synchronize=lambda: None, batch_exec=None):
+  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, runtime, synchronize=lambda: None, batch_exec=BasicBatchExecutor):
     self.buffer, self.linearizer_opts, self.renderer, self.runtime, self.synchronize, self.batch_exec = buffer, linearizer_opts, renderer, runtime, synchronize, batch_exec
     self.method_cache: Dict[Any, ASTRunner] = {}
 

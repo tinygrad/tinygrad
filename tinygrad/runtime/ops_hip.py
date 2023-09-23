@@ -3,7 +3,7 @@ import ctypes, functools
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
 from tinygrad.helpers import DEBUG, getenv, GlobalCounters
-from tinygrad.ops import Compiled, ASTRunner
+from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
@@ -30,10 +30,10 @@ class _HIP:
     self.allocator = HIPAllocator(hip.hipGetDeviceProperties(self.default_device).totalGlobalMem)
 HIP = _HIP()
 
-class HIPGraph:
+class HIPGraph(BasicBatchExecutor):
   def __init__(self, jit_cache: List[Tuple[Any, Any, Any]]):
     self.info: List[Tuple[Any, ...]] = []
-    if not all(isinstance(prg, ASTRunner) and isinstance(prg.clprg, HIPProgram) for prg,_,_ in jit_cache): raise ValueError # Only HIPProgram can be captured.
+    if DEBUG>0 or not all(isinstance(prg, ASTRunner) and isinstance(prg.clprg, HIPProgram) for prg,_,_ in jit_cache): raise ValueError # Only HIPProgram can be captured.
     if len(set([pargs[0]._device for _,pargs,_ in jit_cache])) != 1: raise ValueError # Only one device is supported now.
     capture_stream = hip.hipStreamCreate()
     hip.hipStreamBeginCapture(capture_stream)
