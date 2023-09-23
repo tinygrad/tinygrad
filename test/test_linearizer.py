@@ -5,6 +5,7 @@ from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import Compiled, Device, MovementOps, LazyOp
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
+from tinygrad.lazy import _replace_loadops
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -30,7 +31,7 @@ class TestLinearizer(unittest.TestCase):
     r = a[:-1] + a[1:]
     ast = r.lazydata.op
     r = r.realize()  # realize an output buffer
-    k = Linearizer(ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(_replace_loadops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.upcast()
     k.linearize()
@@ -48,7 +49,7 @@ class TestLinearizer(unittest.TestCase):
     r = a.expand([2]) + b.expand([2])
     ast = r.lazydata.op
     r = r.realize()  # realize an output buffer
-    k = Linearizer(ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(_replace_loadops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.upcast()
     k.linearize()
@@ -63,7 +64,7 @@ class TestLinearizer(unittest.TestCase):
     r = Tensor.stack([a, b])
     ast = r.lazydata.op
     r = r.realize()  # realize an output buffer
-    k = Linearizer(ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(_replace_loadops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.upcast()
     k.linearize()
@@ -79,7 +80,7 @@ class TestLinearizer(unittest.TestCase):
     r = a * b
     ast = r.lazydata.op
     r = r.realize()  # realize an output buffer
-    k = Linearizer(ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(_replace_loadops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
@@ -88,12 +89,14 @@ class TestLinearizer(unittest.TestCase):
 def helper_linearizer_opt(r:Tensor, opts=[]):
   wanna_output = None
   realized_ast = None
+  real_bufs = None
 
   # HACK to get real ast.
   real_dev_exec_ast = Device[Device.DEFAULT].exec_ast
-  def fake_exec_ast(ast, output=None, **kwargs):
-    nonlocal realized_ast
-    x = real_dev_exec_ast(ast, output, **kwargs)
+  def fake_exec_ast(ast, output=None, inputs=None, **kwargs):
+    nonlocal realized_ast, real_bufs
+    x = real_dev_exec_ast(ast, output, inputs, **kwargs)
+    real_bufs = [output.realized] + inputs
     if not(ast.op in MovementOps and ast.src[0].__class__ is not LazyOp and ast.src[0].realized): realized_ast = ast # get last executed
     return x
   Device[Device.DEFAULT].exec_ast = fake_exec_ast
@@ -106,26 +109,26 @@ def helper_linearizer_opt(r:Tensor, opts=[]):
     k.process()
     k.apply_auto_opt(x)
     prg = to_prg(k)
-    k.bufs[0].realized = k.bufs[0].realized.fromCPU(np.zeros(k.bufs[0].shape, dtype=k.bufs[0].dtype.np)) # Zero to check that all values are filled
-    prg.exec(k.bufs, force_wait=True)
-    np.testing.assert_allclose(wanna_output, k.bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
+    real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
+    prg.exec(real_bufs, force_wait=True)
+    np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
 
   # Get baseline, which is not optimized at all.
-  k = Linearizer(realized_ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts)
+  k = Linearizer(realized_ast, Device[Device.DEFAULT].linearizer_opts)
   k.process()
   prg = Device[Device.DEFAULT].to_program(k)
-  prg.exec(k.bufs, force_wait=True)
-  wanna_output = k.bufs[0].toCPU().copy()
+  prg.exec(real_bufs, force_wait=True)
+  wanna_output = real_bufs[0].toCPU().copy()
 
   # Check correctness of handcoded optimiztions.
-  k = Linearizer(realized_ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts)
+  k = Linearizer(realized_ast, Device[Device.DEFAULT].linearizer_opts)
   k.hand_coded_optimizations()
   prg = Device[Device.DEFAULT].to_program(k)
-  k.bufs[0].realized = k.bufs[0].realized.fromCPU(np.zeros(k.bufs[0].shape, dtype=k.bufs[0].dtype.np)) # Zero to check that all values are filled
-  prg.exec(k.bufs, force_wait=True)
-  np.testing.assert_allclose(wanna_output, k.bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
+  real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
+  prg.exec(real_bufs, force_wait=True)
+  np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
   for x in opts: # Check custom transformations if any.
-    check_opt(x, lambda: Linearizer(realized_ast, r.lazydata, Device[Device.DEFAULT].linearizer_opts), Device[Device.DEFAULT].to_program)
+    check_opt(x, lambda: Linearizer(realized_ast, Device[Device.DEFAULT].linearizer_opts), Device[Device.DEFAULT].to_program)
 
 class TestLinearizerOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):
