@@ -26,7 +26,7 @@ class LinearizerOptions(NamedTuple):
   local_max: Optional[List[int]] = None
 
 class Kernel:
-  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, opts:Optional[LinearizerOptions]=None):
+  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
     self.opts = opts if opts else LinearizerOptions()
     self.ast, self.key = ast, ast
     #self.bufs = [x.arg for x in self.ast.get_lazyops() if x.op in LoadOps]

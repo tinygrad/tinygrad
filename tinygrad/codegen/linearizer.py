@@ -256,7 +256,8 @@ class Linearizer(OptimizedKernel):
     # add global buffers
     #arg_bufs = {}
     for i,buf in enumerate(self.bufs):
-      if isinstance(buf, MemBuffer): self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (f"data{buf.idx}", buf.dtype))
+      if isinstance(buf, MemBuffer):
+        self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (f"data{buf.idx}", buf.dtype))
     #for buf,name in self.arg_bufs.items():
     #  arg_bufs[buf] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (name, buf.dtype))
     #for i,b in enumerate(self.bufs):
@@ -494,6 +495,7 @@ class Linearizer(OptimizedKernel):
     return self.uops[-1]
 
   def ast_parse(self, x, acc, loaded_buffers, do_reduce=False) -> List[UOp]:
+    if x.__class__ is not LazyOp: return loaded_buffers[x]    # for LOCAL_BUFFER
     if x.op in [LoadOps.BUFFER, LoadOps.CONST]: return loaded_buffers[x.arg]
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
