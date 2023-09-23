@@ -3,7 +3,7 @@ from weakref import ref
 from collections import defaultdict
 import functools, itertools
 from tinygrad.helpers import DEBUG, DType, merge_dicts
-from tinygrad.ops import RawBuffer, Device, Compiled, BasicBatchExecutor
+from tinygrad.ops import RawBuffer, Device, BasicBatchExecutor
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
@@ -62,8 +62,8 @@ class TinyJit:
       assert set([x[0] for x in self.input_replace.values()]) == set(input_rawbuffers.keys()), "some input tensors not found"
 
       # init batch_executor
-      try: self.batch_executor = cast(Compiled, Device[Device.DEFAULT]).batch_exec(self.jit_cache)
-      except ValueError: self.batch_executor = BasicBatchExecutor(self.jit_cache)
+      try: self.batch_executor = self.jit_cache[0][0].batch_exec(self.jit_cache)
+      except (AttributeError, ValueError): self.batch_executor = BasicBatchExecutor(self.jit_cache)
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 0:
       self.ret = self.fxn(*args, **kwargs)

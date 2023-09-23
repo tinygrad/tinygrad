@@ -186,8 +186,8 @@ class ASTRunner:
     if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args or not runtime_args['binary']): print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
-  def build(self, runtime):
-    self.clprg = runtime(self.name, self.prg, **self.runtime_args)
+  def build(self, runtime, batch_exec=BasicBatchExecutor):
+    self.clprg, self.batch_exec = runtime(self.name, self.prg, **self.runtime_args), batch_exec
     return self
 
   def exec(self, rawbufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False, optimizing=False) -> Optional[float]:
@@ -225,7 +225,7 @@ class Compiled:
       return ASTRunner(k.function_name, src[0], k.global_size, src[1],display_name=k.display_name, runtime_args=src[2]).build(self.runtime)
     return ASTRunner(k.function_name, src, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
-                     display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime)
+                     display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime, self.batch_exec)
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
     #if DEBUG >= 4:
