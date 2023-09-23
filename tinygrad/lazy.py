@@ -1,6 +1,6 @@
 from __future__ import annotations
 import sys, operator, math
-from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast
+from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapping
 from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
@@ -330,7 +330,7 @@ class LazyBuffer:
 
   @property
   def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
-  def map_buffers(self, real_srcs: Dict[LazyBuffer, Union[LazyBuffer, LazyOp, str]]): return real_srcs.get(self, self)
+  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp, str]]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[LazyOp]: return []
   def replace_with_movement_ops(self: LazyBuffer, ops:List[Tuple[MovementOps, Any]]) -> LazyBuffer:
     y = self

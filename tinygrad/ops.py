@@ -1,8 +1,8 @@
 from __future__ import annotations
 import time, importlib, inspect, functools, pathlib
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, NamedTuple
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup, merge_dicts
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, merge_dicts
 from tinygrad.shape.view import View
 from dataclasses import dataclass
 if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
@@ -51,7 +51,7 @@ class LazyOp:
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
-  def map_buffers(self, real_srcs: Dict[LazyBuffer, Union[LazyBuffer, LazyOp, str]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
+  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp, str]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
@@ -139,7 +139,7 @@ class Interpreted:
     created_context = context is None
     if context is None: context = dict()
     if not created_context and ast in context: return context[ast]
-    srcs = [self.exec_ast(x, inputs=inputs, context=context, **kwargs) for x in ast.src]
+    srcs = [self.exec_ast(cast(LazyOp, x), inputs=inputs, context=context, **kwargs) for x in ast.src]
     if DEBUG >= 3: st = time.perf_counter()
     ret = self.from_underlying(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
     if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op: ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.to_underlying(ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
@@ -173,7 +173,7 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 
 # **************** for Compiled Buffers ****************
 
-from tinygrad.runtime.lib import RawBuffer, RawConst, buf_is_kernel_arg
+from tinygrad.runtime.lib import RawBuffer, RawConst
 from tinygrad.shape.symbolic import Variable, sym_infer
 
 class ASTRunner:
@@ -241,9 +241,9 @@ class Compiled:
     # update the output var_vals from src
     output.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in ast.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 
-    if DEBUG >= 4:
-      from extra.utils import print_tree
-      print_tree(ast)
+    #if DEBUG >= 4:
+    #  from extra.utils import print_tree
+    #  print_tree(ast)
 
     from tinygrad.codegen.linearizer import Linearizer
     k = Linearizer(ast, self.linearizer_opts)
@@ -251,7 +251,7 @@ class Compiled:
     # compilation time
     def get_program():
       from tinygrad.codegen.search import kernel_optimize
-      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, output, self.linearizer_opts), self.to_program)
+      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts), self.to_program)
       elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
