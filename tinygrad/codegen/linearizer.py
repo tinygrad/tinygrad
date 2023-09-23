@@ -135,8 +135,8 @@ class Linearizer(OptimizedKernel):
 
   def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
     render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
-    return self.uop(UOps.ALU, dtype, (a, render_b), op, cachable=True)
-  def const(self, b:Union[int,float], dtype=dtypes.int32) -> UOp: return self.uop(UOps.CONST, dtype, tuple(), b, cachable=True)
+    return self.uop(UOps.ALU, dtype, (a, render_b), op)
+  def const(self, b:Union[int,float], dtype=dtypes.int32) -> UOp: return self.uop(UOps.CONST, dtype, tuple(), b)
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
@@ -185,7 +185,7 @@ class Linearizer(OptimizedKernel):
           self.load_cache[key] = self.const(this_const, localtype)
           if valid.min == 0 and valid.max == 1:
             valid_rendered = valid.render(self.render_ops, self)
-            self.load_cache[key] = self.uop(UOps.ALU, localtype, (valid_rendered, self.load_cache[key], self.const(invalid_value, localtype)), TernaryOps.WHERE, cachable=True)
+            self.load_cache[key] = self.uop(UOps.ALU, localtype, (valid_rendered, self.load_cache[key], self.const(invalid_value, localtype)), TernaryOps.WHERE)
         else:
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
@@ -327,7 +327,7 @@ class Linearizer(OptimizedKernel):
       render_loop(reduce_idxs)
 
       # barrier for fast GEMM
-      if self.use_tensor_cores: self.uop(UOps.BARRIER, None, ())
+      if self.use_tensor_cores: self.uop(UOps.BARRIER, None, (), cachable=False)
 
       # compute local aliases
       # TODO: this is garbage code and should be at least moved elsewhere
@@ -388,9 +388,9 @@ class Linearizer(OptimizedKernel):
               i += 8
       else:
         if locals_to_store:
-          self.uop(UOps.BARRIER, None, ())
+          self.uop(UOps.BARRIER, None, (), cachable=False)
           for i, idxs, ll in locals_to_store: self.global_store(i, idxs, ll)
-          self.uop(UOps.BARRIER, None, ())
+          self.uop(UOps.BARRIER, None, (), cachable=False)
 
         # load earlybufs
         loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs})
@@ -406,7 +406,7 @@ class Linearizer(OptimizedKernel):
       if self.group_for_reduce:
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc)  # store accumulators
-        self.uop(UOps.BARRIER, None, ())
+        self.uop(UOps.BARRIER, None, (), cachable=False)
         end_loop(loop_local_idxs)
 
         # create new late reduce local loops and replace local_idxs that have been used
