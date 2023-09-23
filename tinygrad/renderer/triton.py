@@ -3,7 +3,7 @@ from collections import defaultdict
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
 from tinygrad.helpers import dtypes, ImageDType, DEBUG, getenv
 from tinygrad.codegen.linearizer import  UOp, UOps
-from triton.compiler import compile as triton_compile
+from triton.compiler import compile as triton_compile  # type: ignore
 import hashlib
 import math
 import re
@@ -49,7 +49,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   for ru in uops:
     for v in ru.vin:
       child_count[v] += 1
-  
+
   def kk(s): kernel.append("  "*depth+s)
   code_for_op: Final[Dict[Op, Callable]] = {
     UnaryOps.EXP2: lambda x,: f"tl.math.exp2({x})",
@@ -80,7 +80,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       if child_count[u] <=1 or dtypes.is_int(dtype): r[u] = int_div(*[r[x] for x in vin]) if args == BinaryOps.DIV and dtypes.is_int(dtype) else val
       else: kk(f"{ssa(u, 'alu')} = ({val}).to({triton_dtypes[dtype]})")
     elif uop == UOps.LOAD:
-      assert dtype is not None 
+      assert dtype is not None
       if len(vin) == 2: kk(f"{ssa(u, 'val')} = tl.load({r[vin[0]]} + { fill_dims_for_idx(r[vin[1]], dims)}, mask = {render_valid(valid)}).to({triton_dtypes[vin[0].dtype]})")# type: ignore
       else: kk(f"{ssa(u, 'val')} = tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0).to({triton_dtypes[vin[0].dtype]})")# type: ignore
     elif uop == UOps.DEFINE_ACC: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, triton_dtypes[dtype], args).replace('//', '/')}") # type: ignore
@@ -101,15 +101,15 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
         kk(f"{args[1]} = tl.arange({0}, {next_power_of_2(args[2])})")
         local_size.append(args[2])
       r[u] = args[1]
-    else: raise NotImplementedError(f"unimplemented: {uop}")  
-  
+    else: raise NotImplementedError(f"unimplemented: {uop}")
+
   prg = f"import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n@triton.jit\ndef {function_name}("+','.join(f"{buf[0]}" for buf in bufs)+"):\n"
   for i, line in enumerate(list(filter(lambda line: "tl.arange" in line, kernel))): kernel[kernel.index(line)] +=  f"[{', '.join([':' if i == j else 'None' for j in range(len(local_size))])}]"
   prg += "\n".join(kernel)
-  
+
   acc_local_size = 1
   for x in local_size: acc_local_size *= next_power_of_2(x)
-  local_size = [acc_local_size] + [1] * (len(local_size) - 1)  
+  local_size = [acc_local_size] + [1] * (len(local_size) - 1)
 
   if DEBUG >=4: print(prg)
   hsh = hashlib.md5(prg.encode('utf-8')).hexdigest()
