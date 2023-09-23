@@ -4,6 +4,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, NamedTuple
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, dedup, merge_dicts
 from tinygrad.shape.view import View
+from dataclasses import dataclass
 if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -20,12 +21,14 @@ class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps]]
 
-class MemBuffer(NamedTuple):
+@dataclass(frozen=True)
+class MemBuffer:
   idx: int
   dtype: DType
   views: Tuple[View, ...]
 
-class ConstBuffer(NamedTuple):
+@dataclass(frozen=True)
+class ConstBuffer:
   val: Any
   dtype: DType
   views: Tuple[View, ...]
@@ -159,7 +162,7 @@ class FlopCounter:
     self.flops, ret = 0, self.flops
     return ret
 shape_fxn_for_op: Dict[Op, Callable] = {
-  LoadOps.BUFFER: lambda arg: (arg[2][-1].shape, arg[1], 0), LoadOps.CONST: lambda arg: (arg[2][-1].shape, arg[1], 0),
+  LoadOps.BUFFER: lambda arg: (arg.views[-1].shape, arg.dtype, 0), LoadOps.CONST: lambda arg: (arg.views[-1].shape, arg.dtype, 0),
   UnaryOps.CAST: lambda self,arg: (self.shape, arg[0], self.consume_flops()),   # cast uses no flops
   **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op != UnaryOps.CAST},
   **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
