@@ -14,6 +14,7 @@ class LocalBuffer(NamedTuple):
   def __str__(self): return f"localbuffer<{self.name}[{self.size}]>"
 
 class LinearizerOptions(NamedTuple):
+  device: str = ""
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
   supports_float4_alu: bool = True
