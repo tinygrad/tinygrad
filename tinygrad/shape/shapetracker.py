@@ -7,6 +7,45 @@ from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, s
 from tinygrad.shape.view import View
 
 @functools.lru_cache(maxsize=None)
+def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
+  assert len(shape) == len(strides)
+  ret = [(shape[0], strides[0])] if shape else []
+  for i in range(1, len(shape)):
+    if ret[-1][1] == shape[i]*strides[i] or ret[-1][0] == 1:
+      ret[-1] = (ret[-1][0] * shape[i], strides[i])
+    elif shape[i] == 1:
+      continue
+    else:
+      ret.append((shape[i], strides[i]))
+  return tuple(ret)
+
+def expr_node_mask(view:View, idx, valid=None) -> Node:
+  expr = [valid] if valid is not None else []
+  if view.mask is not None:
+    acc = 1
+    for ns,(x,y) in reversed(list(zip(view.shape, view.mask))):
+      if x != 0 or y != ns:
+        base = ((idx//acc) % ns)
+        expr += [base >= x, base < y]
+      acc *= ns
+  return Variable.ands(expr)
+
+# generate an expression if you have a single idx variable
+def expr_node(view:View, idx=None) -> Node:
+  if idx is None: idx = Variable('idx', 0, prod(view.shape)-1)
+  ret: List[Node] = [Variable.num(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
+  acc = 1
+  for d,s in reversed(to_shape_strides(view.shape, view.strides)):
+    ret.append(((idx//acc)%d)*s)
+    acc *= d
+  return Variable.sum(ret)
+
+# generate an expression if you have a variable or expression for each index
+def expr_idxs(view:View, idxs) -> Node:
+  assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
+  return Variable.sum([Variable.num(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])
+
+@functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if vm2.mask: return None  # this isn't supported yet
   mst = ShapeTracker(vm1.shape, [vm2, vm1])
@@ -70,8 +109,8 @@ class ShapeTracker:
   def _expr_idx(self, idx, valid) -> Tuple[Node, Node]:
     for v in reversed(self.views[0:-1]):
       if valid.max == 0: return Variable.num(-1), valid
-      valid = v.expr_node_mask(idx, valid)
-      idx = v.expr_node(idx)
+      valid = expr_node_mask(v, idx, valid)
+      idx = expr_node(v, idx)
     return idx, valid
 
   def simplify(self):
@@ -84,13 +123,13 @@ class ShapeTracker:
 
   def expr_idxs(self, idxs=None):
     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
-    idx = self.views[-1].expr_idxs(tuple(idxs))
-    valid = self.views[-1].expr_node_mask(idxs_to_idx(self.views[-1].shape, tuple(idxs)))
+    idx = expr_idxs(self.views[-1], tuple(idxs))
+    valid = expr_node_mask(self.views[-1], idxs_to_idx(self.views[-1].shape, tuple(idxs)))
     return self._expr_idx(idx, valid)
 
   def expr_node(self, idx='idx'):
     if idx.__class__ is str: idx = Variable(idx, 0, prod(self.shape)-1)
-    return self._expr_idx(self.views[-1].expr_node(idx), self.views[-1].expr_node_mask(idx))
+    return self._expr_idx(expr_node(self.views[-1], idx), expr_node_mask(self.views[-1], idx))
 
   def axis_is_masked(self, axis) -> bool:
     _, valid = self.expr_idxs()
