@@ -1,4 +1,3 @@
-from abc import ABC
 import math
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
@@ -40,7 +39,7 @@ class BatchNorm2d:
 def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
   return Conv2d(in_channels, out_channels, (kernel_size,), stride, padding, dilation, groups, bias)
 
-class BaseConv(ABC):
+class BaseConv:
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
