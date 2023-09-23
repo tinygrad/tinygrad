@@ -243,7 +243,7 @@ class LazyBuffer:
     srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
     return create_lazybuffer(self.device, ShapeTracker(new_shape), ReduceOps, LazyOp(op, srcs, new_shape), self.dtype, self.var_vals)
 
-  def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+  def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if any(not isinstance(s, int) for s in self.shape) or prod(self.shape) // prod(new_shape) < 32768: return self._reduce_op(op, new_shape) # The amount of work should be big enough to take the benefit of "2 kernels" approach.
     heuristic, divisor, dim_to_split = max(((divisor := math.gcd(256, old))/(stride or math.inf), divisor, i) for i, (old, new, stride) in enumerate(zip(self.shape, new_shape, self.st.real_strides())) if old != new) # type: ignore
     if divisor < 16 or heuristic < 0.1: return self._reduce_op(op, new_shape) # Choose largest divisor (>=16) to split on, penalize large strides.
@@ -289,7 +289,7 @@ class LazyBuffer:
         src, rop = self.op.src[0], self.op.op
         src.children.discard(self)
         del self  # TODO: why doesn't this delete remove it from the children
-        return src.permute(arg).reduce_op(cast(ReduceOps, rop), narg)
+        return src.permute(arg).r(cast(ReduceOps, rop), narg)
 
       # move permutes before expands (always, this is safe)
       if self.op.op == MovementOps.EXPAND:
