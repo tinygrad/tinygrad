@@ -251,7 +251,7 @@ class Compiled:
     # compilation time
     def get_program():
       from tinygrad.codegen.search import kernel_optimize
-      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program)
+      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program, [output.realized]+inputs)
       elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
