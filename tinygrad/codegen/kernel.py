@@ -44,8 +44,7 @@ class Kernel:
 
     # create new shapetrackers inside this kernel, we will permute them
     self.bufs = [MemBuffer(0, self.info.dtype, (View.create(self.info.shape),))] + dedup([x.arg for x in self.ast.get_lazyops() if x.op in LoadOps])
-    self.sts: List[ShapeTracker] = [ShapeTracker(x.views[-1].shape, views=list(x.views)) for x in self.bufs]
-    for st in self.sts: st.simplify()
+    self.sts: List[ShapeTracker] = [ShapeTracker(x.views).simplify() for x in self.bufs]
 
     self.mem_estimate: int = sum(x.dtype.itemsize*x.views[-1].size() for x in self.bufs)
 

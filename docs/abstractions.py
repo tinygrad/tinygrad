@@ -326,7 +326,7 @@ void E_1(float* data0) {
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # create a virtual (10, 10) Tensor. this is just a shape, there's no actual tensor
-a = ShapeTracker((10, 10))
+a = ShapeTracker.from_shape((10, 10))
 
 # you'll see it has one view. the (10, 1 are the strides)
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (10, 1), 0)])
