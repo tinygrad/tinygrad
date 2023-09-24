@@ -1,9 +1,8 @@
 from typing import Tuple, List, cast, Optional
 import itertools, math, os
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
-from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp
+from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp, LoadOps
 from tinygrad.codegen.kernel import Kernel, LocalBuffer
-from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 
@@ -167,14 +166,14 @@ class OptimizedKernel(Kernel):
     self.simplify_ones()
 
     # should use HIP tensor cores?
-    if getenv("TC", 1) != 0 and self.bufs[0].device == "HIP" and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
+    if getenv("TC", 1) != 0 and self.opts.device == "HIP" and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
         isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == UnaryOps.CAST and \
         isinstance(self.reduceop.src[0].src[0], LazyOp) and self.reduceop.src[0].src[0].op == BinaryOps.MUL and \
-        isinstance(self.reduceop.src[0].src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[0].src[1], LazyBuffer) and self.opts.has_local and \
-        self.reduceop.src[0].src[0].src[0].dtype == dtypes.half and self.reduceop.src[0].src[0].src[1].dtype == dtypes.half:
+        self.reduceop.src[0].src[0].src[0].op == LoadOps.BUFFER and self.reduceop.src[0].src[0].src[1].op == LoadOps.BUFFER and self.opts.has_local and \
+        cast(LazyOp, self.reduceop.src[0].src[0].src[0]).arg.dtype == dtypes.half and cast(LazyOp, self.reduceop.src[0].src[0].src[1]).arg.dtype == dtypes.half:
       # HIP tensor cores are 16x16x16
-      buf0 = self.bufs.index(self.reduceop.src[0].src[0].src[0])
-      buf1 = self.bufs.index(self.reduceop.src[0].src[0].src[1])
+      buf0 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[0].src[0]).arg)
+      buf1 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[0].src[1]).arg)
       buf0_strides = self.sts[buf0].real_strides()
       buf1_strides = self.sts[buf1].real_strides()
       axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%16 == 0 and i < self.first_reduce]
@@ -227,13 +226,13 @@ class OptimizedKernel(Kernel):
 
     # should use METAL tensor cores?
     # first, confirm it's a straightforward mulacc on a device with real locals
-    tensor_cores_allowed = getenv("TC", 1) != 0 and (getenv("TC", 1) == 2 or (self.bufs[0].device == "METAL" and os.uname().machine == "arm64"))
+    tensor_cores_allowed = getenv("TC", 1) != 0 and (getenv("TC", 1) == 2 or (self.opts.device == "METAL" and os.uname().machine == "arm64"))
     if tensor_cores_allowed and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
         isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
-        isinstance(self.reduceop.src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[1], LazyBuffer) and self.opts.has_local:
+        self.reduceop.src[0].src[0].op == LoadOps.BUFFER and self.reduceop.src[0].src[1].op == LoadOps.BUFFER and self.opts.has_local:
       # METAL tensor cores are 8x8x8, with 2 elements per thread in the 32 thread warp
-      buf0 = self.bufs.index(self.reduceop.src[0].src[0])
-      buf1 = self.bufs.index(self.reduceop.src[0].src[1])
+      buf0 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[0]).arg)
+      buf1 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[1]).arg)
       buf0_strides = self.sts[buf0].real_strides()
       buf1_strides = self.sts[buf1].real_strides()
       axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]

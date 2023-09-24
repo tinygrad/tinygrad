@@ -5,9 +5,8 @@ from collections import defaultdict
 from enum import Enum, auto
 
 from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
-from tinygrad.ops import LazyOp, UnaryOps
+from tinygrad.ops import LazyOp, UnaryOps, LoadOps, ConstBuffer, MemBuffer
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
-from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 from tinygrad.codegen.optimizer import OptimizedKernel
@@ -128,11 +127,6 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
 class Linearizer(OptimizedKernel):
-  def get_buffer_name(self, i):
-    if self.bufs[i].__class__ == LocalBuffer: return self.bufs[i].name
-    assert self.bufs[i].realized.__class__ is not RawConst  # constants shouldn't be loaded with memops
-    return self.arg_bufs[self.bufs[i].realized]
-
   def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
     render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
     return self.uop(UOps.ALU, dtype, (a, render_b), op)
@@ -147,7 +141,7 @@ class Linearizer(OptimizedKernel):
     AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[UOp]:
-    const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
+    const = self.bufs[i].val if isinstance(self.bufs[i], ConstBuffer) else acc
 
     expanded_nodes = [idx.expand() for idx in idxs]
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
@@ -176,7 +170,7 @@ class Linearizer(OptimizedKernel):
         idx, valid = g_idx.substitute(substitute), g_valid.substitute(substitute)
         localtype = dtypes.float32
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
-      key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
+      key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else (self.bufs[i].idx if isinstance(self.bufs[i], MemBuffer) else self.bufs[i].name)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
         if acc is not None:
           assert valid.min == 1
@@ -253,15 +247,13 @@ class Linearizer(OptimizedKernel):
     self.loop_uops: Dict[str, UOp] = {}
 
     # add global buffers
-    arg_bufs = {}
-    for buf,name in self.arg_bufs.items():
-      arg_bufs[buf] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (name, buf.dtype))
-    for i,b in enumerate(self.bufs):
-      if b.realized in arg_bufs: self.buf_uops[i] = arg_bufs[b.realized]
-    # add variables from symbolic shapes
-    for var in sorted(set(v for buf in self.ast.buffers for v in buf.var_vals), key=lambda k: k.key):
-      assert var.expr is not None
-      self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), (var.expr, dtypes._arg_int32))
+    for i,buf in enumerate(self.bufs):
+      if isinstance(buf, MemBuffer):
+        self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (f"data{buf.idx}", buf.dtype))
+    if self.var_vals:
+      for var in sorted(set(self.var_vals), key=lambda k: k.key):
+        assert var.expr is not None
+        self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), (var.expr, dtypes._arg_int32))
     # define local buffers
     for lb in self.local_alias.values():
       self.buf_uops[self.bufs.index(lb)] = self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), (lb.name, self.sts[self.bufs.index(lb)].size()))
@@ -368,7 +360,7 @@ class Linearizer(OptimizedKernel):
 
       # copy in any global buffers
       if self.use_tensor_cores:
-        if self.bufs[0].device == "METAL":
+        if self.opts.device == "METAL":
           if 2 * len(acc) == len(locals_to_store[0][2]) * len(locals_to_store[1][2]):
             i = 0
             for y0,y1 in zip(locals_to_store[1][2][::2], locals_to_store[1][2][1::2]):
@@ -380,7 +372,7 @@ class Linearizer(OptimizedKernel):
             for i in range(0, len(acc), 2):
               for y0,y1,x0,x1 in zip(locals_to_store[1][2][:k], locals_to_store[1][2][k:], locals_to_store[0][2][k*i:], locals_to_store[0][2][k*i+k:]):
                 self.uop(UOps.WMMA, None, (x0, x1, y0, y1, acc[i], acc[i+1]), "METAL")
-        elif self.bufs[0].device == "HIP":
+        elif self.opts.device == "HIP":
           i = 0
           for y in range(0, len(locals_to_store[1][2]), 0x10):
             for x in range(0, len(locals_to_store[0][2]), 0x10):
@@ -491,7 +483,8 @@ class Linearizer(OptimizedKernel):
     return self.uops[-1]
 
   def ast_parse(self, x, acc, loaded_buffers, do_reduce=False) -> List[UOp]:
-    if x.__class__ is not LazyOp: return loaded_buffers[x]
+    if x.__class__ is not LazyOp: return loaded_buffers[x]    # for LOCAL_BUFFER
+    if x.op in [LoadOps.BUFFER, LoadOps.CONST]: return loaded_buffers[x.arg]
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
     # MULACC fusion. TODO: this is copied from Interpreted
