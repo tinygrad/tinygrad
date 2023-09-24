@@ -174,7 +174,6 @@ class OpNode(Node):
   def get_bounds(self) -> Tuple[int, int]: pass
 
 class LtNode(OpNode):
-  def __mul__(self, b: Union[Node, int]): return (self.a*b) < (self.b*b)
   def __floordiv__(self, b: Union[Node, int], _=False): return (self.a//b) < (self.b//b)
   def get_bounds(self) -> Tuple[int, int]:
     if isinstance(self.b, int):
@@ -296,7 +295,6 @@ class SumNode(RedNode):
     return new_nodes
 
 class AndNode(RedNode):
-  def __mul__(self, b: Union[Node, int]): Variable.ands([x*b for x in self.nodes])
   def __floordiv__(self, b: Union[Node, int], _=True): return Variable.ands([x//b for x in self.nodes])
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node:
     subed = []
