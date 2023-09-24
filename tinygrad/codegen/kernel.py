@@ -27,8 +27,9 @@ class LinearizerOptions(NamedTuple):
 class Kernel:
   def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None, var_vals=None):
     self.opts = opts if opts else LinearizerOptions()
-    self.ast, self.key = ast, ast
+    self.ast = ast
     self.var_vals = var_vals
+    self.key = (ast, tuple(var_vals.keys())) if var_vals else ast
     #self.bufs = [x.arg for x in self.ast.get_lazyops() if x.op in LoadOps]
 
     """
