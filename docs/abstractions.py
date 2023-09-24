@@ -263,7 +263,6 @@ class Linearizer:
   uops: List[UOp]
 
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
 result = Tensor(2).realize() + Tensor(3).realize()
 
 # use the real Linearizer to linearize 2+3

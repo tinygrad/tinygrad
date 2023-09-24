@@ -222,23 +222,6 @@ class Compiled:
                      display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime)
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
-    # check if we can reuse the output buffer
-    # if it's aliased, don't use it
-    # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
-    output.realized = output.output_buffer
-    if output.realized:
-      if output.realized.__class__ is RawConst: output.realized = None  # can't assign to RawConst
-      for a in ast.buffers:
-        if a.realized == output.realized and not a.st.contiguous:
-          output.realized = None
-          break
-
-    # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-    if not output.realized: output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
-    else:
-      from tinygrad.jit import CacheCollector
-      CacheCollector._mark_output_buffer(output.output_buffer)
-
     #if DEBUG >= 4:
     #  from extra.utils import print_tree
     #  print_tree(ast)
@@ -260,6 +243,24 @@ class Compiled:
       prg = get_program()
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
+
+    # check if we can reuse the output buffer
+    # if it's aliased, don't use it
+    # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
+    output.realized = output.output_buffer
+    if output.realized:
+      if output.realized.__class__ is RawConst: output.realized = None  # can't assign to RawConst
+      for a in inputs:
+        # TODO: if this is contiguous it's fine
+        if a == output.realized:
+          output.realized = None
+          break
+
+    # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
+    if not output.realized: output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
+    else:
+      from tinygrad.jit import CacheCollector
+      CacheCollector._mark_output_buffer(output.output_buffer)
 
     prg.exec([output.realized]+inputs, var_vals=var_vals)
     return output.realized

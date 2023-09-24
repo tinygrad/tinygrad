@@ -141,7 +141,6 @@ class Linearizer(OptimizedKernel):
     AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
   def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[UOp]:
-    #const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
     const = self.bufs[i].val if isinstance(self.bufs[i], ConstBuffer) else acc
 
     expanded_nodes = [idx.expand() for idx in idxs]
