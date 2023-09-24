@@ -1,5 +1,9 @@
 import ctypes
 from tinygrad.helpers import DEBUG
+import sys
+import numpy as np
+from typing import Any, Dict, List, Tuple
+from dataclasses import dataclass
 
 try:
   _libhip = ctypes.cdll.LoadLibrary("libamdhip64.so")
@@ -58,6 +62,180 @@ try:
     status = _libhip.hipEventElapsedTime(ctypes.byref(t), start, stop)
     hipCheckStatus(status)
     return t.value
+
+  ## Stream Management
+
+  # Stream capture modes:
+  hipStreamCaptureModeGlobal = 0
+  hipStreamCaptureModeThreadLocal = 1
+  hipStreamCaptureModeRelaxed = 2
+
+  _libhip.hipStreamCreate.restype = int
+  _libhip.hipStreamCreate.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
+  def hipStreamCreate():
+    ptr = ctypes.c_void_p()
+    status = _libhip.hipStreamCreate(ctypes.byref(ptr))
+    hipCheckStatus(status)
+    return ptr
+
+  _libhip.hipStreamDestroy.restype = int
+  _libhip.hipStreamDestroy.argtypes = [ctypes.c_void_p]
+  def hipStreamDestroy(stream):
+    status = _libhip.hipStreamDestroy(stream)
+    hipCheckStatus(status)
+
+  _libhip.hipStreamBeginCapture.restype = int
+  _libhip.hipStreamBeginCapture.argtypes = [ctypes.c_void_p, ctypes.c_int]
+  def hipStreamBeginCapture(stream, mode=hipStreamCaptureModeGlobal):
+    t = ctypes.c_float()
+    status = _libhip.hipStreamBeginCapture(stream, mode)
+    hipCheckStatus(status)
+
+  _libhip.hipStreamEndCapture.restype = int
+  _libhip.hipStreamEndCapture.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+  def hipStreamEndCapture(stream):
+    ptr = ctypes.c_void_p()
+    status = _libhip.hipStreamEndCapture(stream, ctypes.byref(ptr))
+    hipCheckStatus(status)
+    return ptr
+
+  _libhip.hipStreamGetCaptureInfo_v2.restype = int
+  _libhip.hipStreamGetCaptureInfo_v2.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+  def hipStreamGetCaptureInfo_v2(stream):
+    status_out = ctypes.c_void_p()
+    id_out = ctypes.c_ulonglong()
+    graph_out = ctypes.c_void_p()
+    deps_out = ctypes.POINTER(ctypes.c_void_p)()
+    num_deps = ctypes.c_size_t()
+    status = _libhip.hipStreamGetCaptureInfo_v2(stream, ctypes.byref(status_out), ctypes.byref(id_out), ctypes.byref(graph_out), ctypes.byref(deps_out), ctypes.byref(num_deps))
+    hipCheckStatus(status)
+    deps = [ctypes.cast(deps_out[i], ctypes.c_void_p) for i in range(num_deps.value)]
+    return status_out, id_out.value, graph_out, deps
+
+  hipStreamAddCaptureDependencies = 0
+  hipStreamSetCaptureDependencies = 1
+
+  _libhip.hipStreamUpdateCaptureDependencies.restype = int
+  _libhip.hipStreamUpdateCaptureDependencies.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint]
+  def hipStreamUpdateCaptureDependencies(stream, deps, flags=hipStreamAddCaptureDependencies):
+    deps_in = (ctypes.c_void_p * len(deps))()
+    deps_in[:] = deps
+    num_deps = ctypes.c_size_t()
+    num_deps.value = len(deps)
+    flags_in = ctypes.c_uint()
+    flags_in.value = flags
+    status = _libhip.hipStreamUpdateCaptureDependencies(stream, deps_in, num_deps, flags_in)
+    hipCheckStatus(status)
+
+
+  ## Graph Management
+
+  _libhip.hipGraphInstantiate.restype = int
+  _libhip.hipGraphInstantiate.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+  def hipGraphInstantiate(graph):
+    ptr = ctypes.c_void_p()
+    status = _libhip.hipGraphInstantiate(ctypes.byref(ptr), graph, 0, 0, 0)
+    hipCheckStatus(status)
+    return ptr
+
+  _libhip.hipGraphDestroy.restype = int
+  _libhip.hipGraphDestroy.argtypes = [ctypes.c_void_p]
+  def hipGraphDestroy(graph):
+    status = _libhip.hipGraphDestroy(graph)
+    hipCheckStatus(status)
+
+  _libhip.hipGraphExecDestroy.restype = int
+  _libhip.hipGraphExecDestroy.argtypes = [ctypes.c_void_p]
+  def hipGraphExecDestroy(gexec):
+    status = _libhip.hipGraphExecDestroy(gexec)
+    hipCheckStatus(status)
+
+  _libhip.hipGraphLaunch.restype = int
+  _libhip.hipGraphLaunch.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+  def hipGraphLaunch(graph_exec, stream=0):
+    status = _libhip.hipGraphLaunch(graph_exec, stream)
+    hipCheckStatus(status)
+
+  class hipKernelNodeParams(ctypes.Structure):
+    _fields_ = [("blockDimX", ctypes.c_uint32), ("blockDimY", ctypes.c_uint32), ("blockDimZ", ctypes.c_uint32),
+                ("extra", ctypes.POINTER(ctypes.c_void_p)),
+                ("func", ctypes.c_void_p),
+                ("gridDimX", ctypes.c_uint32), ("gridDimY", ctypes.c_uint32), ("gridDimZ", ctypes.c_uint32),
+                ("kernelParams", ctypes.POINTER(ctypes.c_void_p)),
+                ("sharedMemBytes", ctypes.c_uint32)]
+
+  @dataclass
+  class kernelNodeParamsWrapper():
+    c_struct: Any
+    context: Any = None
+
+  # Better to cache struct_types since they reused often and take a lot of time to create.
+  struct_type_cache: Dict[str, Any] = {}
+  def __get_struct(name, field_list):
+    global struct_type_cache
+    if name in struct_type_cache:
+      return struct_type_cache[name]
+    class CStructure(ctypes.Structure):
+      _fields_ = field_list
+    struct_type_cache[name] = CStructure
+    return struct_type_cache[name]
+
+  def getStructTypeForArgs(*args):
+    types = ""
+    fields: List[Tuple[str, Any]] = []
+    for idx in range(len(args)):
+      if args[idx].__class__ is int:
+        types += 'i'
+        fields.append((f'field{idx}', ctypes.c_int))
+      else:
+        types += 'P'
+        fields.append((f'field{idx}', ctypes.c_void_p))
+    return __get_struct(types, fields)
+
+  def updateKernelNodeParams(npwrapper:kernelNodeParamsWrapper, *args, grid=(1,1,1), block=(1,1,1), updated_args=None):
+    _, struct, _ = npwrapper.context
+    if updated_args is not None:
+      for i in updated_args:
+        setattr(struct, f'field{i}', (args[i] if args[i].__class__ is int else args[i]._buf))
+    else:
+      for i,d in enumerate(args):
+        setattr(struct, f'field{i}', (d if d.__class__ is int else d._buf))
+    npwrapper.c_struct.blockDimX = block[0]
+    npwrapper.c_struct.blockDimY = block[1]
+    npwrapper.c_struct.blockDimZ = block[2]
+    npwrapper.c_struct.gridDimX = grid[0]
+    npwrapper.c_struct.gridDimY = grid[1]
+    npwrapper.c_struct.gridDimZ = grid[2]
+
+  def buildKernelNodeParams(*args, func=None, grid=(1,1,1), block=(1,1,1), sharedMemBytes=0, argsStructType=None):
+    data = [d if d.__class__ is int else d._buf for d in args]
+    if argsStructType is None: argsStructType = getStructTypeForArgs(*args)
+    struct = argsStructType(*data)
+    size = ctypes.c_size_t(ctypes.sizeof(struct))
+    p_size = ctypes.c_void_p(ctypes.addressof(size))
+    p_struct = ctypes.c_void_p(ctypes.addressof(struct))
+    config = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), p_struct,
+                                  ctypes.c_void_p(2), p_size, ctypes.c_void_p(3))
+    params = hipKernelNodeParams(block[0], block[1], block[2], config, func, grid[0], grid[1], grid[2], None, sharedMemBytes)
+    return kernelNodeParamsWrapper(c_struct=params, context=(size, struct, config))
+
+  _libhip.hipGraphAddKernelNode.restype = int
+  _libhip.hipGraphAddKernelNode.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p]
+  def hipGraphAddKernelNode(graph, deps, params:kernelNodeParamsWrapper):
+    graph_node = ctypes.c_void_p()
+    deps_in = (ctypes.c_void_p * len(deps))()
+    deps_in[:] = deps
+    num_deps = ctypes.c_size_t(len(deps))
+    status = _libhip.hipGraphAddKernelNode(ctypes.byref(graph_node), graph, deps_in, num_deps, ctypes.byref(params.c_struct))
+    hipCheckStatus(status)
+    return graph_node
+
+  _libhip.hipGraphExecKernelNodeSetParams.restype = int
+  _libhip.hipGraphExecKernelNodeSetParams.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+  def hipGraphExecKernelNodeSetParams(gexec, node, params:kernelNodeParamsWrapper):
+    status = _libhip.hipGraphExecKernelNodeSetParams(gexec, node, ctypes.byref(params.c_struct))
+    hipCheckStatus(status)
+
 
   _libhip.hipMalloc.restype = int
   _libhip.hipMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]

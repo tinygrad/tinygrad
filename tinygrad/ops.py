@@ -176,13 +176,18 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 from tinygrad.runtime.lib import RawBuffer, RawConst
 from tinygrad.shape.symbolic import Variable, sym_infer
 
+class BasicBatchExecutor:
+  def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): pass
+  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
+    for prg, pargs, variables in jit_cache: prg(pargs, variables, jit=True) # type: ignore
+
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
     if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args or not runtime_args['binary']): print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
-  def build(self, runtime):
-    self.clprg = runtime(self.name, self.prg, **self.runtime_args)
+  def build(self, runtime, batch_exec=BasicBatchExecutor):
+    self.clprg, self.batch_exec = runtime(self.name, self.prg, **self.runtime_args), batch_exec
     return self
 
   def exec(self, rawbufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False, optimizing=False) -> Optional[float]:
@@ -190,13 +195,15 @@ class ASTRunner:
     if not optimizing: CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return self(rawbufs, var_vals, force_wait=force_wait)
 
+  def launch_dims(self, var_vals):
+    global_size = ([sym_infer(sz, var_vals) for sz in self.global_size] + [1]*(3-len(self.global_size))) if self.global_size is not None else self.global_size
+    local_size = ([sym_infer(sz, var_vals) for sz in self.local_size] + [1]*(3-len(self.local_size))) if self.local_size is not None else self.local_size
+    return global_size, local_size
+
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
     if var_vals is None: var_vals = {}
-    global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
-    local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else self.local_size
-    if et := self.clprg((global_size + [1]*(3-len(global_size))) if global_size is not None else None,
-                        (local_size + [1]*(3-len(local_size))) if local_size is not None else None,
-                        *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
+    global_size, local_size = self.launch_dims(var_vals)
+    if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
     op_estimate = sym_infer(self.op_estimate, var_vals)
     if DEBUG >= 2:
       print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(33-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(global_size):18s} {str(local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
@@ -207,8 +214,8 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, runtime, synchronize=lambda: None):
-    self.buffer, self.linearizer_opts, self.renderer, self.runtime, self.synchronize = buffer, linearizer_opts, renderer, runtime, synchronize
+  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, runtime, synchronize=lambda: None, batch_exec=BasicBatchExecutor):
+    self.buffer, self.linearizer_opts, self.renderer, self.runtime, self.synchronize, self.batch_exec = buffer, linearizer_opts, renderer, runtime, synchronize, batch_exec
     self.method_cache: Dict[Any, ASTRunner] = {}
 
   def to_program(self, k):
@@ -218,7 +225,7 @@ class Compiled:
       return ASTRunner(k.function_name, src[0], k.global_size, src[1],display_name=k.display_name, runtime_args=src[2]).build(self.runtime)
     return ASTRunner(k.function_name, src, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
-                     display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime)
+                     display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime, self.batch_exec)
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
     #if DEBUG >= 4:
