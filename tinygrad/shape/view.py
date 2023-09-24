@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools
 from typing import Tuple, List, Optional, NamedTuple
 from tinygrad.helpers import prod, all_int
-from tinygrad.shape.symbolic import NumNode, is_sym_int, sint
+from tinygrad.shape.symbolic import Node, NumNode, is_sym_int, sint
 
 @functools.lru_cache(maxsize=None)
 def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
@@ -29,7 +29,7 @@ class View(NamedTuple):
     return View(shape, strides, offset, mask, contiguous)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def size(self): return prod([s for s,st in zip(self.shape, self.strides) if st != 0])
+  def size(self): return prod([s.max if isinstance(s, Node) else s for s,st in zip(self.shape, self.strides) if st != 0])
 
   # MovementOps live here now
 
