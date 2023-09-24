@@ -5,7 +5,7 @@ from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
 from tinygrad.graph import log_op
-from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, partition, all_int, dedup
+from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, partition, all_int, dedup, merge_dicts
 from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer
 from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
@@ -176,8 +176,9 @@ class LazyBuffer:
           else:
             self.op = LazyOp(UnaryOps.CAST, (self.op,), (dtypes.float32, False))
           self.dtype = dtypes.float32
+        self.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in self.op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
         op, realized_bufs = _replace_loadops(self.op)
-        self.realized = Device[self.device].exec_ast(op, output=self, inputs=realized_bufs, **self._device_extra_args())
+        self.realized = Device[self.device].exec_ast(op, output=self, inputs=realized_bufs, var_vals=self.var_vals, **self._device_extra_args())
 
       assert self.realized and isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
       # HACK: allow hot casting of images
