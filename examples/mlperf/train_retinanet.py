@@ -15,6 +15,7 @@ import numpy as np
 from typing import List, Tuple
 from extra.training import focal_loss, smooth_l1_loss
 from torch import tensor as torch_tensor
+from tinygrad.state import get_state_dict
 import torch
 from contextlib import redirect_stdout
 
@@ -96,7 +97,7 @@ def bbox_transform(proposals, reference_boxes):
   return targets
 
 class RetinaNetTrainer:
-    def __init__(self, model : RetinaNet = RetinaNet(ResNeXt50_32X4D(num_classes=None)), debug = False):
+    def __init__(self,  model : RetinaNet = RetinaNet(ResNeXt50_32X4D(num_classes=None)), debug = False):
         self.model = model
         Warning("TODO: at training, ResNet weights should be loaded and most of its layers should be frozen.")
         #self.model.backbone.load_from_pretrained()
@@ -138,7 +139,6 @@ class RetinaNetTrainer:
         return {"regression_targets": regression_targets, "classification_targets": classification_targets, "regression_masks": regression_masks, "classification_masks": classification_masks}
     
     def freeze_spec_backbone_layers(self, layers_to_train = ["layer2", "layer3", "layer4"]):
-        from tinygrad.state import get_state_dict
         """(MLPerf) The weights of the first two stages are frozen (code). 
         In addition, all batch norm layers in the backbone are frozen (code)."""
         for (key,val) in get_state_dict(self.model.backbone).items():
@@ -158,9 +158,8 @@ class RetinaNetTrainer:
         checker = None
         if self.debug: 
             checker = RetinaNetMlPerfTrainingChecker(retina)
-            checker.check_anchorgen()
-            breakpoint()
-            checker.check_model_weights()
+            #checker.check_anchorgen()
+            checker.check_weight_init()
             checker.check_anchors(anchors_orig, anchors_flattened_levels)
 
         for x, annotations in iterate(self.dataset, BS):
@@ -198,7 +197,7 @@ class RetinaNetTrainer:
     def tg_init_setup(self):
         retina = self.model 
         Warning("initial weight setting skipped")
-        #self.set_initial_weights()
+        self.set_initial_weights()
         self.freeze_spec_backbone_layers()
         anchors_orig = retina.anchor_gen(self.image_size) #TODO: get them just with reshape of flattened?
         anchors_flattened_levels = np.concatenate(anchors_orig)
@@ -214,18 +213,37 @@ class RetinaNetTrainer:
         self.set_regression_weights()
         self.set_fpn_weights()
 
-    def set_classification_weights(mean : float = 0, std : float = 0.01, conv_bias : float = -4.59511985013459, bias : float = 0):
-        raise NotImplementedError
+    def set_classification_weights(self,mean : float = 0, std : float = 0.01, conv_bias : float = -4.59511985013459, bias : float = 0):
+        for (key,val) in get_state_dict(self.model.head.classification_head).items():
+            if "weight" in key: 
+                val = Tensor.normal(*(val.shape), mean=mean, std=std)
+            elif "bias" in key: 
+                val = Tensor.full(*(val.shape), conv_bias)
+        
 
-    def set_regression_weights(mean : float =0, std : float =0.01, bias : float = 0):
-        raise NotImplementedError
+    def set_regression_weights(self, mean : float =0, std : float =0.01, conv_bias : float = 0):
+        for (key,val) in get_state_dict(self.model.head.regression_head).items():
+            if "weight" in key: 
+                val = Tensor.normal(*(val.shape), mean=mean, std=std)
+            elif "bias" in key:
+                val = Tensor.full(*(val.shape), conv_bias)
     
     def set_fpn_weights(self, bias : float =0):
         """ 
-        The FPN network weights are initialized with uniform Kaiming (also known as He initialization) using negative slope=1. 
+        The FPN network weights are initialized with uniform Kaiming (also known as He initialization) 
+        using negative slope=1. 
         The biases are initialized with zeros (code).
         """
-        raise NotImplementedError
+        for (key,val) in get_state_dict(self.model.backbone).items():
+            breakpoint()
+            if "conv" in key: 
+                val = Tensor.kaiming_uniform(*(val.shape),a=1)
+            elif "bias" in key:
+                val = Tensor.full(*(val.shape), conv_bias)
+        #mlp_fpn = [(name,param) for name,param in mlperf_model.backbone.fpn.named_parameters()]
+        #tg_w = [(name,param.numpy()) for name,param in get_state_dict(self.model.backbone.fpn).items()]
+        
+
     def mAP_compute(self, annotations, predictions):
         coco_results  = [{"image_id": annotations[i]["image_id"], "category_id": label, "bbox": box.tolist(), "score": score}
       for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
@@ -381,7 +399,9 @@ class RetinaNetMlPerfTrainingChecker:
         self.mlperf_model.training = False
         sample_image_list = [torch_tensor(np.random.rand(3,200,200))]
         sample_image_list, _ = self.mlperf_model.transform(sample_image_list,None)
-        feature_maps = self.mlperf_model.backbone.double()(sample_image_list.tensors.double())
+
+        feature_maps = self.mlperf_model.backbone.double()(sample_image_list.tensors.double()) #TODO .double() bothers me. but default usage raises errors ("expected Double instead of Float" bc resnet bias is initialized w/ 32 bits)
+        
         features = list(feature_maps.values())
         anchors_one_image = self.mlperf_model.anchor_generator(sample_image_list, features)
         self.mlperf_model.training = True
@@ -394,6 +414,7 @@ class RetinaNetMlPerfTrainingChecker:
         raise NotImplementedError
     def check_losses(self):
         raise NotImplementedError
+
     
 
 
