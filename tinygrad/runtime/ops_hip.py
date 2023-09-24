@@ -1,5 +1,5 @@
 import numpy as np
-import ctypes, functools
+import ctypes, functools, math
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
 from tinygrad.helpers import DEBUG, getenv, GlobalCounters
@@ -33,37 +33,45 @@ HIP = _HIP()
 class HIPGraph(BasicBatchExecutor):
   def __init__(self, jit_cache: List[Tuple[Any, Any, Any]]):
     self.info: List[Tuple[Any, ...]] = []
-    self.graph, self.instance = None, None
+    self.graphs, self.instances = [], []
     if DEBUG>0 or not all(isinstance(prg, ASTRunner) and isinstance(prg.clprg, HIPProgram) for prg,_,_ in jit_cache): return # Only HIPProgram can be captured.
     if len(set([pargs[0]._device for _,pargs,_ in jit_cache])) != 1: return # Only one device is supported now.
     capture_stream = hip.hipStreamCreate()
     hip.hipStreamBeginCapture(capture_stream)
-    for prg, pargs, variables in jit_cache:
+    for j,(prg, pargs, variables) in enumerate(jit_cache):
       _, _, graph, deps = hip.hipStreamGetCaptureInfo_v2(capture_stream)
       global_size, local_size = prg.launch_dims(variables)
       params = hip.buildKernelNodeParams(*pargs, *variables.values(), func=prg.clprg.prgs[pargs[0]._device], grid=global_size, block=local_size)
       graph_node = hip.hipGraphAddKernelNode(graph, deps, params)
       hip.hipStreamUpdateCaptureDependencies(capture_stream, [graph_node], 1)
       self.info.append((graph_node, params, prg.mem_estimate, sym_infer(prg.op_estimate, variables)))
-    self.graph = hip.hipStreamEndCapture(capture_stream) # Only one graph is supported now
-    self.instance = hip.hipGraphInstantiate(self.graph)
+      if self.__get_batch(j) != self.__get_batch(j+1) or j==len(jit_cache)-1: # If the next batch is different or this is the last entry, finish the graph.
+        self.graphs.append(hip.hipStreamEndCapture(capture_stream))
+        self.instances.append(hip.hipGraphInstantiate(self.graphs[-1]))
+        if j!=len(jit_cache)-1: hip.hipStreamBeginCapture(capture_stream)
     hip.hipStreamDestroy(capture_stream)
   def __del__(self):
-    if self.instance: hip.hipGraphExecDestroy(self.instance)
-    if self.graph: hip.hipGraphDestroy(self.graph)
+    for inst in self.instances: hip.hipGraphExecDestroy(inst)
+    for gr in self.graphs: hip.hipGraphDestroy(gr)
   def __update(self, nodeid, prg, pargs, variables, updated_args=None):
     graph_node, params, _, _ = self.info[nodeid]
     global_size, local_size = prg.launch_dims(variables)
     hip.updateKernelNodeParams(params, *pargs, *variables.values(), grid=global_size, block=local_size, updated_args=updated_args)
-    hip.hipGraphExecKernelNodeSetParams(self.instance, graph_node, params)
+    hip.hipGraphExecKernelNodeSetParams(self.instances[self.__get_batch(nodeid)], graph_node, params)
     self.info[nodeid] = (graph_node, params, prg.mem_estimate, sym_infer(prg.op_estimate, variables))
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
-    if self.instance is None: return super().exec(jit_cache, updatable_entries) # No graph is created switch to basic executor.
-    for j,v in updatable_entries.items(): self.__update(j, jit_cache[j][0], jit_cache[j][1], jit_cache[j][2], updated_args=v)
-    hip.hipGraphLaunch(self.instance)
+    if not self.instances: return super().exec(jit_cache, updatable_entries) # No graph is created switch to basic executor.
+    prev_batch = 0
+    for j in sorted(updatable_entries.keys()):
+      # Checking if we have started processing different batch. If yes, schedule the prev one to GPUs.
+      if prev_batch != self.__get_batch(j): prev_batch, _ = self.__get_batch(j), hip.hipGraphLaunch(self.instances[prev_batch])
+      self.__update(j, jit_cache[j][0], jit_cache[j][1], jit_cache[j][2], updated_args=updatable_entries[j])
+    hip.hipGraphLaunch(self.instances[prev_batch])
     GlobalCounters.kernel_count += len(self.info)
     GlobalCounters.global_ops += sum(x[3] for x in self.info)
     GlobalCounters.global_mem += sum(x[2] for x in self.info)
+  @functools.lru_cache(maxsize=32)
+  def __get_batch(self, j): return int(math.log(j+4,2)-2) # Batch sizes are logarithmic 4,8,16,32,...
 
 class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device=str(HIP.default_device)): super().__init__(size, dtype, allocator=HIP.allocator, **{'device': int(device)})
