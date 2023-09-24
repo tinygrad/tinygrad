@@ -3,7 +3,7 @@ import time, importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
-from tinygrad.shape.view import View
+from tinygrad.shape.shapetracker import ShapeTracker
 from dataclasses import dataclass
 if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
 
@@ -25,13 +25,13 @@ OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOp
 class MemBuffer:
   idx: int
   dtype: DType
-  views: Tuple[View, ...]
+  st: ShapeTracker
 
 @dataclass(frozen=True)
 class ConstBuffer:
   val: Any
   dtype: DType
-  views: Tuple[View, ...]
+  st: ShapeTracker
 
 class LazyOp:
   __slots__ = "op", "src", "arg", "buffers", "__weakref__"
@@ -101,8 +101,8 @@ Device = _Device()
 
 # **************** for Interpreted Buffers ****************
 
-def apply_shapetracker(fxn_for_op, ret, views):
-  for v in views:
+def apply_shapetracker(fxn_for_op, ret, st):
+  for v in st.views:
     real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
     real_offset = v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
     # first, we apply the offset
@@ -133,7 +133,7 @@ class Interpreted:
   def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
     if ast.op == LoadOps.BUFFER and LoadOps.BUFFER not in self.fxn_for_op:
       assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
-      return self.from_underlying(apply_shapetracker(self.fxn_for_op, self.to_underlying(inputs[ast.arg.idx-1]), ast.arg.views))
+      return self.from_underlying(apply_shapetracker(self.fxn_for_op, self.to_underlying(inputs[ast.arg.idx-1]), ast.arg.st))
     if TernaryOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
     created_context = context is None
@@ -162,7 +162,7 @@ class FlopCounter:
     self.flops, ret = 0, self.flops
     return ret
 shape_fxn_for_op: Dict[Op, Callable] = {
-  LoadOps.BUFFER: lambda arg: (arg.views[-1].shape, arg.dtype, 0), LoadOps.CONST: lambda arg: (arg.views[-1].shape, arg.dtype, 0),
+  LoadOps.BUFFER: lambda arg: (arg.st.shape, arg.dtype, 0), LoadOps.CONST: lambda arg: (arg.st.shape, arg.dtype, 0),
   UnaryOps.CAST: lambda self,arg: (self.shape, arg[0], self.consume_flops()),   # cast uses no flops
   **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op != UnaryOps.CAST},
   **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
@@ -241,8 +241,7 @@ class Compiled:
       for i,a in enumerate(inputs):
         # TODO: if this is contiguous it's fine
         if a == output.realized:
-          views = [x.arg.views for x in ast.get_lazyops() if x.op == LoadOps.BUFFER and x.arg.idx == i+1]
-          if any(len(v) > 1 or not v[0].contiguous for v in views):
+          if any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == LoadOps.BUFFER and x.arg.idx == i+1):
             output.realized = None
             break
 

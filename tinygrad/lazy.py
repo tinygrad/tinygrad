@@ -95,11 +95,10 @@ def _replace_loadops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
   realized_bufs = dedup([x.realized for x in op.buffers if buf_is_kernel_arg(x)])
   for x in op.buffers:
     assert x.realized, "buffer isn't realized"
-    views = x.st.simplify().views
     if isinstance(x.realized, RawConst):
-      replacements[x] = LazyOp(LoadOps.CONST, (), ConstBuffer(x.realized._buf, x.realized.dtype, views))
+      replacements[x] = LazyOp(LoadOps.CONST, (), ConstBuffer(x.realized._buf, x.realized.dtype, x.st.simplify()))
     elif x.realized in realized_bufs:
-      replacements[x] = LazyOp(LoadOps.BUFFER, (), MemBuffer(realized_bufs.index(x.realized)+1, x.realized.dtype, views))
+      replacements[x] = LazyOp(LoadOps.BUFFER, (), MemBuffer(realized_bufs.index(x.realized)+1, x.realized.dtype, x.st.simplify()))
     else:
       raise NotImplementedError(f"not handled {x}")
   return (op.src[0] if op.op == MovementOps.RESHAPE else op).map_buffers(replacements), realized_bufs
