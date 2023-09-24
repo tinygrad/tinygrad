@@ -250,11 +250,13 @@ class Compiled:
     output.realized = output.output_buffer
     if output.realized:
       if output.realized.__class__ is RawConst: output.realized = None  # can't assign to RawConst
-      for a in inputs:
+      for i,a in enumerate(inputs):
         # TODO: if this is contiguous it's fine
         if a == output.realized:
-          output.realized = None
-          break
+          views = [x.arg.views for x in ast.get_lazyops() if x.op in LoadOps and x.arg.idx == i+1]
+          if any(len(v) > 1 or not v[0].contiguous for v in views):
+            output.realized = None
+            break
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     if not output.realized: output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
