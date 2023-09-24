@@ -253,7 +253,7 @@ class Compiled:
       for i,a in enumerate(inputs):
         # TODO: if this is contiguous it's fine
         if a == output.realized:
-          views = [x.arg.views for x in ast.get_lazyops() if x.op in LoadOps and x.arg.idx == i+1]
+          views = [x.arg.views for x in ast.get_lazyops() if x.op == LoadOps.BUFFER and x.arg.idx == i+1]
           if any(len(v) > 1 or not v[0].contiguous for v in views):
             output.realized = None
             break
