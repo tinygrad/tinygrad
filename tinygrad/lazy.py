@@ -323,8 +323,7 @@ class LazyBuffer:
     return self.shuffle_and_prune_movement_ops(self.st.shrink(arg), MovementOps.SHRINK, arg)
 
   def stride(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
-    local_st = ShapeTracker.from_shape(self.shape).stride(arg)
-    if self.shape == local_st.shape and local_st.contiguous: return self
+    if all(a == 1 for a in arg): return self
     if not self.realized and self.op.op == MovementOps.STRIDE: return self.op.src[0].stride(tuple(map(operator.mul, arg, self.op.arg)))
     return self.shuffle_and_prune_movement_ops(self.st.stride(arg), MovementOps.STRIDE, arg)
 
