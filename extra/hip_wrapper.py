@@ -112,9 +112,12 @@ try:
     deps = [ctypes.cast(deps_out[i], ctypes.c_void_p) for i in range(num_deps.value)]
     return status_out, id_out.value, graph_out, deps
 
+  hipStreamAddCaptureDependencies = 0
+  hipStreamSetCaptureDependencies = 1
+
   _libhip.hipStreamUpdateCaptureDependencies.restype = int
   _libhip.hipStreamUpdateCaptureDependencies.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint]
-  def hipStreamUpdateCaptureDependencies(stream, deps, flags=1):
+  def hipStreamUpdateCaptureDependencies(stream, deps, flags=hipStreamAddCaptureDependencies):
     deps_in = (ctypes.c_void_p * len(deps))()
     deps_in[:] = deps
     num_deps = ctypes.c_size_t()

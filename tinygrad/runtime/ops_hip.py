@@ -38,12 +38,14 @@ class HIPGraph(BasicBatchExecutor):
     if len(set([pargs[0]._device for _,pargs,_ in jit_cache])) != 1: return # Only one device is supported now.
     capture_stream = hip.hipStreamCreate()
     hip.hipStreamBeginCapture(capture_stream)
+    # Splitting the JIT cache into batches to enable parallel execution (cpu+gpu). Batch sizes follow a logarithmic pattern: 4, 8, 16, 32, and so on.
+    # This helps push tasks to the GPU while the CPU updates the next graph.
     for j,(prg, pargs, variables) in enumerate(jit_cache):
       _, _, graph, deps = hip.hipStreamGetCaptureInfo_v2(capture_stream)
       global_size, local_size = prg.launch_dims(variables)
       params = hip.buildKernelNodeParams(*pargs, *variables.values(), func=prg.clprg.prgs[pargs[0]._device], grid=global_size, block=local_size)
       graph_node = hip.hipGraphAddKernelNode(graph, deps, params)
-      hip.hipStreamUpdateCaptureDependencies(capture_stream, [graph_node], 1)
+      hip.hipStreamUpdateCaptureDependencies(capture_stream, [graph_node], hip.hipStreamSetCaptureDependencies)
       self.info.append((graph_node, params, prg.mem_estimate, sym_infer(prg.op_estimate, variables)))
       if self.__get_batch(j) != self.__get_batch(j+1) or j==len(jit_cache)-1: # If the next batch is different or this is the last entry, finish the graph.
         self.graphs.append(hip.hipStreamEndCapture(capture_stream))
