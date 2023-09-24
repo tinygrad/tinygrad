@@ -67,7 +67,7 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
 @dataclass(frozen=True)
 class ShapeTracker:
   views: Tuple[View, ...]
-  def __post_init__(self): assert all(isinstance(v, View) for v in self.views), "ShapeTracker must be created with Views"
+  def __post_init__(self): assert isinstance(self.views, tuple) and all(isinstance(v, View) for v in self.views), "ShapeTracker must be created with Views"
 
   @staticmethod
   def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),))
