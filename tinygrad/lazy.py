@@ -148,8 +148,8 @@ class LazyBuffer:
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
   @property
   def key(self):
-    if self.realized: return (self.dtype, self.realized.key, self.st.key, self.var_vals_key)
-    return (self.dtype, self.op.op, self.st.key, self.var_vals_key)
+    if self.realized: return (self.dtype, self.realized.key, self.st, self.var_vals_key)
+    return (self.dtype, self.op.op, self.st, self.var_vals_key)
 
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
 

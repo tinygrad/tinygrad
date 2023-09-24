@@ -67,7 +67,6 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
 @dataclass(frozen=True)
 class ShapeTracker:
   views: Tuple[View, ...]
-  def __post_init__(self): assert isinstance(self.views, tuple) and all(isinstance(v, View) for v in self.views), "ShapeTracker must be created with Views"
 
   @staticmethod
   def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),))
@@ -77,9 +76,6 @@ class ShapeTracker:
 
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
-
-  @property
-  def key(self) -> Tuple[View, ...]: return self.views
 
   # this is the real size (ish)
   def size(self): return self.views[-1].size()
