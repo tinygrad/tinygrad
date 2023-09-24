@@ -51,7 +51,7 @@ class LazyOp:
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
-  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp, str]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
+  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
@@ -179,7 +179,7 @@ from tinygrad.shape.symbolic import Variable, sym_infer
 class BasicBatchExecutor:
   def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): pass
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
-    for prg, pargs, variables in jit_cache: prg(pargs, variables, jit=True) # type: ignore
+    for prg, pargs, variables in jit_cache: prg(pargs, variables, jit=True)
 
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
