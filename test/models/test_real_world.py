@@ -14,17 +14,17 @@ from examples.hlb_cifar10 import SpeedyResNet
 from examples.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
 from examples.stable_diffusion import UNetModel
 
-def kopt_search_hook(k, create_k, to_prg, baseline, bufs):
+def kopt_search_hook(k, create_k, to_prg, baseline):
   import nevergrad as ng
-  wanna_output = bufs[0].toCPU().copy()
+  wanna_output = k.bufs[0].toCPU().copy()
   def check_opt(x):
     try:
       k = create_k()
       k.process()
       k.apply_auto_opt(x)
       prg = to_prg(k)
-      first_tm = prg.exec(bufs, force_wait=True, optimizing=True)
-      np.testing.assert_allclose(wanna_output, bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
+      first_tm = prg.exec(k.bufs, force_wait=True, optimizing=True)
+      np.testing.assert_allclose(wanna_output, k.bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
       return first_tm
     except Exception:
       return 10000_000   # 10000 seconds is infinity
