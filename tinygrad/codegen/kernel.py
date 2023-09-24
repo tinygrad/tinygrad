@@ -30,21 +30,6 @@ class Kernel:
     self.ast = ast
     self.var_vals = var_vals
     self.key = (ast, tuple(var_vals.keys())) if var_vals else ast
-    #self.bufs = [x.arg for x in self.ast.get_lazyops() if x.op in LoadOps]
-
-    """
-    # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
-    self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
-
-    # get the output buffers
-    self.bufs = [output_buffer] + dedup(ast.buffers)
-    self.arg_bufs = {x:f"data{i}" for i,x in enumerate(dedup([x.realized for x in self.bufs if buf_is_kernel_arg(x)]))}
-
-    # key for lookup in cache (can change, str might not be right)
-    # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
-    # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
-    self.key = (ast.map_buffers({x:self.arg_bufs.get(x.realized,x) for x in self.bufs}).key, tuple([x.key for x in self.bufs]))
-    """
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
@@ -58,19 +43,14 @@ class Kernel:
     self.reduceop = reduceops[0] if reduceops else None
 
     # create new shapetrackers inside this kernel, we will permute them
-    #self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]
-    #for st in self.sts: st.simplify()
-    #output_shapetracker = ShapeTracker(self.info.shape)
     self.bufs = [MemBuffer(0, self.info.dtype, (View.create(self.info.shape),))] + [x.arg for x in self.ast.get_lazyops() if x.op in LoadOps]
     self.sts: List[ShapeTracker] = [ShapeTracker(x.views[-1].shape, views=list(x.views)) for x in self.bufs]
+    for st in self.sts: st.simplify()
 
     self.mem_estimate: int = sum(x.dtype.itemsize*x.views[-1].size() for x in self.bufs)
 
     # get earlybufs, before the one reduce op
     self.earlybufs = [x.arg for x in self.reduceop.get_lazyops() if x.op in LoadOps] if self.reduceop else []
-
-    # make the output buffer shape correct in here
-    #self.sts[0].reshape(self.info.shape)
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
     # parameters

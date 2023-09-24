@@ -127,11 +127,6 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
 class Linearizer(OptimizedKernel):
-  #def get_buffer_name(self, i):
-  #  if self.bufs[i].__class__ == LocalBuffer: return self.bufs[i].name
-  #  assert self.bufs[i].realized.__class__ is not RawConst  # constants shouldn't be loaded with memops
-  #  return self.arg_bufs[self.bufs[i].realized]
-
   def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
     render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
     return self.uop(UOps.ALU, dtype, (a, render_b), op)
@@ -253,18 +248,9 @@ class Linearizer(OptimizedKernel):
     self.loop_uops: Dict[str, UOp] = {}
 
     # add global buffers
-    #arg_bufs = {}
     for i,buf in enumerate(self.bufs):
       if isinstance(buf, MemBuffer):
         self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (f"data{buf.idx}", buf.dtype))
-    #for buf,name in self.arg_bufs.items():
-    #  arg_bufs[buf] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (name, buf.dtype))
-    #for i,b in enumerate(self.bufs):
-    #  if b.realized in arg_bufs: self.buf_uops[i] = arg_bufs[b.realized]
-    # add variables from symbolic shapes
-    #for var in sorted(set(v for buf in self.ast.buffers for v in buf.var_vals), key=lambda k: k.key):
-    #  assert var.expr is not None
-    #  self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), (var.expr, dtypes._arg_int32))
     if self.var_vals:
       for var in sorted(set(self.var_vals), key=lambda k: k.key):
         assert var.expr is not None

@@ -238,8 +238,6 @@ class Compiled:
     else:
       from tinygrad.jit import CacheCollector
       CacheCollector._mark_output_buffer(output.output_buffer)
-    # update the output var_vals from src
-    #output.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in ast.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 
     #if DEBUG >= 4:
     #  from extra.utils import print_tree
