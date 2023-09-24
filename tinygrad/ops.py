@@ -2,7 +2,7 @@ from __future__ import annotations
 import time, importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, merge_dicts
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
 from tinygrad.shape.view import View
 from dataclasses import dataclass
 if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
@@ -130,7 +130,7 @@ class Interpreted:
     self.synchronize = lambda: None
     self.codegen = None
 
-  def exec_ast(self, ast:LazyOp, output=None, inputs=None, context=None, **kwargs):
+  def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
     if ast.op == LoadOps.BUFFER and LoadOps.BUFFER not in self.fxn_for_op:
       assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
       return self.from_underlying(apply_shapetracker(self.fxn_for_op, self.to_underlying(inputs[ast.arg.idx-1]), ast.arg.views))
@@ -221,7 +221,7 @@ class Compiled:
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                      display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime)
 
-  def exec_ast(self, ast:LazyOp, output, inputs, **kwargs):
+  def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
@@ -239,19 +239,19 @@ class Compiled:
       from tinygrad.jit import CacheCollector
       CacheCollector._mark_output_buffer(output.output_buffer)
     # update the output var_vals from src
-    output.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in ast.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+    #output.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in ast.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 
     #if DEBUG >= 4:
     #  from extra.utils import print_tree
     #  print_tree(ast)
 
     from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(ast, self.linearizer_opts)
+    k = Linearizer(ast, self.linearizer_opts, var_vals)
 
     # compilation time
     def get_program():
       from tinygrad.codegen.search import kernel_optimize
-      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts), self.to_program)
+      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program)
       elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
@@ -263,5 +263,5 @@ class Compiled:
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
-    prg.exec([output.realized]+inputs, var_vals=output.var_vals)
+    prg.exec([output.realized]+inputs, var_vals=var_vals)
     return output.realized
