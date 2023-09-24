@@ -43,7 +43,7 @@ class Kernel:
     self.reduceop = reduceops[0] if reduceops else None
 
     # create new shapetrackers inside this kernel, we will permute them
-    self.bufs = [MemBuffer(0, self.info.dtype, (View.create(self.info.shape),))] + [x.arg for x in self.ast.get_lazyops() if x.op in LoadOps]
+    self.bufs = [MemBuffer(0, self.info.dtype, (View.create(self.info.shape),))] + dedup([x.arg for x in self.ast.get_lazyops() if x.op in LoadOps])
     self.sts: List[ShapeTracker] = [ShapeTracker(x.views[-1].shape, views=list(x.views)) for x in self.bufs]
     for st in self.sts: st.simplify()
 
