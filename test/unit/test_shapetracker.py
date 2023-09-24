@@ -180,36 +180,52 @@ class TestIndexExpressions2d(unittest.TestCase):
       self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: idxs[0]*base_shape[1] + idxs[1] + offset)
 
   def test_permute(self):
+    new_st = []
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
       st = st.permute((1, 0))
       self.node_exprs.append(lambda idx, base_shape=base_shape, offset=offset: idx%base_shape[0]*base_shape[1] + idx//base_shape[0]%base_shape[1] + offset)
       self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: idxs[0] + idxs[1]*base_shape[1] + offset)
+      new_st.append(st)
+    self.sts = new_st
 
   def test_reshape(self):
+    new_st = []
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
       st = st.reshape((base_shape[0], 1, base_shape[1]))
       self.node_exprs.append(lambda idx, base_shape=base_shape, offset=offset: idx%prod(base_shape)  + offset)
       self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: idxs[0]*base_shape[1] + idxs[2] + offset)
+      new_st.append(st)
+    self.sts = new_st
 
   def test_reshape_expand(self):
+    new_st = []
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
       st = st.reshape((base_shape[0], 1, base_shape[1]))
       st = st.expand((base_shape[0], base_shape[1], base_shape[1]))
       self.node_exprs.append(lambda idx, base_shape=base_shape, offset=offset: idx//(base_shape[1]*base_shape[1])%base_shape[0]*base_shape[1] + idx%base_shape[1] + offset)
       self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: idxs[0]*base_shape[1] + idxs[2] + offset)
+      new_st.append(st)
+    self.sts = new_st
+
   def test_permute_reshape_1(self): # This tests multiple views
+    new_st = []
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
       st = st.permute((1, 0))
       st = st.reshape((base_shape[0]//5, 1, base_shape[1]*5))
       self.node_exprs.append(lambda idx, base_shape=base_shape, offset=offset: idx%prod(base_shape)%base_shape[0]*base_shape[1] + idx//base_shape[0]%base_shape[1] + offset)
       self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: (idxs[0]*(base_shape[1]*5)+idxs[2])%base_shape[0]*base_shape[1] + (idxs[0]*(base_shape[1]*5)+idxs[2])//base_shape[0] + offset)
+      new_st.append(st)
+    self.sts = new_st
 
   def test_permute_reshape_2(self):
+    new_st = []
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
       st = st.permute((1, 0))
       st = st.reshape((1, base_shape[0]//5, base_shape[1]*5))
       self.node_exprs.append(lambda idx, base_shape=base_shape, offset=offset: idx%prod(base_shape)%base_shape[0]*base_shape[1] + idx//base_shape[0]%base_shape[1] + offset)
       self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: (idxs[1]*(base_shape[1]*5)+idxs[2])%base_shape[0]*base_shape[1] + (idxs[1]*(base_shape[1]*5)+idxs[2])//base_shape[0] + offset)
+      new_st.append(st)
+    self.sts = new_st
 
 class TestSimplifyingShapeTracker(unittest.TestCase):
   def setUp(self):
