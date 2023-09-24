@@ -1,7 +1,7 @@
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict
 import itertools
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, ReduceOps, LoadOps, MemBuffer
-from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType
+from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape, View
@@ -86,7 +86,7 @@ class Kernel:
 
   def has_variable_shape(self) -> bool:
     for b in self.bufs:
-      if any(not isinstance(x, int) for x in b.st.shape): return True
+      if not all_int(b.views[-1].shape): return True
     return False
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
