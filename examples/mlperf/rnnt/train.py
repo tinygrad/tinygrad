@@ -1,6 +1,6 @@
 # %%
 from tinygrad.tensor import Tensor
-from temp.print_tree import print_tree
+# from temp.print_tree import print_tree
 from tinygrad.nn.optim import Adam, LAMB
 
 # %%
@@ -94,7 +94,6 @@ _=plt.plot(X[0][:,0,2:6])
 # ## tokenize
 
 # %%
-import numpy as np
 from tinygrad.tensor import Tensor
 
 # %%
@@ -126,7 +125,7 @@ labels = text_encode(Y[0])[0]
 from tinygrad.jit import TinyJit
 from tinygrad.nn import Embedding, Linear
 
-# %%
+# %% model
 class RNNT:
   def __init__(self, input_features=240, vocab_size=29, enc_hidden_size=1024, pred_hidden_size=320, joint_hidden_size=512, pre_enc_layers=2, post_enc_layers=3, pred_layers=2, stack_time_factor=2, dropout=0.32):
     self.encoder = Encoder(input_features, enc_hidden_size, pre_enc_layers, post_enc_layers, stack_time_factor, dropout)
@@ -174,7 +173,6 @@ class RNNT:
     out = j.cat(hc, dim=2)
     return out.realize()
   
-
 class LSTMCell:
   def __init__(self, input_size, hidden_size, dropout):
     self.dropout = dropout
@@ -229,7 +227,6 @@ class LSTM:
 
     return output, hc
 
-
 class Joint:
   def __init__(self, vocab_size, pred_hidden_size, enc_hidden_size, joint_hidden_size, dropout):
     self.dropout = dropout
@@ -283,94 +280,113 @@ class Prediction:
     x_, hc = self.rnn(emb.transpose(0, 1), hc)
     return x_.transpose(0, 1), hc
 
-# %% [markdown]
-# # training
 
-# %%
+# %% calc loss stable
 def calc_loss(enc,distribution,labels):
 
+  T,U = distribution.shape[2],distribution.shape[1]
+  assert len(labels) == U-1, f"len labels {len(labels)} doesnt match U-1 {U-1}"
+  assert enc.shape[1] == T, f"{enc.shape}[1] != {T}"
 
-    T,U = distribution.shape[2],distribution.shape[1]
-    assert len(labels) == U-1, f"len labels {len(labels)} doesnt match U-1 {U-1}"
-    assert enc.shape[1] == T, f"{enc.shape}[1] != {T}"
+  alpha = np.zeros((T,U))
+  alpha [0,0] = 1
+  beta = np.zeros((T,U))
+  beta [-1,-1] = 1
 
-    alpha = np.zeros((T,U))
-    alpha[0,0] = 1.
+  labels=np.array(labels)
+  alpha_norm_log = 0
 
-    for t in range(T):
-        for u in range(U):
-            if t < T-1: 
-                alpha[t+1,u] = alpha[t,u] * distribution[0,u,t,-1]
-            if u < U-1: 
-                label = int((labels)[u])
-                alpha[t,u+1] += alpha[t,u] * distribution[0,u,t,label]
+  for i in range(1,T+U-1):
 
-    P = alpha[-1,-1] * distribution[0,-1,-1,-1]
-    Loss = -np.log(P)
-    Loss_grad = 1
+    offset= max(0,i-T+1)
+    u=np.arange(offset,min(i+1,U))
+    t=i-u
 
-    alpha_grad = np.zeros((T,U))
-    alpha_grad[-1,-1] = -1/alpha[-1,-1]
-    distribution_grad = np.zeros_like(distribution,dtype=np.float64)
-    distribution_grad[0,-1,-1,-1] = -1/distribution[0,-1,-1,-1]
+    _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
+    alpha[_t,_u] += alpha[_t-1,_u] * distribution[0,_u,_t-1,-1]
 
-    for t in reversed(range(T)):
-        for u in reversed(range(U)):
-            if t < T-1:
-                alpha_grad[t,u] += alpha_grad[t+1,u] * distribution[0,u,t,-1]
-                distribution_grad[0,u,t,-1] += alpha_grad[t+1,u] * alpha[t,u]
-            if u < U-1:
-                label = int((labels)[u])
+    _t,_u = t[np.where(u>0)], u[np.where(u>0)]
+    alpha[_t,_u] += alpha[_t,_u-1] * distribution[0,_u-1,_t,labels[_u-1]]
 
-                alpha_grad[t,u] += alpha_grad[t,u+1] * distribution[0,u,t,label]
-                distribution_grad[0,u,t,label] += alpha_grad[t,u+1] * alpha[t,u]
+    alpha_norm = alpha[t,u].sum()
+    alpha [t,u] /= alpha_norm
+    alpha_norm_log += np.log(alpha_norm)
 
-    # plt.imshow(-distribution_grad[0,:,:,:].sum(-1))
-    # plt.show()
-    return Loss,distribution_grad
+  Loss = -alpha_norm_log - np.log(distribution[0,-1,-1,-1])
+
+  ab = alpha
+  
+  for i in range(T+U-2,-1,-1):
+
+    offset= max(0,i-T+1)
+    u=np.arange(offset,min(i+1,U))
+    t=i-u
+
+    beta[t,u] /= beta[t,u].sum()
+
+    ab [t,u] *= beta [t,u]
+    ab [t,u] /= ab[t,u].sum()
+    alpha_norm_log += np.log(alpha_norm)
+
+    _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
+    beta[_t-1,_u] += beta[_t,_u] * distribution[0,_u,_t-1,-1]
+
+    _t,_u = t[np.where(u>0)], u[np.where(u>0)]
+    beta[_t,_u-1] += beta[_t,_u] * distribution[0,_u-1,_t,labels[_u-1]]
+
+  dgrad = np.zeros_like(distribution)
+  t = np.arange(T-1)
+  u = np.arange(U-1)
+  dgrad[0,:-1,:-1,-1] = ab[:-1,:-1].T / (distribution[0,:-1,:-1,-1] + (beta[:-1,1:]/beta[1:,:-1]).T * distribution[0,u,:-1,labels[u]] )
+  # u=U
+  dgrad[0,-1,:,-1] = ab[:,-1].T / (distribution[0,-1,:,-1]  )
+
+  dgrad[0,u,:-1,labels[u]] = ab[:-1,:-1].T / (distribution[0,:-1,:-1,-1]* (beta[1:,:-1]/beta[:-1,1:]).T + distribution[0,u,:-1,labels[u]])
+  dgrad[0,u,-1,labels[u]] = ab[-1,:-1].T / ( distribution[0,u,-1,labels[u]])
+
+  return Loss,-dgrad
 
 # %%
 rnnt= RNNT()
 
-# %%
+#%% encode
+
+def encode(X,labels):
+  enc, enc_lens  = rnnt.encoder(Tensor(X[0]),Tensor(X[1]))
+  preds = None
+  hc = Tensor.zeros(rnnt.prediction.rnn.layers, 2, rnnt.prediction.hidden_size)
+  for x in [0] + labels:
+      pred,hc = rnnt.prediction.__call__(Tensor([[x]]),hc,1)
+      preds = pred if preds is None else preds.cat(pred,dim=1).realize()
+
+  distribution_tensor = rnnt.joint.__call__(preds, enc).softmax(3).realize()
+  distribution = distribution_tensor.numpy()
+  return enc,distribution,distribution_tensor
+
+# %% train step
 opt = LAMB(rnnt.params)
 def train_step(X,Y):
-    labels = text_encode(Y[0])[0]
     opt.zero_grad()
-    enc, enc_lens  = rnnt.encoder(Tensor(X[0]),Tensor(X[1]))
-    preds = None
-    hc = Tensor.zeros(rnnt.prediction.rnn.layers, 2, rnnt.prediction.hidden_size)
-    for x in [0] + labels:
-        pred,hc = rnnt.prediction.__call__(Tensor([[x]]),hc,1)
-        preds = pred if preds is None else preds.cat(pred,dim=1).realize()
-
-
-    distribution_tensor = rnnt.joint.__call__(preds, enc).softmax(3).realize()
-    distribution = distribution_tensor.numpy()
-
-    Loss, distribution_grad = calc_loss(enc,distribution,labels)
+    labels = text_encode(Y[0])[0]
+    enc,distribution,distribution_tensor = encode(X,labels)
+    
+    Loss,distribution_grad = calc_loss(enc,distribution,labels)
     distribution_grad = distribution_grad.astype(np.float32)
 
     _loss = (distribution_tensor * Tensor(distribution_grad)).sum()
 
     _loss.backward()
     opt.step()
-    print(f"Loss: {Loss}")
+    print(f"Rel Loss: {Loss/(X[1][0]+len(Y[0])):.6}")
     return Loss,distribution_grad
-
-# %%
-train_step()
-
-# %%
-train_step()
-
-# %%
-loss, distribution_grad =  train_step()
 
 # %%
 hist = []
 def epoch ():
-  for X,Y in iterate():
+  for i,(X,Y) in enumerate(iterate()):
+
     Loss,grad = train_step(X,Y)
+    print(i,end='')
     hist.append(Loss)
 
+epoch()
