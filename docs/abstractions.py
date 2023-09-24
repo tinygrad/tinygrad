@@ -263,14 +263,13 @@ class Linearizer:
   uops: List[UOp]
 
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
 result = Tensor(2).realize() + Tensor(3).realize()
-result.lazydata.realized = Device[Device.DEFAULT].buffer(prod(result.shape), result.dtype)
 
 # use the real Linearizer to linearize 2+3
+from tinygrad.lazy import _replace_loadops
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.codegen.kernel import LinearizerOptions
-linearizer = Linearizer(result.lazydata.op, result.lazydata, LinearizerOptions())
+op, _ = _replace_loadops(result.lazydata.op)
+linearizer = Linearizer(op)
 linearizer.linearize()
 
 # print the uops
@@ -279,13 +278,11 @@ for uop in linearizer.uops: print(uop)
 # output:
 """
    0 UOps.DEFINE_GLOBAL  : ptr.dtypes.float          []                               ('data0', dtypes.float)
-   1 UOps.LOOP           :                           []                               ([], 'global')
-   2 UOps.LOOP           :                           []                               ([], 'local')
-   3 UOps.CONST          : dtypes.float              []                               2.0
-   4 UOps.CONST          : dtypes.float              []                               3.0
-   5 UOps.ALU            : dtypes.float              [3, 4]                           BinaryOps.ADD
-   6 UOps.STORE          :                           [5]                              MemOp(name='data0', idx=<0>, local=False, memory_dtype=dtypes.float, valid=<1>, invalid_value=0.0)
-   7 UOps.ENDLOOP        :                           []                               ([], 'global+local')
+   1 UOps.CONST          : dtypes.float              []                               2.0
+   2 UOps.CONST          : dtypes.float              []                               3.0
+   3 UOps.ALU            : dtypes.float              [1, 2]                           BinaryOps.ADD
+   4 UOps.CONST          : dtypes.int                []                               0
+   5 UOps.STORE          :                           [0, 4, 3]                        None
 """
 
 # %%

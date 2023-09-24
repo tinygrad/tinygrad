@@ -1,12 +1,10 @@
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict
 import itertools
-from tinygrad.ops import LazyOp, MovementOps, FlopCounter, get_lazyop_info, ReduceOps
-from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType
-from tinygrad.runtime.lib import buf_is_kernel_arg
+from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, ReduceOps, LoadOps, MemBuffer
+from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
-from tinygrad.shape.view import strides_for_shape
+from tinygrad.shape.view import strides_for_shape, View
 
 class LocalBuffer(NamedTuple):
   name: str
@@ -16,6 +14,7 @@ class LocalBuffer(NamedTuple):
   def __str__(self): return f"localbuffer<{self.name}[{self.size}]>"
 
 class LinearizerOptions(NamedTuple):
+  device: str = ""
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
   supports_float4_alu: bool = True
@@ -26,41 +25,32 @@ class LinearizerOptions(NamedTuple):
   local_max: Optional[List[int]] = None
 
 class Kernel:
-  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, opts:Optional[LinearizerOptions]=None):
-    # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
-    self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
+  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None, var_vals=None):
     self.opts = opts if opts else LinearizerOptions()
-
-    # get the output buffers
-    self.bufs = [output_buffer] + dedup(ast.buffers)
-    self.arg_bufs = {x:f"data{i}" for i,x in enumerate(dedup([x.realized for x in self.bufs if buf_is_kernel_arg(x)]))}
-
-    # key for lookup in cache (can change, str might not be right)
-    # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
-    # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
-    self.key = (ast.map_buffers({x:self.arg_bufs.get(x.realized,x) for x in self.bufs}).key, tuple([x.key for x in self.bufs]))
+    self.ast = ast
+    self.var_vals = var_vals
+    self.key = (ast, tuple(var_vals.keys())) if var_vals else ast
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
-    self.mem_estimate: int = sum(x.dtype.itemsize*x.size for x in self.arg_bufs.keys())
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
     assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None
 
-    # get earlybufs, before the one reduce op
-    self.earlybufs = dedup(self.reduceop.buffers) if self.reduceop else []
-
     # create new shapetrackers inside this kernel, we will permute them
-    self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]
+    self.bufs = [MemBuffer(0, self.info.dtype, (View.create(self.info.shape),))] + [x.arg for x in self.ast.get_lazyops() if x.op in LoadOps]
+    self.sts: List[ShapeTracker] = [ShapeTracker(x.views[-1].shape, views=list(x.views)) for x in self.bufs]
     for st in self.sts: st.simplify()
 
-    # make the output buffer shape correct in here
-    self.sts[0].reshape(self.info.shape)
+    self.mem_estimate: int = sum(x.dtype.itemsize*x.views[-1].size() for x in self.bufs)
+
+    # get earlybufs, before the one reduce op
+    self.earlybufs = [x.arg for x in self.reduceop.get_lazyops() if x.op in LoadOps] if self.reduceop else []
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
     # parameters
@@ -77,7 +67,7 @@ class Kernel:
 
   def has_variable_shape(self) -> bool:
     for b in self.bufs:
-      if any(not isinstance(x, int) for x in b.st.shape): return True
+      if not all_int(b.views[-1].shape): return True
     return False
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
@@ -147,6 +137,6 @@ class Kernel:
   def colored_shape(self) -> str: return ' '.join(colored(s, color) for s,color in zip([f"{s:4d}" if isinstance(s, int) else s for s in self.full_shape], self.colors()))
   def printbufs(self, prefix=""):
     for i,st in enumerate(self.sts):
-      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i].realized is not None else str(self.bufs[i]):47s}", st.views)
+      print(prefix, f"{i:3d} {str(self.bufs[i]):47s}", st.views)
     print(self.colored_shape())
 
