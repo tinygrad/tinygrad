@@ -170,7 +170,7 @@ class Linearizer(OptimizedKernel):
         idx, valid = g_idx.substitute(substitute), g_valid.substitute(substitute)
         localtype = dtypes.float32
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
-      key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else i}{idx.render()}{valid.render()}"
+      key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else (self.bufs[i].idx if isinstance(self.bufs[i], MemBuffer) else self.bufs[i].name)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
         if acc is not None:
           assert valid.min == 1
