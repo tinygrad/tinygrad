@@ -6,18 +6,18 @@ from tinygrad.tensor import Tensor
 class TestSymbolic(unittest.TestCase):
   def test_symbolic_st(self):
     x = Variable("x", 1, 100)
-    st = ShapeTracker((x, 3))
+    st = ShapeTracker.from_shape((x, 3))
     assert st.shape == (x, 3)
     assert st.real_strides() == (3, 1)
 
   def test_expr_idxs(self):
     x = Variable("x", 1, 100)
-    st = ShapeTracker((x, 3))
+    st = ShapeTracker.from_shape((x, 3))
     idxs = [Variable("x", 0, 100), Variable("y", 0, 100)]
     e1, e2 = st.expr_idxs(idxs)
     assert e1.render() == "((x*3)+y)"
     assert e2.render() == "1"
-    st.permute((1, 0))
+    st = st.permute((1, 0))
     e1, e2 = st.expr_idxs(idxs)
     assert e1.render() == "((y*3)+x)"
     assert e2.render() == "1"
@@ -142,8 +142,7 @@ class TestSymbolicShapeExpr(unittest.TestCase):
     idx = (gidx0, lidx1, Variable.num(1))
     shape = (i+1, 8, 4)
     strides = (1, (i*4)+4, i+1)
-    view = View.create(shape, strides)
-    st = ShapeTracker(shape, [view])
+    st = ShapeTracker((View.create(shape, strides), ))
     idx, valid = st.expr_idxs(idx)
     assert idx.render() == "((lidx1*((i*4)+4))+1+gidx0+i)"
 

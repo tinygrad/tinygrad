@@ -24,9 +24,12 @@ class OptimizedKernel(Kernel):
 
   # apply reshape and permute to all shapetrackers
   def reshape_and_permute(self, new_shape_fxn, axis):
+    new_sts = []
     for st in self.sts:
-      if new_shape_fxn is not None: st.reshape(tuple(new_shape_fxn(st.shape)))
-      if axis is not None: st.permute(tuple(axis))
+      if new_shape_fxn is not None: st = st.reshape(tuple(new_shape_fxn(st.shape)))
+      if axis is not None: st = st.permute(tuple(axis))
+      new_sts.append(st)
+    self.sts = new_sts
 
   # drops the final dimension
   def upcast(self):
@@ -76,7 +79,7 @@ class OptimizedKernel(Kernel):
         else: rets[j].append((shapes[j][i], strides[j][i]))
 
     # do the reshapes
-    for i,x in enumerate(rets): self.sts[i].reshape(tuple([y[0] for y in x]))
+    for i,x in enumerate(rets): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
 
   # ******************** GPU simplifiers ********************
   def _limit_size(self, x: Tuple[int], max_size: List) -> Tuple[int, ...]:
@@ -120,7 +123,7 @@ class OptimizedKernel(Kernel):
           stride[j] = bst
           bst *= shp[j]
 
-    self.sts.append(ShapeTracker(tuple(shp), [View.create(tuple(shp), tuple(stride))]))
+    self.sts.append(ShapeTracker((View.create(tuple(shp), tuple(stride)),)))
     self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]

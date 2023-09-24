@@ -4,7 +4,7 @@ from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, ReduceOps, LoadOp
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
-from tinygrad.shape.view import strides_for_shape, View
+from tinygrad.shape.view import strides_for_shape
 
 class LocalBuffer(NamedTuple):
   name: str
@@ -43,11 +43,10 @@ class Kernel:
     self.reduceop = reduceops[0] if reduceops else None
 
     # create new shapetrackers inside this kernel, we will permute them
-    self.bufs = [MemBuffer(0, self.info.dtype, (View.create(self.info.shape),))] + dedup([x.arg for x in self.ast.get_lazyops() if x.op in LoadOps])
-    self.sts: List[ShapeTracker] = [ShapeTracker(x.views[-1].shape, views=list(x.views)) for x in self.bufs]
-    for st in self.sts: st.simplify()
+    self.bufs = [MemBuffer(0, self.info.dtype, ShapeTracker.from_shape(self.info.shape))] + dedup([x.arg for x in self.ast.get_lazyops() if x.op in LoadOps])
+    self.sts: List[ShapeTracker] = [x.st for x in self.bufs]
 
-    self.mem_estimate: int = sum(x.dtype.itemsize*x.views[-1].size() for x in self.bufs)
+    self.mem_estimate: int = sum(x.dtype.itemsize*x.st.size() for x in self.bufs)
 
     # get earlybufs, before the one reduce op
     self.earlybufs = [x.arg for x in self.reduceop.get_lazyops() if x.op in LoadOps] if self.reduceop else []
@@ -67,7 +66,7 @@ class Kernel:
 
   def has_variable_shape(self) -> bool:
     for b in self.bufs:
-      if not all_int(b.views[-1].shape): return True
+      if not all_int(b.st.views[-1].shape): return True
     return False
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
