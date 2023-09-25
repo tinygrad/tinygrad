@@ -49,7 +49,7 @@ def convert_st_to_movement_ops(st: ShapeTracker, prev_ops: List[Tuple[MovementOp
       expand_arg = tuple((x[0],y-x[1]) for x,y in zip(shrink_arg, expanded_shape))
       prev_ops.append((MovementOps.SHRINK, shrink_arg))
       return convert_st_to_movement_ops(st.pad(expand_arg), prev_ops, False)
-    # only pad produces masks. 
+    # only pad produces masks.
     if st.views[-1].mask is not None and prod(strides) < prod(default_strides):
       pad_arg = tuple((x[0], y-x[1]) for x,y in zip(st.views[-1].mask, st.views[-1].shape))
       prev_ops.append((MovementOps.PAD,pad_arg))
