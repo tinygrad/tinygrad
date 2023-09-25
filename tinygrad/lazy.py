@@ -54,16 +54,16 @@ def _ast_binaryops(op:LazyBuffer, output_shape:Tuple[sint, ...]) -> LazyOp:
 
 def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
   replacements:Dict[LazyBuffer, LazyOp] = {}
-  realized_bufs = dedup([x.realized for x in op.buffers if buf_is_kernel_arg(x)])
+  base_bufs = dedup([x.base if x.base else x for x in op.buffers])
   for x in op.buffers:
-    assert x.realized, "buffer isn't realized"
-    if isinstance(x.realized, RawConst):
-      replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(x.realized._buf, x.realized.dtype, x.st.simplify()))
-    elif x.realized in realized_bufs:
-      replacements[x] = LazyOp(BufferOps.MEM, (), MemBuffer(realized_bufs.index(x.realized)+1, x.realized.dtype, x.st.simplify()))
+    base = x.base if x.base else x
+    if base.op.op == LoadOps.CONST:
+      replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(float(base.op.arg), x.dtype, x.st.simplify()))
+    elif base in base_bufs:
+      replacements[x] = LazyOp(BufferOps.MEM, (), MemBuffer(base_bufs.index(base)+1, x.dtype, x.st.simplify()))
     else:
       raise NotImplementedError(f"not handled {x}")
-  return op.map_buffers(replacements), realized_bufs
+  return op.map_buffers(replacements)
 
 class LazyBuffer:
   def __init__(self, op:Optional[LazyOp], st:ShapeTracker, dtype:DType, device:str, src:Optional[RawBuffer]=None, base:Optional[LazyBuffer]=None):
@@ -83,6 +83,7 @@ class LazyBuffer:
         self._op: LazyOp = op
         for x in op.buffers: x.children.add(self)
 
+  def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
 
   # handle base
@@ -163,22 +164,55 @@ class LazyBuffer:
   def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[LazyOp]: return []
 
+  def schedule(self:LazyBuffer) -> List[Tuple[LazyBuffer, LazyOp, List[LazyBuffer]]]:
+    if self.base: return self.base.schedule()
+    if self.op.op in LoadOps: return [(self, self.op, [])]
+
+    op = self.op
+    if op.op in ElementwiseOps: op = _ast_binaryops(op, self.shape)
+    elif op.op in ReduceOps: op = _ast_reduceops(op)
+    buffers = op.buffers
+    op = _replace_bufferops(op)
+    ret = []
+    seen = set()
+    for x in buffers:
+      if not x.realized:
+        for out,_op,_buffers in x.schedule():
+          if out not in seen:
+            seen.add(out)
+            ret.append((out,_op,_buffers))
+    return ret+[(self, op, buffers)]
+
+
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
+      #print("SCHEDULE")
+      for out,op,buffers in self.schedule():
+        if op.op in LoadOps:
+          LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out)
+        else:
+          realized_bufs = dedup([x.realized for x in buffers if buf_is_kernel_arg(x)])
+          out.realized = Device[out.device].exec_ast(op, output=out, inputs=realized_bufs, var_vals={}, **self._device_extra_args())
+
+
+      """
       if self.base: self.base.realize()
       elif self.op.op in LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
       else:
         op = self.op
         if op.op in ElementwiseOps: op = _ast_binaryops(op, self.shape)
         elif op.op in ReduceOps: op = _ast_reduceops(op)
+        buffers = op.buffers
+        op = _replace_bufferops(op)
 
-        for x in self.op.buffers: x.realize()
-        op, realized_bufs = _replace_bufferops(op)
+        for x in buffers: x.realize()
+        realized_bufs = dedup([x.realized for x in buffers if buf_is_kernel_arg(x)])
         self.realized = Device[self.device].exec_ast(op, output=self, inputs=realized_bufs, var_vals={}, **self._device_extra_args())
 
         if DEBUG >= 4:
           from extra.utils import print_tree
           print_tree(op)
+      """
 
     return self
 
