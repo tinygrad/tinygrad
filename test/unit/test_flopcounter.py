@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.ops import LazyOp, BinaryOps, ReduceOps, get_lazyop_info, LoadOps, MemBuffer
+from tinygrad.ops import LazyOp, BinaryOps, ReduceOps, get_lazyop_info, BufferOps, MemBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.helpers import dtypes
 
 class TestFlopCounter(unittest.TestCase):
   def setUp(self):
-    self.buf0 = LazyOp(LoadOps.BUFFER, (), MemBuffer(1, dtypes.float32, ShapeTracker.from_shape((4,))))
-    self.buf1 = LazyOp(LoadOps.BUFFER, (), MemBuffer(2, dtypes.float32, ShapeTracker.from_shape((4,))))
+    self.buf0 = LazyOp(BufferOps.MEM, (), MemBuffer(1, dtypes.float32, ShapeTracker.from_shape((4,))))
+    self.buf1 = LazyOp(BufferOps.MEM, (), MemBuffer(2, dtypes.float32, ShapeTracker.from_shape((4,))))
 
   def test_flops_add(self):
     op0 = LazyOp(BinaryOps.ADD, (self.buf0,self.buf1,), None)

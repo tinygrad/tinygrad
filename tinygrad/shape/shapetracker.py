@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, cast
+from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, sint
 from tinygrad.shape.view import View
@@ -80,6 +81,29 @@ class ShapeTracker:
 
   # this is the real size (ish)
   def size(self): return self.views[-1].size()
+
+  def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
+    to_apply:List[Tuple[MovementOps, Tuple]] = []
+    for v in self.views:
+      real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
+      real_offset = v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
+      # first, we apply the offset
+      # then, we make it the correct shape
+      # then, we apply permutations
+      # TODO: don't use as_strided
+      to_apply.append((MovementOps.AS_STRIDED, ([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)], v.strides, real_offset)))
+      # then, we apply pre expand pads
+      if v.mask is not None:
+        pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
+        post_expand_pads = tuple((x,s-y) if st == 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
+        if any(x != (0,0) for x in pre_expand_pads):
+          to_apply.append((MovementOps.PAD, pre_expand_pads))
+          real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand_pads))
+      # then, we do any expands
+      if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)): to_apply.append((MovementOps.EXPAND, real_shape))
+      # lastly, we apply post expand pads
+      if v.mask is not None and any(x != (0,0) for x in post_expand_pads): to_apply.append((MovementOps.PAD, post_expand_pads))
+    return to_apply
 
   # these are multiview strides, value is None if it's not a simple strided dimension
   # TODO: this can be shared code between simplify and merge_views

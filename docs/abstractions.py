@@ -266,9 +266,9 @@ from tinygrad.tensor import Tensor
 result = Tensor(2).realize() + Tensor(3).realize()
 
 # use the real Linearizer to linearize 2+3
-from tinygrad.lazy import _replace_loadops
+from tinygrad.lazy import _replace_bufferops
 from tinygrad.codegen.linearizer import Linearizer
-op, _ = _replace_loadops(result.lazydata.op)
+op, _ = _replace_bufferops(result.lazydata.op)
 linearizer = Linearizer(op)
 linearizer.linearize()
 

@@ -3,9 +3,7 @@ import time, importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
-from tinygrad.shape.shapetracker import ShapeTracker
 from dataclasses import dataclass
-if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -15,11 +13,17 @@ class UnaryOps(Enum): NOOP = auto(); EXP2 = auto(); LOG2 = auto(); CAST = auto()
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class TernaryOps(Enum): MULACC = auto(); WHERE = auto() # noqa: E702
+class BufferOps(Enum): MEM = auto(); CONST = auto() # noqa: E702
+# Ops below this line are not allowed in ASTs
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
-class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); BUFFER = auto() # noqa: E702
+class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto() # noqa: E702
 
-Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps]
-OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps]]
+Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps, BufferOps]
+OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps], Type[BufferOps]]
+
+if TYPE_CHECKING:
+  from tinygrad.lazy import LazyBuffer
+  from tinygrad.shape.shapetracker import ShapeTracker
 
 @dataclass(frozen=True)
 class MemBuffer:
@@ -101,28 +105,6 @@ Device = _Device()
 
 # **************** for Interpreted Buffers ****************
 
-def apply_shapetracker(fxn_for_op, ret, st):
-  for v in st.views:
-    real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-    real_offset = v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
-    # first, we apply the offset
-    # then, we make it the correct shape
-    # then, we apply permutations
-    # TODO: don't use as_strided
-    ret = fxn_for_op[MovementOps.AS_STRIDED](ret, ([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)], v.strides, real_offset))
-    # then, we apply pre expand pads
-    if v.mask is not None:
-      pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-      post_expand_pads = tuple((x,s-y) if st == 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-      if any(x != (0,0) for x in pre_expand_pads):
-        ret = fxn_for_op[MovementOps.PAD](ret, pre_expand_pads)
-        real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand_pads))
-    # then, we do any expands
-    if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)): ret = fxn_for_op[MovementOps.EXPAND](ret, real_shape)
-    # lastly, we apply post expand pads
-    if v.mask is not None and any(x != (0,0) for x in post_expand_pads): ret = fxn_for_op[MovementOps.PAD](ret, post_expand_pads)
-  return ret
-
 class Interpreted:
   def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], to_underlying=lambda x: x._buf, from_underlying=None):
     self.buffer, self.fxn_for_op, self.to_underlying = buffer, fxn_for_op, to_underlying
@@ -131,9 +113,11 @@ class Interpreted:
     self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
-    if ast.op == LoadOps.BUFFER and LoadOps.BUFFER not in self.fxn_for_op:
+    if ast.op == BufferOps.MEM and BufferOps.MEM not in self.fxn_for_op:
       assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
-      return self.from_underlying(apply_shapetracker(self.fxn_for_op, self.to_underlying(inputs[ast.arg.idx-1]), ast.arg.st))
+      buf = self.to_underlying(inputs[ast.arg.idx-1])
+      for mop,arg in ast.arg.st.to_movement_ops(): buf = self.fxn_for_op[mop](buf, arg)
+      return self.from_underlying(buf)
     if TernaryOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
     created_context = context is None
@@ -162,7 +146,7 @@ class FlopCounter:
     self.flops, ret = 0, self.flops
     return ret
 shape_fxn_for_op: Dict[Op, Callable] = {
-  LoadOps.BUFFER: lambda arg: (arg.st.shape, arg.dtype, 0), LoadOps.CONST: lambda arg: (arg.st.shape, arg.dtype, 0),
+  BufferOps.MEM: lambda arg: (arg.st.shape, arg.dtype, 0), BufferOps.CONST: lambda arg: (arg.st.shape, arg.dtype, 0),
   UnaryOps.CAST: lambda self,arg: (self.shape, arg[0], self.consume_flops()),   # cast uses no flops
   **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op != UnaryOps.CAST},
   **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
@@ -241,7 +225,7 @@ class Compiled:
       for i,a in enumerate(inputs):
         # TODO: if this is contiguous it's fine
         if a == output.realized:
-          if any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == LoadOps.BUFFER and x.arg.idx == i+1):
+          if any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
             output.realized = None
             break
 

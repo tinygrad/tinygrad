@@ -5,7 +5,7 @@ from collections import defaultdict
 from enum import Enum, auto
 
 from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
-from tinygrad.ops import LazyOp, UnaryOps, LoadOps, ConstBuffer, MemBuffer
+from tinygrad.ops import LazyOp, UnaryOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
@@ -484,7 +484,7 @@ class Linearizer(OptimizedKernel):
 
   def ast_parse(self, x, acc, loaded_buffers, do_reduce=False) -> List[UOp]:
     if x.__class__ is not LazyOp: return loaded_buffers[x]    # for LOCAL_BUFFER
-    if x.op in [LoadOps.BUFFER, LoadOps.CONST]: return loaded_buffers[x.arg]
+    if x.op in BufferOps: return loaded_buffers[x.arg]
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
     # MULACC fusion. TODO: this is copied from Interpreted

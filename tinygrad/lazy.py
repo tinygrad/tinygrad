@@ -6,7 +6,7 @@ from weakref import ref, WeakSet, WeakValueDictionary
 import numpy as np
 from tinygrad.graph import log_op
 from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, partition, all_int, dedup, merge_dicts
-from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer
+from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
 
@@ -63,15 +63,15 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   ast = self.op.map_buffers(cast(Dict[LazyBuffer, Union[LazyOp, LazyBuffer]], real_srcs))
   return LazyOp(MovementOps.RESHAPE, (ast, ), self.shape) if intermediate_shape != self.shape else ast
 
-def _replace_loadops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
+def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
   replacements:Dict[LazyBuffer, LazyOp] = {}
   realized_bufs = dedup([x.realized for x in op.buffers if buf_is_kernel_arg(x)])
   for x in op.buffers:
     assert x.realized, "buffer isn't realized"
     if isinstance(x.realized, RawConst):
-      replacements[x] = LazyOp(LoadOps.CONST, (), ConstBuffer(x.realized._buf, x.realized.dtype, x.st.simplify()))
+      replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(x.realized._buf, x.realized.dtype, x.st.simplify()))
     elif x.realized in realized_bufs:
-      replacements[x] = LazyOp(LoadOps.BUFFER, (), MemBuffer(realized_bufs.index(x.realized)+1, x.realized.dtype, x.st.simplify()))
+      replacements[x] = LazyOp(BufferOps.MEM, (), MemBuffer(realized_bufs.index(x.realized)+1, x.realized.dtype, x.st.simplify()))
     else:
       raise NotImplementedError(f"not handled {x}")
   return (op.src[0] if op.op == MovementOps.RESHAPE else op).map_buffers(replacements), realized_bufs
@@ -138,8 +138,6 @@ class LazyBuffer:
       elif self.optype is MovementOps: self.realized = self.op.src[0].realize().realized
       # run the ast if we still have to, and log the op
       if not self.realized:
-        for x in self.op.buffers: x.realize()
-
         # HACK: image shape can be wrong, hot cast it back to a normal float
         if isinstance(self.dtype, ImageDType) and self.optype != MovementOps and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
           if self.op.op == MovementOps.RESHAPE:
@@ -148,8 +146,11 @@ class LazyBuffer:
           else:
             self.op = LazyOp(UnaryOps.CAST, (self.op,), (dtypes.float32, False))
           self.dtype = dtypes.float32
+
+        # realize the past and exec the AST
+        for x in self.op.buffers: x.realize()
         self.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in self.op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
-        op, realized_bufs = _replace_loadops(self.op)
+        op, realized_bufs = _replace_bufferops(self.op)
         self.realized = Device[self.device].exec_ast(op, output=self, inputs=realized_bufs, var_vals=self.var_vals, **self._device_extra_args())
 
       assert self.realized and isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
@@ -216,16 +217,6 @@ class LazyBuffer:
 
     return create_lazybuffer(out_device, ShapeTracker.from_shape(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype, self.var_vals)
 
-  def shuffle_and_prune_movement_ops(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[sint, ...], Tuple[Tuple[sint, sint], ...]]) -> LazyBuffer:
-    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and (op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and self.op.op in UnaryOps)) and not self.children:
-      return self.op.replace_with_movement_ops([(op, arg)])
-    if REMOVE_MOVEMENT_NOPS and not self.realized and st.contiguous:
-      # MovementOps aren't stacked any more, they each have one parent, find the root
-      root = get_movementroot(self)
-      if root.st.contiguous and root != self and prod(st.shape) == prod(root.shape):
-        return root.reshape(st.shape)
-    return create_lazybuffer(self.device, st, MovementOps, LazyOp(op, (self,), arg), self.dtype, self.var_vals)
-
   def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
     srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
@@ -237,6 +228,16 @@ class LazyBuffer:
     if divisor < 16 or heuristic < 0.1: return self._reduce_op(op, new_shape) # Choose largest divisor (>=16) to split on, penalize large strides.
     def splitted_shape(dim_aft_div): return self.shape[:dim_to_split] + (self.shape[dim_to_split]//divisor,) + dim_aft_div + self.shape[dim_to_split+1:]
     return self.reshape(splitted_shape((divisor,)))._reduce_op(op, splitted_shape((1,))).reshape(splitted_shape(()))._reduce_op(op, new_shape)
+
+  def shuffle_and_prune_movement_ops(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[sint, ...], Tuple[Tuple[sint, sint], ...]]) -> LazyBuffer:
+    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and (op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and self.op.op in UnaryOps)) and not self.children:
+      return self.op.replace_with_movement_ops([(op, arg)])
+    if REMOVE_MOVEMENT_NOPS and not self.realized and st.contiguous:
+      # MovementOps aren't stacked any more, they each have one parent, find the root
+      root = get_movementroot(self)
+      if root.st.contiguous and root != self and prod(st.shape) == prod(root.shape):
+        return root.reshape(st.shape)
+    return create_lazybuffer(self.device, st, MovementOps, LazyOp(op, (self,), arg), self.dtype, self.var_vals)
 
   def reshape(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == arg: return self
