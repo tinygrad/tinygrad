@@ -123,7 +123,7 @@ class LazyBuffer:
 
     if MERGE_ELEMENTWISE_OPS:
       # remove the buffers from any (childless) BinaryOps that feed into this
-      srcs = tuple([x.op if not x.realized and not x.base and x.op.op in ElementwiseOps and not x.children else x for x in srcs])  # type: ignore
+      srcs = tuple([x.op if not x.realized and x.st.contiguous and x.op.op in ElementwiseOps and not x.children else x for x in srcs])  # type: ignore
 
     return LazyBuffer(LazyOp(op, srcs, arg), ShapeTracker.from_shape(self.shape), out_dtype, self.device)
 
@@ -131,23 +131,32 @@ class LazyBuffer:
     if self.shape == tuple(new_shape): return self
     return LazyBuffer(LazyOp(op, (self,), new_shape), ShapeTracker.from_shape(new_shape), self.dtype, self.device)
 
+  def _movement_op(self, st) -> LazyBuffer:
+    return LazyBuffer(None, st, self.dtype, self.device, base=self)
+
   def reshape(self, arg) -> LazyBuffer:
-    return LazyBuffer(None, self.st.reshape(arg), self.dtype, self.device, base=self)
+    if self.shape == arg: return self
+    return self._movement_op(self.st.reshape(arg))
 
   def expand(self, arg) -> LazyBuffer:
-    return LazyBuffer(None, self.st.expand(arg), self.dtype, self.device, base=self)
+    if self.shape == arg: return self
+    return self._movement_op(self.st.expand(arg))
 
   def permute(self, arg) -> LazyBuffer:
-    return LazyBuffer(None, self.st.permute(arg), self.dtype, self.device, base=self)
+    if arg == tuple(range(len(self.shape))): return self
+    return self._movement_op(self.st.permute(arg))
 
   def pad(self, arg) -> LazyBuffer:
-    return LazyBuffer(None, self.st.pad(arg), self.dtype, self.device, base=self)
+    if all(b == 0 and e == 0 for b,e in arg): return self
+    return self._movement_op(self.st.pad(arg))
 
   def shrink(self, arg) -> LazyBuffer:
-    return LazyBuffer(None, self.st.shrink(arg), self.dtype, self.device, base=self)
+    if all(b - a == s for s, (a, b) in zip(self.shape, arg)): return self
+    return self._movement_op(self.st.shrink(arg))
 
   def stride(self, arg) -> LazyBuffer:
-    return LazyBuffer(None, self.st.stride(arg), self.dtype, self.device, base=self)
+    if all(a == 1 for a in arg): return self
+    return self._movement_op(self.st.stride(arg))
 
   @property
   def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
