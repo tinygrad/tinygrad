@@ -126,6 +126,146 @@ class LazyBuffer:
 
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
 
+  @staticmethod
+  def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
+    return create_lazybuffer(device, ShapeTracker.from_shape(tuple(shape)), LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype, {})
+
+  # create a constant with the shape and dtype of self
+  def const(self, val:Union[float, int]) -> LazyBuffer:
+    # NOTE: dtypes.from_np(self.dtype.np) to deal with image types
+    return self.loadop(LoadOps.CONST, tuple(), dtypes.from_np(self.dtype.np), self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
+
+  def contiguous(self:LazyBuffer) -> LazyBuffer:
+    if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype, self.var_vals)
+
+  @staticmethod
+  def fromCPU(x: np.ndarray) -> LazyBuffer:
+    return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, LazyOp(LoadOps.EMPTY, (), None), dtypes.from_np(x.dtype), {}, RawNumpyBuffer.fromCPU(x))
+
+  def toCPU(self) -> np.ndarray:
+    assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
+    self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
+    realized = self_casted.contiguous().realize().realized
+    assert all_int(self.shape), f"no toCPU if shape is symbolic, {self.shape=}"
+    return cast(RawBuffer, realized).toCPU().reshape(self.shape)
+
+  def e(self:LazyBuffer, op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
+    # srcs includes self
+    srcs = (self,)+srcs
+
+    # get outputs now
+    out_device, out_shape, out_dtype = srcs[0].device, srcs[0].shape, max([x.dtype for x in srcs]) if op != UnaryOps.CAST else cast(Tuple[DType, bool], arg)[0]
+
+    if MERGE_ELEMENTWISE_OPS:
+      # remove the buffers from any (childless) BinaryOps that feed into this
+      srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
+
+    return create_lazybuffer(out_device, ShapeTracker.from_shape(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype, self.var_vals)
+
+  def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+    if self.shape == tuple(new_shape): return self
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), ReduceOps, LazyOp(op, (self, ), new_shape), self.dtype, self.var_vals)
+
+  def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+    if any(not isinstance(s, int) for s in self.shape) or prod(self.shape) // prod(new_shape) < 32768: return self._reduce_op(op, new_shape) # The amount of work should be big enough to take the benefit of "2 kernels" approach.
+    heuristic, divisor, dim_to_split = max(((divisor := math.gcd(256, old))/(stride or math.inf), divisor, i) for i, (old, new, stride) in enumerate(zip(self.shape, new_shape, self.st.real_strides())) if old != new) # type: ignore
+    if divisor < 16 or heuristic < 0.1: return self._reduce_op(op, new_shape) # Choose largest divisor (>=16) to split on, penalize large strides.
+    def splitted_shape(dim_aft_div): return self.shape[:dim_to_split] + (self.shape[dim_to_split]//divisor,) + dim_aft_div + self.shape[dim_to_split+1:]
+    return self.reshape(splitted_shape((divisor,)))._reduce_op(op, splitted_shape((1,))).reshape(splitted_shape(()))._reduce_op(op, new_shape)
+
+  def reshape(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer:
+    return create_lazybuffer(self.device, self.st.reshape(arg), MovementOps, LazyOp(MovementOps.RESHAPE, (self,), arg), self.dtype, self.var_vals)
+
+  def permute(self:LazyBuffer, arg) -> LazyBuffer:
+    return create_lazybuffer(self.device, self.st.permute(arg), MovementOps, LazyOp(MovementOps.PERMUTE, (self,), arg), self.dtype, self.var_vals)
+
+  def shrink(self:LazyBuffer, arg) -> LazyBuffer:
+    return create_lazybuffer(self.device, self.st.shrink(arg), MovementOps, LazyOp(MovementOps.SHRINK, (self,), arg), self.dtype, self.var_vals)
+
+  def pad(self:LazyBuffer, arg) -> LazyBuffer:
+    return create_lazybuffer(self.device, self.st.pad(arg), MovementOps, LazyOp(MovementOps.PAD, (self,), arg), self.dtype, self.var_vals)
+
+  def stride(self:LazyBuffer, arg) -> LazyBuffer:
+    return create_lazybuffer(self.device, self.st.stride(arg), MovementOps, LazyOp(MovementOps.STRIDE, (self,), arg), self.dtype, self.var_vals)
+
+  def expand(self:LazyBuffer, arg) -> LazyBuffer:
+    return create_lazybuffer(self.device, self.st.expand(arg), MovementOps, LazyOp(MovementOps.EXPAND, (self,), arg), self.dtype, self.var_vals)
+
+  def realize(self:LazyBuffer) -> LazyBuffer:
+    if not self.realized:
+      # get real ops first
+      if self.optype is BinaryOps: self.op = _ast_binaryops(self)
+      elif self.optype is ReduceOps:
+        self.op = _ast_reduceops(self)
+        if self.op.op in BinaryOps: self.op = _ast_binaryops(self)
+      elif self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
+      # TODO: prerealize MovementOps to share the underlying buffer
+      elif self.optype is MovementOps: self.realized = self.op.src[0].realize().realized
+      # run the ast if we still have to, and log the op
+      if not self.realized:
+        # HACK: image shape can be wrong, hot cast it back to a normal float
+        if isinstance(self.dtype, ImageDType) and self.optype != MovementOps and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
+          if self.op.op == MovementOps.RESHAPE:
+            # put CAST before the final RESHAPE
+            self.op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, self.op.src, (dtypes.float32, False)),), self.op.arg)
+          else:
+            self.op = LazyOp(UnaryOps.CAST, (self.op,), (dtypes.float32, False))
+          self.dtype = dtypes.float32
+
+        # realize the past and exec the AST
+        for x in self.op.buffers: x.realize()
+        self.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in self.op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+        op, realized_bufs = _replace_bufferops(self.op)
+        self.realized = Device[self.device].exec_ast(op, output=self, inputs=realized_bufs, var_vals=self.var_vals, **self._device_extra_args())
+
+      assert self.realized and isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
+      # HACK: allow hot casting of images
+      assert self.realized.dtype == self.dtype or self.dtype.__class__ is ImageDType, f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
+      self.dtype = self.realized.dtype
+
+      # log to the graph
+      if (DEBUG or GRAPH) and (self.realized.__class__ is not RawConst or GRAPH >= 2):
+        log_op(self, self.op)
+
+      # no need to keep the op after realization
+      del self.op
+    return self
+
+  @property
+  def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
+  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
+  def get_lazyops(self) -> List[LazyOp]: return []
+
+"""
+class LazyBuffer:
+  __deletable__ = ('op',)
+  def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, var_vals:Dict[Variable,int], src:Optional[RawBuffer]=None):
+    self.st: ShapeTracker = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
+    self.var_vals: Dict[Variable, int] = var_vals
+    self.var_vals_key: Tuple[Variable, ...] = tuple(sorted(self.var_vals.keys()))
+    self.device, self.shape, self.optype, self.dtype = device, self.st.shape, optype, dtype
+    self.realized: Optional[RawBuffer] = src
+    self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
+    # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
+    self.children: WeakSet = WeakSet()
+    # NOTE: op should be read only after construction of LazyBuffer
+    self.op: LazyOp = op
+    for x in op.buffers: x.children.add(self)
+    if not LAZY: self.realize()
+
+    # log phantom ops to the graph
+    if GRAPH >= 3:
+      log_op(self, self.op, phantom=True)
+
+  def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
+  @property
+  def key(self):
+    if self.realized: return (self.dtype, self.realized.key, self.st, self.var_vals_key)
+    return (self.dtype, self.op.op, self.st, self.var_vals_key)
+
+  def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
+
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       # get real ops first
@@ -309,6 +449,7 @@ class LazyBuffer:
     y = self
     for op, arg in ops: y = MOVEMENT_OPS_DISPATCHER[op](y, arg)
     return y
+"""
 
 def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
   new_srcs = []
