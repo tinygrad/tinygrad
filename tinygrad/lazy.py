@@ -235,12 +235,14 @@ class LazyBuffer:
   def fromCPU(x: np.ndarray) -> LazyBuffer:
     return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, LazyOp(LoadOps.EMPTY, (), None), dtypes.from_np(x.dtype), {}, RawNumpyBuffer.fromCPU(x))
 
+  def prepare_transfer(self):
+    self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
+    return self_casted.contiguous().realize().realized
+
   def toCPU(self) -> np.ndarray:
     assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
-    self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
-    realized = self_casted.contiguous().realize().realized
     assert all_int(self.shape), f"no toCPU if shape is symbolic, {self.shape=}"
-    return cast(RawBuffer, realized).toCPU().reshape(self.shape)
+    return cast(RawBuffer, self.prepare_transfer()).toCPU().reshape(self.shape)
 
   # *** elementwise ops ***
 
@@ -410,7 +412,7 @@ def _realize_from(buffer: LazyBuffer) -> None:
   if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
     assert all_int(buffer.shape), "does not support symbolic shape"
     buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
-    rawbuf.realized.readinto(cast(RawBufferMapped, buffer.realized)._buffer())
+    rawbuf.prepare_transfer().readinto(cast(RawBufferMapped, buffer.realized)._buffer())
   elif isinstance(rawbuf.realized, RawBufferTransfer) and issubclass(Device[buffer.device].buffer, RawBufferTransfer) and P2P >= 1:
     buffer.realized = cast(RawBufferTransfer, Device[buffer.device].buffer).transfer(rawbuf.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
   else:
