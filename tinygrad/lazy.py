@@ -4,7 +4,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.ops import LazyOp, LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps
 ElementwiseOps = {*UnaryOps, *BinaryOps, *TernaryOps}
 
-from tinygrad.ops import BufferOps, ConstBuffer, MemBuffer, Device
+from tinygrad.ops import BufferOps, ConstBuffer, MemBuffer, Device, Compiled
 from tinygrad.helpers import DType, dtypes, all_int, dedup, DEBUG, getenv, prod
 from tinygrad.runtime.lib import RawConst, RawBuffer, buf_is_kernel_arg
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
@@ -13,9 +13,8 @@ from weakref import WeakSet
 import numpy as np
 
 OPT = getenv("OPT", 2)
-MERGE_ELEMENTWISE_INTO_REDUCE = OPT>=1
+MERGE_ELEMENTWISE_INTO_REDUCE, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1
 MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2
-
 
 def _ast_reduceops(op:LazyOp) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
@@ -115,11 +114,16 @@ class LazyBuffer:
     self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
     realized = self_casted.contiguous().realize().realized
     assert all_int(self.shape), f"no toCPU if shape is symbolic, {self.shape=}"
-    return cast(RawBuffer, realized).toCPU().reshape(self.shape)
+    return cast(RawBuffer, realized).toCPU().flatten()[:prod(self.shape)].reshape(self.shape)
 
   def e(self:LazyBuffer, op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs = (self,)+srcs
     out_dtype = max([x.dtype for x in srcs]) if op != UnaryOps.CAST else cast(Tuple[DType, bool], arg)[0]
+
+    if MERGE_ELEMENTWISE_OPS:
+      # remove the buffers from any (childless) BinaryOps that feed into this
+      srcs = tuple([x.op if not x.realized and not x.alias and x.op.op in ElementwiseOps and not x.children else x for x in srcs])  # type: ignore
+
     return LazyBuffer(LazyOp(op, srcs, arg), ShapeTracker.from_shape(self.shape), out_dtype, self.device)
 
   def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
@@ -134,6 +138,15 @@ class LazyBuffer:
 
   def permute(self, arg) -> LazyBuffer:
     return LazyBuffer(None, self.st.permute(arg), self.dtype, self.device, alias=self)
+
+  def pad(self, arg) -> LazyBuffer:
+    return LazyBuffer(None, self.st.pad(arg), self.dtype, self.device, alias=self)
+
+  def shrink(self, arg) -> LazyBuffer:
+    return LazyBuffer(None, self.st.shrink(arg), self.dtype, self.device, alias=self)
+
+  def stride(self, arg) -> LazyBuffer:
+    return LazyBuffer(None, self.st.stride(arg), self.dtype, self.device, alias=self)
 
   @property
   def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
@@ -164,6 +177,13 @@ def _realize_from(buffer: LazyBuffer) -> None:
   if DEBUG >= 3: print(f"*** copy {buffer.device} <- {rawbuf.device} size {rawbuf.realized.size} dtype {rawbuf.realized.dtype}")
   buffer.realized = Device[buffer.device].buffer.fromCPU(rawbuf.toCPU(), **buffer._device_extra_args())
 
+def _realize_const(buffer: LazyBuffer) -> None:
+  if isinstance(Device[buffer.device], Compiled) and buffer.device not in ["LLVM"]:  # consts are broken in LLVM in NaN/inf
+    buffer.realized = RawConst(1, buffer.dtype, float(buffer.op.arg))
+  else:
+    buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args())
+
 LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
   LoadOps.FROM: _realize_from,
+  LoadOps.CONST: _realize_const,
 }
