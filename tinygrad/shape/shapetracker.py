@@ -73,8 +73,6 @@ class ShapeTracker:
   @staticmethod
   def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),))
 
-  def __repr__(self): return f"st<{self.shape}>"
-
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
 

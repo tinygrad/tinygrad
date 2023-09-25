@@ -322,9 +322,6 @@ def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
   return tuple(new_srcs)
 
 def _realize_contiguous(buffer: LazyBuffer) -> None:
-  #if isinstance(buffer.dtype, ImageDType) and prod(buffer.shape) != prod(buffer.dtype.shape):
-  #  print("CONTIG SHAPE MISMATCH", buffer.shape, buffer.dtype.shape)
-  #  buffer.op.src[0].dtype = dtypes.float32
   realized = buffer.op.src[0].realize().realized
   if buffer.op.src[0].st.contiguous and realized.__class__ is not RawConst and realized is not None and realized.size == prod(buffer.shape):
     # no need to run an AST, this is already contiguous
