@@ -39,6 +39,7 @@ sched = C.lazydata.schedule()
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.kernel import LinearizerOptions
 lin = Linearizer(sched[-1][0], LinearizerOptions(has_local=False, supports_float4=False))
+#lin.hand_coded_optimizations()
 lin.linearize()
 from tinygrad.runtime.ops_clang import renderer
 src = renderer("mmult", lin.uops)

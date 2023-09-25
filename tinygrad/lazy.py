@@ -52,7 +52,7 @@ def _ast_binaryops(op:LazyBuffer, output_shape:Tuple[sint, ...]) -> LazyOp:
   # NOTE: cast the type to remove the Optional
   return op.map_buffers(cast(Dict[LazyBuffer, Union[LazyOp, LazyBuffer]], real_srcs))
 
-def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
+def _ast_bufferops(op:LazyOp) -> LazyOp:
   replacements:Dict[LazyBuffer, LazyOp] = {}
   base_bufs = dedup([x.base if x.base else x for x in op.buffers])
   for x in op.buffers:
@@ -172,7 +172,7 @@ class LazyBuffer:
     if op.op in ElementwiseOps: op = _ast_binaryops(op, self.shape)
     elif op.op in ReduceOps: op = _ast_reduceops(op)
     buffers = op.buffers
-    op = _replace_bufferops(op)
+    op = _ast_bufferops(op)
     ret = []
     seen = set()
     for x in buffers:
@@ -183,37 +183,17 @@ class LazyBuffer:
             ret.append((_op,_buffers))
     return ret+[(op, (self,)+buffers)]
 
-
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
-      #print("SCHEDULE")
       for op,buffers in self.schedule():
         if op.op in LoadOps:
           LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](buffers[0])
         else:
           realized_bufs = dedup([x.realized for x in buffers[1:] if buf_is_kernel_arg(x)])
           buffers[0].realized = Device[buffers[0].device].exec_ast(op, output=buffers[0], inputs=realized_bufs, var_vals={}, **self._device_extra_args())
-
-      """
-      if self.base: self.base.realize()
-      elif self.op.op in LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
-      else:
-        op = self.op
-        if op.op in ElementwiseOps: op = _ast_binaryops(op, self.shape)
-        elif op.op in ReduceOps: op = _ast_reduceops(op)
-        buffers = op.buffers
-        op = _replace_bufferops(op)
-
-        for x in buffers: x.realize()
-        realized_bufs = dedup([x.realized for x in buffers if buf_is_kernel_arg(x)])
-        self.realized = Device[self.device].exec_ast(op, output=self, inputs=realized_bufs, var_vals={}, **self._device_extra_args())
-
-        if DEBUG >= 4:
-          from extra.utils import print_tree
-          print_tree(op)
-      """
-
     return self
+
+# *** loadop realization (unrelated to lazy) ***
 
 def _realize_from(buffer: LazyBuffer) -> None:
   rawbuf = buffer.op.src[0].realize()
@@ -231,8 +211,18 @@ def _realize_const(buffer: LazyBuffer) -> None:
   else:
     buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args())
 
+def _realize_empty(buffer: LazyBuffer) -> None:
+  assert all_int(buffer.shape), "does not support symbolic shape"
+  buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
+
+def _realize_custom(buffer: LazyBuffer) -> None:
+  # this needs to immediately realize
+  buffer.realized = buffer.op.arg(buffer, *[x.realize() for x in buffer.op.src])
+
 LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
+  LoadOps.CUSTOM: _realize_custom,
   LoadOps.FROM: _realize_from,
+  LoadOps.EMPTY: _realize_empty,
   LoadOps.CONST: _realize_const,
   LoadOps.RAND: _realize_rand,
 }
