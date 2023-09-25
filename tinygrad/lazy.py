@@ -164,9 +164,9 @@ class LazyBuffer:
   def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[LazyOp]: return []
 
-  def schedule(self:LazyBuffer) -> List[Tuple[LazyBuffer, LazyOp, List[LazyBuffer]]]:
+  def schedule(self:LazyBuffer) -> List[Tuple[LazyOp, Tuple[LazyBuffer]]]:
     if self.base: return self.base.schedule()
-    if self.op.op in LoadOps: return [(self, self.op, [])]
+    if self.op.op in LoadOps: return [(self.op, (self,))]
 
     op = self.op
     if op.op in ElementwiseOps: op = _ast_binaryops(op, self.shape)
@@ -177,23 +177,22 @@ class LazyBuffer:
     seen = set()
     for x in buffers:
       if not x.realized:
-        for out,_op,_buffers in x.schedule():
-          if out not in seen:
-            seen.add(out)
-            ret.append((out,_op,_buffers))
-    return ret+[(self, op, buffers)]
+        for _op,_buffers in x.schedule():
+          if _buffers[0] not in seen:
+            seen.add(_buffers[0])
+            ret.append((_op,_buffers))
+    return ret+[(op, (self,)+buffers)]
 
 
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       #print("SCHEDULE")
-      for out,op,buffers in self.schedule():
+      for op,buffers in self.schedule():
         if op.op in LoadOps:
-          LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out)
+          LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](buffers[0])
         else:
-          realized_bufs = dedup([x.realized for x in buffers if buf_is_kernel_arg(x)])
-          out.realized = Device[out.device].exec_ast(op, output=out, inputs=realized_bufs, var_vals={}, **self._device_extra_args())
-
+          realized_bufs = dedup([x.realized for x in buffers[1:] if buf_is_kernel_arg(x)])
+          buffers[0].realized = Device[buffers[0].device].exec_ast(op, output=buffers[0], inputs=realized_bufs, var_vals={}, **self._device_extra_args())
 
       """
       if self.base: self.base.realize()
@@ -222,6 +221,10 @@ def _realize_from(buffer: LazyBuffer) -> None:
   if DEBUG >= 3: print(f"*** copy {buffer.device} <- {rawbuf.device} size {rawbuf.realized.size} dtype {rawbuf.realized.dtype}")
   buffer.realized = Device[buffer.device].buffer.fromCPU(rawbuf.toCPU(), **buffer._device_extra_args())
 
+def _realize_rand(buffer: LazyBuffer) -> None:
+  rng = np.random.default_rng(buffer.op.arg)
+  buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=buffer.shape, dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args()) # type: ignore
+
 def _realize_const(buffer: LazyBuffer) -> None:
   if isinstance(Device[buffer.device], Compiled) and buffer.device not in ["LLVM"]:  # consts are broken in LLVM in NaN/inf
     buffer.realized = RawConst(1, buffer.dtype, float(buffer.op.arg))
@@ -231,4 +234,5 @@ def _realize_const(buffer: LazyBuffer) -> None:
 LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
   LoadOps.FROM: _realize_from,
   LoadOps.CONST: _realize_const,
+  LoadOps.RAND: _realize_rand,
 }
