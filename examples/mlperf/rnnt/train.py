@@ -309,12 +309,7 @@ class RNNTLoss(Function):
     dgrad[0,u,-1,self.labels[u]] = ab[-1,:-1].T / ( self.distribution[0,u,-1,self.labels[u]])
 
     return LazyBuffer.fromCPU(-dgrad), None
-
-
-Loss = RNNTLoss.apply(distribution_tensor, labels)
-Loss.numpy()
-Loss.backward()
-
+  
 #%% encode
 def encode(X,labels):
   enc, enc_lens  = rnnt.encoder(Tensor(X[0]),Tensor(X[1]))
@@ -328,16 +323,15 @@ def encode(X,labels):
   distribution = distribution_tensor.numpy()
   return enc,distribution,distribution_tensor
 
-
 opt = LAMB(rnnt.params)
 def train_step(X,Y):
   opt.zero_grad()
   labels = Tensor(text_encode(Y[0])[0],dtype=dtypes.int16)
-  enc,distribution,distribution_tensor = encode(X[0],labels)
+  enc,distribution,distribution_tensor = encode(X,labels)
 
   loss = RNNTLoss.apply(distribution_tensor,labels)
   ll = loss.numpy()
-  print (f'loss: {ll:.5} latice shape: {distribution.shape[1:-1]} normalized: {ll/sum(distribution.shape[:-1])}')
+  print (f'loss: {ll:.5} latice shape: {distribution_tensor.shape} normalized: {ll/sum(distribution.shape[:-1]):.5}')
 
   loss.backward()
   opt.step()
@@ -355,4 +349,4 @@ def epoch ():
     hist.append(Loss)
 
 epoch()
-# %%
+
