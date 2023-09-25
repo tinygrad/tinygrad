@@ -138,15 +138,6 @@ class LazyBuffer:
       elif self.optype is MovementOps: self.realized = self.op.src[0].realize().realized
       # run the ast if we still have to, and log the op
       if not self.realized:
-        # HACK: image shape can be wrong, hot cast it back to a normal float
-        if isinstance(self.dtype, ImageDType) and self.optype != MovementOps and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
-          if self.op.op == MovementOps.RESHAPE:
-            # put CAST before the final RESHAPE
-            self.op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, self.op.src, (dtypes.float32, False)),), self.op.arg)
-          else:
-            self.op = LazyOp(UnaryOps.CAST, (self.op,), (dtypes.float32, False))
-          self.dtype = dtypes.float32
-
         # realize the past and exec the AST
         for x in self.op.buffers: x.realize()
         self.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in self.op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
@@ -154,9 +145,7 @@ class LazyBuffer:
         self.realized = Device[self.device].exec_ast(op, output=self, inputs=realized_bufs, var_vals=self.var_vals, **self._device_extra_args())
 
       assert self.realized and isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
-      # HACK: allow hot casting of images
-      assert self.realized.dtype == self.dtype or self.dtype.__class__ is ImageDType, f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
-      self.dtype = self.realized.dtype
+      assert self.realized.dtype == self.dtype, f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
 
       # log to the graph
       if (DEBUG or GRAPH) and (self.realized.__class__ is not RawConst or GRAPH >= 2):
@@ -220,7 +209,9 @@ class LazyBuffer:
   def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
     srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), ReduceOps, LazyOp(op, srcs, new_shape), self.dtype, self.var_vals)
+    ret = create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), ReduceOps, LazyOp(op, srcs, new_shape), self.dtype, self.var_vals)
+    if isinstance(ret.dtype, ImageDType) and prod(ret.dtype.shape) != prod(ret.shape): ret = ret.e(UnaryOps.CAST, arg=(dtypes.float32, False))
+    return ret
 
   def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if any(not isinstance(s, int) for s in self.shape) or prod(self.shape) // prod(new_shape) < 32768: return self._reduce_op(op, new_shape) # The amount of work should be big enough to take the benefit of "2 kernels" approach.
@@ -260,7 +251,9 @@ class LazyBuffer:
   def pad(self:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
     if all(b == 0 and e == 0 for b,e in arg): return self
     if not self.realized and self.op.op == MovementOps.PAD: return self.op.src[0].pad(tuple([(b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)]))
-    return self.shuffle_and_prune_movement_ops(self.st.pad(arg), MovementOps.PAD, arg)
+    ret = self.shuffle_and_prune_movement_ops(self.st.pad(arg), MovementOps.PAD, arg)
+    if isinstance(ret.dtype, ImageDType) and any(b > 3 or e > 3 for b,e in arg) and prod(ret.dtype.shape) != prod(ret.shape): ret = ret.e(UnaryOps.CAST, arg=(dtypes.float32, False))
+    return ret
 
   def expand(self: LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == arg: return self
@@ -329,6 +322,9 @@ def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
   return tuple(new_srcs)
 
 def _realize_contiguous(buffer: LazyBuffer) -> None:
+  #if isinstance(buffer.dtype, ImageDType) and prod(buffer.shape) != prod(buffer.dtype.shape):
+  #  print("CONTIG SHAPE MISMATCH", buffer.shape, buffer.dtype.shape)
+  #  buffer.op.src[0].dtype = dtypes.float32
   realized = buffer.op.src[0].realize().realized
   if buffer.op.src[0].st.contiguous and realized.__class__ is not RawConst and realized is not None and realized.size == prod(buffer.shape):
     # no need to run an AST, this is already contiguous
