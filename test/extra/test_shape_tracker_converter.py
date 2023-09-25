@@ -1,7 +1,9 @@
 import unittest
+from math import prod
 
 from extra.shape_tracker_converter import convert_st_to_movement_ops
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import View
 from tinygrad.ops import MovementOps
 
 def apply_movement_op(st, movement_op):
@@ -15,17 +17,17 @@ def apply_movement_op(st, movement_op):
 
 def helper_test_st_converter(test_case, shapes, movement_ops):
   for shape in shapes:
-    st = ShapeTracker(shape)
+    st = ShapeTracker((View.create((prod(shape),)),View.create(shape)))
     for op in movement_ops: st = apply_movement_op(st, op)
 
     # ugh ugly hack since deepcopy doesn't work on Shapetracker.
-    copy_st = ShapeTracker(shape)
+    copy_st = ShapeTracker((View.create((prod(shape),)),View.create(shape)))
     for op in movement_ops: copy_st = apply_movement_op(copy_st, op)
 
     out = convert_st_to_movement_ops(copy_st)
 
     # apply movement ops generated and compare result
-    new_st = ShapeTracker(shape)
+    new_st = ShapeTracker((View.create((prod(shape),)),View.create(shape)))
     for op in out: new_st = apply_movement_op(new_st, op)
 
     test_case.assertEqual(len(st.views), len(new_st.views))

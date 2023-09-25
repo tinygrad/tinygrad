@@ -59,11 +59,10 @@ def convert_st_to_movement_ops(st: ShapeTracker, prev_ops: List[Tuple[MovementOp
   if len(st.views) >= 2:
     # identify reshapes by multiple views. TO DO: this does not track "vanilla" reshapes where no movement op has been applied before.
     if prod(st.views[-1].shape) == prod(st.views[-2].shape):
-      prev_ops.append((MovementOps.RESHAPE, st.views[-1].shape))
-      prev_st = st.reshape(st.views[-2].shape)
-      # remove "duplicate views"
-      prev_st.simplify()
-      return convert_st_to_movement_ops(prev_st, prev_ops, initial_call=False)
+      if len(prev_ops) == 0 or prev_ops[-1] != (MovementOps.RESHAPE, st.views[-1].shape):
+        prev_ops.append((MovementOps.RESHAPE, st.views[-1].shape))
+        prev_st = ShapeTracker(st.views[:-1])
+        return convert_st_to_movement_ops(prev_st, prev_ops, initial_call=False)
 
   # ops have been identified and appended in reverse order
   return prev_ops[::-1]
