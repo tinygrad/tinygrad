@@ -1,12 +1,13 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, functools, ctypes
 import Metal, Cocoa, libdispatch # type: ignore
-from typing import List, Any
+from typing import List, Any, Tuple
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
-from tinygrad.ops import Compiled
+from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, GlobalCounters
+from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.runtime.lib import RawBufferMapped, LRUAllocator
+from tinygrad.shape.symbolic import sym_infer
 
 METAL_XCODE = getenv("METAL_XCODE")
 
@@ -34,6 +35,30 @@ class RawMetalBuffer(RawBufferMapped):
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
+
+class MetalBatchExecutor(BasicBatchExecutor):
+  def __init__(self, jit_cache: List[Tuple[Any, Any, Any]]): self.use_basic_executor = (DEBUG>0 or not all(isinstance(prg, ASTRunner) and isinstance(prg.clprg, MetalProgram) for prg,_,_ in jit_cache))
+  def __do_exec(self, jit_cache: List[Tuple[Any, Any, Any]]):
+    if len(jit_cache) == 0: return
+    command_buffer = METAL.mtl_queue.commandBufferWithUnretainedReferences()
+    encoder = command_buffer.computeCommandEncoder()
+    for prg, pargs, variables in jit_cache:
+      global_size, local_size = prg.launch_dims(variables)
+      encoder.setComputePipelineState_(prg.clprg.pipeline_state)
+      for i,a in enumerate(pargs): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
+      for i,a in enumerate(variables.values()): encoder.setBytes_length_atIndex_((arg:=ctypes.c_int32(a)), ctypes.sizeof(arg), len(pargs)+i)
+      encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
+    encoder.endEncoding()
+    command_buffer.commit()
+    METAL.mtl_buffers_in_flight.append(command_buffer)
+  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
+    if self.use_basic_executor: return super().exec(jit_cache, updatable_entries) # No graph is created switch to basic executor.
+    self.__do_exec(jit_cache[:8])
+    self.__do_exec(jit_cache[8:])
+    for prg, _, variables in jit_cache:
+      GlobalCounters.kernel_count += 1
+      GlobalCounters.global_ops += sym_infer(prg.op_estimate, variables)
+      GlobalCounters.global_mem += prg.mem_estimate
 
 def unwrap(x):
   ret, err = x
@@ -85,4 +110,4 @@ renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);", float4 = "float4", uses_ptr_arithmetic=True,
   gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']))
-MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), renderer, MetalProgram, METAL.synchronize)
+MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), renderer, MetalProgram, METAL.synchronize, MetalBatchExecutor)
