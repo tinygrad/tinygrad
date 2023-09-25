@@ -84,27 +84,6 @@ class Sigmoid(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.e(BinaryOps.MUL, self.ret.const(1).e(BinaryOps.SUB, self.ret)).e(BinaryOps.MUL, grad_output)
 
-# ************* reduce ops *************
-
-class Sum(Function):
-  def forward(self, x:LazyBuffer, new_shape:Tuple[int, ...]) -> LazyBuffer:
-    self.input_shape = x.shape
-    return x.r(ReduceOps.SUM, new_shape)
-
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.expand(self.input_shape)
-
-class Max(Function):
-  def forward(self, x:LazyBuffer, new_shape:Tuple[int, ...]) -> LazyBuffer:
-    self.x, self.ret = x, x.r(ReduceOps.MAX, new_shape)
-    return self.ret
-
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    # 1s in locations where the max was chosen (can be two locations)
-    max_is_1s = self.x.const(1.0).e(BinaryOps.SUB, self.x.e(BinaryOps.CMPLT, self.ret.expand(self.x.shape)))
-    div = max_is_1s.r(ReduceOps.SUM, grad_output.shape).expand(self.x.shape)
-    return max_is_1s.e(BinaryOps.DIV, div).e(BinaryOps.MUL, grad_output.expand(self.x.shape))
-
 # ************* binary ops *************
 
 class Less(Function):
@@ -156,6 +135,27 @@ class Where(Function):
     return None, \
            self.x.e(TernaryOps.WHERE, grad_output, grad_output.const(0)) if self.needs_input_grad[1] else None, \
            self.x.e(TernaryOps.WHERE, grad_output.const(0), grad_output) if self.needs_input_grad[2] else None
+
+# ************* reduce ops *************
+
+class Sum(Function):
+  def forward(self, x:LazyBuffer, new_shape:Tuple[int, ...]) -> LazyBuffer:
+    self.input_shape = x.shape
+    return x.r(ReduceOps.SUM, new_shape)
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return grad_output.expand(self.input_shape)
+
+class Max(Function):
+  def forward(self, x:LazyBuffer, new_shape:Tuple[int, ...]) -> LazyBuffer:
+    self.x, self.ret = x, x.r(ReduceOps.MAX, new_shape)
+    return self.ret
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    # 1s in locations where the max was chosen (can be two locations)
+    max_is_1s = self.x.const(1.0).e(BinaryOps.SUB, self.x.e(BinaryOps.CMPLT, self.ret.expand(self.x.shape)))
+    div = max_is_1s.r(ReduceOps.SUM, grad_output.shape).expand(self.x.shape)
+    return max_is_1s.e(BinaryOps.DIV, div).e(BinaryOps.MUL, grad_output.expand(self.x.shape))
 
 # ************* movement ops *************
 
