@@ -4,7 +4,6 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
 from dataclasses import dataclass
-if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -22,7 +21,9 @@ class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps, BufferOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps], Type[BufferOps]]
 
-from tinygrad.shape.shapetracker import ShapeTracker
+if TYPE_CHECKING:
+  from tinygrad.lazy import LazyBuffer
+  from tinygrad.shape.shapetracker import ShapeTracker
 
 @dataclass(frozen=True)
 class MemBuffer:
