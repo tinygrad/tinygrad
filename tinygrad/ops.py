@@ -3,7 +3,6 @@ import time, importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
-from tinygrad.shape.shapetracker import ShapeTracker
 from dataclasses import dataclass
 if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
 
@@ -20,6 +19,8 @@ class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps]]
+
+from tinygrad.shape.shapetracker import ShapeTracker
 
 @dataclass(frozen=True)
 class MemBuffer:
@@ -101,28 +102,6 @@ Device = _Device()
 
 # **************** for Interpreted Buffers ****************
 
-def apply_shapetracker(fxn_for_op, ret, st):
-  for v in st.views:
-    real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-    real_offset = v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
-    # first, we apply the offset
-    # then, we make it the correct shape
-    # then, we apply permutations
-    # TODO: don't use as_strided
-    ret = fxn_for_op[MovementOps.AS_STRIDED](ret, ([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)], v.strides, real_offset))
-    # then, we apply pre expand pads
-    if v.mask is not None:
-      pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-      post_expand_pads = tuple((x,s-y) if st == 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-      if any(x != (0,0) for x in pre_expand_pads):
-        ret = fxn_for_op[MovementOps.PAD](ret, pre_expand_pads)
-        real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand_pads))
-    # then, we do any expands
-    if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)): ret = fxn_for_op[MovementOps.EXPAND](ret, real_shape)
-    # lastly, we apply post expand pads
-    if v.mask is not None and any(x != (0,0) for x in post_expand_pads): ret = fxn_for_op[MovementOps.PAD](ret, post_expand_pads)
-  return ret
-
 class Interpreted:
   def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], to_underlying=lambda x: x._buf, from_underlying=None):
     self.buffer, self.fxn_for_op, self.to_underlying = buffer, fxn_for_op, to_underlying
@@ -133,7 +112,9 @@ class Interpreted:
   def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
     if ast.op == LoadOps.BUFFER and LoadOps.BUFFER not in self.fxn_for_op:
       assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
-      return self.from_underlying(apply_shapetracker(self.fxn_for_op, self.to_underlying(inputs[ast.arg.idx-1]), ast.arg.st))
+      buf = self.to_underlying(inputs[ast.arg.idx-1])
+      for mop,arg in ast.arg.st.to_movement_ops(): buf = self.fxn_for_op[mop](buf, arg)
+      return self.from_underlying(buf)
     if TernaryOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
     created_context = context is None
