@@ -148,31 +148,15 @@ class LazyBuffer:
   # *** movement ops ***
 
   def _movement_op(self, st) -> LazyBuffer:
+    if self.st == st: return self
     return LazyBuffer(None, st, self.dtype, self.device, base=self.base)
 
-  def reshape(self, arg) -> LazyBuffer:
-    if self.shape == arg: return self
-    return self._movement_op(self.st.reshape(arg))
-
-  def permute(self, arg) -> LazyBuffer:
-    if arg == tuple(range(len(self.shape))): return self
-    return self._movement_op(self.st.permute(arg))
-
-  def shrink(self, arg) -> LazyBuffer:
-    if all(b - a == s for s, (a, b) in zip(self.shape, arg)): return self
-    return self._movement_op(self.st.shrink(arg))
-
-  def stride(self, arg) -> LazyBuffer:
-    if all(a == 1 for a in arg): return self
-    return self._movement_op(self.st.stride(arg))
-
-  def expand(self, arg) -> LazyBuffer:
-    if self.shape == arg: return self
-    return self._movement_op(self.st.expand(arg))
-
-  def pad(self, arg) -> LazyBuffer:
-    if all(b == 0 and e == 0 for b,e in arg): return self
-    return self._movement_op(self.st.pad(arg))
+  def reshape(self, arg) -> LazyBuffer: return self._movement_op(self.st.reshape(arg))
+  def permute(self, arg) -> LazyBuffer: return self._movement_op(self.st.permute(arg))
+  def shrink(self, arg) -> LazyBuffer: return self._movement_op(self.st.shrink(arg))
+  def stride(self, arg) -> LazyBuffer: return self._movement_op(self.st.stride(arg))
+  def expand(self, arg) -> LazyBuffer: return self._movement_op(self.st.expand(arg))
+  def pad(self, arg) -> LazyBuffer: return self._movement_op(self.st.pad(arg))
 
   @property
   def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
@@ -191,7 +175,7 @@ class LazyBuffer:
     ret = []
     seen = set()
     for x in buffers:
-      if not x.realized:
+      if not x.realized and x not in seen:
         for _op,_buffers in x.schedule():
           if _buffers[0] not in seen:
             seen.add(_buffers[0])
