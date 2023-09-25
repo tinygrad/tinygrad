@@ -31,7 +31,7 @@ def _ast_binaryops(op:LazyBuffer, output_shape:Tuple[sint, ...]) -> LazyOp:
   real_srcs: Dict[LazyBuffer, Optional[Union[LazyOp, LazyBuffer]]] = {x:None for x in op.buffers}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
-  psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x.base if x.base is not None and x.st.contiguous else x) for k,x in zip(real_srcs.keys(), real_srcs.keys()) if not x.realized and x.op.op in ReduceOps and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
+  psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x.base if x.is_contiguous() else x) for k,x in zip(real_srcs.keys(), real_srcs.keys()) if not x.realized and x.op.op in ReduceOps and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape: Tuple[sint, ...] = output_shape
   if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and psrcs:
     psrc = psrcs[0] # NOTE: right now we can't handle multiple, as we'd have to check for loop
@@ -84,19 +84,22 @@ class LazyBuffer:
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
+  def is_contiguous(self): return self.st.contiguous and self.base.st.size() == self.st.size()
 
   # handle base
   @property
-  def op(self): return self.base._op if self.base else self._op
+  def op(self): return self.base._op
   @property
-  def realized(self): return self.base._realized if self.base else self._realized
+  def realized(self): return self.base._realized
   @realized.setter
-  def realized(self, val): self._realized = val
+  def realized(self, val):
+    assert self.base == self, "must be a base"
+    self._realized = val
   @property
-  def children(self): return self.base._children if self.base else self._children
+  def children(self): return self.base._children
 
   def contiguous(self) -> LazyBuffer:
-    if self.st.contiguous and self.base.st.size() == self.st.size(): return self
+    if self.is_contiguous(): return self
     return LazyBuffer(LazyOp(LoadOps.CONTIGUOUS, (self,)), ShapeTracker.from_shape(self.shape), self.dtype, self.device)
 
   @staticmethod
@@ -125,7 +128,7 @@ class LazyBuffer:
 
     if MERGE_ELEMENTWISE_OPS:
       # remove the buffers from any (childless) BinaryOps that feed into this
-      srcs = tuple([x.op if not x.realized and x.st.contiguous and x.op.op in ElementwiseOps and not x.children else x for x in srcs])  # type: ignore
+      srcs = tuple([x.op if not x.realized and x.is_contiguous() and x.op.op in ElementwiseOps and not x.children else x for x in srcs])  # type: ignore
 
     return LazyBuffer(LazyOp(op, srcs, arg), ShapeTracker.from_shape(self.shape), out_dtype, self.device)
 
