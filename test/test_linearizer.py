@@ -5,7 +5,7 @@ from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import Compiled, Device, MovementOps, LazyOp
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
-from tinygrad.lazy import _replace_loadops
+from tinygrad.lazy import _replace_bufferops
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -31,7 +31,7 @@ class TestLinearizer(unittest.TestCase):
     r = a[:-1] + a[1:]
     ast = r.lazydata.op
     r = r.realize()  # realize an output buffer
-    k = Linearizer(_replace_loadops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(_replace_bufferops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.upcast()
     k.linearize()
@@ -49,7 +49,7 @@ class TestLinearizer(unittest.TestCase):
     r = a.expand([2]) + b.expand([2])
     ast = r.lazydata.op
     r = r.realize()  # realize an output buffer
-    k = Linearizer(_replace_loadops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(_replace_bufferops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.upcast()
     k.linearize()
@@ -64,7 +64,7 @@ class TestLinearizer(unittest.TestCase):
     r = Tensor.stack([a, b])
     ast = r.lazydata.op
     r = r.realize()  # realize an output buffer
-    k = Linearizer(_replace_loadops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(_replace_bufferops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.upcast()
     k.linearize()
@@ -80,7 +80,7 @@ class TestLinearizer(unittest.TestCase):
     r = a * b
     ast = r.lazydata.op
     r = r.realize()  # realize an output buffer
-    k = Linearizer(_replace_loadops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(_replace_bufferops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
