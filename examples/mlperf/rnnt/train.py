@@ -1,28 +1,22 @@
-# %%
+#%%
 from tinygrad.tensor import Tensor
-# from temp.print_tree import print_tree
 from tinygrad.nn.optim import Adam, LAMB
-
-# %%
-import functools
-import itertools
-
-# %%
+from tinygrad.nn import Embedding, Linear
 from tinygrad.helpers import dtypes
 from tinygrad.ops import Device
+from tinygrad.jit import TinyJit
+from tinygrad.mlops import Function
+from tinygrad.lazy import LazyBuffer
 
-# Device.DEFAULT = 'METAL'
-
-# %% [markdown]
-# # data
-
-# %%
+import itertools
 import pathlib
 import json
-import  numpy as np
+import numpy as np
 import matplotlib.pyplot as plt
 import librosa
 import soundfile
+
+#%% data extract
 BASEDIR = pathlib.Path("../../../extra/datasets/librispeech")
 with open(BASEDIR / "dev-clean-wav.json") as f:
   ci = json.load(f)
@@ -32,23 +26,15 @@ WINDOW = librosa.filters.get_window("hann", 320)
 def feature_extract(x, x_lens):
   x_lens = np.ceil((x_lens / 160) / 3).astype(np.int32)
 
-  # pre-emphasis
   x = np.concatenate((np.expand_dims(x[:, 0], 1), x[:, 1:] - 0.97 * x[:, :-1]), axis=1)
 
-  # stft
   x = librosa.stft(x, n_fft=512, window=WINDOW, hop_length=160, win_length=320, center=True, pad_mode="reflect")
   x = np.stack((x.real, x.imag), axis=-1)
 
-  # power spectrum
   x = (x**2).sum(-1)
-
-  # mel filter bank
   x = np.matmul(FILTER_BANK, x)
-
-  # log
   x = np.log(x + 1e-20)
 
-  # feature splice
   seq = [x]
   for i in range(1, 3):
     tmp = np.zeros_like(x)
@@ -82,21 +68,6 @@ def iterate(bs=1, start=0):
 
     yield feature_extract(samples, sample_lens), np.array([v["transcript"] for v in ci[i : i + bs]])
 
-iter = iterate()
-X, Y = next(iter)
-print(X[0].shape, len(Y[0]))
-
-
-# %%
-_=plt.plot(X[0][:,0,2:6])
-
-# %% [markdown]
-# ## tokenize
-
-# %%
-from tinygrad.tensor import Tensor
-
-# %%
 characters = [*" 'abcdefghijklmnopqrstuvwxyz","<skip>"]
 c2i= dict([(c,i) for i,c in enumerate(characters)])
 charn = len(characters)
@@ -110,20 +81,6 @@ def text_decode(toks:Tensor):
     for seq in toks:
         ret.append("".join([characters[int(tok)] for tok in seq ]))
     return ret
-
-
-assert text_decode(text_encode(Y)) == Y
-
-# %%
-labels = text_encode(Y[0])[0]
-
-# %% [markdown]
-# # model
-
-# %%
-# from models.rnnt import RNNT, LSTM, LSTMCell, StackTime,Encoder, Prediction, Joint
-from tinygrad.jit import TinyJit
-from tinygrad.nn import Embedding, Linear
 
 # %% model
 class RNNT:
@@ -280,113 +237,122 @@ class Prediction:
     x_, hc = self.rnn(emb.transpose(0, 1), hc)
     return x_.transpose(0, 1), hc
 
+ #%%
+def check32(arg):assert arg.dtype == np.float32 or arg.dtype == dtypes.float32 , f'{arg.dtype}'
+#%% Loss
+class RNNTLoss(Function):
+  def forward(self,distribution:LazyBuffer,labels:LazyBuffer):
+    self.device = distribution.device
+    self.distribution = distribution.toCPU()
+    assert isinstance(self.distribution,np.ndarray)
+    self.labels=labels.toCPU()
 
-# %% calc loss stable
-def calc_loss(enc,distribution,labels):
+    self.T,self.U = distribution.shape[2],distribution.shape[1]
+    assert len(self.labels) == self.U-1, f"len labels {len(self.labels)} doesnt match U-1 {self.U-1}"
 
-  T,U = distribution.shape[2],distribution.shape[1]
-  assert len(labels) == U-1, f"len labels {len(labels)} doesnt match U-1 {U-1}"
-  assert enc.shape[1] == T, f"{enc.shape}[1] != {T}"
+    self.alpha = np.zeros((self.T,self.U),dtype=np.float32)
+    self.alpha [0,0] = 1
 
-  alpha = np.zeros((T,U))
-  alpha [0,0] = 1
-  beta = np.zeros((T,U))
-  beta [-1,-1] = 1
+    alpha_norm_log = np.zeros((),np.float32)
 
-  labels=np.array(labels)
-  alpha_norm_log = 0
+    for i in range(1,self.T+self.U-1):
 
-  for i in range(1,T+U-1):
+      offset= max(0,i-self.T+1)
+      u=np.arange(offset,min(i+1,self.U))
+      t=i-u
 
-    offset= max(0,i-T+1)
-    u=np.arange(offset,min(i+1,U))
-    t=i-u
+      _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
 
-    _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
-    alpha[_t,_u] += alpha[_t-1,_u] * distribution[0,_u,_t-1,-1]
+      self.alpha[_t,_u] += self.alpha[_t-1,_u] * self.distribution[0,_u,_t-1,-1]
 
-    _t,_u = t[np.where(u>0)], u[np.where(u>0)]
-    alpha[_t,_u] += alpha[_t,_u-1] * distribution[0,_u-1,_t,labels[_u-1]]
+      _t,_u = t[np.where(u>0)], u[np.where(u>0)]
+      self.alpha[_t,_u] += self.alpha[_t,_u-1] * self.distribution[0,_u-1,_t,self.labels[_u-1]]
 
-    alpha_norm = alpha[t,u].sum()
-    alpha [t,u] /= alpha_norm
-    alpha_norm_log += np.log(alpha_norm)
+      alpha_norm = self.alpha[t,u].sum()
+      self.alpha [t,u] /= alpha_norm
+      alpha_norm_log += np.log(alpha_norm,dtype=np.float32)
+    
+    Loss= -alpha_norm_log - np.log(self.distribution[0,-1,-1,-1])
+    return LazyBuffer.fromCPU(Loss)
 
-  Loss = -alpha_norm_log - np.log(distribution[0,-1,-1,-1])
+  def backward(self,grad):
+    beta = np.zeros((self.T,self.U))
+    beta [-1,-1] = 1
 
-  ab = alpha
-  
-  for i in range(T+U-2,-1,-1):
+    ab = self.alpha
+    
+    for i in range(self.T+self.U-2,-1,-1):
 
-    offset= max(0,i-T+1)
-    u=np.arange(offset,min(i+1,U))
-    t=i-u
+      offset= max(0,i-self.T+1)
+      u=np.arange(offset,min(i+1,self.U))
+      t=i-u
 
-    beta[t,u] /= beta[t,u].sum()
+      beta[t,u] /= beta[t,u].sum()
 
-    ab [t,u] *= beta [t,u]
-    ab [t,u] /= ab[t,u].sum()
-    alpha_norm_log += np.log(alpha_norm)
+      ab [t,u] *= beta [t,u]
+      ab [t,u] /= ab[t,u].sum()
 
-    _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
-    beta[_t-1,_u] += beta[_t,_u] * distribution[0,_u,_t-1,-1]
+      _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
+      beta[_t-1,_u] += beta[_t,_u] * self.distribution[0,_u,_t-1,-1]
 
-    _t,_u = t[np.where(u>0)], u[np.where(u>0)]
-    beta[_t,_u-1] += beta[_t,_u] * distribution[0,_u-1,_t,labels[_u-1]]
+      _t,_u = t[np.where(u>0)], u[np.where(u>0)]
+      beta[_t,_u-1] += beta[_t,_u] * self.distribution[0,_u-1,_t,self.labels[_u-1]]
 
-  dgrad = np.zeros_like(distribution)
-  t = np.arange(T-1)
-  u = np.arange(U-1)
-  dgrad[0,:-1,:-1,-1] = ab[:-1,:-1].T / (distribution[0,:-1,:-1,-1] + (beta[:-1,1:]/beta[1:,:-1]).T * distribution[0,u,:-1,labels[u]] )
-  # u=U
-  dgrad[0,-1,:,-1] = ab[:,-1].T / (distribution[0,-1,:,-1]  )
+    dgrad = np.zeros_like(self.distribution)
+    t = np.arange(self.T-1)
+    u = np.arange(self.U-1)
+    dgrad[0,:-1,:-1,-1] = ab[:-1,:-1].T / (self.distribution[0,:-1,:-1,-1] + (beta[:-1,1:]/beta[1:,:-1]).T * self.distribution[0,u,:-1,self.labels[u]] )
+    # u=U
+    dgrad[0,-1,:,-1] = ab[:,-1].T / (self.distribution[0,-1,:,-1]  )
 
-  dgrad[0,u,:-1,labels[u]] = ab[:-1,:-1].T / (distribution[0,:-1,:-1,-1]* (beta[1:,:-1]/beta[:-1,1:]).T + distribution[0,u,:-1,labels[u]])
-  dgrad[0,u,-1,labels[u]] = ab[-1,:-1].T / ( distribution[0,u,-1,labels[u]])
+    dgrad[0,u,:-1,self.labels[u]] = ab[:-1,:-1].T / (self.distribution[0,:-1,:-1,-1]* (beta[1:,:-1]/beta[:-1,1:]).T + self.distribution[0,u,:-1,self.labels[u]])
+    dgrad[0,u,-1,self.labels[u]] = ab[-1,:-1].T / ( self.distribution[0,u,-1,self.labels[u]])
 
-  return Loss,-dgrad
+    return LazyBuffer.fromCPU(-dgrad), None
 
-# %%
-rnnt= RNNT()
+
+Loss = RNNTLoss.apply(distribution_tensor, labels)
+Loss.numpy()
+Loss.backward()
 
 #%% encode
-
 def encode(X,labels):
   enc, enc_lens  = rnnt.encoder(Tensor(X[0]),Tensor(X[1]))
   preds = None
   hc = Tensor.zeros(rnnt.prediction.rnn.layers, 2, rnnt.prediction.hidden_size)
-  for x in [0] + labels:
-      pred,hc = rnnt.prediction.__call__(Tensor([[x]]),hc,1)
-      preds = pred if preds is None else preds.cat(pred,dim=1).realize()
+  for x in [0] + list(labels.numpy()):
+    pred,hc = rnnt.prediction.__call__(Tensor([[x]]),hc,1)
+    preds = pred if preds is None else preds.cat(pred,dim=1).realize()
 
   distribution_tensor = rnnt.joint.__call__(preds, enc).softmax(3).realize()
   distribution = distribution_tensor.numpy()
   return enc,distribution,distribution_tensor
 
-# %% train step
+
 opt = LAMB(rnnt.params)
 def train_step(X,Y):
-    opt.zero_grad()
-    labels = text_encode(Y[0])[0]
-    enc,distribution,distribution_tensor = encode(X,labels)
-    
-    Loss,distribution_grad = calc_loss(enc,distribution,labels)
-    distribution_grad = distribution_grad.astype(np.float32)
+  opt.zero_grad()
+  labels = Tensor(text_encode(Y[0])[0],dtype=dtypes.int16)
+  enc,distribution,distribution_tensor = encode(X[0],labels)
 
-    _loss = (distribution_tensor * Tensor(distribution_grad)).sum()
+  loss = RNNTLoss.apply(distribution_tensor,labels)
+  ll = loss.numpy()
+  print (f'loss: {ll:.5} latice shape: {distribution.shape[1:-1]} normalized: {ll/sum(distribution.shape[:-1])}')
 
-    _loss.backward()
-    opt.step()
-    print(f"Rel Loss: {Loss/(X[1][0]+len(Y[0])):.6}")
-    return Loss,distribution_grad
+  loss.backward()
+  opt.step()
+  return ll
+# %%
+rnnt= RNNT()
+opt = LAMB(rnnt.params)
 
 # %%
 hist = []
 def epoch ():
   for i,(X,Y) in enumerate(iterate()):
-
-    Loss,grad = train_step(X,Y)
-    print(i,end='')
+    print(end=(f'{i}: ').rjust(5))
+    Loss = train_step(X,Y)
     hist.append(Loss)
 
 epoch()
+# %%
