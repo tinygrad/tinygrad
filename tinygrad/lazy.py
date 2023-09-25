@@ -176,8 +176,9 @@ class LazyBuffer:
         op, realized_bufs = _replace_bufferops(op)
         self.realized = Device[self.device].exec_ast(op, output=self, inputs=realized_bufs, var_vals={}, **self._device_extra_args())
 
-        #from extra.utils import print_tree
-        #print_tree(op)
+        if DEBUG >= 4:
+          from extra.utils import print_tree
+          print_tree(op)
 
     return self
 
