@@ -96,6 +96,8 @@ class LazyBuffer:
   # handle base
   @property
   def op(self): return self.base._op
+  @op.setter
+  def op(self, val): self.base._op = val
   @property
   def realized(self): return self.base._realized
   @realized.setter
