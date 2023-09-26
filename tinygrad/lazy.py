@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import math
 from typing import Optional, Union, cast, Tuple, Any, List, Dict, Mapping, Callable
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -186,7 +187,30 @@ class LazyBuffer:
         if self.base == self:
           mapped = self.op.map_buffers({x:x._movement_op(fxn, arg) for x in self.op.buffers})
           return LazyBuffer.cache(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
+
+        """
         print("CONTIG NE", self.base.shape, self.shape, fxn, arg)
+        # push the permute and the reshape as a pair
+        if fxn == ShapeTracker.permute:
+          mapped = self.base.op.map_buffers({x:x.reshape(self.shape)._movement_op(fxn, arg) for x in self.base.op.buffers})
+          return LazyBuffer.cache(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
+        """
+
+        """
+        # push a permute through a reshape
+        if fxn == ShapeTracker.permute:
+          permutation = None
+          if shape_idx_groups := get_contraction(self.base.shape, self.shape):
+            permutation = tuple(flatten(shape_idx_groups[i] for i in arg))
+          if shape_idx_groups := get_contraction(self.shape, self.base.shape):
+            permutation = tuple(argsort([arg.index(x[0]) for x in shape_idx_groups]))
+          if permutation:
+            print("PUSHING", self.base.shape, permutation)
+            assert all([self.base.shape == x.shape for x in self.base.op.buffers]), f"mismatch {self.base.shape} != {[x.shape for x in self.base.op.buffers]}"
+            mapped = self.base.op.map_buffers({x:x._movement_op(fxn, permutation) for x in self.base.op.buffers})
+            return LazyBuffer.cache(mapped, ShapeTracker.from_shape(mapped.buffers[0].shape), self.dtype, self.device).reshape(st.shape)
+        """
+
     return LazyBuffer.cache(None, st, self.dtype, self.device, base=self.base)
 
   def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, SHUFFLE_MOVEMENT_OPS)
