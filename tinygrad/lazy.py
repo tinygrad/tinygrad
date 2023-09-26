@@ -5,8 +5,9 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.ops import LazyOp, LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps
 ElementwiseOps = {*UnaryOps, *BinaryOps, *TernaryOps}
 
+from tinygrad.graph import log_op
 from tinygrad.ops import BufferOps, ConstBuffer, MemBuffer, Device, Compiled
-from tinygrad.helpers import DType, dtypes, all_int, dedup, DEBUG, getenv, prod
+from tinygrad.helpers import GRAPH, DType, dtypes, all_int, dedup, DEBUG, getenv, prod
 from tinygrad.runtime.lib import RawConst, RawBuffer, buf_is_kernel_arg
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.shape.symbolic import sint
@@ -185,6 +186,10 @@ class LazyBuffer:
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       for op,buffers in self.schedule():
+        #if (DEBUG or GRAPH): log_op(self, op)
+        if DEBUG >= 3:
+          from extra.utils import print_tree
+          print_tree(op)
         if op.op in LoadOps:
           LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](buffers[0])
         else:
