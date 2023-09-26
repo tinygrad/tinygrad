@@ -57,8 +57,8 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
   if IMAGE >= 2: x,w = x.cast(ImageDType(*base_image_type, shape=x.shape)), w.cast(ImageDType(*base_image_type, shape=w.shape))
   x, w = x.contiguous(), w.contiguous()
-  # TODO: fix this
-  #if get_single_root(w.lazydata).realized: w.realize()
+  # TODO: fix this for transformers
+  w.realize()
 
   # expand out
   rcin_hi, rcin_lo = cin//4 if cin >= 4 else 1, 4 if cin >= 4 else 1

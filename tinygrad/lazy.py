@@ -7,7 +7,7 @@ ElementwiseOps = {*UnaryOps, *BinaryOps, *TernaryOps}
 
 #from tinygrad.graph import log_op
 from tinygrad.ops import BufferOps, ConstBuffer, MemBuffer, Device, Compiled
-from tinygrad.helpers import DType, dtypes, all_int, dedup, DEBUG, getenv, prod
+from tinygrad.helpers import DType, dtypes, all_int, dedup, DEBUG, getenv, prod, ImageDType
 from tinygrad.runtime.lib import RawConst, RawBuffer, buf_is_kernel_arg
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.shape.symbolic import sint
@@ -84,7 +84,7 @@ def _ast_bufferops(op:LazyOp) -> LazyOp:
 class LazyBuffer:
   def __init__(self, op:Optional[LazyOp], st:ShapeTracker, dtype:DType, device:str, src:Optional[RawBuffer]=None, base:Optional[LazyBuffer]=None):
     self.st: ShapeTracker = st
-    self.shape, self.dtype, self.device = self.st.shape, dtype, device
+    self.shape, self._dtype, self.device = self.st.shape, dtype, device
     self.output_buffer: Optional[RawBuffer] = None
     self.var_vals: Dict = {}
     if base:
@@ -114,6 +114,8 @@ class LazyBuffer:
   def is_contiguous(self): return self.st.contiguous and self.base.st.size() == self.st.size()
 
   # handle base
+  @property
+  def dtype(self): return self.base._dtype
   @property
   def base(self): return self._base if hasattr(self, '_base') else self
   @property
@@ -178,17 +180,19 @@ class LazyBuffer:
     st:ShapeTracker = fxn(self.st, arg)
     if self.st == st: return self
     if st == self.base.st: return self.base
-    if push_ewop and not self.realized and self.base == self and self.op.op in ElementwiseOps:
-      if not unsafe_ops or not any(x.op in UNSAFE_PAD_OPS for x in self.op.get_lazyops()):
-        mapped = self.op.map_buffers({x:x._movement_op(fxn, arg) for x in self.op.buffers})
-        return LazyBuffer.cache(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
+    if push_ewop and not self.realized and self.is_contiguous() and self.base.op.op in ElementwiseOps:
+      if not unsafe_ops or not any(x.op in unsafe_ops for x in self.base.op.get_lazyops()):
+        if self.base == self:
+          mapped = self.op.map_buffers({x:x._movement_op(fxn, arg) for x in self.op.buffers})
+          return LazyBuffer.cache(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
+        print("CONTIG NE", self.base.shape, self.shape, fxn, arg)
     return LazyBuffer.cache(None, st, self.dtype, self.device, base=self.base)
 
   def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, SHUFFLE_MOVEMENT_OPS)
   def shrink(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.shrink, arg, SHUFFLE_MOVEMENT_OPS)
   def stride(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.stride, arg, SHUFFLE_MOVEMENT_OPS)
-  def pad(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.pad, arg, SHUFFLE_PAD_OPS, UNSAFE_PAD_OPS)
-  def reshape(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.reshape, arg)
+  def pad(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.pad, arg) #, SHUFFLE_PAD_OPS, UNSAFE_PAD_OPS)
+  def reshape(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.reshape, arg, SHUFFLE_MOVEMENT_OPS)
   def expand(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.expand, arg)
 
   @property
@@ -202,16 +206,21 @@ class LazyBuffer:
     seen.add(self)
     if self.realized: return []
     if self.base != self: return self.base.schedule(seen)
+
     # NOTE: late rewrite contiguous
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
+
+    # HACK: late image fixup
+    if isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
+      self.base._dtype = dtypes.float32
+      op = LazyOp(UnaryOps.CAST, (op,), (dtypes.float32, False))
+
     if op.op in LoadOps: return [(self.op, self, ())]
     if op.op in ElementwiseOps: op = _ast_binaryops(op, self.shape)
     elif op.op in ReduceOps: op = _ast_reduceops(op)
-    buffers = op.buffers
-    op = _ast_bufferops(op)
     ret = []
-    for x in buffers: ret += x.schedule(seen)
-    return ret+[(op, self, buffers)]
+    for x in op.buffers: ret += x.schedule(seen)
+    return ret+[(_ast_bufferops(op), self, op.buffers)]
 
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
@@ -225,6 +234,7 @@ class LazyBuffer:
           realized_bufs = dedup([x.realized for x in buffers if buf_is_kernel_arg(x)])
           out.realized = Device[buffers[0].device].exec_ast(op, output=out, inputs=realized_bufs, var_vals={}, **self._device_extra_args())
           del out.op
+        assert out.realized.dtype == out.dtype, "realized dtype is correct"
     return self
 
 # *** loadop realization (unrelated to lazy) ***

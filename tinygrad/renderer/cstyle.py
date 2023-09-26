@@ -57,7 +57,7 @@ class CStyleLanguage(NamedTuple):
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
-      assert output_dtype == dtypes._float4, "images must be float4"
+      assert output_dtype == dtypes._float4, f"image {buf_name} must be float4, not {output_dtype}"
       return f"read_imagef({buf_name}, smp, {idx})"
     if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx})"

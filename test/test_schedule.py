@@ -137,5 +137,15 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 3)
     Tensor.training = False
 
+  def test_fold_conv(self):
+    c1 = nn.Conv2d(3,16,3)
+    c1.weight.realize()
+    c1.bias.realize()
+
+    # run
+    img = Tensor.ones(2,3,64,64)
+    out = c1(img).elu()
+    check_schedule(out, 1)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
