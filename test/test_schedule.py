@@ -154,25 +154,41 @@ class TestSchedule(unittest.TestCase):
     del x    # is 3 without this
     check_schedule(out, 2)
 
-  #@unittest.skip("either push reshapes or permutes through reshapes")
   def test_push_permute_through_reshape(self):
     a = Tensor.empty(16,16)
     b = Tensor.empty(16,16)
     c = (a+b).reshape(4,4,4,4).permute(2,3,0,1).contiguous()
     check_schedule(c, 1)
 
-  #@unittest.skip("either push reshapes or permutes through reshapes")
   def test_push_permute_through_reshape_alt(self):
     a = Tensor.empty(4,4,4,4)
     b = Tensor.empty(4,4,4,4)
     c = (a+b).reshape(16,16).permute(1,0).contiguous()
     check_schedule(c, 1)
 
+  def test_no_binop_rerun(self):
+    a = Tensor.empty(16)
+    b = Tensor.empty(16)
+    c = a+b
+    d = (a+b).reshape(16,1)
+    c.realize()
+    check_schedule(d, 0)
+
+  @unittest.skip("complex shape pushing decisions")
   def test_multi_permute_should_collapse(self):
     a = Tensor.empty(4,4,4,4)
     b = Tensor.empty(16)
     c = a.sum((0,1)).cast(dtypes.float16).permute(1,0).reshape(4,4,1).permute(1,0,2).reshape(16) + b
     check_schedule(c, 1)
+
+  @unittest.skip("requires fancy deduping we don't have")
+  def test_fancy_reshape_fusion(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = a+b
+    d = a.reshape(10,1)+b.reshape(10,1)
+    out = c.sum() + d.sum()
+    check_schedule(out, 1)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

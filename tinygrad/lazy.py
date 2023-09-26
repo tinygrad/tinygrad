@@ -216,8 +216,8 @@ class LazyBuffer:
   def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, SHUFFLE_MOVEMENT_OPS)
   def shrink(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.shrink, arg, SHUFFLE_MOVEMENT_OPS)
   def stride(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.stride, arg, SHUFFLE_MOVEMENT_OPS)
-  def reshape(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.reshape, arg, SHUFFLE_MOVEMENT_OPS)
   def pad(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.pad, arg) #, SHUFFLE_PAD_OPS, UNSAFE_PAD_OPS)
+  def reshape(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.reshape, arg) #, SHUFFLE_MOVEMENT_OPS)
   def expand(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.expand, arg)
 
   @property
