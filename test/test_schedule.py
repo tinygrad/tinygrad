@@ -147,5 +147,12 @@ class TestSchedule(unittest.TestCase):
     out = c1(img).elu()
     check_schedule(out, 1)
 
+  def test_two_sum(self):
+    img = Tensor.empty(64,64)
+    x = (img.sum(0) + img.sum(1))
+    out = x.relu()
+    del x    # is 3 without this
+    check_schedule(out, 2)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

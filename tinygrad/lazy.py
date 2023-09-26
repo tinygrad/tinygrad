@@ -7,12 +7,13 @@ ElementwiseOps = {*UnaryOps, *BinaryOps, *TernaryOps}
 
 #from tinygrad.graph import log_op
 from tinygrad.ops import BufferOps, ConstBuffer, MemBuffer, Device, Compiled
-from tinygrad.helpers import DType, dtypes, all_int, dedup, DEBUG, getenv, prod, ImageDType
+from tinygrad.helpers import DType, dtypes, all_int, dedup, DEBUG, getenv, prod
 from tinygrad.runtime.lib import RawConst, RawBuffer, buf_is_kernel_arg
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.shape.symbolic import sint
 from weakref import WeakSet, WeakValueDictionary, ref
 import numpy as np
+from tinygrad.graph import log_op
 
 OPT = getenv("OPT", 2)
 LAZYCACHE = getenv("LAZYCACHE", 1)
@@ -191,8 +192,8 @@ class LazyBuffer:
   def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, SHUFFLE_MOVEMENT_OPS)
   def shrink(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.shrink, arg, SHUFFLE_MOVEMENT_OPS)
   def stride(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.stride, arg, SHUFFLE_MOVEMENT_OPS)
-  def pad(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.pad, arg) #, SHUFFLE_PAD_OPS, UNSAFE_PAD_OPS)
   def reshape(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.reshape, arg, SHUFFLE_MOVEMENT_OPS)
+  def pad(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.pad, arg) #, SHUFFLE_PAD_OPS, UNSAFE_PAD_OPS)
   def expand(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.expand, arg)
 
   @property
@@ -210,16 +211,12 @@ class LazyBuffer:
     # NOTE: late rewrite contiguous
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
 
-    # HACK: late image fixup
-    if isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
-      self.base._dtype = dtypes.float32
-      op = LazyOp(UnaryOps.CAST, (op,), (dtypes.float32, False))
-
     if op.op in LoadOps: return [(self.op, self, ())]
     if op.op in ElementwiseOps: op = _ast_binaryops(op, self.shape)
     elif op.op in ReduceOps: op = _ast_reduceops(op)
     ret = []
     for x in op.buffers: ret += x.schedule(seen)
+    log_op(self, op.map_buffers({x:x.base for x in op.buffers}))
     return ret+[(_ast_bufferops(op), self, op.buffers)]
 
   def realize(self:LazyBuffer) -> LazyBuffer:
