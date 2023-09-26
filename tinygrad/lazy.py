@@ -15,7 +15,7 @@ from weakref import WeakSet
 import numpy as np
 
 OPT = getenv("OPT", 2)
-MERGE_ELEMENTWISE_INTO_REDUCE, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1
+MERGE_ELEMENTWISE_INTO_REDUCE, MERGE_ELEMENTWISE_OPS, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1
 MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2
 
 def _ast_reduceops(op:LazyOp) -> LazyOp:
@@ -23,12 +23,16 @@ def _ast_reduceops(op:LazyOp) -> LazyOp:
   src = op.src[0]
   if not src.realized:
     assert isinstance(src.op, LazyOp), "if not src.realized, then src.op must be a LazyOp"
-    if MERGE_ELEMENTWISE_INTO_REDUCE and src.op.op in ElementwiseOps and len(src.children) <= 1:
-      src = src.op
+    if MERGE_ELEMENTWISE_INTO_REDUCE and src.op.op in ElementwiseOps and len(src.children) <= 1 and src.is_contiguous():
+      # it's contiguous, but it might require reshapes of the binaryops
+      if src.base != src:
+        src = src.op.map_buffers({x:x.reshape(src.shape) for x in src.op.buffers})
+      else:
+        src = src.op
   return LazyOp(op.op, (src,), op.arg)
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
-def _ast_binaryops(op:LazyBuffer, output_shape:Tuple[sint, ...]) -> LazyOp:
+def _ast_binaryops(op:LazyOp, output_shape:Tuple[sint, ...]) -> LazyOp:
   real_srcs: Dict[LazyBuffer, Optional[Union[LazyOp, LazyBuffer]]] = {x:None for x in op.buffers}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
@@ -82,7 +86,7 @@ class LazyBuffer:
       self._children: WeakSet = WeakSet()
       if op:
         self._op: LazyOp = op
-        for x in op.buffers: x.children.add(self)
+        for x in op.buffers: x.base.children.add(self)   # add children to the base?
 
   def __repr__(self): return f"<L{'B' if self.base == self else 'V'} {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
@@ -149,16 +153,20 @@ class LazyBuffer:
 
   # *** movement ops ***
 
-  def _movement_op(self, st) -> LazyBuffer:
+  def _movement_op(self, fxn, arg, push_ewop=False) -> LazyBuffer:
+    st:ShapeTracker = fxn(self.st, arg)
     if self.st == st: return self
+    if SHUFFLE_MOVEMENT_OPS and push_ewop and not self.realized and self.op.op in ElementwiseOps and self.base == self:
+      mapped = self.op.map_buffers({x:x._movement_op(fxn, arg) for x in self.op.buffers})
+      return LazyBuffer(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
     return LazyBuffer(None, st, self.dtype, self.device, base=self.base)
 
-  def reshape(self, arg) -> LazyBuffer: return self._movement_op(self.st.reshape(arg))
-  def permute(self, arg) -> LazyBuffer: return self._movement_op(self.st.permute(arg))
-  def shrink(self, arg) -> LazyBuffer: return self._movement_op(self.st.shrink(arg))
-  def stride(self, arg) -> LazyBuffer: return self._movement_op(self.st.stride(arg))
-  def expand(self, arg) -> LazyBuffer: return self._movement_op(self.st.expand(arg))
-  def pad(self, arg) -> LazyBuffer: return self._movement_op(self.st.pad(arg))
+  def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, True)
+  def shrink(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.shrink, arg, True)
+  def stride(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.stride, arg, True)
+  def reshape(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.reshape, arg)
+  def expand(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.expand, arg)
+  def pad(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.pad, arg)
 
   @property
   def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
@@ -169,9 +177,12 @@ class LazyBuffer:
     if self.base != self: return self.base.schedule()
     # NOTE: late rewrite contiguous
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
-    if op.op in LoadOps: return [(self.op, (self,))]
-    if op.op in ElementwiseOps: op = _ast_binaryops(op, self.shape)
-    elif op.op in ReduceOps: op = _ast_reduceops(op)
+    if op.op in LoadOps:
+      return [(self.op, (self,))]
+    if op.op in ElementwiseOps:
+      op = _ast_binaryops(op, self.shape)
+    elif op.op in ReduceOps:
+      op = _ast_reduceops(op)
     buffers = op.buffers
     op = _ast_bufferops(op)
     ret = []
