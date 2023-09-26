@@ -82,6 +82,7 @@ class LazyBuffer:
     self.st: ShapeTracker = st
     self.shape, self.dtype, self.device = self.st.shape, dtype, device
     self.output_buffer: Optional[RawBuffer] = None
+    self.var_vals: Dict = {}
     if base:
       assert base.st.contiguous, "base must be contiguous"
       self.base: LazyBuffer = base

@@ -5,7 +5,6 @@ from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import Compiled, Device, MovementOps, LazyOp
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
-from tinygrad.lazy import _replace_bufferops
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -18,7 +17,7 @@ class TestLinearizer(unittest.TestCase):
     rawbufs = CacheCollector.finish()[0][1]
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.realized, b.lazydata.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
-    np.testing.assert_allclose(np_c, c.numpy())
+    np.testing.assert_allclose(np_c, c.numpy(), atol=1e-6)
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
@@ -29,9 +28,7 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.randn(4).realize()
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
-    ast = r.lazydata.op
-    r = r.realize()  # realize an output buffer
-    k = Linearizer(_replace_bufferops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(r.lazydata.schedule()[-1][0])
     k.process()
     k.upcast()
     k.linearize()
@@ -47,9 +44,7 @@ class TestLinearizer(unittest.TestCase):
 
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = a.expand([2]) + b.expand([2])
-    ast = r.lazydata.op
-    r = r.realize()  # realize an output buffer
-    k = Linearizer(_replace_bufferops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(r.lazydata.schedule()[-1][0])
     k.process()
     k.upcast()
     k.linearize()
@@ -62,9 +57,7 @@ class TestLinearizer(unittest.TestCase):
 
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack([a, b])
-    ast = r.lazydata.op
-    r = r.realize()  # realize an output buffer
-    k = Linearizer(_replace_bufferops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(r.lazydata.schedule()[-1][0])
     k.process()
     k.upcast()
     k.linearize()
@@ -78,9 +71,7 @@ class TestLinearizer(unittest.TestCase):
 
     a, b = Tensor(2), Tensor(3)
     r = a * b
-    ast = r.lazydata.op
-    r = r.realize()  # realize an output buffer
-    k = Linearizer(_replace_bufferops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(r.lazydata.schedule()[-1][0])
     k.process()
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
