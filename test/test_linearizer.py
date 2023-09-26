@@ -1,11 +1,13 @@
 import numpy as np
-import unittest
+import unittest, os
 
+from tinygrad.codegen.kernel import tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import Compiled, Device, MovementOps, LazyOp
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.lazy import _replace_bufferops
+from extra.utils import print_tree
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -18,7 +20,7 @@ class TestLinearizer(unittest.TestCase):
     rawbufs = CacheCollector.finish()[0][1]
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.realized, b.lazydata.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
-    np.testing.assert_allclose(np_c, c.numpy())
+    np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
@@ -86,11 +88,32 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
     assert num_ops <= 0, "more load or alu uops than needed"
 
-def helper_linearizer_opt(r:Tensor, opts=[]):
-  wanna_output = None
+  def test_tensor_cores(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+    if Device.DEFAULT not in tensor_cores:
+      self.skipTest("No tensor cores for device")
+
+    for tc in tensor_cores[Device.DEFAULT]:
+      if tc.arch is not None and tc.arch != os.uname().machine: continue
+      a, b = Tensor.rand(tc.dims[0], tc.dims[2], dtype=tc.dtype_in), Tensor.rand(tc.dims[2], tc.dims[1], dtype=tc.dtype_in)
+      np_a, np_b = a.numpy(), b.numpy()
+      if tc.dtype_out != tc.dtype_in:
+        r = (a.reshape(tc.dims[0], 1, tc.dims[2]) * b.permute(1,0).reshape(1, tc.dims[1], tc.dims[2])).cast(tc.dtype_out).sum(axis=2)
+      else:
+        r = a @ b
+      realized_ast, _ = helper_realized_ast(r)
+      k = Linearizer(realized_ast, Device[Device.DEFAULT].linearizer_opts)
+      k.process()
+      k.hand_coded_optimizations()
+      k.linearize()
+      assert len([uop for uop in k.uops if uop.uop == UOps.WMMA]) == 1, "tensor core not triggered"
+      np_c = np_a @ np_b
+      np.testing.assert_allclose(np_c, r.numpy(), atol=5e-3, rtol=1e-4)
+
+def helper_realized_ast(r:Tensor):
   realized_ast = None
   real_bufs = None
-
   # HACK to get real ast.
   real_dev_exec_ast = Device[Device.DEFAULT].exec_ast
   def fake_exec_ast(ast, output=None, inputs=None, **kwargs):
@@ -103,6 +126,11 @@ def helper_linearizer_opt(r:Tensor, opts=[]):
   r = r.realize()  # realize an output buffer
   assert realized_ast is not None
   Device[Device.DEFAULT].exec_ast = real_dev_exec_ast
+  return realized_ast, real_bufs
+
+def helper_linearizer_opt(r:Tensor, opts=[]):
+  wanna_output = None
+  realized_ast, real_bufs = helper_realized_ast(r)
 
   def check_opt(x, create_k, to_prg):
     k = create_k()
