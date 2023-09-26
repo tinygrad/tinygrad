@@ -64,7 +64,7 @@ def _ast_binaryops(op:LazyOp, output_shape:Tuple[sint, ...]) -> LazyOp:
 
 def _ast_bufferops(op:LazyOp) -> LazyOp:
   replacements:Dict[LazyBuffer, LazyOp] = {}
-  base_bufs = dedup([x.base for x in op.buffers if x.realized or not isinstance(Device[x.device], Compiled) or x.base.op.op != LoadOps.CONST])
+  base_bufs = dedup([x.base for x in op.buffers if x.realized or not isinstance(Device[x.device], Compiled) or x.device == "LLVM" or x.base.op.op != LoadOps.CONST])
   for x in op.buffers:
     if x.base in base_bufs:
       if x.realized and isinstance(x.realized, RawConst):
