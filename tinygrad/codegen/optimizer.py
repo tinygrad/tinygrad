@@ -1,8 +1,8 @@
 from typing import Tuple, List, cast, Optional
 import itertools, math, os
-from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
+from tinygrad.helpers import DEBUG, prod, getenv, ImageDType
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp, BufferOps
-from tinygrad.codegen.kernel import Kernel, LocalBuffer, LinearizerOptions
+from tinygrad.codegen.kernel import Kernel, LocalBuffer, LinearizerOptions, tensor_cores
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 
@@ -165,122 +165,37 @@ class OptimizedKernel(Kernel):
     # simplify
     self.simplify_ones()
 
-    # should use HIP tensor cores?
-    if use_tensor_cores != 0 and self.opts.device == "HIP" and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
-        isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == UnaryOps.CAST and \
-        isinstance(self.reduceop.src[0].src[0], LazyOp) and self.reduceop.src[0].src[0].op == BinaryOps.MUL and \
-        self.reduceop.src[0].src[0].src[0].op == BufferOps.MEM and self.reduceop.src[0].src[0].src[1].op == BufferOps.MEM and self.opts.has_local and \
-        cast(LazyOp, self.reduceop.src[0].src[0].src[0]).arg.dtype == dtypes.half and cast(LazyOp, self.reduceop.src[0].src[0].src[1]).arg.dtype == dtypes.half:
-      # HIP tensor cores are 16x16x16
-      buf0 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[0].src[0]).arg)
-      buf1 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[0].src[1]).arg)
-      buf0_strides = self.sts[buf0].real_strides()
-      buf1_strides = self.sts[buf1].real_strides()
-      axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%16 == 0 and i < self.first_reduce]
-      axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%16 == 0 and i < self.first_reduce]
-      if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce) == 1:
-        if DEBUG >= 3: print("HIP TENSOR CORES", axis_buf0, axis_buf1)
-        self.use_tensor_cores = use_tensor_cores == 1  # TC=2 will do the shape ops without the WMMA
-        self.reverse_upcast_dir = True
+    if getenv("TC", 1) != 0 and self.opts.has_local and self.reduceop and self.reduceop.op == ReduceOps.SUM and self.opts.device in tensor_cores:
+      for tc in tensor_cores[self.opts.device]:
+        if not((tc.arch is None or tc.arch == os.uname().machine) and isinstance(self.reduceop.src[0], LazyOp)): continue
+        has_cast = tc.dtype_in != tc.dtype_out
 
-        # TODO: select axis in smart way
-        s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
+        if has_cast and not(isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == UnaryOps.CAST and self.reduceop.src[0].arg[0] == tc.dtype_out): continue
+        mul_op = self.reduceop.src[0].src[0] if has_cast else self.reduceop.src[0]
+
+        if not(isinstance(mul_op, LazyOp) and mul_op.op == BinaryOps.MUL): continue
+        if not(isinstance(mul_op.src[0], LazyOp) and mul_op.src[0].op == BufferOps.MEM and mul_op.src[0].arg.dtype == tc.dtype_in): continue
+        if not(isinstance(mul_op.src[1], LazyOp) and mul_op.src[1].op == BufferOps.MEM and mul_op.src[1].arg.dtype == tc.dtype_in): continue
+        buf0, buf1 = self.bufs.index(cast(LazyOp, mul_op.src[0].arg)), self.bufs.index(cast(LazyOp, mul_op.src[1].arg))
+        buf0_strides, buf1_strides = self.sts[buf0].real_strides(), self.sts[buf1].real_strides()
+        axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[0] == 0]
+        axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[1] == 0]
+        #optim_conv2d = (self.shape_len-self.first_reduce) == 3 and self.full_shape[self.first_reduce+1]%2 == 1 and self.full_shape[self.first_reduce+2]%2 == 1 and max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 21
+        # enabling this gives wrong answers!! https://github.com/tinygrad/tinygrad/issues/1967
+        # TODO: WMMA must be a lot better before reenabling things like this
+        optim_conv2d = False
+
+        if not(axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%tc.dims[2] == 0 and self.full_shape[self.first_reduce] >= tc.dims[2] and ((self.shape_len-self.first_reduce) == 1 or optim_conv2d)): continue
+        if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
+        self.tensor_core = tc
+        s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0] # TODO: select axis in smart way
         global_count = self.first_reduce
-
-        # upcast first
-        if self.full_shape[self.first_reduce] > 16: self.shift_to(self.first_reduce, 16)
-        self.upcast()
-
-        # 2 locals
-        self.shift_to(s1, 16, insert_before=self.first_reduce)  # axis 2
-        self.shift_to(s0, 16, insert_before=self.first_reduce)  # axis 3
-        self.local_dims += 1
-
-        # output shape
-        self.shift_to(self.first_reduce-2, 8)
-        self.upcast()
-
-        # split local dim
-        self.shift_to(self.first_reduce-1, 8, insert_before=self.first_reduce)  # axis 3
-
-        # final global upcast
-        for ax in [s1, s0]:
-          for upc in [4,3,2]:
-            if self.full_shape[ax]%upc == 0:
-              self.shift_to(ax, upc)
-              self.upcast()
-              break
-
-        # alias buffer
-        alias_pattern = [0]*global_count + [0,0,1] + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [2,3] + [0]*(self.upcasted-2)
-        self.alias_buffer(buf0, alias_pattern)
-        self.alias_buffer(buf1, alias_pattern)
-
-        # two fake locals
-        if self.use_tensor_cores:
-          self.local_dims += 2
-          self.exclude_local_upcast += 2
-
-        # early exit
-        return
-
-    # should use METAL tensor cores?
-    # first, confirm it's a straightforward mulacc on a device with real locals
-    tensor_cores_allowed = use_tensor_cores != 0 and (use_tensor_cores == 2 or (self.opts.device == "METAL" and os.uname().machine == "arm64"))
-    if tensor_cores_allowed and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
-        isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
-        self.reduceop.src[0].src[0].op == BufferOps.MEM and self.reduceop.src[0].src[1].op == BufferOps.MEM and self.opts.has_local:
-      # METAL tensor cores are 8x8x8, with 2 elements per thread in the 32 thread warp
-      buf0 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[0]).arg)
-      buf1 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[1]).arg)
-      buf0_strides = self.sts[buf0].real_strides()
-      buf1_strides = self.sts[buf1].real_strides()
-      axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
-      axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
-      #optim_conv2d = (self.shape_len-self.first_reduce) == 3 and self.full_shape[self.first_reduce+1]%2 == 1 and self.full_shape[self.first_reduce+2]%2 == 1 and max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 21
-      # enabling this gives wrong answers!! https://github.com/tinygrad/tinygrad/issues/1967
-      # TODO: WMMA must be a lot better before reenabling things like this
-      optim_conv2d = False
-      if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce == 1 or optim_conv2d):
-        if DEBUG >= 3: print("METAL TENSOR CORES", axis_buf0, axis_buf1)
-        self.use_tensor_cores = use_tensor_cores == 1  # TC=2 will do the shape ops without the WMMA
-
-        # TODO: select axis in smart way
-        s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
-        global_count = self.first_reduce
-
-        # upcast first
-        if self.full_shape[self.first_reduce] > 8: self.shift_to(self.first_reduce, 8)
-        self.upcast()
-
-        # 2 locals
-        self.shift_to(s1, 8, insert_before=self.first_reduce)  # axis 2
-        self.shift_to(s0, 8, insert_before=self.first_reduce)  # axis 3
-
-        # permuted+upcast for tensor cores
-        self.shift_to(global_count, 4, insert_before=self.first_reduce)
-        self.shift_to(global_count+1, 4, insert_before=self.first_reduce)
-        self.shift_to(self.first_reduce-1, 2)
-        self.upcast()
-
-        # final global upcast
-        if not optim_conv2d:
-          for ax in [s1, s0]:
-            for upc in [4,3,2]:
-              if self.full_shape[ax]%upc == 0:
-                self.shift_to(ax, upc)
-                self.upcast()
-                break
-
-        # alias buffer
-        self.local_dims = self.first_reduce - global_count
-        alias_pattern = [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2)
-        self.alias_buffer(buf0, alias_pattern)
-        self.alias_buffer(buf1, alias_pattern)
-
-        if self.use_tensor_cores and optim_conv2d:
+        if optim_conv2d:
           self.upcast()
-
+          self.shift_to(self.first_reduce, tc.dims[2], insert_before=self.shape_len-1)
+          self.shift_to(s0, tc.dims[0], insert_before=self.shape_len-1)
+          self.shift_to(s1, tc.dims[1], insert_before=self.shape_len-1)
+          self.upcasted += 3
           if max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 5:
             self.upcast()
             for upc in range(8, 1, -1):
@@ -294,14 +209,19 @@ class OptimizedKernel(Kernel):
                 self.shift_to(global_count-1, upc)
                 self.upcast()
                 break
-
-        # very late upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
-        if self.use_tensor_cores and self.full_shape[s0] % 2 == 0:
-          self.shift_to(s0, 2, insert_before=self.first_reduce-self.local_dims)
-          self.local_dims += 1
-          self.exclude_local_upcast += 1
-
-        # early exit
+        else:
+          self.shift_to(self.first_reduce, tc.dims[2])
+          self.shift_to(s0, tc.dims[0])
+          self.shift_to(s1, tc.dims[1])
+          self.upcasted += 3
+          for ax in [s1, s0]:
+            for upc in [4,3,2]:
+              if self.full_shape[ax]%upc == 0:
+                self.shift_to(ax, upc)
+                self.upcast()
+                break
+        self.alias_buffer(buf0, [0]*(self.shape_len-self.upcasted) + [1]*3 + [0]*(self.upcasted-3))
+        self.alias_buffer(buf1, [0]*(self.shape_len-self.upcasted) + [1]*3 + [0]*(self.upcasted-3))
         return
 
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
