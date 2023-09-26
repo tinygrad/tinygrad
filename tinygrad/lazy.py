@@ -32,7 +32,8 @@ def _ast_binaryops(op:LazyBuffer, output_shape:Tuple[sint, ...]) -> LazyOp:
   real_srcs: Dict[LazyBuffer, Optional[Union[LazyOp, LazyBuffer]]] = {x:None for x in op.buffers}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
-  psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x.base if x.is_contiguous() else x) for k,x in zip(real_srcs.keys(), real_srcs.keys()) if not x.realized and x.op.op in ReduceOps and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
+  psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), [x.base if x.is_contiguous() else x for x in real_srcs.keys()]) if not x.realized and x.op.op in ReduceOps and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
+
   intermediate_shape: Tuple[sint, ...] = output_shape
   if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and psrcs:
     psrc = psrcs[0] # NOTE: right now we can't handle multiple, as we'd have to check for loop
@@ -74,7 +75,7 @@ class LazyBuffer:
     if base:
       assert base.st.contiguous, "base must be contiguous"
       self.base: LazyBuffer = base
-      base.children.add(self)
+      #base.children.add(self)
     else:
       self.base = self
       self._realized: Optional[RawBuffer] = src
@@ -83,7 +84,7 @@ class LazyBuffer:
         self._op: LazyOp = op
         for x in op.buffers: x.children.add(self)
 
-  def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
+  def __repr__(self): return f"<L{'B' if self.base == self else 'V'} {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
   def is_contiguous(self): return self.st.contiguous and self.base.st.size() == self.st.size()
 
