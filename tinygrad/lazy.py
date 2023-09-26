@@ -17,6 +17,7 @@ import numpy as np
 OPT = getenv("OPT", 2)
 MERGE_ELEMENTWISE_INTO_REDUCE, MERGE_ELEMENTWISE_OPS, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1
 MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2
+UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
 
 def fix_unbased_shape(src:LazyBuffer) -> LazyOp:
   assert src.is_contiguous(), "non contiguous can't be fixed"
@@ -156,20 +157,21 @@ class LazyBuffer:
 
   # *** movement ops ***
 
-  def _movement_op(self, fxn, arg, push_ewop=False) -> LazyBuffer:
+  def _movement_op(self, fxn, arg, push_ewop=False, unsafe_ops=None) -> LazyBuffer:
     st:ShapeTracker = fxn(self.st, arg)
     if self.st == st: return self
     if SHUFFLE_MOVEMENT_OPS and push_ewop and not self.realized and self.op.op in ElementwiseOps and self.base == self:
-      mapped = self.op.map_buffers({x:x._movement_op(fxn, arg) for x in self.op.buffers})
-      return LazyBuffer(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
+      if not unsafe_ops or not any(x.op in UNSAFE_PAD_OPS for x in self.op.get_lazyops()):
+        mapped = self.op.map_buffers({x:x._movement_op(fxn, arg) for x in self.op.buffers})
+        return LazyBuffer(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
     return LazyBuffer(None, st, self.dtype, self.device, base=self.base)
 
   def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, True)
   def shrink(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.shrink, arg, True)
   def stride(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.stride, arg, True)
-  def reshape(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.reshape, arg)
+  def reshape(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.reshape, arg, True)
+  def pad(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.pad, arg, True, UNSAFE_PAD_OPS)
   def expand(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.expand, arg)
-  def pad(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.pad, arg)
 
   @property
   def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
