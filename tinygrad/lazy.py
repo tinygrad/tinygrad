@@ -99,13 +99,14 @@ class LazyBuffer:
 
   lazycache: WeakValueDictionary = WeakValueDictionary()
   @staticmethod
-  def cache(op:LazyOp, st:ShapeTracker, dtype:DType, device:str):
-    if not LAZYCACHE: return LazyBuffer(op, st, dtype, device)
-    wop = (ref(op), st, dtype, device)
+  def cache(op:Optional[LazyOp], st:ShapeTracker, dtype:DType, device:str, base:Optional[LazyBuffer]=None):
+    if not LAZYCACHE: return LazyBuffer(op, st, dtype, device, base=base)
+    wop = (ref(op) if op else ref(base), st, dtype, device)
     if wop in LazyBuffer.lazycache:
-      for x in op.buffers: x.children.add(LazyBuffer.lazycache[wop])
+      if op:
+        for x in op.buffers: x.children.add(LazyBuffer.lazycache[wop])
       return LazyBuffer.lazycache[wop]
-    LazyBuffer.lazycache[wop] = ret = LazyBuffer(op, st, dtype, device)
+    LazyBuffer.lazycache[wop] = ret = LazyBuffer(op, st, dtype, device, base=base)
     return ret
 
   def __repr__(self): return f"<L{'B' if self.base == self else 'V'} {self.shape} {self.dtype} op={(self.op.op if hasattr(self, 'op') else '') if not self.realized else self.realized} st={self.st}>"
@@ -180,7 +181,7 @@ class LazyBuffer:
       if not unsafe_ops or not any(x.op in UNSAFE_PAD_OPS for x in self.op.get_lazyops()):
         mapped = self.op.map_buffers({x:x._movement_op(fxn, arg) for x in self.op.buffers})
         return LazyBuffer.cache(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
-    return LazyBuffer(None, st, self.dtype, self.device, base=self.base)
+    return LazyBuffer.cache(None, st, self.dtype, self.device, base=self.base)
 
   def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, SHUFFLE_MOVEMENT_OPS)
   def shrink(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.shrink, arg, SHUFFLE_MOVEMENT_OPS)
