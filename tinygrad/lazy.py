@@ -11,7 +11,7 @@ from tinygrad.helpers import DType, dtypes, all_int, dedup, DEBUG, getenv, prod
 from tinygrad.runtime.lib import RawConst, RawBuffer, buf_is_kernel_arg
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.shape.symbolic import sint
-from weakref import WeakSet
+from weakref import WeakSet, WeakValueDictionary, ref
 import numpy as np
 
 OPT = getenv("OPT", 2)
@@ -95,15 +95,21 @@ class LazyBuffer:
         self.op: LazyOp = op
         for x in op.buffers: x.base.children.add(self)   # add children to the base?
 
+  lazycache: WeakValueDictionary = WeakValueDictionary()
+  @staticmethod
+  def cache(op:LazyOp, st:ShapeTracker, dtype:DType, device:str):
+    wop = (ref(op), st, dtype, device)
+    if wop in LazyBuffer.lazycache:
+      for x in op.buffers: x.children.add(LazyBuffer.lazycache[wop])
+      return LazyBuffer.lazycache[wop]
+    LazyBuffer.lazycache[wop] = ret = LazyBuffer(op, st, dtype, device)
+    return ret
+
   def __repr__(self): return f"<L{'B' if self.base == self else 'V'} {self.shape} {self.dtype} op={(self.op.op if hasattr(self, 'op') else '') if not self.realized else self.realized} st={self.st}>"
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
   def is_contiguous(self): return self.st.contiguous and self.base.st.size() == self.st.size()
 
   # handle base
-  #@property
-  #def op(self): return self.base._op
-  #@op.setter
-  #def op(self, val): self.base._op = val
   @property
   def realized(self): return self.base._realized
   @realized.setter
@@ -115,7 +121,7 @@ class LazyBuffer:
 
   def contiguous(self) -> LazyBuffer:
     if self.is_contiguous(): return self
-    return LazyBuffer(LazyOp(LoadOps.CONTIGUOUS, (self,)), ShapeTracker.from_shape(self.shape), self.dtype, self.device)
+    return LazyBuffer.cache(LazyOp(LoadOps.CONTIGUOUS, (self,)), ShapeTracker.from_shape(self.shape), self.dtype, self.device)
 
   @staticmethod
   def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
@@ -145,13 +151,13 @@ class LazyBuffer:
       # remove the buffers from any (childless) BinaryOps that feed into this
       srcs = tuple([fix_unbased_shape(x) if not x.realized and x.is_contiguous() and x.base.op.op in ElementwiseOps and not x.children else x for x in srcs])  # type: ignore
 
-    return LazyBuffer(LazyOp(op, srcs, arg), ShapeTracker.from_shape(self.shape), out_dtype, self.device)
+    return LazyBuffer.cache(LazyOp(op, srcs, arg), ShapeTracker.from_shape(self.shape), out_dtype, self.device)
 
   # *** reduce ops ***
 
   def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
-    return LazyBuffer(LazyOp(op, (self,), new_shape), ShapeTracker.from_shape(new_shape), self.dtype, self.device)
+    return LazyBuffer.cache(LazyOp(op, (self,), new_shape), ShapeTracker.from_shape(new_shape), self.dtype, self.device)
 
   def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if any(not isinstance(s, int) for s in self.shape) or prod(self.shape) // prod(new_shape) < 32768: return self._reduce_op(op, new_shape) # The amount of work should be big enough to take the benefit of "2 kernels" approach.
@@ -168,7 +174,7 @@ class LazyBuffer:
     if SHUFFLE_MOVEMENT_OPS and push_ewop and not self.realized and self.base == self and self.op.op in ElementwiseOps:
       if not unsafe_ops or not any(x.op in UNSAFE_PAD_OPS for x in self.op.get_lazyops()):
         mapped = self.op.map_buffers({x:x._movement_op(fxn, arg) for x in self.op.buffers})
-        return LazyBuffer(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
+        return LazyBuffer.cache(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
     return LazyBuffer(None, st, self.dtype, self.device, base=self.base)
 
   def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, True)
@@ -183,8 +189,12 @@ class LazyBuffer:
   def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[LazyOp]: return []
 
-  def schedule(self:LazyBuffer) -> List[Tuple[LazyOp, List[LazyBuffer]]]:
-    if self.base != self: return self.base.schedule()
+  def schedule(self:LazyBuffer, seen=None) -> List[Tuple[LazyOp, List[LazyBuffer]]]:
+    if seen is None: seen = set()
+    if self in seen: return []
+    seen.add(self)
+    if self.realized: return []
+    if self.base != self: return self.base.schedule(seen)
     # NOTE: late rewrite contiguous
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
     if op.op in LoadOps:
@@ -196,13 +206,10 @@ class LazyBuffer:
     buffers = list(op.buffers)
     op = _ast_bufferops(op)
     ret = []
-    seen = set()
     for x in buffers:
-      if not x.realized and x not in seen:
-        for _op,_buffers in x.schedule():
-          if _buffers[0] not in seen:
-            seen.add(_buffers[0])
-            ret.append((_op,_buffers))
+      if not x.realized:
+        for _op,_buffers in x.schedule(seen):
+          ret.append((_op,_buffers))
     return ret+[(op, [self]+buffers)]
 
   def realize(self:LazyBuffer) -> LazyBuffer:

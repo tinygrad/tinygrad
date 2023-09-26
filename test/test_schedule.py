@@ -82,5 +82,31 @@ class TestSchedule(unittest.TestCase):
     d = ((a+b).reshape(10,10) + c).sum(axis=0)
     check_schedule(d, 1)
 
+  def test_diamond_folded(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = Tensor.empty(10)
+    d = Tensor.empty(10)
+    ab = a+b
+    e = (ab+c) + (ab+d)
+    check_schedule(e, 1)
+
+  def test_cache_binaryop(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = a+b
+    d = a+b
+    c.realize()
+    check_schedule(d, 0)
+
+  @unittest.skip("not realizing these are the same reduce")
+  def test_cache_two_reduceops(self):
+    a = Tensor.empty(10)
+    b = a.sum()
+    c = a.sum()
+    bc = b+c
+    check_schedule(bc, 1)
+
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
