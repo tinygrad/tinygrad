@@ -101,7 +101,7 @@ class LazyBuffer:
   @staticmethod
   def cache(op:Optional[LazyOp], st:ShapeTracker, dtype:DType, device:str, base:Optional[LazyBuffer]=None):
     if not LAZYCACHE: return LazyBuffer(op, st, dtype, device, base=base)
-    wop = (ref(op) if op else ref(base), st, dtype, device)
+    wop = (ref(op) if op else None, st, dtype, device, ref(base) if base else None)
     if wop in LazyBuffer.lazycache:
       if op:
         for x in op.buffers: x.children.add(LazyBuffer.lazycache[wop])
