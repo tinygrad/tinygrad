@@ -5,9 +5,9 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.ops import LazyOp, LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps
 ElementwiseOps = {*UnaryOps, *BinaryOps, *TernaryOps}
 
-from tinygrad.graph import log_op
+#from tinygrad.graph import log_op
 from tinygrad.ops import BufferOps, ConstBuffer, MemBuffer, Device, Compiled
-from tinygrad.helpers import GRAPH, DType, dtypes, all_int, dedup, DEBUG, getenv, prod
+from tinygrad.helpers import DType, dtypes, all_int, dedup, DEBUG, getenv, prod
 from tinygrad.runtime.lib import RawConst, RawBuffer, buf_is_kernel_arg
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.shape.symbolic import sint
@@ -27,6 +27,7 @@ def _ast_reduceops(op:LazyOp) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = op.src[0]
   if not src.realized:
+    assert isinstance(src, LazyBuffer), "src must be a LazyBuffer"
     assert isinstance(src.base.op, LazyOp), "if not src.realized, then src.op must be a LazyOp"
     if MERGE_ELEMENTWISE_INTO_REDUCE and src.base.op.op in ElementwiseOps and len(src.children) <= 1 and src.is_contiguous():
       # it's contiguous, but it might require reshapes of the binaryops
@@ -181,17 +182,17 @@ class LazyBuffer:
   def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[LazyOp]: return []
 
-  def schedule(self:LazyBuffer) -> List[Tuple[LazyOp, Tuple[LazyBuffer]]]:
+  def schedule(self:LazyBuffer) -> List[Tuple[LazyOp, List[LazyBuffer]]]:
     if self.base != self: return self.base.schedule()
     # NOTE: late rewrite contiguous
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
     if op.op in LoadOps:
-      return [(self.op, (self,))]
+      return [(self.op, [self])]
     if op.op in ElementwiseOps:
       op = _ast_binaryops(op, self.shape)
     elif op.op in ReduceOps:
       op = _ast_reduceops(op)
-    buffers = op.buffers
+    buffers = list(op.buffers)
     op = _ast_bufferops(op)
     ret = []
     seen = set()
@@ -201,7 +202,7 @@ class LazyBuffer:
           if _buffers[0] not in seen:
             seen.add(_buffers[0])
             ret.append((_op,_buffers))
-    return ret+[(op, (self,)+buffers)]
+    return ret+[(op, [self]+buffers)]
 
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:

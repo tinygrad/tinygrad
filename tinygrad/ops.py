@@ -58,11 +58,6 @@ class LazyOp:
   def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
-  def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
-    assert self.op in BinaryOps or self.op in UnaryOps or self.op in TernaryOps
-    srcs = [z.replace_with_movement_ops(ops) for z in self.src]
-    return srcs[0].e(self.op, *srcs[1:], arg=self.arg)   # type: ignore
-
   @property
   def st(self): raise NotImplementedError
   @property
