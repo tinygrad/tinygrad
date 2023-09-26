@@ -27,8 +27,8 @@ def _ast_reduceops(op:LazyOp) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = op.src[0]
   if not src.realized:
-    assert isinstance(src.op, LazyOp), "if not src.realized, then src.op must be a LazyOp"
-    if MERGE_ELEMENTWISE_INTO_REDUCE and src.op.op in ElementwiseOps and len(src.children) <= 1 and src.is_contiguous():
+    assert isinstance(src.base.op, LazyOp), "if not src.realized, then src.op must be a LazyOp"
+    if MERGE_ELEMENTWISE_INTO_REDUCE and src.base.op.op in ElementwiseOps and len(src.children) <= 1 and src.is_contiguous():
       # it's contiguous, but it might require reshapes of the binaryops
       src = fix_unbased_shape(src)
   return LazyOp(op.op, (src,), op.arg)
@@ -63,12 +63,15 @@ def _ast_binaryops(op:LazyOp, output_shape:Tuple[sint, ...]) -> LazyOp:
 
 def _ast_bufferops(op:LazyOp) -> LazyOp:
   replacements:Dict[LazyBuffer, LazyOp] = {}
-  base_bufs = dedup([x.base for x in op.buffers if x.base.op.op != LoadOps.CONST])
+  base_bufs = dedup([x.base for x in op.buffers if x.realized or not isinstance(Device[x.device], Compiled) or x.base.op.op != LoadOps.CONST])
   for x in op.buffers:
-    if x.base.op.op == LoadOps.CONST:
+    if x.base in base_bufs:
+      if x.realized and isinstance(x.realized, RawConst):
+        replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(float(x.realized._buf), x.dtype, x.st.simplify()))
+      else:
+        replacements[x] = LazyOp(BufferOps.MEM, (), MemBuffer(base_bufs.index(x.base)+1, x.dtype, x.st.simplify()))
+    elif x.base.op.op == LoadOps.CONST:
       replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(float(x.base.op.arg), x.dtype, x.st.simplify()))
-    elif x.base in base_bufs:
-      replacements[x] = LazyOp(BufferOps.MEM, (), MemBuffer(base_bufs.index(x.base)+1, x.dtype, x.st.simplify()))
     else:
       raise NotImplementedError(f"not handled {x}")
   return op.map_buffers(replacements)
@@ -87,18 +90,18 @@ class LazyBuffer:
       self._realized: Optional[RawBuffer] = src
       self._children: WeakSet = WeakSet()
       if op:
-        self._op: LazyOp = op
+        self.op: LazyOp = op
         for x in op.buffers: x.base.children.add(self)   # add children to the base?
 
-  def __repr__(self): return f"<L{'B' if self.base == self else 'V'} {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
+  def __repr__(self): return f"<L{'B' if self.base == self else 'V'} {self.shape} {self.dtype} op={(self.op.op if hasattr(self, 'op') else '') if not self.realized else self.realized} st={self.st}>"
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
   def is_contiguous(self): return self.st.contiguous and self.base.st.size() == self.st.size()
 
   # handle base
-  @property
-  def op(self): return self.base._op
-  @op.setter
-  def op(self, val): self.base._op = val
+  #@property
+  #def op(self): return self.base._op
+  #@op.setter
+  #def op(self, val): self.base._op = val
   @property
   def realized(self): return self.base._realized
   @realized.setter
@@ -138,7 +141,7 @@ class LazyBuffer:
 
     if MERGE_ELEMENTWISE_OPS:
       # remove the buffers from any (childless) BinaryOps that feed into this
-      srcs = tuple([fix_unbased_shape(x) if not x.realized and x.is_contiguous() and x.op.op in ElementwiseOps and not x.children else x for x in srcs])  # type: ignore
+      srcs = tuple([fix_unbased_shape(x) if not x.realized and x.is_contiguous() and x.base.op.op in ElementwiseOps and not x.children else x for x in srcs])  # type: ignore
 
     return LazyBuffer(LazyOp(op, srcs, arg), ShapeTracker.from_shape(self.shape), out_dtype, self.device)
 
@@ -160,7 +163,7 @@ class LazyBuffer:
   def _movement_op(self, fxn, arg, push_ewop=False, unsafe_ops=None) -> LazyBuffer:
     st:ShapeTracker = fxn(self.st, arg)
     if self.st == st: return self
-    if SHUFFLE_MOVEMENT_OPS and push_ewop and not self.realized and self.op.op in ElementwiseOps and self.base == self:
+    if SHUFFLE_MOVEMENT_OPS and push_ewop and not self.realized and self.base == self and self.op.op in ElementwiseOps:
       if not unsafe_ops or not any(x.op in UNSAFE_PAD_OPS for x in self.op.get_lazyops()):
         mapped = self.op.map_buffers({x:x._movement_op(fxn, arg) for x in self.op.buffers})
         return LazyBuffer(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
@@ -203,7 +206,6 @@ class LazyBuffer:
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       for op,buffers in self.schedule():
-        #if (DEBUG or GRAPH): log_op(self, op)
         if DEBUG >= 3:
           from extra.utils import print_tree
           print_tree(op)
@@ -212,6 +214,7 @@ class LazyBuffer:
         else:
           realized_bufs = dedup([x.realized for x in buffers[1:] if buf_is_kernel_arg(x)])
           buffers[0].realized = Device[buffers[0].device].exec_ast(op, output=buffers[0], inputs=realized_bufs, var_vals={}, **self._device_extra_args())
+          del buffers[0].op
     return self
 
 # *** loadop realization (unrelated to lazy) ***
