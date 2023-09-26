@@ -177,6 +177,7 @@ class LazyBuffer:
   def _movement_op(self, fxn, arg, push_ewop=False, unsafe_ops=None) -> LazyBuffer:
     st:ShapeTracker = fxn(self.st, arg)
     if self.st == st: return self
+    if st == self.base.st: return self.base
     if push_ewop and not self.realized and self.base == self and self.op.op in ElementwiseOps:
       if not unsafe_ops or not any(x.op in UNSAFE_PAD_OPS for x in self.op.get_lazyops()):
         mapped = self.op.map_buffers({x:x._movement_op(fxn, arg) for x in self.op.buffers})

@@ -104,12 +104,19 @@ class TestSchedule(unittest.TestCase):
   def test_cache_binaryop_transpose(self):
     a = Tensor.empty(10,10)
     b = Tensor.empty(10,10)
-    c = a+b
-    d = (a.T+b.T).T
+    c = (a.T*b.T).T
+    d = a*b
     c.realize()
     check_schedule(d, 0)
 
-  @unittest.skip("not realizing these are the same reduce")
+  def test_cache_binaryop_transpose_realized(self):
+    a = Tensor.randn(10,10).realize()
+    b = Tensor.randn(10,10).realize()
+    c = (a.T*b.T).T
+    d = a*b
+    c.realize()
+    check_schedule(d, 0)
+
   def test_cache_two_reduceops(self):
     a = Tensor.empty(10)
     b = a.sum()
