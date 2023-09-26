@@ -196,7 +196,7 @@ class LazyBuffer:
   def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[LazyOp]: return []
 
-  def schedule(self:LazyBuffer, seen=None) -> List[Tuple[LazyOp, List[LazyBuffer]]]:
+  def schedule(self:LazyBuffer, seen=None) -> List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]:
     if seen is None: seen = set()
     if self in seen: return []
     seen.add(self)
@@ -204,33 +204,27 @@ class LazyBuffer:
     if self.base != self: return self.base.schedule(seen)
     # NOTE: late rewrite contiguous
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
-    if op.op in LoadOps:
-      return [(self.op, [self])]
-    if op.op in ElementwiseOps:
-      op = _ast_binaryops(op, self.shape)
-    elif op.op in ReduceOps:
-      op = _ast_reduceops(op)
-    buffers = list(op.buffers)
+    if op.op in LoadOps: return [(self.op, self, ())]
+    if op.op in ElementwiseOps: op = _ast_binaryops(op, self.shape)
+    elif op.op in ReduceOps: op = _ast_reduceops(op)
+    buffers = op.buffers
     op = _ast_bufferops(op)
     ret = []
-    for x in buffers:
-      if not x.realized:
-        for _op,_buffers in x.schedule(seen):
-          ret.append((_op,_buffers))
-    return ret+[(op, [self]+buffers)]
+    for x in buffers: ret += x.schedule(seen)
+    return ret+[(op, self, buffers)]
 
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
-      for op,buffers in self.schedule():
+      for op,out,buffers in self.schedule():
         if DEBUG >= 3:
           from extra.utils import print_tree
           print_tree(op)
         if op.op in LoadOps:
-          LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](buffers[0])
+          LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out)
         else:
-          realized_bufs = dedup([x.realized for x in buffers[1:] if buf_is_kernel_arg(x)])
-          buffers[0].realized = Device[buffers[0].device].exec_ast(op, output=buffers[0], inputs=realized_bufs, var_vals={}, **self._device_extra_args())
-          del buffers[0].op
+          realized_bufs = dedup([x.realized for x in buffers if buf_is_kernel_arg(x)])
+          out.realized = Device[buffers[0].device].exec_ast(op, output=out, inputs=realized_bufs, var_vals={}, **self._device_extra_args())
+          del out.op
     return self
 
 # *** loadop realization (unrelated to lazy) ***
