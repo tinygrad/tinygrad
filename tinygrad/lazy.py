@@ -15,13 +15,17 @@ from weakref import WeakSet, WeakValueDictionary, ref
 import numpy as np
 
 OPT = getenv("OPT", 2)
+LAZYCACHE = getenv("LAZYCACHE", 1)
+
 MERGE_ELEMENTWISE_INTO_REDUCE, MERGE_ELEMENTWISE_OPS, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1
-MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2
+MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS = OPT>=2, OPT>=2
+PUSH_PERMUTES = OPT>=3  # TODO: reimplement this
 UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
 
 def fix_unbased_shape(src:LazyBuffer) -> LazyOp:
   assert src.is_contiguous(), "non contiguous can't be fixed"
-  return src.op.map_buffers({x:x.reshape(src.shape) for x in src.op.buffers}) if src.base != src else src.op
+  # if it's contiguous, applying a reshape to the base is safe
+  return src.base.op.map_buffers({x:x.reshape(src.shape) for x in src.base.op.buffers}) if src.base != src else src.op
 
 def _ast_reduceops(op:LazyOp) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
@@ -39,7 +43,7 @@ def _ast_binaryops(op:LazyOp, output_shape:Tuple[sint, ...]) -> LazyOp:
   real_srcs: Dict[LazyBuffer, Optional[Union[LazyOp, LazyBuffer]]] = {x:None for x in op.buffers}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
-  psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), [x.base for x in real_srcs.keys()]) if not x.realized and k.is_contiguous() and x.op.op in ReduceOps and len(x.children) <= 1 and len(k.children) <= 1]
+  psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), [x.base for x in real_srcs.keys()]) if not x.realized and k.is_contiguous() and x.op.op in ReduceOps and len(x.children) <= 1]
 
   intermediate_shape: Tuple[sint, ...] = output_shape
   if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and psrcs:
@@ -85,19 +89,18 @@ class LazyBuffer:
     self.var_vals: Dict = {}
     if base:
       assert base.st.contiguous, "base must be contiguous"
-      self.base: LazyBuffer = base
-      #base.children.add(self)
+      self._base: LazyBuffer = base
     else:
-      self.base = self
       self._realized: Optional[RawBuffer] = src
       self._children: WeakSet = WeakSet()
       if op:
         self.op: LazyOp = op
-        for x in op.buffers: x.base.children.add(self)   # add children to the base?
+        for x in op.buffers: x.children.add(self)
 
   lazycache: WeakValueDictionary = WeakValueDictionary()
   @staticmethod
   def cache(op:LazyOp, st:ShapeTracker, dtype:DType, device:str):
+    if not LAZYCACHE: return LazyBuffer(op, st, dtype, device)
     wop = (ref(op), st, dtype, device)
     if wop in LazyBuffer.lazycache:
       for x in op.buffers: x.children.add(LazyBuffer.lazycache[wop])
@@ -110,6 +113,8 @@ class LazyBuffer:
   def is_contiguous(self): return self.st.contiguous and self.base.st.size() == self.st.size()
 
   # handle base
+  @property
+  def base(self): return self._base if hasattr(self, '_base') else self
   @property
   def realized(self): return self.base._realized
   @realized.setter
@@ -171,17 +176,17 @@ class LazyBuffer:
   def _movement_op(self, fxn, arg, push_ewop=False, unsafe_ops=None) -> LazyBuffer:
     st:ShapeTracker = fxn(self.st, arg)
     if self.st == st: return self
-    if SHUFFLE_MOVEMENT_OPS and push_ewop and not self.realized and self.base == self and self.op.op in ElementwiseOps:
+    if push_ewop and not self.realized and self.base == self and self.op.op in ElementwiseOps:
       if not unsafe_ops or not any(x.op in UNSAFE_PAD_OPS for x in self.op.get_lazyops()):
         mapped = self.op.map_buffers({x:x._movement_op(fxn, arg) for x in self.op.buffers})
         return LazyBuffer.cache(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
     return LazyBuffer(None, st, self.dtype, self.device, base=self.base)
 
-  def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, True)
-  def shrink(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.shrink, arg, True)
-  def stride(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.stride, arg, True)
-  def reshape(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.reshape, arg, True)
-  def pad(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.pad, arg, True, UNSAFE_PAD_OPS)
+  def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, SHUFFLE_MOVEMENT_OPS)
+  def shrink(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.shrink, arg, SHUFFLE_MOVEMENT_OPS)
+  def stride(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.stride, arg, SHUFFLE_MOVEMENT_OPS)
+  def pad(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.pad, arg, SHUFFLE_PAD_OPS, UNSAFE_PAD_OPS)
+  def reshape(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.reshape, arg)
   def expand(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.expand, arg)
 
   @property

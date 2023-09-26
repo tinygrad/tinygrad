@@ -1,21 +1,23 @@
 # this will be the new test_ops for the next level
 # schedule confirms the right things are capable of fusing
+# NOTE: this has overlap with external_test_opt.py
 
 import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.helpers import DEBUG
 from tinygrad.codegen.linearizer import Linearizer
+from tinygrad import nn
 
-def check_schedule(t:Tensor, l:int):
+def check_schedule(t:Tensor, allowed:int):
   sched = [s for s in t.lazydata.schedule() if s[0].op not in LoadOps]
-  if len(sched) != l: print(f"SCHEDULE ISSUE, expecting {l} got {len(sched)}")
-  if len(sched) != l or DEBUG >= 3:
+  if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
+  if len(sched) != allowed or DEBUG >= 3:
     from extra.utils import print_tree
     for i, s in enumerate(sched):
       print("op", i)
       print_tree(s[0])
-  assert len(sched) == l
+  assert len(sched) == allowed
   # test the ops linearize
   for s in sched:
     l = Linearizer(s[0])
@@ -107,6 +109,18 @@ class TestSchedule(unittest.TestCase):
     bc = b+c
     check_schedule(bc, 1)
 
+  def test_fold_double_unary(self):
+    y = Tensor.empty(2)
+    out = y.sum(keepdim=True).sqrt().__neg__()
+    check_schedule(out, 1)
+
+  def test_fold_batchnorm(self):
+    Tensor.training = True
+    img = Tensor.empty(1,32,4,4)
+    bn = nn.BatchNorm2d(32, track_running_stats=False)
+    out = bn(img)
+    check_schedule(out, 3)
+    Tensor.training = False
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

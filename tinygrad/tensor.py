@@ -624,7 +624,7 @@ class Tensor:
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     if x.__class__ is not Tensor and not reverse:
       # simple pow identities
-      if x < 0: return (1.0/self).pow(-x)
+      if x < 0: return self.reciprocal().pow(-x)
       if x == 3.0: return self*self*self
       if x == 2.0: return self*self
       if x == 1.0: return self
