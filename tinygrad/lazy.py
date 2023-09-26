@@ -18,6 +18,10 @@ OPT = getenv("OPT", 2)
 MERGE_ELEMENTWISE_INTO_REDUCE, MERGE_ELEMENTWISE_OPS, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1
 MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2
 
+def fix_unbased_shape(src:LazyBuffer) -> LazyOp:
+  assert src.is_contiguous(), "non contiguous can't be fixed"
+  return src.op.map_buffers({x:x.reshape(src.shape) for x in src.op.buffers}) if src.base != src else src.op
+
 def _ast_reduceops(op:LazyOp) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = op.src[0]
@@ -25,10 +29,7 @@ def _ast_reduceops(op:LazyOp) -> LazyOp:
     assert isinstance(src.op, LazyOp), "if not src.realized, then src.op must be a LazyOp"
     if MERGE_ELEMENTWISE_INTO_REDUCE and src.op.op in ElementwiseOps and len(src.children) <= 1 and src.is_contiguous():
       # it's contiguous, but it might require reshapes of the binaryops
-      if src.base != src:
-        src = src.op.map_buffers({x:x.reshape(src.shape) for x in src.op.buffers})
-      else:
-        src = src.op
+      src = fix_unbased_shape(src)
   return LazyOp(op.op, (src,), op.arg)
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
@@ -36,7 +37,7 @@ def _ast_binaryops(op:LazyOp, output_shape:Tuple[sint, ...]) -> LazyOp:
   real_srcs: Dict[LazyBuffer, Optional[Union[LazyOp, LazyBuffer]]] = {x:None for x in op.buffers}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
-  psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), [x.base if x.is_contiguous() else x for x in real_srcs.keys()]) if not x.realized and x.op.op in ReduceOps and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
+  psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), [x.base for x in real_srcs.keys()]) if not x.realized and k.is_contiguous() and x.op.op in ReduceOps and len(x.children) <= 1 and len(k.children) <= 1]
 
   intermediate_shape: Tuple[sint, ...] = output_shape
   if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and psrcs:
@@ -134,7 +135,7 @@ class LazyBuffer:
 
     if MERGE_ELEMENTWISE_OPS:
       # remove the buffers from any (childless) BinaryOps that feed into this
-      srcs = tuple([x.op if not x.realized and x.is_contiguous() and x.op.op in ElementwiseOps and not x.children else x for x in srcs])  # type: ignore
+      srcs = tuple([fix_unbased_shape(x) if not x.realized and x.is_contiguous() and x.op.op in ElementwiseOps and not x.children else x for x in srcs])  # type: ignore
 
     return LazyBuffer(LazyOp(op, srcs, arg), ShapeTracker.from_shape(self.shape), out_dtype, self.device)
 

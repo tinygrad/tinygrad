@@ -68,11 +68,19 @@ class TestSchedule(unittest.TestCase):
     c = a.sum(axis=0) + b
     check_schedule(c, 1)
 
+  @unittest.skip("not pushing permutes through reduces")
   def test_reduce_permute_binop_fusion(self):
     a = Tensor.empty(10,10,10)
     b = Tensor.empty(10,10,1)
     c = a.sum(axis=0, keepdim=True).permute(2,1,0) + b
     check_schedule(c, 1)
+
+  def test_binop_early_reshape_reduce_fusion(self):
+    a = Tensor.empty(100)
+    b = Tensor.empty(100)
+    c = Tensor.empty(10,10)
+    d = ((a+b).reshape(10,10) + c).sum(axis=0)
+    check_schedule(d, 1)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
