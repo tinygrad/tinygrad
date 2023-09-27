@@ -7,7 +7,6 @@ from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, GlobalCounters
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.runtime.lib import RawBufferMapped, LRUAllocator
-from tinygrad.shape.symbolic import sym_infer
 
 METAL_XCODE = getenv("METAL_XCODE")
 
@@ -57,7 +56,7 @@ class MetalBatchExecutor(BasicBatchExecutor):
     self.__do_exec(jit_cache[8:])
     for prg, _, variables in jit_cache:
       GlobalCounters.kernel_count += 1
-      GlobalCounters.global_ops += sym_infer(prg.op_estimate, variables)
+      GlobalCounters.global_ops += prg.calc_op_estimate(variables)
       GlobalCounters.global_mem += prg.mem_estimate
 
 def unwrap(x):

@@ -7,7 +7,6 @@ from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
-from tinygrad.shape.symbolic import sym_infer
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
 if DEBUG >= 6:
@@ -49,7 +48,7 @@ class HIPGraph(BasicBatchExecutor):
       params = hip.buildKernelNodeParams(*pargs, *variables.values(), func=prg.clprg.prgs[pargs[0]._device], grid=global_size, block=local_size)
       graph_node = hip.hipGraphAddKernelNode(graph, deps, params)
       hip.hipStreamUpdateCaptureDependencies(capture_stream, [graph_node], hip.hipStreamSetCaptureDependencies)
-      self.info.append((self.__get_batch(j), graph_node, params, prg.mem_estimate, sym_infer(prg.op_estimate, variables)))
+      self.info.append((self.__get_batch(j), graph_node, params, prg.mem_estimate, prg.calc_op_estimate(variables)))
 
       # If the next batch is different or this is the last entry, finish the graph.
       if self.__get_batch(j) != self.__get_batch(j+1) or j==len(jit_cache)-1:
@@ -67,7 +66,7 @@ class HIPGraph(BasicBatchExecutor):
     global_size, local_size = prg.launch_dims(variables)
     hip.updateKernelNodeParams(params, *pargs, *variables.values(), grid=global_size, block=local_size, updated_args=updated_args)
     hip.hipGraphExecKernelNodeSetParams(inst, graph_node, params)
-    self.info[nodeid] = (batchid, graph_node, params, prg.mem_estimate, sym_infer(prg.op_estimate, variables))
+    self.info[nodeid] = (batchid, graph_node, params, prg.mem_estimate, prg.calc_op_estimate(variables))
 
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
     if not self.instances: return super().exec(jit_cache, updatable_entries) # No graph is created switch to basic executor.
