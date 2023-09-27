@@ -125,6 +125,7 @@ class Preprocessor:
 
 
 def verify_dataset(results_dir):
+    print('open', results_dir)
     with open('checksum.json') as f:
         source = json.load(f)
 
