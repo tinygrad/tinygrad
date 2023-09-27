@@ -15,6 +15,19 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   for d in shape[::-1][:-1]: strides = [d*strides[0]] + strides
   return filter_strides(shape, tuple(strides))
 
+@functools.lru_cache(maxsize=None)
+def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
+  assert len(shape) == len(strides)
+  ret = [(shape[0], strides[0])] if shape else []
+  for i in range(1, len(shape)):
+    if ret[-1][1] == shape[i]*strides[i] or ret[-1][0] == 1:
+      ret[-1] = (ret[-1][0] * shape[i], strides[i])
+    elif shape[i] == 1:
+      continue
+    else:
+      ret.append((shape[i], strides[i]))
+  return tuple(ret)
+
 @dataclass(frozen=True)
 class View:
   shape:Tuple[sint, ...]
@@ -30,6 +43,11 @@ class View:
     strides = filter_strides(shape, strides) if strides else strides_for_shape(shape)
     contiguous = offset == 0 and mask is None and all(s1 == s2 for s1,s2 in zip(strides, strides_for_shape(shape)))
     return View(shape, strides, offset, mask, contiguous)
+
+  def canonical(self) -> View:
+    if self.mask: return self.reshape(tuple(x for x in self.shape if x != 1))
+    shape_strides = to_shape_strides(self.shape, self.strides)
+    return View.create(tuple(x[0] for x in shape_strides), tuple(x[1] for x in shape_strides), self.offset, self.mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def size(self): return prod([s.max if isinstance(s, Node) else s for s,st in zip(self.shape, self.strides) if st != 0])

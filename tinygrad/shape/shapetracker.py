@@ -5,23 +5,10 @@ from dataclasses import dataclass
 from typing import Tuple, List, Optional, cast, TYPE_CHECKING
 from tinygrad.helpers import prod, DEBUG, all_same
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, sint
-from tinygrad.shape.view import View
+from tinygrad.shape.view import View, to_shape_strides
 
 if TYPE_CHECKING:
   from tinygrad.ops import MovementOps
-
-@functools.lru_cache(maxsize=None)
-def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
-  assert len(shape) == len(strides)
-  ret = [(shape[0], strides[0])] if shape else []
-  for i in range(1, len(shape)):
-    if ret[-1][1] == shape[i]*strides[i] or ret[-1][0] == 1:
-      ret[-1] = (ret[-1][0] * shape[i], strides[i])
-    elif shape[i] == 1:
-      continue
-    else:
-      ret.append((shape[i], strides[i]))
-  return tuple(ret)
 
 def expr_node_mask(view:View, idx, valid=None) -> Node:
   expr = [valid] if valid is not None else []
@@ -77,6 +64,9 @@ class ShapeTracker:
 
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
+
+  def canonical(self) -> ShapeTracker:
+    return ShapeTracker(tuple(v.canonical() for v in self.views))
 
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
