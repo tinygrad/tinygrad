@@ -6,7 +6,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, prod, DType, strip_parens
 
 class CStyleLanguage(NamedTuple):
-  size_prefix: str = "int"
+  size_prefix: str = "ptrdiff_t"
   generic_var_prefix: str = ""
   kernel_prefix: str = ""
   buffer_prefix: str = ""
