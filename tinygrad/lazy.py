@@ -54,7 +54,7 @@ class LazyBacking(LazyCommon):
     self.children: WeakSet = WeakSet()
     if op:
       self.op: LazyOp = op
-      for x in op.buffers: x.children.add(self)
+      for x in op.buffers: x.children.add(self.base)
 
   def __repr__(self): return f"<LB {self.size} {self.dtype} op={(self.op.op if hasattr(self, 'op') else '') if not self.realized else self.realized}>"
 
@@ -104,7 +104,6 @@ class LazyBacking(LazyCommon):
     assert len(reduceops) <= 1, "max one reduce op in an ast"
 
     # get buffer shapes
-    # TODO: remove_1s won't be needed once we have canonical LazyViews
     if reduceops:
       late_shapes = [x.shape for x in op.buffers if x not in reduceops[0].buffers]
       tmp_early_shape = get_common_shape([x.shape for x in reduceops[0].buffers] + [reduceops[0].arg[0]])
@@ -137,6 +136,7 @@ class LazyBacking(LazyCommon):
         replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(float(x.base.op.arg), x.dtype, st))
       else:
         raise NotImplementedError(f"not handled {x}")
+    log_op(self, op)
     return ret + [(op.map_buffers(replacements), self, base_bufs)]
 
   def realize(self:LazyBuffer) -> LazyBuffer:
@@ -161,7 +161,7 @@ class LazyView(LazyCommon):
     self.st: ShapeTracker = st
     self.base: LazyBacking = base
 
-  def __repr__(self): return f"<LV {id(self.base)} {self.st} {self.base}>"
+  def __repr__(self): return f"<LV {self.st} {self.base}>"
 
   lazycache: WeakValueDictionary = WeakValueDictionary()
   @staticmethod
@@ -287,8 +287,7 @@ class LazyBuffer:
 
     if MERGE_ELEMENTWISE_OPS:
       # remove the buffers from any (childless) BinaryOps that feed into this
-      bsrcs = tuple([x.op if not x.realized and isinstance(x, LazyBacking) and x.op.op in ElementwiseOps and not x.children else x for x in bsrcs])  # type: ignore
-
+      bsrcs = tuple([x.op if not x.realized and isinstance(x, LazyBacking) and x.op.op in ElementwiseOps and len(x.children) == 0 else x for x in bsrcs])  # type: ignore
     return LazyBuffer(self.shape, LazyBacking.cache(LazyOp(op, bsrcs, arg), prod(self.shape), out_dtype, self.device))
 
     """
@@ -316,7 +315,6 @@ class LazyBuffer:
   # *** movement ops ***
 
   def _movement_op(self, fxn, arg, push_ewop=False, unsafe_ops=None) -> LazyBuffer:
-    #print(self.shape, fxn, arg)
     st:ShapeTracker = fxn(self.backing.st.reshape(self.shape), arg)
     if st.contiguous and st.size() == self.backing.base.size: return LazyBuffer(st.shape, self.backing.base)
     if push_ewop and not self.realized and isinstance(self.backing, LazyBacking) and self.backing.op.op in ElementwiseOps:
@@ -324,18 +322,6 @@ class LazyBuffer:
         mapped = self.backing.op.map_buffers({x:LazyBuffer(self.shape, x)._movement_op(fxn, arg).backing for x in self.backing.op.buffers})
         return LazyBuffer(st.shape, LazyBacking.cache(mapped, prod(st.shape), self.backing.dtype, self.backing.device))
     return LazyBuffer(st.shape, LazyView.cache(st.canonical(), self.backing.base))
-
-    """
-    st:ShapeTracker = fxn(self.st, arg)
-    if self.st == st: return self
-    if st == self.base.st: return self.base
-    if push_ewop and not self.realized and self.is_contiguous() and self.base.op.op in ElementwiseOps:
-      if not unsafe_ops or not any(x.op in unsafe_ops for x in self.base.op.get_lazyops()):
-        if self.base == self:
-          mapped = self.op.map_buffers({x:x._movement_op(fxn, arg) for x in self.op.buffers})
-          return LazyBuffer.cache(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
-    return LazyBuffer.cache(None, st, self.dtype, self.device, base=self.base)
-    """
 
   def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, SHUFFLE_MOVEMENT_OPS)
   def shrink(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.shrink, arg, SHUFFLE_MOVEMENT_OPS)

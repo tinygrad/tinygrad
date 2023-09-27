@@ -66,7 +66,8 @@ class ShapeTracker:
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
 
   def canonical(self) -> ShapeTracker:
-    return ShapeTracker(tuple(v.canonical() for v in self.views))
+    if self.contiguous: return self
+    return ShapeTracker(tuple(v.canonical() for v in self.views if not v.contiguous))
 
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
