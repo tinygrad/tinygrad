@@ -5,10 +5,9 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from examples.mlperf.metrics import dice_ce_loss, get_dice_score, get_dice_score_np
+from examples.mlperf.metrics import dice_ce_loss
 from examples.mlperf.unet3d.inference import evaluate
 from extra.datasets import kits19
-from extra.datasets.kits19 import sliding_window_inference
 from extra.lr_scheduler import MultiStepLR
 from extra.training import lr_warmup
 from tinygrad.helpers import dtypes, getenv
@@ -41,15 +40,13 @@ def train(flags, model:UNet3D, train_loader, val_loader, loss_fn):
     optimizer.zero_grad()
     loss_value.backward()
     optimizer.step()
-    return loss_value.realize() # loss_value.realize is needed
+    return loss_value.realize()
   training_step_fn = TinyJit(training_step) if getenv("JIT") else training_step
   if getenv("OVERFIT"):
     loader = [(0, next(iter(train_loader)))]
 
   for epoch in range(1, flags.max_epochs + 1):
-    Tensor.training = True
     Tensor.no_grad = False
-
     print('epoch', epoch)
     cumulative_loss = []
     if epoch <= flags.lr_warmup_epochs:
@@ -84,7 +81,6 @@ def train(flags, model:UNet3D, train_loader, val_loader, loss_fn):
 
     if epoch == next_eval_at and getenv("EVAL", 1):
       next_eval_at += flags.evaluate_every
-      Tensor.training = False
       Tensor.no_grad = True
       dtype_img = dtypes.half if getenv("FP16") else dtypes.float
 
