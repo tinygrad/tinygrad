@@ -17,7 +17,7 @@ class RawBuffer:  # pylint: disable=abstract-method
   def __del__(self):  # NOTE: if it fails on init (bad dtype), it won't have a _memsz
     if hasattr(self, '_memsz'): GlobalCounters.mem_used -= self._memsz
     if hasattr(self, '_allocator') and self._allocator: self._allocator.free(self._buf)
-  def __repr__(self): return f"buffer<{self.size}, {self.dtype}>"
+  def __repr__(self): return f"buffer<{self.size}, {self.dtype}, {id(self)}>"
   @property
   def key(self): return (self.size, self.dtype)
 

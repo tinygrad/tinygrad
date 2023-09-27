@@ -130,6 +130,10 @@ class TestSymbolic(unittest.TestCase):
     # NOTE: even though the mod max is 50, it can't know this without knowing about the mul
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 99, "((b*50)%100)")
 
+  def test_mod_to_sub(self):
+    # This is mod reduction
+    self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, (Variable("a",1,2)-1).render())
+
   def test_sum_div_const(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*4, Variable.num(3)]) // 4, 0, 7, "a")
 
@@ -358,17 +362,18 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     a = Variable("a", 1, 5)
     b = Variable("b", 6, 9)
     c = Variable("c", 1, 10)
+    d = Variable("d", 5, 10)
     # if the value is always the same, it folds to num
     assert (a < b) == 1
-    # if it remains as a LtNode, bool is always true and we need to test against min to test if it always evals to True
-    assert (a < c).__class__ is LtNode and (a < c).min == 0 and (a < c).max == 1
+    assert (b < a) == 0
+    assert (d < a) == 0
+    # if it remains as a LtNode, bool is always true and (min, max) == (0, 1)
+    assert isinstance((a < c), LtNode) and (a < c).min == 0 and (a < c).max == 1
     assert a < c
-    assert not (a < c).min
-    assert (a > c).__class__ is LtNode and (a > c).min == 0 and (a > c).max == 1
-    assert not (a > c).min
+    assert isinstance((a > c), LtNode) and (a > c).min == 0 and (a > c).max == 1
     # same when comparing with a constant
-    assert a < 3
-    assert a > 3
+    assert a < 3 and (a < 3).min == 0 and (a < 3).max == 1
+    assert a > 3 and (a > 3).min == 0 and (a > 3).max == 1
 
   def test_num_node_mul_node(self):
     a = Variable("a", 1, 5)

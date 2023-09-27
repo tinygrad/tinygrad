@@ -619,9 +619,8 @@ if __name__ == "__main__":
 
     # direction pointing to x_t
     dir_xt = (1. - a_prev - sigma_t**2).sqrt() * e_t
-    noise = sigma_t * Tensor.randn(*x.shape) * temperature
 
-    x_prev = a_prev.sqrt() * pred_x0 + dir_xt #+ noise
+    x_prev = a_prev.sqrt() * pred_x0 + dir_xt
     return x_prev, pred_x0
 
   @TinyJit

@@ -7,10 +7,10 @@ from itertools import accumulate
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 
-from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod
+from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device, LoadOps
-from tinygrad.shape.symbolic import NumNode, sint, all_int
+from tinygrad.shape.symbolic import sint
 
 # An instantiation of the Function is the Context
 class Function:
@@ -91,7 +91,7 @@ class Tensor:
     # TODO: this is a hack for writing to DISK
     if self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      self.lazydata.realize().realized._copyin(x.numpy())  # type: ignore
+      self.lazydata.contiguous().realize().realized._copyin(x.numpy())  # type: ignore
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
@@ -303,9 +303,8 @@ class Tensor:
         if isinstance(s, int):
           dim_collapsed += 1
         else:
-          # TODO: replace NumNode with int in shape
-          assert isinstance(dim_shape, (int, NumNode)), f"does not support symbolic shape {dim_shape}"
-          final_shape.append(int(dim_shape))
+          assert isinstance(dim_shape, int), f"does not support symbolic shape {dim_shape}"
+          final_shape.append(dim_shape)
           if isinstance(s, Tensor):
             tensors.append(s)
             dim.append(i-dim_collapsed)

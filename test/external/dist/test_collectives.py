@@ -28,7 +28,7 @@ def run():
     print(t.numpy())
     t2 = allreduce_jit(t.contiguous().realize(), cache_id="test")
     print(t2.numpy())
-    assert np.allclose(np.ones((SIZE, SIZE)), t2.numpy())
+    assert np.allclose(np.ones((SIZE, SIZE)), t2.numpy()), f"{t2.numpy()} wasn't ones"
 
   # reset jit
   allreduce_jit.cnt = 0
@@ -40,7 +40,7 @@ def run():
     print(t.numpy())
     t2 = allreduce_jit(t.contiguous().realize(), cache_id="test2")
     print(t2.numpy())
-    assert np.allclose(np.ones((SIZE_2, SIZE_2, SIZE_2)), t2.numpy())
+    assert np.allclose(np.ones((SIZE_2, SIZE_2, SIZE_2)), t2.numpy()), f"{t2.numpy()} wasn't ones"
 
   print(f"rank {rank} passed")
 
