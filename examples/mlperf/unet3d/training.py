@@ -60,7 +60,7 @@ def train(flags, model:UNet3D, train_loader, val_loader, loss_fn):
       # print('len(loader)', len(loader))
       # loader = loader[:4]
     # 1 EPOCH with FILTERS="8 64 128 256 320" FP16=0 With 24 images currently takes 31 seconds. ~1.3 seconds per step. LOSS is actually going down!! To around 0.3 - 0.5
-    # dice score is now also at 0.3-0.4
+    # dice score is now also at 0.3-0.4 mean: 0.298
     start_time_epoch = time.time() # for 19 steps its currently ~5 seconds.
     for iteration, batch in loader:
       # print('optimizer.lr', optimizer.lr.numpy())
@@ -122,7 +122,7 @@ if __name__ == "__main__":
     np.random.seed(seed)
     torch.manual_seed(seed)
     random.seed(seed)
-  model = UNet3D(debug_speed=getenv("SPEED", 3), filters=getenv("FILTERS", ()))
+  model = UNet3D(debug_speed=getenv("SPEED", 2), filters=getenv("FILTERS", ()))
   if getenv("PRETRAINED"):
     model.load_from_pretrained()
   if getenv("FP16"):
