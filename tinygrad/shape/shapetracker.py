@@ -226,6 +226,9 @@ def reduce_expand(real, rin, rout):
   # the question we ask is if an axis is reduced or not
   ret = []
   for s in real[::-1]:
+    if not len(rout):
+      ret.append(1)
+      continue
     if rout[-1] == 1:
       ret.append(1)
     else:
@@ -235,3 +238,18 @@ def reduce_expand(real, rin, rout):
       rin = rin[:-1]
       rout = rout[:-1]
   return tuple(ret[::-1])
+
+def reduce_contract_arg(in_shape, new_shape):
+  assert len(in_shape) == len(new_shape)
+  if len(in_shape) == 0: return (), ()
+  old_shape, small_new_shape = [in_shape[0]], [new_shape[0]]
+  for o,n in zip(in_shape[1:], new_shape[1:]):
+    if o == n and old_shape[-1] == small_new_shape[-1]:
+      old_shape[-1] *= o
+      small_new_shape[-1] *= n
+    elif n == 1 and small_new_shape[-1] == 1:
+      old_shape[-1] *= o
+    else:
+      old_shape.append(o)
+      small_new_shape.append(n)
+  return tuple(old_shape), tuple(small_new_shape)

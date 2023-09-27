@@ -604,6 +604,7 @@ class TestShapeStuff(unittest.TestCase):
   def test_reduce_expand(self):
     self.assertEqual(reduce_expand((3,4,5), (60,), (1,)), (1,1,1))
     self.assertEqual(reduce_expand((64, 64, 64), (4096, 64), (4096, 1)), (64,64,1))
+    self.assertEqual(reduce_expand((1, 1, 4, 7, 7, 4, 3, 3), (196, 36), (196, 1)), (1, 1, 4, 7, 7, 1, 1, 1))
 
 class TestGetContraction(unittest.TestCase):
   def test_contraction(self):

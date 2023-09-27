@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from typing import Optional, Union, cast, Tuple, Any, List, Dict, Mapping, Callable
-from tinygrad.shape.shapetracker import ShapeTracker, get_common_shape, reduce_expand
+from tinygrad.shape.shapetracker import ShapeTracker, get_common_shape, reduce_expand, reduce_contract_arg
 from tinygrad.ops import LazyOp, LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps
 ElementwiseOps = {*UnaryOps, *BinaryOps, *TernaryOps}
 
@@ -349,22 +349,9 @@ class LazyBuffer:
   # *** reduce ops ***
 
   def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
-    # TODO: make this generic
-    old_shape, small_new_shape = [self.shape[0]], [new_shape[0]]
-    for o,n in zip(self.shape[1:], new_shape[1:]):
-      if o == n and old_shape[-1] == small_new_shape[-1]:
-        old_shape[-1] *= o
-        small_new_shape[-1] *= n
-      elif n == 1 and small_new_shape[-1] == 1:
-        old_shape[-1] *= o
-      else:
-        old_shape.append(o)
-        small_new_shape.append(n)
-    old_shape, small_new_shape = tuple(old_shape), tuple(small_new_shape)
+    old_shape, small_new_shape = reduce_contract_arg(self.shape, new_shape)
     if old_shape == small_new_shape: return self
     return LazyBuffer(new_shape, LazyBacking.cache(LazyOp(op, (self.backing,), (old_shape, small_new_shape)), prod(new_shape), self.dtype, self.device))
-
-    #return LazyBuffer.cache(LazyOp(op, (self,), new_shape), ShapeTracker.from_shape(new_shape), self.dtype, self.device)
 
   def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if any(not isinstance(s, int) for s in self.shape) or prod(self.shape) // prod(new_shape) < 32768: return self._reduce_op(op, new_shape) # The amount of work should be big enough to take the benefit of "2 kernels" approach.
