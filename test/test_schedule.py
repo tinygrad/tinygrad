@@ -196,5 +196,16 @@ class TestSchedule(unittest.TestCase):
     out = c.sum() + d.sum()
     check_schedule(out, 1)
 
+  def test_reshape_doesnt_matter(self):
+    a = Tensor.empty(10)
+    b = a.reshape(10,1)
+    self.assertIs(a.lazydata.backing, b.lazydata.backing)
+
+  def test_permute_doesnt_matter(self):
+    a = Tensor.empty(10, 10)
+    b = a.permute(1,0)
+    c = a.reshape(10, 1, 10).permute(2,1,0)
+    self.assertIs(b.lazydata.backing, c.lazydata.backing)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

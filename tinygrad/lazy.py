@@ -161,12 +161,14 @@ class LazyView(LazyCommon):
     self.st: ShapeTracker = st
     self.base: LazyBacking = base
 
+  def __repr__(self): return f"<LV {id(self.base)} {self.st} {self.base}>"
+
   lazycache: WeakValueDictionary = WeakValueDictionary()
   @staticmethod
   def cache(st:ShapeTracker, base:LazyBacking):
     wop = (st, ref(base))
     if wop in LazyView.lazycache: return LazyView.lazycache[wop]
-    LazyBacking.lazycache[wop] = ret = LazyView(st, base)
+    LazyView.lazycache[wop] = ret = LazyView(st, base)
     return ret
 
   @property
