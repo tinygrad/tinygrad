@@ -34,6 +34,10 @@ def _ast_binaryops(op:LazyOp) -> LazyOp:
   real_srcs: Dict[LazyCommon, Union[LazyOp, LazyCommon]] = {x:x for x in op.buffers}
   if MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
     fuse_reduce = dedup([x for x in real_srcs.keys() if isinstance(x, LazyBacking) and not x.realized and x.op.op in ReduceOps and len(x.children) <= 1])
+    for x in real_srcs.keys():
+      if isinstance(x, LazyBacking) and not x.realized and x.op.op in ReduceOps:
+        print("CANT FUSE CHILDREN", list(x.children))
+        #for c in x.children: print(c.op.buffers)
     if fuse_reduce:
       # NOTE: we only fuse the first reduce op if there's multiple fusable ones
       real_srcs[fuse_reduce[0]] = _ast_reduceops(fuse_reduce[0].op)
@@ -54,16 +58,21 @@ class LazyBacking(LazyCommon):
     self.children: WeakSet = WeakSet()
     if op:
       self.op: LazyOp = op
-      for x in op.buffers: x.children.add(self.base)
+      for x in op.buffers:
+        #print(f"adding {self} as child to {x}")
+        x.children.add(self)
+        #if isinstance(x, LazyView): x.base.children.add(x)
+      #if DEBUG >= 6: print(f"create LazyBacking {op} {op.buffers}")
+      #if GRAPH >= 3: log_op(self, op, phantom=True)
 
-  def __repr__(self): return f"<LB {self.size} {self.dtype} op={(self.op.op if hasattr(self, 'op') else '') if not self.realized else self.realized}>"
+  def __repr__(self): return f"<LB {id(self)} {self.size} {self.dtype} op={(self.op.op if hasattr(self, 'op') else '') if not self.realized else self.realized}>"
 
   lazycache: WeakValueDictionary = WeakValueDictionary()
   @staticmethod
   def cache(op:LazyOp, size:int, dtype:DType, device:str):
     wop = (ref(op), size, dtype, device)
     if wop in LazyBacking.lazycache:
-      for x in op.buffers: x.children.add(LazyBacking.lazycache[wop])
+      #for x in op.buffers: x.children.add(LazyBacking.lazycache[wop])
       return LazyBacking.lazycache[wop]
     LazyBacking.lazycache[wop] = ret = LazyBacking(op, size, dtype, device)
     return ret
@@ -142,6 +151,7 @@ class LazyBacking(LazyCommon):
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       for op,out,buffers in self.schedule(set()):
+        print(f"realizing {out} with {len(out.children)} children")
         if DEBUG >= 3:
           from extra.utils import print_tree
           print_tree(op)
@@ -160,14 +170,20 @@ class LazyView(LazyCommon):
     assert not st.contiguous or st.size() != base.size, "LazyView should never be contiguous"
     self.st: ShapeTracker = st
     self.base: LazyBacking = base
+    self.base.children.add(self)
+    self.children: WeakSet = WeakSet()
 
-  def __repr__(self): return f"<LV {self.st} {self.base}>"
+  def __repr__(self): return f"<LV {id(self)} {self.st} {self.base}>"
 
   lazycache: WeakValueDictionary = WeakValueDictionary()
   @staticmethod
-  def cache(st:ShapeTracker, base:LazyBacking):
+  def cache(st:ShapeTracker, base:LazyBacking) -> LazyCommon:
+    if st.contiguous and st.size() == base.size: return base
+    st = st.canonical()
     wop = (st, ref(base))
-    if wop in LazyView.lazycache: return LazyView.lazycache[wop]
+    if wop in LazyView.lazycache:
+      #LazyView.lazycache[wop].base.children.add()
+      return LazyView.lazycache[wop]
     LazyView.lazycache[wop] = ret = LazyView(st, base)
     return ret
 
@@ -179,8 +195,8 @@ class LazyView(LazyCommon):
   def device(self): return self.base.device
   @property
   def realized(self): return self.base.realized
-  @property
-  def children(self): return self.base.children
+  #@property
+  #def children(self): return self.base.children
   def schedule(self, seen): return self.base.schedule(seen)
   def realize(self): return self.base.realize()
   def toCPU(self) -> np.ndarray: return LazyBuffer(self.shape, self).contiguous().backing.toCPU()
@@ -261,6 +277,7 @@ class LazyBuffer:
   def contiguous(self) -> LazyBuffer:
     if isinstance(self.backing, LazyBacking): return self
     return LazyBuffer(self.shape, LazyBacking(LazyOp(LoadOps.CONTIGUOUS, (self.backing,)), prod(self.shape), self.dtype, self.device))
+    #return self.e(UnaryOps.NOOP)
 
   # *** external entrypoints ***
 
@@ -287,7 +304,24 @@ class LazyBuffer:
 
     if MERGE_ELEMENTWISE_OPS:
       # remove the buffers from any (childless) BinaryOps that feed into this
-      bsrcs = tuple([x.op if not x.realized and isinstance(x, LazyBacking) and x.op.op in ElementwiseOps and len(x.children) == 0 else x for x in bsrcs])  # type: ignore
+      def push_st(x):
+        if x.realized or x.base.op.op not in ElementwiseOps or len(x.children): return x
+        if isinstance(x, LazyBacking):
+          print(x.children)
+          return x.op
+        assert isinstance(x, LazyView), "x is a LazyView"
+        """
+        if x.st.size() <= x.base.size:   # can also check non expanded
+          replacements = {}
+          for b in x.base.op.buffers:
+            replacements[b] = LazyView(ShapeTracker(b.st.views + x.st.views), b.base)
+          return x.base.op.map_buffers(replacements)
+          #return x.base.op.map_buffers({x:LazyView() x._movement_op()})
+          #print("smaller, should push")
+          #return x.base.op
+        """
+        return x
+      bsrcs = tuple(push_st(x) for x in bsrcs)
     return LazyBuffer(self.shape, LazyBacking.cache(LazyOp(op, bsrcs, arg), prod(self.shape), out_dtype, self.device))
 
     """
@@ -316,12 +350,26 @@ class LazyBuffer:
 
   def _movement_op(self, fxn, arg, push_ewop=False, unsafe_ops=None) -> LazyBuffer:
     st:ShapeTracker = fxn(self.backing.st.reshape(self.shape), arg)
-    if st.contiguous and st.size() == self.backing.base.size: return LazyBuffer(st.shape, self.backing.base)
-    if push_ewop and not self.realized and isinstance(self.backing, LazyBacking) and self.backing.op.op in ElementwiseOps:
-      if not unsafe_ops or not any(x.op in unsafe_ops for x in self.backing.op.get_lazyops()):
-        mapped = self.backing.op.map_buffers({x:LazyBuffer(self.shape, x)._movement_op(fxn, arg).backing for x in self.backing.op.buffers})
+    #if st.contiguous and st.size() == self.backing.base.size: return LazyBuffer(st.shape, self.backing.base)
+    if push_ewop and not self.realized and isinstance(self.backing, LazyBacking) and self.backing.op.op in ElementwiseOps: # and not self.backing.children:
+      #if not unsafe_ops or not any(x.op in unsafe_ops for x in self.backing.op.get_lazyops()):
+      if not self.backing.children: # or True:
+        mapped = self.backing.op.map_buffers({x:LazyBuffer(self.shape, x)._movement_op(fxn, arg, push_ewop).backing for x in self.backing.op.buffers})
         return LazyBuffer(st.shape, LazyBacking.cache(mapped, prod(st.shape), self.backing.dtype, self.backing.device))
-    return LazyBuffer(st.shape, LazyView.cache(st.canonical(), self.backing.base))
+      else:
+        tst = st.canonical()
+        if tst.shape == (8192,16) and not self.realized:
+          print("CANT2 MOP CHILDREN", self.backing, list(self.backing.children))
+          for c in self.backing.children:
+            print("   ", c.op)
+    """
+    tst = st.canonical()
+    if tst.shape == (8192,16) and not self.realized:
+      print("WTF2 NOT PUSHED", fxn, arg, push_ewop, not self.realized, isinstance(self.backing, LazyBacking))
+      if fxn == ShapeTracker.permute:
+        assert push_ewop
+    """
+    return LazyBuffer(st.shape, LazyView.cache(st, self.backing.base))
 
   def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, SHUFFLE_MOVEMENT_OPS)
   def shrink(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.shrink, arg, SHUFFLE_MOVEMENT_OPS)

@@ -207,5 +207,57 @@ class TestSchedule(unittest.TestCase):
     c = a.reshape(10, 1, 10).permute(2,1,0)
     self.assertIs(b.lazydata.backing, c.lazydata.backing)
 
+  # NOTE: for this to pass, LazyViews must be children of LazyBuffers so the (a+b) runs first
+  #@unittest.skip("hard to make work with test_permute_breaks_fusion")
+  def test_children_dont_push(self):
+    a = Tensor.empty(10, 10, 1)
+    b = Tensor.empty(10, 10, 1)
+    d = (a+b).expand(10, 10, 10)
+    e = (a+b).permute(2,1,0)
+    f = d+e
+    check_schedule(f, 2)
+
+  def test_dont_fuse_binops_with_children(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = Tensor.empty(10)
+    keep_me = a+b
+    e = keep_me.sum() # give keep_me a child (NOTE: BinaryOps won't be a child since it will instant fuse)
+    d = keep_me+c
+    check_schedule(d, 2)
+    d.realize()
+    check_schedule(keep_me, 0)
+
+  def test_permute_breaks_fusion(self):
+    a = Tensor.empty(10, 10, 10)
+    b = Tensor.empty(10, 10)
+    c = (a.sum(axis=2) + b).permute(1,0)
+    d = c.permute(1,0)
+    check_schedule(d, 1)
+
+  def test_openpilot_permute_fusion(self):
+    a = Tensor.empty(8192, 16)
+    b = Tensor.empty(1, 16)
+    d = (a.T + b.expand(8192, 16).T)
+    c = a + b.expand(8192, 16)
+    e = d.T
+    check_schedule(c, 1)
+    check_schedule(e, 1)
+
+  def test_image_conv_fusion(self):
+    from tinygrad.nn.image import image_conv2d
+    w1 = Tensor.empty(16, 16, 3, 3)
+    b1 = Tensor.empty(16)
+    w2 = Tensor.empty(16, 16, 3, 3)
+    b2 = Tensor.empty(16)
+
+    x = Tensor.empty(1, 16, 256, 256)
+    x = base = image_conv2d(x, w1, b1, padding=1).relu()
+    x = image_conv2d(x, w2, b2, padding=1).relu() + base
+    x = image_conv2d(x, w2, b2, padding=1).relu()
+    # NOOP, 3 convs, contiguous
+    check_schedule(x, 5)
+
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

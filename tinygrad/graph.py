@@ -56,15 +56,18 @@ def log_op(ret: 'LazyBuffer', ast: LazyOp, show_graph: Optional[bool] = None, ph
   oporder = [LoadOps, TernaryOps, ReduceOps, BinaryOps, UnaryOps, MovementOps, BufferOps]
   optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1
-  if DEBUG >= 6: print(f"{op} : {', '.join([f'{x.shape}-<{nm(x.base)}>' for x in inp])} -> {ret.shape}-<{nm(ret)}>")
+  if DEBUG >= 6: print(f"{op} : {', '.join([f'{x.shape}-<{nm(x)}>' for x in inp])} -> {ret.shape}-<{nm(ret)}>")
   if show_graph:
     top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#ff8080", BufferOps: "#404040"}
     dashed = (optype == LoadOps and hasattr(ret, "_backing")) or (hasattr(ret, "st") and not ret.st.contiguous)  # type: ignore
-
     for x in inp:
-      G.add_edge(nm(x.base), nm(ret), label=get_sop(op), color='#00000060' if phantom else 'black')
+      if x.base != x:
+        # view node
+        G.add_node(nm(x), label=f"{x.st.shape} {x.st.real_strides()}", fillcolor="#80ff8080", style='filled')
+        G.add_edge(nm(x.base), nm(x), color="#408040")
+      G.add_edge(nm(x), nm(ret), label=get_sop(op), color='#00000060' if phantom else 'black')
       if 'label' not in G.nodes[nm(x.base)]:
-        G.nodes[nm(x.base)]['label'] = str(x.shape)+str_dtype(ret.dtype)
+        G.nodes[nm(x.base)]['label'] = str(x.base.shape)+str_dtype(ret.dtype)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
 
     G.nodes[nm(ret)]['label'] = (str(set(x.shape for x in inp))+"\n"+str(ret.shape))+str_dtype(ret.dtype)
