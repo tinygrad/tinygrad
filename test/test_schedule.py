@@ -235,7 +235,7 @@ class TestSchedule(unittest.TestCase):
     d = c.permute(1,0)
     check_schedule(d, 1)
 
-  def test_openpilot_permute_fusion(self):
+  def test_some_permute_fusion(self):
     a = Tensor.empty(8192, 16)
     b = Tensor.empty(1, 16)
     d = (a.T + b.expand(8192, 16).T)
@@ -244,20 +244,46 @@ class TestSchedule(unittest.TestCase):
     check_schedule(c, 1)
     check_schedule(e, 1)
 
+  # this is the failing case in openpilot...it's very simple like this
   def test_image_conv_fusion(self):
     from tinygrad.nn.image import image_conv2d
-    w1 = Tensor.empty(16, 16, 3, 3)
+    w1 = Tensor.empty(16, 16, 1, 1)
     b1 = Tensor.empty(16)
-    w2 = Tensor.empty(16, 16, 3, 3)
+    w2 = Tensor.empty(16, 16, 1, 1)
     b2 = Tensor.empty(16)
+    w3 = Tensor.empty(16, 16, 1, 1)
+    b3 = Tensor.empty(16)
 
-    x = Tensor.empty(1, 16, 256, 256)
-    x = base = image_conv2d(x, w1, b1, padding=1).relu()
-    x = image_conv2d(x, w2, b2, padding=1).relu() + base
-    x = image_conv2d(x, w2, b2, padding=1).relu()
+    x = Tensor.empty(1, 16, 32, 32)
+    x = base = image_conv2d(x, w1, b1)
+    x = image_conv2d(x, w2, b2) + base
+    x = image_conv2d(x, w3, b3)
+
     # NOOP, 3 convs, contiguous
     check_schedule(x, 5)
 
+  def test_image_conv_fusion_minimal(self):
+    b1 = Tensor.empty(16)
+    b2 = Tensor.empty(16)
+    def p(x): return x.permute(1,0).reshape(32,16,1).expand(32,16,16).sum(axis=2).permute(1,0)
+
+    x = Tensor.empty(16, 32)
+    x = base = p(x) + b1.reshape(16,1)
+    x = p(x) + b2.reshape(16,1)
+    x = x + base
+    del base
+    x = p(x)
+    check_schedule(x, 3)
+
+  def test_image_conv_fusion_more_minimal(self):
+    b1 = Tensor.empty(16)
+    def p(x): return x.permute(1,0).reshape(32,16,1).expand(32,16,16).sum(axis=2).permute(1,0)
+
+    x = Tensor.empty(16, 32)
+    x = base = p(x) + b1.reshape(16,1)
+    x = p(x)
+    del base
+    check_schedule(x, 2)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
