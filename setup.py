@@ -14,8 +14,7 @@ setup(name='tinygrad',
       license='MIT',
       long_description=long_description,
       long_description_content_type='text/markdown',
-      packages = ['tinygrad', 'tinygrad.codegen', 'tinygrad.nn', 'tinygrad.renderer', 'tinygrad.runtime', 'tinygrad.shape',
-                  'examples', 'examples.mlperf', 'examples.mlperf.unet3d',],
+      packages = ['tinygrad', 'tinygrad.codegen', 'tinygrad.nn', 'tinygrad.renderer', 'tinygrad.runtime', 'tinygrad.shape'],
       classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"

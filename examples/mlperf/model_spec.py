@@ -28,7 +28,7 @@ def spec_retinanet():
 def spec_unet3d():
   # 3D UNET
   from models.unet3d import UNet3D
-  mdl = UNet3D(1,3)
+  mdl = UNet3D()
   mdl.load_from_pretrained()
   img = Tensor.randn(1, 1, 128, 128, 128)
   test_model(mdl, img)

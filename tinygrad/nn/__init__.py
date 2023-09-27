@@ -50,17 +50,6 @@ class Conv2d:
 
   def __call__(self, x):
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
-  
-class Conv3d:
-  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
-    self.kernel_size = (kernel_size, kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
-    assert len(self.kernel_size) == 3, "kernel_size must be an int or a tuple of 3"
-    self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
-    self.weight = Tensor.kaiming_uniform(out_channels, in_channels//groups, *self.kernel_size, a=math.sqrt(5))
-    bound = 1 / math.sqrt(prod(self.weight.shape[1:]))
-    self.bias = Tensor.uniform(out_channels, low=-bound, high=bound) if bias else None
-  def __call__(self, x):
-    return x.conv3d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
   def initialize_weight(self, out_channels, in_channels, groups): return Tensor.kaiming_uniform(out_channels, in_channels//groups, *self.kernel_size, a=math.sqrt(5))
 
@@ -74,17 +63,6 @@ class ConvTranspose2d(Conv2d):
 
   def __call__(self, x):
     return x.conv_transpose2d(self.weight, self.bias, padding=self.padding, output_padding=self.output_padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
-  
-class ConvTranspose3d:
-  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, output_padding=0, dilation=1, groups=1, bias=True):
-    self.kernel_size = (kernel_size, kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
-    self.stride, self.padding, self.output_padding, self.dilation, self.groups = stride, padding, output_padding, dilation, groups
-    self.weight = Tensor.kaiming_uniform(in_channels, out_channels//groups, *self.kernel_size, a=math.sqrt(5))
-    bound = 1 / math.sqrt(prod(self.weight.shape[1:]))
-    self.bias = Tensor.uniform(out_channels, low=-bound, high=bound) if bias else None
-
-  def __call__(self, x):
-    return x.conv_transpose3d(self.weight, self.bias, padding=self.padding, output_padding=self.output_padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
   def initialize_weight(self, out_channels, in_channels, groups): return Tensor.kaiming_uniform(in_channels, out_channels//groups, *self.kernel_size, a=math.sqrt(5))
 

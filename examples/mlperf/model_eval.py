@@ -1,10 +1,14 @@
+import random
 import time
 from pathlib import Path
 import numpy as np
+import torch
+
+from examples.mlperf.metrics import get_dice_score_np
+from tinygrad.nn.state import get_state_dict, load_state_dict
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.helpers import getenv, dtypes
-from examples.mlperf import helpers
 
 def eval_resnet():
   # Resnet50-v1.5
@@ -52,24 +56,67 @@ def eval_resnet():
     d += len(t)
     print(f"****** {n}/{d}  {n*100.0/d:.2f}%")
     st = time.perf_counter()
-
+from line_profiler_pycharm import profile
+@profile
 def eval_unet3d():
-  # UNet3D # todo check this
+  seed = 0
+  if seed is not None:
+    Tensor._seed = seed
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    random.seed(seed)
+  # UNet3D
   from models.unet3d import UNet3D
   from extra.datasets.kits19 import iterate, sliding_window_inference
   from examples.mlperf.metrics import get_dice_score
-  mdl = UNet3D(1,3)
+  mdl = UNet3D()
   mdl.load_from_pretrained()
+  if getenv("FP16",1): # FP16 works great!
+    weights = get_state_dict(mdl)
+    for k, v in weights.items():
+      weights[k] = v.cpu().half()
+    load_state_dict(mdl, weights)
   s = 0
   st = time.perf_counter()
+  _mdl_jit = TinyJit(lambda x: mdl(x).realize())
+  from diskcache import Cache
+  memoize= False
+  cache = Cache('/home/gijs/code_projects/tinygrad/model_cache')
+
+  if memoize:
+    # cache = Cache('/home/gijs/code_projects/tinygrad/model_cache')
+    @cache.memoize() # only works for not too many files
+    def test(x):
+      return _mdl_jit(Tensor(x)).numpy()
+    mdl_jit = test
+  else:
+    mdl_jit = lambda x: _mdl_jit(Tensor(x)).numpy()
   for i, (image, label) in enumerate(iterate(), start=1):
+    print('i', i)
     mt = time.perf_counter()
-    pred, label = sliding_window_inference(mdl, Tensor(image), Tensor(label))
+    print(image.shape)
+    # width=64+32
+    # image = image[...,:128+width,:128+width,:128+width]
+    # label = label[...,:128+width,:128+width,:128+width]
+    # pred, label = sliding_window_inference(mdl_jit, image, label)
+    print('label shape', label.shape)
+    @cache.memoize()
+    def slide_cache(image,label):
+      print("SLIDE CACHE")
+      pred, label = sliding_window_inference(mdl_jit, image, label)
+      return pred, label
+    pred, label = slide_cache(image,label)
     et = time.perf_counter()
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
-    s += get_dice_score(pred, label).mean() # todo check if this still works
+    np_score = get_dice_score_np(pred, label)
+    tiny_score = get_dice_score(Tensor(pred), Tensor(label)).numpy()
+    print(f"np_score: {np_score}")
+    print(f"tiny_score: {tiny_score}")
+    s += tiny_score.mean()
     print(f"****** {s:.2f}/{i}  {s/i:.5f} Mean DICE score")
     st = time.perf_counter()
+    exit()
+  assert i>1, "no data"
 
 def eval_retinanet():
   # RetinaNet with ResNeXt50_32X4D
@@ -236,9 +283,11 @@ if __name__ == "__main__":
   Tensor.training = False
   Tensor.no_grad = True
 
-  models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,mrcnn").split(",")
-  for m in models:
-    nm = f"eval_{m}"
-    if nm in globals():
-      print(f"eval {m}")
-      globals()[nm]()
+  models = getenv("MODEL", "unet3d").split(",")
+  eval_unet3d()
+
+  # for m in models:
+  #   nm = f"eval_{m}"
+  #   if nm in globals():
+  #     print(f"eval {m}")
+  #     globals()[nm]()
