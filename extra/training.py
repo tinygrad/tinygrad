@@ -1,7 +1,12 @@
 import numpy as np
 from tqdm import trange
-from tinygrad.tensor import Tensor, Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import dtypes, getenv
+from tinygrad.tensor import Tensor
+
+def lr_warmup(optimizer, init_lr, lr, current_epoch, warmup_epochs):
+  scale = current_epoch / warmup_epochs
+  new_lr = init_lr + (lr - init_lr) * scale
+  optimizer.lr.assign([new_lr])
 
 def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=lambda out,y: out.sparse_categorical_crossentropy(y),
         transform=lambda x: x, target_transform=lambda x: x, noloss=False):
@@ -50,4 +55,3 @@ def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=Fal
   acc, Y_test_pred = numpy_eval(Y_test, num_classes)
   print("test set accuracy is %f" % acc)
   return (acc, Y_test_pred) if return_predict else acc
-

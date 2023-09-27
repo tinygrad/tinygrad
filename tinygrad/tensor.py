@@ -347,7 +347,7 @@ class Tensor:
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
-    assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
+    assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args), f"wrong shapes x: {self.shape}, args: {' '.join([str(y.shape) for y in args])}"
     catargs = [self, *args]
     assert all(t.shape for t in catargs), "zero-dimensional tensor cannot be concatenated"
     shapes = [s.shape[dim] for s in catargs]
@@ -532,6 +532,31 @@ class Tensor:
     ret = ret.reshape(bs, cout, *[c * HWO[i] for i, c in enumerate(tyx)]).shrink(tuple((0, s) for s in [bs, cout, *oyx]))  # merge groups and rcout, tyx and HWO: (bs, groups, cout, *yx), shrink to final
 
     return (ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))).contiguous().contiguous_backward()
+
+  def conv3d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
+    (bs, cin_), (cout, cin), DHW = self.shape[:2], weight.shape[:2], weight.shape[2:]
+    assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
+    if isinstance(padding, (tuple,list)): assert len(padding) == 2*len(DHW) or len(padding) == len(DHW), f"Expected padding of length {3*len(DHW)} or {len(DHW)}, but got {len(padding)} for tensor of shape {self.shape}"
+    padding_ = [(padding, padding)]*len(DHW) if isinstance(padding, int) else (padding if len(padding) == len(DHW) else [(p,p) for p in padding])
+    padding_ = tuple([(0, 0)] * (len(self.shape)-3) + padding_)
+
+    x = self.pad(padding_)._pool(DHW, stride, dilation)   # (bs, groups*cin, oz, oy, ox, D, H, W)
+    rcout, ozyx = cout//groups, x.shape[2:-len(DHW)]
+    x = x.reshape(bs, groups, cin, 1, *ozyx, *DHW).expand(bs, groups, cin, rcout, *ozyx, *DHW).permute(0,1,3,*[4+i for i in range(len(ozyx))],2,*[4+len(ozyx)+i for i in range(len(DHW))])
+    ret = (x * weight.reshape(1, groups, rcout, *[1] * len(ozyx), cin, *DHW)).sum([-1-i for i in range(1+len(ozyx))], keepdim=True).reshape(bs, cout, *ozyx)
+    return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(DHW)))
+
+  def conv_transpose3d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0) -> Tensor:
+    HWD, trailing = weight.shape[2:], list(range(3, len(weight.shape)+1))
+    x, w = self, weight.reshape(groups, weight.shape[0]//groups, weight.shape[1], *weight.shape[2:]).permute(0,2,1,*trailing).flip(trailing)
+    stride = make_pair(stride, len(HWD))
+    if any(s>1 for s in stride):
+      x = x.reshape(*x.shape[:2], *flatten((k,1) for k in x.shape[2:]))
+      x = x.pad(((0,0), (0,0), *flatten(((0,0),(0,s-1)) for s in stride)))
+      x = x.reshape(*x.shape[:2], *[k*s for k,s in zip(x.shape[2::2], stride)])
+      x = x.shrink(((0,x.shape[0]), (0,x.shape[1]), *[(0,k-(s-1)) for k,s in zip(x.shape[2:], stride)]))
+    padding = flatten((((k-1)*d-p,(k-1)*d-p+op) for k,d,p,op in reversed(list(zip(HWD, make_pair(dilation, len(HWD)), make_pair(padding, len(HWD)), make_pair(output_padding, len(HWD)))))))
+    return x.conv2d(w.reshape(w.shape[0]*w.shape[1],*w.shape[2:]), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
   def dot(self, w:Tensor) -> Tensor:
     n1, n2 = len(self.shape), len(w.shape)

@@ -3,6 +3,10 @@ import string
 from collections import Counter
 import numpy as np
 
+from examples.mlperf.unet3d.losses import to_one_hot
+from tinygrad.tensor import Tensor
+
+
 def levenshtein(a, b):
   n, m = len(a), len(b)
   if n > m:
@@ -30,20 +34,58 @@ def word_error_rate(x, y):
   return float(scores) / words, float(scores), words
 
 def one_hot(arr, num_classes=3):
-  res = np.eye(num_classes)[np.array(arr).reshape(-1)]
-  arr = res.reshape(list(arr.shape) + [num_classes])
-  arr = arr.transpose((0, 4, 1, 2, 3)).astype(np.float32)
+  res = np.eye(num_classes)[np.array(arr.astype(int)).reshape(-1)]
+  arr = res.reshape([arr.shape[0]] + [num_classes] + list(arr.shape[2:]))
   return arr
 
-def get_dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6):
-  channel_axis, reduce_axis = 1, tuple(range(2, len(prediction.shape)))
-  prediction = prediction.argmax(axis=channel_axis)
-  prediction, target= one_hot(prediction)[:, 1:], one_hot(target)[:, 1:]
-  intersection = np.sum(prediction * target, axis=reduce_axis)
-  target_sum = np.sum(target, axis=reduce_axis)
-  prediction_sum = np.sum(prediction, axis=reduce_axis)
-  result = (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
-  return result[0]
+def dice_ce_loss_old(y_pred, y_true, n_classes):
+
+  y_true = one_hot(y_true, n_classes).astype("float32") # we cant compute the dice_score with float16 because of overflows
+  y_true = Tensor(y_true, requires_grad=False)
+  cross_entropy = -y_true.mul(y_pred.softmax(1).clip(1e-8, 1).log()).mean()
+  dice_score = get_dice_score(y_pred, y_true)
+  dice_loss = (Tensor.ones_like(dice_score) - dice_score).mean()
+  loss = (dice_loss + cross_entropy) / 2
+  return loss
+
+def get_dice_score(prediction, target, prediction_argmax=True, smooth_nr=1e-6, smooth_dr=1e-6):
+  prediction, target = prediction.float(), target.float()
+  channel_axis = 1
+  # both prediction and target should be one_hot
+  # And only the prediction should be argmax
+  reduce_axis = list(range(2, len(prediction.shape)))
+  if prediction_argmax:
+    assert not prediction.requires_grad
+    prediction = prediction.argmax(axis=channel_axis)
+    prediction = to_one_hot(prediction, channel_axis=channel_axis)
+  else:
+    prediction = prediction.softmax(axis=channel_axis)
+  target = to_one_hot(target, channel_axis=channel_axis)
+
+  target = target[:, 1:]
+  prediction = prediction[:, 1:]
+
+  assert target.shape == prediction.shape, f"Target and prediction shape do not match. Target: ({target.shape}), prediction: ({prediction.shape})."
+  intersection = (target * prediction).sum(axis=reduce_axis)
+  target_sum = target.sum(axis=reduce_axis)
+  prediction_sum = prediction.sum(axis=reduce_axis)
+  return (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
+
+def dice_ce_loss(prediction, target):
+  prediction, target = prediction.float(), target.float()
+  # here prediction doesnt have one_hot. Only target has one_hot
+  # here prediction has softmax - TRUE
+  target_one_hot = to_one_hot(target) # we cant compute the dice_score with float16 because of overflows
+  # todo use nn.cross entropy here?
+  # overflow in reduce?????? Check with CPU=1
+  # cross_entropy = -(target_one_hot * prediction.softmax(1).clip(1e-8, 1).log()).mean()
+  cross_entropy = -(target_one_hot * prediction.softmax(1).clip(1e-8, 1).log()).mean()
+  dice_score = get_dice_score(prediction, target, prediction_argmax=False)
+  dice_loss = (1. - dice_score).mean()
+  print('dice_loss', dice_loss.numpy())
+  print('cross_entropy', cross_entropy.numpy())
+  loss = (dice_loss + cross_entropy) / 2
+  return loss
 
 def normalize_string(s):
   s = "".join(c for c in s.lower() if c not in string.punctuation)

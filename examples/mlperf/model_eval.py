@@ -54,20 +54,20 @@ def eval_resnet():
     st = time.perf_counter()
 
 def eval_unet3d():
-  # UNet3D
+  # UNet3D # todo check this
   from models.unet3d import UNet3D
   from extra.datasets.kits19 import iterate, sliding_window_inference
   from examples.mlperf.metrics import get_dice_score
-  mdl = UNet3D()
+  mdl = UNet3D(1,3)
   mdl.load_from_pretrained()
   s = 0
   st = time.perf_counter()
   for i, (image, label) in enumerate(iterate(), start=1):
     mt = time.perf_counter()
-    pred, label = sliding_window_inference(mdl, image, label)
+    pred, label = sliding_window_inference(mdl, Tensor(image), Tensor(label))
     et = time.perf_counter()
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
-    s += get_dice_score(pred, label).mean()
+    s += get_dice_score(pred, label).mean() # todo check if this still works
     print(f"****** {s:.2f}/{i}  {s/i:.5f} Mean DICE score")
     st = time.perf_counter()
 

@@ -1,0 +1,46 @@
+git clone https://github.com/gijskoning/tinygrad.git
+cd tinygrad
+git checkout train_unet3d_gijs
+pip install -e .
+pip install scipy
+
+sudo apt install -y nvidia-cuda-toolkit # WORKED! FIXES "GPU"
+
+cd examples/mlperf/unet3d/
+git clone https://github.com/neheller/kits19
+cd kits19
+pip3 install -r requirements.txt
+python3 -m starter_code.get_imaging
+cd ../
+python3 preprocess_dataset.py --data_dir kits19/data --results_dir kits19/processed_data
+
+GPU=1 WINO=1 DATA_DIR=kits19/processed_data SPEED=0 FP16=1 JIT=1 python training.py
+DATA_DIR=kits19/processed_data SPEED=1 FP16=1 JIT=1 python training.py
+GPU=1 DATA_DIR=kits19/processed_data SPEED=1  python training.py
+
+3090 cannot handle anything much bigger than this. At least not the first dim
+TC=1 FILTERS="8 16 16 16 16" GPU=1 DATA_DIR=kits19/processed_data JIT=1 FP16=1 python training.py
+With wino only:
+TC=2 WINO=1 SPEED=1 GPU=1 DATA_DIR=kits19/processed_data JIT=1 FP16=1 python training.py
+
+Installing hip:
+https://docs.amd.com/en/docs-5.1.1/deploy/linux/quick_start.html
+https://docs.amd.com/en/docs-5.1.1/deploy/linux/index.html
+https://www.reddit.com/r/gpgpu/comments/u6eelz/address_of_rocm_install_servers_for_hip/
+  Says to skip installing amdgpu
+sudo mkdir --parents --mode=0755 /etc/apt/keyrings
+wget https://repo.radeon.com/rocm/rocm.gpg.key -O - |     gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+# from reddit: # seems to work!! Aboce line maybe needed
+sudo apt install wget gnupg2
+wget -qO- https://repo.radeon.com/rocm/rocm.gpg.key | sudo apt-key add -
+echo 'deb [arch=amd64] https://repo.radeon.com/rocm/apt/5.1.1 ubuntu main' | sudo tee /etc/apt/sources.list.d/rocm.list
+sudo apt update
+sudo apt install hip-base hip-runtime-nvidia # doesnt work yet. Maybe I need a different docker?
+# could work: sudo apt-get install rocm-hip-runtime -y
+# use ctrl+b then release, then c. To open a new terminal
+# ctrl+b, then n to switch
+
+# testing hip
+# from tinygrad.tensor import Tensor, Device
+# Device['HIP']
+# Device['GPU']
