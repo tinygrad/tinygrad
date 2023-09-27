@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction, get_common_shape, reduce_expand
+from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction, get_common_shape, reduce_expand, reduce_unexpand
 from tinygrad.shape.symbolic import Variable
 from itertools import product
 

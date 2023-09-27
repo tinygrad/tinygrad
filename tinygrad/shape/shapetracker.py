@@ -212,7 +212,7 @@ def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> O
 
 # get maximum common shape
 def get_common_shape(shapes:List[Tuple[sint, ...]]) -> Tuple[sint, ...]:
-  assert all_same([prod(x) for x in shapes])
+  assert all_same([prod(x) for x in shapes]), f"no common shape of unmatched shapes: {shapes}"
   ret = []
   while any(len(x) for x in shapes):
     # NOTE: should this be gcd instead of min?

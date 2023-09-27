@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from typing import Optional, Union, cast, Tuple, Any, List, Dict, Mapping, Callable
-from tinygrad.shape.shapetracker import ShapeTracker, get_common_shape, reduce_expand, reduce_contract_arg
+from tinygrad.shape.shapetracker import ShapeTracker, get_common_shape, reduce_expand, reduce_contract_arg, get_contraction
 from tinygrad.ops import LazyOp, LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps
 ElementwiseOps = {*UnaryOps, *BinaryOps, *TernaryOps}
 
@@ -133,14 +133,25 @@ class LazyBacking(LazyCommon):
     assert len(reduceops) <= 1, "max one reduce op in an ast"
 
     # get buffer shapes
+    # TODO: remove_1s won't be needed once we have canonical LazyViews
+    def remove_1s(x): return tuple([s for s in x if s != 1])
     if reduceops:
-      early_shape = get_common_shape([x.shape for x in reduceops[0].buffers] + [reduceops[0].arg[0]])
-      reduced_shape = reduce_expand(early_shape, reduceops[0].arg[0], reduceops[0].arg[1])
-      late_shape = get_common_shape([x.shape for x in op.buffers if x not in reduceops[0].buffers] + [reduceops[0].arg[1], reduced_shape])
-      #print(early_shape, reduceops[0].arg[0], reduceops[0].arg[1])
-      #print(late_shape)
+      late_shapes = [remove_1s(x.shape) for x in op.buffers if x not in reduceops[0].buffers]
+      tmp_early_shape = get_common_shape([remove_1s(x.shape) for x in reduceops[0].buffers] + [reduceops[0].arg[0]])
+      reduced_shape = reduce_expand(tmp_early_shape, reduceops[0].arg[0], reduceops[0].arg[1])
+      late_shape = get_common_shape(late_shapes + [reduceops[0].arg[1], reduced_shape])
+      early_shape = []
+      for es, c in zip(tmp_early_shape, get_contraction(late_shape, reduced_shape)):
+        if len(c) > 1:
+          piece_of_late_shape = [late_shape[x] for x in c]
+          assert prod(piece_of_late_shape) == es, f"late shape {piece_of_late_shape} early piece {es}"
+          early_shape += piece_of_late_shape
+        else:
+          early_shape.append(es)
+      early_shape = tuple(early_shape)
+      assert len(early_shape) == len(late_shape), f"shape len mismatch {early_shape} != {late_shape}"
     else:
-      late_shape = get_common_shape([x.shape for x in op.buffers])
+      late_shape = get_common_shape([remove_1s(x.shape) for x in op.buffers])
 
     #all_shapes = [x.shape for x in op.buffers] + (list(reduceops[0].arg) if reduceops else [])
     #print(all_shapes)
@@ -208,7 +219,7 @@ class LazyBacking(LazyCommon):
 # this is a view into a contiguous LazyBacking. this is always non-contiguous
 class LazyView(LazyCommon):
   def __init__(self, st:ShapeTracker, base:LazyBacking):
-    assert not st.contiguous, "LazyView should never be contiguous"
+    assert not st.contiguous or st.size() != base.size, "LazyView should never be contiguous"
     self.st: ShapeTracker = st
     self.base: LazyBacking = base
 
@@ -355,7 +366,7 @@ class LazyBuffer:
 
   def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if any(not isinstance(s, int) for s in self.shape) or prod(self.shape) // prod(new_shape) < 32768: return self._reduce_op(op, new_shape) # The amount of work should be big enough to take the benefit of "2 kernels" approach.
-    heuristic, divisor, dim_to_split = max(((divisor := math.gcd(256, old))/(stride or math.inf), divisor, i) for i, (old, new, stride) in enumerate(zip(self.shape, new_shape, self.st.real_strides())) if old != new) # type: ignore
+    heuristic, divisor, dim_to_split = max(((divisor := math.gcd(256, old))/(stride or math.inf), divisor, i) for i, (old, new, stride) in enumerate(zip(self.shape, new_shape, self.backing.st.reshape(self.shape).real_strides())) if old != new) # type: ignore
     if divisor < 16 or heuristic < 0.1: return self._reduce_op(op, new_shape) # Choose largest divisor (>=16) to split on, penalize large strides.
     def splitted_shape(dim_aft_div): return self.shape[:dim_to_split] + (self.shape[dim_to_split]//divisor,) + dim_aft_div + self.shape[dim_to_split+1:]
     return self.reshape(splitted_shape((divisor,)))._reduce_op(op, splitted_shape((1,))).reshape(splitted_shape(()))._reduce_op(op, new_shape)
@@ -365,7 +376,7 @@ class LazyBuffer:
   def _movement_op(self, fxn, arg, push_ewop=False, unsafe_ops=None) -> LazyBuffer:
     #print(self.shape, fxn, arg)
     st:ShapeTracker = fxn(self.backing.st.reshape(self.shape), arg)
-    if st.contiguous: return LazyBuffer(st.shape, self.backing.base)
+    if st.contiguous and st.size() == self.backing.base.size: return LazyBuffer(st.shape, self.backing.base)
     if push_ewop and not self.realized and isinstance(self.backing, LazyBacking) and self.backing.op.op in ElementwiseOps:
       mapped = self.backing.op.map_buffers({x:LazyBuffer(self.shape, x)._movement_op(fxn, arg).backing for x in self.backing.op.buffers})
       return LazyBuffer(st.shape, LazyBacking.cache(mapped, prod(st.shape), self.backing.dtype, self.backing.device))
