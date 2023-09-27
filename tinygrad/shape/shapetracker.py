@@ -4,7 +4,7 @@ import functools
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, cast
 from tinygrad.ops import MovementOps
-from tinygrad.helpers import prod, DEBUG
+from tinygrad.helpers import prod, DEBUG, all_same
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, sint
 from tinygrad.shape.view import View
 
@@ -206,3 +206,13 @@ def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> O
       elif axis_group_size > new_shape[i]: return None
       old_shape_i += 1
   return axis_groups
+
+def get_common_shape(shapes:List[Tuple[sint, ...]]):
+  assert all_same([prod(x) for x in shapes])
+  ret = []
+  while any(len(x) for x in shapes):
+    # NOTE: should this be gcd instead of min?
+    last_num = min(x[-1] for x in shapes)
+    ret.append(last_num)
+    shapes = [x[0:-1] if x[-1] == last_num else x[0:-1]+(x[-1]//last_num,) for x in shapes]
+  return tuple(ret[::-1])

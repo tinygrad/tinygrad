@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction
+from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction, get_common_shape
 from tinygrad.shape.symbolic import Variable
 from itertools import product
 
@@ -589,6 +589,16 @@ class TestShapeTracker(unittest.TestCase):
     self.test_slice_1()
     self.test_expand()
     self.test_permute()
+
+class TestGetCommonShape(unittest.TestCase):
+  def test_get_common_shape(self):
+    self.assertEqual(get_common_shape([(16,16)]), (16,16))
+    self.assertEqual(get_common_shape([(256,), (16,16)]), (16,16))
+    self.assertEqual(get_common_shape([(256,1), (16,16)]), (16,16,1))
+    self.assertEqual(get_common_shape([(256,1), (16,16,1)]), (16,16,1))
+    self.assertEqual(get_common_shape([(16,4,4), (4,4,16)]), (4,4,4,4))
+    self.assertEqual(get_common_shape([(16,4,1,4), (4,4,16)]), (4,4,4,1,4))
+    self.assertEqual(get_common_shape([(16,4,1,4), (4,1,4,16)]), (4,1,4,4,1,4))
 
 class TestGetContraction(unittest.TestCase):
   def test_contraction(self):

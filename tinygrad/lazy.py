@@ -24,50 +24,29 @@ MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS = OPT>=2, OPT>=2
 PUSH_PERMUTES = OPT>=3  # TODO: reimplement this
 UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
 
+def _ast_reduceops(op:LazyOp) -> LazyOp:
+  src = op.src[0]
+  fuse = not src.realized and MERGE_ELEMENTWISE_INTO_REDUCE and isinstance(src, LazyBacking) and src.op.op in ElementwiseOps and len(src.children) <= 1
+  return LazyOp(op.op, (src.op if fuse else src,), op.arg)
+
+# this supports late merging an upstream Reduce op and even an Elementwise op above that
+def _ast_binaryops(op:LazyOp) -> LazyOp:
+  real_srcs: Dict[LazyCommon, Union[LazyOp, LazyCommon]] = {x:x for x in op.buffers}
+  if MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
+    fuse_reduce = dedup([x for x in real_srcs.keys() if isinstance(x, LazyBacking) and not x.realized and x.op.op in ReduceOps and len(x.children) <= 1])
+    if fuse_reduce:
+      # NOTE: we only fuse the first reduce op if there's multiple fusable ones
+      real_srcs[fuse_reduce[0]] = _ast_reduceops(fuse_reduce[0].op)
+  return op.map_buffers(real_srcs)
+
+"""
 def fix_unbased_shape(src:LazyBuffer) -> LazyOp:
   assert src.is_contiguous(), "non contiguous can't be fixed"
   # if it's contiguous, applying a reshape to the base is safe
   return src.base.op.map_buffers({x:x.reshape(src.shape) for x in src.base.op.buffers}) if src.base != src else src.op
+"""
 
-def _ast_reduceops(op:LazyOp) -> LazyOp:
-  # TODO: this can also corealize a binary op after the reduce, not just before
-  src = op.src[0]
-  if not src.realized:
-    assert isinstance(src, LazyBuffer), "src must be a LazyBuffer"
-    assert isinstance(src.base.op, LazyOp), "if not src.realized, then src.op must be a LazyOp"
-    if MERGE_ELEMENTWISE_INTO_REDUCE and src.base.op.op in ElementwiseOps and len(src.children) <= 1 and src.is_contiguous():
-      # it's contiguous, but it might require reshapes of the binaryops
-      src = fix_unbased_shape(src)
-  return LazyOp(op.op, (src,), op.arg)
-
-# this supports late merging an upstream Reduce op and even an Elementwise op above that
-def _ast_binaryops(op:LazyOp, output_shape:Tuple[sint, ...]) -> LazyOp:
-  real_srcs: Dict[LazyBuffer, Optional[Union[LazyOp, LazyBuffer]]] = {x:None for x in op.buffers}
-  # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
-  # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
-  psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), [x.base for x in real_srcs.keys()]) if not x.realized and k.is_contiguous() and x.op.op in ReduceOps and len(x.children) <= 1]
-
-  intermediate_shape: Tuple[sint, ...] = output_shape
-  if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and psrcs:
-    psrc = psrcs[0] # NOTE: right now we can't handle multiple, as we'd have to check for loop
-    if psrc[1].op.op in ReduceOps:
-      top = _ast_reduceops(psrc[1].op)
-    real_srcs[psrc[0]] = top
-    real_srcs.update({x:x for x in top.buffers})  # the reduce op buffers are not modified
-
-    # if the ReduceOp is followed by a reshape, we push this reshape before all the ElementwiseOp inputs
-    if psrc[0].shape != psrc[1].shape:
-      intermediate_shape = psrc[1].shape
-      assert psrc[0].shape == output_shape, f"shape mismatch {psrc[0].shape} != {output_shape}"
-
-  # reshape all the late ops into the output shape
-  # NOTE: these RESHAPEs will return self if they don't change the shape
-  for x in real_srcs.keys():
-    if real_srcs[x] is None: real_srcs[x] = x.reshape(intermediate_shape)
-
-  # NOTE: cast the type to remove the Optional
-  return op.map_buffers(cast(Dict[LazyBuffer, Union[LazyOp, LazyBuffer]], real_srcs))
-
+"""
 def _ast_bufferops(op:LazyOp) -> LazyOp:
   replacements:Dict[LazyBuffer, LazyOp] = {}
   base_bufs = dedup([x.base for x in op.buffers if x.realized or not isinstance(Device[x.device], Compiled) or x.device == "LLVM" or x.base.op.op != LoadOps.CONST])
@@ -82,19 +61,158 @@ def _ast_bufferops(op:LazyOp) -> LazyOp:
     else:
       raise NotImplementedError(f"not handled {x}")
   return op.map_buffers(replacements)
+"""
 
-class LazyBacking:
+def get_max_shape(x):
+  if len(x) == 0: return None
+  # TODO: this is wrong and they need to be combined
+  return sorted(x, key=lambda x: len(x))[-1]
+
+class LazyCommon:
+  @property
+  def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
+  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
+  def get_lazyops(self) -> List[LazyOp]: return []
+
+# this is a contiguous array and can have an op fill it
+class LazyBacking(LazyCommon):
   def __init__(self, op:Optional[LazyOp], size:int, dtype:DType, device:str, src:Optional[RawBuffer]=None):
     self.size, self.dtype, self.device = size, dtype, device
     self.realized: Optional[RawBuffer] = src
+    self.output_buffer: Optional[RawBuffer] = None
     self.children: WeakSet = WeakSet()
     if op:
       self.op: LazyOp = op
       for x in op.buffers: x.children.add(self)
 
-class LazyView:
+  def __repr__(self): return f"<LB {self.size} {self.dtype} op={(self.op.op if hasattr(self, 'op') else '') if not self.realized else self.realized}>"
+
+  lazycache: WeakValueDictionary = WeakValueDictionary()
+  @staticmethod
+  def cache(op:LazyOp, size:int, dtype:DType, device:str):
+    wop = (ref(op), size, dtype, device)
+    if wop in LazyBacking.lazycache:
+      for x in op.buffers: x.children.add(LazyBacking.lazycache[wop])
+      return LazyBacking.lazycache[wop]
+    LazyBacking.lazycache[wop] = ret = LazyBacking(op, size, dtype, device)
+    return ret
+
+  def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
+
+  @property
+  def base(self) -> LazyBacking: return self
+  @property
+  def shape(self): return (self.size,)
+  @property
+  def st(self): return ShapeTracker.from_shape((self.size,))
+
+  def toCPU(self) -> np.ndarray:
+    assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
+    return self.realize().realized.toCPU()
+    """
+    self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
+    realized = self_casted.contiguous().realize().realized
+    assert all_int(self.shape), f"no toCPU if shape is symbolic, {self.shape=}"
+    return cast(RawBuffer, realized).toCPU()
+    """
+
+  def schedule(self, seen):
+    if self in seen or self.realized: return []
+    seen.add(self)
+
+    op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
+    if op.op in LoadOps: return [(self.op, self, ())]
+    if op.op in ElementwiseOps: op = _ast_binaryops(op)
+    elif op.op in ReduceOps: op = _ast_reduceops(op)
+
+    base_bufs = dedup([x.base for x in op.buffers if x.realized or not isinstance(Device[x.device], Compiled) or x.device == "LLVM" or x.base.op.op != LoadOps.CONST])
+    ret = []
+    for x in base_bufs: ret += x.schedule(seen)
+
+    reduceops = dedup([x for x in op.get_lazyops() if x.op in ReduceOps])
+    assert len(reduceops) <= 1, "max one reduce op in an ast"
+
+    # get buffer shapes
+    all_shapes = [x.shape for x in op.buffers] + (list(reduceops[0].arg) if reduceops else [])
+    print(all_shapes)
+
+    """
+    early_shapes, late_shapes = [], []
+    buffer_shapes = {}
+    if reduceops:
+      early_shapes.append(reduceops[0].arg[0])
+      late_shapes.append(reduceops[0].arg[1])
+      for x in reduceops[0].buffers: early_shapes.append(x.shape)
+      early_shape = get_max_shape(early_shapes)
+      for x in reduceops[0].buffers: buffer_shapes[x] = early_shape
+    late_shapes += [x.shape for x in op.buffers if not reduceops or x not in reduceops[0].buffers]
+    late_shape = get_max_shape(late_shapes)
+    for x in op.buffers:
+      if x not in buffer_shapes:
+        buffer_shapes[x] = late_shape
+    """
+
+    # replace the buffers with BufferOps with the correct shape
+    # uses: op.buffers, base_bufs, and buffer_shapes
+    replacements:Dict[LazyBuffer, LazyOp] = {}
+    for x in op.buffers:
+      st = x.st.reshape(buffer_shapes[x]).simplify()
+      if x.base in base_bufs:
+        if x.realized and isinstance(x.realized, RawConst):
+          replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(float(x.realized._buf), x.dtype, st))
+        else:
+          replacements[x] = LazyOp(BufferOps.MEM, (), MemBuffer(base_bufs.index(x.base)+1, x.dtype, st))
+      elif x.base.op.op == LoadOps.CONST:
+        replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(float(x.base.op.arg), x.dtype, st))
+      else:
+        raise NotImplementedError(f"not handled {x}")
+
+    return ret + [(op.map_buffers(replacements), self, base_bufs)]
+
+
+    """
+    if op.op in LoadOps: return [(self.op, self, ())]
+    if op.op in ElementwiseOps: op = _ast_binaryops(op, self.shape)
+    elif op.op in ReduceOps: op = _ast_reduceops(op)
+    """
+    #log_op(self, op.map_buffers({x:x.base for x in op.buffers}))
+
+    #ret = []
+    #for x in op.buffers: ret += x.schedule(seen)
+    #return ret+[(_ast_bufferops(op), self, op.buffers)]
+
+  def realize(self:LazyBuffer) -> LazyBuffer:
+    if not self.realized:
+      for op,out,buffers in self.schedule(set()):
+        if DEBUG >= 3:
+          from extra.utils import print_tree
+          print_tree(op)
+        if op.op in LoadOps:
+          LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out)
+        else:
+          realized_bufs = dedup([x.realized for x in buffers if buf_is_kernel_arg(x)])
+          out.realized = Device[out.device].exec_ast(op, output=out, inputs=realized_bufs, var_vals={}, **self._device_extra_args())
+          del out.op
+        assert out.realized.dtype == out.dtype, "realized dtype is correct"
+    return self
+
+# this is a view into a contiguous LazyBacking. this is always non-contiguous
+class LazyView(LazyCommon):
   def __init__(self, st:ShapeTracker, base:LazyBacking):
-    self.st, self.base = st, base
+    assert not st.contiguous, "LazyView should never be contiguous"
+    self.st: ShapeTracker = st
+    self.base: LazyBacking = base
+
+  lazycache: WeakValueDictionary = WeakValueDictionary()
+  @staticmethod
+  def cache(st:ShapeTracker, base:LazyBacking):
+    wop = (st, ref(base))
+    if wop in LazyView.lazycache: return LazyView.lazycache[wop]
+    LazyBacking.lazycache[wop] = ret = LazyView(st, base)
+    return ret
+
+  @property
+  def shape(self): return self.st.shape
   @property
   def dtype(self): return self.base.dtype
   @property
@@ -103,8 +221,31 @@ class LazyView:
   def realized(self): return self.base.realized
   @property
   def children(self): return self.base.children
+  def schedule(self, seen): return self.base.schedule(seen)
+  def realize(self): return self.base.realize()
+  def toCPU(self) -> np.ndarray: return LazyBuffer(self.shape, self).contiguous().backing.toCPU()
+  @property
+  def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
+  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
 
+# this is the normal LazyBuffer class. it has a shape and behaves like a reasonable tensor should
+# there's no longer any point in caching it, as we just cache the underlying stuff
 class LazyBuffer:
+  def __init__(self, shape:Tuple[sint, ...], backing:Union[LazyBacking, LazyView]):
+    assert isinstance(shape, tuple)
+    self.shape, self.backing = shape, backing
+
+  # passthrough properties
+  @property
+  def device(self): return self.backing.device
+  @property
+  def dtype(self): return self.backing.dtype
+  @property
+  def realized(self): return self.backing.realized
+  def schedule(self): return self.backing.schedule(set())
+  def realize(self): return self.backing.realize()
+
+  """
   def __init__(self, op:Optional[LazyOp], st:ShapeTracker, dtype:DType, device:str, src:Optional[RawBuffer]=None, base:Optional[LazyBuffer]=None):
     self.st: ShapeTracker = st
     self.shape, self._dtype, self.device = self.st.shape, dtype, device
@@ -119,7 +260,9 @@ class LazyBuffer:
       if op:
         self.op: LazyOp = op
         for x in op.buffers: x.children.add(self)
+  """
 
+  """
   lazycache: WeakValueDictionary = WeakValueDictionary()
   @staticmethod
   def cache(op:Optional[LazyOp], st:ShapeTracker, dtype:DType, device:str, base:Optional[LazyBuffer]=None):
@@ -131,12 +274,14 @@ class LazyBuffer:
       return LazyBuffer.lazycache[wop]
     LazyBuffer.lazycache[wop] = ret = LazyBuffer(op, st, dtype, device, base=base)
     return ret
+  """
 
-  def __repr__(self): return f"<L{'B' if self.base == self else 'V'} {self.shape} {self.dtype} op={(self.op.op if hasattr(self, 'op') else '') if not self.realized else self.realized} st={self.st}>"
-  def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
-  def is_contiguous(self): return self.st.contiguous and self.base.st.size() == self.st.size()
+  #def __repr__(self): return f"<L{'B' if self.base == self else 'V'} {self.shape} {self.dtype} op={(self.op.op if hasattr(self, 'op') else '') if not self.realized else self.realized} st={self.st}>"
+  #def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
+  #def is_contiguous(self): return self.st.contiguous and self.base.st.size() == self.st.size()
 
   # handle base
+  """
   @property
   def dtype(self): return self.base._dtype
   @property
@@ -149,46 +294,68 @@ class LazyBuffer:
     self._realized = val
   @property
   def children(self): return self.base._children
+  """
 
   def contiguous(self) -> LazyBuffer:
-    if self.is_contiguous(): return self
-    return LazyBuffer.cache(LazyOp(LoadOps.CONTIGUOUS, (self,)), ShapeTracker.from_shape(self.shape), self.dtype, self.device)
+    if isinstance(self.backing, LazyBacking): return self
+    return LazyBuffer(self.shape, LazyBacking(LazyOp(LoadOps.CONTIGUOUS, (self.backing,)), prod(self.shape), self.dtype, self.device))
+
+  # *** external entrypoints ***
 
   @staticmethod
-  def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
-    return LazyBuffer(LazyOp(op, tuple() if src is None else (src,), arg), ShapeTracker.from_shape(tuple(shape)), dtype, device)
+  def loadop(op, shape, dtype, device, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
+    return LazyBuffer(shape, LazyBacking(LazyOp(op, tuple() if src is None else (src.backing,), arg), prod(shape), dtype, device))
+    #return LazyBuffer(LazyOp(op, tuple() if src is None else (src,), arg), ShapeTracker.from_shape(tuple(shape)), dtype, device)
 
   def const(self, val:Union[float, int]) -> LazyBuffer:
     return self.loadop(LoadOps.CONST, tuple(), dtypes.from_np(self.dtype.np), self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
 
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
-    return LazyBuffer(None, ShapeTracker.from_shape(x.shape), dtypes.from_np(x.dtype), "CPU", src=RawNumpyBuffer.fromCPU(x))
+    return LazyBuffer(x.shape, LazyBacking(None, prod(x.shape), dtypes.from_np(x.dtype), "CPU", src=RawNumpyBuffer.fromCPU(x)))
+    #return LazyBuffer(None, ShapeTracker.from_shape(x.shape), dtypes.from_np(x.dtype), "CPU", src=RawNumpyBuffer.fromCPU(x))
 
-  def toCPU(self) -> np.ndarray:
-    assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
-    self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
-    realized = self_casted.contiguous().realize().realized
-    assert all_int(self.shape), f"no toCPU if shape is symbolic, {self.shape=}"
-    return cast(RawBuffer, realized).toCPU().reshape(self.shape)
+  def toCPU(self) -> np.ndarray: return self.backing.toCPU().reshape(self.shape)
 
   # *** elementwise ops ***
 
   def e(self:LazyBuffer, op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
-    srcs = (self,)+srcs
-    out_dtype = max([x.dtype for x in srcs]) if op != UnaryOps.CAST else cast(Tuple[DType, bool], arg)[0]
+    bsrcs = tuple(x.backing for x in (self,)+srcs)
+    out_dtype = max([x.dtype for x in bsrcs]) if op != UnaryOps.CAST else cast(Tuple[DType, bool], arg)[0]
 
+    if MERGE_ELEMENTWISE_OPS:
+      # remove the buffers from any (childless) BinaryOps that feed into this
+      bsrcs = tuple([x.op if not x.realized and isinstance(x, LazyBacking) and x.op.op in ElementwiseOps and not x.children else x for x in bsrcs])  # type: ignore
+
+    return LazyBuffer(self.shape, LazyBacking.cache(LazyOp(op, bsrcs, arg), prod(self.shape), out_dtype, self.device))
+
+    """
     if MERGE_ELEMENTWISE_OPS:
       # remove the buffers from any (childless) BinaryOps that feed into this
       srcs = tuple([fix_unbased_shape(x) if not x.realized and x.is_contiguous() and x.base.op.op in ElementwiseOps and not x.children else x for x in srcs])  # type: ignore
 
     return LazyBuffer.cache(LazyOp(op, srcs, arg), ShapeTracker.from_shape(self.shape), out_dtype, self.device)
+    """
 
   # *** reduce ops ***
 
   def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
-    if self.shape == tuple(new_shape): return self
-    return LazyBuffer.cache(LazyOp(op, (self,), new_shape), ShapeTracker.from_shape(new_shape), self.dtype, self.device)
+    # TODO: make this generic
+    old_shape, small_new_shape = [self.shape[0]], [new_shape[0]]
+    for o,n in zip(self.shape[1:], new_shape[1:]):
+      if o == n and old_shape[-1] == small_new_shape[-1]:
+        old_shape[-1] *= o
+        small_new_shape[-1] *= n
+      elif n == 1 and small_new_shape[-1] == 1:
+        old_shape[-1] *= o
+      else:
+        old_shape.append(o)
+        small_new_shape.append(n)
+    old_shape, small_new_shape = tuple(old_shape), tuple(small_new_shape)
+    if old_shape == small_new_shape: return self
+    return LazyBuffer(new_shape, LazyBacking.cache(LazyOp(op, (self.backing,), (old_shape, small_new_shape)), prod(new_shape), self.dtype, self.device))
+
+    #return LazyBuffer.cache(LazyOp(op, (self,), new_shape), ShapeTracker.from_shape(new_shape), self.dtype, self.device)
 
   def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if any(not isinstance(s, int) for s in self.shape) or prod(self.shape) // prod(new_shape) < 32768: return self._reduce_op(op, new_shape) # The amount of work should be big enough to take the benefit of "2 kernels" approach.
@@ -200,6 +367,15 @@ class LazyBuffer:
   # *** movement ops ***
 
   def _movement_op(self, fxn, arg, push_ewop=False, unsafe_ops=None) -> LazyBuffer:
+    #print(self.shape, fxn, arg)
+    st:ShapeTracker = fxn(self.backing.st.reshape(self.shape), arg)
+    if st.contiguous: return LazyBuffer(st.shape, self.backing.base)
+    if push_ewop and not self.realized and isinstance(self.backing, LazyBacking) and self.backing.op.op in ElementwiseOps:
+      mapped = self.backing.op.map_buffers({x:LazyBuffer(self.shape, x)._movement_op(fxn, arg).backing for x in self.backing.op.buffers})
+      return LazyBuffer(st.shape, LazyBacking.cache(mapped, prod(st.shape), self.backing.dtype, self.backing.device))
+    return LazyBuffer(st.shape, LazyView.cache(st, self.backing.base))
+
+    """
     st:ShapeTracker = fxn(self.st, arg)
     if self.st == st: return self
     if st == self.base.st: return self.base
@@ -209,6 +385,7 @@ class LazyBuffer:
           mapped = self.op.map_buffers({x:x._movement_op(fxn, arg) for x in self.op.buffers})
           return LazyBuffer.cache(mapped, ShapeTracker.from_shape(st.shape), self.dtype, self.device)
     return LazyBuffer.cache(None, st, self.dtype, self.device, base=self.base)
+    """
 
   def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, SHUFFLE_MOVEMENT_OPS)
   def shrink(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.shrink, arg, SHUFFLE_MOVEMENT_OPS)
@@ -217,17 +394,16 @@ class LazyBuffer:
   def reshape(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.reshape, arg) #, SHUFFLE_MOVEMENT_OPS)
   def expand(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.expand, arg)
 
-  @property
-  def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
   def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[LazyOp]: return []
 
+  """
   def schedule(self:LazyBuffer, seen=None) -> List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]:
     if seen is None: seen = set()
     if self in seen: return []
     seen.add(self)
     if self.realized: return []
-    if self.base != self: return self.base.schedule(seen)
+    #if self.base != self: return self.base.schedule(seen)
 
     # NOTE: late rewrite contiguous
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
@@ -254,6 +430,7 @@ class LazyBuffer:
           del out.op
         assert out.realized.dtype == out.dtype, "realized dtype is correct"
     return self
+  """
 
 # *** loadop realization (unrelated to lazy) ***
 
