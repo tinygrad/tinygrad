@@ -2,11 +2,13 @@
 from __future__ import annotations
 import functools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, cast
-from tinygrad.ops import MovementOps
+from typing import Tuple, List, Optional, cast, TYPE_CHECKING
 from tinygrad.helpers import prod, DEBUG, all_same
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, sint
 from tinygrad.shape.view import View
+
+if TYPE_CHECKING:
+  from tinygrad.ops import MovementOps
 
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
@@ -83,6 +85,7 @@ class ShapeTracker:
   def size(self): return self.views[-1].size()
 
   def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
+    from tinygrad.ops import MovementOps
     to_apply:List[Tuple[MovementOps, Tuple]] = []
     for v in self.views:
       real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
@@ -207,12 +210,28 @@ def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> O
       old_shape_i += 1
   return axis_groups
 
-def get_common_shape(shapes:List[Tuple[sint, ...]]):
+# get maximum common shape
+def get_common_shape(shapes:List[Tuple[sint, ...]]) -> Tuple[sint, ...]:
   assert all_same([prod(x) for x in shapes])
   ret = []
   while any(len(x) for x in shapes):
     # NOTE: should this be gcd instead of min?
-    last_num = min(x[-1] for x in shapes)
+    last_num = min(x[-1] for x in shapes if len(x))
     ret.append(last_num)
-    shapes = [x[0:-1] if x[-1] == last_num else x[0:-1]+(x[-1]//last_num,) for x in shapes]
+    shapes = [x[0:-1] if x[-1] == last_num else x[0:-1]+(x[-1]//last_num,) for x in shapes if len(x)]
+  return tuple(ret[::-1])
+
+# apply the rin -> rout expansion to real
+def reduce_expand(real, rin, rout):
+  # the question we ask is if an axis is reduced or not
+  ret = []
+  for s in real[::-1]:
+    if rout[-1] == 1:
+      ret.append(1)
+    else:
+      ret.append(s)
+    rin = rin[:-1] + (rin[-1]//s,)
+    if rin[-1] == 1:
+      rin = rin[:-1]
+      rout = rout[:-1]
   return tuple(ret[::-1])

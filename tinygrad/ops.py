@@ -23,8 +23,8 @@ OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOp
 
 if TYPE_CHECKING:
   from tinygrad.lazy import LazyBuffer
-  from tinygrad.shape.shapetracker import ShapeTracker
 
+from tinygrad.shape.shapetracker import ShapeTracker
 @dataclass(frozen=True)
 class MemBuffer:
   idx: int
@@ -135,6 +135,8 @@ class Interpreted:
 
 # --teenygrad--
 
+from tinygrad.shape.shapetracker import reduce_expand
+
 class FlopCounter:
   def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops, self._buf = *tup, self
   def consume_flops(self):
@@ -145,7 +147,7 @@ shape_fxn_for_op: Dict[Op, Callable] = {
   UnaryOps.CAST: lambda self,arg: (self.shape, arg[0], self.consume_flops()),   # cast uses no flops
   **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op != UnaryOps.CAST},
   **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
-  **{op:lambda self,shape_pair: (shape_pair[1], self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
+  **{op:lambda self,shape_pair: (reduce_expand(self.shape, shape_pair[0], shape_pair[1]), self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
   TernaryOps.WHERE: lambda self,y,z: (self.shape, y.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape))}
 InterpretedFlopCounter = Interpreted(FlopCounter, shape_fxn_for_op, lambda x: x)
 def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.exec_ast(ast)

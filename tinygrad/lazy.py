@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from typing import Optional, Union, cast, Tuple, Any, List, Dict, Mapping, Callable
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.shapetracker import ShapeTracker, get_common_shape, reduce_expand
 from tinygrad.ops import LazyOp, LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps
 ElementwiseOps = {*UnaryOps, *BinaryOps, *TernaryOps}
 
@@ -129,12 +129,21 @@ class LazyBacking(LazyCommon):
     ret = []
     for x in base_bufs: ret += x.schedule(seen)
 
-    reduceops = dedup([x for x in op.get_lazyops() if x.op in ReduceOps])
+    reduceops: List[LazyOp] = dedup([x for x in op.get_lazyops() if x.op in ReduceOps])
     assert len(reduceops) <= 1, "max one reduce op in an ast"
 
     # get buffer shapes
-    all_shapes = [x.shape for x in op.buffers] + (list(reduceops[0].arg) if reduceops else [])
-    print(all_shapes)
+    if reduceops:
+      early_shape = get_common_shape([x.shape for x in reduceops[0].buffers] + [reduceops[0].arg[0]])
+      reduced_shape = reduce_expand(early_shape, reduceops[0].arg[0], reduceops[0].arg[1])
+      late_shape = get_common_shape([x.shape for x in op.buffers if x not in reduceops[0].buffers] + [reduceops[0].arg[1], reduced_shape])
+      #print(early_shape, reduceops[0].arg[0], reduceops[0].arg[1])
+      #print(late_shape)
+    else:
+      late_shape = get_common_shape([x.shape for x in op.buffers])
+
+    #all_shapes = [x.shape for x in op.buffers] + (list(reduceops[0].arg) if reduceops else [])
+    #print(all_shapes)
 
     """
     early_shapes, late_shapes = [], []
@@ -156,7 +165,7 @@ class LazyBacking(LazyCommon):
     # uses: op.buffers, base_bufs, and buffer_shapes
     replacements:Dict[LazyBuffer, LazyOp] = {}
     for x in op.buffers:
-      st = x.st.reshape(buffer_shapes[x]).simplify()
+      st = x.st.reshape(early_shape if reduceops and x in reduceops[0].buffers else late_shape).simplify()
       if x.base in base_bufs:
         if x.realized and isinstance(x.realized, RawConst):
           replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(float(x.realized._buf), x.dtype, st))
