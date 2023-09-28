@@ -18,9 +18,10 @@ from tinygrad.graph import log_op
 
 OPT = getenv("OPT", 2)
 
-MERGE_ELEMENTWISE_INTO_REDUCE, MERGE_ELEMENTWISE_OPS, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1
-MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2
-#UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
+SHUFFLE_MOVEMENT_OPS = OPT>=0
+MERGE_ELEMENTWISE_INTO_REDUCE, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1
+MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS = OPT>=2, OPT>=2
+UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
 
 class LazyCommon:
   @property
@@ -265,22 +266,23 @@ class LazyBuffer:
 
   # *** movement ops ***
 
-  def _movement_op(self, fxn, arg, push_ewop=False) -> LazyBuffer:
+  def _movement_op(self, fxn, arg, push_ewop=False, unsafe_ops=None) -> LazyBuffer:
     st:ShapeTracker = fxn(self.backing.st.reshape(self.shape), arg)
     if push_ewop and not self.realized and isinstance(self.backing, LazyBacking) and self.backing.op.op in ElementwiseOps and not self.backing.children:
-      op = self.backing.op
-      # self is no longer children of its buffers
-      # NOTE: do children have to be refcounted
-      for x in op.buffers:
-        if self.backing in x.children: x.children.remove(self.backing)
-      mapped = op.map_buffers({x:LazyBuffer(self.shape, x)._movement_op(fxn, arg, push_ewop).backing for x in op.buffers})
+      if not unsafe_ops or not any(x.op in unsafe_ops for x in self.backing.base.op.get_lazyops()):
+        op = self.backing.op
+        # self is no longer children of its buffers
+        # NOTE: do children have to be refcounted
+        for x in op.buffers:
+          if self.backing in x.children: x.children.remove(self.backing)
+        mapped = op.map_buffers({x:LazyBuffer(self.shape, x)._movement_op(fxn, arg, push_ewop).backing for x in op.buffers})
       return LazyBuffer(st.shape, LazyBacking.cache(mapped, prod(st.shape), self.dtype, self.device))
     return LazyBuffer(st.shape, LazyView.cache(st, self.backing.base))
 
   def permute(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.permute, arg, SHUFFLE_MOVEMENT_OPS)
   def shrink(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.shrink, arg, SHUFFLE_MOVEMENT_OPS)
   def stride(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.stride, arg, SHUFFLE_MOVEMENT_OPS)
-  def pad(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.pad, arg)
+  def pad(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.pad, arg, SHUFFLE_PAD_OPS, UNSAFE_PAD_OPS)
   def reshape(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.reshape, arg)
   def expand(self, arg) -> LazyBuffer: return self._movement_op(ShapeTracker.expand, arg)
 

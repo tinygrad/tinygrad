@@ -52,7 +52,7 @@ def log_op(ret: 'LazyBuffer', ast: LazyOp, show_graph: Optional[bool] = None, ph
   if show_graph is None: show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
   op: List[Op] = [x.op for x in ast.get_lazyops()]
-  inp: List['LazyBuffer'] = [x for x in ast.buffers if (not isinstance(x.realized, RawConst) and (hasattr(x.base, 'op') and not x.base.op.op == LoadOps.CONST)) or GRAPH > 1]
+  inp: List['LazyBuffer'] = [x for x in ast.buffers] # if (not isinstance(x.realized, RawConst) and (hasattr(x.base, 'op') and not x.base.op.op == LoadOps.CONST)) or GRAPH > 1]
   oporder = [LoadOps, TernaryOps, ReduceOps, BinaryOps, UnaryOps, MovementOps, BufferOps]
   optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1
@@ -63,7 +63,7 @@ def log_op(ret: 'LazyBuffer', ast: LazyOp, show_graph: Optional[bool] = None, ph
     for x in inp:
       if x.base != x:
         # view node
-        G.add_node(nm(x), label=f"{x.st.shape} {x.st.real_strides()}", fillcolor="#80ff8080", style='filled')
+        G.add_node(nm(x), label=f"{x.st.shape} {x.st.real_strides()} {x.st.views[-1].mask if x.st.views[-1].mask else ''}", fillcolor="#80ff8080", style='filled')
         G.add_edge(nm(x.base), nm(x), color="#408040")
       G.add_edge(nm(x), nm(ret), label=get_sop(op), color='#00000060' if phantom else 'black')
       if 'label' not in G.nodes[nm(x.base)]:
