@@ -197,7 +197,7 @@ class LazyBuffer:
         if op.op in LoadOps:
           LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out)
         else:
-          out.realized = Device[out.device].exec_ast(op, output=out, inputs=[x.realized for x in buffers], var_vals=self.var_vals, **self._device_extra_args())
+          out.realized = Device[out.device].exec_ast(op, output=out, inputs=[x.realized for x in buffers], var_vals=out.var_vals, **self._device_extra_args())
           del out.op
         assert out.realized and isinstance(out.realized, (RawConst, Device[out.device].buffer)), f"device mismatch on realized got {type(out.realized)} expected {out.device}"
         assert out.realized.dtype == out.dtype, "realized dtype is incorrect"
