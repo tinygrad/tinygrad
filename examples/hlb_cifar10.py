@@ -22,7 +22,7 @@ from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
 from extra.dist import collectives
 
-BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 100)
+BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
 class BatchNorm(nn.BatchNorm2d):
   def __init__(self, num_features):

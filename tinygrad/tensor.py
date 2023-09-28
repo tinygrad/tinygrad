@@ -42,7 +42,7 @@ class Tensor:
     def __enter__(self):
       self.prev = Tensor.training
       Tensor.training = True
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
+    def __exit__(self, exc_type: any, exc_value: any, traceback: any):
       Tensor.training = self.prev
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
