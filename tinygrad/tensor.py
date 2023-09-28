@@ -38,7 +38,7 @@ class Tensor:
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
-  class train():
+  class train:
     def __enter__(self):
       self.prev = Tensor.training
       Tensor.training = True
