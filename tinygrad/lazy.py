@@ -106,7 +106,7 @@ class LazyBuffer:
     self.st: ShapeTracker = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
     self.var_vals: Dict[Variable, int] = var_vals
     self.var_vals_key: Tuple[Variable, ...] = tuple(sorted(self.var_vals.keys()))
-    self.device, self.shape, self.optype, self.dtype = device, self.st.shape, optype, dtype
+    self.device, self.shape, self.optype, self._dtype = device, self.st.shape, optype, dtype
     self._realized: Optional[RawBuffer] = src
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
@@ -131,6 +131,12 @@ class LazyBuffer:
   def realized(self, val):
     assert self._base is None, "no setting based LazyBuffers"
     self._realized = val
+  @property
+  def dtype(self): return self.base._dtype
+  @dtype.setter
+  def dtype(self, val):
+    assert self._base is None, "no setting based LazyBuffers"
+    self._dtype = val
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self._realized else self._realized} st={self.st}>"
   @property

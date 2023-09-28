@@ -152,7 +152,7 @@ class TestSchedule(unittest.TestCase):
     out = y.sum(keepdim=True).sqrt().__neg__()
     check_schedule(out, 1)
 
-  @unittest.skip("may want to reconsider this")
+  #@unittest.skip("may want to reconsider this")
   def test_fold_batchnorm(self):
     Tensor.training = True
     img = Tensor.empty(1,32,4,4)
@@ -304,7 +304,6 @@ class TestSchedule(unittest.TestCase):
     x = base = p(x) + b1.reshape(16,1)
     x = p(x)
     x = x + b2.reshape(16,1)
-    print("HERE")
     x = x + base
     del base
     x = p(x)
