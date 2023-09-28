@@ -24,7 +24,7 @@ class HIPAllocator(LRUAllocator):
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 
 class _HIP:
-  def post_init(self, device=None):
+  def __init__(self, device=None):
     self.default_device = device or getenv("HIP_DEFAULT_DEVICE")
     hip.hipSetDevice(self.default_device)
     self.device_count = hip.hipGetDeviceCount()
@@ -34,7 +34,6 @@ class _HIP:
       hip.hipSetDevice(i)
       hip.hipDeviceSynchronize()
 HIP = _HIP()
-if not getenv("DELAYED_RUNTIME_INIT", False): HIP.post_init()
 
 class HIPGraph(BasicBatchExecutor):
   def __init__(self, jit_cache: List[Tuple[Any, Any, Any]]):
@@ -88,7 +87,7 @@ class HIPGraph(BasicBatchExecutor):
   def __get_batch(self, j): return int(math.log(j+4,2)-2) # Batch sizes are logarithmic 4,8,16,32,...
 
 class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
-  def __init__(self, size, dtype, device=None, buf=None, allocator=None): super().__init__(size, dtype, buf=buf, allocator=allocator or HIP.allocator, **{'device': int(device or HIP.default_device)})
+  def __init__(self, size, dtype, device=HIP.default_device, buf=None, allocator=HIP.allocator): super().__init__(size, dtype, buf=buf, allocator=allocator, **{'device': int(device)})
   def _copyin(self, x:np.ndarray):
     hip.hipSetDevice(self._device)
     hip.hipMemcpyAsync(self._buf, np.require(x, requirements='C').ctypes.data, self.size * self.dtype.itemsize, hip.hipMemcpyHostToDevice, 0)

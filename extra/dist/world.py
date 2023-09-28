@@ -1,11 +1,11 @@
-import time
-from typing import Any, Optional, Tuple, cast
+from typing import Optional
 from extra import dist
 from multiprocessing import shared_memory
 from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer
-from tinygrad.runtime.lib import RawBuffer, RawBufferCopyIn, RawBufferCopyInOut, RawBufferTransfer
-from tinygrad.runtime.ops_hip import RawHIPBuffer
+from tinygrad.runtime.lib import RawBuffer, RawBufferCopyIn, RawBufferCopyInOut
+try: from tinygrad.runtime.ops_hip import RawHIPBuffer
+except: pass
 from tinygrad.runtime.ops_shm import RawShmBuffer
 from tinygrad.jit import CacheCollector
 from tinygrad.tensor import Tensor, Function
