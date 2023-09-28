@@ -214,7 +214,9 @@ class LazyBuffer:
 
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
-    if self.st.contiguous and prod(self.shape) == prod(get_movementroot(self).shape) and (not self.realized or prod(self.shape) == self.realized.size): return self
+    if self.st.contiguous and prod(self.shape) == prod(self.base.shape) and (hasattr(self.base, 'op') and self.base.op.op not in LoadOps) and (not self.realized or not isinstance(self.realized, RawConst)) and (not self.realized or prod(self.shape) == self.realized.size):
+      # NOTE: the size can be wrong on LoadOps, so we excluded them all for now
+      return self
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype, self.var_vals)
 
   @staticmethod
