@@ -219,7 +219,7 @@ class Compiled:
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
-    output.realized = output.output_buffer
+    if output.output_buffer: output.realized = output.output_buffer
     if output.realized:
       if output.realized.__class__ is RawConst: output.realized = None  # can't assign to RawConst
       for i,a in enumerate(inputs):
