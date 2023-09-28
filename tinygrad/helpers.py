@@ -1,8 +1,9 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator
 import numpy as np
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar
-from typing_extensions import TypeGuard
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
+if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
+  from typing_extensions import TypeGuard
 
 T = TypeVar("T")
 # NOTE: it returns int 1 if x is empty regardless of the type of x
