@@ -104,8 +104,7 @@ class LazyBuffer:
   __deletable__ = ('op',)
   def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, var_vals:Dict[Variable,int], src:Optional[RawBuffer]=None, base:Optional[LazyBuffer]=None):
     self.st: ShapeTracker = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
-    self.var_vals: Dict[Variable, int] = var_vals
-    self.var_vals_key: Tuple[Variable, ...] = tuple(sorted(self.var_vals.keys()))
+    self._var_vals: Dict[Variable, int] = var_vals
     self.device, self.shape, self.optype, self._dtype = device, self.st.shape, optype, dtype
     self._realized: Optional[RawBuffer] = src
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
@@ -123,20 +122,29 @@ class LazyBuffer:
       log_op(self, self.op, phantom=True)
 
   @property
+  def var_vals_key(self): return tuple(sorted(self.var_vals.keys()))
+
+  @property
   def base(self): return self._base if self._base is not None else self
 
   @property
   def realized(self): return self.base._realized
   @realized.setter
   def realized(self, val):
-    assert self._base is None, "no setting based LazyBuffers"
+    assert self._base is None, "no setting realized of based LazyBuffers"
     self._realized = val
   @property
   def dtype(self): return self.base._dtype
   @dtype.setter
   def dtype(self, val):
-    assert self._base is None, "no setting based LazyBuffers"
+    assert self._base is None, "no setting dtype of based LazyBuffers"
     self._dtype = val
+  @property
+  def var_vals(self): return self.base._var_vals
+  @var_vals.setter
+  def var_vals(self, val):
+    assert self._base is None, "no setting var_vals of based LazyBuffers"
+    self._var_vals = val
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self._realized else self._realized} st={self.st}>"
   @property
@@ -184,12 +192,12 @@ class LazyBuffer:
     if not self.realized:
       for op,out,buffers in self.schedule():
         if DEBUG >= 3:
-          from extra.utils import print_tree
+          from extra.utils import print_tree   # type: ignore
           print_tree(op)
         if op.op in LoadOps:
           LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out)
         else:
-          out.realized = Device[out.device].exec_ast(op, output=out, inputs=[x.realized for x in buffers], var_vals={}, **self._device_extra_args())
+          out.realized = Device[out.device].exec_ast(op, output=out, inputs=[x.realized for x in buffers], var_vals=self.var_vals, **self._device_extra_args())
           del out.op
         assert out.realized and isinstance(out.realized, (RawConst, Device[out.device].buffer)), f"device mismatch on realized got {type(out.realized)} expected {out.device}"
         assert out.realized.dtype == out.dtype, "realized dtype is incorrect"
@@ -282,6 +290,7 @@ class LazyBuffer:
       # reshape from all int shape into shape with a variable, update the variable value
       assert len(new_nodes) == 1 and isinstance(new_nodes[0], Variable), "only support adding one Variable to the int shape"
       new_var, new_val = new_nodes[0], prod(self.shape) // prod(new_ints)
+      # TODO: is it okay to set these var_vals on the base?
       if new_var not in self.var_vals:
         assert new_var.min <= new_val <= new_var.max, f"variable value {new_val} out of range [{new_var.min}, {new_var.max}]"
         self.var_vals[new_var] = new_val
@@ -289,7 +298,6 @@ class LazyBuffer:
     if not self.realized and self.op.op == MovementOps.RESHAPE:
       assert isinstance(self.op.src[0], LazyBuffer)
       self.op.src[0].children.discard(self) # NOTE: this is only required in reshape and when pushing permutes, why??
-      self.op.src[0].var_vals = self.var_vals
       return self.op.src[0].reshape(arg)
     return self.shuffle_and_prune_movement_ops(self.st.reshape(arg), MovementOps.RESHAPE, arg)
 
