@@ -161,7 +161,7 @@ class LazyBuffer:
   def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[LazyOp]: return []
 
-  def schedule(self, seen=None):
+  def schedule(self, seen=None) -> List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]:
     if seen is None: seen = set()
     if self in seen or self.realized: return []
     seen.add(self)
@@ -188,13 +188,13 @@ class LazyBuffer:
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
-    return ret + [(op, self, base_bufs)]
+    return ret + [(op, self, tuple(base_bufs))]
 
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       # NOTE: if you for loop the schedule it's slow because nothing frees
       schedule = self.schedule()
-      if DEBUG >= 2: print(f"scheduling {len(schedule)}")
+      if DEBUG >= 3: print(f"scheduling {len(schedule)}")
       while len(schedule):
         op,out,buffers = schedule.pop(0)
         if DEBUG >= 3:
@@ -221,7 +221,7 @@ class LazyBuffer:
 
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
-    if self.st.contiguous and prod(self.shape) == prod(self.base.shape) and (hasattr(self.base, 'op') and self.base.op.op not in LoadOps) and (not self.realized or not isinstance(self.realized, RawConst)) and (not self.realized or prod(self.shape) == self.realized.size):
+    if self.st.contiguous and prod(self.shape) == prod(self.base.shape) and (hasattr(self.base, 'op') and self.base.op.op != LoadOps.CONST) and (not self.realized or not isinstance(self.realized, RawConst)) and (not self.realized or prod(self.shape) == self.realized.size):
       # NOTE: the size can be wrong on LoadOps, so we excluded them all for now
       return self
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype, self.var_vals)
