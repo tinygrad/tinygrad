@@ -105,7 +105,7 @@ class LazyBuffer:
     self.var_vals: Dict[Variable, int] = var_vals
     self.var_vals_key: Tuple[Variable, ...] = tuple(sorted(self.var_vals.keys()))
     self.device, self.shape, self.optype, self.dtype = device, self.st.shape, optype, dtype
-    self.realized: Optional[RawBuffer] = src
+    self._realized: Optional[RawBuffer] = src
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: WeakSet = WeakSet()
@@ -113,10 +113,20 @@ class LazyBuffer:
     self.op: LazyOp = op
     for x in op.buffers: x.children.add(self)
     if not LAZY: self.realize()
+    self._base: Optional[LazyBuffer] = None
 
     # log phantom ops to the graph
     if GRAPH >= 3:
       log_op(self, self.op, phantom=True)
+
+  @property
+  def realized(self):
+    if self._base: return self._base.realized
+    return self._realized
+  @realized.setter
+  def realized(self, val):
+    assert self._base is None
+    self._realized = val
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
   @property
@@ -134,7 +144,10 @@ class LazyBuffer:
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       if self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
-      elif self.optype is MovementOps: self.realized = self.op.src[0].realize().realized # TODO: prerealize MovementOps to share the underlying buffer
+      elif self.optype is MovementOps:
+        self.op.src[0].realize()
+        self._base = cast(LazyBuffer,self.op.src[0])
+        return self
 
       op = self.op
 
