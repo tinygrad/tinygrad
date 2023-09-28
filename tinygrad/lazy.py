@@ -200,7 +200,7 @@ class LazyBuffer:
     if not self.realized:
       # NOTE: if you for loop the schedule it's slow because nothing frees
       schedule = self.schedule()
-      if DEBUG >= 2 and len(schedule) > 1: print(f"scheduled {len(schedule)}")
+      #if DEBUG >= 2 and len(schedule) > 1: print(f"scheduled {len(schedule)}")
       while len(schedule):
         op,out,buffers = schedule.pop(0)
         if DEBUG >= 3:
