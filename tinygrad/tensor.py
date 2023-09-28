@@ -43,7 +43,7 @@ class Tensor:
       self.prev = Tensor.training
       Tensor.training = True
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
-      Tensor.training = self.prev  
+      Tensor.training = self.prev
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
   def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
