@@ -135,36 +135,39 @@ class LazyBuffer:
     if not self.realized:
       if self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
       elif self.optype is MovementOps: self.realized = self.op.src[0].realize().realized # TODO: prerealize MovementOps to share the underlying buffer
+
+      op = self.op
+
       # get real ops first
-      if self.optype is BinaryOps: self.op = _ast_binaryops(self.op, self.shape)
+      if self.optype is BinaryOps: op = _ast_binaryops(op, self.shape)
       elif self.optype is ReduceOps:
-        self.op = _ast_reduceops(self.op)
-        if self.op.op in BinaryOps: self.op = _ast_binaryops(self.op, self.shape)
+        op = _ast_reduceops(op)
+        if op.op in BinaryOps: op = _ast_binaryops(op, self.shape)
       # run the ast if we still have to, and log the op
       if not self.realized:
         # HACK: image shape can be wrong, hot cast it back to a normal float
         if isinstance(self.dtype, ImageDType) and self.optype != MovementOps and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
-          if self.op.op == MovementOps.RESHAPE:
+          if op.op == MovementOps.RESHAPE:
             # put CAST before the final RESHAPE
-            self.op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, self.op.src, (dtypes.float32, False)),), self.op.arg)
+            op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, op.src, (dtypes.float32, False)),), op.arg)
           else:
-            self.op = LazyOp(UnaryOps.CAST, (self.op,), (dtypes.float32, False))
+            op = LazyOp(UnaryOps.CAST, (op,), (dtypes.float32, False))
           self.dtype = dtypes.float32
 
         # realize the past and exec the AST
-        for x in self.op.buffers: x.realize()
-        self.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in self.op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
-        op, realized_bufs = _replace_bufferops(self.op)
+        for x in op.buffers: x.realize()
+        self.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+
+        # log to the graph
+        if (DEBUG or GRAPH) and (self.realized.__class__ is not RawConst or GRAPH >= 2): log_op(self, op)
+
+        op, realized_bufs = _replace_bufferops(op)
         self.realized = Device[self.device].exec_ast(op, output=self, inputs=realized_bufs, var_vals=self.var_vals, **self._device_extra_args())
 
       assert self.realized and isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
       # HACK: allow hot casting of images
       assert self.realized.dtype == self.dtype or self.dtype.__class__ is ImageDType, f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
       self.dtype = self.realized.dtype
-
-      # log to the graph
-      if (DEBUG or GRAPH) and (self.realized.__class__ is not RawConst or GRAPH >= 2):
-        log_op(self, self.op)
 
       # no need to keep the op after realization
       del self.op
