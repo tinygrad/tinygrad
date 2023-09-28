@@ -90,7 +90,7 @@ def train(flags, model:UNet3D, train_loader, val_loader, loss_fn):
       next_eval_at += flags.evaluate_every
       dtype_img = dtypes.half if getenv("FP16") else dtypes.float
 
-      eval_model = lambda x : model(Tensor(x, dtype=dtype_img)).numpy() # todo maybe change
+      eval_model = lambda x : jit_model(Tensor(x, dtype=dtype_img)).numpy()
       eval_metrics = evaluate(flags, eval_model, val_loader, epoch=epoch)
       eval_metrics["train_loss"] = sum(cumulative_loss) / len(cumulative_loss)
       logging.info(eval_metrics)
