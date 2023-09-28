@@ -140,6 +140,9 @@ jobs:
           PYTHONPATH="." OPT=2 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
           PYTHONPATH="." OPT=3 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
       - if: ${{ matrix.task == 'optimage'}}
+        name: Test WINO=1
+        run: GPU=1 DEBUG=2 WINO=1 python3 test/test_ops.py TestOps.test_simple_conv2d
+      - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE ops
         run: |
           GPU=1 IMAGE=1 python -m pytest -n=auto test/test_ops.py

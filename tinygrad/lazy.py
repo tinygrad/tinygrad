@@ -166,6 +166,12 @@ class LazyBuffer:
     if self in seen or self.realized: return []
     seen.add(self)
 
+    # contiguous can be a copy
+    if self.op.op == LoadOps.CONTIGUOUS:
+      src = cast(LazyBuffer, self.op.src[0])
+      if src.st.contiguous and src.st.size() == src.base.st.size() and (src.realized or not src.base.op.op == LoadOps.CONST) and (not src.realized or not isinstance(src.realized, RawConst)):
+        return src.schedule() + [(self.op, self, ())]
+
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
     if op.op in LoadOps: return [(self.op, self, ())]
     if self.optype is MovementOps: return self.base.schedule(seen)
@@ -194,7 +200,7 @@ class LazyBuffer:
     if not self.realized:
       # NOTE: if you for loop the schedule it's slow because nothing frees
       schedule = self.schedule()
-      if DEBUG >= 3: print(f"scheduling {len(schedule)}")
+      if DEBUG >= 2 and len(schedule) > 1: print(f"scheduled {len(schedule)}")
       while len(schedule):
         op,out,buffers = schedule.pop(0)
         if DEBUG >= 3:
@@ -202,10 +208,11 @@ class LazyBuffer:
           print_tree(op)
         if op.op in LoadOps:
           LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out)
+          # TODO: why can't we delete these ops?
         else:
           out.realized = Device[out.device].exec_ast(op, output=out, inputs=[x.realized for x in buffers], var_vals=out.var_vals, **self._device_extra_args())
-        del out.op
-        for v in out.views: del v.op
+          del out.op
+          for v in out.views: del v.op
         assert out.realized and isinstance(out.realized, (RawConst, Device[out.device].buffer)), f"device mismatch on realized got {type(out.realized)} expected {out.device}"
         assert out.realized.dtype == out.dtype, "realized dtype is incorrect"
     return self
@@ -221,9 +228,6 @@ class LazyBuffer:
 
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
-    if self.st.contiguous and prod(self.shape) == prod(self.base.shape) and (hasattr(self.base, 'op') and self.base.op.op != LoadOps.CONST) and (not self.realized or not isinstance(self.realized, RawConst)) and (not self.realized or prod(self.shape) == self.realized.size):
-      # NOTE: the size can be wrong on LoadOps, so we excluded them all for now
-      return self
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype, self.var_vals)
 
   @staticmethod
@@ -388,6 +392,9 @@ MOVEMENT_OPS_DISPATCHER: Dict[MovementOps, Callable] = {
 
 # *** loadop realization (unrelated to lazy) ***
 
+def _realize_contiguous(buffer: LazyBuffer) -> None:
+  buffer.realized = buffer.op.src[0].realized
+
 def _realize_custom(buffer: LazyBuffer) -> None:
   # this needs to immediately realize
   buffer.realized = buffer.op.arg(buffer, *[x.realize() for x in buffer.op.src])
@@ -421,6 +428,7 @@ def _realize_const(buffer: LazyBuffer) -> None:
     buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args())
 
 LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
+  LoadOps.CONTIGUOUS: _realize_contiguous,
   LoadOps.CUSTOM: _realize_custom,
   LoadOps.FROM: _realize_from,
   LoadOps.EMPTY: _realize_empty,
