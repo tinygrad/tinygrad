@@ -66,48 +66,7 @@ class LazyBacking(LazyCommon):
     #self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
     return self.realize().realized.toCPU()
 
-  def toposort(self, seen):
-    if self in seen or self.realized: return []
-    seen.add(self)
-    ret = []
-    def key(x:LazyCommon):
-      if isinstance(x, LazyView): return 10
-      if x.op.op == LoadOps.CONTIGUOUS: return 9
-      if x.op.op in ReduceOps: return 8
-      if x.op.op in ElementwiseOps: return 7
-    for x in sorted(self.op.buffers, key=key):
-      ret += x.toposort(seen)
-    return ret + [self]
-
   def schedule(self, seen=None):
-    #s = self.toposort(set())
-    #for x in s: print(x)
-
-    # walk it in reverse to do the scheduling
-    # we break on either
-    #  1. a LazyView of a non LoadOp
-    #  2. a second reduce op
-    #  3. a contiguous op
-    """
-    groups = []
-    group, group_has_reduce_op = [], False
-    for x in s[::-1]:
-      if (isinstance(x, LazyView) and x.base.op.op not in LoadOps) or (x.base.op.op in ReduceOps and group_has_reduce_op) or (isinstance(x, LazyBacking) and x.op.op == LoadOps.CONTIGUOUS):
-        groups.append(group[::-1])
-        group, group_has_reduce_op = [], False
-      elif isinstance(x, LazyBacking) and x.op.op in ReduceOps:
-        group_has_reduce_op = True
-      group.append(x)
-    groups.append(group[::-1])
-    groups = groups[::-1]
-
-    for g in groups:
-      print("GROUP")
-      for x in g:
-        print(x)
-    """
-    #return []
-
     if seen is None: seen = set()
     if self in seen or self.realized: return []
     seen.add(self)
@@ -148,77 +107,6 @@ class LazyBacking(LazyCommon):
     elif op.op in ReduceOps:
       reduceop_fusion(op)
     op = op.map_buffers(replacements)
-
-    print(op, op.buffers)
-
-
-    """
-    def fusion(op:LazyOp):
-      nonlocal seen_reduce_op
-      if op.op in ReduceOps and MERGE_ELEMENTWISE_INTO_REDUCE:
-        assert not seen_reduce_op
-        # if the op is a ReduceOp it has 1 src
-        src = op.src[0]
-        if not src.realized and isinstance(src, LazyBacking) and src.op.op in ElementwiseOps and all(x in replacements for x in src.children):
-          replacements[src] = src.op
-          fusion(src.op)
-      elif op.op in ElementwiseOps:
-        for src in op.src:
-          if not src.realized and isinstance(src, LazyBacking) and all(x in replacements for x in src.children):
-            if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and src.op.op in ReduceOps and not seen_reduce_op:
-              replacements[src] = src.op
-              fusion(src.op)
-              seen_reduce_op = True
-            elif MERGE_ELEMENTWISE_OPS and src.base.op.op in ElementwiseOps and src.st.size() <= src.base.size:
-              replacements[src] = src.op
-              fusion(src.op)
-    """
-
-
-    """
-    while 1:
-      old_op = op
-      op = old_op.map_buffers(replacements)
-      if old_op == op: break
-    """
-
-
-
-    """
-    def fusion(op:LazyOp, cache:Dict[LazyOp, LazyOp], seen_reduce_op=False) -> LazyOp:
-      #print("fusion", op)
-      if op.op in ReduceOps and MERGE_ELEMENTWISE_INTO_REDUCE:
-        assert not seen_reduce_op, "already seen reduce op"
-        # if the op is a ReduceOp it has 1 src
-        src = op.src[0]
-        child_ops = [x.base.op for x in src.children if not x.realized]
-        if not src.realized and isinstance(src, LazyBacking) and src.op.op in ElementwiseOps and all(x == op or x in cache for x in child_ops):
-          # if it's an ElementwiseOps we might be able to fuse it
-          return LazyOp(op.op, (fusion(src.op, cache, True),), op.arg)
-      elif op.op in ElementwiseOps:
-        # ElementwiseOps have multiple srcs
-        def fuse_src(src):
-          child_ops = [x.base.op for x in src.children if not x.realized]
-          if not src.realized and isinstance(src, LazyBacking) and all(x == op or x in cache for x in child_ops):
-            if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and src.op.op in ReduceOps:
-              if not seen_reduce_op:
-                # new reduce op
-                cache[op] = ret = fusion(src.op, cache, seen_reduce_op)
-                return ret
-            elif MERGE_ELEMENTWISE_OPS and src.base.op.op in ElementwiseOps and src.st.size() <= src.base.size:
-              # src can be a LazyView
-              cache[op] = ret = fusion(src.base.op, cache, seen_reduce_op)
-              return ret
-          return src
-        return LazyOp(op.op, tuple(fuse_src(src) for src in op.src), op.arg)
-      # no fusion possible of other ops
-      return op
-
-    # op.op is either ElementwiseOps or ReduceOps
-    op = fusion(op, {})
-    """
-
-    #print("base fusion")
 
     base_bufs = dedup([x.base for x in op.buffers if x.realized or not isinstance(Device[x.device], Compiled) or x.device == "LLVM" or x.base.op.op != LoadOps.CONST])
     ret = []
