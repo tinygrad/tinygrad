@@ -166,12 +166,6 @@ class LazyBuffer:
     if self in seen or self.realized: return []
     seen.add(self)
 
-    # contiguous can be a copy
-    if self.op.op == LoadOps.CONTIGUOUS:
-      src = cast(LazyBuffer, self.op.src[0])
-      if src.st.contiguous and src.st.size() == src.base.st.size() and (src.realized or not src.base.op.op == LoadOps.CONST) and (not src.realized or not isinstance(src.realized, RawConst)):
-        return src.schedule() + [(self.op, self, ())]
-
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
     if op.op in LoadOps: return [(self.op, self, ())]
     if self.optype is MovementOps: return self.base.schedule(seen)
@@ -186,6 +180,13 @@ class LazyBuffer:
       if op.op == MovementOps.RESHAPE: op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, op.src, (dtypes.float32, False)),), op.arg)
       else: op = LazyOp(UnaryOps.CAST, (op,), (dtypes.float32, False))
       self.dtype = dtypes.float32
+
+    # contiguous can be a copy. must do this after the image hack
+    if self.op.op == LoadOps.CONTIGUOUS:
+      src = cast(LazyBuffer, self.op.src[0])
+      if src.st.contiguous and src.st.size() == src.base.st.size() and (src.realized or not src.base.op.op == LoadOps.CONST) and (not src.realized or not isinstance(src.realized, RawConst)):
+        #for c in src.children: print(c)
+        return src.schedule(seen) + [(self.op, self, ())]
 
     # realize the past and exec the AST
     ret = []
@@ -393,7 +394,9 @@ MOVEMENT_OPS_DISPATCHER: Dict[MovementOps, Callable] = {
 # *** loadop realization (unrelated to lazy) ***
 
 def _realize_contiguous(buffer: LazyBuffer) -> None:
-  buffer.realized = buffer.op.src[0].realized
+  src = cast(LazyBuffer, buffer.op.src[0])
+  buffer.realized = src.realized
+  assert buffer.dtype == src.dtype, f"contiguous dtype mismatch, expecting {buffer.dtype}, got {src.dtype}"
 
 def _realize_custom(buffer: LazyBuffer) -> None:
   # this needs to immediately realize
