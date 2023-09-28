@@ -16,8 +16,22 @@ def convert_st_to_movement_ops(st: ShapeTracker, prev_ops: List[Tuple[MovementOp
   # if prev_ops == []: st = deepcopy(st)
   # Stop space from polluting. TO DO: remove this line.
   if initial_call: prev_ops = []
+  if any(dim==1 for dim in st.views[-1].shape): 
+    prev_ops.append((MovementOps.RESHAPE, st.views[-1].shape))
+    return convert_st_to_movement_ops(st.reshape(tuple(filter(lambda x: x != 1, st.views[-1].shape))), prev_ops, False)
+  # identify expands if stride is 0 on a dimension != 1
   strides = st.views[-1].strides
   default_strides = strides_for_shape(st.views[-1].shape)
+  if ((reduced_shape := tuple(dim if stride != 0 else 1 for stride,dim in zip(strides, st.shape))) != st.shape):
+    if len(prev_ops) == 0 or prev_ops[-1][0] != MovementOps.EXPAND:
+      prev_ops.append((MovementOps.EXPAND, st.shape))
+      return convert_st_to_movement_ops(st.shrink(tuple((0,dim) for dim in reduced_shape)), prev_ops, initial_call=False)
+  if any(i < 0 for i in strides):
+    stride_arg = tuple(1 if i>=0 else -1 for i in strides)
+    prev_ops.append((MovementOps.STRIDE, stride_arg))
+    return convert_st_to_movement_ops(st.stride(stride_arg), prev_ops, False)
+   # strides should no longer have values > 0 after this point. Uncomment the following line if ever in doubt.
+  assert all(stride > 0 for stride in strides)
   if (offset := st.views[-1].offset) != 0:
     # only pad produces masks.
     if offset < 0 and st.views[-1].mask is not None:
@@ -46,15 +60,6 @@ def convert_st_to_movement_ops(st: ShapeTracker, prev_ops: List[Tuple[MovementOp
 
   if strides != default_strides:
     # only identify negative strides since technically the rest is a combination of other movement ops.
-    if any(i < 0 for i in strides):
-      stride_arg = tuple(1 if i>=0 else -1 for i in strides)
-      prev_ops.append((MovementOps.STRIDE, stride_arg))
-      return convert_st_to_movement_ops(st.stride(stride_arg), prev_ops, False)
-    # identify expands if stride is 0 on a dimension != 1
-    if ((reduced_shape := tuple(dim if stride != 0 else 1 for stride,dim in zip(strides, st.shape))) != st.shape):
-      if len(prev_ops) == 0 or prev_ops[-1][0] != MovementOps.EXPAND:
-        prev_ops.append((MovementOps.EXPAND, st.shape))
-        return convert_st_to_movement_ops(st.shrink(tuple((0,dim) for dim in reduced_shape)), prev_ops, initial_call=False)
     # identify permutations by strides not being ordered. TO DO: this breaks when a shape includes a dim=1.
     if (sorted_strides := tuple(reversed(sorted(strides)))) != strides:
       if len(prev_ops) == 0 or prev_ops[-1][0] != MovementOps.PERMUTE:
@@ -70,6 +75,6 @@ def convert_st_to_movement_ops(st: ShapeTracker, prev_ops: List[Tuple[MovementOp
         prev_ops.append((MovementOps.RESHAPE, st.views[-1].shape))
         prev_st = ShapeTracker(st.views[:-1])
         return convert_st_to_movement_ops(prev_st, prev_ops, initial_call=False)
-
+      
   # ops have been identified and appended in reverse order
   return prev_ops[::-1]
