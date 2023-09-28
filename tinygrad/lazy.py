@@ -128,14 +128,13 @@ class LazyBuffer:
 
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
+      if self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
+      elif self.optype is MovementOps: self.realized = self.op.src[0].realize().realized # TODO: prerealize MovementOps to share the underlying buffer
       # get real ops first
       if self.optype is BinaryOps: self.op = _ast_binaryops(self)
       elif self.optype is ReduceOps:
         self.op = _ast_reduceops(self)
         if self.op.op in BinaryOps: self.op = _ast_binaryops(self)
-      elif self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
-      # TODO: prerealize MovementOps to share the underlying buffer
-      elif self.optype is MovementOps: self.realized = self.op.src[0].realize().realized
       # run the ast if we still have to, and log the op
       if not self.realized:
         # HACK: image shape can be wrong, hot cast it back to a normal float
@@ -190,6 +189,8 @@ class LazyBuffer:
     assert all_int(self.shape), f"no toCPU if shape is symbolic, {self.shape=}"
     return cast(RawBuffer, realized).toCPU().reshape(self.shape)
 
+  # *** elementwise ops ***
+
   def e(self:LazyBuffer, op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     # srcs includes self
     srcs = (self,)+srcs
@@ -217,6 +218,8 @@ class LazyBuffer:
 
     return create_lazybuffer(out_device, ShapeTracker.from_shape(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype, self.var_vals)
 
+  # *** reduce ops ***
+
   def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
     srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
@@ -228,6 +231,8 @@ class LazyBuffer:
     if divisor < 16 or heuristic < 0.1: return self._reduce_op(op, new_shape) # Choose largest divisor (>=16) to split on, penalize large strides.
     def splitted_shape(dim_aft_div): return self.shape[:dim_to_split] + (self.shape[dim_to_split]//divisor,) + dim_aft_div + self.shape[dim_to_split+1:]
     return self.reshape(splitted_shape((divisor,)))._reduce_op(op, splitted_shape((1,))).reshape(splitted_shape(()))._reduce_op(op, new_shape)
+
+  # *** movement ops ***
 
   def shuffle_and_prune_movement_ops(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[sint, ...], Tuple[Tuple[sint, sint], ...]]) -> LazyBuffer:
     if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and (op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and self.op.op in UnaryOps)) and not self.children:
@@ -328,6 +333,17 @@ def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
       new_srcs.append(x)
   return tuple(new_srcs)
 
+MOVEMENT_OPS_DISPATCHER: Dict[MovementOps, Callable] = {
+  MovementOps.RESHAPE: LazyBuffer.reshape,
+  MovementOps.EXPAND: LazyBuffer.expand,
+  MovementOps.SHRINK: LazyBuffer.shrink,
+  MovementOps.PERMUTE: LazyBuffer.permute,
+  MovementOps.PAD: LazyBuffer.pad,
+  MovementOps.STRIDE: LazyBuffer.stride,
+}
+
+# *** loadop realization (unrelated to lazy) ***
+
 def _realize_contiguous(buffer: LazyBuffer) -> None:
   realized = buffer.op.src[0].realize().realized
   if buffer.op.src[0].st.contiguous and realized.__class__ is not RawConst and realized is not None and realized.size == prod(buffer.shape):
@@ -375,13 +391,4 @@ LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
   LoadOps.EMPTY: _realize_empty,
   LoadOps.RAND: _realize_rand,
   LoadOps.CONST: _realize_const,
-}
-
-MOVEMENT_OPS_DISPATCHER: Dict[MovementOps, Callable] = {
-  MovementOps.RESHAPE: LazyBuffer.reshape,
-  MovementOps.EXPAND: LazyBuffer.expand,
-  MovementOps.SHRINK: LazyBuffer.shrink,
-  MovementOps.PERMUTE: LazyBuffer.permute,
-  MovementOps.PAD: LazyBuffer.pad,
-  MovementOps.STRIDE: LazyBuffer.stride,
 }
