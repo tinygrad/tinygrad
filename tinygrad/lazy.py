@@ -143,13 +143,13 @@ class LazyBuffer:
 
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
-      if self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
+      if self.optype is LoadOps and self.op.op != LoadOps.CONTIGUOUS: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
       elif self.optype is MovementOps:
         self.op.src[0].realize()
         self._base = cast(LazyBuffer,self.op.src[0])
         return self
 
-      op = self.op
+      op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
 
       # get real ops first
       if self.optype is BinaryOps: op = _ast_binaryops(op, self.shape)
@@ -197,6 +197,7 @@ class LazyBuffer:
 
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
+    if self.st.contiguous and prod(self.shape) == prod(get_movementroot(self).shape) and (not self.realized or prod(self.shape) == self.realized.size): return self
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype, self.var_vals)
 
   @staticmethod
@@ -361,14 +362,6 @@ MOVEMENT_OPS_DISPATCHER: Dict[MovementOps, Callable] = {
 
 # *** loadop realization (unrelated to lazy) ***
 
-def _realize_contiguous(buffer: LazyBuffer) -> None:
-  realized = buffer.op.src[0].realize().realized
-  if buffer.op.src[0].st.contiguous and realized.__class__ is not RawConst and realized is not None and realized.size == prod(buffer.shape):
-    # no need to run an AST, this is already contiguous
-    buffer.realized = realized
-  else:
-    buffer.op = LazyOp(UnaryOps.NOOP, buffer.op.src)
-
 def _realize_custom(buffer: LazyBuffer) -> None:
   # this needs to immediately realize
   buffer.realized = buffer.op.arg(buffer, *[x.realize() for x in buffer.op.src])
@@ -402,7 +395,6 @@ def _realize_const(buffer: LazyBuffer) -> None:
     buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args())
 
 LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
-  LoadOps.CONTIGUOUS: _realize_contiguous,
   LoadOps.CUSTOM: _realize_custom,
   LoadOps.FROM: _realize_from,
   LoadOps.EMPTY: _realize_empty,
