@@ -37,7 +37,7 @@ def fetch_cifar(shuffle=False):
   download_file('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz', fn)
   tt = tarfile.open(fn, mode='r:gz')
   db = [pickle.load(tt.extractfile(f'cifar-10-batches-py/data_batch_{i}'), encoding="bytes") for i in range(1,6)]
-  X_train, Y_train = _load_disk_tensor(50000, 10000, db, "g1y5x3_cifar_train", shuffle=shuffle)
+  X_train, Y_train = _load_disk_tensor(50000, 10000, db, "cifar_train", shuffle=shuffle)
   db = [pickle.load(tt.extractfile('cifar-10-batches-py/test_batch'), encoding="bytes")]
-  X_test, Y_test = _load_disk_tensor(10000, 10000, db, "g1y5x3_cifar_test", shuffle=shuffle)
+  X_test, Y_test = _load_disk_tensor(10000, 10000, db, "cifar_test", shuffle=shuffle)
   return X_train, Y_train, X_test, Y_test
