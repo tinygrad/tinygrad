@@ -30,5 +30,6 @@ class RawShmBuffer(RawBufferMapped):
     if self.cache_id is None: self._buf.close()
   def _buffer(self): return memoryview(self._buf)
 
-shm_fxn_for_op: Dict[Op, Callable] = { UnaryOps.NOOP: lambda x:x, MovementOps.RESHAPE: lambda x,_:x }
+# TODO: is this wrong?
+shm_fxn_for_op: Dict[Op, Callable] = { UnaryOps.NOOP: lambda x:x, MovementOps.RESHAPE: lambda x,_:x, MovementOps.AS_STRIDED: lambda x,_:x }
 ShmBuffer = Interpreted(RawShmBuffer, shm_fxn_for_op, to_underlying=lambda x:x, from_underlying=lambda x:x)
