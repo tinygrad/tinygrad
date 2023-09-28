@@ -311,5 +311,13 @@ class TestSchedule(unittest.TestCase):
     del base
     check_schedule(x, 3)
 
+  def test_resnet_block(self):
+    from models.resnet import BasicBlock
+    bb = BasicBlock(64,64)
+
+    x = Tensor.empty(1, 64, 32, 32)
+    out = bb(x)
+    check_schedule(out, 4)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
