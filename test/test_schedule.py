@@ -32,6 +32,14 @@ class TestSchedule(unittest.TestCase):
     d = a+b+c
     check_schedule(d, 1)
 
+  def test_basic_binop_fusion_deep(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = Tensor.empty(10)
+    d = Tensor.empty(10)
+    e = a+b+c+d
+    check_schedule(e, 1)
+
   def test_mulacc_fusion(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
@@ -57,6 +65,11 @@ class TestSchedule(unittest.TestCase):
     c = Tensor.empty(5,2)
     d = (a+b).permute(1,0)+c
     check_schedule(d, 1)
+
+  def test_binop_elu_fusion(self):
+    a = Tensor.empty(10)
+    b = a.elu()
+    check_schedule(b, 1)
 
   def test_binop_reshape_reduce_fusion(self):
     a = Tensor.empty(100)
@@ -112,7 +125,7 @@ class TestSchedule(unittest.TestCase):
   def test_cache_binaryop_transpose(self):
     a = Tensor.empty(10,10)
     b = Tensor.empty(10,10)
-    c = (a.T*b.T).T
+    c = (a.T*b.T).T #.contiguous()
     d = a*b
     c.realize()
     check_schedule(d, 0)
@@ -145,7 +158,17 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 3)
     Tensor.training = False
 
-  def test_fold_conv(self):
+  def test_fold_conv_relu(self):
+    c1 = nn.Conv2d(3,16,3)
+    c1.weight.realize()
+    c1.bias.realize()
+
+    # run
+    img = Tensor.ones(2,3,64,64)
+    out = c1(img).relu()
+    check_schedule(out, 1)
+
+  def test_fold_conv_elu(self):
     c1 = nn.Conv2d(3,16,3)
     c1.weight.realize()
     c1.bias.realize()
@@ -265,25 +288,27 @@ class TestSchedule(unittest.TestCase):
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
     b2 = Tensor.empty(16)
-    def p(x): return x.permute(1,0).reshape(32,16,1).expand(32,16,16).sum(axis=2).permute(1,0)
+    def p(x): return x.permute(1,0).contiguous().reshape(32,16,1).expand(32,16,16).sum(axis=2).permute(1,0)
 
     x = Tensor.empty(16, 32)
     x = base = p(x) + b1.reshape(16,1)
-    x = p(x) + b2.reshape(16,1)
+    x = p(x)
+    x = x + b2.reshape(16,1)
+    print("HERE")
     x = x + base
     del base
     x = p(x)
-    check_schedule(x, 3)
+    check_schedule(x, 4)
 
   def test_image_conv_fusion_more_minimal(self):
     b1 = Tensor.empty(16)
-    def p(x): return x.permute(1,0).reshape(32,16,1).expand(32,16,16).sum(axis=2).permute(1,0)
+    def p(x): return x.permute(1,0).contiguous().reshape(32,16,1).expand(32,16,16).sum(axis=2).permute(1,0)
 
     x = Tensor.empty(16, 32)
     x = base = p(x) + b1.reshape(16,1)
     x = p(x)
     del base
-    check_schedule(x, 2)
+    check_schedule(x, 3)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

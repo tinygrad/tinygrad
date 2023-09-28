@@ -14,7 +14,8 @@ from tinygrad import nn
 from tinygrad.helpers import getenv
 from tinygrad.nn import optim
 from tinygrad.ops import GlobalCounters, MovementOps, ReduceOps
-from tinygrad.lazy import PUSH_PERMUTES
+#from tinygrad.lazy import PUSH_PERMUTES
+PUSH_PERMUTES = False  # functionality removed
 from tinygrad.jit import CacheCollector
 
 class CLCache:
