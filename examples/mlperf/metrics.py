@@ -92,8 +92,6 @@ def dice_ce_loss(prediction, target):
   cross_entropy = -(target_one_hot * prediction.softmax(1).clip(1e-8, 1).log()).mean()
   dice_score = get_dice_score(prediction, target, prediction_argmax=False)
   dice_loss = (1. - dice_score).mean()
-  print('dice_loss', dice_loss.numpy())
-  print('cross_entropy', cross_entropy.numpy())
   loss = (dice_loss + cross_entropy) / 2
   return loss
 
