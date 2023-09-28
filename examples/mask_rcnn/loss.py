@@ -209,6 +209,46 @@ def smooth_l1_loss(input, target, beta=1. / 9, size_average=True):
       return loss.mean()
   return loss.sum()
 
+class SmoothL1LossFunction(Function):
+  @staticmethod
+  def forward(ctx, input, target, beta=1. / 9, size_average=True):
+    n = Tensor.abs(input - target)
+    cond = n < beta
+    loss = Tensor.where(cond, 0.5 * n ** 2 / beta, n - 0.5 * beta)
+    
+    # save input and target for the backward pass
+    ctx.save_for_backward(input, target)
+    ctx.beta = beta
+    
+    if size_average:
+        return loss.mean()
+    return loss.sum()
+    
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, target = ctx.saved_tensors
+    beta = ctx.beta
+
+    diff = input - target
+    abs_diff = Tensor.abs(diff)
+    cond = abs_diff < beta
+    
+    grad_input = Tensor.where(cond, diff / beta, diff.sign())
+    
+    # multiply grad_input by grad_output to propagate the gradient 
+    grad_input *= grad_output
+    
+    return grad_input, None  # we don't need gradient for target and beta
+
+# Re-define smooth_l1_loss to use the custom function
+def smooth_l1_loss(input, target, beta=1. / 9, size_average=True):
+    return SmoothL1LossFunction.apply(input, target, beta, size_average)
+
+def test_fork_grad():
+  res = smooth_l1_loss(Tensor([1, 4, 1, 9, 2], requires_grad=True),Tensor([2, 8, 1, 1, 4]), beta=2)
+  res.backward()
+  res
+
 def test_match_targets_to_anchors():
   anchors = BoxList(Tensor([[0, 0, 10, 10], [0, 0, 5, 5]]), image_size = (50, 50)) # preds
   targets = BoxList(Tensor([[0, 0, 5, 5], [0, 0, 10, 10]]), image_size = (50, 50))
