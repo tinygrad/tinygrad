@@ -28,40 +28,40 @@ MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS = OPT>=2, OPT>=2
 PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
 
 # **** realize functions ****
-def _ast_reduceops(self:LazyBuffer) -> LazyOp:
+def _ast_reduceops(op:LazyOp) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
-  src = self.op.src[0]
+  src = op.src[0]
   if not src.realized:
     assert isinstance(src.op, LazyOp), "if not src.realized, then src.op must be a LazyOp"
     if MERGE_ELEMENTWISE_INTO_REDUCE and src.optype is BinaryOps and len(src.children) <= 1: src = src.op
-  return LazyOp(self.op.op, (src,), self.op.arg)
+  return LazyOp(op.op, (src,), op.arg)
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
-def _ast_binaryops(self:LazyBuffer) -> LazyOp:
-  real_srcs: Dict[LazyBuffer, Optional[Union[LazyOp, LazyBuffer]]] = {x:None for x in self.op.buffers}
+def _ast_binaryops(op:LazyOp, shape: Tuple[sint, ...]) -> LazyOp:
+  real_srcs: Dict[LazyBuffer, Optional[Union[LazyOp, LazyBuffer]]] = {x:None for x in op.buffers}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
   psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and not x.realized and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
-  intermediate_shape: Tuple[sint, ...] = self.shape
+  intermediate_shape: Tuple[sint, ...] = shape
   if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and psrcs:
     psrc = psrcs[0] # NOTE: right now we can't handle multiple, as we'd have to check for loop
     if psrc[1].optype == ReduceOps:
-      top = _ast_reduceops(psrc[1])
+      top = _ast_reduceops(psrc[1].op)
     real_srcs[psrc[0]] = top
     real_srcs.update({x:x for x in top.buffers})  # the reduce op buffers are not modified
 
     # if the ReduceOp is followed by a reshape, we push this reshape before all the ElementwiseOp inputs
     if psrc[0].shape != psrc[1].shape:
       intermediate_shape = psrc[1].shape
-      assert psrc[0].shape == self.shape, f"shape mismatch {psrc[0].shape} != {self.shape}"
+      assert psrc[0].shape == shape, f"shape mismatch {psrc[0].shape} != {shape}"
 
   # reshape all the late ops into the output shape
   # NOTE: these RESHAPEs will return self if they don't change the shape
   for x in real_srcs.keys():
     if real_srcs[x] is None: real_srcs[x] = x.reshape(intermediate_shape)
   # NOTE: cast the type to remove the Optional
-  ast = self.op.map_buffers(cast(Dict[LazyBuffer, Union[LazyOp, LazyBuffer]], real_srcs))
-  return LazyOp(MovementOps.RESHAPE, (ast, ), self.shape) if intermediate_shape != self.shape else ast
+  ast = op.map_buffers(cast(Dict[LazyBuffer, Union[LazyOp, LazyBuffer]], real_srcs))
+  return LazyOp(MovementOps.RESHAPE, (ast, ), shape) if intermediate_shape != shape else ast
 
 def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
   replacements:Dict[LazyBuffer, LazyOp] = {}
@@ -126,15 +126,20 @@ class LazyBuffer:
 
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
 
+  @property
+  def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
+  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
+  def get_lazyops(self) -> List[LazyOp]: return []
+
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       if self.optype is LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, self.op.op)](self)
       elif self.optype is MovementOps: self.realized = self.op.src[0].realize().realized # TODO: prerealize MovementOps to share the underlying buffer
       # get real ops first
-      if self.optype is BinaryOps: self.op = _ast_binaryops(self)
+      if self.optype is BinaryOps: self.op = _ast_binaryops(self.op, self.shape)
       elif self.optype is ReduceOps:
-        self.op = _ast_reduceops(self)
-        if self.op.op in BinaryOps: self.op = _ast_binaryops(self)
+        self.op = _ast_reduceops(self.op)
+        if self.op.op in BinaryOps: self.op = _ast_binaryops(self.op, self.shape)
       # run the ast if we still have to, and log the op
       if not self.realized:
         # HACK: image shape can be wrong, hot cast it back to a normal float
@@ -306,10 +311,6 @@ class LazyBuffer:
     if not self.realized and self.op.op == MovementOps.STRIDE: return self.op.src[0].stride(tuple(map(operator.mul, arg, self.op.arg)))
     return self.shuffle_and_prune_movement_ops(self.st.stride(arg), MovementOps.STRIDE, arg)
 
-  @property
-  def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
-  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
-  def get_lazyops(self) -> List[LazyOp]: return []
   def replace_with_movement_ops(self: LazyBuffer, ops:List[Tuple[MovementOps, Any]]) -> LazyBuffer:
     y = self
     for op, arg in ops: y = MOVEMENT_OPS_DISPATCHER[op](y, arg)
