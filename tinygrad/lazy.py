@@ -35,7 +35,6 @@ class LazyBacking(LazyCommon):
     self.realized: Optional[RawBuffer] = src
     self.output_buffer: Optional[RawBuffer] = None
     self.children: WeakSet = WeakSet()
-    self.siblings: WeakSet = WeakSet()
     if op:
       self.op: LazyOp = op
       if DEBUG >= 6: print(f"create LazyBacking {self}")
@@ -268,7 +267,7 @@ class LazyBuffer:
 
   def _movement_op(self, fxn, arg, push_ewop=False) -> LazyBuffer:
     st:ShapeTracker = fxn(self.backing.st.reshape(self.shape), arg)
-    if push_ewop and not self.realized and isinstance(self.backing, LazyBacking) and self.backing.op.op in ElementwiseOps:# and not self.backing.children:
+    if push_ewop and not self.realized and isinstance(self.backing, LazyBacking) and self.backing.op.op in ElementwiseOps and not self.backing.children:
       op = self.backing.op
       # self is no longer children of its buffers
       # NOTE: do children have to be refcounted
