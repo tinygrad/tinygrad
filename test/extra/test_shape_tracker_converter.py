@@ -47,20 +47,25 @@ class TestStConverter(unittest.TestCase):
     helper_test_st_converter(self, [(4,3,6)], [(MovementOps.STRIDE, (-1,1,-1))])
 
   def test_multiple_ops(self):
-    # EXPAND combinations
+    # EXPAND
     helper_test_st_converter(self, [(4,3,6,1)], [(MovementOps.EXPAND, (4,3,6,6)),(MovementOps.PERMUTE, (3,0,1,2))])
     helper_test_st_converter(self, [(4,3,6,1)], [(MovementOps.EXPAND, (4,3,6,6)),(MovementOps.PAD, ((1,2),(0,5),(4,3),(4,7)))])
     helper_test_st_converter(self, [(4,3,6,1)], [(MovementOps.EXPAND, (4,3,6,6)),(MovementOps.RESHAPE, (12,2,3,6))])
     # helper_test_st_converter(self, [(4,3,6,1)], [(MovementOps.EXPAND, (4,3,6,6)),(MovementOps.SHRINK, ((1,2),(0,2),(4,6),(1,5)))])
     # helper_test_st_converter(self, [(4,3,6,1)], [(MovementOps.EXPAND, (4,3,6,6)),(MovementOps.STRIDE, (12,2,-3,6))])
 
-    # PAD combinations
+    # PAD 
     helper_test_st_converter(self, [(4,3,6,1)], [(MovementOps.PAD, ((1,2),(3,0),(4,5),(0,0))),(MovementOps.EXPAND, (7,6,15,6))])
     helper_test_st_converter(self, [(4,3,6)], [(MovementOps.PAD, ((1,2),(3,0),(4,5))),(MovementOps.PERMUTE, (1,2,0))])
     helper_test_st_converter(self, [(4,3,6)], [(MovementOps.PAD, ((1,2),(3,0),(4,5))),(MovementOps.RESHAPE, (42,3,5))])
     # helper_test_st_converter(self, [(4,3,6)], [(MovementOps.PAD, ((1,2),(3,0),(4,5))),(MovementOps.SHRINK, ((0,1),(1,3),(5,10)))])
     # helper_test_st_converter(self, [(4,3,6)], [(MovementOps.PAD, ((1,2),(3,0),(4,5))), (MovementOps.STRIDE, (2,3,4))])
 
+    # PERMUTE
+    helper_test_st_converter(self, [(4,3,6,1)], [(MovementOps.PERMUTE, ((1,2,3,0))),(MovementOps.EXPAND, (3, 6, 5, 4))])
+    helper_test_st_converter(self, [(4,3,6)], [(MovementOps.PERMUTE, ((1,2,0))),(MovementOps.PAD, ((1,2),(0,5),(4,3)))])
+    helper_test_st_converter(self, [(4,3,6)], [(MovementOps.PERMUTE, ((1,2,0))),(MovementOps.RESHAPE, ((2,2,3,2,3)))])
+    # helper_test_st_converter(self, [(4,3,6)], [(MovementOps.PERMUTE, ((1,2,0))),(MovementOps.SHRINK, ((1,2),(0,3),(2,4)))])
 
   @unittest.skip('Tests to highlight some known limitations of shapetracker.')
   def test_known_limitations(self):
