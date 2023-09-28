@@ -51,7 +51,6 @@ def _process_wrap(rank:int, device:str, oob:_OOB, fn:Callable, args=()):
   elif "HIP" in device:
     os.environ["HIP_VISIBLE_DEVICES"] = str(device_num)
     os.environ["HIP_DEFAULT_DEVICE"] = str(device_num)
-    from tinygrad.runtime.ops_hip import HIP
   if DEBUG >= 1: print(f"distributed process {rank} initialized runtime for device {device}")
 
   # convert device to be process specific
