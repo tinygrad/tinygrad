@@ -85,8 +85,8 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1), keepdim=True)
 
   # reshape to image and cast back to image
-  #ret = ret.reshape(bs*oy, ox*cout//4, 4)
-  if IMAGE >= 2: ret = ret.cast(ImageDType(*base_image_type, shape=(bs*oy, ox*cout//4, 4)))
+  ret = ret.reshape(bs*oy, ox*cout//4, 4)
+  if IMAGE >= 2: ret = ret.cast(ImageDType(*base_image_type, shape=ret.shape))
   if IMAGE >= 3: ret = ret.contiguous()
 
   # undo hack for non multiples of 4 on C.rcout
