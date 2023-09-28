@@ -65,7 +65,7 @@ def _ast_binaryops(op:LazyOp, shape: Tuple[sint, ...]) -> LazyOp:
 
 def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
   replacements:Dict[LazyBuffer, LazyOp] = {}
-  base_bufs = dedup([x.base for x in op.buffers if (x.realized and not isinstance(x.realized, RawConst)) or not isinstance(Device[x.device], Compiled) or x.device == "LLVM" or x.base.op.op != LoadOps.CONST])
+  base_bufs = dedup([x.base for x in op.buffers if (x.realized and not isinstance(x.realized, RawConst)) or not isinstance(Device[x.device], Compiled) or x.device == "LLVM" or (not x.realized and x.base.op.op != LoadOps.CONST)])
   for x in op.buffers:
     st = x.st.simplify()
     if x.base in base_bufs:
@@ -110,10 +110,12 @@ class LazyBuffer:
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: WeakSet = WeakSet()
+    self.views: WeakSet = WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
     self.op: LazyOp = op
     assert optype != MovementOps or (base is not None and base.optype != MovementOps), "MovementOps must be based"
     self._base = base
+    if base: base.views.add(self)
     for x in op.buffers: x.children.add(self)
     if not LAZY: self.realize()
 
@@ -166,7 +168,7 @@ class LazyBuffer:
 
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
     if op.op in LoadOps: return [(self.op, self, ())]
-    if self.optype is MovementOps: return cast(LazyBuffer, self.op.src[0]).schedule(seen)
+    if self.optype is MovementOps: return self.base.schedule(seen)
 
     if self.optype is BinaryOps: op = _ast_binaryops(op, self.shape)
     elif self.optype is ReduceOps:
@@ -190,7 +192,11 @@ class LazyBuffer:
 
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
-      for op,out,buffers in self.schedule():
+      # NOTE: if you for loop the schedule it's slow because nothing frees
+      schedule = self.schedule()
+      if DEBUG >= 2: print(f"scheduling {len(schedule)}")
+      while len(schedule):
+        op,out,buffers = schedule.pop(0)
         if DEBUG >= 3:
           from extra.utils import print_tree   # type: ignore
           print_tree(op)
@@ -198,7 +204,8 @@ class LazyBuffer:
           LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out)
         else:
           out.realized = Device[out.device].exec_ast(op, output=out, inputs=[x.realized for x in buffers], var_vals=out.var_vals, **self._device_extra_args())
-          del out.op
+        del out.op
+        for v in out.views: del v.op
         assert out.realized and isinstance(out.realized, (RawConst, Device[out.device].buffer)), f"device mismatch on realized got {type(out.realized)} expected {out.device}"
         assert out.realized.dtype == out.dtype, "realized dtype is incorrect"
     return self
