@@ -1,11 +1,10 @@
 import unittest
 import multiprocessing.shared_memory as shared_memory
-from tinygrad.helpers import CI, OSX
+from tinygrad.helpers import CI
 from tinygrad.runtime.ops_shm import RawShmBuffer
 from tinygrad.tensor import Tensor, Device
 import numpy as np
 
-@unittest.skipIf(OSX, "no shm on OSX")
 class TestRawShmBuffer(unittest.TestCase):
   def test_e2e(self):
     t = Tensor.randn(2, 2, 2).realize()

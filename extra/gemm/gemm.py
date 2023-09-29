@@ -21,7 +21,7 @@ if __name__ == "__main__":
     et = time.monotonic()
     s = et-st
     print(f"{flop/s * 1e-9:.2f} GFLOP/S, {s*1e3:.2f} ms")
-  
+
   with open("/tmp/matmul", "wb") as f:
     f.write(A.data)
     f.write(B.data)
