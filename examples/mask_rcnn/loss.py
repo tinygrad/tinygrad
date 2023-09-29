@@ -215,7 +215,7 @@ class SmoothL1Loss(Function):
     _x = x.e(UnaryOps.NEG)
     return x.e(BinaryOps.MAX, x.const(0)).e(BinaryOps.ADD, _x.e(BinaryOps.MAX, _x.const(0))) #abs
 
-  def forward(self, x, t, beta=1. / 9, size_average=True):
+  def forward(self, x, t, beta=1. / 9, size_average=True): # (abs(x - t) < beta).where( 0.5 * abs(x - t) ** 2 / beta, abs(x - t) - 0.5 * beta))
     self.dif = x.e(BinaryOps.SUB, t)
     self.beta = beta
     n = self.abs(self.dif)
@@ -227,24 +227,27 @@ class SmoothL1Loss(Function):
         return loss.mean().lazydata
     return loss.sum().lazydata
 
-  def backward(self, grad_output):
-    cond = self.abs(self.dif).e(BinaryOps.CMPLT, self.beta)
-    grad_input = cond.e(TernaryOps.WHERE, self.dif / self.beta, Tensor(self.dif).sign().lazydata)
-    grad_input *= grad_output
-    return grad_input, None  # return grad for input tensor, and None for target tenso
+  def backward(self, grad_output): # (abs(x - t) < beta).where((x-t)/beta, (x-t).sign())
+    cond = self.abs(self.dif).e(BinaryOps.CMPLT, self.dif.const(self.beta))
+    grad_input = cond.e(TernaryOps.WHERE, self.dif.e(BinaryOps.DIV, self.dif.const(self.beta)),
+      Tensor(self.dif).sign().lazydata) #todo sign
+    return grad_input.e(BinaryOps.MUL, grad_output), None  # return grad for input tensor, and None for target tenso
 
 def smooth_l1_loss_function(input, target, beta=1. / 9, size_average=True):
     return SmoothL1Loss.apply(input, target, beta=beta, size_average=size_average)
 
 def test_fork_grad():
+  optimizer = optim.SGD(Tensor([0,0,0,0,0]), lr=0.001, momentum=0.9, weight_decay=0.0005)
   res = smooth_l1_loss_function(
       Tensor([1, 4, 1, 9, 2], requires_grad=True),
       Tensor([2, 8, 1, 1, 4]),
       beta=2
   )
-  print(res)
-  print(res.numpy())
   assert res.numpy() == 2.25
+  optimizer.zero_grad()
+  res.backward()
+  optimizer.step()
+  
 
 def test_match_targets_to_anchors():
   anchors = BoxList(Tensor([[0, 0, 10, 10], [0, 0, 5, 5]]), image_size = (50, 50)) # preds
@@ -426,24 +429,25 @@ class RPNLossComputation:
     return objectness_loss, box_loss
 
 if __name__ == "__main__":
-  download_train()
-  test_concat_box_prediction_layers()
-  test_loss()
-  test_binary_cross_entropy_with_logits()
-  test_prepare_targets()
-  test_boxlist_iou()
-  test_match_eval()
-  test_low_qual_match()
-  test_rind()
-  test_balanced_sampler()
-  test_match_targets_to_anchors()
-  #PLAYGROUND
-  data = Tensor([[1, 2, 3],
-               [4, 5, 6],
-               [7, 8, 9],
-               [10, 11, 12]])
-  idx = Tensor([0, 2, 1, 1]).reshape(4, 1)
-  result = data.gather(idx, dim=1)
+  test_fork_grad()
+  # download_train()
+  # test_concat_box_prediction_layers()
+  # test_loss()
+  # test_binary_cross_entropy_with_logits()
+  # test_prepare_targets()
+  # test_boxlist_iou()
+  # test_match_eval()
+  # test_low_qual_match()
+  # test_rind()
+  # test_balanced_sampler()
+  # test_match_targets_to_anchors()
+  # #PLAYGROUND
+  # data = Tensor([[1, 2, 3],
+  #              [4, 5, 6],
+  #              [7, 8, 9],
+  #              [10, 11, 12]])
+  # idx = Tensor([0, 2, 1, 1]).reshape(4, 1)
+  # result = data.gather(idx, dim=1)
   
   # ind = Tensor.arange(mask.shape[0])
   # nz = mask.sum().numpy().item()
