@@ -27,7 +27,8 @@ REMOVE_MOVEMENT_NOPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS, MERGE
 MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS = OPT>=2, OPT>=2
 PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
 
-# **** realize functions ****
+# **** ast fixing functions ****
+
 def _ast_reduceops(op:LazyOp) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = op.src[0]
@@ -162,6 +163,8 @@ class LazyBuffer:
   def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[LazyOp]: return []
 
+  # *** scheduling ***
+
   def schedule(self, seen=None) -> List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]:
     if seen is None: seen = set()
     if self in seen or self.realized: return []
@@ -200,6 +203,8 @@ class LazyBuffer:
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized: run_schedule(self.schedule())
     return self
+
+  # *** creation/special ops ***
 
   @staticmethod
   def loadop(op, shape, dtype, device, arg=None, src=None, val_vals=None) -> LazyBuffer:
@@ -393,6 +398,7 @@ def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]
     assert out.realized.dtype == out.dtype, "realized dtype is incorrect"
 
 def _realize_contiguous(buffer: LazyBuffer) -> None:
+  # this is just a copy now, if it's not a copy schedule will handle it
   src = cast(LazyBuffer, buffer.op.src[0])
   buffer.realized = src.realized
   assert buffer.dtype == src.dtype, f"contiguous dtype mismatch, expecting {buffer.dtype}, got {src.dtype}"
