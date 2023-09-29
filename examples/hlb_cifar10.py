@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # setup for distributed
 from extra import dist
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, dtypes
 if __name__ == "__main__":
   if getenv("DIST"):
     dist.preinit()
@@ -23,6 +23,9 @@ from tinygrad.jit import TinyJit
 from extra.dist import collectives
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
+
+Tensor.default_dtype = dtypes.float16
+np_dtype = np.float16
 
 class BatchNorm(nn.BatchNorm2d):
   def __init__(self, num_features):
@@ -63,6 +66,8 @@ class SpeedyResNet:
       nn.Linear(512, 10, bias=False),
       lambda x: x.mul(1./9)
     ]
+    print(self.net[0].weight.dtype)
+
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
     forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
@@ -123,7 +128,7 @@ def train_cifar():
 
     Λ, V = _eigens(_patches(X.numpy()))
 
-    return Tensor(V/np.sqrt(Λ+1e-2)[:,None,None,None], requires_grad=False)
+    return Tensor(V/np.sqrt(Λ+1e-2)[:,None,None,None].astype(np_dtype), requires_grad=False)
 
   # ========== Loss ==========
   def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
@@ -168,7 +173,7 @@ def train_cifar():
   def random_crop(X, crop_size=32):
     mask = make_square_mask(X.shape, crop_size)
     mask = mask.repeat((1,3,1,1))
-    X_cropped = Tensor(X.flatten().numpy()[mask.flatten().numpy().astype(bool)])
+    X_cropped = Tensor(X.flatten().numpy()[mask.flatten().numpy().astype(bool)].astype(np_dtype))
 
     return X_cropped.reshape((-1, 3, crop_size, crop_size))
 
@@ -177,8 +182,8 @@ def train_cifar():
     mask = make_square_mask(X.shape, mask_size)
     order = list(range(0, X.shape[0]))
     random.shuffle(order)
-    X_patch = Tensor(X.numpy()[order,...])
-    Y_patch = Tensor(Y.numpy()[order])
+    X_patch = Tensor(X.numpy()[order,...].astype(np_dtype))
+    Y_patch = Tensor(Y.numpy()[order].astype(np_dtype))
     X_cutmix = Tensor.where(mask, X_patch, X)
     mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
@@ -195,7 +200,7 @@ def train_cifar():
         X = random_crop(X, crop_size=32)
         X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < 0.5, X[..., ::-1], X) # flip LR
         if step >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
-      X, Y = X.numpy(), Y.numpy()
+      X, Y = X.numpy().astype(np_dtype), Y.numpy().astype(np_dtype)
       for i in range(0, X.shape[0], BS):
         # pad the last batch
         batch_end = min(i+BS, Y.shape[0])
@@ -218,7 +223,7 @@ def train_cifar():
       self.net_ema = SpeedyResNet(w)
       for net_ema_param, net_param in zip(get_state_dict(self.net_ema).values(), get_state_dict(net).values()):
         net_ema_param.requires_grad = False
-        net_ema_param.assign(net_param.numpy())
+        net_ema_param.assign(net_param.numpy().astype(np_dtype))
 
     @TinyJit
     def update(self, net, decay):
@@ -378,6 +383,8 @@ def train_cifar():
 
       if STEPS == 0 or i==STEPS: break
       X, Y = next(batcher)
+      print(X.dtype)
+      print(model.net[0].weight.dtype)
       # further split batch if distributed
       if getenv("DIST"):
         X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
