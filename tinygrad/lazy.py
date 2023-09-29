@@ -171,9 +171,7 @@ class LazyBuffer:
     if self.optype is MovementOps: return self.base.schedule(seen)
 
     if self.optype is BinaryOps: op = _ast_binaryops(op, self.shape)
-    elif self.optype is ReduceOps:
-      op = _ast_reduceops(op)
-      if op.op in BinaryOps: op = _ast_binaryops(op, self.shape)
+    elif self.optype is ReduceOps: op = _ast_reduceops(op)
 
     # HACK: image shape can be wrong, hot cast it back to a normal float
     if isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
@@ -185,12 +183,13 @@ class LazyBuffer:
     if self.op.op == LoadOps.CONTIGUOUS:
       src = cast(LazyBuffer, self.op.src[0])
       if src.st.contiguous and src.st.size() == src.base.st.size() and (src.realized or not src.base.op.op == LoadOps.CONST) and (not src.realized or not isinstance(src.realized, RawConst)):
-        #for c in src.children: print(c)
         return src.schedule(seen) + [(self.op, self, ())]
 
     # realize the past and exec the AST
     ret = []
     for x in op.buffers: ret += x.schedule(seen)
+
+    # TODO: this belongs in the schedule in some way
     self.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 
     # run the ast and log the op
