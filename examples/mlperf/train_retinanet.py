@@ -158,7 +158,7 @@ class RetinaNetTrainer:
         checker = None
         if self.debug: 
             checker = RetinaNetMlPerfTrainingChecker(retina)
-            #checker.check_anchorgen()
+            #checker.check_anchorgen() already passes
             checker.check_weight_init()
             checker.check_anchors(anchors_orig, anchors_flattened_levels)
 
@@ -196,7 +196,6 @@ class RetinaNetTrainer:
 
     def tg_init_setup(self):
         retina = self.model 
-        Warning("initial weight setting skipped")
         self.set_initial_weights()
         self.freeze_spec_backbone_layers()
         anchors_orig = retina.anchor_gen(self.image_size) #TODO: get them just with reshape of flattened?
@@ -224,8 +223,10 @@ class RetinaNetTrainer:
     def set_regression_weights(self, mean : float =0, std : float =0.01, conv_bias : float = 0):
         for (key,val) in get_state_dict(self.model.head.regression_head).items():
             if "weight" in key: 
+                print(key)
                 val = Tensor.normal(*(val.shape), mean=mean, std=std)
             elif "bias" in key:
+                print(key)
                 val = Tensor.full(*(val.shape), conv_bias)
     
     def set_fpn_weights(self, bias : float =0):
@@ -235,11 +236,12 @@ class RetinaNetTrainer:
         The biases are initialized with zeros (code).
         """
         for (key,val) in get_state_dict(self.model.backbone).items():
-            breakpoint()
-            if "conv" in key: 
+            if "conv" in key:
+                print(key) 
                 val = Tensor.kaiming_uniform(*(val.shape),a=1)
             elif "bias" in key:
-                val = Tensor.full(*(val.shape), conv_bias)
+                print(key)
+                val = Tensor.full(*(val.shape), bias)
         #mlp_fpn = [(name,param) for name,param in mlperf_model.backbone.fpn.named_parameters()]
         #tg_w = [(name,param.numpy()) for name,param in get_state_dict(self.model.backbone.fpn).items()]
         
@@ -391,7 +393,7 @@ class RetinaNetMlPerfTrainingChecker:
         self.trainer = RetinaNetTrainer(model=tg_model,debug=True)
         self.model = tg_model
         self.mlperf_model = mlp_retinanet.retinanet_from_backbone(backbone="resnext50_32x4d",num_classes=tg_model.num_classes, image_size = list(IMAGE_SIZES["debug"]))
-        
+
     def check_anchorgen(self):
         #TODO refactor. Make more robust (can it?)
         model, anchors_orig, anchors_flattened_levels, optimizer = self.trainer.tg_init_setup()
@@ -407,7 +409,21 @@ class RetinaNetMlPerfTrainingChecker:
         self.mlperf_model.training = True
         assert torch.equal(torch_tensor(anchors_flattened_levels),anchors_one_image[0])
     def check_weight_init(self):
-        raise NotImplementedError
+        model, anchors_orig, anchors_flattened_levels, optimizer = self.trainer.tg_init_setup()
+        mlp_params = {name:params for name,params in self.mlperf_model.named_parameters()}
+        model_params = get_state_dict(model)
+        Warning("MLPerf model has way less parameters!!" 
+                , "Maybe bc modules are different? ",
+                "or bc optimizer and stuff from tg_init_setup()? ")
+        #TODO: the difference comes partly from the frozen layers in the mlperf model
+        _missing = [item for item in model_params.keys() if item not in mlp_params.keys()] 
+        
+        breakpoint()
+        assert(len(mlp_params.keys())==len(model_params.keys()))
+        for item in mlp_params.keys(): 
+            assert(torch.equal(torch_tensor(model_params[item].numpy()),mlp_params[item]))
+        breakpoint()
+
     def check_head_outputs(self):
         raise NotImplementedError
     def check_preds(self):
