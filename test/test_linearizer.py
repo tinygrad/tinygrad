@@ -7,7 +7,7 @@ from tinygrad.ops import Compiled, Device, MovementOps, LazyOp
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.lazy import _replace_bufferops
-from extra.utils import print_tree
+from tinygrad.helpers import dtypes
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -234,6 +234,159 @@ class TestLinearizerOpts(unittest.TestCase):
       [(0, 2, 'L'), (1, 2, 'L'), (0, 8, 'G'), (1, 4, 'G'), (0, 2, 'U')], [(0, 2, 'L'), (1, 2, 'L'), (0, 8, 'G'), (1, 4, 'G'), (0, 2, 'U'), (0, 4, 'R'), (1, 4, 'R')], # Checking how it works with 2 grouped_reduces + upcasts + locals.
       [(0, 4, 'L'), (1, 4, 'L'), (0, 8, 'G'), (1, 4, 'G'), (0, 2, 'U'), (1, 2, 'U')], # No globals
     ])
+
+class TestFloat4(unittest.TestCase):
+  def setUp(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.supports_float4:
+      self.skipTest("Device does not support float4")
+
+  @staticmethod
+  def count_float4(k):
+    return (len([uop for uop in k.uops if uop.uop == UOps.LOAD and uop.dtype == dtypes._float4]),
+            len([uop for uop in k.uops if uop.uop == UOps.STORE and len(uop.vin) == 3 and uop.vin[2].dtype == dtypes._float4]))
+
+  # TODO: express opts below as auto opts
+
+  def test_float4_basic(self):
+    a = Tensor.rand(2, 8).realize()
+    b = Tensor.rand(2, 8).realize()
+    c = a + b
+
+    s = c.lazydata.schedule()[0]
+    k = Linearizer(s[0])
+    k.hand_coded_optimizations()
+    k.linearize()
+
+    assert TestFloat4.count_float4(k) == (2, 1)
+
+  def test_float4_multidim(self):
+    a = Tensor.rand(2, 8).realize()
+    b = Tensor.rand(2, 8).realize()
+    c = a + b
+
+    s = c.lazydata.schedule()[0]
+    k = Linearizer(s[0])
+    k.process()
+    k.shift_to(0, 4)  # float4 dimension
+    k.shift_to(0, 2, insert_before=k.shape_len-1)
+    k.upcast()
+    k.upcast()
+    k.local_dims += 1
+    k.linearize()
+
+    assert TestFloat4.count_float4(k) == (4, 2)
+
+  def test_float4_unaligned_load(self):
+    a = Tensor.rand(9).realize().shrink(((1, 9),))
+    b = Tensor.rand(9).realize().shrink(((1, 9),))
+    c = a + b
+
+    s = c.lazydata.schedule()[0]
+    k = Linearizer(s[0])
+    k.hand_coded_optimizations()  # implicit trigger float4 dim
+    k.linearize()
+
+    assert TestFloat4.count_float4(k) == (0, 1)
+
+  def test_float4_multidim_unaligned_load(self):
+    a = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
+    b = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
+    c = a + b
+
+    s = c.lazydata.schedule()[0]
+    k = Linearizer(s[0])
+    k.process()
+    k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
+    k.upcast()
+    k.shift_to(len(k.full_unupcasted_shape)-1, 2, insert_before=k.shape_len-1)
+    k.upcast()
+    k.local_dims += 1
+    k.linearize()
+
+    assert TestFloat4.count_float4(k) == (0, 2)
+
+  def test_float4_sometimes_unaligned(self):
+    a = Tensor.rand(1, 1, 8).realize()
+    b = Tensor.rand(1, 1, 5).realize().shrink(((0, 1), (0, 1), (1, 5)))
+    c = a.conv2d(b)
+    # only the first and last conv dot products are aligned in a, and b is never aligned, so no
+    # float4 should be emitted (the reduce axis of size 4 is the float4 axis here)
+
+    s = c.lazydata.schedule()[0]
+    k = Linearizer(s[0])
+    k.process()
+    k.upcast()
+    k.linearize()
+
+    assert TestFloat4.count_float4(k) == (0, 0)
+
+  def test_float4_multidim_sometimes_unaligned(self):
+    a = Tensor.rand(1, 1, 7).realize()
+    b = Tensor.rand(1, 1, 5).realize().shrink(((0, 1), (0, 1), (1, 5)))
+    c = a.conv2d(b)
+    # the first conv dot product is aligned in a. If we upcast the output and reduce
+    # dimension, then we could do float4 for only that one set of loads, but we currently
+    # don't.
+
+    s = c.lazydata.schedule()[0]
+    k = Linearizer(s[0])
+    k.process()
+    k.upcast()
+    k.upcast()
+    k.linearize()
+
+    assert TestFloat4.count_float4(k) == (0, 1)
+
+  def test_float4_noncontiguous(self):
+    a = Tensor.rand(4, 2).realize()
+    b = Tensor.rand(4, 2).realize()
+    c = a + b
+
+    # we will upcast the top axis of sz 4. they should not be coalesced into float4,
+    # since the top axis is not contiguous.
+
+    s = c.lazydata.schedule()[0]
+    k = Linearizer(s[0])
+    k.process()
+    k.shift_to(0, 4, top=True)  # top axes are float4 axes
+    k.upcast()
+    k.linearize()
+
+    assert TestFloat4.count_float4(k) == (0, 0)
+
+  def test_float4_expand(self):
+    a = Tensor.rand(9).realize().shrink(((1, 9),))
+    b = Tensor.rand(2).realize().reshape((2, 1)).expand((2,4)).reshape((8,))
+    c = a + b
+
+    # we will upcast the top axis of sz 4. they should not be coalesced into float4,
+    # since the top axis is not contiguous.
+
+    s = c.lazydata.schedule()[0]
+    k = Linearizer(s[0])
+    k.process()
+    k.shift_to(0, 4)  # float4 axis
+    k.upcast()
+    k.linearize()
+
+    assert TestFloat4.count_float4(k) == (0, 1)
+
+  def test_float4_heterogeneous(self):
+    a = Tensor.rand(8).realize()
+    b = Tensor.rand(9).realize().shrink(((1, 9),))
+    c = a + b
+
+    # should float4 b but not a
+
+    s = c.lazydata.schedule()[0]
+    k = Linearizer(s[0])
+    k.process()
+    k.shift_to(0, 4)  # float4 axis
+    k.upcast()
+    k.linearize()
+
+    assert TestFloat4.count_float4(k) == (1, 1)
+
 
 if __name__ == '__main__':
   unittest.main()
