@@ -92,8 +92,6 @@ class LRUAllocator:
     self.buffer_info[newbuf] = (size, dtype, device)
     return newbuf
   def _free_buffer(self, buf_to_free):
-    from tinygrad.jit import CacheCollector
-    CacheCollector._on_buf_free(buf_to_free)
     self.free_space[self.buffer_info[buf_to_free][2]] += self._underlying_buf_memsz(buf_to_free)
     GlobalCounters.mem_cached -= self._underlying_buf_memsz(buf_to_free)
     self.buffer_info.pop(buf_to_free)

@@ -70,18 +70,13 @@ class TinyJit:
 class _CacheCollector:
   class _Placeholder:
     def __init__(self, buf): self.size, self.dtype, self._device, self.ref, self.buftype = buf.size, buf.dtype, getattr(buf, '_device', None), ref(buf), type(buf)
-    def alive(self): return self.ref() is not None
     def alloc_rawbuf(self): return self.buftype(self.size, self.dtype, **({'device':self._device} if self._device is not None else dict()))
 
   def __init__(self):
     self.cache: Optional[List[Tuple[Callable, List[Any], Dict[Any,Any]]]] = None
     self.placeholders: Dict[RawBuffer, _CacheCollector._Placeholder] = {} # Rawbuffers are replaced with placeholders to allow freeing of the real buffer while collecting cache.
-    self.last_buftype: Dict[Tuple[int,...], int] = {} # Last index of the cached entry where a buffer with the shape (shape is a key) is used as input to the prog.
-    self.last_placeholder_index: Dict[_CacheCollector._Placeholder, int] = {} # Last index where the placeholder is used as output. This allows tracking when we need to stick to the original buffer if it is still alive.
-    self.freed_placeholders: Dict[Tuple[int,...], List[_CacheCollector._Placeholder]] = defaultdict(list)
     self.circular_signatures: Set[Any] = set()
-  def start(self):
-    self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index, self.freed_buffers, self.circular_signatures = [], {}, {}, {}, defaultdict(list), set()
+  def start(self): self.cache, self.placeholders, self.circular_signatures = [], {}, set()
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
     cached_rawbufs = []
@@ -92,77 +87,34 @@ class _CacheCollector:
     self.cache.append((prg, cached_rawbufs, var_vals))
   def finish(self):
     if self.cache is None: return []
-    # print("FINISH")
 
-    buf_pool = []
-    buf_map = {}
-    buf_first_use, buf_last_use, last_buftype = {}, {}, {}
-    for j,(p,cached_bufs,var_vals) in enumerate(self.cache):
-      for buf in cached_bufs:
-        if isinstance(buf, RawBuffer): last_buftype[self._buftype_key(buf)] = j
-    for j,(p,cached_bufs,var_vals) in enumerate(self.cache):
-      for buf in cached_bufs:
+    rawbuf_pool, buf_map, buf_first_use, buf_last_use = [], {}, {}, {}
+    last_buftype = {self._buftype_key(buf): j for j, (_, cached_bufs, _) in enumerate(self.cache) for buf in cached_bufs if isinstance(buf, RawBuffer)}
+    
+    for j,(_,bufs,_) in enumerate(self.cache):
+      for buf in bufs:
         if buf.__class__ is not _CacheCollector._Placeholder: continue
-        if buf.alive():
-          buf_pool.append((buf.ref(), [(-1, last_buftype.get(self._buftype_key(buf), -1)), (j, len(self.cache)+1)]))
+        # If rawbuf is holded by someone, use it.
+        if buf.ref() is not None:
+          rawbuf_pool.append((buf.ref(), [(-1, last_buftype.get(self._buftype_key(buf), -1)), (j, len(self.cache)+1)]))
           buf_map[buf] = buf.ref()
         else:
           if buf not in buf_first_use: buf_first_use[buf] = j
           buf_last_use[buf] = j
 
+    # Query list contains query for every rawbuf. Serve this queries from the largest buffer to the smallest, allocate if no buffer from pool can serve the query.
     query_list = sorted([(buf.size*buf.dtype.itemsize, buf_first_use[buf], buf_last_use[buf], buf) for buf in buf_first_use.keys()], key=lambda x: x[0], reverse=True)
-    for size,start,end,buf in query_list:
-      buf_pool_i = -1
-      for i,(with_buf,usages) in enumerate(buf_pool):
-        if not self._can_replace(buf, with_buf): continue
-        bad = False
-        for st,en in usages:
-          if end < st or en < start: pass
-          else:
-            bad = True
-            break
-        if not bad: buf_pool_i = i
-      if buf_pool_i == -1:
-        buf_pool.append((buf.alloc_rawbuf(), []))
-        buf_pool_i = len(buf_pool) - 1
-      # else:
-        # print("Reuse", buf_pool_i)
-      buf_map[buf] = buf_pool[buf_pool_i][0]
-      buf_pool[buf_pool_i][1].append((start,end))
+    for _, start, end, buf in query_list:
+      buf_pool_i = next((i for i,(with_buf, usages) in enumerate(rawbuf_pool) if self._can_replace(buf, with_buf) and all(en < start or end < st for st, en in usages)), -1)
+      if buf_pool_i == -1: rawbuf_pool.append((buf.alloc_rawbuf(), [])); buf_pool_i = len(rawbuf_pool) - 1
+      buf_map[buf] = rawbuf_pool[buf_pool_i][0]
+      rawbuf_pool[buf_pool_i][1].append((start, end))
 
-    # print(buf_pool)
-
-    cache_result = []
-    for j,(p,cached_bufs,var_vals) in enumerate(self.cache):
-      cache_result.append((p, [buf_map.get(buf, buf) for buf in cached_bufs], var_vals))
+    cache_result = [(p, [buf_map.get(buf, buf) for buf in cached_bufs], var_vals) for p, cached_bufs, var_vals in self.cache]
     self.cache = None
     return cache_result
-
-    # for j,(p,cached_bufs,var_vals) in enumerate(self.cache): pass
-    placeholder_mapper, cache_result = {}, []
-    for j,(p,cached_bufs,var_vals) in enumerate(self.cache):
-      if cached_bufs[0].__class__ is _CacheCollector._Placeholder:
-        if cached_bufs[0].alive():
-          # Since the placeholder is alive (someone holds refed RawBuffer) to avoid hazards when this output buffer could be used as input on the other launch (e.g., LSTM),
-          # we allocate a backing buffer and and use it until the penultimate entry (the last entry is 100% safe to use the original RawBuffer).
-          if self.last_buftype.get(self._buftype_key(cached_bufs[0]), -1) < j or self.last_placeholder_index[cached_bufs[0]] == j:
-            # Safe to use the original buffer when all inputs buffers of the same size and dtype are behind or this is the last usage of this buffer as output.
-            placeholder_mapper[cached_bufs[0]] = cached_bufs[0].ref()
-          elif cached_bufs[0] not in placeholder_mapper:
-            placeholder_mapper[cached_bufs[0]] = cached_bufs[0].alloc_rawbuf() # Allocating a backing buffer.
-        elif cached_bufs[0] not in placeholder_mapper:
-          placeholder_mapper[cached_bufs[0]] = cached_bufs[0].alloc_rawbuf()
-      cache_result.append((p, [placeholder_mapper.get(buf, buf) for buf in cached_bufs], var_vals))
-    self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index, self.freed_buffers, self.circular_signatures = None, {}, {}, {}, defaultdict(list), set()
-    return cache_result
-
   def _can_replace(self, buf, with_buf): 
     return buf._device==with_buf._device and (buf.size*buf.dtype.itemsize<=with_buf.size*with_buf.dtype.itemsize if not isinstance(buf.dtype, ImageDType) and not isinstance(with_buf.dtype, ImageDType) else buf.size==with_buf.size and buf.dtype==with_buf.dtype and buf.dtype.shape==with_buf.dtype.shape)
   def _mark_output_buffer(self, output_buffer): self.circular_signatures.add(ref(output_buffer))
-  def _on_buf_free(self, underlying_buf):
-    if underlying_buf not in self.placeholders: return
-    self.freed_placeholders[self._buftype_key(self.placeholders[underlying_buf])].append(self.placeholders[underlying_buf])
-    self.placeholders.pop(underlying_buf)
-  def _get_signature(self, buf): return buf._buf if getattr(buf, '_buf', None) is not None and getattr(buf, '_allocator', None) is not None else buf
   def _buftype_key(self, buf): return (buf.size, buf.dtype, buf._device, buf.dtype.shape if hasattr(buf.dtype, 'shape') else None)
 CacheCollector = _CacheCollector()
