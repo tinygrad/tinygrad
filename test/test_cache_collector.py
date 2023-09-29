@@ -78,8 +78,8 @@ class TestCacheCollector(unittest.TestCase):
     assert cache[0][1][1] == inps[0], "Input should be on its place."
     assert cache[1][1][2] == inps[1], "Input should be on its place."
     assert cache[-1][1][0] == out, "Output does not match."
-    assert get_bufs_count(cache) == 6, "Should have 6 buffers in total"
     assert cache[-1][1][0] != cache[0][1][0] and cache[0][1][0] == cache[3][1][0], "Output buffers from 1st and 4th kernel could not be the same as the 5th."
+    assert get_bufs_count(cache) == 5, "Should have 5 buffers in total"
     FAKE_GLOBAL_ALLOCATOR = None
 
   def test_cache_collector_all_alive(self):
@@ -123,7 +123,7 @@ class TestCacheCollector(unittest.TestCase):
     assert cache[3][1][0] != cache[2][1][2], "None of outputs buffer should reuse new_input."
     assert cache[4][1][0] != cache[2][1][2], "None of outputs buffer should reuse new_input."
     assert cache[-1][1][0] == out, "Output does not match."
-    assert get_bufs_count(cache) == 7
+    assert get_bufs_count(cache) == 6
     FAKE_GLOBAL_ALLOCATOR = None
 
   def test_cache_collector_multidev(self):
@@ -179,7 +179,7 @@ class TestCacheCollector(unittest.TestCase):
     assert cache[0][1][1] == inps[0], "Input should be on its place."
     assert cache[1][1][2] == inps[1], "Input should be on its place."
     assert cache[-1][1][0] == out, "Output does not match."
-    assert get_bufs_count(cache) == 6, "Should have 6 buffers in total"
+    assert get_bufs_count(cache) == 5, "Should have 5 buffers in total"
     assert cache[0][1][0] == cache[3][1][0], "Output buffers from 1st and 4th should be the same"
     FAKE_GLOBAL_ALLOCATOR = None
 
@@ -201,7 +201,7 @@ class TestCacheCollector(unittest.TestCase):
     assert cache[1][1][2] == inps[1], "Input should be on its place."
     assert cache[-1][1][0] == out, "Output does not match."
     assert cache[0][1][0] != cache[3][1][0], "Cannot reuse 4th output buffer, it's an output buffer which might ovewrite itself"
-    assert get_bufs_count(cache) == 7, "Should have 7 buffers in total"
+    assert get_bufs_count(cache) == 6, "Should have 6 buffers in total"
     FAKE_GLOBAL_ALLOCATOR = None
 
 if __name__ == "__main__":
