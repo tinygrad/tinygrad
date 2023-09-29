@@ -61,7 +61,7 @@ if __name__ == "__main__":
   else:
     X_train, Y_train = fetch_cifar()
 
-  with Tensor.train()
+  with Tensor.train():
     for i in (t := trange(steps)):
       if IMAGENET:
         X, Y = q.get(True)
