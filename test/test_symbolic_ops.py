@@ -57,11 +57,11 @@ class TestSymbolicOps(unittest.TestCase):
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_attention_training(self):
-    Tensor.training = True
-    self.test_attention(dropout_p=0.0)
-    with self.assertRaises(AssertionError):
-      # symbolic shape dropout is not supported
-      self.test_attention(dropout_p=0.5)
+    with Tensor.train():
+      self.test_attention(dropout_p=0.0)
+      with self.assertRaises(AssertionError):
+        # symbolic shape dropout is not supported
+        self.test_attention(dropout_p=0.5)
 
   def test_cat_dim0(self):
     def f(a, b): return a.cat(b, dim=0).realize()
