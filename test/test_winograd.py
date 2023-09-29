@@ -22,7 +22,8 @@ class TestWinograd(unittest.TestCase):
 
     for i,s in enumerate(sched):
       if s[0].op in LoadOps: continue
-      with Timing(f"linearize {i}: "):
+      ops = s[0].get_lazyops()
+      with Timing(f"linearize {i} with {len(ops):4d} ops: "):
         l = Linearizer(s[0])
         l.hand_coded_optimizations()
         l.linearize()
