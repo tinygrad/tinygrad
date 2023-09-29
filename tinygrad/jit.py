@@ -99,7 +99,9 @@ class _CacheCollector:
     query_list = sorted([(buf.size*buf.dtype.itemsize, buf_use_bounds[buf][0], buf_use_bounds[buf][1], buf) for buf in buf_use_bounds.keys()], key=lambda x: x[0], reverse=True)
     for _, start, end, buf in query_list:
       pool_idx = next((i for i,(with_buf, usages) in enumerate(rawbuf_pool) if self._can_substitute(buf, with_buf) and self._no_intersect(start,end,usages)), -1)
-      if pool_idx == -1: rawbuf_pool.append((buf.alloc_rawbuf(), [])); pool_idx = len(rawbuf_pool) - 1
+      if pool_idx == -1:
+        rawbuf_pool.append((buf.alloc_rawbuf(), []))
+        pool_idx = len(rawbuf_pool) - 1
       buf_map[buf] = rawbuf_pool[pool_idx][0]
       rawbuf_pool[pool_idx][1].append((start, end))
 
