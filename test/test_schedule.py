@@ -8,15 +8,19 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.helpers import DEBUG, dtypes
 from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.graph import log_schedule_item
 from tinygrad import nn
 
 def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=None):
   seen = set()
   if to_prerealize:
     for pre in to_prerealize:
-      for _, out, _ in pre.lazydata.schedule(seen.copy()):
-        seen.add(out)
-  sched = [s for s in t.lazydata.schedule(seen) if s[0].op not in LoadOps]
+      for s in pre.lazydata.schedule(seen.copy()):
+        log_schedule_item(*s)
+        seen.add(s[1])
+  sched = t.lazydata.schedule(seen)
+  for s in sched: log_schedule_item(*s)
+  sched = [s for s in sched if s[0].op not in LoadOps]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     from extra.utils import print_tree
