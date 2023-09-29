@@ -84,28 +84,50 @@ class _CacheCollector:
     self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index, self.freed_buffers, self.circular_signatures = [], {}, {}, {}, defaultdict(list), set()
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
-    # When we got buffers with the same signature, we can use just 1(max 2, see cycle avoidance below) buffer insted of all of them.
-    # Current implementation of a signature is an underlying buffer, because if 2 or more different RawBuffers shares the same, all but the very last are dead.
-    for buf in rawbufs[1:]:
-      # Check if the input matches any of placeholder to determine if it's existing or newly created input.
-      # In case of newly created input remove placeholder and capture the whole buffer.
-      if isinstance(buf, RawBuffer) and self._get_signature(buf) in self.placeholders and self.placeholders[self._get_signature(buf)].ref != ref(buf):
-        self.placeholders.pop(self._get_signature(buf))
-      if isinstance(buf, RawBuffer) and self._get_signature(buf) not in self.placeholders:
-        self.last_buftype[self._buftype_key(buf)] = len(self.cache)
-
-    # Creating/updating a placeholder for the current output buffer. If we update output, set the ref to point to the new RawBuffer,
-    # since the previous RawBuffer is dead (overwise we won't get a new RawBuffer with the same signature). Do not care about dead buffers, they 100% could be replaced with any other buffer.
-    if self._get_signature(rawbufs[0]) in self.placeholders: self.placeholders[self._get_signature(rawbufs[0])].ref = ref(rawbufs[0])
-    else:
-      # This is a new output buffer. Try to reuse any freed placeholders with the same type to "merge" these buffers.
-      # If this output buffer is "output_buffer", reusage of the output buffer is scary.
-      plh = self.freed_placeholders[self._buftype_key(rawbufs[0])].pop() if self._get_signature(rawbufs[0]) not in self.circular_signatures and self.freed_placeholders[self._buftype_key(rawbufs[0])] else _CacheCollector._Placeholder(rawbufs[0])
-      self.placeholders.setdefault(self._get_signature(rawbufs[0]), plh).ref = ref(rawbufs[0])
-    self.last_placeholder_index[self.placeholders[self._get_signature(rawbufs[0])]] = len(self.cache)
-    self.cache.append((prg,[self.placeholders.get(self._get_signature(x), x) for x in rawbufs],var_vals))
+    print("DAI")
+    self.cache.append((prg,[self.placeholders.setdefault(x, _CacheCollector._Placeholder(x)) for x in rawbufs],var_vals))
   def finish(self):
     if self.cache is None: return []
+    print("FINISH")
+
+    buf_map = {}
+    buf_first_use, buf_last_use = {}, {}
+    for j,(p,cached_bufs,var_vals) in enumerate(self.cache):
+      for buf in cached_bufs:
+        if buf.alive(): buf_map[buf] = buf.ref()
+        else:
+          if buf not in buf_first_use: buf_first_use[buf] = j
+          buf_last_use[buf] = j
+
+    # are_intervals_intersecting = lambda start1, end1, start2, end2: max(start1, start2) <= min(end1, end2)
+    
+    buf_pool = []
+    query_list = sorted([(buf.size*buf.dtype.itemsize, buf, buf_first_use[buf], buf_last_use[buf]) for buf in buf_first_use.keys()], reverse=True)
+    for size,start,end,buf in query_list:
+      buf_pool_i = -1
+      for i,(with_buf,usages) in enumerate(buf_pool):
+        if not self._can_replace(buf, with_buf): continue
+        for st,en in usages:
+          if max(start, st) <= min(end, en):
+            bad = True
+            break
+        if not bad: buf_pool_i = i
+      if buf_pool_i == -1:
+        print("FUCK", buf_pool_i)
+        buf_pool.append((buf.alloc_rawbuf(), []))
+        buf_pool_i = len(buf_pool) - 1
+      else:
+        print("Reuse", buf_pool_i)
+      buf_map[buf] = buf_pool[buf_pool_i][0]
+      buf_pool[buf_pool_i][1].append((start,end))
+
+    cache_result = []
+    for j,(p,cached_bufs,var_vals) in enumerate(self.cache):
+      cache_result.append((p, [buf_map[buf] for buf in cached_bufs], var_vals))
+    self.cache = None
+    return cache_result
+
+    # for j,(p,cached_bufs,var_vals) in enumerate(self.cache): pass
     placeholder_mapper, cache_result = {}, []
     for j,(p,cached_bufs,var_vals) in enumerate(self.cache):
       if cached_bufs[0].__class__ is _CacheCollector._Placeholder:
@@ -122,6 +144,8 @@ class _CacheCollector:
       cache_result.append((p, [placeholder_mapper.get(buf, buf) for buf in cached_bufs], var_vals))
     self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index, self.freed_buffers, self.circular_signatures = None, {}, {}, {}, defaultdict(list), set()
     return cache_result
+  
+  def _can_replace(buf, with_buf): return buf.size*buf.dtype.itemsize<=with_buf.size*with_buf.dtype.itemsize if not hasattr(buf.dtype, 'shape') else buf.size == with_buf.size and with_buf.dtype == with_buf.dtype
   def _mark_output_buffer(self, output_buffer): self.circular_signatures.add(self._get_signature(output_buffer))
   def _on_buf_free(self, underlying_buf):
     if underlying_buf not in self.placeholders: return
