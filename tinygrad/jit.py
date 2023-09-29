@@ -87,16 +87,18 @@ class _CacheCollector:
     if self.cache is None: return []
 
     rawbuf_pool: List[Tuple[RawBuffer, List[Tuple[int, int]]]] = []
-    buf_use_bounds: Dict[_CacheCollector._Placeholder, Tuple[int, int]] = {}
+    buf_usage_bounds: Dict[_CacheCollector._Placeholder, Tuple[int, int]] = {}
     buf_map: Dict[_CacheCollector._Placeholder, RawBuffer] = {}
+
     for j,(_,bufs,_) in enumerate(self.cache):
       for buf in bufs:
         if buf.__class__ is not _CacheCollector._Placeholder: continue
-        if buf.ref() is not None: buf_map[buf] = buf.ref()
-        else: buf_use_bounds[buf] = buf_use_bounds.get(buf, (j, j))[0], j
+        if buf.ref() is not None: buf_map[buf] = buf.ref() # rawbufs that are referenced are not replaced but are used as is.
+        else: buf_usage_bounds[buf] = buf_usage_bounds.get(buf, (j, j))[0], j
 
-    # Query list contains query for every output rawbuf in the cache. Serve the queries from the largest buffer to the smallest.
-    query_list = sorted([(buf.size*buf.dtype.itemsize, buf_use_bounds[buf][0], buf_use_bounds[buf][1], buf) for buf in buf_use_bounds.keys()], key=lambda x: x[0], reverse=True)
+    # The query list contains a query for every placeholder that should be replaced with the actual rawbuffer. Queries are served from the largest to the smallest.
+    # For each query, find any rawbuffer that is free within the query timeframe or allocate a new one.
+    query_list = sorted([(buf.size*buf.dtype.itemsize, buf_usage_bounds[buf][0], buf_usage_bounds[buf][1], buf) for buf in buf_usage_bounds.keys()], key=lambda x: x[0], reverse=True)
     for _, start, end, buf in query_list:
       pool_idx = next((i for i,(with_buf, usages) in enumerate(rawbuf_pool) if self._can_substitute(buf, with_buf) and self._no_intersect(start,end,usages)), -1)
       if pool_idx == -1:
