@@ -1,7 +1,5 @@
 import numpy as np
-import unittest
 import unittest, os
-from typing import Optional, Any
 
 from tinygrad.codegen.kernel import tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOps
@@ -10,7 +8,6 @@ from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.lazy import _replace_bufferops
 from tinygrad.helpers import dtypes
-from extra.utils import print_tree
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -240,7 +237,7 @@ class TestLinearizerOpts(unittest.TestCase):
 
 class TestFloat4(unittest.TestCase):
   def setUp(self):
-    if not Device[Device.DEFAULT].linearizer_opts.supports_float4:
+    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.supports_float4:
       self.skipTest("Device does not support float4")
 
   @staticmethod
