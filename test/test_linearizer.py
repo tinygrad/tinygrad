@@ -253,7 +253,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
+    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
     k.hand_coded_optimizations()
     k.linearize()
 
@@ -265,7 +265,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
+    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.shift_to(0, 4)  # float4 dimension
     k.shift_to(0, 2, insert_before=k.shape_len-1)
@@ -282,7 +282,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
+    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
     k.hand_coded_optimizations()  # implicit trigger float4 dim
     k.linearize()
 
@@ -294,7 +294,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
+    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
     k.upcast()
@@ -313,7 +313,7 @@ class TestFloat4(unittest.TestCase):
     # float4 should be emitted (the reduce axis of size 4 is the float4 axis here)
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
+    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.upcast()
     k.linearize()
@@ -329,7 +329,7 @@ class TestFloat4(unittest.TestCase):
     # don't.
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
+    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.upcast()
     k.upcast()
@@ -346,7 +346,7 @@ class TestFloat4(unittest.TestCase):
     # since the top axis is not contiguous.
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
+    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.shift_to(0, 4, top=True)  # top axes are float4 axes
     k.upcast()
@@ -363,7 +363,7 @@ class TestFloat4(unittest.TestCase):
     # since the top axis is not contiguous.
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
+    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.shift_to(0, 4)  # float4 axis
     k.upcast()
@@ -379,7 +379,7 @@ class TestFloat4(unittest.TestCase):
     # should float4 b but not a
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
+    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
     k.process()
     k.shift_to(0, 4)  # float4 axis
     k.upcast()
