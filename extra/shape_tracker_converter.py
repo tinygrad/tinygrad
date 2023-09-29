@@ -1,5 +1,5 @@
 from math import prod
-from copy import copy, deepcopy
+from itertools import zip_longest
 from typing import List, Tuple
 
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -16,7 +16,7 @@ def convert_st_to_movement_ops(st: ShapeTracker, prev_ops: List[Tuple[MovementOp
   # if prev_ops == []: st = deepcopy(st)
   # Stop space from polluting. TO DO: remove this line.
   if initial_call: prev_ops = []
-  if any(dim==1 for dim in st.views[-1].shape): 
+  if any(dim==1 for dim in st.views[-1].shape):
     prev_ops.append((MovementOps.RESHAPE, st.views[-1].shape))
     return convert_st_to_movement_ops(st.reshape(tuple(filter(lambda x: x != 1, st.views[-1].shape))), prev_ops, False)
   # identify expands if stride is 0 on a dimension != 1
@@ -69,12 +69,18 @@ def convert_st_to_movement_ops(st: ShapeTracker, prev_ops: List[Tuple[MovementOp
         return convert_st_to_movement_ops(st.permute(inv_permutation), prev_ops, initial_call=False)
 
   if len(st.views) >= 2:
-    # identify reshapes by multiple views. TO DO: this does not track "vanilla" reshapes where no movement op has been applied before.
+    # identify reshapes by multiple views.
     if prod(st.views[-1].shape) == prod(st.views[-2].shape):
       if len(prev_ops) == 0 or prev_ops[-1][0] != MovementOps.RESHAPE:
         prev_ops.append((MovementOps.RESHAPE, st.views[-1].shape))
         prev_st = ShapeTracker(st.views[:-1])
         return convert_st_to_movement_ops(prev_st, prev_ops, initial_call=False)
       
+  if reshapes := tuple(filter(lambda x: x[0]==MovementOps.RESHAPE and 1 in x[1], prev_ops)):
+    idxs = set(y.index(1) for x,y in reshapes)
+    reshape_arg = list(st.views[-1].shape)
+    for idx in idxs: reshape_arg.insert(idx, 1)
+    prev_ops.append((MovementOps.RESHAPE, tuple(reshape_arg)))
+    
   # ops have been identified and appended in reverse order
   return prev_ops[::-1]
