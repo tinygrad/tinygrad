@@ -84,11 +84,11 @@ class _CacheCollector:
     self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index, self.freed_buffers, self.circular_signatures = [], {}, {}, {}, defaultdict(list), set()
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
-    print("DAI")
-    self.cache.append((prg,[self.placeholders.setdefault(x, _CacheCollector._Placeholder(x)) for x in rawbufs],var_vals))
+    # print("DAI")
+    self.cache.append((prg,[self.placeholders.setdefault(ref(x), _CacheCollector._Placeholder(x)) for x in rawbufs],var_vals))
   def finish(self):
     if self.cache is None: return []
-    print("FINISH")
+    # print("FINISH")
 
     buf_map = {}
     buf_first_use, buf_last_use = {}, {}
@@ -102,22 +102,23 @@ class _CacheCollector:
     # are_intervals_intersecting = lambda start1, end1, start2, end2: max(start1, start2) <= min(end1, end2)
     
     buf_pool = []
-    query_list = sorted([(buf.size*buf.dtype.itemsize, buf, buf_first_use[buf], buf_last_use[buf]) for buf in buf_first_use.keys()], reverse=True)
+    query_list = sorted([(buf.size*buf.dtype.itemsize, buf_first_use[buf], buf_last_use[buf], buf) for buf in buf_first_use.keys()], key=lambda x: x[0], reverse=True)
     for size,start,end,buf in query_list:
       buf_pool_i = -1
       for i,(with_buf,usages) in enumerate(buf_pool):
         if not self._can_replace(buf, with_buf): continue
+        bad = False
         for st,en in usages:
-          if max(start, st) <= min(end, en):
+          if end < st or en < start: pass
+          else:
             bad = True
             break
         if not bad: buf_pool_i = i
       if buf_pool_i == -1:
-        print("FUCK", buf_pool_i)
         buf_pool.append((buf.alloc_rawbuf(), []))
         buf_pool_i = len(buf_pool) - 1
-      else:
-        print("Reuse", buf_pool_i)
+      # else:
+        # print("Reuse", buf_pool_i)
       buf_map[buf] = buf_pool[buf_pool_i][0]
       buf_pool[buf_pool_i][1].append((start,end))
 
@@ -145,7 +146,7 @@ class _CacheCollector:
     self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index, self.freed_buffers, self.circular_signatures = None, {}, {}, {}, defaultdict(list), set()
     return cache_result
   
-  def _can_replace(buf, with_buf): return buf.size*buf.dtype.itemsize<=with_buf.size*with_buf.dtype.itemsize if not hasattr(buf.dtype, 'shape') else buf.size == with_buf.size and with_buf.dtype == with_buf.dtype
+  def _can_replace(self, buf, with_buf): return buf.size*buf.dtype.itemsize<=with_buf.size*with_buf.dtype.itemsize if not hasattr(buf.dtype, 'shape') else buf.size == with_buf.size and with_buf.dtype == with_buf.dtype
   def _mark_output_buffer(self, output_buffer): self.circular_signatures.add(self._get_signature(output_buffer))
   def _on_buf_free(self, underlying_buf):
     if underlying_buf not in self.placeholders: return
