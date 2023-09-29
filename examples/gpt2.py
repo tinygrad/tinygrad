@@ -70,7 +70,7 @@ class TransformerBlock:
     self.ln_1 = LayerNorm(dim, norm_eps)
     self.ln_2 = LayerNorm(dim, norm_eps)
 
-  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor], realize=True, jit_ctx:Optional[Dict[Variable,int]]=None):
+  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor], jit_ctx:Optional[Dict[Variable,int]]=None):
     if start_pos > 0 and mask is None and getenv("JIT"):
       start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
       cache_k = cache_k.reshape(cache_k.shape[0], start_pos_var, cache_k.shape[2], cache_k.shape[3])
@@ -82,8 +82,6 @@ class TransformerBlock:
     output, cache_k, cache_v = self.attn(self.ln_1(x), cache_k, cache_v, start_pos, mask, jit_ctx=jit_ctx)
     h = x + output
     h = (h + self.mlp(self.ln_2(h)))
-    if realize:
-      return h.realize(), cache_k.realize(), cache_v.realize()
     return h, cache_k, cache_v
 
 class Transformer:
@@ -100,14 +98,12 @@ class Transformer:
     self.postprocess_jitted = TinyJit(self.postprocess)
     self.h_jitted = [TinyJit(h.__call__) for h in self.h]
 
-  def embed(self, tokens:Tensor, pos:Tensor, realize=True):
+  def embed(self, tokens:Tensor, pos:Tensor):
     tok_emb = self.wte(tokens)
     pos_emb = self.wpe(pos)
     h = tok_emb + pos_emb
     if getenv("FP16"): h = h.half()
-    if not realize:
-      return h
-    return h.realize()
+    return h
 
   def postprocess(self, x, temperature:Optional[float]):
     logits = self.lm_head(self.ln_f(x))
@@ -116,10 +112,10 @@ class Transformer:
 
   @TinyJit
   def run_all_layers(self, tokens:Tensor, pos:Tensor, start_pos:int, temperature:float, jit_ctx:Optional[Dict[Variable,int]]=None, **kv_cache):
-    h = self.embed(tokens, pos, realize=False)
+    h = self.embed(tokens, pos)
 
     for i, hi in enumerate(self.h):
-      h, kv_cache[f'cache_k{i}'], kv_cache[f'cache_v{i}'] = hi(h, kv_cache[f'cache_k{i}'], kv_cache[f'cache_v{i}'], start_pos=start_pos, mask=None, realize=False, jit_ctx=jit_ctx)
+      h, kv_cache[f'cache_k{i}'], kv_cache[f'cache_v{i}'] = hi(h, kv_cache[f'cache_k{i}'], kv_cache[f'cache_v{i}'], start_pos=start_pos, mask=None, jit_ctx=jit_ctx)
     for v in kv_cache.values(): v.realize()
 
     return self.postprocess(h, temperature), kv_cache
