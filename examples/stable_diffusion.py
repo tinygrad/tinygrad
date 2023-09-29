@@ -596,7 +596,7 @@ if __name__ == "__main__":
 
   def get_model_output(latent, timestep):
     # put into diffuser
-    latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep.expand(2, *timestep.shape[1:]), unconditional_context.cat(context, dim=0))
+    latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep, unconditional_context.cat(context, dim=0))
     unconditional_latent, latent = latents[0:1], latents[1:2]
 
     unconditional_guidance_scale = 7.5
@@ -619,9 +619,8 @@ if __name__ == "__main__":
 
     # direction pointing to x_t
     dir_xt = (1. - a_prev - sigma_t**2).sqrt() * e_t
-    noise = sigma_t * Tensor.randn(*x.shape) * temperature
 
-    x_prev = a_prev.sqrt() * pred_x0 + dir_xt #+ noise
+    x_prev = a_prev.sqrt() * pred_x0 + dir_xt
     return x_prev, pred_x0
 
   @TinyJit

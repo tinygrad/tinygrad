@@ -61,43 +61,43 @@ if __name__ == "__main__":
   else:
     X_train, Y_train = fetch_cifar()
 
-  Tensor.training = True
-  for i in (t := trange(steps)):
-    if IMAGENET:
-      X, Y = q.get(True)
-    else:
-      samp = np.random.randint(0, X_train.shape[0], size=(BS))
-      X, Y = X_train[samp], Y_train[samp]
+  with Tensor.train()
+    for i in (t := trange(steps)):
+      if IMAGENET:
+        X, Y = q.get(True)
+      else:
+        samp = np.random.randint(0, X_train.shape[0], size=(BS))
+        X, Y = X_train[samp], Y_train[samp]
 
-    st = time.time()
-    out = model.forward(Tensor(X.astype(np.float32), requires_grad=False))
-    fp_time = (time.time()-st)*1000.0
+      st = time.time()
+      out = model.forward(Tensor(X.astype(np.float32), requires_grad=False))
+      fp_time = (time.time()-st)*1000.0
 
-    y = np.zeros((BS,classes), np.float32)
-    y[range(y.shape[0]),Y] = -classes
-    y = Tensor(y, requires_grad=False)
-    loss = out.log_softmax().mul(y).mean()
+      y = np.zeros((BS,classes), np.float32)
+      y[range(y.shape[0]),Y] = -classes
+      y = Tensor(y, requires_grad=False)
+      loss = out.log_softmax().mul(y).mean()
 
-    optimizer.zero_grad()
+      optimizer.zero_grad()
 
-    st = time.time()
-    loss.backward()
-    bp_time = (time.time()-st)*1000.0
+      st = time.time()
+      loss.backward()
+      bp_time = (time.time()-st)*1000.0
 
-    st = time.time()
-    optimizer.step()
-    opt_time = (time.time()-st)*1000.0
+      st = time.time()
+      optimizer.step()
+      opt_time = (time.time()-st)*1000.0
 
-    st = time.time()
-    loss = loss.numpy()
-    cat = out.argmax(axis=1).numpy()
-    accuracy = (cat == Y).mean()
-    finish_time = (time.time()-st)*1000.0
+      st = time.time()
+      loss = loss.numpy()
+      cat = out.argmax(axis=1).numpy()
+      accuracy = (cat == Y).mean()
+      finish_time = (time.time()-st)*1000.0
 
-    # printing
-    t.set_description("loss %.2f accuracy %.2f -- %.2f + %.2f + %.2f + %.2f = %.2f" %
-      (loss, accuracy,
-      fp_time, bp_time, opt_time, finish_time,
-      fp_time + bp_time + opt_time + finish_time))
+      # printing
+      t.set_description("loss %.2f accuracy %.2f -- %.2f + %.2f + %.2f + %.2f = %.2f" %
+        (loss, accuracy,
+        fp_time, bp_time, opt_time, finish_time,
+        fp_time + bp_time + opt_time + finish_time))
 
-    del out, y, loss
+      del out, y, loss

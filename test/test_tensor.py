@@ -1,9 +1,11 @@
 import numpy as np
 import torch
-import unittest
+import struct
+import unittest, copy
 from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
+from extra.utils import temp
 
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)
@@ -97,12 +99,12 @@ class TestTinygrad(unittest.TestCase):
     assert W.grad is not None
 
   def test_dropout(self):
-    Tensor.training = True
-    n, rate = 1_000_000, 0.1
-    w = Tensor.ones(n).dropout(rate)
-    non_zeros = np.count_nonzero(w.numpy())
-    expected = n * (1 - rate)
-    np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
+    with Tensor.train():
+      n, rate = 1_000_000, 0.1
+      w = Tensor.ones(n).dropout(rate)
+      non_zeros = np.count_nonzero(w.numpy())
+      expected = n * (1 - rate)
+      np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
 
   def test_jacobian(self):
     W = np.random.RandomState(42069).random((10, 5)).astype(np.float32)
@@ -235,6 +237,16 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor(arr).dtype == Tensor.default_type
     assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
     assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+
+  def test_tensor_copy(self):
+    x = copy.deepcopy(Tensor.ones((3,3,3)))
+    np.testing.assert_allclose(x.numpy(), np.ones((3,3,3)))
+
+  def test_copy_from_disk(self):
+    t = Tensor.randn(30, device="CPU").to(f"disk:{temp('test_copy_from_disk')}")
+    a = t[10:20]
+    dev = a.to(Device.DEFAULT)
+    np.testing.assert_allclose(a.numpy(), dev.numpy())
 
 if __name__ == '__main__':
   unittest.main()

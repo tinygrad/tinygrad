@@ -32,7 +32,7 @@ class TestFetchRelative(unittest.TestCase):
     self.tempdir = tempfile.TemporaryDirectory()
     os.chdir(self.tempdir.name)
     with open('test_file.txt', 'x') as f:
-        f.write("12345")
+      f.write("12345")
 
   def tearDown(self):
     os.chdir(self.working_dir)
@@ -44,9 +44,9 @@ class TestFetchRelative(unittest.TestCase):
 
   #test ../
   def test_fetch_relative_dotdotslash(self):
-      os.mkdir('test_file_path')
-      os.chdir('test_file_path')
-      self.assertEqual(b'12345', fetch("../test_file.txt"))
+    os.mkdir('test_file_path')
+    os.chdir('test_file_path')
+    self.assertEqual(b'12345', fetch("../test_file.txt"))
 
 class TestDownloadFile(unittest.TestCase):
   def setUp(self):
