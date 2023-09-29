@@ -157,7 +157,7 @@ class _CacheCollector:
     return cache_result
 
   def _can_replace(self, buf, with_buf): 
-    return buf._device==with_buf._device and (buf.size*buf.dtype.itemsize<=with_buf.size*with_buf.dtype.itemsize if not isinstance(buf.dtype, ImageDType) and not isinstance(with_buf.dtype, ImageDType) else buf.size==with_buf.size and buf.dtype==with_buf.dtype)
+    return buf._device==with_buf._device and (buf.size*buf.dtype.itemsize<=with_buf.size*with_buf.dtype.itemsize if not isinstance(buf.dtype, ImageDType) and not isinstance(with_buf.dtype, ImageDType) else False)
   def _mark_output_buffer(self, output_buffer): self.circular_signatures.add(ref(output_buffer))
   def _on_buf_free(self, underlying_buf):
     if underlying_buf not in self.placeholders: return
