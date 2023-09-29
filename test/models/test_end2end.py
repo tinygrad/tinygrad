@@ -9,50 +9,50 @@ from extra.datasets import fetch_mnist
 from tinygrad.helpers import CI
 
 def compare_tiny_torch(model, model_torch, X, Y):
-  Tensor.training = True
-  model_torch.train()
-  model_state_dict = get_state_dict(model)
-  for k,v in model_torch.named_parameters():
-    if not CI: print(f"initting {k} from torch")
-    model_state_dict[k].assign(Tensor(v.detach().numpy())).realize()
+  with Tensor.train():
+    model_torch.train()
+    model_state_dict = get_state_dict(model)
+    for k,v in model_torch.named_parameters():
+      if not CI: print(f"initting {k} from torch")
+      model_state_dict[k].assign(Tensor(v.detach().numpy())).realize()
 
-  optimizer = optim.SGD(get_parameters(model), lr=0.01)
-  optimizer_torch = torch.optim.SGD(model_torch.parameters(), lr=0.01)
+    optimizer = optim.SGD(get_parameters(model), lr=0.01)
+    optimizer_torch = torch.optim.SGD(model_torch.parameters(), lr=0.01)
 
-  Xt = torch.Tensor(X.numpy())
-  np.testing.assert_allclose(X.numpy(), Xt.detach().numpy())
+    Xt = torch.Tensor(X.numpy())
+    np.testing.assert_allclose(X.numpy(), Xt.detach().numpy())
 
-  out = model(X)
-  loss = (out * Y).mean()
-  if not CI: print(loss.realize().numpy())
+    out = model(X)
+    loss = (out * Y).mean()
+    if not CI: print(loss.realize().numpy())
 
-  out_torch = model_torch(torch.Tensor(X.numpy()))
-  loss_torch = (out_torch * torch.Tensor(Y.numpy())).mean()
-  if not CI: print(loss_torch.detach().numpy())
+    out_torch = model_torch(torch.Tensor(X.numpy()))
+    loss_torch = (out_torch * torch.Tensor(Y.numpy())).mean()
+    if not CI: print(loss_torch.detach().numpy())
 
-  # assert losses match
-  np.testing.assert_allclose(loss.realize().numpy(), loss_torch.detach().numpy(), atol=1e-4)
+    # assert losses match
+    np.testing.assert_allclose(loss.realize().numpy(), loss_torch.detach().numpy(), atol=1e-4)
 
-  # zero and backward
-  optimizer.zero_grad()
-  loss.backward()
-  optimizer_torch.zero_grad()
-  loss_torch.backward()
+    # zero and backward
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer_torch.zero_grad()
+    loss_torch.backward()
 
-  for k,v in list(model_torch.named_parameters())[::-1]:
-    g = model_state_dict[k].grad.numpy()
-    gt = v.grad.detach().numpy()
-    if not CI: print("testing grads", k)
-    np.testing.assert_allclose(g, gt, atol=1e-3, err_msg=f'grad mismatch {k}')
+    for k,v in list(model_torch.named_parameters())[::-1]:
+      g = model_state_dict[k].grad.numpy()
+      gt = v.grad.detach().numpy()
+      if not CI: print("testing grads", k)
+      np.testing.assert_allclose(g, gt, atol=1e-3, err_msg=f'grad mismatch {k}')
 
-  # take the steps
-  optimizer.step()
-  optimizer_torch.step()
+    # take the steps
+    optimizer.step()
+    optimizer_torch.step()
 
-  # assert weights match (they don't!)
-  for k,v in model_torch.named_parameters():
-    if not CI: print("testing weight", k)
-    np.testing.assert_allclose(model_state_dict[k].numpy(), v.detach().numpy(), atol=1e-3, err_msg=f'weight mismatch {k}')
+    # assert weights match (they don't!)
+    for k,v in model_torch.named_parameters():
+      if not CI: print("testing weight", k)
+      np.testing.assert_allclose(model_state_dict[k].numpy(), v.detach().numpy(), atol=1e-3, err_msg=f'weight mismatch {k}')
 
 def get_mnist_data():
   X_train, Y_train, X_test, Y_test = fetch_mnist()

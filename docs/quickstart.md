@@ -131,12 +131,6 @@ Training neural networks in tinygrad is super simple.
 All we need to do is define our neural network, define our loss function, and then call `.backward()` on the loss function to compute the gradients.
 They can then be used to update the parameters of our neural network using one of the many optimizers in [optim.py](/tinygrad/nn/optim.py).
 
-First we need to set the training flag in `Tensor`:
-
-```python
-Tensor.training = True
-```
-
 For our loss function we will be using sparse categorical cross entropy loss.
 
 ```python
@@ -176,37 +170,41 @@ from extra.datasets import fetch_mnist
 Now we have everything we need to start training our neural network.
 We will be training for 1000 steps with a batch size of 64.
 
+We use `with Tensor.train()` set the internal flag `Tensor.training` to `True` during training.
+Upon exit, the flag is restored to its previous value by the context manager.
+
 ```python
 X_train, Y_train, X_test, Y_test = fetch_mnist()
 
-for step in range(1000):
-  # random sample a batch
-  samp = np.random.randint(0, X_train.shape[0], size=(64))
-  batch = Tensor(X_train[samp], requires_grad=False)
-  # get the corresponding labels
-  labels = Tensor(Y_train[samp])
+with Tensor.train():
+  for step in range(1000):
+    # random sample a batch
+    samp = np.random.randint(0, X_train.shape[0], size=(64))
+    batch = Tensor(X_train[samp], requires_grad=False)
+    # get the corresponding labels
+    labels = Tensor(Y_train[samp])
 
-  # forward pass
-  out = net(batch)
+    # forward pass
+    out = net(batch)
 
-  # compute loss
-  loss = sparse_categorical_crossentropy(out, labels)
+    # compute loss
+    loss = sparse_categorical_crossentropy(out, labels)
 
-  # zero gradients
-  opt.zero_grad()
+    # zero gradients
+    opt.zero_grad()
 
-  # backward pass
-  loss.backward()
+    # backward pass
+    loss.backward()
 
-  # update parameters
-  opt.step()
+    # update parameters
+    opt.step()
 
-  # calculate accuracy
-  pred = out.argmax(axis=-1)
-  acc = (pred == labels).mean()
+    # calculate accuracy
+    pred = out.argmax(axis=-1)
+    acc = (pred == labels).mean()
 
-  if step % 100 == 0:
-    print(f"Step {step+1} | Loss: {loss.numpy()} | Accuracy: {acc.numpy()}")
+    if step % 100 == 0:
+      print(f"Step {step+1} | Loss: {loss.numpy()} | Accuracy: {acc.numpy()}")
 ```
 
 ## Evaluation
@@ -215,9 +213,6 @@ Now that we have trained our neural network we can evaluate it on the test set.
 We will be using the same batch size of 64 and will be evaluating for 1000 of those batches.
 
 ```python
-# set training flag to false
-Tensor.training = False
-
 with Timing("Time: "):
   avg_acc = 0
   for step in range(1000):

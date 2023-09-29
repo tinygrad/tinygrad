@@ -22,7 +22,7 @@ from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
 from extra.dist import collectives
 
-BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 100)
+BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
 class BatchNorm(nn.BatchNorm2d):
   def __init__(self, num_features):
@@ -234,7 +234,6 @@ def train_cifar():
 
   # this import needs to be done here because this is running in a subprocess
   from extra.dist import OOB
-  Tensor.training = True
   rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
 
   X_train, Y_train, X_test, Y_test = fetch_cifar()
@@ -312,8 +311,7 @@ def train_cifar():
   eval_step_jitted     = TinyJit(eval_step)
   eval_step_ema_jitted = TinyJit(eval_step)
 
-  # 97 steps in 2 seconds = 20ms / step  Tensor.training = True
-
+  # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
   # 4 seconds for tfloat32 ~ 28 TFLOPS, 41% of max 68
   # 6.4 seconds for float32 ~ 17 TFLOPS, 50% of max 34.1
@@ -327,77 +325,78 @@ def train_cifar():
   best_eval = -1
   i = 0
   batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
-  while i <= STEPS:
-    if i%100 == 0 and i > 1:
-      # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
-      corrects = []
-      corrects_ema = []
-      losses = []
-      losses_ema = []
-      for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
-        # further split batch if distributed
-        if getenv("DIST"):
-          Xt, Yt = Xt.chunk(min(world_size, 5), 0)[min(rank, 4)], Yt.chunk(min(world_size, 5), 0)[min(rank, 4)]
+  with Tensor.train():
+    while i <= STEPS:
+      if i%100 == 0 and i > 1:
+        # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
+        corrects = []
+        corrects_ema = []
+        losses = []
+        losses_ema = []
+        for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
+          # further split batch if distributed
+          if getenv("DIST"):
+            Xt, Yt = Xt.chunk(min(world_size, 5), 0)[min(rank, 4)], Yt.chunk(min(world_size, 5), 0)[min(rank, 4)]
 
-        correct, loss = eval_step_jitted(model, Xt, Yt)
-        losses.append(loss.numpy().tolist())
-        corrects.extend(correct.numpy().tolist())
-        if model_ema:
-          correct_ema, loss_ema = eval_step_ema_jitted(model_ema.net_ema, Xt, Yt)
-          losses_ema.append(loss_ema.numpy().tolist())
-          corrects_ema.extend(correct_ema.numpy().tolist())
-
-      # collect accuracy across ranks
-      correct_sum, correct_len = sum(corrects), len(corrects)
-      if model_ema: correct_sum_ema, correct_len_ema = sum(corrects_ema), len(corrects_ema)
-      if getenv("DIST"):
-        if rank == 0:
-          for j in range(1, min(world_size, 5)):
-            if model_ema:
-              recv_sum, recv_len, recv_sum_ema, recv_len_ema = OOB.recv(j)
-            else:
-              recv_sum, recv_len = OOB.recv(j)
-            correct_sum += recv_sum
-            correct_len += recv_len
-            if model_ema:
-              correct_sum_ema += recv_sum_ema
-              correct_len_ema += recv_len_ema
-        elif rank < min(world_size, 5):
+          correct, loss = eval_step_jitted(model, Xt, Yt)
+          losses.append(loss.numpy().tolist())
+          corrects.extend(correct.numpy().tolist())
           if model_ema:
-            OOB.send((correct_sum, correct_len, correct_sum_ema, correct_len_ema), 0)
-          else:
-            OOB.send((correct_sum, correct_len), 0)
+            correct_ema, loss_ema = eval_step_ema_jitted(model_ema.net_ema, Xt, Yt)
+            losses_ema.append(loss_ema.numpy().tolist())
+            corrects_ema.extend(correct_ema.numpy().tolist())
 
-      # only rank 0 prints
-      if rank == 0:
-        acc = correct_sum/correct_len*100.0
-        if model_ema: acc_ema = correct_sum_ema/correct_len_ema*100.0
-        if acc > best_eval:
-          best_eval = acc
-          print(f"eval     {correct_sum}/{correct_len} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
-          if model_ema: print(f"eval ema {correct_sum_ema}/{correct_len_ema} {acc_ema:.2f}%, {(sum(losses_ema)/len(losses_ema)):7.2f} val_loss STEP={i}")
+        # collect accuracy across ranks
+        correct_sum, correct_len = sum(corrects), len(corrects)
+        if model_ema: correct_sum_ema, correct_len_ema = sum(corrects_ema), len(corrects_ema)
+        if getenv("DIST"):
+          if rank == 0:
+            for j in range(1, min(world_size, 5)):
+              if model_ema:
+                recv_sum, recv_len, recv_sum_ema, recv_len_ema = OOB.recv(j)
+              else:
+                recv_sum, recv_len = OOB.recv(j)
+              correct_sum += recv_sum
+              correct_len += recv_len
+              if model_ema:
+                correct_sum_ema += recv_sum_ema
+                correct_len_ema += recv_len_ema
+          elif rank < min(world_size, 5):
+            if model_ema:
+              OOB.send((correct_sum, correct_len, correct_sum_ema, correct_len_ema), 0)
+            else:
+              OOB.send((correct_sum, correct_len), 0)
 
-    if STEPS == 0 or i==STEPS: break
-    X, Y = next(batcher)
-    # further split batch if distributed
-    if getenv("DIST"):
-      X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
-    GlobalCounters.reset()
-    st = time.monotonic()
-    loss = train_step_jitted(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
-    et = time.monotonic()
-    loss_cpu = loss.numpy()
-    # EMA for network weights
-    if i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
-      if model_ema is None:
-        model_ema = modelEMA(W, model)
-      model_ema.update(model, Tensor([projected_ema_decay_val*(i/STEPS)**hyp['ema']['decay_pow']]))
-    cl = time.monotonic()
-    if not getenv("DIST"):
-      print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
-    else:
-      print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {world_size*GlobalCounters.mem_used/1e9:.2f} GB used, {world_size*GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
-    i += 1
+        # only rank 0 prints
+        if rank == 0:
+          acc = correct_sum/correct_len*100.0
+          if model_ema: acc_ema = correct_sum_ema/correct_len_ema*100.0
+          if acc > best_eval:
+            best_eval = acc
+            print(f"eval     {correct_sum}/{correct_len} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
+            if model_ema: print(f"eval ema {correct_sum_ema}/{correct_len_ema} {acc_ema:.2f}%, {(sum(losses_ema)/len(losses_ema)):7.2f} val_loss STEP={i}")
+
+      if STEPS == 0 or i==STEPS: break
+      X, Y = next(batcher)
+      # further split batch if distributed
+      if getenv("DIST"):
+        X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
+      GlobalCounters.reset()
+      st = time.monotonic()
+      loss = train_step_jitted(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
+      et = time.monotonic()
+      loss_cpu = loss.numpy()
+      # EMA for network weights
+      if i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
+        if model_ema is None:
+          model_ema = modelEMA(W, model)
+        model_ema.update(model, Tensor([projected_ema_decay_val*(i/STEPS)**hyp['ema']['decay_pow']]))
+      cl = time.monotonic()
+      if not getenv("DIST"):
+        print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      else:
+        print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {world_size*GlobalCounters.mem_used/1e9:.2f} GB used, {world_size*GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      i += 1
 
 if __name__ == "__main__":
   if not getenv("DIST"):

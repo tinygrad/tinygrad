@@ -5,7 +5,7 @@ from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any
 
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int
 from tinygrad.lazy import LazyBuffer
@@ -38,6 +38,12 @@ class Tensor:
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
+  class train:
+    def __enter__(self):
+      self.prev = Tensor.training
+      Tensor.training = True
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any): Tensor.training = self.prev
+
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
   def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
