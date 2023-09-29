@@ -59,7 +59,9 @@ if __name__ == "__main__":
       p.daemon = True
       p.start()
   else:
-    X_train, Y_train = fetch_cifar()
+    X_train, Y_train, _, _ = fetch_cifar()
+    X_train = X_train.reshape((-1, 3, 32, 32))
+    Y_train = Y_train.reshape((-1,))
 
   with Tensor.train():
     for i in (t := trange(steps)):
@@ -67,7 +69,7 @@ if __name__ == "__main__":
         X, Y = q.get(True)
       else:
         samp = np.random.randint(0, X_train.shape[0], size=(BS))
-        X, Y = X_train[samp], Y_train[samp]
+        X, Y = X_train.numpy()[samp], Y_train.numpy()[samp]
 
       st = time.time()
       out = model.forward(Tensor(X.astype(np.float32), requires_grad=False))
