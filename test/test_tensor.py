@@ -97,12 +97,12 @@ class TestTinygrad(unittest.TestCase):
     assert W.grad is not None
 
   def test_dropout(self):
-    Tensor.training = True
-    n, rate = 1_000_000, 0.1
-    w = Tensor.ones(n).dropout(rate)
-    non_zeros = np.count_nonzero(w.numpy())
-    expected = n * (1 - rate)
-    np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
+    with Tensor.train():
+      n, rate = 1_000_000, 0.1
+      w = Tensor.ones(n).dropout(rate)
+      non_zeros = np.count_nonzero(w.numpy())
+      expected = n * (1 - rate)
+      np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
 
   def test_jacobian(self):
     W = np.random.RandomState(42069).random((10, 5)).astype(np.float32)
