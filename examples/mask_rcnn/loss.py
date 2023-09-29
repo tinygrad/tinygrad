@@ -1,8 +1,9 @@
 # RCNN-specific loss functions
 
 from models.mask_rcnn import *
-from tinygrad.tensor import Tensor
-from tinygrad.tensor import dtypes
+from tinygrad.tensor import Tensor, dtypes, Function
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.lazy import LazyBuffer
 import tinygrad.nn.optim as optim
 import numpy as np
 from typing import List, Callable, Tuple
@@ -209,45 +210,41 @@ def smooth_l1_loss(input, target, beta=1. / 9, size_average=True):
       return loss.mean()
   return loss.sum()
 
-class SmoothL1LossFunction(Function):
-  @staticmethod
-  def forward(ctx, input, target, beta=1. / 9, size_average=True):
-    n = Tensor.abs(input - target)
-    cond = n < beta
-    loss = Tensor.where(cond, 0.5 * n ** 2 / beta, n - 0.5 * beta)
-    
-    # save input and target for the backward pass
-    ctx.save_for_backward(input, target)
-    ctx.beta = beta
-    
+class SmoothL1Loss(Function):
+  def abs(self, x: LazyBuffer) -> LazyBuffer:
+    _x = x.e(UnaryOps.NEG)
+    return x.e(BinaryOps.MAX, x.const(0)).e(BinaryOps.ADD, _x.e(BinaryOps.MAX, _x.const(0))) #abs
+
+  def forward(self, x, t, beta=1. / 9, size_average=True):
+    self.dif = x.e(BinaryOps.SUB, t)
+    self.beta = beta
+    n = self.abs(self.dif)
+    cond = n.e(BinaryOps.CMPLT, n.const(beta))
+    a = n.e(BinaryOps.MUL, n).e(BinaryOps.MUL, n.const(.5 / beta))
+    loss = cond.e(TernaryOps.WHERE, a, n.e(BinaryOps.SUB, n.const(.5 * beta)))
+    loss = Tensor(loss) #todo
     if size_average:
-        return loss.mean()
-    return loss.sum()
-    
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, target = ctx.saved_tensors
-    beta = ctx.beta
+        return loss.mean().lazydata
+    return loss.sum().lazydata
 
-    diff = input - target
-    abs_diff = Tensor.abs(diff)
-    cond = abs_diff < beta
-    
-    grad_input = Tensor.where(cond, diff / beta, diff.sign())
-    
-    # multiply grad_input by grad_output to propagate the gradient 
+  def backward(self, grad_output):
+    cond = self.abs(self.dif).e(BinaryOps.CMPLT, self.beta)
+    grad_input = cond.e(TernaryOps.WHERE, self.dif / self.beta, Tensor(self.dif).sign().lazydata)
     grad_input *= grad_output
-    
-    return grad_input, None  # we don't need gradient for target and beta
+    return grad_input, None  # return grad for input tensor, and None for target tenso
 
-# Re-define smooth_l1_loss to use the custom function
-def smooth_l1_loss(input, target, beta=1. / 9, size_average=True):
-    return SmoothL1LossFunction.apply(input, target, beta, size_average)
+def smooth_l1_loss_function(input, target, beta=1. / 9, size_average=True):
+    return SmoothL1Loss.apply(input, target, beta=beta, size_average=size_average)
 
 def test_fork_grad():
-  res = smooth_l1_loss(Tensor([1, 4, 1, 9, 2], requires_grad=True),Tensor([2, 8, 1, 1, 4]), beta=2)
-  res.backward()
-  res
+  res = smooth_l1_loss_function(
+      Tensor([1, 4, 1, 9, 2], requires_grad=True),
+      Tensor([2, 8, 1, 1, 4]),
+      beta=2
+  )
+  print(res)
+  print(res.numpy())
+  assert res.numpy() == 2.25
 
 def test_match_targets_to_anchors():
   anchors = BoxList(Tensor([[0, 0, 10, 10], [0, 0, 5, 5]]), image_size = (50, 50)) # preds
