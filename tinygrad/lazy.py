@@ -198,24 +198,7 @@ class LazyBuffer:
     return ret + [(op, self, tuple(base_bufs))]
 
   def realize(self:LazyBuffer) -> LazyBuffer:
-    if not self.realized:
-      # NOTE: if you for loop the schedule it's slow because nothing frees
-      schedule = self.schedule()
-      #if DEBUG >= 2: print(f"scheduled {len(schedule)}")
-      while len(schedule):
-        op,out,buffers = schedule.pop(0)
-        if DEBUG >= 3:
-          from extra.utils import print_tree   # type: ignore
-          print_tree(op)
-        if op.op in LoadOps:
-          LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out)
-          # TODO: why can't we delete these ops?
-        else:
-          out.realized = Device[out.device].exec_ast(op, output=out, inputs=[x.realized for x in buffers], var_vals=out.var_vals, **self._device_extra_args())
-          del out.op
-          for v in out.views: del v.op
-        assert out.realized and isinstance(out.realized, (RawConst, Device[out.device].buffer)), f"device mismatch on realized got {type(out.realized)} expected {out.device}"
-        assert out.realized.dtype == out.dtype, "realized dtype is incorrect"
+    if not self.realized: run_schedule(self.schedule())
     return self
 
   @staticmethod
@@ -287,7 +270,7 @@ class LazyBuffer:
 
   # *** movement ops ***
 
-  def shuffle_and_prune_movement_ops(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[sint, ...], Tuple[Tuple[sint, sint], ...]]) -> LazyBuffer:
+  def _movement_op(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[sint, ...], Tuple[Tuple[sint, sint], ...]]) -> LazyBuffer:
     if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and (op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and self.op.op in UnaryOps)) and not self.children:
       return self.op.replace_with_movement_ops([(op, arg)])
     if REMOVE_MOVEMENT_NOPS and not self.realized and st.contiguous:
@@ -313,18 +296,17 @@ class LazyBuffer:
       assert isinstance(self.op.src[0], LazyBuffer)
       self.op.src[0].children.discard(self) # NOTE: this is only required in reshape and when pushing permutes, why??
       return self.op.src[0].reshape(arg)
-    return self.shuffle_and_prune_movement_ops(self.st.reshape(arg), MovementOps.RESHAPE, arg)
+    return self._movement_op(self.st.reshape(arg), MovementOps.RESHAPE, arg)
 
   def pad(self:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
     if all(b == 0 and e == 0 for b,e in arg): return self
     if not self.realized and self.op.op == MovementOps.PAD: return self.op.src[0].pad(tuple([(b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)]))
-    return self.shuffle_and_prune_movement_ops(self.st.pad(arg), MovementOps.PAD, arg)
+    return self._movement_op(self.st.pad(arg), MovementOps.PAD, arg)
 
   def expand(self: LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == arg: return self
-    if not self.realized and self.op.op == MovementOps.EXPAND:
-      return self.op.src[0].expand(arg)
-    return self.shuffle_and_prune_movement_ops(self.st.expand(arg), MovementOps.EXPAND, arg)
+    if not self.realized and self.op.op == MovementOps.EXPAND: return self.op.src[0].expand(arg)
+    return self._movement_op(self.st.expand(arg), MovementOps.EXPAND, arg)
 
   def permute(self: LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
     if arg == tuple(range(len(self.shape))): return self
@@ -347,17 +329,17 @@ class LazyBuffer:
         if shape_idx_groups := get_contraction(self.op.src[0].shape, self.shape):
           self.op.src[0].children.discard(self) # NOTE: this is only required in reshape and when pushing permutes, why??
           return self.op.src[0].permute(tuple(flatten(shape_idx_groups[i] for i in arg))).reshape(self.st.permute(arg).shape)
-    return self.shuffle_and_prune_movement_ops(self.st.permute(arg), MovementOps.PERMUTE, arg)
+    return self._movement_op(self.st.permute(arg), MovementOps.PERMUTE, arg)
 
   def shrink(self:LazyBuffer, arg:Tuple[Tuple[sint, sint], ...]) -> LazyBuffer:
     if all(b - a == s for s, (a, b) in zip(self.shape, arg)): return self
     if not self.realized and self.op.op == MovementOps.SHRINK: return self.op.src[0].shrink(tuple([(b1+b2, b1+e2) for (b1,_),(b2,e2) in zip(self.op.arg, arg)]))
-    return self.shuffle_and_prune_movement_ops(self.st.shrink(arg), MovementOps.SHRINK, arg)
+    return self._movement_op(self.st.shrink(arg), MovementOps.SHRINK, arg)
 
   def stride(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
     if all(a == 1 for a in arg): return self
     if not self.realized and self.op.op == MovementOps.STRIDE: return self.op.src[0].stride(tuple(map(operator.mul, arg, self.op.arg)))
-    return self.shuffle_and_prune_movement_ops(self.st.stride(arg), MovementOps.STRIDE, arg)
+    return self._movement_op(self.st.stride(arg), MovementOps.STRIDE, arg)
 
   def replace_with_movement_ops(self: LazyBuffer, ops:List[Tuple[MovementOps, Any]]) -> LazyBuffer:
     y = self
@@ -391,7 +373,24 @@ MOVEMENT_OPS_DISPATCHER: Dict[MovementOps, Callable] = {
   MovementOps.STRIDE: LazyBuffer.stride,
 }
 
-# *** loadop realization (unrelated to lazy) ***
+# *** realization (unrelated to lazy) ***
+
+def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]):
+  # NOTE: if you for loop the schedule it's slow because nothing frees
+  while len(schedule):
+    op,out,buffers = schedule.pop(0)
+    if DEBUG >= 3:
+      from extra.utils import print_tree   # type: ignore
+      print_tree(op)
+    if op.op in LoadOps:
+      LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out)
+      # TODO: why can't we delete these ops?
+    else:
+      out.realized = Device[out.device].exec_ast(op, output=out, inputs=[x.realized for x in buffers], var_vals=out.var_vals, **out._device_extra_args())
+      del out.op
+      for v in out.views: del v.op
+    assert out.realized and isinstance(out.realized, (RawConst, Device[out.device].buffer)), f"device mismatch on realized got {type(out.realized)} expected {out.device}"
+    assert out.realized.dtype == out.dtype, "realized dtype is incorrect"
 
 def _realize_contiguous(buffer: LazyBuffer) -> None:
   src = cast(LazyBuffer, buffer.op.src[0])
