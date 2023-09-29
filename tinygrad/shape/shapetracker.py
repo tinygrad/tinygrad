@@ -135,21 +135,22 @@ class ShapeTracker:
       elif tidx not in idx_vars: ret[i] = 0
     return tuple(ret)
 
-  def real_mask(self) -> Optional[Tuple[Tuple[int, int], ...]]:
-    idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
+  def real_mask(self) -> Optional[Tuple[Tuple[int, sint], ...]]:
+    idxs: List[Node] = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx, valid = self.expr_idxs(idxs)
-    ret: List[Tuple[int, int]] = [(0,s) for s in self.shape]
+    ret: List[Tuple[int, sint]] = [(0,s) for s in self.shape]
     for valid_restriction in (valid.nodes if isinstance(valid, AndNode) else [valid]):
-      # we suppport two things here
       if not isinstance(valid_restriction, LtNode): return None
       if valid_restriction.a in idxs:
-        # top bound
+        # top bound on a single axis
         idx = idxs.index(valid_restriction.a)
         ret[idx] = (ret[idx][0], valid_restriction.b)
       elif isinstance(valid_restriction.a, MulNode) and valid_restriction.a.b == -1 and valid_restriction.a.a in idxs:
+        # lower bound on a single axis
         idx = idxs.index(valid_restriction.a.a)
         ret[idx] = (valid_restriction.b*-1+1, ret[idx][1])
       else:
+        # a complex expression
         return None
     return tuple(ret)
 
