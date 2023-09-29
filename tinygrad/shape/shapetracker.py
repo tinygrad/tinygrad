@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Optional, cast
 from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, sint
+from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, AndNode, LtNode, sint
 from tinygrad.shape.view import View
 
 @functools.lru_cache(maxsize=None)
@@ -49,10 +49,17 @@ def expr_idxs(view:View, idxs) -> Node:
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
-  if vm2.mask: return None  # this isn't supported yet
   mst = ShapeTracker((vm2, vm1))
   strides = mst.real_strides()
-  if None in strides: return None
+  if None in strides:
+    # a chance to save the fusion
+    if vm2.mask is not None and vm1.mask is None:
+      # might be an issue with the mask in vm2. try this
+      strides_invalid = mst.real_strides(ignore_valid=True)
+      if None in strides_invalid: return None
+      new_mask = mst.real_mask()
+      if new_mask: return View.create(vm1.shape, cast(Tuple[sint, ...], strides_invalid), mst.real_offset(), new_mask)
+    return None
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), mst.real_offset(), vm1.mask)
 
 @functools.lru_cache(maxsize=None)
@@ -127,6 +134,25 @@ class ShapeTracker:
       if tidx in valid_vars and not ignore_valid: ret[i] = None
       elif tidx not in idx_vars: ret[i] = 0
     return tuple(ret)
+
+  def real_mask(self) -> Optional[Tuple[Tuple[int, int], ...]]:
+    idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
+    idx, valid = self.expr_idxs(idxs)
+    ret: List[Tuple[int, int]] = [(0,s) for s in self.shape]
+    for valid_restriction in (valid.nodes if isinstance(valid, AndNode) else [valid]):
+      # we suppport two things here
+      if not isinstance(valid_restriction, LtNode): return None
+      if valid_restriction.a in idxs:
+        # top bound
+        idx = idxs.index(valid_restriction.a)
+        ret[idx] = (ret[idx][0], valid_restriction.b)
+      elif isinstance(valid_restriction.a, MulNode) and valid_restriction.a.b == -1 and valid_restriction.a.a in idxs:
+        idx = idxs.index(valid_restriction.a.a)
+        ret[idx] = (valid_restriction.b*-1+1, ret[idx][1])
+      else:
+        return None
+    return tuple(ret)
+
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
   def _expr_idx(self, idx, valid) -> Tuple[Node, Node]:

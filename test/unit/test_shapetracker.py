@@ -590,6 +590,12 @@ class TestShapeTracker(unittest.TestCase):
     self.test_expand()
     self.test_permute()
 
+class TestWinogradOpt(unittest.TestCase):
+  def test_opt_masked(self):
+    st = ShapeTracker((View(shape=(4, 2, 4, 2, 4), strides=(4, 2, 0, 1, 0), offset=560, mask=((0, 4), (0, 2), (3, 4), (0, 2), (3, 4)), contiguous=False),
+                       View(shape=(8, 2, 4, 4), strides=(32, 4, 1, 8), offset=0, mask=None, contiguous=False)))
+    assert len(st.simplify().views) == 1
+
 class TestGetContraction(unittest.TestCase):
   def test_contraction(self):
     r = get_contraction((1,2,3,4), (2,3,4))
