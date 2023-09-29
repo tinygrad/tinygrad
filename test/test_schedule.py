@@ -14,7 +14,7 @@ def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=N
   seen = set()
   if to_prerealize:
     for pre in to_prerealize:
-      for out, _, _ in pre.lazydata.schedule(seen):
+      for _, out, _ in pre.lazydata.schedule(seen.copy()):
         seen.add(out)
   sched = [s for s in t.lazydata.schedule(seen) if s[0].op not in LoadOps]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
