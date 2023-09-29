@@ -14,17 +14,17 @@ from examples.hlb_cifar10 import SpeedyResNet
 from examples.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
 from examples.stable_diffusion import UNetModel
 
-def kopt_search_hook(k, create_k, to_prg, baseline):
+def kopt_search_hook(k, create_k, to_prg, baseline, bufs):
   import nevergrad as ng
-  wanna_output = k.bufs[0].toCPU().copy()
+  wanna_output = bufs[0].toCPU().copy()
   def check_opt(x):
     try:
       k = create_k()
       k.process()
       k.apply_auto_opt(x)
       prg = to_prg(k)
-      first_tm = prg.exec(k.bufs, force_wait=True, optimizing=True)
-      np.testing.assert_allclose(wanna_output, k.bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
+      first_tm = prg.exec(bufs, force_wait=True, optimizing=True)
+      np.testing.assert_allclose(wanna_output, bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
       return first_tm
     except Exception:
       return 10000_000   # 10000 seconds is infinity
@@ -122,27 +122,24 @@ class TestRealWorld(unittest.TestCase):
     #Device.DEFAULT = "FAKE"
     #Device['fake'].codegen = Device[old_default].codegen
 
-    # TODO: with train
-    old_training = Tensor.training
-    Tensor.training = True
-    model = SpeedyResNet(Tensor.ones((12,3,2,2)))
-    optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=0.8, nesterov=True, weight_decay=0.15)
+    with Tensor.train():
+      model = SpeedyResNet(Tensor.ones((12,3,2,2)))
+      optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=0.8, nesterov=True, weight_decay=0.15)
 
-    BS = 32 if CI else 512
+      BS = 32 if CI else 512
 
-    @TinyJit
-    def train(X):
-      out = model(X)
-      loss = out.mean()
-      optimizer.zero_grad()
-      loss.backward()
-      optimizer.step()
+      @TinyJit
+      def train(X):
+        out = model(X)
+        loss = out.mean()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-    helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 153)
+      helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 154)   # it's 154 on metal
 
-    # reset device
-    Tensor.training = old_training
-    #Device.DEFAULT = old_default
+      # reset device
+      #Device.DEFAULT = old_default
 
 if __name__ == '__main__':
   unittest.main()

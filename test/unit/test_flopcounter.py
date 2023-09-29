@@ -1,18 +1,13 @@
 #!/usr/bin/env python
 import unittest
-from typing import NamedTuple, Tuple
-from tinygrad.ops import LazyOp, BinaryOps, ReduceOps, get_lazyop_info
-from tinygrad.helpers import DType, dtypes
-
-class TestBuffer(NamedTuple):
-  __test__ = False # To prevent pytest from collecting this as a test
-  shape: Tuple[int, ...]
-  dtype: DType
+from tinygrad.ops import LazyOp, BinaryOps, ReduceOps, get_lazyop_info, BufferOps, MemBuffer
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.helpers import dtypes
 
 class TestFlopCounter(unittest.TestCase):
   def setUp(self):
-    self.buf0 = TestBuffer(shape=(4,), dtype=dtypes.float32)
-    self.buf1 = TestBuffer(shape=(4,), dtype=dtypes.float32)
+    self.buf0 = LazyOp(BufferOps.MEM, (), MemBuffer(1, dtypes.float32, ShapeTracker.from_shape((4,))))
+    self.buf1 = LazyOp(BufferOps.MEM, (), MemBuffer(2, dtypes.float32, ShapeTracker.from_shape((4,))))
 
   def test_flops_add(self):
     op0 = LazyOp(BinaryOps.ADD, (self.buf0,self.buf1,), None)

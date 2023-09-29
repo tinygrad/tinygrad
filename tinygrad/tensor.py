@@ -5,12 +5,12 @@ from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any
 
-from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod
+from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device, LoadOps
-from tinygrad.shape.symbolic import NumNode, sint, all_int
+from tinygrad.shape.symbolic import sint
 
 # An instantiation of the Function is the Context
 class Function:
@@ -38,6 +38,12 @@ class Tensor:
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
+  class train:
+    def __enter__(self):
+      self.prev = Tensor.training
+      Tensor.training = True
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any): Tensor.training = self.prev
+
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
   def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
@@ -91,7 +97,7 @@ class Tensor:
     # TODO: this is a hack for writing to DISK
     if self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      self.lazydata.realize().realized._copyin(x.numpy())  # type: ignore
+      self.lazydata.contiguous().realize().realized._copyin(x.numpy())  # type: ignore
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
@@ -119,7 +125,7 @@ class Tensor:
 
   @staticmethod
   def _loadop(op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
-    return Tensor(LazyBuffer.loadop(op, [sz], Tensor.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
+    return Tensor(LazyBuffer.loadop(op, (sz,), Tensor.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
 
   @staticmethod
   def empty(*shape, **kwargs):
@@ -303,9 +309,8 @@ class Tensor:
         if isinstance(s, int):
           dim_collapsed += 1
         else:
-          # TODO: replace NumNode with int in shape
-          assert isinstance(dim_shape, (int, NumNode)), f"does not support symbolic shape {dim_shape}"
-          final_shape.append(int(dim_shape))
+          assert isinstance(dim_shape, int), f"does not support symbolic shape {dim_shape}"
+          final_shape.append(dim_shape)
           if isinstance(s, Tensor):
             tensors.append(s)
             dim.append(i-dim_collapsed)
@@ -625,7 +630,7 @@ class Tensor:
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     if x.__class__ is not Tensor and not reverse:
       # simple pow identities
-      if x < 0: return (1.0/self).pow(-x)
+      if x < 0: return self.reciprocal().pow(-x)
       if x == 3.0: return self*self*self
       if x == 2.0: return self*self
       if x == 1.0: return self

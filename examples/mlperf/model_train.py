@@ -26,12 +26,11 @@ def train_maskrcnn():
   pass
 
 if __name__ == "__main__":
-  Tensor.training = True
-
-  for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
-    nm = f"train_{m}"
-    if nm in globals():
-      print(f"training {m}")
-      globals()[nm]()
+  with Tensor.train():
+    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
+      nm = f"train_{m}"
+      if nm in globals():
+        print(f"training {m}")
+        globals()[nm]()
 
 
