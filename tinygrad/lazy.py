@@ -5,7 +5,7 @@ from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
 from tinygrad.graph import log_op
-from tinygrad.helpers import GRAPH, DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, partition, all_int, dedup, merge_dicts
+from tinygrad.helpers import DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, partition, all_int, dedup, merge_dicts
 from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
@@ -122,10 +122,6 @@ class LazyBuffer:
     else: assert st.contiguous, "unbased LazyBuffers must be contiguous"
     if not LAZY: self.realize()
 
-    # log phantom ops to the graph
-    if GRAPH >= 3:
-      log_op(self, self.op, phantom=True)
-
   @property
   def var_vals_key(self): return tuple(sorted(self.var_vals.keys()))
 
@@ -170,10 +166,13 @@ class LazyBuffer:
     if seen is None: seen = set()
     if self in seen or self.realized: return []
     seen.add(self)
+    if self.optype is MovementOps: return self.base.schedule(seen)
 
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
-    if op.op in LoadOps: return [(self.op, self, ())]
-    if self.optype is MovementOps: return self.base.schedule(seen)
+
+    if op.op in LoadOps:
+      log_op(self, self.op)
+      return [(self.op, self, ())]
 
     if self.optype is BinaryOps: op = _ast_binaryops(op, self.shape)
     elif self.optype is ReduceOps: op = _ast_reduceops(op)
@@ -188,6 +187,7 @@ class LazyBuffer:
     if self.op.op == LoadOps.CONTIGUOUS:
       src = cast(LazyBuffer, self.op.src[0])
       if src.st.contiguous and src.st.size() == src.base.st.size() and (src.realized or not src.base.op.op == LoadOps.CONST) and (not src.realized or not isinstance(src.realized, RawConst)):
+        log_op(self, self.op)
         return src.schedule(seen) + [(self.op, self, ())]
 
     # realize the past and exec the AST
@@ -196,6 +196,9 @@ class LazyBuffer:
 
     # TODO: this belongs in the schedule in some way
     self.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+
+    # log op to the graph
+    log_op(self, op)
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
