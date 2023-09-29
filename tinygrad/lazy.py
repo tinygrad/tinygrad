@@ -72,7 +72,7 @@ def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
     if x.base in base_bufs:
       replacements[x] = LazyOp(BufferOps.MEM, (), MemBuffer(base_bufs.index(x.base)+1, x.dtype, st))
     elif x.realized and isinstance(x.realized, RawConst):
-      replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(x.realized._buf, x.realized.dtype, st))
+      replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(x.realized._buf, x.dtype, st))
     elif not x.realized and x.base.op.op == LoadOps.CONST:
       replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(float(x.base.op.arg), x.dtype, st))
     else:
@@ -104,7 +104,7 @@ UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, 
 class LazyBuffer:
   __deletable__ = ('op',)
   def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:Optional[LazyOp], dtype:DType, var_vals:Dict[Variable,int], src:Optional[RawBuffer]=None, base:Optional[LazyBuffer]=None):
-    self.st: ShapeTracker = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
+    self.st: ShapeTracker = st
     self._var_vals: Dict[Variable, int] = var_vals
     self.device, self.shape, self.optype, self._dtype = device, self.st.shape, optype, dtype
     self._realized: Optional[RawBuffer] = src
@@ -112,13 +112,14 @@ class LazyBuffer:
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: WeakSet = WeakSet()
     self.views: WeakSet = WeakSet()
-    # NOTE: op should be read only after construction of LazyBuffer
+    # NOTE: op should be read only after construction of LazyBuffer. it is now with schedule
     if op is not None:
       self.op: LazyOp = op
       for x in op.buffers: x.children.add(self)
     assert optype != MovementOps or (base is not None and base.optype != MovementOps), "MovementOps must be based"
     self._base = base
     if base: base.views.add(self)
+    else: assert st.contiguous, "unbased LazyBuffers must be contiguous"
     if not LAZY: self.realize()
 
     # log phantom ops to the graph
