@@ -164,6 +164,11 @@ class BasicBatchExecutor:
   def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): pass
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
     for prg, pargs, variables in jit_cache: prg(pargs, variables, jit=True)
+  def recalc_stat(self, jit_cache: List[Tuple[Any, Any, Any]]):
+    for prg, _, variables in jit_cache:
+      GlobalCounters.kernel_count += 1
+      GlobalCounters.global_ops += sym_infer(prg.op_estimate, variables)
+      GlobalCounters.global_mem += prg.mem_estimate
 
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
@@ -179,7 +184,6 @@ class ASTRunner:
     if not optimizing: CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return self(rawbufs, var_vals, force_wait=force_wait)
 
-  def calc_op_estimate(self, var_vals): return sym_infer(self.op_estimate, var_vals)
   def launch_dims(self, var_vals):
     global_size = ([sym_infer(sz, var_vals) for sz in self.global_size] + [1]*(3-len(self.global_size))) if self.global_size is not None else self.global_size
     local_size = ([sym_infer(sz, var_vals) for sz in self.local_size] + [1]*(3-len(self.local_size))) if self.local_size is not None else self.local_size
@@ -189,7 +193,7 @@ class ASTRunner:
     if var_vals is None: var_vals = {}
     global_size, local_size = self.launch_dims(var_vals)
     if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
-    op_estimate = self.calc_op_estimate(var_vals)
+    op_estimate = sym_infer(self.op_estimate, var_vals)
     if DEBUG >= 2:
       print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(37-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(global_size):18s} {str(local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {self.mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))

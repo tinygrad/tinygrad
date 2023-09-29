@@ -2,7 +2,7 @@ import numpy as np
 import ctypes, functools, math, collections
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
-from tinygrad.helpers import DEBUG, getenv, GlobalCounters
+from tinygrad.helpers import DEBUG, getenv
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -48,7 +48,7 @@ class HIPGraph(BasicBatchExecutor):
       params = hip.buildKernelNodeParams(*pargs, *variables.values(), func=prg.clprg.prgs[pargs[0]._device], grid=global_size, block=local_size)
       graph_node = hip.hipGraphAddKernelNode(graph, deps, params)
       hip.hipStreamUpdateCaptureDependencies(capture_stream, [graph_node], hip.hipStreamSetCaptureDependencies)
-      self.info.append((self.__get_batch(j), graph_node, params, prg.mem_estimate, prg.calc_op_estimate(variables)))
+      self.info.append((self.__get_batch(j), graph_node, params))
 
       # If the next batch is different or this is the last entry, finish the graph.
       if self.__get_batch(j) != self.__get_batch(j+1) or j==len(jit_cache)-1:
@@ -62,11 +62,11 @@ class HIPGraph(BasicBatchExecutor):
     for gr in self.graphs: hip.hipGraphDestroy(gr)
 
   def __update(self, nodeid, inst, prg, pargs, variables, updated_args=None):
-    batchid, graph_node, params, _, _ = self.info[nodeid]
+    batchid, graph_node, params = self.info[nodeid]
     global_size, local_size = prg.launch_dims(variables)
     hip.updateKernelNodeParams(params, *pargs, *variables.values(), grid=global_size, block=local_size, updated_args=updated_args)
     hip.hipGraphExecKernelNodeSetParams(inst, graph_node, params)
-    self.info[nodeid] = (batchid, graph_node, params, prg.mem_estimate, prg.calc_op_estimate(variables))
+    self.info[nodeid] = (batchid, graph_node, params)
 
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
     if not self.instances: return super().exec(jit_cache, updatable_entries) # No graph is created switch to basic executor.
@@ -75,9 +75,7 @@ class HIPGraph(BasicBatchExecutor):
     for i,inst in enumerate(self.instances):
       for j in update_keys_per_batch[i]: self.__update(j, inst, jit_cache[j][0], jit_cache[j][1], jit_cache[j][2], updated_args=updatable_entries[j])
       hip.hipGraphLaunch(inst)
-    GlobalCounters.kernel_count += len(self.info)
-    GlobalCounters.global_ops += sum(x[4] for x in self.info)
-    GlobalCounters.global_mem += sum(x[3] for x in self.info)
+    super().recalc_stat(jit_cache)
   def __get_batch(self, j): return int(math.log(j+4,2)-2) # Batch sizes are logarithmic 4,8,16,32,...
 
 class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):

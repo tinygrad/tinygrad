@@ -4,7 +4,7 @@ import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any, Tuple
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, GlobalCounters
+from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.runtime.lib import RawBufferMapped, LRUAllocator
 
@@ -54,10 +54,7 @@ class MetalBatchExecutor(BasicBatchExecutor):
     if self.use_basic_executor: return super().exec(jit_cache, updatable_entries) # No graph is created switch to basic executor.
     self.__do_exec(jit_cache[:8])
     self.__do_exec(jit_cache[8:])
-    for prg, _, variables in jit_cache:
-      GlobalCounters.kernel_count += 1
-      GlobalCounters.global_ops += prg.calc_op_estimate(variables)
-      GlobalCounters.global_mem += prg.mem_estimate
+    super().recalc_stat(jit_cache)
 
 def unwrap(x):
   ret, err = x
