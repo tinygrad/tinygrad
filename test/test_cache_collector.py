@@ -123,7 +123,7 @@ class TestCacheCollector(unittest.TestCase):
     assert cache[3][1][0] != cache[2][1][2], "None of outputs buffer should reuse new_input."
     assert cache[4][1][0] != cache[2][1][2], "None of outputs buffer should reuse new_input."
     assert cache[-1][1][0] == out, "Output does not match."
-    assert get_bufs_count(cache) == 6
+    assert get_bufs_count(cache) == 7
     FAKE_GLOBAL_ALLOCATOR = None
 
   def test_cache_collector_multidev(self):

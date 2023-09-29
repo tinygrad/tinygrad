@@ -2,7 +2,7 @@ from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional, Set
 from weakref import ref
 from collections import defaultdict
 import functools, itertools
-from tinygrad.helpers import DEBUG, DType, merge_dicts
+from tinygrad.helpers import DEBUG, DType, merge_dicts, ImageDType
 from tinygrad.ops import RawBuffer, Device, BasicBatchExecutor
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -100,6 +100,8 @@ class _CacheCollector:
     for j,(p,cached_bufs,var_vals) in enumerate(self.cache):
       for buf in cached_bufs:
         if isinstance(buf, RawBuffer): last_buftype[self._buftype_key(buf)] = j
+    for j,(p,cached_bufs,var_vals) in enumerate(self.cache):
+      for buf in cached_bufs:
         if buf.__class__ is not _CacheCollector._Placeholder: continue
         if buf.alive():
           buf_pool.append((buf.ref(), [(-1, last_buftype.get(self._buftype_key(buf), -1)), (j, len(self.cache)+1)]))
@@ -128,7 +130,7 @@ class _CacheCollector:
       buf_map[buf] = buf_pool[buf_pool_i][0]
       buf_pool[buf_pool_i][1].append((start,end))
 
-    print(buf_pool)
+    # print(buf_pool)
 
     cache_result = []
     for j,(p,cached_bufs,var_vals) in enumerate(self.cache):
@@ -154,7 +156,8 @@ class _CacheCollector:
     self.cache, self.placeholders, self.last_buftype, self.last_placeholder_index, self.freed_buffers, self.circular_signatures = None, {}, {}, {}, defaultdict(list), set()
     return cache_result
 
-  def _can_replace(self, buf, with_buf): return buf._device==with_buf._device and (buf.size*buf.dtype.itemsize<=with_buf.size*with_buf.dtype.itemsize if not hasattr(buf.dtype, 'shape') else buf.size == with_buf.size and with_buf.dtype == with_buf.dtype)
+  def _can_replace(self, buf, with_buf): 
+    return buf._device==with_buf._device and (buf.size*buf.dtype.itemsize<=with_buf.size*with_buf.dtype.itemsize if not isinstance(buf.dtype, ImageDType) and not isinstance(with_buf.dtype, ImageDType) else buf.size==with_buf.size and buf.dtype==with_buf.dtype)
   def _mark_output_buffer(self, output_buffer): self.circular_signatures.add(ref(output_buffer))
   def _on_buf_free(self, underlying_buf):
     if underlying_buf not in self.placeholders: return

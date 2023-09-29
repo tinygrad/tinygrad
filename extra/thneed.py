@@ -5,7 +5,7 @@ import json
 import traceback
 import numpy as np
 from tinygrad.runtime.ops_gpu import CLProgram
-from tinygrad.helpers import DEBUG, getenv
+from tinygrad.helpers import DEBUG, getenv, ImageDType
 from collections import defaultdict
 import pyopencl as cl
 from tinygrad.runtime.ops_gpu import CL, OSX_TIMING_RATIO
@@ -23,6 +23,8 @@ class Thneed:
     nodes = defaultdict(lambda: {'in_edges': [], 'out_edges': []})
     for _, args in self.cl_cache:
       # output is always the first parameter
+      # output buffers could be reused by jit cache, so if this is an output again, reset out edges.
+      nodes[args[2]]['out_edges'] = []
       for a in args[3:]:
         nodes[a]['out_edges'].append(args[2])
         nodes[args[2]]['in_edges'].append(a)
