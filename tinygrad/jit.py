@@ -74,7 +74,7 @@ class _CacheCollector:
 
   def __init__(self):
     self.cache: Optional[List[Tuple[Callable, List[Any], Dict[Any,Any]]]] = None
-    self.placeholders: Dict[ref[RawBuffer], _CacheCollector._Placeholder] = {} # Rawbuffers are replaced with placeholders to allow freeing of the real buffer while collecting cache.
+    self.placeholders: Dict[ref[RawBuffer], _CacheCollector._Placeholder] = {} # Output rawbufs are replaced with placeholders to allow freeing of the real buffer while collecting cache.
     self.circular_signatures: Set[Any] = set()
   def start(self): self.cache, self.placeholders, self.circular_signatures = [], {}, set()
   def add(self, prg, rawbufs, var_vals):
