@@ -32,7 +32,6 @@ def partition(lst, fxn):
   b: list[Any] = []
   for s in lst: (a if fxn(s) else b).append(s)
   return a,b
-def all_int(l:Iterable): return all(x.__class__ is int for x in l)
 
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
