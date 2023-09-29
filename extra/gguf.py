@@ -1,14 +1,14 @@
-import enum, os, struct, io
+import enum, os, struct, io, sys
 import numpy as np
+from tqdm import tqdm
 from typing import Any, Dict, List, Tuple
 
-from numpy.core.multiarray import where
 from tinygrad.helpers import dtypes, prod
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
-import sys
 
 Device.DEFAULT = "GPU"
+INDEX = int(sys.argv[1])
 
 # --- Compatibility junk
 class GgmlDType(enum.Enum): F32 = 0; F16 = 1; Q4_0 = 2; Q4_1 = 3; Q5_0 = 6; Q5_1 = 7; Q8_0 = 8; Q8_1 = 9; Q2K = 10; Q3K = 11; Q4K = 12; Q5K = 13; Q6K = 14; Q8K = 15
@@ -60,22 +60,57 @@ def read_data_offset(reader: io.BufferedReader, params: Dict) -> int: # This is 
 # Vectorized version of https://github.com/ggerganov/llama.cpp/blob/468ea24fb4633a0d681f7ac84089566c1c6190cb/ggml.c#L1525
 def dequantize_q4_0_tensor(t: Tensor, n_blocks, shape):
   qs_size = 16; d_size = 2; block_size = d_size + qs_size
-  d = t.cast(dtypes.float16).to("GPU")[::9][:n_blocks].reshape(-1, 1)
+  d = t.cast(dtypes.float16).to("GPU")[::block_size//d_size][:n_blocks].reshape(-1, 1)
   qs = t.cast(dtypes.uint8).to("GPU").reshape(n_blocks, block_size)[:, d_size:]
-  x0 = qs - (qs / 16).floor() * 16 - 8 # qs & 0x0F - 8
+  x0 = qs - (qs / 16).floor() * 16 - 8 # qs & 0x0F - 8 (can I implement these bitshifts as methods on Tensor?)
   x1 = (qs / 16).floor() - 8 # (qs >> 4) - 8
   ret =  Tensor.stack([x0 * d, x1 * d]).transpose(0, 1).reshape(shape)
   return ret
 
 def dequantize_q6k_tensor(t: Tensor, n_blocks, shape):
-  pass
+  qk_k = 256; ql_size = qk_k // 2; qh_size = qk_k // 4; scales_size = qk_k // 16; d_size =2; block_size = ql_size + qh_size + scales_size + d_size
+  ql = t.cast(dtypes.uint8).to("GPU").reshape(n_blocks, block_size)[:, :ql_size]
+  qh = t.cast(dtypes.uint8).to("GPU").reshape(n_blocks, block_size)[:, ql_size:ql_size+qh_size]
+  scales = t.cast(dtypes.int8).to("GPU").reshape(n_blocks, block_size)[:, ql_size+qh_size:ql_size+qh_size+scales_size]
+  data_offset = (ql_size+qh_size+scales_size)//2
+  d = t.cast(dtypes.half).to("GPU")[data_offset::data_offset+1][:n_blocks] #.reshape(-1, 1)
+  # some progress here but not ready for full vectorization
+  # ql0 = ql - (ql / 16).floor() * 16 # ql & 0xF
+  # qh0 = (qh - (qh / 4).floor() * 4) * 16 # ((qh & 3) << 4)
+  # print(ql0.shape, qh0.shape, scales.shape, gl)
+
+  # HACK - this should be vectorized
+  QL = ql.numpy(); QH = qh.numpy(); SCALES = scales.numpy(); D = d.numpy()
+  y = np.zeros(n_blocks * QK_K, dtype=np.float16)
+  for idx_x, x in tqdm(enumerate(range(n_blocks))):
+    d = D[idx_x]
+    ql = QL[idx_x]
+    qh = QH[idx_x]
+    sc = SCALES[idx_x]
+    for n in range(0, QK_K, 128):
+      idx = n // 128
+      ys = y[idx_x * QK_K + n:]
+      sc = sc[8 * idx:]
+      ql = ql[64 * idx:]
+      qh = qh[32 * idx:]
+      for l in range(32):
+        isl = l // 16
+        q1 = ((ql[l] & 0xF) | ((qh[l] & 3) << 4)) - 32
+        q2 = ((ql[l + 32] & 0xF) | (((qh[l] >> 2) & 3) << 4)) - 32
+        q3 = ((ql[l] >> 4) | (((qh[l] >> 4) & 3) << 4)) - 32
+        q4 = ((ql[l + 32] >> 4) | (((qh[l] >> 6) & 3) << 4)) - 32
+        ys[l] = d * sc[isl] * q1
+        ys[l + 32] = d * sc[isl + 2] * q2
+        ys[l + 64] = d * sc[isl + 4] * q3
+        ys[l + 96] = d * sc[isl + 6] * q4
+  return Tensor(y)
 
 def tinygrad_tensor_from_gguf(disk_tensor: Tensor, name: str, shape: Tuple, ggml_dtype: GgmlDType, offset: int, data_offset: int) -> Tensor:
   print(name, ggml_dtype)
   itemsize, block_size = ggml_sizes[ggml_dtype]
   size_in_bytes = int(prod(shape) * itemsize // block_size)
   init_offset = data_offset + offset
-  n_blocks = size_in_bytes // itemsize
+  n_blocks = int(size_in_bytes // itemsize)
   fxn_for_dtype = {
       GgmlDType.F32: lambda ret: ret[:n_blocks].cast(dtypes.float32),
       GgmlDType.Q4_0: lambda ret: dequantize_q4_0_tensor(ret, n_blocks, shape),
