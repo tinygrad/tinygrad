@@ -159,7 +159,7 @@ class OptimizedKernel(Kernel):
           self.shift_to(unit_stride_axes_mul_4[0], 4)
           self.upcast()
 
-  def hand_coded_optimizations(self):
+  def hand_coded_optimizations(self, use_tensor_cores=getenv("TC", 1)):
     self.process()
 
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
@@ -169,7 +169,7 @@ class OptimizedKernel(Kernel):
     self.simplify_ones()
 
     # should use HIP tensor cores?
-    if getenv("TC", 1) != 0 and self.opts.device == "HIP" and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
+    if use_tensor_cores != 0 and self.opts.device == "HIP" and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
         isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == UnaryOps.CAST and \
         isinstance(self.reduceop.src[0].src[0], LazyOp) and self.reduceop.src[0].src[0].op == BinaryOps.MUL and \
         self.reduceop.src[0].src[0].src[0].op == BufferOps.MEM and self.reduceop.src[0].src[0].src[1].op == BufferOps.MEM and self.opts.has_local and \
@@ -183,7 +183,7 @@ class OptimizedKernel(Kernel):
       axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%16 == 0 and i < self.first_reduce]
       if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce) == 1:
         if DEBUG >= 3: print("HIP TENSOR CORES", axis_buf0, axis_buf1)
-        self.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
+        self.use_tensor_cores = use_tensor_cores == 1  # TC=2 will do the shape ops without the WMMA
         self.reverse_upcast_dir = True
 
         # TODO: select axis in smart way
@@ -229,7 +229,7 @@ class OptimizedKernel(Kernel):
 
     # should use METAL tensor cores?
     # first, confirm it's a straightforward mulacc on a device with real locals
-    tensor_cores_allowed = getenv("TC", 1) != 0 and (getenv("TC", 1) == 2 or (self.opts.device == "METAL" and os.uname().machine == "arm64"))
+    tensor_cores_allowed = use_tensor_cores != 0 and (use_tensor_cores == 2 or (self.opts.device == "METAL" and os.uname().machine == "arm64"))
     if tensor_cores_allowed and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
         isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
         self.reduceop.src[0].src[0].op == BufferOps.MEM and self.reduceop.src[0].src[1].op == BufferOps.MEM and self.opts.has_local:
@@ -243,7 +243,7 @@ class OptimizedKernel(Kernel):
       optim_conv2d = (self.shape_len-self.first_reduce) == 3 and self.full_shape[self.first_reduce+1]%2 == 1 and self.full_shape[self.first_reduce+2]%2 == 1 and max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 21
       if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce == 1 or optim_conv2d):
         if DEBUG >= 3: print("METAL TENSOR CORES", axis_buf0, axis_buf1)
-        self.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
+        self.use_tensor_cores = use_tensor_cores == 1  # TC=2 will do the shape ops without the WMMA
 
         # TODO: select axis in smart way
         s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]

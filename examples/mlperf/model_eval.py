@@ -34,6 +34,7 @@ def eval_resnet():
   iterator = cross_process(lambda: iterate(BS))
   x,ny = next(iterator)
   dat = Tensor(x)
+  print(dat.shape)
   while dat is not None:
     y = ny
     GlobalCounters.reset()
