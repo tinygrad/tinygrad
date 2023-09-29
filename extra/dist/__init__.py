@@ -12,7 +12,7 @@ def preinit():
 
 # out-of-band communication/synchronization
 class _OOB:
-  def __init__(self, pipes:List[Tuple[Connection, Connection]], barrier:mp.Barrier):
+  def __init__(self, pipes:List[Tuple[Connection, Connection]], barrier):
     self.pipes, self.barrier = pipes, barrier
 
   # send some data to a target rank, blocks until data is received

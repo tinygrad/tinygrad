@@ -5,7 +5,7 @@ from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawBuffer, RawBufferCopyIn, RawBufferCopyInOut
 try: from tinygrad.runtime.ops_hip import RawHIPBuffer
-except: pass
+except: RawHIPBuffer = None
 from tinygrad.runtime.ops_shm import RawShmBuffer
 from tinygrad.jit import CacheCollector
 from tinygrad.tensor import Tensor, Function
@@ -16,7 +16,7 @@ import numpy as np
 def __send_rb(args, variables=None, jit=False, force_wait=False):
   x, target_rank, y, extra = args[:4]
   if y is None:
-    if isinstance(x, RawHIPBuffer):
+    if RawHIPBuffer and x.__class__ is RawHIPBuffer:
       hip.hipSetDevice(x._device)
       hip.hipDeviceSynchronize()
       extra = (hip.hipIpcGetMemHandle(x._buf), x._device)
@@ -29,7 +29,7 @@ def __send_rb(args, variables=None, jit=False, force_wait=False):
 def __recv_rb(args, variables=None, jit=False, force_wait=False):
   x, target_rank, y = args
   extra = dist.OOB.recv(target_rank)
-  if isinstance(x, RawHIPBuffer):
+  if RawHIPBuffer and x.__class__ is RawHIPBuffer:
     hip.hipSetDevice(extra[1])
     y._buf = hip.hipIpcOpenMemHandle(extra[0], 0)
     x._transfer(y)
@@ -41,7 +41,7 @@ def __recv_rb(args, variables=None, jit=False, force_wait=False):
 
 # send a rawbuffer from out rank to the target rank
 def _send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
-  if isinstance(x, RawHIPBuffer):
+  if RawHIPBuffer and x.__class__ is RawHIPBuffer:
     # send ipc handle
     hip.hipSetDevice(x._device)
     handle = hip.hipIpcGetMemHandle(x._buf)
@@ -73,7 +73,7 @@ setattr(_send_rb, "shared_memory_cache", {})
 
 # receive a rawbuffer from the target rank
 def _recv_rb(x:RawBuffer, target_rank:int):
-  if isinstance(x, RawHIPBuffer):
+  if RawHIPBuffer and isinstance(x, RawHIPBuffer):
     # open ipc handle
     handle, y_device = dist.OOB.recv(target_rank)
     hip.hipSetDevice(y_device)

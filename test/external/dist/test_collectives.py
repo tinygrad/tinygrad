@@ -25,9 +25,7 @@ def run():
   for _ in range(3):
     # create a tensor to send
     t = Tensor.zeros(SIZE, SIZE) if rank != 0 else Tensor.ones(SIZE, SIZE)
-    print(t.numpy())
     t2 = allreduce_jit(t.contiguous().realize(), cache_id="test")
-    print(t2.numpy())
     assert np.allclose(np.ones((SIZE, SIZE)), t2.numpy()), f"{t2.numpy()} wasn't ones"
 
   # reset jit
@@ -38,16 +36,14 @@ def run():
   for _ in range(3):
     # create a tensor to send
     t = Tensor.ones(SIZE_2, SIZE_2, SIZE_2) if rank == 0 else Tensor.zeros(SIZE_2, SIZE_2, SIZE_2)
-    print(t.numpy())
     t2 = allreduce_jit(t.contiguous().realize(), cache_id="test2")
-    print(t2.numpy())
     assert np.allclose(np.ones((SIZE_2, SIZE_2, SIZE_2)), t2.numpy()), f"{t2.numpy()} wasn't ones"
 
   print(f"rank {rank} passed")
 
 if __name__ == "__main__":
-  # devices = ["gpu:0", "gpu:1" if not CI else "gpu:0"]
-  devices = ["hip:0", "hip:1", "hip:2", "hip:3"]
+  devices = ["gpu:0", "gpu:1" if not CI else "gpu:0"]
+  # devices = ["hip:0", "hip:1", "hip:2", "hip:3"]
   world_size = len(devices)
 
   dist.init_oob(world_size)
