@@ -3,14 +3,24 @@
 # NOTE: this has overlap with external_test_opt.py
 
 import unittest
+from typing import List, Optional
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.helpers import DEBUG, dtypes
 from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.graph import log_schedule_item
 from tinygrad import nn
 
-def check_schedule(t:Tensor, allowed:int):
-  sched = [s for s in t.lazydata.schedule() if s[0].op not in LoadOps]
+def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=None):
+  seen = set()
+  if to_prerealize:
+    for pre in to_prerealize:
+      for s in pre.lazydata.schedule(seen.copy()):
+        log_schedule_item(*s)
+        seen.add(s[1])
+  sched = t.lazydata.schedule(seen)
+  for s in sched: log_schedule_item(*s)
+  sched = [s for s in sched if s[0].op not in LoadOps]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     from extra.utils import print_tree
@@ -111,8 +121,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty(10)
     c = a+b
     d = a+b
-    c.realize()
-    check_schedule(d, 0)
+    check_schedule(d, 0, [c])
 
   @unittest.skip("failing in old lazy")
   def test_cache_binaryop_reshaped(self):
@@ -120,25 +129,14 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty(10)
     c = a+b
     d = a.reshape(10,1)+b.reshape(10,1)
-    c.realize()
-    check_schedule(d, 0)
+    check_schedule(d, 0, [c])
 
   def test_cache_binaryop_transpose(self):
     a = Tensor.empty(10,10)
     b = Tensor.empty(10,10)
     c = (a.T*b.T).T #.contiguous()
     d = a*b
-    c.realize()
-    check_schedule(d, 0)
-
-  @unittest.skip("failing in old lazy")
-  def test_cache_binaryop_transpose_realized(self):
-    a = Tensor.randn(10,10).realize()
-    b = Tensor.randn(10,10).realize()
-    c = (a.T*b.T).T
-    d = a*b
-    c.realize()
-    check_schedule(d, 0)
+    check_schedule(d, 0, [c])
 
   def test_cache_two_reduceops(self):
     a = Tensor.empty(10)
@@ -162,23 +160,19 @@ class TestSchedule(unittest.TestCase):
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
-    c1.weight.realize()
-    c1.bias.realize()
 
     # run
     img = Tensor.ones(2,3,64,64)
     out = c1(img).relu()
-    check_schedule(out, 1)
+    check_schedule(out, 1, [c1.weight, c1.bias])
 
   def test_fold_conv_elu(self):
     c1 = nn.Conv2d(3,16,3)
-    c1.weight.realize()
-    c1.bias.realize()
 
     # run
     img = Tensor.ones(2,3,64,64)
     out = c1(img).elu()
-    check_schedule(out, 1)
+    check_schedule(out, 1, [c1.weight, c1.bias])
 
   def test_two_sum(self):
     img = Tensor.empty(64,64)
@@ -206,8 +200,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty(16)
     c = a+b
     d = (a+b).reshape(16,1)
-    c.realize()
-    check_schedule(d, 0)
+    check_schedule(d, 0, [c])
 
   def test_multi_permute_should_collapse(self):
     a = Tensor.empty(4,4,4,4)
@@ -223,19 +216,6 @@ class TestSchedule(unittest.TestCase):
     d = a.reshape(10,1)+b.reshape(10,1)
     out = c.sum() + d.sum()
     check_schedule(out, 1)
-
-  """
-  def test_reshape_doesnt_matter(self):
-    a = Tensor.empty(10)
-    b = a.reshape(10,1)
-    self.assertIs(a.lazydata.backing, b.lazydata.backing)
-
-  def test_permute_doesnt_matter(self):
-    a = Tensor.empty(10, 10)
-    b = a.permute(1,0)
-    c = a.reshape(10, 1, 10).permute(2,1,0)
-    self.assertIs(b.lazydata.backing, c.lazydata.backing)
-  """
 
   # NOTE: for this to pass, LazyViews must be children of LazyBuffers so the (a+b) runs first
   @unittest.skip("not real world")
@@ -255,8 +235,7 @@ class TestSchedule(unittest.TestCase):
     e = keep_me.sum() # give keep_me a child (NOTE: BinaryOps won't be a child since it will instant fuse)
     d = keep_me+c
     check_schedule(d, 2)
-    d.realize()
-    check_schedule(keep_me, 0)
+    check_schedule(keep_me, 0, [d])
 
   @unittest.skip("failing in old lazy")
   def test_permute_breaks_fusion(self):
@@ -294,7 +273,6 @@ class TestSchedule(unittest.TestCase):
     # NOOP, 3 convs, contiguous
     check_schedule(x, 5)
 
-  @unittest.skip("failing now with contig")
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
     b2 = Tensor.empty(16)
