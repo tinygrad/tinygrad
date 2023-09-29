@@ -147,7 +147,7 @@ class LazyBuffer:
     assert self._base is None, "no setting var_vals of based LazyBuffers"
     self._var_vals = val
 
-  def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self._realized else self._realized} st={self.st}>"
+  def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if hasattr(self, 'op') else self._realized} st={self.st}>"
   @property
   def key(self):
     if self.realized: return (self.dtype, self.realized.key, self.st, self.var_vals_key)

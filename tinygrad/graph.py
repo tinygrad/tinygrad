@@ -4,7 +4,7 @@ try:
 except ImportError:
   nx = None # graph won't work
 from collections import defaultdict
-from typing import Dict, List, TYPE_CHECKING, Tuple
+from typing import Dict, List, TYPE_CHECKING, Tuple, cast
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
 from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters
 
@@ -50,7 +50,7 @@ def str_dtype(dtyp):
 def log_schedule_item(iop: LazyOp, ret: 'LazyBuffer', inp: Tuple['LazyBuffer', ...]):
   show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
-  if iop.op == LoadOps.CONTIGUOUS: setattr(ret, 'node_id', nm(iop.src[0]))
+  if iop.op == LoadOps.CONTIGUOUS: setattr(ret, 'node_id', nm(cast('LazyBuffer', iop.src[0]).base))
   if iop.op in {LoadOps.CONST, LoadOps.CONTIGUOUS}: return
 
   op: List[Op] = [x.op for x in iop.get_lazyops()]
@@ -58,9 +58,11 @@ def log_schedule_item(iop: LazyOp, ret: 'LazyBuffer', inp: Tuple['LazyBuffer', .
   optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1
   if show_graph:
+    assert ret.base == ret, "all outputs based"
     top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#FF8080'}
     for x in inp:
-      assert x.base == x, "all based"
+      assert x.base == x, "all inputs based"
+      #assert nm(x) in G.nodes, "all inputs seen"
       G.add_edge(nm(x), nm(ret), label=get_sop(op), color='#00000060')
       if 'label' not in G.nodes[nm(x)]:
         G.nodes[nm(x)]['label'] = str(x.shape)+str_dtype(ret.dtype)
