@@ -1,20 +1,21 @@
 from typing import Any, Optional, Tuple
 from extra import dist
 from multiprocessing import shared_memory
-from tinygrad.helpers import DEBUG, GlobalCounters, colored
+from tinygrad.helpers import DEBUG, colored
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawBufferCopyIn, RawBufferCopyInOut
 from tinygrad.runtime.ops_shm import RawShmBuffer
+from tinygrad.jit import CacheCollector
 from tinygrad.tensor import Tensor, Function
 import numpy as np
 
 # fake the function signature of ASTRunner so we can put it in the cache
-def __send_rb(args:Tuple[RawBufferCopyInOut, RawShmBuffer, int, Any], jit=False, force_wait=False):
+def __send_rb(args:Tuple[RawBufferCopyInOut, RawShmBuffer, int, Any], variables=None, jit=False, force_wait=False):
   args[0]._copyout(np.frombuffer(args[1]._buffer(), dtype=args[0].dtype.np))
   dist.OOB.send(args[3], args[2])
   if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}   sent {args[0]} to rank {args[2]}")
 
-def __recv_rb(args:Tuple[RawBufferCopyIn, RawShmBuffer, int], jit=False, force_wait=False):
+def __recv_rb(args:Tuple[RawBufferCopyIn, RawShmBuffer, int], variables=None, jit=False, force_wait=False):
   dist.OOB.recv(args[2])
   args[0]._copyin(args[1].toCPU())
   if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}   recv {args[0]} from rank {args[2]}")
@@ -35,7 +36,7 @@ def _send_rb(x:RawBufferCopyInOut, target_rank:int, cache_id:Optional[str]=None)
   __send_rb((x, rb, target_rank, (shm_name, cache_id)))
 
   # jit support
-  if GlobalCounters.cache is not None: GlobalCounters.cache.append((__send_rb, [x, rb, target_rank, None]))
+  CacheCollector.add(__send_rb, [x, rb, target_rank, None], {})
 setattr(_send_rb, "shared_memory_cache", {})
 
 # receive a rawbuffer from the target rank
@@ -52,7 +53,7 @@ def _recv_rb(x:RawBufferCopyIn, target_rank:int):
     s.unlink()
 
   # jit support
-  if GlobalCounters.cache is not None: GlobalCounters.cache.append((__recv_rb, [x, rb, target_rank]))
+  CacheCollector.add(__recv_rb, [x, rb, target_rank], {})
 
 # sends a lazybuffer from our rank to the target rank
 def _send_lb(x:LazyBuffer, target_rank:int, cache_id:Optional[str]=None) -> None: _send_rb(x.contiguous().realize().realized, target_rank, cache_id=cache_id)

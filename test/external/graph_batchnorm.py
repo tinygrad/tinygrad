@@ -1,18 +1,17 @@
 import unittest
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d, BatchNorm2d, optim
 
 def model_step(lm):
-  Tensor.training = True
-  x = Tensor.ones(8,12,128,256, requires_grad=False)
-  optimizer = optim.SGD(get_parameters(lm), lr=0.001)
-  loss = lm.forward(x).sum()
-  optimizer.zero_grad()
-  loss.backward()
-  del x,loss
-  optimizer.step()
-  Tensor.training = False
+  with Tensor.train():
+    x = Tensor.ones(8,12,128,256, requires_grad=False)
+    optimizer = optim.SGD(get_parameters(lm), lr=0.001)
+    loss = lm.forward(x).sum()
+    optimizer.zero_grad()
+    loss.backward()
+    del x,loss
+    optimizer.step()
 
 class TestBatchnorm(unittest.TestCase):
   def test_conv(self):
@@ -33,7 +32,7 @@ class TestBatchnorm(unittest.TestCase):
         return self.c2(self.c(x)).relu()
     lm = LilModel()
     model_step(lm)
-  
+
   def test_two_conv_bn(self):
     class LilModel:
       def __init__(self):

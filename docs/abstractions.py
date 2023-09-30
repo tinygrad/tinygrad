@@ -22,7 +22,7 @@ from abc import ABC
 # let's trace an addition down through the layers of abstraction.
 
 # we will be using the clang backend
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 Device.DEFAULT = "CLANG"
 
 # first, 2+3 as a Tensor, the highest level
@@ -245,14 +245,12 @@ np.testing.assert_allclose(output.toCPU(), numpy_a+numpy_b)
 
 class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto();
 
-class Token:
-  name: str
-
 class UOp:
   uop: UOps
-  out: Optional[Token]
-  vin: List[Token]
+  dtype: Optional[DType]
+  vin: Tuple[UOp, ...]
   arg: Any
+  num: int  # UOps are unique
 
 class Linearizer:
   # create the kernel with the AST
@@ -265,13 +263,12 @@ class Linearizer:
   uops: List[UOp]
 
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
 result = Tensor(2).realize() + Tensor(3).realize()
-result.lazydata.realized = Device[Device.DEFAULT].buffer(prod(result.shape), result.dtype)
 
 # use the real Linearizer to linearize 2+3
-from tinygrad.codegen.linearizer import Linearizer, LinearizerOptions
-linearizer = Linearizer(result.lazydata.op, result.lazydata, LinearizerOptions())
+from tinygrad.codegen.linearizer import Linearizer
+sched = result.lazydata.schedule()
+linearizer = Linearizer(sched[-1][0])
 linearizer.linearize()
 
 # print the uops
@@ -279,14 +276,12 @@ for uop in linearizer.uops: print(uop)
 
 # output:
 """
-UOps.DEFINE_GLOBAL  :                           []                               ('data0', dtypes.float)
-UOps.LOOP           :                           []                               ([], 'global')
-UOps.LOOP           :                           []                               ([], 'local')
-UOps.LOAD           : <acc1_0>                  []                               ConstOp(value=2.0, valid=<1>, invalid_value=0.0)
-UOps.LOAD           : <acc2_0>                  []                               ConstOp(value=3.0, valid=<1>, invalid_value=0.0)
-UOps.ALU            : <alu0>                    [<acc1_0>, <acc2_0>]             BinaryOps.ADD
-UOps.STORE          :                           [<alu0>]                         MemOp(name='data0', idx=<0>, local=False, memory_dtype=dtypes.float, valid=<1>, invalid_value=0.0)
-UOps.ENDLOOP        :                           []                               ([], 'global+local')
+   0 UOps.DEFINE_GLOBAL  : ptr.dtypes.float          []                               ('data0', dtypes.float)
+   1 UOps.CONST          : dtypes.float              []                               2.0
+   2 UOps.CONST          : dtypes.float              []                               3.0
+   3 UOps.ALU            : dtypes.float              [1, 2]                           BinaryOps.ADD
+   4 UOps.CONST          : dtypes.int                []                               0
+   5 UOps.STORE          :                           [0, 4, 3]                        None
 """
 
 # %%
@@ -299,15 +294,14 @@ result = Tensor(2) + Tensor(3)
 
 # we have a global cache used by the JIT
 # from there, we can see the generated clang code
-from tinygrad.helpers import GlobalCounters
-GlobalCounters.cache = []    # enables the cache
+from tinygrad.jit import CacheCollector
+CacheCollector.start()       # enables the cache
 result.realize()             # create the program and runs it
-cache_saved = GlobalCounters.cache
-GlobalCounters.cache = None  # disable the cache
+cache_saved = CacheCollector.finish()  # disable the cache
 
 # there's one ASTRunner in the cache
 assert len(cache_saved) == 1
-prg, bufs = cache_saved[0]
+prg, bufs, _ = cache_saved[0]
 
 # print the C Program :)
 print(prg.prg)
@@ -331,22 +325,22 @@ void E_1(float* data0) {
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # create a virtual (10, 10) Tensor. this is just a shape, there's no actual tensor
-a = ShapeTracker((10, 10))
+a = ShapeTracker.from_shape((10, 10))
 
 # you'll see it has one view. the (10, 1 are the strides)
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (10, 1), 0)])
 
 # we can permute it, and the strides change
-a.permute((1,0))
+a = a.permute((1,0))
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (1, 10), 0)])
 
 # we can then reshape it, and the strides change again
 # note how the permute stays applied
-a.reshape((5,2,5,2))
+a = a.reshape((5,2,5,2))
 print(a) # ShapeTracker(shape=(5, 2, 5, 2), views=[View((5, 2, 5, 2), (2, 1, 20, 10), 0)])
 
 # now, if we were to reshape it to a (100,) shape tensor, we have to create a second view
-a.reshape((100,))
+a = a.reshape((100,))
 print(a) # ShapeTracker(shape=(100,), views=[
          #   View((5, 2, 5, 2), (2, 1, 20, 10), 0),
          #   View((100,), (1,), 0)])
@@ -357,7 +351,7 @@ idx, _ = a.expr_idxs()
 print(idx.render())  # (((idx0%10)*10)+(idx0//10))
 
 # of course, if we reshape it back, the indexes get simple again
-a.reshape((10,10))
+a = a.reshape((10,10))
 idx, _ = a.expr_idxs()
 print(idx.render())  # ((idx1*10)+idx0)
 
@@ -367,11 +361,11 @@ print(a) # ShapeTracker(shape=(10, 10), views=[
          #   View((10, 10), (10, 1), 0)])
 
 # ...until we simplify it!
-a.simplify()
+a = a.simplify()
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (1, 10), 0)])
 
 # and now we permute it back
-a.permute((1,0))
+a = a.permute((1,0))
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (10, 1), 0)])
 
 # and it's even contiguous

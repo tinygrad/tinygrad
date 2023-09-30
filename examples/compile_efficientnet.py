@@ -1,20 +1,22 @@
+from pathlib import Path
 from models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
-from tinygrad.state import safe_save
+from tinygrad.nn.state import safe_save
 from extra.utils import fetch
 from extra.export_model import export_model
 from tinygrad.helpers import getenv
-import ast, os
+import ast
 
 if __name__ == "__main__":
   model = EfficientNet(0)
   model.load_from_pretrained()
   mode = "clang" if getenv("CLANG", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else ""
   prg, inp_size, out_size, state = export_model(model, Tensor.randn(1,3,224,224), mode)
+  dirname = Path(__file__).parent
   if getenv("CLANG", "") == "":
-    safe_save(state, os.path.join(os.path.dirname(__file__), "net.safetensors"))
+    safe_save(state, (dirname / "net.safetensors").as_posix())
     ext = "js" if getenv("WEBGPU", "") != "" else "json"
-    with open(os.path.join(os.path.dirname(__file__), f"net.{ext}"), "w") as text_file:
+    with open(dirname / f"net.{ext}", "w") as text_file:
       text_file.write(prg)
   else:
     cprog = [prg]

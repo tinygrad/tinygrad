@@ -7,7 +7,7 @@ import multiprocessing
 import numpy as np
 from typing import Optional
 from extra.utils import download_file
-from tinygrad.state import torch_load, load_state_dict
+from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
@@ -136,7 +136,7 @@ LANGUAGES = {
   "as": "assamese", "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa", "ba": "bashkir", "jw": "javanese", "su": "sundanese",
 }
 
-BASE = pathlib.Path(__file__).parent.parent / "weights"
+BASE = pathlib.Path(__file__).parents[1] / "weights"
 def get_encoding(n_vocab_in):
   download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/gpt2.tiktoken", BASE / "gpt2.tiktoken")
   ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(BASE / "gpt2.tiktoken") if line)}
@@ -202,7 +202,7 @@ if __name__ == "__main__":
     for i in range(50):
       out = model.decoder(Tensor([lst]), dat)
       out.realize()
-      idx = out[0,-1].numpy().argmax()
+      idx = out[0,-1].argmax().numpy()
       lst.append(idx)
       print(enc.decode(lst))
   else:
@@ -227,7 +227,7 @@ if __name__ == "__main__":
         log_spec = prep_audio(waveform=Tensor(total).numpy(), sr=RATE)
         encoded_audio = model.encoder(Tensor(log_spec)).realize()
       out = model.decoder(Tensor([lst]), encoded_audio).realize()
-      idx = out[0,-1].numpy().argmax()
+      idx = out[0,-1].argmax().numpy()
       lst.append(idx)
       dec = enc.decode(lst)
       print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT

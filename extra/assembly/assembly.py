@@ -1,5 +1,5 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict, cast
-from tinygrad.codegen.linearizer import UOps, Token, ConstOp, MemOp, UOp
+from tinygrad.codegen.linearizer import UOps, MemOp, UOp
 from tinygrad.ops import BinaryOps, UnaryOps
 from tinygrad.helpers import DType, dtypes, DEBUG
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
@@ -38,16 +38,15 @@ class AssemblyLanguage:
   ins: List[AssemblyInstruction] = []
 
   def type_to_letter(self,x): return _type_to_letter[x[0]].upper() if x[1] else _type_to_letter[x[0]]
-  def newreg(self, tok, dtype=dtypes.float32, scalar=False):
-    if isinstance(tok, Token): dtype = tok.dtype  # this
+  def newreg(self, tok, dtype=dtypes.float32, scalar=False) -> Register:
     self.tor[tok] = ret = Register(f"%{self.type_to_letter((dtype, scalar))}{self.cnts[(dtype, scalar)]}", dtype, scalar)
     if dtype == dtypes._float4:
       for off in range(4):
-        self.tor[Token(tok.name, tok.dtype, off)] = Register(ret.nm, dtypes.float, ret.scalar, off)
+        self.tor[tok] = Register(ret.nm, dtypes.float, ret.scalar, off)
     self.cnts[(dtype, scalar)] += 1
     return ret
 
-  def render_numnode(self, b):
+  def render_numnode(self, b) -> Register:
     key = ("num", b)
     if key not in self.tor: self.ins.append(AssemblyInstruction(UOps.LOAD, self.newreg(key, scalar=True, dtype=dtypes.int32), [], b))
     return self.tor[key]
@@ -80,7 +79,7 @@ class AssemblyLanguage:
     off = 0  # TODO: should this be None?
     if isinstance(idx, SumNode):
       nums = [n.b for n in idx.nodes if isinstance(n, NumNode)]
-      if len(nums) > 0 and nums[0] < 4096 and (idx-nums[0]).min >= 0:  # TODO: different for each GPU?
+      if nums and nums[0] < 4096 and (idx-nums[0]).min >= 0:  # TODO: different for each GPU?
         idx -= nums[0]
         off = cast(int, nums[0])
     reg = idx.render(self.render_ops, self)
@@ -98,11 +97,12 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
   lang.ins.clear()
   lang.tor.clear()
   lang.cnts.clear()
-  buf_to_dtype = {args[0]:args[1] for uop,_,_,args in uops if uop == UOps.DEFINE_GLOBAL}
+  buf_to_dtype = {args[0]:args[1] for uop,_,_,args,_ in uops if uop == UOps.DEFINE_GLOBAL}
   global_size, local_size = [], []
   skipload_branch = 0
   lang.ins += [AssemblyInstruction(UOps.SPECIAL, lang.newreg(buf, dtype=dtypes.uint64, scalar=True), [], buf) for buf in buf_to_dtype]
-  for uop,newvar,vin,args in uops:
+  for u in uops:
+    uop,dtype,vin,args,_ = u
     if uop == UOps.DEFINE_LOCAL:
       lang.ins.append(AssemblyInstruction(UOps.DEFINE_LOCAL, None, [], args))
       lang.ins.append(AssemblyInstruction(UOps.ALU, lang.newreg(args[0], dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
@@ -133,59 +133,55 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
       elif args[1] == 'local':
         for i, var in enumerate(reversed(args[0])):
           lang.ins.append(AssemblyInstruction(UOps.ENDLOOP, None, [lang.tor[var]], (var.max+1, f"lid{i}")))
-    elif uop == UOps.CAST and newvar is not None:
+    elif uop == UOps.CAST:
       # TODO: we should reconsider outputting CAST in the linearizer. these are needless copies
-      out = lang.newreg(newvar)
+      out = lang.newreg(u, dtype)
       for i,sr in enumerate(out.subregs()):
         lang.ins.append(AssemblyInstruction(UOps.ALU, sr, [lang.tor[vin[i]]], UnaryOps.NOOP))
-    elif uop == UOps.ALU and newvar is not None:
-      out = lang.newreg(newvar) if newvar not in lang.tor else lang.tor[newvar]
+    elif uop == UOps.ALU:
+      out = lang.newreg(u, dtype) if u not in lang.tor else lang.tor[u]
       # this is the only thing that can violate SSA
       if args in [BinaryOps.CMPLT]:
-        pred_reg = lang.newreg((newvar, 'pred'), dtype=dtypes.bool)
+        pred_reg = lang.newreg((u, 'pred'), dtype=dtypes.bool)
         lang.ins.append(AssemblyInstruction(UOps.ALU, pred_reg, [lang.tor[x] for x in vin], args))
         lang.ins.append(AssemblyInstruction(UOps.CAST, out, [pred_reg], args))
       elif args == BinaryOps.DIV and lang.no_div:
-        tmp = lang.newreg((newvar, "rcp"))
+        tmp = lang.newreg((u, "rcp"))
         lang.ins.append(AssemblyInstruction(UOps.ALU, tmp, [lang.tor[vin[1]]], UnaryOps.RECIP))
         lang.ins.append(AssemblyInstruction(UOps.ALU, out, [lang.tor[vin[0]], tmp], BinaryOps.MUL))
       elif args == UnaryOps.SIN and lang.sin_is_sin2pi:
-        tmp = lang.newreg((newvar, "2pi"))
+        tmp = lang.newreg((u, "2pi"))
         lang.ins.append(AssemblyInstruction(UOps.ALU, tmp, [lang.tor[vin[0]], 1/(math.pi*2)], BinaryOps.MUL))
         lang.ins.append(AssemblyInstruction(UOps.ALU, out, [tmp], args))
       else:
         lang.ins.append(AssemblyInstruction(UOps.ALU, out, [lang.tor[x] for x in vin], args))
-    elif uop == UOps.LOAD and newvar is not None:
-      if isinstance(args, ConstOp):
-        if args.valid.min == 0 and args.valid.max == 1:
-          reg = lang.newreg(newvar, dtype=newvar.dtype)
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], args.invalid_value))
+    elif uop == UOps.DEFINE_ACC:
+      reg = lang.newreg(u, dtype=dtype)
+      lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], args))
+    elif uop == UOps.SPECIAL:
+      lang.tor[u] = lang.tor[args]
+    elif uop == UOps.CONST:
+      lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(u, dtype=dtype), [], args))
+    elif uop == UOps.LOAD:
+      idx, treg, off = lang.addr_w_offset(args)
+      reg = lang.newreg(u, dtype=dtype, scalar=(idx.scalar and (not isinstance(treg, Register) or treg.scalar)))
+      if args.valid.min == 0:
+        lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], 0))
+        if args.valid.max == 1:
           pred = args.valid.render(lang.render_ops, lang)
           lang.ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], args.value))
-          lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
-          skipload_branch += 1
-        else:
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, lang.newreg(newvar, dtype=newvar.dtype), [], args.value if args.valid.min == 1 else args.invalid_value))
+      if args.valid.max == 1:
+          # NOTE: you can't compute the index in here, because it assumes it's all available later
+        lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype if args.memory_dtype != dtypes.float else None)))
+      if args.valid.min == 0 and args.valid.max == 1:
+        lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
+        skipload_branch += 1
+    elif uop == UOps.STORE:
+      if args is None:
+        lang.ins.append(AssemblyInstruction(UOps.ALU, lang.tor[vin[0]], [lang.tor[vin[1]]], UnaryOps.NOOP))
       else:
         idx, treg, off = lang.addr_w_offset(args)
-        reg = lang.newreg(newvar, dtype=newvar.dtype, scalar=(idx.scalar and (not isinstance(treg, Register) or treg.scalar))) # and not dtypes.is_float(newvar.dtype)))
-        if args.valid.min == 0:
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [], 0))
-          if args.valid.max == 1:
-            pred = args.valid.render(lang.render_ops, lang)
-            lang.ins.append(AssemblyInstruction(UOps.COND_BRANCH, None, [pred], (f"$skipload_{skipload_branch}", False)))
-        if args.valid.max == 1:
-            # NOTE: you can't compute the index in here, because it assumes it's all available later
-          lang.ins.append(AssemblyInstruction(UOps.LOAD, reg, [idx] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype if args.memory_dtype != dtypes.float else None)))
-        if args.valid.min == 0 and args.valid.max == 1:
-          lang.ins.append(AssemblyInstruction(UOps.LABEL, None, [], f"$skipload_{skipload_branch}"))
-          skipload_branch += 1
-    elif uop == UOps.STORE:
-      idx, treg, off = lang.addr_w_offset(args)
-      lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype if args.memory_dtype != dtypes.float else None)))
-  # define registers
-  lang.ins = [AssemblyInstruction(UOps.DEFINE_REGISTER, None, [], (dtype, lang.type_to_letter(dtype), c)) for dtype,c in lang.cnts.items()] + lang.ins
+        lang.ins.append(AssemblyInstruction(UOps.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype if args.memory_dtype != dtypes.float else None)))
 
   if DEBUG >= 4:
     for tins in lang.ins: print(tins)

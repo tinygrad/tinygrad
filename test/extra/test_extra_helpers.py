@@ -13,7 +13,7 @@ class TestEarlyExec(unittest.TestCase):
       temp.write(file_content)
       temp_path = temp.name
     try:
-      output = self.early_exec((["python", temp_path] + exec_args, None))
+      output = self.early_exec((["python3", temp_path] + exec_args, None))
       return output
     finally:
       os.remove(temp_path)
@@ -32,7 +32,7 @@ class TestEarlyExec(unittest.TestCase):
 
   def test_enable_early_exec_type_exception(self):
     with self.assertRaises(TypeError):
-      self.early_exec((["python"], "print('Hello, world!')"))
+      self.early_exec((["python3"], "print('Hello, world!')"))
 
 class TestCrossProcess(unittest.TestCase):
 

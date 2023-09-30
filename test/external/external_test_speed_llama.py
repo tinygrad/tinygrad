@@ -4,8 +4,8 @@ import numpy as np
 from examples.llama import Transformer, MODEL_PARAMS
 from test.test_net_speed import start_profile, stop_profile
 from tinygrad.tensor import Tensor
-from tinygrad.lazy import Device
-from tinygrad.state import get_state_dict
+from tinygrad.ops import Device
+from tinygrad.nn.state import get_state_dict
 from tinygrad.ops import Compiled
 from tinygrad.helpers import dtypes, prod
 from tinygrad.runtime.lib import RawBuffer
@@ -28,7 +28,7 @@ class TestLLaMASpeed(unittest.TestCase):
     Device[Device.DEFAULT].buffer = RawFakeBuffer
 
     print("testing llama python run time")
-    model = Transformer(**MODEL_PARAMS[1]["7B"]["args"])
+    model = Transformer(**MODEL_PARAMS["1"]["7B"]["args"])
     print("built model")
     # assign fake tensors to the values
     for v in get_state_dict(model).values(): v.assign(Tensor.empty(*v.shape, dtype=v.dtype))

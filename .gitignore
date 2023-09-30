@@ -6,6 +6,7 @@ notebooks
 .*.swo
 *.pyc
 *.so
+*.txt
 build
 /dist
 *.egg-info
@@ -36,3 +37,6 @@ package.json
 package-lock.json
 temp
 *.csv
+.coverage
+coverage.xml
+htmlcov

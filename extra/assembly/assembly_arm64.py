@@ -20,11 +20,12 @@ def specialize_to_arm64(fn_nm, asm):
   var_size = 16
   prev_uop:Optional[UOps] = None
   ins = []
-  x_regs = ['x' + str(i) for i in reversed(range(29)) if i not in (10,11,12,13,14,15,16,17,18,19,20)]
-  s_regs = ['s' + str(i) for i in reversed(range(3,30))]
+  x_regs = ['x' + str(i) for i in reversed(range(12))]
+  s_regs = ['s' + str(i) for i in reversed(range(3,32)) if i <= 7 or i >= 16]
   type_to_reg = {dtypes.double: "d", dtypes.half: 'h', dtypes.float32: 's', dtypes.bool: 'w', dtypes.int8:'w', dtypes.int32: 'w', dtypes.int64: 'x', dtypes.uint8:'w', dtypes.uint32: 'w', dtypes.uint64: 'x'}
   alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
           BinaryOps.MOD: "", BinaryOps.CMPLT: "subs",
+          UnaryOps.NOOP: "mov", UnaryOps.NEG: "neg",
           UnaryOps.SIN:'bl ' + get_name('sinf'), UnaryOps.LOG2: 'bl ' + get_name("log2f"), UnaryOps.EXP2: 'bl ' + get_name("exp2f"), UnaryOps.SQRT: 'bl ' + get_name("sqrtf"),
           TernaryOps.MULACC: "madd", TernaryOps.WHERE: "fcsel"}
 
@@ -55,15 +56,15 @@ def specialize_to_arm64(fn_nm, asm):
     for v in [v for v in mvars if v is not None and v.__class__ is not int and v.nm not in rtor]:
       available_regs = s_regs if dtypes.is_float(v[1]) else x_regs
       #NOTE: Very simple spill, everything that don't fit in regs goes to mem
-      if len(available_regs) == 0:
+      if not available_regs:
         # ARM needs the stack 16-byte aligned
         var_size += 16
-        available_regs.append('s0' if dtypes.is_float(out[1]) else 'x11')
+        available_regs.append('s0' if dtypes.is_float(out[1]) else 'x12')
         mem_vars[v.nm] = var_size
       rtor[v.nm] = available_regs.pop()
 
   temp_floats = ['s0', 's1', 's2']
-  temp_ints = ['x11', 'x12', 'x13']
+  temp_ints = ['x12', 'x13', 'x16']
   for i, (uop, out, vin, arg) in enumerate(asm):
     # Clear regs out of interval
     for var, reg in list(rtor.items()):
@@ -83,16 +84,21 @@ def specialize_to_arm64(fn_nm, asm):
       if arg.startswith('data'):
         # data 8 to n into the stack
         if int(arg[4:]) >= 8:
-          ins.append(f"ldr x15, [x19, #{(int(arg[4:]) - 8) * 8}]")
+          ins.append(f"ldr x15, [x17, #{(int(arg[4:]) - 8) * 8}]")
           ins.append(f"mov {rtor[out.nm]}, x15")
       else:
         ins.append(f"mov {rtor[out.nm]}, #0")
         ins.append(f"loop_{arg}:")
     elif uop == UOps.CAST:
       if arg == BinaryOps.CMPLT:
-        mov_imm(0.0, 's0')
-        mov_imm(1.0, 's1')
-        ins.append(f"fcsel {rtor[out.nm]}, s1, s0, lt")
+        if rtor[out.nm][0] == 's':
+          mov_imm(0.0, 's0')
+          mov_imm(1.0, 's1')
+          ins.append(f"fcsel {rtor[out.nm]}, s1, s0, lt")
+        if rtor[out.nm][0] == 'x':
+          mov_imm(0, 'x14')
+          mov_imm(1, 'x15')
+          ins.append(f"csel {rtor[out.nm]}, x15, x14, lt")
       else:
         ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
     elif uop == UOps.ALU:
@@ -100,7 +106,7 @@ def specialize_to_arm64(fn_nm, asm):
       if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
         ins.append(f"ands {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
       elif arg == TernaryOps.WHERE:
-        ins.append(f"fcmp {rtor[vin[0].nm]}, #0.0")
+        ins.append(f"fcmp {rtor[vin[0].nm]}, #0.0" if rtor[vin[0].nm][0] == 's' else f"cmp {rtor[vin[0].nm]}, #0")
         ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[1].nm]}, {rtor[vin[2].nm]}, ne")
       elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
         #NOTE: Not a real instruction, use to emulate a ext call in unicorn
@@ -124,8 +130,9 @@ def specialize_to_arm64(fn_nm, asm):
       elif arg == BinaryOps.CMPLT:
         ins.append(f"{alu[arg]} {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}" if not dtypes.is_float(vin[0][1]) else f"fcmp {rtor[vin[0].nm]}, {rtor[vin[1].nm]}")
       elif arg == BinaryOps.MOD:
-        ins.append(f"udiv x14, {rtor[vin[0].nm]}, x15")
-        ins.append(f"msub {rtor[out.nm]}, x14, x15, {rtor[vin[0].nm]}")
+        rhs = 'x15' if vin[1].__class__ is int else rtor[vin[1].nm]
+        ins.append(f"udiv x14, {rtor[vin[0].nm]}, {rhs}")
+        ins.append(f"msub {rtor[out.nm]}, x14, {rhs}, {rtor[vin[0].nm]}")
       else:
         ins.append(f"{'f' if dtypes.is_float(vin[0][1]) else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {', '.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
     elif uop == UOps.LOAD:
@@ -139,12 +146,11 @@ def specialize_to_arm64(fn_nm, asm):
         ins.append(f"ldr{'sb' if arg[2] is not None and arg[2] in (dtypes.int8, dtypes.uint8, dtypes.bool) else ''} {reg_in}, [x15]")
         if arg[2] is not None: ins.append(f"{'fcvt' if arg[2] in [dtypes.half, dtypes.double] else 'scvtf'} {rtor[out.nm]}, {reg_in}")
     elif uop == UOps.STORE:
-      shifts = {dtypes.int64: "#3", dtypes.half: "#1", dtypes.int8:"#2", dtypes.uint8: "#2", dtypes.bool: "#2"}
       #NOTE: if need casting load var in s/h0 or x/w12 temp regs
       reg_out = (type_to_reg[arg[2]] + ('0' if dtypes.is_float(arg[2]) else '12') if arg[2] is not None else rtor[vin[1].nm])
       if arg[2] is not None: ins.append(f"fcvt{'zs' if arg[2] not in [dtypes.half, dtypes.double] else '' } {reg_out}, {rtor[vin[1].nm]}")
       ins.append(f"mov x15, #{arg[0]}")
-      ins.append(f"str {reg_out}, [{rtor[vin[0].nm]}, x15, lsl {shifts[arg[2]] if arg[2] is not None and arg[2] in shifts else '#0'}]")
+      ins.append(f"str {reg_out}, [{rtor[vin[0].nm]}, x15, lsl #0]")
     elif uop == UOps.COND_BRANCH:
       #TODO: this is a hack it shouldn't always be a cmp before a cond branch?
       if prev_uop == UOps.LOAD:
@@ -162,7 +168,7 @@ def specialize_to_arm64(fn_nm, asm):
     if out is not None and out.nm in mem_vars:
       ins.append(f"mov x15, {mem_vars[out.nm]}")
       ins.append(f"str {rtor[out.nm]}, [sp, x15]")
-  return "\n".join([f"//varsize {var_size}",".arch armv8-a",".text", f".global {get_name(fn_nm)}",".p2align 2", f"{get_name(fn_nm)}:", "mov x19, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret", "\n"])
+  return "\n".join([f"//varsize {var_size}",".arch armv8-a",".text", f".global {get_name(fn_nm)}",".p2align 2", f"{get_name(fn_nm)}:", "mov x17, sp"] + [f"sub sp, sp, #{offset}" for offset in compute_offsets(var_size)]+ ins + [f"add sp, sp, #{offset}" for offset in compute_offsets(var_size)] +["ret", "\n"])
 
 def uops_to_arm64_asm(fn_nm:str, uops:List[UOp]) -> Tuple[str, List[int], List[int], bool]:
   lang = ARM64Language()
