@@ -109,6 +109,13 @@ class TestSymbolicReshape(unittest.TestCase):
         t = t.reshape(vj, vi)
         assert t.shape == (vj, vi)
 
+  def test_reshape_non_contiguous(self):
+    vi = Variable("i", 1, 5)
+    t = Tensor.rand(3,4)
+    t = t.permute(1,0)
+    t = t.reshape(4, vi)
+    assert t.shape == (4, vi)
+
 class TestSymbolicExpand(unittest.TestCase):
   def test_expand_into_symbols(self):
     vi = Variable("i", 1, 5)
@@ -119,7 +126,7 @@ class TestSymbolicExpand(unittest.TestCase):
     a = a.reshape(3, vi, 1).expand((3, vi, vj))
     assert a.shape == (3, vi, vj)
     assert a.lazydata.var_vals == {}
-  
+
   def test_expand_into_reshape_with_symbols(self):
     vi = Variable("i", 1, 5)
     a = Tensor([[1], [2], [3]]).expand((3, 4))
