@@ -11,7 +11,6 @@ from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
 
 from tinygrad.runtime.lib import RawBuffer
-from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -218,7 +217,7 @@ class LazyBuffer:
 
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
-    return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), {}, RawNumpyBuffer.fromCPU(x))
+    return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), {}, Device["CPU"].buffer.fromCPU(x))
 
   def prepare_transfer(self):
     self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
