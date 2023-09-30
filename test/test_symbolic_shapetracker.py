@@ -119,6 +119,13 @@ class TestSymbolicExpand(unittest.TestCase):
     a = a.reshape(3, vi, 1).expand((3, vi, vj))
     assert a.shape == (3, vi, vj)
     assert a.lazydata.var_vals == {}
+  
+  def test_expand_into_reshape_with_symbols(self):
+    vi = Variable("i", 1, 5)
+    a = Tensor([[1], [2], [3]]).expand((3, 4))
+    a = a.reshape(3, vi)
+    assert a.shape == (3, vi)
+    assert a.lazydata.var_vals == {vi: 4}
 
   def test_plus_expands_constant(self):
     vi = Variable("i", 1, 5)
