@@ -1,5 +1,6 @@
 from __future__ import annotations
 import functools
+from itertools import zip_longest
 from dataclasses import dataclass
 from typing import Tuple, List, Optional
 from tinygrad.helpers import prod, all_int
@@ -97,7 +98,7 @@ class View:
 
     # check if this is adding or removing 1s (only)
     # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
-    if [x for x in self.shape if x != 1] == [x for x in new_shape if x != 1]:
+    if sum(1 for a,b in zip_longest([x for x in self.shape if x != 1],[x for x in new_shape if x != 1]) if a != b) <= 1:
       new_strides: List[sint] = [y for x,y in zip(self.shape, self.strides) if x != 1]
       new_strides_tuple: Tuple[sint, ...] = tuple([0 if x == 1 else new_strides.pop(0) for x in new_shape])
       new_mask_tuple: Optional[Tuple[Tuple[sint, sint], ...]] = None
