@@ -74,7 +74,6 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          header: LOC
           ignore_empty: true
           skip_unchanged: true
           recreate: true
@@ -94,5 +93,6 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           skip_unchanged: true
+          recreate: true
           message: |
             This branch currently is behind tinygrad/master. The line count difference bot is disabled.

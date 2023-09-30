@@ -8,7 +8,7 @@ from examples.mlperf.metrics import get_dice_score_np
 from tinygrad.nn.state import get_state_dict, load_state_dict
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
-from tinygrad.helpers import getenv, dtypes
+from tinygrad.helpers import getenv, dtypes, GlobalCounters
 
 def eval_resnet():
   # Resnet50-v1.5
@@ -40,6 +40,7 @@ def eval_resnet():
   dat = Tensor(x)
   while dat is not None:
     y = ny
+    GlobalCounters.reset()
     mt = time.perf_counter()
     outs = mdlrun(dat) if dat.shape[0] != BS else mdljit(dat)
     try:
@@ -49,12 +50,9 @@ def eval_resnet():
       dat = None
     t = outs.argmax(axis=1).numpy()
     et = time.perf_counter()
-    print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
-    print(t)
-    print(y)
     n += (t==y).sum()
     d += len(t)
-    print(f"****** {n}/{d}  {n*100.0/d:.2f}%")
+    print(f"****** {n}/{d}  {n*100.0/d:.2f}% -- {(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:7.2f} ms to run model. {len(t)/(et-mt):.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-mt):.2f} TFLOPS")
     st = time.perf_counter()
 from line_profiler_pycharm import profile
 @profile

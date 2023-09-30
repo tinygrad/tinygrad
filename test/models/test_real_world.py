@@ -122,27 +122,24 @@ class TestRealWorld(unittest.TestCase):
     #Device.DEFAULT = "FAKE"
     #Device['fake'].codegen = Device[old_default].codegen
 
-    # TODO: with train
-    old_training = Tensor.training
-    Tensor.training = True
-    model = SpeedyResNet(Tensor.ones((12,3,2,2)))
-    optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=0.8, nesterov=True, weight_decay=0.15)
+    with Tensor.train():
+      model = SpeedyResNet(Tensor.ones((12,3,2,2)))
+      optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=0.8, nesterov=True, weight_decay=0.15)
 
-    BS = 32 if CI else 512
+      BS = 32 if CI else 512
 
-    @TinyJit
-    def train(X):
-      out = model(X)
-      loss = out.mean()
-      optimizer.zero_grad()
-      loss.backward()
-      optimizer.step()
+      @TinyJit
+      def train(X):
+        out = model(X)
+        loss = out.mean()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-    helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 154)   # it's 154 on metal
+      helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 154)   # it's 154 on metal
 
-    # reset device
-    Tensor.training = old_training
-    #Device.DEFAULT = old_default
+      # reset device
+      #Device.DEFAULT = old_default
 
 if __name__ == '__main__':
   unittest.main()
