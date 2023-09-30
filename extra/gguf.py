@@ -69,44 +69,36 @@ def dequantize_q4_0_tensor(t: Tensor, n_blocks, shape):
 
 def dequantize_q6k_tensor(t: Tensor, n_blocks, shape):
   qk_k = 256; ql_size = qk_k // 2; qh_size = qk_k // 4; scales_size = qk_k // 16; d_size =2; block_size = ql_size + qh_size + scales_size + d_size
+  # just getting data to the GPU
   ql = t.cast(dtypes.uint8).to("GPU").reshape(n_blocks, block_size)[:, :ql_size]
   qh = t.cast(dtypes.uint8).to("GPU").reshape(n_blocks, block_size)[:, ql_size:ql_size+qh_size]
-  scales = t.cast(dtypes.int8).to("GPU").reshape(n_blocks, block_size)[:, ql_size+qh_size:ql_size+qh_size+scales_size]
+  sc = t.cast(dtypes.int8).to("GPU").reshape(n_blocks, block_size)[:, ql_size+qh_size:ql_size+qh_size+scales_size]
   data_offset = (ql_size+qh_size+scales_size)//2
-  d = t.cast(dtypes.half).to("GPU")[data_offset::data_offset+1][:n_blocks] #.reshape(-1, 1)
-  # some progress here but not ready for full vectorization
-  # ql0 = ql - (ql / 16).floor() * 16 # ql & 0xF
-  # qh0 = (qh - (qh / 4).floor() * 4) * 16 # ((qh & 3) << 4)
-  # print(ql0.shape, qh0.shape, scales.shape, gl)
+  d = t.cast(dtypes.half).to("GPU")[data_offset::data_offset+1][:n_blocks].reshape(-1, 1)
 
-  # HACK - this should be vectorized
-  QL = ql.numpy(); QH = qh.numpy(); SCALES = scales.numpy(); D = d.numpy()
-  y = np.zeros(n_blocks * QK_K, dtype=np.float16)
-  for idx_x, x in tqdm(enumerate(range(n_blocks))):
-    d = D[idx_x]
-    ql = QL[idx_x]
-    qh = QH[idx_x]
-    sc = SCALES[idx_x]
-    for n in range(0, QK_K, 128):
-      idx = n // 128
-      ys = y[idx_x * QK_K + n:]
-      sc = sc[8 * idx:]
-      ql = ql[64 * idx:]
-      qh = qh[32 * idx:]
-      for l in range(32):
-        isl = l // 16
-        q1 = ((ql[l] & 0xF) | ((qh[l] & 3) << 4)) - 32
-        q2 = ((ql[l + 32] & 0xF) | (((qh[l] >> 2) & 3) << 4)) - 32
-        q3 = ((ql[l] >> 4) | (((qh[l] >> 4) & 3) << 4)) - 32
-        q4 = ((ql[l + 32] >> 4) | (((qh[l] >> 6) & 3) << 4)) - 32
-        ys[l] = d * sc[isl] * q1
-        ys[l + 32] = d * sc[isl + 2] * q2
-        ys[l + 64] = d * sc[isl + 4] * q3
-        ys[l + 96] = d * sc[isl + 6] * q4
-  return Tensor(y)
+  # dequantize
+  # --- q1
+  qlx = ql[:, :32]; qhx = qh[:, :32];
+  ql1 = qlx - (qlx / 16).floor() * 16
+  qh1 = (qhx - (qhx / 4).floor() * 4) * 16
+  q1 = ql1.cast(dtypes.int8) + qh1.cast(dtypes.int8) - 32
+  # --- q2
+  qlx = ql[:, 32:32*2]; qhx = qh[:, :32];
+  ql2 = qlx - (qlx / 16).floor() * 16
+  qh2 = (((qhx / 4).floor()) - ((qhx / 16).floor()) * 4) * 16
+  q2 = ql2.cast(dtypes.int8) + qh2.cast(dtypes.int8) - 32
+  # --- q3
+  qlx = ql[:, :32]; qhx = qh[:, :32];
+  ql3 = (qlx / 16).floor()
+  qh3 = ((qhx / 16).floor() - (((qhx / 16).floor() / 4).floor()) * 4) * 16
+  q3 = ql3.cast(dtypes.int8) + qh3.cast(dtypes.int8) - 32
+  # --- q4
+  qlx = ql[:, 32:32*2]; qhx = qh[:, :32];
+  ql4 = (qlx / 16).floor()
+  qh4 = (((qhx / 16).floor() / 4).floor()) * 16
+  q4 = ql4.cast(dtypes.int8) + qh4.cast(dtypes.int8) - 32
 
 def tinygrad_tensor_from_gguf(disk_tensor: Tensor, name: str, shape: Tuple, ggml_dtype: GgmlDType, offset: int, data_offset: int) -> Tensor:
-  print(name, ggml_dtype)
   itemsize, block_size = ggml_sizes[ggml_dtype]
   size_in_bytes = int(prod(shape) * itemsize // block_size)
   init_offset = data_offset + offset
