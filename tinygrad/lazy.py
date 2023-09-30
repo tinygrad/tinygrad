@@ -10,9 +10,8 @@ from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, Redu
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
 
-from tinygrad.runtime.lib import RawBuffer, RawBufferMapped, RawBufferTransfer
+from tinygrad.runtime.lib import RawBuffer
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
-from tinygrad.runtime.ops_disk import RawDiskBuffer
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -20,7 +19,6 @@ sys.setrecursionlimit(10000)
 OPT = getenv("OPT", 2)
 LAZY = getenv("LAZY", 1)
 LAZYCACHE = getenv("LAZYCACHE", 1)
-P2P = getenv("P2P", 0)
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
@@ -413,15 +411,7 @@ def _realize_from(buffer: LazyBuffer) -> None:
   rawbuf = buffer.op.src[0].realize()
   assert rawbuf.realized, "realize failed?"
   if DEBUG >= 3: print(f"*** copy {buffer.device} <- {rawbuf.device} size {rawbuf.realized.size} dtype {rawbuf.realized.dtype}")
-  # TODO: make this generic
-  if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
-    assert all_int(buffer.shape), "does not support symbolic shape"
-    buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
-    rawbuf.prepare_transfer().readinto(cast(RawBufferMapped, buffer.realized)._buffer())
-  elif isinstance(rawbuf.realized, RawBufferTransfer) and issubclass(Device[buffer.device].buffer, RawBufferTransfer) and P2P >= 1:
-    buffer.realized = cast(RawBufferTransfer, Device[buffer.device].buffer).transfer(rawbuf.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
-  else:
-    buffer.realized = Device[buffer.device].buffer.fromCPU(rawbuf.toCPU(), **buffer._device_extra_args())
+  buffer.realized = Device[buffer.device].buffer.from_buffer(rawbuf, **buffer._device_extra_args())
 
 def _realize_empty(buffer: LazyBuffer) -> None:
   assert all_int(buffer.shape), "does not support symbolic shape"
