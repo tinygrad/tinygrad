@@ -194,10 +194,13 @@ class RetinaNetTrainer:
                 #TODO this should be done on validation split predictions (no grad)
                 self.mAP_compute(annotations, predictions)
 
-    def tg_init_setup(self):
-        retina = self.model 
-        self.set_initial_weights()
+    def tg_init_setup(self, mlperf_model = None):
+        retina = self.model
+        self.mlperf_model = mlperf_model
+        breakpoint()
         self.freeze_spec_backbone_layers()
+        self.set_initial_weights(from_mlperf_model=(self.mlperf_model is not None))
+        
         anchors_orig = retina.anchor_gen(self.image_size) #TODO: get them just with reshape of flattened?
         anchors_flattened_levels = np.concatenate(anchors_orig)
         optimizer = optim.SGD(get_parameters(retina), lr=0.001)
@@ -207,26 +210,34 @@ class RetinaNetTrainer:
         Tensor.no_grad = not BACKWARD
         return retina,anchors_orig,anchors_flattened_levels,optimizer
             
-    def set_initial_weights(self):
-        self.set_classification_weights()
-        self.set_regression_weights()
-        self.set_fpn_weights()
+    def set_initial_weights(self, from_mlperf_model = False):
+        if from_mlperf_model:
+            sd = get_state_dict(self.model)
+            for k,p in self.mlperf_model.named_parameters().items():
+                assert k in sd.keys()
+                sd[k] = Tensor(p.clone().numpy())
+                sd[k].requires_grad = p.requires_grad
+        else:
+            Warning("Strange stuff to be resolved")
+            self.set_classification_weights()
+            self.set_regression_weights()
+            self.set_fpn_weights()
 
     def set_classification_weights(self,mean : float = 0, std : float = 0.01, conv_bias : float = -4.59511985013459, bias : float = 0):
         for (key,val) in get_state_dict(self.model.head.classification_head).items():
-            if "weight" in key: 
+            if "weight" in key and val.requires_grad: 
                 val = Tensor.normal(*(val.shape), mean=mean, std=std)
-            elif "bias" in key: 
+            elif "bias" in key and val.requires_grad: 
                 val = Tensor.full(*(val.shape), conv_bias)
         
 
     def set_regression_weights(self, mean : float =0, std : float =0.01, conv_bias : float = 0):
         for (key,val) in get_state_dict(self.model.head.regression_head).items():
-            if "weight" in key: 
-                print(key)
+            if "weight" in key and val.requires_grad: 
+                #print(key)
                 val = Tensor.normal(*(val.shape), mean=mean, std=std)
-            elif "bias" in key:
-                print(key)
+            elif "bias" in key and val.requires_grad:
+                #print(key)
                 val = Tensor.full(*(val.shape), conv_bias)
     
     def set_fpn_weights(self, bias : float =0):
@@ -236,11 +247,13 @@ class RetinaNetTrainer:
         The biases are initialized with zeros (code).
         """
         for (key,val) in get_state_dict(self.model.backbone).items():
-            if "conv" in key:
-                print(key) 
+            if "conv" in key and val.requires_grad:
+                #print(key) 
                 val = Tensor.kaiming_uniform(*(val.shape),a=1)
-            elif "bias" in key:
-                print(key)
+            elif "bias" in key and val.requires_grad:
+                #print(key)
+                if val.__hash__ == (self.model.backbone.body.bn1.bias).__hash__: 
+                    print("This should not happen")
                 val = Tensor.full(*(val.shape), bias)
         #mlp_fpn = [(name,param) for name,param in mlperf_model.backbone.fpn.named_parameters()]
         #tg_w = [(name,param.numpy()) for name,param in get_state_dict(self.model.backbone.fpn).items()]
@@ -392,7 +405,7 @@ class RetinaNetMlPerfTrainingChecker:
 
         self.trainer = RetinaNetTrainer(model=tg_model,debug=True)
         self.model = tg_model
-        self.mlperf_model = mlp_retinanet.retinanet_from_backbone(backbone="resnext50_32x4d",num_classes=tg_model.num_classes, image_size = list(IMAGE_SIZES["debug"]))
+        self.mlperf_model = mlp_retinanet.retinanet_from_backbone(backbone="resnext50_32x4d",num_classes=tg_model.num_classes, image_size = list(IMAGE_SIZES["debug"]), pretrained=False, trainable_backbone_layers=3)
 
     def check_anchorgen(self):
         #TODO refactor. Make more robust (can it?)
@@ -409,19 +422,29 @@ class RetinaNetMlPerfTrainingChecker:
         self.mlperf_model.training = True
         assert torch.equal(torch_tensor(anchors_flattened_levels),anchors_one_image[0])
     def check_weight_init(self):
-        model, anchors_orig, anchors_flattened_levels, optimizer = self.trainer.tg_init_setup()
-        mlp_params = {name:params for name,params in self.mlperf_model.named_parameters()}
-        model_params = get_state_dict(model)
-        Warning("MLPerf model has way less parameters!!" 
-                , "Maybe bc modules are different? ",
-                "or bc optimizer and stuff from tg_init_setup()? ")
+        #TODO non-auxiliar weight init. 
+        Warning("Inference bug: tg model should have way less parameters!! (351 vs 89)")
+        model, anchors_orig, anchors_flattened_levels, optimizer = self.trainer.tg_init_setup(mlperf_model=self.mlperf_model)
+        mlp_params = {name:params for name,params in self.mlperf_model.named_parameters().items()}
+        model_params = get_parameters(model)
         #TODO: the difference comes partly from the frozen layers in the mlperf model
-        _missing = [item for item in model_params.keys() if item not in mlp_params.keys()] 
-        
+        _missing = [(item, t.requires_grad) for (item,t) in model_params.items() if item not in mlp_params.keys()] 
+        _trainable_mlperf = [item for (item,t) in mlp_params.items() if t.requires_grad]
+        _trainable_tg = [item for (item,t) in model_params.items() if t.requires_grad]
+
+        _freezed_mlperf = [item for (item,t) in mlp_params.items() if not t.requires_grad]
+        _freezed_mlperf.sort()
+        _freezed_tg = [item for (item,t) in model_params.items() if not t.requires_grad]
+        _freezed_tg.sort()
         breakpoint()
         assert(len(mlp_params.keys())==len(model_params.keys()))
-        for item in mlp_params.keys(): 
-            assert(torch.equal(torch_tensor(model_params[item].numpy()),mlp_params[item]))
+
+        model_weights = get_state_dict(model)
+        mlp_weights = self.mlperf_model.state_dict()
+        for item in mlp_weights.keys():
+            try:
+                assert(torch.allclose(torch_tensor(model_weights[item].numpy()),mlp_weights[item]))
+            except AssertionError: breakpoint()
         breakpoint()
 
     def check_head_outputs(self):
