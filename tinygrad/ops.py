@@ -233,10 +233,8 @@ class Compiled:
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
     return prg
 
-  def exec_prog(self, prg, output, inputs, var_vals): prg.exec([output.realized]+inputs, var_vals=var_vals)
-
-  def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
-    assert(False)
+  # def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
+  #   assert(False)
     #if DEBUG >= 4:
     #  from extra.utils import print_tree
     #  print_tree(ast)

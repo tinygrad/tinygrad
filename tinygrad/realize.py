@@ -3,10 +3,10 @@ import numpy as np
 import sys
 from weakref import ref
 from collections import defaultdict
-from tinygrad.ops import ASTRunner, LazyOp, BufferOps, LoadOps, Device
+from tinygrad.ops import ASTRunner, LazyOp, BufferOps, LoadOps, Device, Compiled
 from tinygrad.graph import log_schedule_item
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import DEBUG, prod, all_int, getenv
+from tinygrad.helpers import DEBUG, prod, all_int, getenv, ImageDType
 
 from tinygrad.runtime.lib import RawBuffer, RawBufferMapped, RawBufferTransfer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
@@ -30,31 +30,25 @@ def run_prebuilt(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]
     if DEBUG >= 3:
       from extra.utils import print_tree   # type: ignore
       print_tree(op)
-    if op.op in LoadOps:
-      prebuilt_info.append((out, op, None))
-      # TODO: why can't we delete these ops?
+    # TODO: why can't we delete these LoadOps?
+    if op.op in LoadOps: prebuilt_info.append((out, op, []))
     else:
-      if hasattr(Device[out.device], 'compile_ast'):
-        prg = Device[out.device].compile_ast(op, args_info=[(x.shape, x.dtype) for x in ([out]+list(buffers))], var_vals=out.var_vals, **out._device_extra_args())
+      if isinstance(Compiled, Device[out.device]):
         if out.output_buffer is not None: out.realized = __get_output_buffer(op, out, [x.realized for x in buffers])
-        prebuilt_info.append((out, prg, buffers))
-      else: prebuilt_info.append((out, op, buffers))
+        op = Device[out.device].compile_ast(op, args_info=[(x.shape, x.dtype) for x in ([out]+list(buffers))], var_vals=out.var_vals, **out._device_extra_args())
+      prebuilt_info.append((out, op, buffers))
       del out.op
       for v in out.views: del v.op
   return prebuilt_info
 
-def preallocate_buffers(prebuilt_info: List[Tuple[LazyBuffer, Union[ASTRunner, LazyOp], Optional[List[LazyBuffer]]]]):
+def allocate_buffers(prebuilt_info: List[Tuple[LazyBuffer, Union[ASTRunner, LazyOp], Optional[List[LazyBuffer]]]]):
   last_use, cnt = {}, defaultdict(int)
   for j,(out,prog,buffers) in enumerate(prebuilt_info):
-    if buffers is None: continue
-    for buf in buffers:
-      last_use[ref(buf)] = j
-      cnt[ref(buf)] += 1
+    for buf in buffers: last_use[ref(buf)], cnt[ref(buf)] = j, cnt[ref(buf)] + 1
 
   query_list = []
   for j,(out,prog,buffers) in enumerate(prebuilt_info):
-    if isinstance(prog, LazyOp): continue
-    if out.realized is not None: continue
+    if isinstance(prog, LazyOp) or out.realized is not None: continue
     if sys.getrefcount(out)-cnt[ref(out)] == 3:
       query_list.append((prod((s if isinstance(s, int) else s.max for s in out.shape))*out.dtype.itemsize, j, last_use[ref(out)], ref(out)))
 
@@ -77,7 +71,7 @@ def preallocate_buffers(prebuilt_info: List[Tuple[LazyBuffer, Union[ASTRunner, L
 
 def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]):
   prebuilt_info = run_prebuilt(schedule)
-  # preallocate_buffers(prebuilt_info)
+  allocate_buffers(prebuilt_info)
 
   while len(prebuilt_info):
     out,prog,buffers = prebuilt_info.pop(0)
@@ -87,7 +81,7 @@ def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]
     else:
       if out.realized is None: out.realized = Device[out.device].buffer(prod((s if isinstance(s, int) else s.max for s in out.shape)), out.dtype, **out._device_extra_args())
       assert out.realized and isinstance(out.realized, Device[out.device].buffer), f"device mismatch on realized got {type(out.realized)} expected {out.device}"
-      Device[out.device].exec_prog(prog, output=out, inputs=[x.realized for x in buffers], var_vals=out.var_vals)
+      prog.exec([out.realized]+[x.realized for x in buffers], var_vals=out.var_vals)
 
 def _realize_contiguous(buffer: LazyBuffer) -> None:
   # this is just a copy now, if it's not a copy schedule will handle it

@@ -1,9 +1,8 @@
-from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional, Set
-from weakref import ref
+from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
 from collections import defaultdict
 import functools, itertools
-from tinygrad.helpers import DEBUG, DType, merge_dicts, ImageDType
-from tinygrad.ops import RawBuffer, Device, BasicBatchExecutor, ASTRunner
+from tinygrad.helpers import DEBUG, DType, merge_dicts
+from tinygrad.ops import RawBuffer, Device, BasicBatchExecutor
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
@@ -68,11 +67,10 @@ class TinyJit:
     return self.ret
 
 class _CacheCollector:
-  def __init__(self): self.cache = []
+  def __init__(self): self.cache = None
   def start(self): self.cache = []
   def add(self, prg, rawbufs, var_vals): self.cache.append((prg, rawbufs, var_vals)) if self.cache is not None else None
   def finish(self):
     cache_result, self.cache = self.cache, None
     return cache_result
-
 CacheCollector = _CacheCollector()
