@@ -1,7 +1,5 @@
 import enum, os, struct, io, sys
-import numpy as np
-from tqdm import tqdm
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
 
 from tinygrad.helpers import dtypes, prod
 from tinygrad.ops import Device
@@ -76,27 +74,47 @@ def dequantize_q6k_tensor(t: Tensor, n_blocks, shape):
   data_offset = (ql_size+qh_size+scales_size)//2
   d = t.cast(dtypes.half).to("GPU")[data_offset::data_offset+1][:n_blocks].reshape(-1, 1)
 
-  # dequantize
+  qlxa = ql[:, 0:]; qlxb = ql[:, 64:]
+  qhxa = qh[:, 0:]; qhxb = qh[:, 32:]
+  scxa = sc[:, 0:]; scxb = sc[:, 8:]
+
   # --- q1
-  qlx = ql[:, :32]; qhx = qh[:, :32];
+  qlx = Tensor.stack([qlxa[:, :32], qlxb[:, :32]]).transpose(0, 1)
+  qhx = Tensor.stack([qhxa[:, :32], qhxb[:, :32]]).transpose(0, 1)
   ql1 = qlx - (qlx / 16).floor() * 16
   qh1 = (qhx - (qhx / 4).floor() * 4) * 16
   q1 = ql1.cast(dtypes.int8) + qh1.cast(dtypes.int8) - 32
+
   # --- q2
-  qlx = ql[:, 32:32*2]; qhx = qh[:, :32];
+  qlx = Tensor.stack([qlxa[:, 32:32*2], qlxb[:, 32:32*2]]).transpose(0, 1)
+  qhx = Tensor.stack([qhxa[:, :32], qhxb[:, :32]]).transpose(0, 1)
   ql2 = qlx - (qlx / 16).floor() * 16
   qh2 = (((qhx / 4).floor()) - ((qhx / 16).floor()) * 4) * 16
   q2 = ql2.cast(dtypes.int8) + qh2.cast(dtypes.int8) - 32
+
   # --- q3
-  qlx = ql[:, :32]; qhx = qh[:, :32];
+  qlx = Tensor.stack([qlxa[:, :32], qlxb[:, :32]]).transpose(0, 1)
+  qhx = Tensor.stack([qhxa[:, :32], qhxb[:, :32]]).transpose(0, 1)
   ql3 = (qlx / 16).floor()
   qh3 = ((qhx / 16).floor() - (((qhx / 16).floor() / 4).floor()) * 4) * 16
   q3 = ql3.cast(dtypes.int8) + qh3.cast(dtypes.int8) - 32
+
   # --- q4
-  qlx = ql[:, 32:32*2]; qhx = qh[:, :32];
+  qlx = Tensor.stack([qlxa[:, 32:32*2], qlxb[:, 32:32*2]]).transpose(0, 1)
+  qhx = Tensor.stack([qhxa[:, :32], qhxb[:, :32]]).transpose(0, 1)
   ql4 = (qlx / 16).floor()
   qh4 = (((qhx / 16).floor() / 4).floor()) * 16
   q4 = ql4.cast(dtypes.int8) + qh4.cast(dtypes.int8) - 32
+
+  scx = Tensor.stack([scxa[:, :2], scxb[:, :2]]).transpose(0, 1)
+
+  y = d[:, :, None] * q1
+  yhalf_index = y.shape[-1] // 2
+  yh1 = y[:, :, :yhalf_index]
+  yh2 = y[:, :, yhalf_index:]
+  yh1 = yh1 * scx[:, :, :1]
+  yh2 = yh2 * scx[:, :, 1:]
+  y = Tensor.stack([yh1, yh2]).transpose(0,1)
 
 def tinygrad_tensor_from_gguf(disk_tensor: Tensor, name: str, shape: Tuple, ggml_dtype: GgmlDType, offset: int, data_offset: int) -> Tensor:
   itemsize, block_size = ggml_sizes[ggml_dtype]
