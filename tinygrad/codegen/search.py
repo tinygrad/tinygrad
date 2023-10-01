@@ -1,7 +1,7 @@
-from typing import Callable
+from typing import Callable, List, Tuple
 import time
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.helpers import DEBUG, prod, getenv
+from tinygrad.helpers import DEBUG, prod, getenv, DType
 
 def get_divisors(n, min_div = 1, max_div = 512):
   if min_div > 1: yield 1
@@ -51,7 +51,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
 
 # optimization
 global_db = None
-def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, bufs):
+def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], backend, args_info:List[Tuple[int, DType]], **kwargs):
   global global_db
 
   k.process()
@@ -67,13 +67,14 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
     # don't optimize variable shapes
     choice = "BASELINE"
   else:
+    bufs = [backend.buffer(prod(x[0]), x[1], **kwargs) for x in args_info]
     # get baseline
     def get_baseline():
       k = create_k()
       k.hand_coded_optimizations()
-      prg = to_prg(k)
+      prg = backend.to_program(k)
       return min([prg.exec(bufs, force_wait=True, optimizing=True) for _ in range(5)])*1000
-    choice = kernel_optimize_search(k, create_k, to_prg, get_baseline(), bufs)
+    choice = kernel_optimize_search(k, create_k, backend.to_program, get_baseline(), bufs)
     if global_db is not None:
       global_db[skey] = choice
       global_db.sync()

@@ -214,33 +214,13 @@ class Compiled:
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                      display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime, self.batch_exec)
 
-  def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
-    # check if we can reuse the output buffer
-    # if it's aliased, don't use it
-    # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
-    output.realized = output.output_buffer
-    if output.realized:
-      for i,a in enumerate(inputs):
-        # TODO: if this is contiguous it's fine
-        if a == output.realized:
-          if any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
-            output.realized = None
-            break
-
-    # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-    if not output.realized:
-      output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
-    else:
-      from tinygrad.jit import CacheCollector
-      CacheCollector._mark_output_buffer(output.output_buffer)
-
+  def compile_ast(self, ast:LazyOp, args_info:List[Tuple[int, DType]], var_vals, **kwargs):
     from tinygrad.codegen.linearizer import Linearizer
     k = Linearizer(ast, self.linearizer_opts, var_vals)
 
-    # compilation time
     def get_program():
       from tinygrad.codegen.search import kernel_optimize
-      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program, [output.realized]+inputs)
+      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self, args_info, **kwargs)
       elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
@@ -251,6 +231,35 @@ class Compiled:
       prg = get_program()
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
+    return prg
 
-    prg.exec([output.realized]+inputs, var_vals=var_vals)
-    return output.realized
+  def exec_prog(self, prg, output, inputs, var_vals): prg.exec([output.realized]+inputs, var_vals=var_vals)
+
+  def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
+    assert(False)
+    #if DEBUG >= 4:
+    #  from extra.utils import print_tree
+    #  print_tree(ast)
+
+    # check if we can reuse the output buffer
+    # if it's aliased, don't use it
+    # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
+    # output.realized = output.output_buffer
+    # if output.realized:
+    #   for i,a in enumerate(inputs):
+    #     # TODO: if this is contiguous it's fine
+    #     if a == output.realized:
+    #       if any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
+    #         output.realized = None
+    #         break
+
+    # # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
+    # if not output.realized: output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
+    # else:
+    #   from tinygrad.jit import CacheCollector
+    #   CacheCollector._mark_output_buffer(output.output_buffer)
+
+    # prg = self.compile_ast(ast, var_vals, **kwargs)
+
+    # prg.exec([output.realized]+inputs, var_vals=var_vals)
+    # return output.realized
