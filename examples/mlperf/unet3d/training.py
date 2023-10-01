@@ -66,7 +66,12 @@ def train(flags, model:UNet3D, train_loader, val_loader, loss_fn):
     if epoch <= flags.lr_warmup_epochs:
       lr_warmup(optimizer, flags.init_learning_rate, flags.learning_rate, epoch, flags.lr_warmup_epochs)
     start_time_epoch = time.time() # for 19 steps its currently ~5 seconds.
-    for iteration, batch in enumerate(tqdm(train_loader, disable=not flags.verbose)):
+
+    if getenv("DEBUGTRAIN", 0):
+      loader = [(Tensor.rand(1,1,128,128,128), Tensor.rand(1,1,128,128,128)) for i in range(3)]
+    else:
+      loader = tqdm(train_loader, disable=not flags.verbose)
+    for iteration, batch in enumerate(loader):
       image, label = batch
 
       dtype_img = dtypes.half if getenv("FP16") else dtypes.float
