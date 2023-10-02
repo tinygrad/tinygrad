@@ -32,7 +32,7 @@ class TestLinearizer(unittest.TestCase):
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
 
-    k = Linearizer(r.lazydata.schedule()[-1][0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(r.lazydata.schedule()[-1][0])
     k.process()
     k.upcast()
     k.linearize()
@@ -49,7 +49,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = a.expand([2]) + b.expand([2])
 
-    k = Linearizer(r.lazydata.schedule()[-1][0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(r.lazydata.schedule()[-1][0])
     k.process()
     k.upcast()
     k.linearize()
@@ -63,7 +63,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack([a, b])
 
-    k = Linearizer(r.lazydata.schedule()[-1][0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(r.lazydata.schedule()[-1][0])
     k.process()
     k.upcast()
     k.linearize()
@@ -78,7 +78,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor(2), Tensor(3)
     r = a * b
 
-    k = Linearizer(r.lazydata.schedule()[-1][0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(r.lazydata.schedule()[-1][0])
     k.process()
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
@@ -99,7 +99,7 @@ class TestLinearizer(unittest.TestCase):
       else:
         r = a @ b
       realized_ast, _ = helper_realized_ast(r)
-      k = Linearizer(realized_ast, Device[Device.DEFAULT].linearizer_opts)
+      k = Linearizer(realized_ast)
       k.process()
       k.hand_coded_optimizations()
       k.linearize()
@@ -128,21 +128,21 @@ def helper_linearizer_opt(r:Tensor, opts=[]):
     np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
 
   # Get baseline, which is not optimized at all.
-  k = Linearizer(realized_ast, Device[Device.DEFAULT].linearizer_opts)
+  k = Linearizer(realized_ast)
   k.process()
   prg = Device[Device.DEFAULT].to_program(k)
   prg.exec(real_bufs, force_wait=True)
   wanna_output = real_bufs[0].toCPU().copy()
 
   # Check correctness of handcoded optimiztions.
-  k = Linearizer(realized_ast, Device[Device.DEFAULT].linearizer_opts)
+  k = Linearizer(realized_ast)
   k.hand_coded_optimizations()
   prg = Device[Device.DEFAULT].to_program(k)
   real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
   prg.exec(real_bufs, force_wait=True)
   np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
   for x in opts: # Check custom transformations if any.
-    check_opt(x, lambda: Linearizer(realized_ast, Device[Device.DEFAULT].linearizer_opts), Device[Device.DEFAULT].to_program)
+    check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program)
 
 class TestLinearizerOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):
@@ -239,7 +239,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(s[0])
     k.hand_coded_optimizations()
     k.linearize()
 
@@ -251,7 +251,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(s[0])
     k.process()
     k.shift_to(0, 4)  # float4 dimension
     k.shift_to(0, 2, insert_before=k.shape_len-1)
@@ -268,7 +268,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(s[0])
     k.hand_coded_optimizations()  # implicit trigger float4 dim
     k.linearize()
 
@@ -280,7 +280,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(s[0])
     k.process()
     k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
     k.upcast()
@@ -299,7 +299,7 @@ class TestFloat4(unittest.TestCase):
     # float4 should be emitted (the reduce axis of size 4 is the float4 axis here)
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(s[0])
     k.process()
     k.upcast()
     k.linearize()
@@ -315,7 +315,7 @@ class TestFloat4(unittest.TestCase):
     # don't.
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(s[0])
     k.process()
     k.upcast()
     k.upcast()
@@ -332,7 +332,7 @@ class TestFloat4(unittest.TestCase):
     # since the top axis is not contiguous.
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(s[0])
     k.process()
     k.shift_to(0, 4, top=True)  # top axes are float4 axes
     k.upcast()
@@ -349,7 +349,7 @@ class TestFloat4(unittest.TestCase):
     # since the top axis is not contiguous.
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(s[0])
     k.process()
     k.shift_to(0, 4)  # float4 axis
     k.upcast()
@@ -365,7 +365,7 @@ class TestFloat4(unittest.TestCase):
     # should float4 b but not a
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0], Device[Device.DEFAULT].linearizer_opts)
+    k = Linearizer(s[0])
     k.process()
     k.shift_to(0, 4)  # float4 axis
     k.upcast()
