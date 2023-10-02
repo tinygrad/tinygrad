@@ -197,19 +197,6 @@ def concat_box_prediction_layers(box_cls, box_regression):
   box_regression = Tensor.cat(*box_regression_flattened, dim=1).reshape(-1, 4)
   return box_cls, box_regression
 
-# TODO maybe push this to nn?
-def smooth_l1_loss(input, target, beta=1. / 9, size_average=True):
-  """
-  very similar to the smooth_l1_loss from pytorch, but with
-  the extra beta parameter
-  """
-  n = Tensor.abs(input - target)
-  cond = n < beta
-  loss = Tensor.where(cond, 0.5 * n ** 2 / beta, n - 0.5 * beta)
-  if size_average:
-      return loss.mean()
-  return loss.sum()
-
 class SmoothL1Loss(Function):
   def abs(self, x: LazyBuffer) -> LazyBuffer:
     _x = x.e(UnaryOps.NEG)
@@ -233,12 +220,12 @@ class SmoothL1Loss(Function):
       Tensor(self.dif).sign().lazydata) #todo sign
     return grad_input.e(BinaryOps.MUL, grad_output), None  # return grad for input tensor, and None for target tenso
 
-def smooth_l1_loss_function(input, target, beta=1. / 9, size_average=True):
+def smooth_l1_loss(input, target, beta=1. / 9, size_average=True):
     return SmoothL1Loss.apply(input, target, beta=beta, size_average=size_average)
 
 def test_fork_grad():
   optimizer = optim.SGD(Tensor([0,0,0,0,0]), lr=0.001, momentum=0.9, weight_decay=0.0005)
-  res = smooth_l1_loss_function(
+  res = smooth_l1_loss(
       Tensor([1, 4, 1, 9, 2], requires_grad=True),
       Tensor([2, 8, 1, 1, 4]),
       beta=2
@@ -293,7 +280,7 @@ def test_loss():
   images = to_image_list(img)
   features = backbone(images.tensors)
   objectness, rpn_box_regression = rpn(features)
-  anchors = [anchor[3:5] for anchor in anchor_generator(images, features)]
+  anchors = [anchor for anchor in anchor_generator(images, features)]
   coco = COCO(os.path.join(BASEDIR, 'annotations', 'instances_train2017.json'))
   annotations = coco.loadAnns(coco.getAnnIds(imgIds=[img_id]))
   gt = []
@@ -405,7 +392,8 @@ class RPNLossComputation:
     anchors = [cat_boxlist(anchors_per_image) for anchors_per_image in anchors]
     labels, regression_targets = self.prepare_targets(anchors, targets)
     sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
-    sampled_pos_inds, sampled_neg_inds = Tensor([]) if len(sampled_pos_inds[0]) == 0 else Tensor(sampled_pos_inds).squeeze(0), Tensor([]) if len(sampled_neg_inds) == 0 else Tensor(sampled_neg_inds).squeeze(0)
+    assert len(sampled_pos_inds[0]) > 0 and len(sampled_neg_inds[0]) > 0, "increase # anchor generated"
+    sampled_pos_inds, sampled_neg_inds = Tensor(sampled_pos_inds).squeeze(0), Tensor(sampled_neg_inds).squeeze(0)
     sampled_inds = Tensor.cat(sampled_pos_inds, sampled_neg_inds, dim=0)
     ## todo test this, doesn't seem to have the correct box_regression
     objectness, box_regression = \
@@ -414,13 +402,12 @@ class RPNLossComputation:
     objectness = objectness.squeeze()
     labels, regression_targets = Tensor.cat(*labels, dim=0), Tensor.cat(*regression_targets, dim=0)
     
-    # box_loss = smooth_l1_loss(
-    #     box_regression[sampled_pos_inds],
-    #     regression_targets[sampled_pos_inds],
-    #     beta=1.0 / 9,
-    #     size_average=False,
-    # ) / (sampled_inds.numel())
-    box_loss = Tensor(0)
+    box_loss = smooth_l1_loss(
+        box_regression[sampled_pos_inds],
+        regression_targets[sampled_pos_inds],
+        beta=1.0 / 9,
+        size_average=False,
+    ) / (sampled_inds.numel())
 
     objectness_loss = binary_cross_entropy_with_logits(
         objectness[sampled_inds], labels[sampled_inds]
@@ -429,27 +416,27 @@ class RPNLossComputation:
     return objectness_loss, box_loss
 
 if __name__ == "__main__":
+  download_train()
+  test_concat_box_prediction_layers()
   test_fork_grad()
-  # download_train()
-  # test_concat_box_prediction_layers()
-  # test_loss()
-  # test_binary_cross_entropy_with_logits()
-  # test_prepare_targets()
-  # test_boxlist_iou()
-  # test_match_eval()
-  # test_low_qual_match()
-  # test_rind()
-  # test_balanced_sampler()
-  # test_match_targets_to_anchors()
-  # #PLAYGROUND
-  # data = Tensor([[1, 2, 3],
-  #              [4, 5, 6],
-  #              [7, 8, 9],
-  #              [10, 11, 12]])
-  # idx = Tensor([0, 2, 1, 1]).reshape(4, 1)
-  # result = data.gather(idx, dim=1)
+  test_loss()
+  test_binary_cross_entropy_with_logits()
+  test_prepare_targets()
+  test_boxlist_iou()
+  test_match_eval()
+  test_low_qual_match()
+  test_rind()
+  test_balanced_sampler()
+  test_match_targets_to_anchors()
+  #PLAYGROUND
+  data = Tensor([[1, 2, 3],
+               [4, 5, 6],
+               [7, 8, 9],
+               [10, 11, 12]])
+  idx = Tensor([0, 2, 1, 1]).reshape(4, 1)
+  result = data.gather(idx, dim=1)
   
-  # ind = Tensor.arange(mask.shape[0])
-  # nz = mask.sum().numpy().item()
-  # mask = mask * ind
-  # idx = mask.numpy().argsort()[-int(nz):]
+  ind = Tensor.arange(mask.shape[0])
+  nz = mask.sum().numpy().item()
+  mask = mask * ind
+  idx = mask.numpy().argsort()[-int(nz):]
