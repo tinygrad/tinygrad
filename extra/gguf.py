@@ -2,10 +2,7 @@ import enum, os, struct, io
 from typing import Any, Dict, Tuple
 
 from tinygrad.helpers import dtypes, prod
-from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
-
-Device.DEFAULT = "GPU"
 
 # --- Compatibility junk
 class GgmlDType(enum.Enum): F32 = 0; F16 = 1; Q4_0 = 2; Q4_1 = 3; Q5_0 = 6; Q5_1 = 7; Q8_0 = 8; Q8_1 = 9; Q2K = 10; Q3K = 11; Q4K = 12; Q5K = 13; Q6K = 14; Q8K = 15
@@ -66,65 +63,53 @@ def dequantize_q4_0_tensor(t: Tensor, n_blocks, shape):
 
 def dequantize_q6k_tensor(t: Tensor, n_blocks, shape):
   qk_k = 256; ql_size = qk_k // 2; qh_size = qk_k // 4; scales_size = qk_k // 16; d_size =2; block_size = ql_size + qh_size + scales_size + d_size
-  # just getting data to the GPU
-  ql = t.cast(dtypes.uint8).to("GPU").reshape(n_blocks, block_size)[:, :ql_size]
-  qh = t.cast(dtypes.uint8).to("GPU").reshape(n_blocks, block_size)[:, ql_size:ql_size+qh_size]
-  sc = t.cast(dtypes.int8).to("GPU").reshape(n_blocks, block_size)[:, ql_size+qh_size:ql_size+qh_size+scales_size]
-  data_offset = (ql_size+qh_size+scales_size)//2
-  d = t.cast(dtypes.half).to("GPU")[data_offset::data_offset+1][:n_blocks].reshape(-1, 1)
+  offset = 0
+  ql = t.to("GPU").reshape(n_blocks, block_size)[:, offset:ql_size]
+  offset += ql_size
+  qh = t.to("GPU").reshape(n_blocks, block_size)[:, offset:offset+qh_size]
+  offset += qh_size
+  sc = t.cast(dtypes.int8).to("GPU").reshape(n_blocks, block_size)[:, offset:offset+scales_size]
+  offset += scales_size
+  d = t.cast(dtypes.half).to("GPU")[offset//2::offset//2+1][:n_blocks].reshape(-1, 1)
 
-  qlxa = ql[:, 0:]; qlxb = ql[:, 64:]
-  qhxa = qh[:, 0:]; qhxb = qh[:, 32:]
-  scxa = sc[:, 0:]; scxb = sc[:, 8:]
+  qlb = ql[:, ql_size//2:]; qhb = qh[:, qh_size//2:]; scb = sc[:, scales_size//2:]
 
   # --- q1
-  qlx = Tensor.stack([qlxa[:, :32], qlxb[:, :32]]).transpose(0, 1)
-  qhx = Tensor.stack([qhxa[:, :32], qhxb[:, :32]]).transpose(0, 1)
+  qlx = Tensor.stack([ql[:, :32], qlb[:, :32]]).transpose(0, 1)
+  qhx = Tensor.stack([qh[:, :32], qhb[:, :32]]).transpose(0, 1)
   ql1 = qlx - (qlx / 16).floor() * 16
   qh1 = (qhx - (qhx / 4).floor() * 4) * 16
   q1 = ql1.cast(dtypes.int8) + qh1.cast(dtypes.int8) - 32
 
   # --- q2
-  qlx = Tensor.stack([qlxa[:, 32:32*2], qlxb[:, 32:32*2]]).transpose(0, 1)
-  qhx = Tensor.stack([qhxa[:, :32], qhxb[:, :32]]).transpose(0, 1)
+  qlx = Tensor.stack([ql[:, 32:32*2], qlb[:, 32:32*2]]).transpose(0, 1)
+  qhx = Tensor.stack([qh[:, :32], qhb[:, :32]]).transpose(0, 1)
   ql2 = qlx - (qlx / 16).floor() * 16
   qh2 = (((qhx / 4).floor()) - ((qhx / 16).floor()) * 4) * 16
   q2 = ql2.cast(dtypes.int8) + qh2.cast(dtypes.int8) - 32
 
   # --- q3
-  qlx = Tensor.stack([qlxa[:, :32], qlxb[:, :32]]).transpose(0, 1)
-  qhx = Tensor.stack([qhxa[:, :32], qhxb[:, :32]]).transpose(0, 1)
+  qlx = Tensor.stack([ql[:, :32], qlb[:, :32]]).transpose(0, 1)
+  qhx = Tensor.stack([qh[:, :32], qhb[:, :32]]).transpose(0, 1)
   ql3 = (qlx / 16).floor()
   qh3 = ((qhx / 16).floor() - (((qhx / 16).floor() / 4).floor()) * 4) * 16
   q3 = ql3.cast(dtypes.int8) + qh3.cast(dtypes.int8) - 32
 
   # --- q4
-  qlx = Tensor.stack([qlxa[:, 32:32*2], qlxb[:, 32:32*2]]).transpose(0, 1)
-  qhx = Tensor.stack([qhxa[:, :32], qhxb[:, :32]]).transpose(0, 1)
+  qlx = Tensor.stack([ql[:, 32:32*2], qlb[:, 32:32*2]]).transpose(0, 1)
+  qhx = Tensor.stack([qh[:, :32], qhb[:, :32]]).transpose(0, 1)
   ql4 = (qlx / 16).floor()
   qh4 = (((qhx / 16).floor() / 4).floor()) * 16
   q4 = ql4.cast(dtypes.int8) + qh4.cast(dtypes.int8) - 32
 
-  scx = Tensor.stack([scxa[:, :2], scxb[:, :2]]).transpose(0, 1)
-  y1 = d[:, :, None] * q1; half = y1.shape[-1] // 2
-  y1 = Tensor.cat(y1[:, :, :half] * scx[:, :, :1], y1[:, :, half:] * scx[:, :, 1:], dim=2)
+  ys = []
+  for i, q in enumerate([q1, q2, q3, q4]):
+    scx = Tensor.stack([sc[:, i*2:i*2+2], scb[:, i*2:i*2+2]]).transpose(0, 1)
+    y = d[:, :, None] * q
+    half = y.shape[-1] // 2
+    ys.append(Tensor.cat(y[:, :, :half] * scx[:, :, :1], y[:, :, half:] * scx[:, :, 1:], dim=2))
 
-  scx = Tensor.stack([scxa[:, 2:4], scxb[:, 2:4]]).transpose(0, 1)
-  y2 = d[:, :, None] * q2; half = y2.shape[-1] // 2
-  y2 = Tensor.cat(y2[:, :, :half] * scx[:, :, :1], y2[:, :, half:] * scx[:, :, 1:], dim=2)
-
-  scx = Tensor.stack([scxa[:, 4:6], scxb[:, 4:6]]).transpose(0, 1)
-  y3 = d[:, :, None] * q3; half = y3.shape[-1] // 2
-  y3 = Tensor.cat(y3[:, :, :half] * scx[:, :, :1], y3[:, :, half:] * scx[:, :, 1:], dim=2)
-
-  scx = Tensor.stack([scxa[:, 6:8], scxb[:, 6:8]]).transpose(0, 1)
-  y4 = d[:, :, None] * q4; half = y4.shape[-1] // 2
-  y4 = Tensor.cat(y4[:, :, :half] * scx[:, :, :1], y4[:, :, half:] * scx[:, :, 1:], dim=2)
-
-  half = y1.shape[-1] // 2
-  y12 = Tensor.cat(y1, y2, dim=2)
-  y34 = Tensor.cat(y3, y4, dim=2)
-  return Tensor.cat(y12, y34, dim=1).reshape(shape)
+  return Tensor.cat(*ys, dim=2).reshape(shape)
 
 def tinygrad_tensor_from_gguf(disk_tensor: Tensor, name: str, shape: Tuple, ggml_dtype: GgmlDType, offset: int, data_offset: int) -> Tensor:
   itemsize, block_size = ggml_sizes[ggml_dtype]
