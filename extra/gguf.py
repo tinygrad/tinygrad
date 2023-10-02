@@ -5,7 +5,7 @@ from tinygrad.helpers import dtypes, prod
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 
-assert Device.DEFAULT == "METAL", "only metal is tested for now. gpu has a known bug in mac, careful."
+if Device.DEFAULT != "METAL": print("WARN - only metal is tested for now. gpu has a known bug in mac, careful.")
 
 # --- Compatibility junk
 class GgmlDType(enum.Enum): F32 = 0; F16 = 1; Q4_0 = 2; Q4_1 = 3; Q5_0 = 6; Q5_1 = 7; Q8_0 = 8; Q8_1 = 9; Q2K = 10; Q3K = 11; Q4K = 12; Q5K = 13; Q6K = 14; Q8K = 15
