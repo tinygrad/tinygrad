@@ -14,7 +14,6 @@ class LLaMaAdaptor(BaseLM):
     device="",
     quantize=False,
     batch_size=1,
-    max_batch_size=1,
     do_sample=False,
     temperature=1.0,
     checkpoint_path="",
