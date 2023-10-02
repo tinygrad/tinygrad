@@ -1,6 +1,6 @@
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict
 import itertools
-from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, ReduceOps, MemBuffer, BufferOps
+from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, ReduceOps, MemBuffer, BufferOps, Device, Compiled
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
@@ -50,7 +50,7 @@ class LinearizerOptions(NamedTuple):
 
 class Kernel:
   def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None, var_vals=None):
-    self.opts = opts if opts else LinearizerOptions()
+    self.opts = opts if opts else (cast(Compiled, Device[Device.DEFAULT]).linearizer_opts if isinstance(Device[Device.DEFAULT], Compiled) else LinearizerOptions())
     self.ast = ast
     self.var_vals = var_vals
     self.key = (ast, tuple(var_vals.keys())) if var_vals else ast
