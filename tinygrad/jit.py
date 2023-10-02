@@ -3,7 +3,7 @@ from weakref import ref
 from collections import defaultdict
 import functools, itertools
 from tinygrad.helpers import DEBUG, DType, merge_dicts, ImageDType
-from tinygrad.ops import RawBuffer, Device, BasicBatchExecutor
+from tinygrad.ops import RawBuffer, Device, BasicBatchExecutor, ASTRunner
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
@@ -80,7 +80,7 @@ class _CacheCollector:
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
     # Substitute output buffers with placeholders to find the most optimal reusage.
-    if ref(rawbufs[0]) not in self.placeholders: self.placeholders[ref(rawbufs[0])] = _CacheCollector._Placeholder(rawbufs[0])
+    if isinstance(prg, ASTRunner) and ref(rawbufs[0]) not in self.placeholders: self.placeholders[ref(rawbufs[0])] = _CacheCollector._Placeholder(rawbufs[0])
     cached_rawbufs = [self.placeholders.get(ref(buf), buf) if isinstance(buf, RawBuffer) and ref(buf) not in self.circular_signatures else buf for buf in rawbufs]
     self.cache.append((prg, cached_rawbufs, var_vals))
   def finish(self):
