@@ -214,7 +214,7 @@ if __name__ == "__main__":
   mdf = ane.pack(dd, md)
   assert(md == mdf)
 
-  comp = ane.compile(dat) 
+  comp = ane.compile(dat)
   ret = ane.run(comp, tin, tout)
   print("** after **")
   print(tind)

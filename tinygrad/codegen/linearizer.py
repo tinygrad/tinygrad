@@ -4,15 +4,13 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, partition, prod, PtrDType, all_same
-from tinygrad.ops import LazyOp, UnaryOps
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
+from tinygrad.ops import LazyOp, UnaryOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
-from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
+from tinygrad.shape.symbolic import Variable, NumNode, VariableOrNum, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.codegen.kernel import LocalBuffer
-VariableOrNum = Union[Variable, NumNode, Node]
 
 # bottom ones are asm only
 class UOps(Enum):
@@ -21,25 +19,86 @@ class UOps(Enum):
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
-def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
-  idy = (idxy//(4*base_shape[1]))
-  if validhacks and valid.min == 0:
-    idx = (idxy//4) + (idy*-base_shape[1])
-    # find the ones in idx that didn't factorize and remove them (TODO: this is not universal)
-    if isinstance(idx, SumNode):
-      unfactored, idx_nodes = partition(idx.nodes, lambda x: isinstance(x, MulNode) and x.b == -base_shape[1])
-      assert len(unfactored) <= 1
-      idx = Variable.sum(idx_nodes)
-      unfactored = (Variable.sum(unfactored) // base_shape[1])
-      idy += unfactored
-      # ugh really...handtuned garbage
-      if idx.min >= (base_shape[1]*3)//4:
-        idx -= base_shape[1]
-        idy += 1
-  else:
-    idx = (idxy//4)%base_shape[1]
-  if DEBUG >= 5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
-  return idx, idy
+def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
+  # This part is substituting variables by just looking at single var LtNodes in valid
+  # Basically if var[0-5] < 3 -> var[0-2]
+  if valid.min == 0:
+    nodes: List = valid.nodes if isinstance(valid, AndNode) else [valid]
+    var_dict = {var:[var.min, var.max] for var in valid.vars()}
+
+    for nd in nodes:
+      var_range = var_dict[nd.vars()[0]]
+      if isinstance(nd.a, MulNode):
+        if nd.a.b < 0:
+          var_range[0] = (nd.b // nd.a.b) + 1
+        elif nd.a.b > 0:
+          var_range[1] = (nd.b // nd.a.b) - 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
+      elif isinstance(nd.a, Variable):
+        var_range[1] = nd.b - 1
+    # We do not allow NumNode because it is constant
+    # TODO: Remove mx != mn
+    sub_dict: dict[Union[Variable, NumNode], Node] = {v:Variable(v.expr, mn, mx) for v, (mn, mx) in var_dict.items() if mx != mn}
+    valid, idxy = valid.substitute(sub_dict), idxy.substitute(sub_dict)
+
+  idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
+  idx_vars, idy_vars, val_vars = set(idx.vars()), set(idy.vars()), set(valid.vars())
+
+  # Simplify ModNode if possibe # test_padded_conv_transpose2d, Needs much more thinking
+  if valid.min == 0 and isinstance(idx, ModNode) and isinstance(idx.a, SumNode):
+    nodes = valid.nodes if isinstance(valid, AndNode) else [valid]
+    same_dict: Dict[Node, List[Tuple[int, Node]]] = {}
+    idx_nodes = idx.a.flat_components
+
+    for node in nodes:
+      if not isinstance(node, LtNode) or not isinstance(node.a, SumNode): continue
+
+      nd_flat, nd_vars = node.a.flat_components, node.vars()
+
+      same = [x for x in idx_nodes if (x.a if isinstance(x, MulNode) else x) in nd_vars]
+
+      if len(same) != len(nd_vars): continue
+
+      first_b, second_b = nd_flat[0].b if isinstance(nd_flat[0], MulNode) else 1, same[0].b if isinstance(same[0], MulNode) else 1
+      k, same_sum = second_b//first_b, Variable.sum(same)
+
+      if k*(node.a) == same_sum: same_dict[same_sum] = same_dict.get(same_sum, []) + [(k, node)]
+
+    for key in same_dict.keys():
+      same, mnn, mxn = key.flat_components, key.min, key.max # type: ignore # Same is sumnode because node.a is SumNode
+      for k, node in same_dict[key]: # TODO: This part may need more thinking
+        if k < 0: mnn = (-k)*max((-node.b) + 1, min([-lal.b if isinstance(lal, MulNode) else 1 for lal in same]))
+        else: mxn = (node.b - 1)*k
+
+      fake_var = Variable("valid_fake", mnn, mxn)
+      total = (Variable.sum([x for x in idx_nodes if x not in same]) + fake_var) % idx.b
+      idx = total.substitute({fake_var: key})
+      # TODO: If idx has no ModNode we may can remove the valid node, but removing it needs careful thinking
+
+  # Simplify SumNodes
+  # This part just removes valid nodes if node is exactly same as idx or idy
+  # idx = 3*a + b (+ 5), valid = 3*a + b < 10 # Valid will be removed as idx will go out of bounds
+  # Check for var intersection, removing valid can affect other index
+  if valid.min == 0 and not idx_vars.intersection(idy_vars):
+    nds = valid.nodes if isinstance(valid, AndNode) else [valid]
+    flats = [id.flat_components for id in (idx, idy) if isinstance(id, SumNode)]
+    sym_sums = [Variable.sum([i for i in flat if not isinstance(i, NumNode)]) for flat in flats]
+    ones = [node for sym_sum in sym_sums for node in nds if (node.a == sym_sum) or (-(node.a) == sym_sum)] # type: ignore # AndNode always consists of LtNode
+    valid = Variable.ands([i for i in nds if i not in ones])
+
+  # This is the slow part
+  # This part is for brute forcing all possible values of idx, idy and valid
+  # If valid is both 0 and 1 for the same (idx, idy) we can not delete the valid
+  if valid.min == 0 and not isinstance(idx, ModNode):
+    variables = tuple(val_vars | idy_vars | idx_vars)
+    val_infer, idx_infer, idy_infer = valid.expand(variables), idx.expand(variables), idy.expand(variables)
+    val_dict: Dict[int, Set[Tuple[int,int]]] = {0:set(), 1:set()}
+
+    for v, x, y in zip(val_infer, idx_infer, idy_infer): val_dict[v.min].add((x.min, y.min))
+
+    if not val_dict[1].intersection(val_dict[0]): valid = NumNode(1)
+
+  if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
+  return (idx, idy), valid
 
 class UOp(NamedTuple):
   uop: UOps
@@ -67,15 +126,10 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
 class Linearizer(OptimizedKernel):
-  def get_buffer_name(self, i):
-    if self.bufs[i].__class__ == LocalBuffer: return self.bufs[i].name
-    assert self.bufs[i].realized.__class__ is not RawConst  # constants shouldn't be loaded with memops
-    return self.arg_bufs[self.bufs[i].realized]
-
   def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
     render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
-    return self.uop(UOps.ALU, dtype, (a, render_b), op, cachable=True)
-  def const(self, b:Union[int,float], dtype=dtypes.int32) -> UOp: return self.uop(UOps.CONST, dtype, tuple(), b, cachable=True)
+    return self.uop(UOps.ALU, dtype, (a, render_b), op)
+  def const(self, b:Union[int,float], dtype=dtypes.int32) -> UOp: return self.uop(UOps.CONST, dtype, tuple(), b)
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
@@ -85,63 +139,60 @@ class Linearizer(OptimizedKernel):
     SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops,ctx)),
     AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-  def global_load(self, i:int, idxs:Sequence[VariableOrNum], acc=None) -> List[UOp]:
-    const = self.bufs[i].realized._buf if isinstance(self.bufs[i].realized, RawConst) else acc
+  def global_load(self, i:int, idxs:Sequence[Node], acc=None) -> List[UOp]:
+    const = self.bufs[i].val if isinstance(self.bufs[i], ConstBuffer) else acc
 
-    expanded_nodes = [idx.expand() for idx in idxs]
-    _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
+    def rename_var(v: VariableOrNum, expr: str): return v if isinstance(v, NumNode) else Variable(expr, v.min, v.max)
+
+    amt, dim = 1, None
     upcast_dim = self.get_upcast_dim(i)
+    if len(upcast_dim) == 1 and len(float4_expand := idxs[upcast_dim[0]].expand()) in [4,2]:
+      dim, amt = upcast_dim[0], len(float4_expand)
 
-    amt = 1
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [4,2]:
-      dim, amt = upcast_dim[0], len(expanded_nodes[upcast_dim[0]])
+    expand_vars = tuple([rename_var(idx.expand_idx(), f"_uidx{j}") for j, idx in enumerate(idxs)])
+    fake_idxs = [idx.substitute({idx.expand_idx(): ev}) for idx, ev in zip(idxs, expand_vars)]
+    if dim is not None:
+      g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + [float4_expand[0]] + fake_idxs[dim+1:])
+      if (g_idx // amt * amt).render() != g_idx.render():
+        (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
+    else:
+      g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
+    localtype = dtypes.float32 if amt == 1 else dtypes._float4 if amt == 4 else dtypes._float2
 
-    # calculate expr_idxs using placeholder variables
-    fake_idxs = [idx if isinstance(idx, NumNode) else Variable(f"_uidx{i}", idx.min, idx.max) for i, idx in enumerate(idxs)]
-    g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
+    e_idxs, e_valids = g_idx.expand(expand_vars), g_valid.expand(expand_vars)
 
     ret = []
     invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
-    for _idx in _idxs:
-      substitute: Dict[VariableOrNum, Node] = {a: b for a, b in zip(fake_idxs, _idx) if isinstance(a, Variable)}
-      if amt > 1:
-        float4_substitute = {**substitute, fake_idxs[dim]: expanded_nodes[dim][0]}
-        idx, valid = g_idx.substitute(float4_substitute), g_valid.substitute(float4_substitute)
-        localtype = dtypes._float4 if amt == 4 else dtypes._float2
-        if idx.render() != ((idx//amt)*amt).render():
-          idx, valid = g_idx.substitute(substitute), g_valid.substitute(substitute)
-          localtype = dtypes.float32
-      else:
-        idx, valid = g_idx.substitute(substitute), g_valid.substitute(substitute)
-        localtype = dtypes.float32
+    for idx, valid, rep_idx in zip(e_idxs, e_valids, Node.iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
-      key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else self.get_buffer_name(i)}{idx.render()}{valid.render()}"
+      key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else (self.bufs[i].idx if isinstance(self.bufs[i], MemBuffer) else self.bufs[i].name)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
         if acc is not None:
           assert valid.min == 1
-          self.load_cache[key] = self.uop(UOps.DEFINE_ACC, localtype, (), this_const)
+          self.load_cache[key] = self.uop(UOps.DEFINE_ACC, localtype, (), this_const, cachable=False)
         elif this_const is not None:
           self.load_cache[key] = self.const(this_const, localtype)
           if valid.min == 0 and valid.max == 1:
             valid_rendered = valid.render(self.render_ops, self)
-            self.load_cache[key] = self.uop(UOps.ALU, localtype, (valid_rendered, self.load_cache[key], self.const(invalid_value, localtype)), TernaryOps.WHERE, cachable=True)
+            self.load_cache[key] = self.uop(UOps.ALU, localtype, (valid_rendered, self.load_cache[key], self.const(invalid_value, localtype)), TernaryOps.WHERE)
         else:
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           if isinstance(self.bufs[i].dtype, ImageDType):
-            idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+            idx, valid = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
             rendered_idx = self.uop(UOps.CAST, dtypes._int2, (idx[0].render(self.render_ops, self), idx[1].render(self.render_ops, self)))
           else:
             rendered_idx = idx.render(self.render_ops, self)
+
           if valid.min == 0:
             valid_rendered = valid.render(self.render_ops, self)
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx, valid_rendered, self.const(invalid_value, localtype)))
           else:
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx))
-      ret.append(self.uop(UOps.GEP, dtypes.float32, (self.load_cache[key],), expanded_nodes[dim].index(_idx[dim])) if localtype != dtypes.float else self.load_cache[key])
+      ret.append(self.uop(UOps.GEP, dtypes.float32, (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
 
-  def global_store(self, i:int, idxs:List[VariableOrNum], store:List[UOp]) -> None:
+  def global_store(self, i:int, idxs:List[Node], store:List[UOp]) -> None:
     buf_uop = self.buf_uops[i]
     assert buf_uop is not None, f"buffer {i} wasn't UOped"
 
@@ -168,7 +219,7 @@ class Linearizer(OptimizedKernel):
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
       if isinstance(self.bufs[i].dtype, ImageDType):
-        idx = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+        idx, valid = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
         rendered_idx = self.uop(UOps.CAST, dtypes._int2, tuple(x.render(self.render_ops, self) for x in idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
@@ -191,22 +242,20 @@ class Linearizer(OptimizedKernel):
     self.loop_uops: Dict[str, UOp] = {}
 
     # add global buffers
-    arg_bufs = {}
-    for buf,name in self.arg_bufs.items():
-      arg_bufs[buf] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (name, buf.dtype))
-    for i,b in enumerate(self.bufs):
-      if b.realized in arg_bufs: self.buf_uops[i] = arg_bufs[b.realized]
-    # add variables from symbolic shapes
-    for var in sorted(set(v for buf in self.ast.buffers for v in buf.var_vals), key=lambda k: k.key):
-      assert var.expr is not None
-      self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), (var.expr, dtypes._arg_int32))
+    for i,buf in enumerate(self.bufs):
+      if isinstance(buf, MemBuffer):
+        self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (f"data{buf.idx}", buf.dtype))
+    if self.var_vals:
+      for var in sorted(set(self.var_vals), key=lambda k: k.key):
+        assert var.expr is not None
+        self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), (var.expr, dtypes._arg_int32))
     # define local buffers
     for lb in self.local_alias.values():
       self.buf_uops[self.bufs.index(lb)] = self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), (lb.name, self.sts[self.bufs.index(lb)].size()))
     # add a local buffer for multistage reduce. # TODO: use local alias
     if self.group_for_reduce:
       # TODO: the strides of this can be controlled
-      self.sts.append(ShapeTracker(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+len(self.group_for_reduce)]) + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
+      self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+len(self.group_for_reduce)]) + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
       self.buf_uops.append(self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), ("temp", self.sts[-1].size())))
 
@@ -232,7 +281,7 @@ class Linearizer(OptimizedKernel):
     def render_loop(xx:List[Variable]):
       self.loop_uops.update({x.expr:self.uop(UOps.LOOP, dtypes.int32, (
         self.const(x.min) if isinstance(x.min, int) else cast(Variable, x.min).render(self.render_ops, self),
-        self.const(x.max) if isinstance(x.max, int) else cast(Variable, x.max).render(self.render_ops, self))) for x in xx if not isinstance(x, NumNode) and x.expr is not None})
+        self.const(x.max) if isinstance(x.max, int) else cast(Variable, x.max).render(self.render_ops, self)), cachable=False) for x in xx if not isinstance(x, NumNode) and x.expr is not None})
     def end_loop(xx:List[Variable]):
       for x in xx[::-1]:
         if not isinstance(x, NumNode) and x.expr is not None:
@@ -241,6 +290,8 @@ class Linearizer(OptimizedKernel):
 
     if self.opts.has_local:
       self.global_size, self.local_size = [x.max+1 for x in loop_global_idxs][::-1], [x.max+1 for x in loop_local_idxs][::-1]
+      self.global_size += [1]*(3-len(self.global_size))
+      self.local_size += [1]*(3-len(self.local_size))
       self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs)})
       self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_local_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})
     else:
@@ -265,7 +316,7 @@ class Linearizer(OptimizedKernel):
       render_loop(reduce_idxs)
 
       # barrier for fast GEMM
-      if self.use_tensor_cores: self.uop(UOps.BARRIER, None, ())
+      if self.use_tensor_cores: self.uop(UOps.BARRIER, None, (), cachable=False)
 
       # compute local aliases
       # TODO: this is garbage code and should be at least moved elsewhere
@@ -306,7 +357,7 @@ class Linearizer(OptimizedKernel):
 
       # copy in any global buffers
       if self.use_tensor_cores:
-        if self.bufs[0].device == "METAL":
+        if self.opts.device == "METAL":
           if 2 * len(acc) == len(locals_to_store[0][2]) * len(locals_to_store[1][2]):
             i = 0
             for y0,y1 in zip(locals_to_store[1][2][::2], locals_to_store[1][2][1::2]):
@@ -318,7 +369,7 @@ class Linearizer(OptimizedKernel):
             for i in range(0, len(acc), 2):
               for y0,y1,x0,x1 in zip(locals_to_store[1][2][:k], locals_to_store[1][2][k:], locals_to_store[0][2][k*i:], locals_to_store[0][2][k*i+k:]):
                 self.uop(UOps.WMMA, None, (x0, x1, y0, y1, acc[i], acc[i+1]), "METAL")
-        elif self.bufs[0].device == "HIP":
+        elif self.opts.device == "HIP":
           i = 0
           for y in range(0, len(locals_to_store[1][2]), 0x10):
             for x in range(0, len(locals_to_store[0][2]), 0x10):
@@ -326,9 +377,9 @@ class Linearizer(OptimizedKernel):
               i += 8
       else:
         if locals_to_store:
-          self.uop(UOps.BARRIER, None, ())
+          self.uop(UOps.BARRIER, None, (), cachable=False)
           for i, idxs, ll in locals_to_store: self.global_store(i, idxs, ll)
-          self.uop(UOps.BARRIER, None, ())
+          self.uop(UOps.BARRIER, None, (), cachable=False)
 
         # load earlybufs
         loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs})
@@ -344,7 +395,7 @@ class Linearizer(OptimizedKernel):
       if self.group_for_reduce:
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc)  # store accumulators
-        self.uop(UOps.BARRIER, None, ())
+        self.uop(UOps.BARRIER, None, (), cachable=False)
         end_loop(loop_local_idxs)
 
         # create new late reduce local loops and replace local_idxs that have been used
@@ -405,7 +456,7 @@ class Linearizer(OptimizedKernel):
 
     return self
 
-  def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=False) -> UOp:
+  def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=True) -> UOp:
     key = (uop, dtype, vin, arg)
     if uop == UOps.STORE and len(vin) == 2 and vin[0] == vin[1]: return vin[0]   # self store is noop
     if uop == UOps.CAST and all(x.uop == UOps.GEP for x in vin) and all_same([x.vin[0] for x in vin]) and all(x.arg == i for i,x in enumerate(vin)): return vin[0].vin[0]
@@ -429,7 +480,8 @@ class Linearizer(OptimizedKernel):
     return self.uops[-1]
 
   def ast_parse(self, x, acc, loaded_buffers, do_reduce=False) -> List[UOp]:
-    if x.__class__ is not LazyOp: return loaded_buffers[x]
+    if x.__class__ is not LazyOp: return loaded_buffers[x]    # for LOCAL_BUFFER
+    if x.op in BufferOps: return loaded_buffers[x.arg]
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
     # MULACC fusion. TODO: this is copied from Interpreted
@@ -440,9 +492,9 @@ class Linearizer(OptimizedKernel):
     values = [self.ast_parse(v, acc, loaded_buffers) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:
-      ret = [(idx, self.uop(UOps.STORE, dtypes.float32, (val[-1], self.uop(UOps.ALU, dtypes.float32, val, ops[x.op])))) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values, acc))]
+      ret = [(idx, self.uop(UOps.STORE, dtypes.float32, (val[-1], self.uop(UOps.ALU, dtypes.float32, val, ops[x.op], cachable=False)))) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values, acc))]
     else:
-      ret = [(idx, self.uop(UOps.ALU, dtypes.float32, val, x.op, cachable=True)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
+      ret = [(idx, self.uop(UOps.ALU, dtypes.float32, val, x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
     ordered_ret: List[Optional[UOp]] = [None]*len(values[0])
     # scatter
     for i,j in ret:

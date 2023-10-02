@@ -21,7 +21,7 @@ def kernel_optimize_opts(k:Linearizer):
     opts.append(ng.p.TransitionChoice([(i,s,"G") for s in get_divisors(k.full_shape[k.first_reduce+i], min_div=4) if all(st.shape[k.first_reduce+i] % s == 0 or st.shape[k.first_reduce+i] == 1 for st in k.sts)]))
   return opts
 
-def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, baseline):
+def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, baseline, bufs):
   import nevergrad as ng
   def opt(x):
     try:
@@ -29,9 +29,9 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
       k.process()
       k.apply_auto_opt(x)
       prg = to_prg(k)
-      first_tm = prg.exec(k.bufs, force_wait=True, optimizing=True)
+      first_tm = prg.exec(bufs, force_wait=True, optimizing=True)
       if baseline*5 < first_tm*1000: return first_tm*1000  # very slow
-      tm = min([first_tm]+[prg.exec(k.bufs, force_wait=True, optimizing=True) for _ in range(2)])*1000
+      tm = min([first_tm]+[prg.exec(bufs, force_wait=True, optimizing=True) for _ in range(2)])*1000
       return tm
     except Exception:
       if DEBUG >= 3:
@@ -51,7 +51,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
 
 # optimization
 global_db = None
-def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg):
+def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, bufs):
   global global_db
 
   k.process()
@@ -72,8 +72,8 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg):
       k = create_k()
       k.hand_coded_optimizations()
       prg = to_prg(k)
-      return min([prg.exec(k.bufs, force_wait=True, optimizing=True) for _ in range(5)])*1000
-    choice = kernel_optimize_search(k, create_k, to_prg, get_baseline())
+      return min([prg.exec(bufs, force_wait=True, optimizing=True) for _ in range(5)])*1000
+    choice = kernel_optimize_search(k, create_k, to_prg, get_baseline(), bufs)
     if global_db is not None:
       global_db[skey] = choice
       global_db.sync()
