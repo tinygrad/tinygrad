@@ -142,7 +142,6 @@ class Transformer:
     self.tok_embeddings = Embedding(vocab_size, dim)
     self.output = linear(dim, vocab_size, bias=False)
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_seq_len * 2, rope_theta)
-    self.norm_output = lambda x: self.output(self.norm(x))
 
     self.tok_embeddings_jitted = TinyJit(lambda x: self.tok_embeddings(x).realize())
     self.postprocess_jitted = TinyJit(self.postprocess)
@@ -560,7 +559,6 @@ After you are done speaking, output [EOS]. You are not Chad.
     toks = new_toks
     assert outputted == llama.tokenizer.decode(toks)
 
-    last_break = len(outputted)
     for i in range(args.count):
       GlobalCounters.reset()
       if args.profile and i == 2: profiler.enable()
