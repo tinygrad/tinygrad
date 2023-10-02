@@ -2,6 +2,7 @@
 import unittest
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes
+from tinygrad.ops import ASTRunner
 from tinygrad.jit import CacheCollector
 from weakref import ref
 
@@ -33,7 +34,7 @@ def anybuf(size, dtype):
   return FakeBuffer(size, dtype)
 
 def add_to_cache(bufs):
-  CacheCollector.add(None, bufs, None)
+  CacheCollector.add(ASTRunner("", None), bufs, None)
   return bufs[0]
 
 def add_to_cache_refed(bufs):
