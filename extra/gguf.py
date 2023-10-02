@@ -2,7 +2,10 @@ import enum, os, struct, io
 from typing import Any, Dict, Tuple
 
 from tinygrad.helpers import dtypes, prod
+from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
+
+assert Device.DEFAULT == "METAL", "only metal is tested for now. gpu has a known bug in mac, careful."
 
 # --- Compatibility junk
 class GgmlDType(enum.Enum): F32 = 0; F16 = 1; Q4_0 = 2; Q4_1 = 3; Q5_0 = 6; Q5_1 = 7; Q8_0 = 8; Q8_1 = 9; Q2K = 10; Q3K = 11; Q4K = 12; Q5K = 13; Q6K = 14; Q8K = 15
@@ -54,23 +57,22 @@ def read_data_offset(reader: io.BufferedReader, params: Dict) -> int: # This is 
 # Vectorized version of https://github.com/ggerganov/llama.cpp/blob/468ea24fb4633a0d681f7ac84089566c1c6190cb/ggml.c#L1525
 def dequantize_q4_0_tensor(t: Tensor, n_blocks, shape):
   qs_size = 16; d_size = 2; block_size = d_size + qs_size
-  d = t.cast(dtypes.float16).to("GPU")[::block_size//d_size][:n_blocks].reshape(-1, 1)
-  qs = t.cast(dtypes.uint8).to("GPU").reshape(n_blocks, block_size)[:, d_size:]
+  d = t.reshape(n_blocks*2, block_size//2).cast(dtypes.half).to(Device.DEFAULT)[:, :d_size-1][:n_blocks]
+  qs = t.cast(dtypes.uint8).reshape(n_blocks, block_size).to(Device.DEFAULT)[:, d_size:]
   x0 = qs - (qs / 16).floor() * 16 - 8 # qs & 0x0F - 8 (can I implement these bitshifts as methods on Tensor?)
   x1 = (qs / 16).floor() - 8 # (qs >> 4) - 8
-  ret =  Tensor.stack([x0 * d, x1 * d]).transpose(0, 1).reshape(shape)
-  return ret
+  return Tensor.stack([x0 * d, x1 * d]).transpose(0, 1).reshape(shape)
 
 def dequantize_q6k_tensor(t: Tensor, n_blocks, shape):
   qk_k = 256; ql_size = qk_k // 2; qh_size = qk_k // 4; scales_size = qk_k // 16; d_size =2; block_size = ql_size + qh_size + scales_size + d_size
   offset = 0
-  ql = t.to("GPU").reshape(n_blocks, block_size)[:, offset:ql_size]
+  ql = t.to(Device.DEFAULT).reshape(n_blocks, block_size)[:, offset:ql_size]
   offset += ql_size
-  qh = t.to("GPU").reshape(n_blocks, block_size)[:, offset:offset+qh_size]
+  qh = t.to(Device.DEFAULT).reshape(n_blocks, block_size)[:, offset:offset+qh_size]
   offset += qh_size
-  sc = t.cast(dtypes.int8).to("GPU").reshape(n_blocks, block_size)[:, offset:offset+scales_size]
+  sc = t.cast(dtypes.int8).to(Device.DEFAULT).reshape(n_blocks, block_size)[:, offset:offset+scales_size]
   offset += scales_size
-  d = t.cast(dtypes.half).to("GPU")[offset//2::offset//2+1][:n_blocks].reshape(-1, 1)
+  d = t.cast(dtypes.half).to(Device.DEFAULT)[offset//2::offset//2+1][:n_blocks].reshape(-1, 1)
 
   qlb = ql[:, ql_size//2:]; qhb = qh[:, qh_size//2:]; scb = sc[:, scales_size//2:]
 
@@ -133,4 +135,4 @@ def gguf_load(fn:str):
     params = {k: v for k, v in [read_model_params(f) for _ in range(param_count)]}
     tensor_info = [read_tensor_info(f) for _ in range(tensor_count)]
     data_offset = read_data_offset(f, params)
-    return [tinygrad_tensor_from_gguf(t, *info, data_offset) for info in tensor_info], params
+    return {info[0]: tinygrad_tensor_from_gguf(t, *info, data_offset) for info in tensor_info}, params

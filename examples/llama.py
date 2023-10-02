@@ -6,6 +6,8 @@
 from pathlib import Path
 import functools, sys, argparse, json, os
 import numpy as np
+
+from extra.gguf import gguf_load
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple, Dict
 
@@ -270,6 +272,8 @@ def load(fn:str):
     return {k: parts[n][k] for k, n in weight_map.items()}
   elif fn.endswith(".safetensors"):
     return safe_load(fn)
+  elif fn.endswith(".gguf"):
+    return convert_from_gguf(*gguf_load(fn))
   else:
     return torch_load(fn)
 
@@ -284,6 +288,15 @@ def convert_from_huggingface(weights, model):
     "lm_head.weight": "output.weight",
   }
   return {keymap[k]: v for k,v in weights.items() if ".rotary_emb." not in k}
+
+def convert_from_gguf(weights, params):
+  def gguf_rename(tensor_name:str):
+      replace_map = {"blk.": "layers.", "attn_q": "attention.wq", "attn_k": "attention.wk", "attn_v": "attention.wv", "attn_output": "attention.wo", "ffn_gate": "feed_forward.w1", "ffn_down": "feed_forward.w2", "ffn_up": "feed_forward.w3", "attn_norm": "attention_norm", "token_embd.weight": "tok_embeddings.weight", "output_norm.weight": "norm.weight"}
+      for k,v in replace_map.items(): tensor_name = tensor_name.replace(k, v)
+      return tensor_name
+  weights = {gguf_rename(k): v for k,v in weights.items()}
+  weights["rope.freqs"] = params.get('llama.rope.freq_base', 10000.)
+  return weights
 
 class AbsmaxQuantizedLinear:
   def __init__(self, in_features, out_features, bias=False):
@@ -328,7 +341,6 @@ class LLaMa:
       weights = AbsmaxQuantizedLinear.quantize(weights)
       for _,v in weights.items(): v.realize()
     load_state_dict(model, weights, strict=False)
-
     return LLaMa(model, sp_model)
 
   def __init__(self, model, tokenizer):
@@ -524,6 +536,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
+  # MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/llama2-7b-q4/llama-2-7b.Q4_0.gguf" TODO nicer gguf support
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
 
   if chatbot:
