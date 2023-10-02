@@ -227,7 +227,7 @@ class Linearizer(OptimizedKernel):
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
-    if hasattr(self, "uops"): return  # already linearized
+    if hasattr(self, "uops"): return self  # already linearized
 
     self.process()
 
