@@ -98,7 +98,6 @@ def torch_load(fn:str):
         if DEBUG >= 2: print(f"WARNING: returning Dummy for {module} {name}")
         return Dummy
       return intercept[name] if module_root == "torch" else super().find_class(module, name)
-    def persistent_load(self, pid): return pid
 
   if tuple(t[0:2].numpy()) == (0x50, 0x4b):
     myzip = zipfile.ZipFile(fn, 'r')

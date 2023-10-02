@@ -89,10 +89,6 @@ def my_unpickle(fb0):
           return super().find_class(module, name)
         except Exception:
           return Dummy
-
-    def persistent_load(self, pid):
-      return pid
-
   return MyPickle(fb0).load(), key_prelookup
 
 def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, mmap_allowed=False):
