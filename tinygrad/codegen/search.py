@@ -34,6 +34,8 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
     k.process()
     if DEBUG >= 2: print(f"Shape: {k.full_shape}; Applying opt: {list(y for y in x if y[1] != 1)}")
     k.apply_auto_opt(x)
+    k.linearize()
+    assert len(k.uops) < 2 ** 12, f"too many uops: {len(k.uops)}"
     prg = to_prg(k)
     return prg
   def cheap(x):

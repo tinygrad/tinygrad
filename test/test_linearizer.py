@@ -107,6 +107,35 @@ class TestLinearizer(unittest.TestCase):
       np_c = np_a @ np_b
       np.testing.assert_allclose(np_c, r.numpy(), atol=5e-3, rtol=1e-4)
 
+  @unittest.skip("this doesn't work")
+  def test_winograd_badopt_compile(self):
+    from extra.utils import print_tree
+    # this is an example of a wino stack kernel that hasn't been upcasted properly.
+    # tinygrad/Linearizer can actually process this quite quickly, but C compilers cannot.
+    # *** 4121 E_8192_8_8_2_6_6                      arg   2 sz [8192, 1, 1]       [2, 8, 8]    OPs  34087M/1102.10G  mem  1.10 GB tm    725.57us/   827.50ms (46980.09 GFLOPS, 3005.99 GB/s)
+    # suggestion: {('U', 1): 6, ('U', 0): 6, ('L', 2): 2, ('L', 3): 8, ('L', 4): 8}
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled compiles")
+    Tensor.training = True
+    opt = [(1, 2, 'U'), (2, 8, 'U'), (2, 16, 'L'), (3, 4, 'U'), (4, 4, 'L')]
+    x = Tensor.rand(4, 256, 256, 128, requires_grad=True).realize()
+    kernel = Tensor.rand(256, 256, 3, 3, requires_grad=True).realize()
+    y = x.conv2d(kernel, padding=1)
+
+    s = y.lazydata.schedule()
+
+    i = 2
+    run_schedule(s[:i])
+    # todo: why is s[1] just a contiguous?
+    ast, l, bufs = s[i]
+    k = Linearizer(ast)
+    k.process()
+    k.apply_auto_opt(opt)
+    k.linearize()
+    prg = Device[Device.DEFAULT].to_program(k)  # renderer will succeed, but compile will take forever
+    Tensor.training = False
+
+
 def helper_realized_ast(r:Tensor):
   s = r.lazydata.schedule()
   run_schedule(s[:-1])  # run all kernels except the last one
