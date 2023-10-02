@@ -96,7 +96,8 @@ class View:
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)
 
-    # check if this is adding or removing 1s (only)
+    # check if this is adding or removing 1s with [x for x in self.shape if x != 1] == [x for x in new_shape if x != 1].
+    # extend the above to include cases like (3,4) --> (3,i) where we add or remove 1s and add/remove a "dummy" variable.
     # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
     if sum(1 for a,b in zip_longest([x for x in self.shape if x != 1],[x for x in new_shape if x != 1]) if a != b) <= 1:
       new_strides: List[sint] = [y for x,y in zip(self.shape, self.strides) if x != 1]
