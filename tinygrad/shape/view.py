@@ -99,7 +99,8 @@ class View:
     # check if this is adding or removing 1s with [x for x in self.shape if x != 1] == [x for x in new_shape if x != 1].
     # extend the above to include cases like (3,4) --> (3,i) where we add or remove 1s and add/remove a "dummy" variable.
     # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
-    variable_added_or_removed = (sum(1 for a,b in zip_longest([x for x in self.shape if x != 1],[x for x in new_shape if x != 1]) if a != b) == 1)
+    diff_between_shapes = [(a,b) for a,b in zip_longest([x for x in self.shape if x != 1],[x for x in new_shape if x != 1]) if a != b]
+    variable_added_or_removed = (len(diff_between_shapes) == 1) and any(isinstance(x, Node) for x in diff_between_shapes[0])
     if ([x for x in self.shape if x != 1] == [x for x in new_shape if x != 1]) or variable_added_or_removed:
       new_strides: List[sint] = [y for x,y in zip(self.shape, self.strides) if x != 1]
       new_strides_tuple: Tuple[sint, ...] = tuple([0 if x == 1 else new_strides.pop(0) for x in new_shape])
