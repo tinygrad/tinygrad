@@ -47,6 +47,9 @@ class CStyleLanguage(NamedTuple):
     if var_dtype == dtypes._int2: return f"{self.float4.replace('float4', 'int2')}({','.join(x)})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
+  def render_cast_scalar(self, x:str, var_dtype:DType) -> str:
+    return f"({var_dtype.name})({x})"
+  
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): val = "NAN"
@@ -61,10 +64,14 @@ class CStyleLanguage(NamedTuple):
       return f"read_imagef({buf_name}, smp, {idx})"
     if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx})"
-    cast = f"({output_dtype.name})" if output_dtype != buf_dtype else ""
+    
+    out_val = ""
     if output_dtype.sz > 1:
-      return f"{cast}(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx})))"
-    return f"{cast}(*({buf_name}+{idx}))" if self.uses_ptr_arithmetic else f"{cast}({buf_name}[{idx}])"
+      out_val = f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx}))" 
+    else:
+      out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
+
+    return self.render_cast_scalar(out_val, output_dtype) if output_dtype != buf_dtype else out_val
 
   def render_local(self, name:str, size:int):
     return self.smem_prefix + f"float {name}[{size}];"
