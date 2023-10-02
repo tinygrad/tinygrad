@@ -1,4 +1,5 @@
 import tinygrad.nn as nn
+from tinygrad.tensor import Tensor
 from extra.utils import get_child
 
 class BasicBlock:
@@ -114,7 +115,7 @@ class ResNet:
       return out
     return features
 
-  def __call__(self, x):
+  def __call__(self, x:Tensor) -> Tensor:
     return self.forward(x)
 
   def load_from_pretrained(self):
