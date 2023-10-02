@@ -1,4 +1,4 @@
-import enum, os, struct, io, sys
+import enum, os, struct, io
 from typing import Any, Dict, Tuple
 
 from tinygrad.helpers import dtypes, prod
@@ -6,7 +6,6 @@ from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 
 Device.DEFAULT = "GPU"
-INDEX = int(sys.argv[1])
 
 # --- Compatibility junk
 class GgmlDType(enum.Enum): F32 = 0; F16 = 1; Q4_0 = 2; Q4_1 = 3; Q5_0 = 6; Q5_1 = 7; Q8_0 = 8; Q8_1 = 9; Q2K = 10; Q3K = 11; Q4K = 12; Q5K = 13; Q6K = 14; Q8K = 15
@@ -107,14 +106,25 @@ def dequantize_q6k_tensor(t: Tensor, n_blocks, shape):
   q4 = ql4.cast(dtypes.int8) + qh4.cast(dtypes.int8) - 32
 
   scx = Tensor.stack([scxa[:, :2], scxb[:, :2]]).transpose(0, 1)
+  y1 = d[:, :, None] * q1; half = y1.shape[-1] // 2
+  y1 = Tensor.cat(y1[:, :, :half] * scx[:, :, :1], y1[:, :, half:] * scx[:, :, 1:], dim=2)
 
-  y = d[:, :, None] * q1
-  yhalf_index = y.shape[-1] // 2
-  yh1 = y[:, :, :yhalf_index]
-  yh2 = y[:, :, yhalf_index:]
-  yh1 = yh1 * scx[:, :, :1]
-  yh2 = yh2 * scx[:, :, 1:]
-  y = Tensor.stack([yh1, yh2]).transpose(0,1)
+  scx = Tensor.stack([scxa[:, 2:4], scxb[:, 2:4]]).transpose(0, 1)
+  y2 = d[:, :, None] * q2; half = y2.shape[-1] // 2
+  y2 = Tensor.cat(y2[:, :, :half] * scx[:, :, :1], y2[:, :, half:] * scx[:, :, 1:], dim=2)
+
+  scx = Tensor.stack([scxa[:, 4:6], scxb[:, 4:6]]).transpose(0, 1)
+  y3 = d[:, :, None] * q3; half = y3.shape[-1] // 2
+  y3 = Tensor.cat(y3[:, :, :half] * scx[:, :, :1], y3[:, :, half:] * scx[:, :, 1:], dim=2)
+
+  scx = Tensor.stack([scxa[:, 6:8], scxb[:, 6:8]]).transpose(0, 1)
+  y4 = d[:, :, None] * q4; half = y4.shape[-1] // 2
+  y4 = Tensor.cat(y4[:, :, :half] * scx[:, :, :1], y4[:, :, half:] * scx[:, :, 1:], dim=2)
+
+  half = y1.shape[-1] // 2
+  y12 = Tensor.cat(y1, y2, dim=2)
+  y34 = Tensor.cat(y3, y4, dim=2)
+  return Tensor.cat(y12, y34, dim=1).reshape(shape)
 
 def tinygrad_tensor_from_gguf(disk_tensor: Tensor, name: str, shape: Tuple, ggml_dtype: GgmlDType, offset: int, data_offset: int) -> Tensor:
   itemsize, block_size = ggml_sizes[ggml_dtype]
@@ -138,7 +148,4 @@ def gguf_load(fn:str):
     params = {k: v for k, v in [read_model_params(f) for _ in range(param_count)]}
     tensor_info = [read_tensor_info(f) for _ in range(tensor_count)]
     data_offset = read_data_offset(f, params)
-    # return [tinygrad_tensor_from_gguf(t, *info, data_offset) for info in tensor_info], params
-    name = "output.weight"
-    info = [i for i in tensor_info if i[0] == name][0]
-    tinygrad_tensor_from_gguf(t, *info, data_offset)
+    return [tinygrad_tensor_from_gguf(t, *info, data_offset) for info in tensor_info], params
