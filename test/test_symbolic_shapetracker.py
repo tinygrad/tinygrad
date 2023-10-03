@@ -3,15 +3,18 @@ from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
 
-class TestSymbolic(unittest.TestCase):
+class TestSymbolicShapeTracker(unittest.TestCase):
   def test_symbolic_st(self):
-    x = Variable("x", 1, 100)
+    x = Variable("x", 1, 100).bind(3)
     st = ShapeTracker.from_shape((x, 3))
     assert st.shape == (x, 3)
     assert st.real_strides() == (3, 1)
+    st = ShapeTracker.from_shape((3, x))
+    assert st.shape == (3, x)
+    assert st.real_strides() == (x, 1)
 
   def test_expr_idxs(self):
-    x = Variable("x", 1, 100)
+    x = Variable("x", 1, 100).bind(3)
     st = ShapeTracker.from_shape((x, 3))
     idxs = [Variable("x", 0, 100), Variable("y", 0, 100)]
     e1, e2 = st.expr_idxs(idxs)
@@ -23,63 +26,72 @@ class TestSymbolic(unittest.TestCase):
     assert e2.render() == "1"
 
   def test_cat_strides(self):
-    i = Variable("i", 1, 5)
-    j = Variable("j", 1, 5)
-    k = Variable("k", 1, 5)
+    i = Variable("i", 1, 5).bind(3)
+    j = Variable("j", 1, 5).bind(3)
+    k = Variable("k", 1, 5).bind(3)
     t = Tensor.rand(3, 4).reshape(i, 4).cat(Tensor.rand(3, 4).reshape(j, 4), dim=0).cat(Tensor.rand(3, 4).reshape(k, 4), dim=0)
     st = t.lazydata.st
     assert st.shape == (i+j+k, 4)
     assert st.real_strides() == (4, 1)
-    t = Tensor.rand(3, 4).reshape(3, i).cat(Tensor.rand(3, 4).reshape(3, j), dim=1).cat(Tensor.rand(3, 4).reshape(3, k), dim=1)
-    st = t.lazydata.st
-    assert st.shape == (3, i+j+k)
-    assert st.real_strides() == (i+j+k, 1)
+
     t = Tensor.rand(3, 3).reshape(i, 3).cat(Tensor.rand(3, 3).reshape(i, 3), dim=0).cat(Tensor.rand(3, 3), dim=0)
     st = t.lazydata.st
     assert st.shape == (2*i+3, 3)
     assert st.real_strides() == (3, 1)
 
+    i = Variable("i", 1, 5).bind(4)
+    j = Variable("j", 1, 5).bind(4)
+    k = Variable("k", 1, 5).bind(4)
+    t = Tensor.rand(3, 4).reshape(3, i).cat(Tensor.rand(3, 4).reshape(3, j), dim=1).cat(Tensor.rand(3, 4).reshape(3, k), dim=1)
+    st = t.lazydata.st
+    assert st.shape == (3, i+j+k)
+    assert st.real_strides() == (i+j+k, 1)
+
+class TestSymbolicVars(unittest.TestCase):
+  def test_vars_empty(self):
+    assert ShapeTracker.from_shape((3, 4, 5)).vars == set()
+
+  def test_vars_shape(self):
+    x = Variable("x", 1, 100)
+    assert ShapeTracker.from_shape((x, 3)).vars == {x}
+
+  def test_vars_offset(self):
+    x = Variable("x", 1, 100)
+    st = ShapeTracker.from_shape((4, 3)).shrink(((x, x+1), (0, 3)))
+    assert st.real_offset() == x * 3
+    assert st.vars == {x}
+
+  def test_vars_complex(self):
+    x = Variable("x", 1, 100)
+    y = Variable("y", 1, 100)
+    z = Variable("z", 1, 100)
+    st = ShapeTracker.from_shape((x, 5, y)).shrink(((0, x), (z, z+1), (0, 3)))
+    assert st.real_offset() == y * z
+    assert st.vars == {x, y, z}
+
 class TestSymbolicReshape(unittest.TestCase):
   def test_reshape_into_symbols_simple(self):
-    vi = Variable("i", 1, 5)
     for i in range(1, 6):
+      vi = Variable("i", 1, 5).bind(i)
       t = Tensor.rand(i, 4).reshape(vi, 4)
       assert t.shape == (vi, 4)
-      assert t.lazydata.var_vals[vi] == i
       t = Tensor.rand(i, 6).reshape(vi, 2, 3)
       assert t.shape == (vi, 2, 3)
-      assert t.lazydata.var_vals[vi] == i
 
   def test_reshape_symbols_reshape_ints(self):
-    vi = Variable("i", 1, 5)
     for i in range(1, 6):
+      vi = Variable("i", 1, 5).bind(i)
       t = Tensor.rand(i, 4).reshape(vi, 4)
       assert t.shape == (vi, 4)
-      assert t.lazydata.var_vals == {vi: i}
       t = t.reshape(i, 4)
       assert t.shape == (i, 4)
-      assert t.lazydata.var_vals == {vi: i}
-
-  def test_reshape_reuse_var_same_value_ok(self):
-    vi = Variable("i", 1, 5)
-    for i in range(1, 6):
-      a = Tensor.rand(i, 4).reshape(vi, 4)
-      b = Tensor.rand(i, 3).reshape(vi, 3)
-      assert a.lazydata.var_vals[vi] == i
-      assert b.lazydata.var_vals[vi] == i
-
-  def test_reshape_reuse_var_different_value_ok(self):
-    vi = Variable("i", 1, 10)
-    for i in range(1, 6):
-      a = Tensor.rand(i, 4).reshape(vi, 2)
-      b = Tensor.rand(i, 3).reshape(vi, 3)
-      # a and b have different values of vi
-      assert a.lazydata.var_vals[vi] == 2 * i
-      assert b.lazydata.var_vals[vi] == i
 
   def test_reshape_into_symbols_bad_shape(self):
-    vi = Variable("i", 1, 10)
-    vj = Variable("j", 1, 10)
+    # TODO: fix these
+    vi = Variable("i", 1, 10).bind(3)
+    vj = Variable("j", 1, 10).bind(4)
+    with self.assertRaises(AssertionError):
+      t = Tensor.rand(4, 4).reshape(vi, 4) # reshape into different size
     with self.assertRaises(AssertionError):
       t = Tensor.rand(3, 4).reshape(vi, vj) # reshape into two variables
     with self.assertRaises(AssertionError):
@@ -96,10 +108,10 @@ class TestSymbolicReshape(unittest.TestCase):
       t = Tensor.rand(3, 4).reshape(3, (vi+1)) # reshape into non-Variable Node
 
   def test_two_symbol_reshape(self):
-    vi = Variable("i", 1, 5)
-    vj = Variable("j", 1, 5)
     for i in range(1, 6):
       for j in range(1, 6):
+        vi = Variable("i", 1, 5).bind(i)
+        vj = Variable("j", 1, 5).bind(j)
         t1 = Tensor.rand(i, 5).reshape(vi, 5)
         t2 = Tensor.rand(5, j).reshape(5, vj)
         t = t1@t2
@@ -111,18 +123,16 @@ class TestSymbolicReshape(unittest.TestCase):
 
 class TestSymbolicExpand(unittest.TestCase):
   def test_expand_into_symbols(self):
-    vi = Variable("i", 1, 5)
-    vj = Variable("j", 1, 5)
+    vi = Variable("i", 1, 5).bind(2)
+    vj = Variable("j", 1, 5).bind(4)
     a = Tensor([[1], [2], [3]]).expand((3, vi))
     assert a.shape == (3, vi)
-    assert a.lazydata.var_vals == {}
     a = a.reshape(3, vi, 1).expand((3, vi, vj))
     assert a.shape == (3, vi, vj)
-    assert a.lazydata.var_vals == {}
 
   def test_plus_expands_constant(self):
-    vi = Variable("i", 1, 5)
     for i in range(1, 6):
+      vi = Variable("i", 1, 5).bind(i)
       a = Tensor.rand(3, i).reshape(3, vi)
       a = a + 1
       assert a.shape == (3, vi)
@@ -145,24 +155,6 @@ class TestSymbolicShapeExpr(unittest.TestCase):
     st = ShapeTracker((View.create(shape, strides), ))
     idx, valid = st.expr_idxs(idx)
     assert idx.render() == "((lidx1*((i*4)+4))+1+gidx0+i)"
-
-class TestShapeTrackerVarVals(unittest.TestCase):
-  def test_reshape_reshape_updates_var_vals(self):
-    vi = Variable("i", 1, 5)
-    vj = Variable("j", 1, 5)
-    t = Tensor.rand(3, 4).reshape(3, vi).reshape(4, vj)
-    assert t.lazydata.var_vals == {vi: 4, vj: 3}
-
-  def test_lazy_check_var_vals(self):
-    vi = Variable("i", 1, 5)
-    a = Tensor.rand(3, 4).reshape(3, vi)
-    b = Tensor.rand(5, 6).reshape(vi, 6)
-    assert a.lazydata.var_vals == {vi: 4}
-    assert b.lazydata.var_vals == {vi: 5}
-    c = a@b
-    # shapetracker works with symbolic shape and doesn't check the underlying variable values
-    assert c.shape == (3, 6)
-    assert c.lazydata.var_vals == {vi: 4}
 
 if __name__ == '__main__':
   unittest.main()

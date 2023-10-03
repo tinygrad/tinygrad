@@ -245,8 +245,8 @@ class Linearizer(OptimizedKernel):
     for i,buf in enumerate(self.bufs):
       if isinstance(buf, MemBuffer):
         self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (f"data{buf.idx}", buf.dtype))
-    if self.var_vals:
-      for var in sorted(set(self.var_vals), key=lambda k: k.key):
+    if self.ast.var_vals:
+      for var in sorted(set(self.ast.var_vals), key=lambda k: k.key):
         assert var.expr is not None
         self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), (var.expr, dtypes._arg_int32))
     # define local buffers

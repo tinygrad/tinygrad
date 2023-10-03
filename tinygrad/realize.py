@@ -22,7 +22,7 @@ def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]
       LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out)
       # TODO: why can't we delete these ops?
     else:
-      out.realized = Device[out.device].exec_ast(op, output=out, inputs=[x.realized for x in buffers], var_vals=out.var_vals, **out._device_extra_args())
+      out.realized = Device[out.device].exec_ast(op, output=out, inputs=[x.realized for x in buffers], **out._device_extra_args())
       del out.op
       for v in out.views: del v.op
     assert out.realized and isinstance(out.realized, Device[out.device].buffer), f"device mismatch on realized got {type(out.realized)} expected {out.device}"

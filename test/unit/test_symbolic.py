@@ -283,6 +283,28 @@ class TestSymRender(unittest.TestCase):
     assert sym_render(a+1) == "(1+a)"
     assert sym_render(a*b) == "(a*b)"
 
+class TestVariableBind(unittest.TestCase):
+  def test_var_bind(self):
+    a = Variable("a", 1, 10)
+    assert a.val is None
+    a = a.bind(2)
+    assert a.val == 2
+    with self.assertRaises(AssertionError):
+      a = a.bind(3)
+
+  def test_var_same_min_max_bind(self):
+    a = Variable("a", 3, 3).bind(3)
+    assert a.b == 3
+    with self.assertRaises(AssertionError):
+      a = Variable("a", 3, 3).bind(4)
+
+  def test_same_var_different_bind(self):
+    a1 = Variable("a", 1, 10).bind(1)
+    a1_ = Variable("a", 1, 10).bind(1)
+    a2 = Variable("a", 1, 10).bind(2)
+    assert a1 == a1_
+    assert a1 != a2
+
 class TestSymInfer(unittest.TestCase):
   def test_sym_infer(self):
     a = Variable("a", 0, 10)

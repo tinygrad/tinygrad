@@ -1,7 +1,7 @@
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict
 import itertools
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, ReduceOps, MemBuffer, BufferOps, Device, Compiled
-from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int
+from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
@@ -49,11 +49,12 @@ class LinearizerOptions(NamedTuple):
   local_max: Optional[List[int]] = None
 
 class Kernel:
-  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None, var_vals=None):
+  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
     self.opts = opts if opts else (cast(Compiled, Device[Device.DEFAULT]).linearizer_opts if isinstance(Device[Device.DEFAULT], Compiled) else LinearizerOptions())
     self.ast = ast
-    self.var_vals = var_vals
-    self.key = (ast, tuple(var_vals.keys())) if var_vals else ast
+
+  @property
+  def key(self): return self.ast
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
@@ -88,10 +89,7 @@ class Kernel:
     self.global_size: Optional[List[int]] = None
     self.local_size: Optional[List[int]] = None
 
-  def has_variable_shape(self) -> bool:
-    for b in self.bufs:
-      if not all_int(b.st.views[-1].shape): return True
-    return False
+  def has_variable_shape(self) -> bool: return len(self.ast.var_vals) > 0
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
   def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]

@@ -2,7 +2,7 @@
 from __future__ import annotations
 import functools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, cast
+from typing import Tuple, List, Optional, Set, cast
 from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, sint
@@ -78,6 +78,15 @@ class ShapeTracker:
 
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
+
+  @functools.cached_property
+  def vars(self) -> Set[Variable]:
+    # variable can come from shape or offset
+    ret = []
+    for s in self.shape:
+      if not isinstance(s, int): ret += s.vars()
+    if not isinstance(self.views[-1].offset, int): ret += self.views[-1].offset.vars()
+    return set(ret)
 
   # this is the real size (ish)
   def size(self): return self.views[-1].size()
