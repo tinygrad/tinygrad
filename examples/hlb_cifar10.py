@@ -24,8 +24,8 @@ from extra.dist import collectives
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
-Tensor.default_dtype = dtypes.float16
-np_dtype = np.float16
+Tensor.default_dtype = dtypes.float32
+np_dtype = np.float32
 
 class BatchNorm(nn.BatchNorm2d):
   def __init__(self, num_features):
@@ -250,7 +250,7 @@ def train_cifar():
   # preprocess data
   X_train, X_test = X_train.sequential(transform), X_test.sequential(transform)
 
-  # precompute whitening patches
+  # precompute whitening patches, X_train needs to be fp32 here for eigen decompositions
   W = whitening(X_train)
 
   # padding is not timed in the original repo since it can be done all at once

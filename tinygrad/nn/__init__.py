@@ -7,11 +7,11 @@ class BatchNorm2d:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
-    if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
+    if affine: self.weight, self.bias = Tensor.ones(sz, dtype=Tensor.default_type), Tensor.zeros(sz, dtype=Tensor.default_type)
     else: self.weight, self.bias = None, None
 
-    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
-    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
+    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False, dtype=Tensor.default_type), Tensor.ones(sz, requires_grad=False, dtype=Tensor.default_type)
+    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False, dtype=Tensor.default_type)
 
   def __call__(self, x:Tensor):
     if Tensor.training:
@@ -64,15 +64,15 @@ class ConvTranspose2d(Conv2d):
   def __call__(self, x):
     return x.conv_transpose2d(self.weight, self.bias, padding=self.padding, output_padding=self.output_padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
-  def initialize_weight(self, out_channels, in_channels, groups): return Tensor.kaiming_uniform(in_channels, out_channels//groups, *self.kernel_size, a=math.sqrt(5))
+  def initialize_weight(self, out_channels, in_channels, groups): return Tensor.kaiming_uniform(in_channels, out_channels//groups, *self.kernel_size, a=math.sqrt(5), dtype=Tensor.default_dtype)
 
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
-    self.weight = Tensor.kaiming_uniform(out_features, in_features, a=math.sqrt(5))
+    self.weight = Tensor.kaiming_uniform(out_features, in_features, a=math.sqrt(5), dtype=Tensor.default_type)
     # TODO: remove this once we can represent Tensor with int shape in typing
     assert isinstance(self.weight.shape[1], int), "does not support symbolic shape"
     bound = 1 / math.sqrt(self.weight.shape[1])
-    self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
+    self.bias = Tensor.uniform(out_features, low=-bound, high=bound, dtype=Tensor.default_dtype) if bias else None
 
   def __call__(self, x):
     return x.linear(self.weight.transpose(), self.bias)
@@ -80,8 +80,8 @@ class Linear:
 class GroupNorm:
   def __init__(self, num_groups:int, num_channels:int, eps:float=1e-5, affine:bool=True):
     self.num_groups, self.num_channels, self.eps = num_groups, num_channels, eps
-    self.weight: Optional[Tensor] = Tensor.ones(num_channels) if affine else None
-    self.bias: Optional[Tensor] = Tensor.zeros(num_channels) if affine else None
+    self.weight: Optional[Tensor] = Tensor.ones(num_channels, dtype=Tensor.default_type) if affine else None
+    self.bias: Optional[Tensor] = Tensor.zeros(num_channels, dtype=Tensor.default_type) if affine else None
 
   def __call__(self, x:Tensor):
     # reshape for layernorm to work as group norm
@@ -95,8 +95,8 @@ class GroupNorm:
 class InstanceNorm:
   def __init__(self, num_features:int, eps:float=1e-5, affine:bool=True):
     self.num_features, self.eps = num_features, eps
-    self.weight: Optional[Tensor] = Tensor.ones(num_features) if affine else None
-    self.bias: Optional[Tensor] = Tensor.zeros(num_features) if affine else None
+    self.weight: Optional[Tensor] = Tensor.ones(num_features, dtype=Tensor.default_type) if affine else None
+    self.bias: Optional[Tensor] = Tensor.zeros(num_features, dtype=Tensor.default_type) if affine else None
 
   def __call__(self, x:Tensor):
     x = x.reshape(x.shape[0], self.num_features, -1).layernorm(eps=self.eps).reshape(x.shape)
@@ -107,7 +107,7 @@ class LayerNorm:
   def __init__(self, normalized_shape:Union[int, Tuple[int, ...]], eps:float=1e-5, elementwise_affine:bool=True):
     self.normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
     self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(self.normalized_shape))), eps, elementwise_affine
-    self.weight, self.bias = (Tensor.ones(*self.normalized_shape), Tensor.zeros(*self.normalized_shape)) if elementwise_affine else (None, None)
+    self.weight, self.bias = (Tensor.ones(*self.normalized_shape, dtype=Tensor.default_type), Tensor.zeros(*self.normalized_shape, dtype=Tensor.default_type)) if elementwise_affine else (None, None)
 
   def __call__(self, x:Tensor):
     assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"last dimensions of {x.shape} must match {self.normalized_shape}"
@@ -121,8 +121,8 @@ class LayerNorm2d(LayerNorm):
 class Embedding:
   def __init__(self, vocab_size:int, embed_size:int):
     self.vocab_size = vocab_size
-    self.weight = Tensor.glorot_uniform(vocab_size, embed_size)
+    self.weight = Tensor.glorot_uniform(vocab_size, embed_size, dtype=Tensor.default_type)
 
   def __call__(self, idx:Tensor) -> Tensor:
-    if not hasattr(self, 'vocab_counter'): self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(1, 1, self.vocab_size)
+    if not hasattr(self, 'vocab_counter'): self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False, dtype=Tensor.default_type).reshape(1, 1, self.vocab_size)
     return (self.vocab_counter == idx.unsqueeze(2)).expand(*idx.shape, self.vocab_size) @ self.weight
