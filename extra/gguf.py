@@ -123,12 +123,14 @@ def tinygrad_tensor_from_gguf(disk_tensor: Tensor, name: str, shape: Tuple, ggml
       GgmlDType.Q4_0: lambda ret: dequantize_q4_0_tensor(ret, n_blocks, shape),
       GgmlDType.Q6K: lambda ret: dequantize_q6k_tensor(ret, n_blocks, shape),
   }
+  if name == "output.weight":
+    print(ggml_dtype, n_blocks)
   return fxn_for_dtype[ggml_dtype](disk_tensor[init_offset:init_offset+size_in_bytes])
 
 def gguf_load(fn):
   t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
   with open(fn, "rb") as f:
-    magic = read_value(f, GGUFValueType.UINT32)
+    read_value(f, GGUFValueType.UINT32)
     version = read_value(f, GGUFValueType.UINT32); assert version == 2, f"unsupported version {version}"
     tensor_count = read_value(f, GGUFValueType.UINT64)
     param_count = read_value(f, GGUFValueType.UINT64)
