@@ -65,6 +65,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
   st = time.perf_counter()
   budget = getenv("BUDGET", 200)
   optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, budget))
+  optimizer.register_callback("tell", ng.callbacks.ProgressBar())
   optimizer.parametrization.register_cheap_constraint(cheap)
   if suggestion is not None: optimizer.suggest(tuple([(i, s, typ) for (typ, i), s in ({(typ, i): s for i,s,typ in default_opt} | suggestion).items()]))  # maintain ordering from default_opt
   recommendation = optimizer.minimize(opt)
