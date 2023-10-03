@@ -6,8 +6,8 @@ from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import Compiled, Device, MovementOps, LazyOp
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
-from tinygrad.lazy import _replace_bufferops
-from tinygrad.helpers import dtypes
+from tinygrad.lazy import run_schedule
+from tinygrad.helpers import dtypes, prod
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -31,9 +31,8 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.randn(4).realize()
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
-    ast = r.lazydata.op
-    r = r.realize()  # realize an output buffer
-    k = Linearizer(_replace_bufferops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
+
+    k = Linearizer(r.lazydata.schedule()[-1][0])
     k.process()
     k.upcast()
     k.linearize()
@@ -49,9 +48,8 @@ class TestLinearizer(unittest.TestCase):
 
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = a.expand([2]) + b.expand([2])
-    ast = r.lazydata.op
-    r = r.realize()  # realize an output buffer
-    k = Linearizer(_replace_bufferops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
+
+    k = Linearizer(r.lazydata.schedule()[-1][0])
     k.process()
     k.upcast()
     k.linearize()
@@ -64,9 +62,8 @@ class TestLinearizer(unittest.TestCase):
 
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack([a, b])
-    ast = r.lazydata.op
-    r = r.realize()  # realize an output buffer
-    k = Linearizer(_replace_bufferops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
+
+    k = Linearizer(r.lazydata.schedule()[-1][0])
     k.process()
     k.upcast()
     k.linearize()
@@ -80,9 +77,8 @@ class TestLinearizer(unittest.TestCase):
 
     a, b = Tensor(2), Tensor(3)
     r = a * b
-    ast = r.lazydata.op
-    r = r.realize()  # realize an output buffer
-    k = Linearizer(_replace_bufferops(ast)[0], Device[Device.DEFAULT].linearizer_opts)
+
+    k = Linearizer(r.lazydata.schedule()[-1][0])
     k.process()
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
@@ -103,7 +99,7 @@ class TestLinearizer(unittest.TestCase):
       else:
         r = a @ b
       realized_ast, _ = helper_realized_ast(r)
-      k = Linearizer(realized_ast, Device[Device.DEFAULT].linearizer_opts)
+      k = Linearizer(realized_ast)
       k.process()
       k.hand_coded_optimizations()
       k.linearize()
@@ -112,21 +108,11 @@ class TestLinearizer(unittest.TestCase):
       np.testing.assert_allclose(np_c, r.numpy(), atol=5e-3, rtol=1e-4)
 
 def helper_realized_ast(r:Tensor):
-  realized_ast = None
-  real_bufs = None
-  # HACK to get real ast.
-  real_dev_exec_ast = Device[Device.DEFAULT].exec_ast
-  def fake_exec_ast(ast, output=None, inputs=None, **kwargs):
-    nonlocal realized_ast, real_bufs
-    x = real_dev_exec_ast(ast, output, inputs, **kwargs)
-    real_bufs = [output.realized] + inputs
-    if not(ast.op in MovementOps and ast.src[0].__class__ is not LazyOp and ast.src[0].realized): realized_ast = ast # get last executed
-    return x
-  Device[Device.DEFAULT].exec_ast = fake_exec_ast
-  r = r.realize()  # realize an output buffer
-  assert realized_ast is not None
-  Device[Device.DEFAULT].exec_ast = real_dev_exec_ast
-  return realized_ast, real_bufs
+  s = r.lazydata.schedule()
+  run_schedule(s[:-1])  # run all kernels except the last one
+  # now all input LazyBuffers buffers in s[-1] should be realized
+  output_buffer = Device[s[-1][1].device].buffer(prod((s if isinstance(s, int) else s.max for s in s[-1][1].shape)), s[-1][1].dtype, **s[-1][1]._device_extra_args())  # allocate an output buffer
+  return s[-1][0], [output_buffer] + [l.realized for l in s[-1][2]]
 
 def helper_linearizer_opt(r:Tensor, opts=[]):
   wanna_output = None
@@ -142,21 +128,21 @@ def helper_linearizer_opt(r:Tensor, opts=[]):
     np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
 
   # Get baseline, which is not optimized at all.
-  k = Linearizer(realized_ast, Device[Device.DEFAULT].linearizer_opts)
+  k = Linearizer(realized_ast)
   k.process()
   prg = Device[Device.DEFAULT].to_program(k)
   prg.exec(real_bufs, force_wait=True)
   wanna_output = real_bufs[0].toCPU().copy()
 
   # Check correctness of handcoded optimiztions.
-  k = Linearizer(realized_ast, Device[Device.DEFAULT].linearizer_opts)
+  k = Linearizer(realized_ast)
   k.hand_coded_optimizations()
   prg = Device[Device.DEFAULT].to_program(k)
   real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
   prg.exec(real_bufs, force_wait=True)
   np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
   for x in opts: # Check custom transformations if any.
-    check_opt(x, lambda: Linearizer(realized_ast, Device[Device.DEFAULT].linearizer_opts), Device[Device.DEFAULT].to_program)
+    check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program)
 
 class TestLinearizerOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):

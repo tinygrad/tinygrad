@@ -164,6 +164,11 @@ class BasicBatchExecutor:
   def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): pass
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
     for prg, pargs, variables in jit_cache: prg(pargs, variables, jit=True)
+  def recalc_stat(self, jit_cache: List[Tuple[Any, Any, Any]]):
+    for prg, _, variables in jit_cache:
+      GlobalCounters.kernel_count += 1
+      GlobalCounters.global_ops += sym_infer(prg.op_estimate, variables)
+      GlobalCounters.global_mem += prg.mem_estimate
 
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
