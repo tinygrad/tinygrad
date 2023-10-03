@@ -536,7 +536,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
-  # MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/llama2-7b-q4/llama-2-7b.Q4_0.gguf" TODO nicer gguf support
+  MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/llama2-7b-q4/llama-2-7b.Q4_0.gguf" # TODO nicer gguf support
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
 
   if chatbot:
