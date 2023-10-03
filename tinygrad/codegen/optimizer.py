@@ -173,7 +173,7 @@ class OptimizedKernel(Kernel):
         self.shift_to(axis, amt, insert_before=self.first_reduce)
         self.local_dims += 1
     self.simplify_ones()
-    assert prod(self.full_shape[self.shape_len-self.upcasted:self.shape_len]) <= 128
+    assert prod(self.full_shape[self.shape_len-self.upcasted:self.shape_len]) <= 512
 
   def required_optimizations(self, suggestion, early_only=False):
     for buf_index,buf in enumerate(self.bufs):

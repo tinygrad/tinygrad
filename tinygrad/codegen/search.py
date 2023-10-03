@@ -86,6 +86,7 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
 
   if global_db is not None and skey in global_db:
     choice = global_db[skey]
+    if DEBUG >= 1: print(f"from kopt_cache: {list(y for y in choice if y[1] != 1)}")
   elif k.has_variable_shape():
     # don't optimize variable shapes
     choice = "BASELINE"
