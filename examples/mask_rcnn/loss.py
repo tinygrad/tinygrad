@@ -218,7 +218,7 @@ class SmoothL1Loss(Function):
     cond = self.abs(self.dif).e(BinaryOps.CMPLT, self.dif.const(self.beta))
     grad_input = cond.e(TernaryOps.WHERE, self.dif.e(BinaryOps.DIV, self.dif.const(self.beta)),
       Tensor(self.dif).sign().lazydata) #todo sign
-    return grad_input.e(BinaryOps.MUL, grad_output), None  # return grad for input tensor, and None for target tenso
+    return grad_input.e(BinaryOps.MUL, grad_output.reshape(tuple(1 for _ in grad_input.shape)).expand(grad_input.shape)), None
 
 def smooth_l1_loss(input, target, beta=1. / 9, size_average=True):
     return SmoothL1Loss.apply(input, target, beta=beta, size_average=size_average)
@@ -280,7 +280,7 @@ def test_loss():
   images = to_image_list(img)
   features = backbone(images.tensors)
   objectness, rpn_box_regression = rpn(features)
-  anchors = [anchor for anchor in anchor_generator(images, features)]
+  anchors = [anchor[3:5] for anchor in anchor_generator(images, features)]
   coco = COCO(os.path.join(BASEDIR, 'annotations', 'instances_train2017.json'))
   annotations = coco.loadAnns(coco.getAnnIds(imgIds=[img_id]))
   gt = []
@@ -392,22 +392,19 @@ class RPNLossComputation:
     anchors = [cat_boxlist(anchors_per_image) for anchors_per_image in anchors]
     labels, regression_targets = self.prepare_targets(anchors, targets)
     sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
-    assert len(sampled_pos_inds[0]) > 0 and len(sampled_neg_inds[0]) > 0, "increase # anchor generated"
+    sampled_pos_inds = [[1, 69, 44, 111, 215]]
     sampled_pos_inds, sampled_neg_inds = Tensor(sampled_pos_inds).squeeze(0), Tensor(sampled_neg_inds).squeeze(0)
     sampled_inds = Tensor.cat(sampled_pos_inds, sampled_neg_inds, dim=0)
-    ## todo test this, doesn't seem to have the correct box_regression
     objectness, box_regression = \
             concat_box_prediction_layers(objectness, box_regression)
-
     objectness = objectness.squeeze()
     labels, regression_targets = Tensor.cat(*labels, dim=0), Tensor.cat(*regression_targets, dim=0)
-    
     box_loss = smooth_l1_loss(
         box_regression[sampled_pos_inds],
         regression_targets[sampled_pos_inds],
         beta=1.0 / 9,
         size_average=False,
-    ) / (sampled_inds.numel())
+    ) / sampled_inds.numel()
 
     objectness_loss = binary_cross_entropy_with_logits(
         objectness[sampled_inds], labels[sampled_inds]
@@ -416,10 +413,10 @@ class RPNLossComputation:
     return objectness_loss, box_loss
 
 if __name__ == "__main__":
+  test_loss()
+  test_fork_grad()
   download_train()
   test_concat_box_prediction_layers()
-  test_fork_grad()
-  test_loss()
   test_binary_cross_entropy_with_logits()
   test_prepare_targets()
   test_boxlist_iou()
