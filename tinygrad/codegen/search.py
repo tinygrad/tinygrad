@@ -2,7 +2,7 @@ from typing import Callable
 import time
 import functools
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.helpers import DEBUG, prod, getenv
+from tinygrad.helpers import DEBUG, prod, getenv, GlobalCounters
 
 def get_divisors(n, min_div = 1, max_div = 512, extra=None):
   if min_div > 1: yield 1
@@ -91,6 +91,7 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
     # don't optimize variable shapes or if KOPT=3
     choice = "BASELINE"
   else:
+    orig_kernel_count = GlobalCounters.kernel_count
     # get baseline
     def get_baseline():
       k = create_k()
@@ -107,6 +108,8 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
         global_db.sync()
     else:
       choice = "BASELINE"
+
+    GlobalCounters.kernel_count = orig_kernel_count
 
   if choice == "BASELINE": k.hand_coded_optimizations()
   else: k.apply_auto_opt(choice)
