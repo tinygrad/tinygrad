@@ -63,7 +63,7 @@ class TestSymbolicOps(unittest.TestCase):
         # symbolic shape dropout is not supported
         self.test_attention(dropout_p=0.5)
 
-  def test_cat_dim0(self):
+  def test_cat_dim0_one_var(self):
     def f(a, b): return a.cat(b, dim=0).realize()
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
@@ -73,7 +73,7 @@ class TestSymbolicOps(unittest.TestCase):
       expected = f(a, b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  def test_cat_dim1(self):
+  def test_cat_dim1_one_var(self):
     def f(a, b): return a.cat(b, dim=1).realize()
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)

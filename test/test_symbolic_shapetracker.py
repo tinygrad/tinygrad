@@ -47,27 +47,27 @@ class TestSymbolicShapeTracker(unittest.TestCase):
     assert st.shape == (3, i+j+k)
     assert st.real_strides() == (i+j+k, 1)
 
-class TestSymbolicVars(unittest.TestCase):
-  def test_vars_empty(self):
-    assert ShapeTracker.from_shape((3, 4, 5)).vars == set()
+class TestSymbolicVarVals(unittest.TestCase):
+  def test_var_vals_empty(self):
+    assert ShapeTracker.from_shape((3, 4, 5)).var_vals == {}
 
-  def test_vars_shape(self):
-    x = Variable("x", 1, 100)
-    assert ShapeTracker.from_shape((x, 3)).vars == {x}
+  def test_var_vals_shape(self):
+    x = Variable("x", 1, 100).bind(3)
+    assert ShapeTracker.from_shape((x, 3)).var_vals == {Variable("x", 1, 100): 3}
 
-  def test_vars_offset(self):
-    x = Variable("x", 1, 100)
+  def test_var_vals_offset(self):
+    x = Variable("x", 1, 100).bind(3)
     st = ShapeTracker.from_shape((4, 3)).shrink(((x, x+1), (0, 3)))
     assert st.real_offset() == x * 3
-    assert st.vars == {x}
+    assert st.var_vals == {Variable("x", 1, 100): 3}
 
-  def test_vars_complex(self):
-    x = Variable("x", 1, 100)
-    y = Variable("y", 1, 100)
-    z = Variable("z", 1, 100)
+  def test_var_vals_complex(self):
+    x = Variable("x", 1, 100).bind(3)
+    y = Variable("y", 1, 100).bind(4)
+    z = Variable("z", 1, 100).bind(5)
     st = ShapeTracker.from_shape((x, 5, y)).shrink(((0, x), (z, z+1), (0, 3)))
     assert st.real_offset() == y * z
-    assert st.vars == {x, y, z}
+    assert st.var_vals == {Variable("x", 1, 100): 3, Variable("y", 1, 100):4, Variable("z", 1, 100): 5}
 
 class TestSymbolicReshape(unittest.TestCase):
   def test_reshape_into_symbols_simple(self):

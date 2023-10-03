@@ -4,7 +4,7 @@ from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapp
 from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
-from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, all_int, dedup
+from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, all_int, dedup, merge_dicts
 from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import sint
@@ -109,13 +109,7 @@ class LazyBuffer:
     # NOTE: op should be read only after construction of LazyBuffer. it is now with schedule
     if op is not None:
       self.op: LazyOp = op
-      # populate variable values from buffers
-      variables = set()
-      for buf in op.buffers: variables |= buf.st.vars
-      for v in variables:
-        var, val = v.unbind()
-        assert var not in self.op.var_vals or self.op.var_vals[var] == val, f"{var} has conflicted values {val} and {self.op.var_vals[var]}"
-        self.op.var_vals[var] = val
+      self.op.var_vals = merge_dicts([buf.st.var_vals for buf in op.buffers])
       for x in op.buffers: x.children.add(self)
     assert optype != MovementOps or (base is not None and base.optype != MovementOps), "MovementOps must be based"
     self._base = base

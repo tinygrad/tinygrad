@@ -2,7 +2,7 @@
 from __future__ import annotations
 import functools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Set, cast
+from typing import Tuple, List, Optional, Dict, cast
 from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, sint
@@ -80,13 +80,18 @@ class ShapeTracker:
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
 
   @functools.cached_property
-  def vars(self) -> Set[Variable]:
-    # variable can come from shape or offset
-    ret = []
+  def var_vals(self) -> Dict[Variable, int]:
+    # Variable can come from shape or offset
+    variables: List[Variable] = []
     for s in self.shape:
-      if not isinstance(s, int): ret += s.vars()
-    if not isinstance(self.views[-1].offset, int): ret += self.views[-1].offset.vars()
-    return set(ret)
+      if not isinstance(s, int): variables += s.vars()
+    if not isinstance(self.views[-1].offset, int): variables += self.views[-1].offset.vars()
+    ret: Dict[Variable, int] = {}
+    for v in set(variables):
+      var, val = v.unbind()
+      assert var not in ret or ret[var] == val, f"{var} has conflicted values {val} and {ret[var]}"
+      ret[var] = val
+    return ret
 
   # this is the real size (ish)
   def size(self): return self.views[-1].size()
