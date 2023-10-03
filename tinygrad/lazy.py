@@ -126,9 +126,7 @@ class LazyBuffer:
   @property
   def base(self): return self._base if self._base is not None else self
 
-  def is_unrealized_const(self):
-    # consts are broken in LLVM in NaN/inf
-    return not self.realized and (self.base.op.op == LoadOps.CONST and isinstance(Device[self.device], Compiled) and self.device != "LLVM")
+  def is_unrealized_const(self): return not self.realized and (self.base.op.op == LoadOps.CONST and isinstance(Device[self.device], Compiled))
 
   @property
   def realized(self): return self.base._realized
