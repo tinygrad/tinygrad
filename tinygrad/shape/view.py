@@ -99,13 +99,12 @@ class View:
     # check if this is adding or removing 1s
     # extend the above to include cases like (3,4) --> (3,i) where we add or remove 1s and add/remove a "dummy" variable.
     # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
-    filtered_shape = [x for x in self.shape if x != 1]
-    filtered_new_shape = [x for x in new_shape if x != 1]
+    # when the diff is 0, we are adding or removing 1s.
     # if all the values in both shapes are ints, the number of differences between shapes must be even. 
     # this is due to the product of shapes being equal.
     # therefore when we only get 1 diff, we must be in a symbolic case where a variable has either been added, removed or replaced.
-    diff_count_filtered_shapes = sum([1 for a,b in zip_longest(filtered_shape, filtered_new_shape) if a != b])
-    if (filtered_shape == filtered_new_shape) or (diff_count_filtered_shapes == 1):
+    diff_count_filtered_shapes = sum([1 for a,b in zip_longest([x for x in self.shape if x != 1], [x for x in new_shape if x != 1]) if a != b])
+    if diff_count_filtered_shapes <= 1:
       new_strides: List[sint] = [y for x,y in zip(self.shape, self.strides) if x != 1]
       new_strides_tuple: Tuple[sint, ...] = tuple([0 if x == 1 else new_strides.pop(0) for x in new_shape])
       new_mask_tuple: Optional[Tuple[Tuple[sint, sint], ...]] = None
