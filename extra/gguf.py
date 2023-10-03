@@ -125,7 +125,7 @@ def tinygrad_tensor_from_gguf(disk_tensor: Tensor, name: str, shape: Tuple, ggml
   }
   return fxn_for_dtype[ggml_dtype](disk_tensor[init_offset:init_offset+size_in_bytes])
 
-def gguf_load(fn:str):
+def gguf_load(fn):
   t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
   with open(fn, "rb") as f:
     magic = read_value(f, GGUFValueType.UINT32)
