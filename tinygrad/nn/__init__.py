@@ -46,12 +46,12 @@ class Conv2d:
     self.weight = self.initialize_weight(out_channels, in_channels, groups)
     assert all_int(self.weight.shape), "does not support symbolic shape"
     bound = 1 / math.sqrt(prod(self.weight.shape[1:]))
-    self.bias = Tensor.uniform(out_channels, low=-bound, high=bound, dtype=Tensor.default_dtype) if bias else None
+    self.bias = Tensor.uniform(out_channels, low=-bound, high=bound, dtype=Tensor.default_type) if bias else None
 
   def __call__(self, x):
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
-  def initialize_weight(self, out_channels, in_channels, groups): return Tensor.kaiming_uniform(out_channels, in_channels//groups, *self.kernel_size, a=math.sqrt(5), dtype=Tensor.default_dtype)
+  def initialize_weight(self, out_channels, in_channels, groups): return Tensor.kaiming_uniform(out_channels, in_channels//groups, *self.kernel_size, a=math.sqrt(5), dtype=Tensor.default_type)
 
 def ConvTranspose1d(in_channels, out_channels, kernel_size, stride=1, padding=0, output_padding=0, dilation=1, groups=1, bias=True):
   return ConvTranspose2d(in_channels, out_channels, (kernel_size,), stride, padding, output_padding, dilation, groups, bias)
@@ -64,7 +64,7 @@ class ConvTranspose2d(Conv2d):
   def __call__(self, x):
     return x.conv_transpose2d(self.weight, self.bias, padding=self.padding, output_padding=self.output_padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
-  def initialize_weight(self, out_channels, in_channels, groups): return Tensor.kaiming_uniform(in_channels, out_channels//groups, *self.kernel_size, a=math.sqrt(5), dtype=Tensor.default_dtype)
+  def initialize_weight(self, out_channels, in_channels, groups): return Tensor.kaiming_uniform(in_channels, out_channels//groups, *self.kernel_size, a=math.sqrt(5), dtype=Tensor.default_type)
 
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
@@ -72,7 +72,7 @@ class Linear:
     # TODO: remove this once we can represent Tensor with int shape in typing
     assert isinstance(self.weight.shape[1], int), "does not support symbolic shape"
     bound = 1 / math.sqrt(self.weight.shape[1])
-    self.bias = Tensor.uniform(out_features, low=-bound, high=bound, dtype=Tensor.default_dtype) if bias else None
+    self.bias = Tensor.uniform(out_features, low=-bound, high=bound, dtype=Tensor.default_type) if bias else None
 
   def __call__(self, x):
     return x.linear(self.weight.transpose(), self.bias)
