@@ -22,7 +22,7 @@ def __get_output_buffer(ast, output, inputs) -> Optional[RawBuffer]:
       return None
   return output.output_buffer
 
-def run_prebuilt(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]):
+def compile_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]):
   prebuilt_info: List[Tuple[LazyBuffer, Union[ASTRunner, LazyOp], Optional[List[LazyBuffer]]]] = []
   while len(schedule):
     op,out,buffers = schedule.pop(0)
@@ -33,7 +33,7 @@ def run_prebuilt(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]
     # TODO: why can't we delete these LoadOps?
     if op.op in LoadOps: prebuilt_info.append((out, op, []))
     else:
-      if isinstance(Compiled, Device[out.device]):
+      if isinstance(Device[out.device], Compiled):
         if out.output_buffer is not None: out.realized = __get_output_buffer(op, out, [x.realized for x in buffers])
         op = Device[out.device].compile_ast(op, args_info=[(x.shape, x.dtype) for x in ([out]+list(buffers))], var_vals=out.var_vals, **out._device_extra_args())
       prebuilt_info.append((out, op, buffers))
@@ -70,11 +70,16 @@ def allocate_buffers(prebuilt_info: List[Tuple[LazyBuffer, Union[ASTRunner, Lazy
     rawbuf_pool[buf().device][pool_idx][1].append((start, end))
 
 def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]):
-  prebuilt_info = run_prebuilt(schedule)
-  allocate_buffers(prebuilt_info)
+  compiled_info = compile_schedule(schedule)
+  allocate_buffers(compiled_info)
 
-  while len(prebuilt_info):
-    out,prog,buffers = prebuilt_info.pop(0)
+  from tinygrad.jit import SchedCollector
+  SchedCollector.add([x for x in compiled_info])
+  run_compiled(compiled_info)
+
+def run_compiled(compiled_info):
+  while len(compiled_info):
+    out,prog,buffers = compiled_info.pop(0)
     if isinstance(prog, LazyOp):
       if prog.op in LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, prog.op)](out)
       else: out.realized = Device[out.device].exec_ast(prog, output=out, inputs=[x.realized for x in buffers], var_vals=out.var_vals, **out._device_extra_args())
