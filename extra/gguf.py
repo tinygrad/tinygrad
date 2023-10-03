@@ -113,7 +113,7 @@ def dequantize_q6k_tensor(t: Tensor, n_blocks, shape):
 
   return Tensor.cat(*ys, dim=2).reshape(shape)
 
-def tinygrad_tensor_from_gguf(disk_tensor: Tensor, name: str, shape: Tuple, ggml_dtype: GgmlDType, offset: int, data_offset: int) -> Tensor:
+def tinygrad_tensor_from_gguf(disk_tensor: Tensor, name: str, shape: Tuple, ggml_dtype: GgmlDType, offset: int, data_offset: int):
   itemsize, block_size = ggml_sizes[ggml_dtype]
   size_in_bytes = int(prod(shape) * itemsize // block_size)
   init_offset = data_offset + offset
@@ -123,9 +123,7 @@ def tinygrad_tensor_from_gguf(disk_tensor: Tensor, name: str, shape: Tuple, ggml
       GgmlDType.Q4_0: lambda ret: dequantize_q4_0_tensor(ret, n_blocks, shape),
       GgmlDType.Q6K: lambda ret: dequantize_q6k_tensor(ret, n_blocks, shape),
   }
-  if name == "output.weight":
-    print(ggml_dtype, n_blocks)
-  return fxn_for_dtype[ggml_dtype](disk_tensor[init_offset:init_offset+size_in_bytes])
+  return fxn_for_dtype[ggml_dtype](disk_tensor[init_offset:init_offset+size_in_bytes]), ggml_dtype
 
 def gguf_load(fn):
   t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")

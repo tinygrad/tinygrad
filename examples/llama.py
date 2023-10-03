@@ -171,7 +171,9 @@ class Transformer:
       freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (start_pos, start_pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
       mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize()
       h = self.tok_embeddings(tokens)
+      print(len(self.layers))
       for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.layers, self.kv_caches)):
+        print(i)
         # need this reshape back to int shape in conversational mode because jitted and unjitted calls share the same cache
         if cache_k is not None and start_pos > 0:
           cache_k = cache_k.reshape(cache_k.shape[0], start_pos, cache_k.shape[2], cache_k.shape[3])
