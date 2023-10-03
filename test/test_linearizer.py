@@ -6,7 +6,7 @@ from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import Compiled, Device, MovementOps, LazyOp
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
-from tinygrad.lazy import run_schedule
+from tinygrad.realize import run_schedule
 from tinygrad.helpers import dtypes, prod
 
 class TestLinearizer(unittest.TestCase):
