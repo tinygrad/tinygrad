@@ -138,8 +138,6 @@ class Interpreted:
       return output.output_buffer
     return ret
 
-# --teenygrad--
-
 class FlopCounter:
   def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops, self._buf = *tup, self
   def consume_flops(self):
@@ -217,10 +215,6 @@ class Compiled:
                      display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime, self.batch_exec)
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
-    #if DEBUG >= 4:
-    #  from extra.utils import print_tree
-    #  print_tree(ast)
-
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
@@ -234,7 +228,8 @@ class Compiled:
             break
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-    if not output.realized: output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
+    if not output.realized:
+      output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
     else:
       from tinygrad.jit import CacheCollector
       CacheCollector._mark_output_buffer(output.output_buffer)
