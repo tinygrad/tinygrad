@@ -666,7 +666,7 @@ try:
     c_options[:] = [o.encode("utf-8") for o in options]
 
     status = _libhiprtc.hiprtcCompileProgram(prog, len(options), c_options)
-    if status == 6: print(hiprtcGetProgramLog(prog))
+    if status == 6 and DEBUG >= 2: print(hiprtcGetProgramLog(prog))
     hipCheckStatus(status)
 
   _libhiprtc.hiprtcGetCodeSize.restype = int
