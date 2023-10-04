@@ -4,7 +4,7 @@ from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapp
 from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
-from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, partition, all_int, dedup, merge_dicts
+from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, partition, dedup, merge_dicts
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
@@ -16,7 +16,6 @@ from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 sys.setrecursionlimit(10000)
 
 OPT = getenv("OPT", 2)
-LAZY = getenv("LAZY", 1)
 LAZYCACHE = getenv("LAZYCACHE", 1)
 
 # TODO: movement ops that only change shape are really nops. treat them as such
@@ -115,7 +114,6 @@ class LazyBuffer:
     self._base = base
     if base: base.views.add(self)
     else: assert st.contiguous, "unbased LazyBuffers must be contiguous"
-    if not LAZY: self.realize()
 
   @property
   def var_vals_key(self): return tuple(sorted(self.var_vals.keys()))
@@ -199,11 +197,6 @@ class LazyBuffer:
 
     return ret + [(op, self, tuple(base_bufs))]
 
-  def realize(self:LazyBuffer) -> LazyBuffer:
-    from tinygrad.realize import run_schedule
-    if not self.realized: run_schedule(self.schedule())
-    return self
-
   # *** creation/special ops ***
 
   @staticmethod
@@ -222,15 +215,6 @@ class LazyBuffer:
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
     return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), {}, RawNumpyBuffer.fromCPU(x))
-
-  def prepare_transfer(self):
-    self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
-    return self_casted.contiguous().realize().realized
-
-  def toCPU(self) -> np.ndarray:
-    assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
-    assert all_int(self.shape), f"no toCPU if shape is symbolic, {self.shape=}"
-    return cast(RawBuffer, self.prepare_transfer()).toCPU().reshape(self.shape)
 
   # *** elementwise ops ***
 
