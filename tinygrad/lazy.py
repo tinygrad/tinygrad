@@ -166,11 +166,6 @@ class LazyBuffer:
     if self.optype is MovementOps: return self.base.schedule(seen)
 
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
-    if op.op in LoadOps:
-      # TODO: unify this with the rest of the function
-      ret = []
-      for x in op.buffers: ret += x.schedule(seen)
-      return ret + [(self.op, self, ())]
 
     if self.optype is BinaryOps: op = _ast_binaryops(op, self.shape)
     elif self.optype is ReduceOps: op = _ast_reduceops(op)
@@ -185,7 +180,7 @@ class LazyBuffer:
     if self.op.op == LoadOps.CONTIGUOUS:
       src = cast(LazyBuffer, self.op.src[0])
       if src.st.contiguous and src.st.size() == src.base.st.size() and not src.is_unrealized_const():
-        return src.schedule(seen) + [(self.op, self, ())]
+        return src.schedule(seen) + [(self.op, self, (src,))]
 
     # realize the past and exec the AST
     ret = []
@@ -196,6 +191,12 @@ class LazyBuffer:
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
+
+    # confirm the LoadOps are contiguous and in order
+    if op.op in LoadOps:
+      for i,s in enumerate(op.src):
+        assert isinstance(s, LazyOp) and s.op == BufferOps.MEM and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
+
     return ret + [(op, self, tuple(base_bufs))]
 
   def realize(self:LazyBuffer) -> LazyBuffer:
