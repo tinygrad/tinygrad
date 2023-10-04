@@ -18,7 +18,7 @@ class TestLazyBuffer(unittest.TestCase):
       b = LazyBuffer.fromCPU(a).realize()
       #assert b.st.contiguous == a.flags.c_contiguous
       assert b.st.shape == a.shape
-      np.testing.assert_equal(a, b.toCPU())
+      np.testing.assert_equal(a, Tensor(b).numpy())
 
     for ndims in range(1, 4):
       a = np.random.randn(*(4,)*ndims).astype(np.float32)
