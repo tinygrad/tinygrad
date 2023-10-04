@@ -222,6 +222,7 @@ class OptimizedKernel(Kernel):
                 break
         self.alias_buffer(buf0, [0]*(self.shape_len-self.upcasted) + [1]*3 + [0]*(self.upcasted-3))
         self.alias_buffer(buf1, [0]*(self.shape_len-self.upcasted) + [1]*3 + [0]*(self.upcasted-3))
+        self.simplify_ones()
         return
 
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
