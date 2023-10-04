@@ -20,13 +20,14 @@ class TestSymbolicJit(unittest.TestCase):
     assert len(jf.jit_cache) == 1
 
   def test_reshape_inside_plus1(self):
-    vi = Variable("i", 1, 10)
     def f(a, jit=False, jit_ctx=None):
+      vi = Variable("i", 1, 10).bind(a.shape[1])
       if jit: a = a.reshape(3, vi)
       return (a+1).realize()
     jf = TinyJit(f)
     for i in range(1, 5):
       a = Tensor.rand(3, i)
+      vi = Variable("i", 1, 10)
       symbolic = jf(a, jit=True, jit_ctx={vi: i}).reshape(3, i).numpy()
       expected = f(a).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
@@ -171,7 +172,6 @@ class TestSymbolicJit(unittest.TestCase):
       vi = Variable("i", 1, 10).bind(i)
       a = Tensor.rand(7, 11)
       symbolic = a.shrink(((3,5),(vi,vi+2)))
-      symbolic.lazydata.var_vals[vi] = i
       symbolic = jf(symbolic).numpy()
       expected = f(a.shrink(((3,5),(i,i+2)))).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
