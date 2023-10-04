@@ -21,11 +21,10 @@ def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]
     if op.op in LoadOps:
       # NOTE: load op buffers are promised to be in order by the scheduler
       LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out, *buffers)
-      # TODO: why can't we delete these ops?
     else:
       out.realized = Device[out.device].exec_ast(op, output=out, inputs=[x.realized for x in buffers], var_vals=out.var_vals, **out._device_extra_args())
-      del out.op
-      for v in out.views: del v.op
+    del out.op
+    for v in out.views: del v.op
     assert out.realized and isinstance(out.realized, Device[out.device].buffer), f"device mismatch on realized got {type(out.realized)} expected {out.device}"
     assert out.realized.dtype == out.dtype, "realized dtype is incorrect"
 
