@@ -237,7 +237,10 @@ class OptimizedKernel(Kernel):
       buf1_strides = self.sts[buf1].real_strides()
       axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
       axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
-      optim_conv2d = (self.shape_len-self.first_reduce) == 3 and self.full_shape[self.first_reduce+1]%2 == 1 and self.full_shape[self.first_reduce+2]%2 == 1 and max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 21
+      #optim_conv2d = (self.shape_len-self.first_reduce) == 3 and self.full_shape[self.first_reduce+1]%2 == 1 and self.full_shape[self.first_reduce+2]%2 == 1 and max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 21
+      # enabling this gives wrong answers!! https://github.com/tinygrad/tinygrad/issues/1967
+      # TODO: WMMA must be a lot better before reenabling things like this
+      optim_conv2d = False
       if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce == 1 or optim_conv2d):
         if DEBUG >= 3: print("METAL TENSOR CORES", axis_buf0, axis_buf1)
         self.use_tensor_cores = use_tensor_cores == 1  # TC=2 will do the shape ops without the WMMA
