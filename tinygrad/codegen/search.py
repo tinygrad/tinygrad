@@ -104,7 +104,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
             else:
               optimizer.tell(ask, tm)
               best = min(best, tm)
-              bar._progress_bar.set_description(str(best))
+              bar._progress_bar.set_description(f"{baseline:7.3f}/{best:7.3f} ({baseline/best*100:6.2f}%)")
     recommendation = optimizer.provide_recommendation()
 
   et = time.perf_counter() - st
@@ -126,7 +126,7 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
 
   if global_db is not None and skey in global_db:
     choice = global_db[skey]
-    if DEBUG >= 1: print(f"from kopt_cache: {list(y for y in choice if y[1] != 1) if not isinstance(choice, str) else choice}")
+    if DEBUG >= 1: print(f"Shape: {k.full_shape}; from kopt_cache: {list(y for y in choice if y[1] != 1) if not isinstance(choice, str) else choice}")
   elif k.has_variable_shape() or getenv("KOPT") == 3:
     # don't optimize variable shapes or if KOPT=3
     choice = "BASELINE"
@@ -139,14 +139,14 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
       prg = to_prg(k)
       return min([prg.exec(bufs, force_wait=True, optimizing=True) for _ in range(5)])*1000, suggestion
     baseline, suggestion = get_baseline()
-    if DEBUG >= 2: print(f"suggestion: {[(i, s, typ) for (typ, i), s in suggestion.items()] if suggestion is not None else None}")
+    if DEBUG >= 2: print(f"Shape: {k.full_shape}; suggestion: {[(i, s, typ) for (typ, i), s in suggestion.items()] if suggestion is not None else None}")
     KOPT_THRESH = getenv("KOPT_THRESH")  # us
     if baseline >= KOPT_THRESH / 1000:
       choice = kernel_optimize_search(k, create_k, to_prg, baseline, bufs, suggestion)
       if global_db is not None:
         global_db[skey] = choice
         global_db.sync()
-      if DEBUG >= 2: print(f"KOPT choice: {choice}")
+      if DEBUG >= 2: print(f"Shape: {k.full_shape}; KOPT choice: {choice}")
     else:
       choice = "BASELINE"
 
