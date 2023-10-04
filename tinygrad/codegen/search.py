@@ -50,10 +50,10 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
 
 # optimization
 global_db = None
-def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, bufs):
+def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, bufs, key):
   global global_db
 
-  skey = str(k.key)
+  skey = str(key)
 
   if getenv("KOPT") == 2 and global_db is None:
     import shelve

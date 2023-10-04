@@ -235,18 +235,18 @@ class Compiled:
 
     # all the rawbuffers
     rawbuffers = [output.realized] + [x.realized for x in inputs]
+    key = (ast, tuple(var_vals.keys())) if var_vals else ast  # TODO: remove var_vals so the key can just be the AST
 
     # compilation time
     def get_program():
       from tinygrad.codegen.linearizer import Linearizer
       k = Linearizer(ast, self.linearizer_opts, var_vals)
       from tinygrad.codegen.search import kernel_optimize
-      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program, rawbuffers)
+      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program, rawbuffers, key)
       elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
     if getenv("ENABLE_METHOD_CACHE", 1):
-      key = (ast, tuple(var_vals.keys())) if var_vals else ast  # TODO: remove var_vals so the key can just be the AST
       if key not in self.method_cache: self.method_cache[key] = get_program()
       prg = self.method_cache[key]
     else:
