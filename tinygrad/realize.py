@@ -1,6 +1,6 @@
 from typing import List, Tuple, cast, Dict, Callable
 import numpy as np
-from tinygrad.ops import LazyOp, LoadOps, Device
+from tinygrad.ops import LazyOp, LoadOps, BufferOps, Device
 from tinygrad.graph import log_schedule_item
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import DEBUG, prod, all_int, getenv
@@ -19,7 +19,8 @@ def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]
       from extra.utils import print_tree   # type: ignore
       print_tree(op)
     if op.op in LoadOps:
-      # NOTE: load op buffers are promised to be in order by the scheduler
+      # confirm the LoadOps are contiguous and in order
+      for i,s in enumerate(op.src): assert isinstance(s, LazyOp) and s.op == BufferOps.MEM and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
       LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out, *buffers)
     else:
       out.realized = Device[out.device].exec_ast(op, output=out, inputs=[x.realized for x in buffers], var_vals=out.var_vals, **out._device_extra_args())

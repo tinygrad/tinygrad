@@ -185,16 +185,10 @@ class LazyBuffer:
     if self.op.op == LoadOps.CONTIGUOUS:
       src = cast(LazyBuffer, self.op.src[0])
       if src.st.contiguous and src.st.size() == src.base.st.size() and not src.is_unrealized_const():
-        return ret + [(self.op, self, (src,))]
+        op = self.op
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
-
-    # confirm the LoadOps are contiguous and in order
-    if op.op in LoadOps:
-      for i,s in enumerate(op.src):
-        assert isinstance(s, LazyOp) and s.op == BufferOps.MEM and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
-
     return ret + [(op, self, tuple(base_bufs))]
 
   # *** creation/special ops ***

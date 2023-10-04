@@ -56,11 +56,14 @@ def _recv_rb(x:RawBufferCopyIn, target_rank:int):
   CacheCollector.add(__recv_rb, [x, rb, target_rank], {})
 
 # sends a lazybuffer from our rank to the target rank
-def _send_lb(x:LazyBuffer, target_rank:int, cache_id:Optional[str]=None) -> None: _send_rb(x.contiguous().realize().realized, target_rank, cache_id=cache_id)
+def _send_lb(x:LazyBuffer, target_rank:int, cache_id:Optional[str]=None) -> None:
+  assert x.st.contiguous and x.realized, "sending buffer must be contiguous and realized"
+  _send_rb(x.realized, target_rank, cache_id=cache_id)
 
 # receive a lazybuffer from the target rank
 def _recv_lb(x:LazyBuffer, target_rank:int) -> LazyBuffer:
-  _recv_rb(x.contiguous().realize().realized, target_rank)
+  assert x.st.contiguous and x.realized, "receiving buffer must be contiguous and realized"
+  _recv_rb(x.realized, target_rank)
   return x
 
 class Send(Function):
@@ -74,5 +77,5 @@ class Recv(Function):
     self.target_rank, self.cache_id = target_rank, cache_id
     return _recv_lb(x, target_rank)
 
-def send(x:Tensor, target_rank:int, cache_id:Optional[str]=None) -> Tensor: return Send.apply(x, target_rank=target_rank, cache_id=cache_id)
-def recv(x:Tensor, target_rank:int, cache_id:Optional[str]=None) -> Tensor: return Recv.apply(x, target_rank=target_rank, cache_id=cache_id)
+def send(x:Tensor, target_rank:int, cache_id:Optional[str]=None) -> Tensor: return Send.apply(x.contiguous().realize(), target_rank=target_rank, cache_id=cache_id)
+def recv(x:Tensor, target_rank:int, cache_id:Optional[str]=None) -> Tensor: return Recv.apply(x.contiguous().realize(), target_rank=target_rank, cache_id=cache_id)
