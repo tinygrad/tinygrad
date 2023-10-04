@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 import numpy as np
 import unittest
-from tinygrad.lazy import LazyBuffer, Device
+from tinygrad.lazy import LazyBuffer
+from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import CacheCollector
