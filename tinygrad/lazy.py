@@ -197,6 +197,11 @@ class LazyBuffer:
 
     return ret + [(op, self, tuple(base_bufs))]
 
+  def realize(self:LazyBuffer) -> LazyBuffer:
+    from tinygrad.realize import run_schedule
+    if not self.realized: run_schedule(self.schedule())
+    return self
+
   # *** creation/special ops ***
 
   @staticmethod

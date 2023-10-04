@@ -11,7 +11,6 @@ from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device, LoadOps
 from tinygrad.shape.symbolic import sint
-from tinygrad.realize import run_schedule
 
 # An instantiation of the Function is the Context
 class Function:
@@ -91,7 +90,7 @@ class Tensor:
   # ***** data handlers ****
 
   def realize(self) -> Tensor:
-    run_schedule(self.lazydata.schedule())
+    self.lazydata.realize()
     return self
 
   def assign(self, x) -> Tensor:
