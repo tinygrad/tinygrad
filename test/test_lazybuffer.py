@@ -15,7 +15,7 @@ class TestLazyBuffer(unittest.TestCase):
   def test_fromcpu_shape_tracker(self):
     def helper(a: np.ndarray):
       print(a.shape, a.strides, a.flags.c_contiguous)
-      b = LazyBuffer.fromCPU(a).realize()
+      b = LazyBuffer.fromCPU(a)
       #assert b.st.contiguous == a.flags.c_contiguous
       assert b.st.shape == a.shape
       np.testing.assert_equal(a, Tensor(b).numpy())

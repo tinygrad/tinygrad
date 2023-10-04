@@ -16,7 +16,6 @@ from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 sys.setrecursionlimit(10000)
 
 OPT = getenv("OPT", 2)
-LAZY = getenv("LAZY", 1)
 LAZYCACHE = getenv("LAZYCACHE", 1)
 
 # TODO: movement ops that only change shape are really nops. treat them as such
@@ -115,7 +114,6 @@ class LazyBuffer:
     self._base = base
     if base: base.views.add(self)
     else: assert st.contiguous, "unbased LazyBuffers must be contiguous"
-    if not LAZY: self.realize()
 
   @property
   def var_vals_key(self): return tuple(sorted(self.var_vals.keys()))
@@ -187,22 +185,11 @@ class LazyBuffer:
     if self.op.op == LoadOps.CONTIGUOUS:
       src = cast(LazyBuffer, self.op.src[0])
       if src.st.contiguous and src.st.size() == src.base.st.size() and not src.is_unrealized_const():
-        return ret + [(self.op, self, (src,))]
+        op = self.op
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
-
-    # confirm the LoadOps are contiguous and in order
-    if op.op in LoadOps:
-      for i,s in enumerate(op.src):
-        assert isinstance(s, LazyOp) and s.op == BufferOps.MEM and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
-
     return ret + [(op, self, tuple(base_bufs))]
-
-  def realize(self:LazyBuffer) -> LazyBuffer:
-    from tinygrad.realize import run_schedule
-    if not self.realized: run_schedule(self.schedule())
-    return self
 
   # *** creation/special ops ***
 
