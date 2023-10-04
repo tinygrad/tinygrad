@@ -67,14 +67,9 @@ class LazyOp:
   @property
   def st(self): raise NotImplementedError
   @property
-  def children(self): raise NotImplementedError
-  @property
-  def shape(self): raise NotImplementedError
-  @property
   def realized(self): raise NotImplementedError
   @property
-  def optype(self): raise NotImplementedError
-  def realize(self): raise NotImplementedError
+  def children(self): raise NotImplementedError
 
   # movement ops
   def reshape(self, _): raise NotImplementedError
