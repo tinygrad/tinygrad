@@ -67,12 +67,14 @@ def derandomize_model(model):
 
 class TestRealWorld(unittest.TestCase):
   def setUp(self):
+    self.old_type = Tensor.default_type
     np.random.seed(2002)
     if getenv("KOPT"):
       self.oldfunc = getattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search")
       setattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search", kopt_search_hook)
 
   def tearDown(self):
+    Tensor.default_type = self.old_type
     if getenv("KOPT"):
       setattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search", self.oldfunc)
 
@@ -86,7 +88,6 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
   def test_llama(self):
-    old_type = Tensor.default_type
     Tensor.default_type = dtypes.float16
 
     args_tiny = {"dim": 1024, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
@@ -97,11 +98,8 @@ class TestRealWorld(unittest.TestCase):
     # NOTE: only test one pass, not testing the dynamic shape autoregressive part
     helper_test("test_llama", lambda: (Tensor([[1,]]),), test, 0.22 if CI else 13.5, 126 if CI else 486)
 
-    Tensor.default_type = old_type
-
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
   def test_gpt2(self):
-    old_type = Tensor.default_type
     Tensor.default_type = dtypes.float16
 
     args_tiny = {"dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-5, "vocab_size": 1000}
@@ -110,8 +108,6 @@ class TestRealWorld(unittest.TestCase):
     @TinyJit
     def test(t): return model(t, 0).realize()
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),), test, 0.21 if CI else 0.9, 129 if CI else 369)
-
-    Tensor.default_type = old_type
 
   @unittest.skipIf(getenv("KOPT"), "cifar hangs with KOPT")
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
