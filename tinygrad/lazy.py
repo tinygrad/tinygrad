@@ -4,15 +4,13 @@ from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapp
 from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
-from tinygrad.graph import log_schedule_item
-from tinygrad.helpers import DEBUG, prod, getenv, DType, dtypes, flatten, ImageDType, partition, all_int, dedup, merge_dicts
-from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
+from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, partition, all_int, dedup, merge_dicts
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
 
-from tinygrad.runtime.lib import RawBuffer, RawBufferMapped, RawBufferTransfer
+from tinygrad.runtime.lib import RawBuffer
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
-from tinygrad.runtime.ops_disk import RawDiskBuffer
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -20,7 +18,6 @@ sys.setrecursionlimit(10000)
 OPT = getenv("OPT", 2)
 LAZY = getenv("LAZY", 1)
 LAZYCACHE = getenv("LAZYCACHE", 1)
-P2P = getenv("P2P", 0)
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
@@ -126,7 +123,7 @@ class LazyBuffer:
   @property
   def base(self): return self._base if self._base is not None else self
 
-  def is_unrealized_const(self): return not self.realized and (self.base.op.op == LoadOps.CONST and isinstance(Device[self.device], Compiled))
+  def is_unrealized_const(self): return not self.realized and self.base.op.op == LoadOps.CONST
 
   @property
   def realized(self): return self.base._realized
@@ -169,7 +166,6 @@ class LazyBuffer:
     if self.optype is MovementOps: return self.base.schedule(seen)
 
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
-    if op.op in LoadOps: return [(self.op, self, ())]
 
     if self.optype is BinaryOps: op = _ast_binaryops(op, self.shape)
     elif self.optype is ReduceOps: op = _ast_reduceops(op)
@@ -180,24 +176,31 @@ class LazyBuffer:
       else: op = LazyOp(UnaryOps.CAST, (op,), (dtypes.float32, False))
       self.dtype = dtypes.float32
 
-    # contiguous can be a copy. must do this after the image hack
-    if self.op.op == LoadOps.CONTIGUOUS:
-      src = cast(LazyBuffer, self.op.src[0])
-      if src.st.contiguous and src.st.size() == src.base.st.size() and not src.is_unrealized_const():
-        return src.schedule(seen) + [(self.op, self, ())]
-
     # realize the past and exec the AST
     ret = []
     for x in op.buffers: ret += x.schedule(seen)
 
     # TODO: this belongs in the schedule in some way
-    self.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+    self.var_vals = dict(sorted(merge_dicts([self.var_vals] + [buf.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+
+    # contiguous can be a copy. must do this after the image hack
+    if self.op.op == LoadOps.CONTIGUOUS:
+      src = cast(LazyBuffer, self.op.src[0])
+      if src.st.contiguous and src.st.size() == src.base.st.size() and not src.is_unrealized_const():
+        return ret + [(self.op, self, (src,))]
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
+
+    # confirm the LoadOps are contiguous and in order
+    if op.op in LoadOps:
+      for i,s in enumerate(op.src):
+        assert isinstance(s, LazyOp) and s.op == BufferOps.MEM and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
+
     return ret + [(op, self, tuple(base_bufs))]
 
   def realize(self:LazyBuffer) -> LazyBuffer:
+    from tinygrad.realize import run_schedule
     if not self.realized: run_schedule(self.schedule())
     return self
 
@@ -375,68 +378,4 @@ MOVEMENT_OPS_DISPATCHER: Dict[MovementOps, Callable] = {
   MovementOps.PERMUTE: LazyBuffer.permute,
   MovementOps.PAD: LazyBuffer.pad,
   MovementOps.STRIDE: LazyBuffer.stride,
-}
-
-# *** realization (unrelated to lazy) ***
-
-def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]):
-  # NOTE: if you for loop the schedule it's slow because nothing frees
-  while len(schedule):
-    op,out,buffers = schedule.pop(0)
-    log_schedule_item(op, out, buffers)
-    if DEBUG >= 3:
-      from extra.utils import print_tree   # type: ignore
-      print_tree(op)
-    if op.op in LoadOps:
-      LOAD_OPS_DISPATCHER[cast(LoadOps, op.op)](out)
-      # TODO: why can't we delete these ops?
-    else:
-      out.realized = Device[out.device].exec_ast(op, output=out, inputs=[x.realized for x in buffers], var_vals=out.var_vals, **out._device_extra_args())
-      del out.op
-      for v in out.views: del v.op
-    assert out.realized and isinstance(out.realized, Device[out.device].buffer), f"device mismatch on realized got {type(out.realized)} expected {out.device}"
-    assert out.realized.dtype == out.dtype, "realized dtype is incorrect"
-
-def _realize_contiguous(buffer: LazyBuffer) -> None:
-  # this is just a copy now, if it's not a copy schedule will handle it
-  src = cast(LazyBuffer, buffer.op.src[0])
-  buffer.realized = src.realized
-  assert buffer.dtype == src.dtype, f"contiguous dtype mismatch, expecting {buffer.dtype}, got {src.dtype}"
-
-def _realize_custom(buffer: LazyBuffer) -> None:
-  # this needs to immediately realize
-  buffer.realized = buffer.op.arg(buffer, *[x.realize() for x in buffer.op.src])
-
-def _realize_from(buffer: LazyBuffer) -> None:
-  rawbuf = buffer.op.src[0].realize()
-  assert rawbuf.realized, "realize failed?"
-  if DEBUG >= 3: print(f"*** copy {buffer.device} <- {rawbuf.device} size {rawbuf.realized.size} dtype {rawbuf.realized.dtype}")
-  # TODO: make this generic
-  if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
-    assert all_int(buffer.shape), "does not support symbolic shape"
-    buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
-    rawbuf.prepare_transfer().readinto(cast(RawBufferMapped, buffer.realized)._buffer())
-  elif isinstance(rawbuf.realized, RawBufferTransfer) and issubclass(Device[buffer.device].buffer, RawBufferTransfer) and P2P >= 1:
-    buffer.realized = cast(RawBufferTransfer, Device[buffer.device].buffer).transfer(rawbuf.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
-  else:
-    buffer.realized = Device[buffer.device].buffer.fromCPU(rawbuf.toCPU(), **buffer._device_extra_args())
-
-def _realize_empty(buffer: LazyBuffer) -> None:
-  assert all_int(buffer.shape), "does not support symbolic shape"
-  buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
-
-def _realize_rand(buffer: LazyBuffer) -> None:
-  rng = np.random.default_rng(buffer.op.arg)
-  buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=buffer.shape, dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args()) # type: ignore
-
-def _realize_const(buffer: LazyBuffer) -> None:
-  buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args())
-
-LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
-  LoadOps.CONTIGUOUS: _realize_contiguous,
-  LoadOps.CUSTOM: _realize_custom,
-  LoadOps.FROM: _realize_from,
-  LoadOps.EMPTY: _realize_empty,
-  LoadOps.RAND: _realize_rand,
-  LoadOps.CONST: _realize_const,
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 import numpy as np
 import unittest
-from tinygrad.lazy import LazyBuffer, Device
+from tinygrad.lazy import LazyBuffer
+from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import CacheCollector
@@ -47,7 +48,7 @@ class TestLazyBuffer(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT in ["METAL", "CUDA", "GPU"], "Only GPU backends supports cache")
   def test_children_count(self):
-    a = Tensor.rand(8,8,8)
+    a = Tensor.ones(8,8,8)
     d1 = a.sum((0))
     d2 = a.sum((0)).reshape(32,2)
     assert len(d1.lazydata.op.src[0].children) == 1
@@ -56,8 +57,8 @@ class TestLazyBuffer(unittest.TestCase):
     assert len(d3.lazydata.op.src[0].children) == 2
 
     CacheCollector.start()
-    l = Tensor.rand(8,8)
-    r = Tensor.rand(8,8)
+    l = Tensor.ones(8,8)
+    r = Tensor.ones(8,8)
     dd = d1 + l
     dd.realize()
     de = d3 + r
