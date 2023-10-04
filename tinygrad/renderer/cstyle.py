@@ -40,6 +40,7 @@ class CStyleLanguage(NamedTuple):
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype:DType) -> str:
+    if len(x) == 1: return f"({var_dtype.name})({x[0]})"
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "cast is not supported on this platform"
     if var_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
@@ -61,10 +62,12 @@ class CStyleLanguage(NamedTuple):
       return f"read_imagef({buf_name}, smp, {idx})"
     if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx})"
-    cast = f"({output_dtype.name})" if output_dtype != buf_dtype else ""
     if output_dtype.sz > 1:
-      return f"{cast}(*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx})))"
-    return f"{cast}(*({buf_name}+{idx}))" if self.uses_ptr_arithmetic else f"{cast}({buf_name}[{idx}])"
+      out_val = f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx}))" 
+    else:
+      out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
+
+    return self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val
 
   def render_local(self, name:str, size:int):
     return self.smem_prefix + f"float {name}[{size}];"
