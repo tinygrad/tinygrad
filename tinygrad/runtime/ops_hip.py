@@ -101,12 +101,15 @@ class HIPProgram:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
+    self.prg = prg
+    self.name = name
+
+  def __call__(self, global_size, local_size, *args, wait=False):
     self.prgs = []
     for i in range(HIP.device_count):
       hip.hipSetDevice(i)
-      self.prgs.append(hip.hipModuleGetFunction(hip.hipModuleLoadData(prg), name))
+      self.prgs.append(hip.hipModuleGetFunction(hip.hipModuleLoadData(self.prg), self.name))
 
-  def __call__(self, global_size, local_size, *args, wait=False):
     hip.hipSetDevice(args[0]._device)
     if wait:
       start, end = hip.hipEventCreate(), hip.hipEventCreate()

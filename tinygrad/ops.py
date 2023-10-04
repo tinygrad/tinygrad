@@ -202,10 +202,12 @@ class ASTRunner:
     GlobalCounters.global_mem += self.mem_estimate
     return et
 
+
+method_cache: Dict[Any, ASTRunner] = {}
+
 class Compiled:
   def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, runtime, synchronize=lambda: None, batch_exec=BasicBatchExecutor):
     self.buffer, self.linearizer_opts, self.renderer, self.runtime, self.synchronize, self.batch_exec = buffer, linearizer_opts, renderer, runtime, synchronize, batch_exec
-    self.method_cache: Dict[Any, ASTRunner] = {}
 
   def to_program(self, k):
     k.linearize()
@@ -250,8 +252,8 @@ class Compiled:
       return self.to_program(k)
 
     if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
-      if k.key not in self.method_cache: self.method_cache[k.key] = get_program()
-      prg = self.method_cache[k.key]
+      if (self, k.key) not in method_cache: method_cache[(self, k.key)] = get_program()
+      prg = method_cache[(self, k.key)]
     else:
       prg = get_program()
 

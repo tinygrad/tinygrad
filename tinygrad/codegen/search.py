@@ -1,6 +1,7 @@
 from typing import Callable
 import time
 import functools
+import multiprocessing as mp
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.helpers import DEBUG, prod, getenv, GlobalCounters
 
@@ -26,10 +27,10 @@ def kernel_optimize_opts(k:Linearizer, suggestion):
   # nevergrad parameters, default parameter choice
   return [ng.p.TransitionChoice(opt) for opt in opts], [opt[0] for opt in opts]
 
-def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, baseline, bufs, suggestion):
-  import nevergrad as ng
-  @functools.lru_cache
-  def compile(x):
+
+@functools.lru_cache
+def compile_kernel(x, create_k, to_prg):
+  try:
     k = create_k()
     k.process()
     if DEBUG >= 2: print(f"Shape: {k.full_shape}; Applying opt: {list(y for y in x if y[1] != 1)}")
@@ -38,18 +39,29 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
     assert len(k.uops) < 2 ** 12, f"too many uops: {len(k.uops)}"  # device target compiler will take significantly longer than Linearizer
     prg = to_prg(k)
     return prg
+  except Exception:
+    if DEBUG >= 3:
+      import traceback
+      traceback.print_exc()
+    return None
+
+
+def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, baseline, bufs, suggestion):
+  import nevergrad as ng
+
   def cheap(x):
     try:
-      compile(x)
+      compile_kernel(x, create_k, to_prg)
       return True
     except Exception:
       if DEBUG >= 3:
         import traceback
         traceback.print_exc()
       return False
-  def opt(x):
+  def run_and_time(prg):
+    if prg is None:
+      return None
     try:
-      prg = compile(x)
       first_tm = prg.exec(bufs, force_wait=True, optimizing=True)
       if baseline*5 < first_tm*1000: return first_tm*1000  # very slow
       tm = min([first_tm]+[prg.exec(bufs, force_wait=True, optimizing=True) for _ in range(10)])*1000
@@ -58,18 +70,45 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
       if DEBUG >= 3:
         import traceback
         traceback.print_exc()
-      return 10000_000   # 10000 seconds is infinity
+      return None
   opts, default_opt = kernel_optimize_opts(k, suggestion)
   if not opts: return "BASELINE"
   search_space = prod([len(x.choices) for x in opts])
   st = time.perf_counter()
   budget = getenv("BUDGET", 200)
-  optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, budget))
-  optimizer.register_callback("tell", ng.callbacks.ProgressBar())
-  optimizer.parametrization.register_cheap_constraint(cheap)
+  num_workers = getenv("KOPT_WORKERS", 16)
+  optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, budget), num_workers=num_workers)
+  bar = ng.callbacks.ProgressBar()
+  optimizer.register_callback("tell", bar)
   if suggestion is not None: optimizer.suggest(tuple([(i, s, typ) for (typ, i), s in ({(typ, i): s for i,s,typ in default_opt} | suggestion).items()]))  # maintain ordering from default_opt
-  recommendation = optimizer.minimize(opt)
+
+  if num_workers == 1:
+    optimizer.parametrization.register_cheap_constraint(cheap)
+    recommendation = optimizer.minimize(lambda x: run_and_time(compile_kernel(x, create_k, to_prg)) or 10_000)
+  else:
+    from extra.helpers import _CloudpickleFunctionWrapper
+    best = 10_000
+    with mp.Pool(num_workers) as pool:
+      q = []
+      while optimizer.num_tell < optimizer.budget:
+        while len(q) < num_workers * 4 and optimizer.num_ask < optimizer.budget:
+          ask = optimizer.ask()
+          q.append((ask, pool.apply_async(compile_kernel, (ask.value, _CloudpickleFunctionWrapper(create_k), _CloudpickleFunctionWrapper(to_prg)))))
+        while len(q) > num_workers * 2 or (optimizer.num_ask == optimizer.budget and q):
+          ask, prg = q.pop(0)
+          prg = prg.get()
+          if prg is None: optimizer.tell(ask, 10_000, constraint_violation=1.0)
+          else:
+            tm = run_and_time(prg)
+            if tm is None: optimizer.tell(ask, 10_000, constraint_violation=1.0)
+            else:
+              optimizer.tell(ask, tm)
+              best = min(best, tm)
+              bar._progress_bar.set_description(str(best))
+    recommendation = optimizer.provide_recommendation()
+
   et = time.perf_counter() - st
+  del bar
   if DEBUG >= 1: print(f"optimizer({et:6.2f} s to search) space {search_space:8d} with tm {recommendation.loss:5.2f} ms vs baseline {baseline:5.2f} ms, a {baseline/recommendation.loss:5.2f}x gain : {k.colored_shape()}")
   return recommendation.value if recommendation.loss < baseline else "BASELINE"
 
