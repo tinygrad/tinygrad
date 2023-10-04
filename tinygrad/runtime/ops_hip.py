@@ -106,9 +106,11 @@ class HIPProgram:
 
   def __call__(self, global_size, local_size, *args, wait=False):
     self.prgs = []
+    self.modules = []
     for i in range(HIP.device_count):
       hip.hipSetDevice(i)
-      self.prgs.append(hip.hipModuleGetFunction(hip.hipModuleLoadData(self.prg), self.name))
+      self.modules.append(hip.hipModuleLoadData(self.prg))
+      self.prgs.append(hip.hipModuleGetFunction(self.modules[-1], self.name))
 
     hip.hipSetDevice(args[0]._device)
     if wait:
@@ -122,6 +124,10 @@ class HIPProgram:
       hip.hipEventRecord(end)
       hip.hipEventSynchronize(end)
       return hip.hipEventElapsedTime(start, end)*1e-3
+
+  def __del__(self):
+    for module in self.modules:
+      hip.hipModuleUnload(module)
 
 renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
   kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
