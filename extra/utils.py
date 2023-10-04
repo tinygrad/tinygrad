@@ -11,7 +11,6 @@ from tinygrad.codegen.linearizer import Linearizer
 
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
 from tinygrad.ops import GlobalCounters, LoadOps
-from tinygrad.runtime.ops_metal import MetalProgram, RawMetalBuffer, renderer
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device
@@ -227,7 +226,7 @@ def _tree(lazydata, prefix=""):
 def print_tree(tensor:Union[Tensor, LazyBuffer]):print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(tensor if not isinstance(tensor, Tensor) else tensor.lazydata))]))
 
 # pip install pandas plotly
-def profile_kernels(mdl: Callable, x: Any, metric: Union[Literal["time"], Literal["gflops"], Literal["mem"]], group_ops=True, **kwargs):
+def profile_kernels(mdl: Callable, x: Any, metric: Union[Literal["time"], Literal["gflops"], Literal["mem"]], buffer, program, renderer, group_ops=True, **kwargs):
   import pandas as pd
   import plotly.express as px
   seen = set()
@@ -238,13 +237,13 @@ def profile_kernels(mdl: Callable, x: Any, metric: Union[Literal["time"], Litera
 
   stats = []
   for i,(op,out,inp) in enumerate(sched):
-    rout = RawMetalBuffer(out.st.size(), out.dtype)
-    rin = [RawMetalBuffer(x.st.size(), x.dtype) for x in inp]
     lin = Linearizer(op, LinearizerOptions(device="METAL"))
     lin.hand_coded_optimizations(use_tensor_cores=1)
     lin.linearize()
     code = renderer(lin.function_name, lin.uops)
-    prg = MetalProgram(lin.function_name, code)
+    rout = buffer(out.st.size(), out.dtype)
+    rin = [buffer(x.st.size(), x.dtype) for x in inp]
+    prg = program(lin.function_name, code)
     tm = prg(lin.global_size, lin.local_size, rout, *rin, wait=True)
 
     data = (re.sub(r'\x1b\[[0-9;]*m', '', lin.display_name), lin.global_size, lin.local_size, tm*1000, lin.info.flops*1e-9/tm,  GlobalCounters.mem_used/1e9, code, op.op)
