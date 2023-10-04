@@ -38,7 +38,7 @@ def compile_kernel(x, create_k, to_prg):
     k.linearize()
     assert len(k.uops) < 2 ** 12, f"too many uops: {len(k.uops)}"  # device target compiler will take significantly longer than Linearizer
     prg = to_prg(k)
-    return prg
+    return k.display_name, prg
   except Exception:
     if DEBUG >= 3:
       import traceback
@@ -84,10 +84,12 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
 
   if num_workers == 1:
     optimizer.parametrization.register_cheap_constraint(cheap)
-    recommendation = optimizer.minimize(lambda x: run_and_time(compile_kernel(x, create_k, to_prg)) or 10_000)
+    recommendation = optimizer.minimize(lambda x: run_and_time(compile_kernel(x, create_k, to_prg)[1]) or 10_000)
   else:
     from extra.helpers import _CloudpickleFunctionWrapper
     best = 10_000
+    best_ran = 0
+    best_name = ""
     ran = 0
     with mp.Pool(num_workers) as pool:
       q = []
@@ -97,16 +99,23 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
           q.append((ask, pool.apply_async(compile_kernel, (ask.value, _CloudpickleFunctionWrapper(create_k), _CloudpickleFunctionWrapper(to_prg)))))
         while len(q) > num_workers-1 or (optimizer.num_ask == optimizer.budget and q):
           ask, prg = q.pop(0)
-          prg = prg.get()
+          try:
+            prg = prg.get(timeout=5)
+          except mp.TimeoutError:
+            prg = None
           if prg is None: optimizer.tell(ask, 10_000, constraint_violation=1.0)
           else:
+            name, prg = prg
             tm = run_and_time(prg)
             if tm is None: optimizer.tell(ask, 10_000, constraint_violation=1.0)
             else:
               optimizer.tell(ask, tm)
-              best = min(best, tm)
               ran += 1
-              bar._progress_bar.set_description(f"{baseline:7.3f}/{best:7.3f} ({baseline/best*100:4.0f}%) ran {ran}")
+              if tm < best:
+                best = tm
+                best_ran = ran
+                best_name = name
+              bar._progress_bar.set_description(f"{baseline:7.3f}/{best:7.3f} ({baseline/best*100:4.0f}%) @ {best_ran}/{ran} - {best_name:20s}")
     recommendation = optimizer.provide_recommendation()
 
   et = time.perf_counter() - st
