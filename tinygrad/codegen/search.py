@@ -106,7 +106,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
               optimizer.tell(ask, tm)
               best = min(best, tm)
               ran += 1
-              bar._progress_bar.set_description(f"{baseline:7.3f}/{best:7.3f} ({baseline/best*100:6.2f}%) ran {ran}")
+              bar._progress_bar.set_description(f"{baseline:7.3f}/{best:7.3f} ({baseline/best*100:4.0f}%) ran {ran}")
     recommendation = optimizer.provide_recommendation()
 
   et = time.perf_counter() - st
