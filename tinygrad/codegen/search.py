@@ -3,7 +3,7 @@ import time
 import functools
 import multiprocessing as mp
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.helpers import DEBUG, prod, getenv, GlobalCounters
+from tinygrad.helpers import DEBUG, prod, getenv, GlobalCounters, ansilen
 
 def get_divisors(n, min_div = 1, max_div = 512, extra=None):
   if min_div > 1: yield 1
@@ -115,7 +115,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
                 best = tm
                 best_ran = ran
                 best_name = name
-              bar._progress_bar.set_description(f"{baseline:7.3f}/{best:7.3f} ({baseline/best*100:4.0f}%) @ {best_ran}/{ran} - {best_name:20s}")
+              bar._progress_bar.set_description(f"{baseline:7.3f}/{best:7.3f} ({baseline/best*100:4.0f}%) @ {best_ran:4}/{ran:4} - {best_name+' '*(37-ansilen(best_name))}")
     recommendation = optimizer.provide_recommendation()
 
   et = time.perf_counter() - st
