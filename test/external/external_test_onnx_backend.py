@@ -160,6 +160,7 @@ if getenv("CPU") or getenv("ARM64"):
   backend_test.exclude('test_dequantizelinear_axis_cpu')
   backend_test.exclude('test_dequantizelinear_cpu')
 
+"""
 if getenv("TORCH"): # 1562
   backend_test.exclude('test_and2d_cpu')
   backend_test.exclude('test_and3d_cpu')
@@ -195,6 +196,7 @@ if getenv("TORCH"): # 1562
   backend_test.exclude('test_xor_bcast4v2d_cpu')
   backend_test.exclude('test_xor_bcast4v3d_cpu')
   backend_test.exclude('test_xor_bcast4v4d_cpu')
+"""
 
 if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or getenv('MPS'):
   # compiled backends cannot reshape to 0 or from 0

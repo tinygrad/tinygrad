@@ -687,6 +687,7 @@ class Tensor:
   def __le__(self, x) -> Tensor: return 1.0-(self>x)
   def __ne__(self, x) -> Tensor: return (self<x) + (self>x)   # type: ignore
   def __eq__(self, x) -> Tensor: return 1.0-(self != x)       # type: ignore
+  # def __eq__(self, x) -> Tensor: return Tensor(1.0, dtype=dtypes.bool, device="TORCH")-(self != x)       # type: ignore
 
   # ***** functional nn ops *****
 
