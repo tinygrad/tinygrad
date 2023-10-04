@@ -7,7 +7,7 @@ import numpy as np
 from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, all_int, dedup, merge_dicts
 from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
-from tinygrad.shape.symbolic import sint
+from tinygrad.shape.symbolic import Variable, sint
 
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
@@ -32,7 +32,7 @@ def _ast_reduceops(op:LazyOp) -> LazyOp:
   if not src.realized:
     assert isinstance(src.op, LazyOp), "if not src.realized, then src.op must be a LazyOp"
     if MERGE_ELEMENTWISE_INTO_REDUCE and src.optype is BinaryOps and len(src.children) <= 1: src = src.op
-  return LazyOp(op.op, (src,), op.arg, op.var_vals)
+  return LazyOp(op.op, (src,), op.arg)
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _ast_binaryops(op:LazyOp, shape: Tuple[sint, ...]) -> LazyOp:
@@ -109,7 +109,6 @@ class LazyBuffer:
     # NOTE: op should be read only after construction of LazyBuffer. it is now with schedule
     if op is not None:
       self.op: LazyOp = op
-      self.op.var_vals = merge_dicts([buf.st.var_vals for buf in op.buffers])
       for x in op.buffers: x.children.add(self)
     assert optype != MovementOps or (base is not None and base.optype != MovementOps), "MovementOps must be based"
     self._base = base
@@ -177,6 +176,9 @@ class LazyBuffer:
     # realize the past and exec the AST
     ret = []
     for x in op.buffers: ret += x.schedule(seen)
+
+    # TODO: this belongs in the schedule in some way
+    self.var_vals = dict(sorted(merge_dicts([buf.st.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)

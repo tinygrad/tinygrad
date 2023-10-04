@@ -49,12 +49,11 @@ class LinearizerOptions(NamedTuple):
   local_max: Optional[List[int]] = None
 
 class Kernel:
-  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
+  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None, var_vals=None):
     self.opts = opts if opts else (cast(Compiled, Device[Device.DEFAULT]).linearizer_opts if isinstance(Device[Device.DEFAULT], Compiled) else LinearizerOptions())
     self.ast = ast
-
-  @property
-  def key(self): return self.ast
+    self.var_vals = var_vals
+    self.key = (ast, tuple(var_vals.keys())) if var_vals else ast
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
@@ -89,7 +88,7 @@ class Kernel:
     self.global_size: Optional[List[int]] = None
     self.local_size: Optional[List[int]] = None
 
-  def has_variable_shape(self) -> bool: return len(self.ast.var_vals) > 0
+  def has_variable_shape(self) -> bool: return len(self.var_vals) > 0
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
   def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]

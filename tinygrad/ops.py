@@ -38,25 +38,24 @@ class ConstBuffer:
   st: ShapeTracker
 
 class LazyOp:
-  __slots__ = "op", "src", "arg", "buffers", "var_vals", "__weakref__"
+  __slots__ = "op", "src", "arg", "buffers", "__weakref__"
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Any
   buffers: Tuple[LazyBuffer, ...]
-  var_vals: Dict[Variable, int]
-  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None, var_vals: Optional[Dict[Variable, int]]=None):
-    self.op, self.src, self.arg, self.buffers, self.var_vals = op, src, arg, (), var_vals or {}
+  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None):
+    self.op, self.src, self.arg, self.buffers = op, src, arg, ()
     try:  # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
       for x in src: self.buffers += x.buffers
     except AttributeError: self.buffers = ()
 
-  def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg}, var_vals={self.var_vals})"
+  def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   def __eq__(self, __value: object) -> bool: return isinstance(__value, LazyOp) and self.op is __value.op and self.src == __value.src and self.arg == __value.arg
   def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
-  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg, self.var_vals)
+  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
@@ -113,7 +112,7 @@ class Interpreted:
     self.synchronize = lambda: None
     self.codegen = None
 
-  def exec_ast(self, ast:LazyOp, output=None, inputs=None, context=None, **kwargs):
+  def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
     if ast.op == BufferOps.MEM and BufferOps.MEM not in self.fxn_for_op:
       assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
       buf = self.to_underlying(inputs[ast.arg.idx-1])
@@ -215,7 +214,7 @@ class Compiled:
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                      display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime, self.batch_exec)
 
-  def exec_ast(self, ast:LazyOp, output, inputs, **kwargs):
+  def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
@@ -236,12 +235,12 @@ class Compiled:
       CacheCollector._mark_output_buffer(output.output_buffer)
 
     from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(ast, self.linearizer_opts)
+    k = Linearizer(ast, self.linearizer_opts, var_vals)
 
     # compilation time
     def get_program():
       from tinygrad.codegen.search import kernel_optimize
-      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts), self.to_program, [output.realized]+inputs)
+      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program, [output.realized]+inputs)
       elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
@@ -253,5 +252,5 @@ class Compiled:
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
-    prg.exec([output.realized]+inputs, var_vals=ast.var_vals)
+    prg.exec([output.realized]+inputs, var_vals=var_vals)
     return output.realized

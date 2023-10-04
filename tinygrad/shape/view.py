@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, cast
 from tinygrad.helpers import prod, all_int
 from tinygrad.shape.symbolic import Node, Variable, NumNode, is_sym_int, sint
 
@@ -93,7 +93,7 @@ class View:
     # check size for variable shape
     if all_int(self.shape) and not all_int(new_shape):
       assert all(isinstance(s, (int, Variable)) for s in new_shape)
-      assert prod(self.shape) == prod([s if isinstance(s, int) else s.val for s in new_shape])
+      assert prod(self.shape) == prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape])
 
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)
