@@ -11,6 +11,7 @@ class CStyleLanguage(NamedTuple):
   kernel_prefix: str = ""
   buffer_prefix: str = ""
   buffer_suffix: str = ""
+  smem_align: str = ""
   smem_prefix: str = ""
   arg_int_prefix: str = ""
   barrier: str = ""
@@ -70,7 +71,7 @@ class CStyleLanguage(NamedTuple):
     return self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val
 
   def render_local(self, name:str, size:int):
-    return self.smem_prefix + f"float {name}[{size}];"
+    return self.smem_align + self.smem_prefix + f"float {name}[{size}];"
 
   def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str:
     return f"for (int {expr} = {_min}; {expr} <= {_max}; ++{expr}) {{"
