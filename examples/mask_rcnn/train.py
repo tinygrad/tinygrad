@@ -10,7 +10,6 @@ from infer import Resize, Normalize
 from models.resnet import ResNet
 from util import FileLoader
 from PIL import Image
-from loss import *
 
 def build_transforms(is_train=True):
   pixel_mean = [102.9801, 115.9465, 122.7717]
@@ -131,6 +130,7 @@ def main():
 
 
 def simple():
+  from loss import make_match_fn,make_balanced_sampler_fn
   hq_fn, _ = make_match_fn(0.7, 0.4)
   sampler = make_balanced_sampler_fn(10, 0.5)
   coder = BoxCoder(weights=(1.0, 1.0, 1.0, 1.0))

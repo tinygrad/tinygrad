@@ -294,9 +294,10 @@ def test_loss():
   optimizer.zero_grad()
   total_loss.backward()
   optimizer.step()
-  
+
 def binary_cross_entropy(pred: Tensor, y: Tensor): return -(pred.log()*y + (1-y)*(1-pred).log()).mean()
-def binary_cross_entropy_with_logits(x: Tensor, y: Tensor): return binary_cross_entropy(x.sigmoid(), y)
+# todo eps is a bit big
+def binary_cross_entropy_with_logits(x: Tensor, y: Tensor, eps: float=1e-7): return binary_cross_entropy(x.sigmoid().minimum(1-eps).maximum(eps), y)
 
 def test_binary_cross_entropy_with_logits():
   x = Tensor([[ 2.3611, -0.8813, -0.5006, -0.2178],[0.0419, 0.0763, -1.0457, -1.6692]])
