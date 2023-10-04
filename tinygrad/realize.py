@@ -36,11 +36,11 @@ def _realize_contiguous(buffer: LazyBuffer) -> None:
 
 def _realize_custom(buffer: LazyBuffer) -> None:
   # this needs to immediately realize
-  buffer.realized = buffer.op.arg(buffer, *[x.realize() for x in buffer.op.src])
+  buffer.realized = buffer.op.arg(buffer, *buffer.op.src)
 
 def _realize_from(buffer: LazyBuffer) -> None:
-  rawbuf = cast(LazyBuffer, buffer.op.src[0]).contiguous().realize()
-  assert rawbuf.realized, "realize failed?"
+  rawbuf = cast(LazyBuffer, buffer.op.src[0])
+  assert rawbuf.realized, "from buffer wasn't realized"
   if DEBUG >= 3: print(f"*** copy {buffer.device} <- {rawbuf.device} size {rawbuf.realized.size} dtype {rawbuf.realized.dtype}")
   # TODO: make this generic
   if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):

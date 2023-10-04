@@ -166,7 +166,11 @@ class LazyBuffer:
     if self.optype is MovementOps: return self.base.schedule(seen)
 
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
-    if op.op in LoadOps: return [(self.op, self, ())]
+    if op.op in LoadOps:
+      # TODO: unify this with the rest of the function
+      ret = []
+      for x in op.buffers: ret += x.schedule(seen)
+      return ret + [(self.op, self, ())]
 
     if self.optype is BinaryOps: op = _ast_binaryops(op, self.shape)
     elif self.optype is ReduceOps: op = _ast_reduceops(op)
