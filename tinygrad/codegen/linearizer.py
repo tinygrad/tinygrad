@@ -227,8 +227,6 @@ class Linearizer(OptimizedKernel):
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
-    self.process()
-
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
 

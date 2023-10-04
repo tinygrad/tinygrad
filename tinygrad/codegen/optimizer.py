@@ -2,14 +2,13 @@ from typing import Tuple, List, cast, Optional
 import itertools, math, os
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp, BufferOps
-from tinygrad.codegen.kernel import Kernel, LocalBuffer
+from tinygrad.codegen.kernel import Kernel, LocalBuffer, LinearizerOptions
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 
 class OptimizedKernel(Kernel):
-  def process(self) -> None:
-    if hasattr(self, "sts"): return   # already processed
-    super().process()
+  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None, var_vals=None):
+    super().__init__(ast, opts, var_vals)
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
@@ -160,8 +159,6 @@ class OptimizedKernel(Kernel):
           self.upcast()
 
   def hand_coded_optimizations(self, use_tensor_cores=getenv("TC", 1)):
-    self.process()
-
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     self.required_optimizations(early_only=True)
 
@@ -240,7 +237,10 @@ class OptimizedKernel(Kernel):
       buf1_strides = self.sts[buf1].real_strides()
       axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
       axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
-      optim_conv2d = (self.shape_len-self.first_reduce) == 3 and self.full_shape[self.first_reduce+1]%2 == 1 and self.full_shape[self.first_reduce+2]%2 == 1 and max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 21
+      #optim_conv2d = (self.shape_len-self.first_reduce) == 3 and self.full_shape[self.first_reduce+1]%2 == 1 and self.full_shape[self.first_reduce+2]%2 == 1 and max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 21
+      # enabling this gives wrong answers!! https://github.com/tinygrad/tinygrad/issues/1967
+      # TODO: WMMA must be a lot better before reenabling things like this
+      optim_conv2d = False
       if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce == 1 or optim_conv2d):
         if DEBUG >= 3: print("METAL TENSOR CORES", axis_buf0, axis_buf1)
         self.use_tensor_cores = use_tensor_cores == 1  # TC=2 will do the shape ops without the WMMA
