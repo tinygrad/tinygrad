@@ -15,15 +15,8 @@ P2P = getenv("P2P", 0)
 
 # *** realization (unrelated to lazy) ***
 
-def __get_output_buffer(ast, output, inputs) -> Optional[RawBuffer]:
-  for i,a in enumerate(inputs):
-    # TODO: if this is contiguous it's fine
-    if a == output.realized and any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
-      return None
-  return output.output_buffer
-
 def compile_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]):
-  prebuilt_info: List[Tuple[LazyBuffer, Union[ASTRunner, LazyOp], Optional[List[LazyBuffer]]]] = []
+  compiled_sched: List[Tuple[LazyBuffer, Union[ASTRunner, LazyOp], Optional[List[LazyBuffer]]]] = []
   while len(schedule):
     op,out,buffers = schedule.pop(0)
     log_schedule_item(op, out, buffers)
@@ -31,30 +24,35 @@ def compile_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, .
       from extra.utils import print_tree   # type: ignore
       print_tree(op)
     # TODO: why can't we delete these LoadOps?
-    if op.op in LoadOps: prebuilt_info.append((out, op, []))
+    if op.op in LoadOps: compiled_sched.append((out, op, []))
     else:
       if isinstance(Device[out.device], Compiled):
-        if out.output_buffer is not None: out.realized = __get_output_buffer(op, out, [x.realized for x in buffers])
+        out.realized = out.output_buffer
+        for i,a in enumerate([x.realized for x in buffers]):
+          # TODO: if this is contiguous it's fine
+          if a == out.output_buffer and any(not x.arg.st.contiguous for x in op.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
+            out.realized = None
         op = Device[out.device].compile_ast(op, args_info=[(x.shape, x.dtype) for x in ([out]+list(buffers))], var_vals=out.var_vals, **out._device_extra_args())
-      prebuilt_info.append((out, op, buffers))
+      compiled_sched.append((out, op, buffers))
       del out.op
       for v in out.views: del v.op
-  return prebuilt_info
+  return compiled_sched
 
-def allocate_buffers(prebuilt_info: List[Tuple[LazyBuffer, Union[ASTRunner, LazyOp], Optional[List[LazyBuffer]]]]):
+def _can_use_rawbuf(out:LazyBuffer, with_buf:RawBuffer):
+  # TODO: Double check this for imgs.
+  return (not isinstance(out.dtype, ImageDType) and not isinstance(with_buf.dtype, ImageDType)) or (out.dtype==with_buf.dtype and out.dtype.shape==with_buf.dtype.shape)
+
+# TODO: Consider moving it back to jit?
+def allocate_buffers(compiled_sched: List[Tuple[LazyBuffer, Union[ASTRunner, LazyOp], Optional[List[LazyBuffer]]]]):
   last_use, cnt = {}, defaultdict(int)
-  for j,(out,prog,buffers) in enumerate(prebuilt_info):
+  for j,(out,prog,buffers) in enumerate(compiled_sched):
     for buf in buffers: last_use[ref(buf)], cnt[ref(buf)] = j, cnt[ref(buf)] + 1
 
   query_list = []
-  for j,(out,prog,buffers) in enumerate(prebuilt_info):
+  for j,(out,prog,buffers) in enumerate(compiled_sched):
     if isinstance(prog, LazyOp) or out.realized is not None: continue
     if sys.getrefcount(out)-cnt[ref(out)] == 3:
       query_list.append((prod((s if isinstance(s, int) else s.max for s in out.shape))*out.dtype.itemsize, j, last_use[ref(out)], ref(out)))
-
-  def _can_use_rawbuf(out:LazyBuffer, with_buf:RawBuffer):
-    out_size = prod((s if isinstance(s, int) else s.max for s in out.shape))
-    return (out_size*out.dtype.itemsize<=with_buf.size*with_buf.dtype.itemsize if not isinstance(out.dtype, ImageDType) and not isinstance(with_buf.dtype, ImageDType) else out_size==with_buf.size and buf.dtype==with_buf.dtype and buf.dtype.shape==with_buf.dtype.shape)
 
   # The query list contains a query for every placeholder that should be replaced with the actual rawbuffer. Queries are served from the largest to the smallest.
   # For each query, find any rawbuffer that is free within the query timeframe or allocate a new one.
@@ -70,16 +68,16 @@ def allocate_buffers(prebuilt_info: List[Tuple[LazyBuffer, Union[ASTRunner, Lazy
     rawbuf_pool[buf().device][pool_idx][1].append((start, end))
 
 def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]):
-  compiled_info = compile_schedule(schedule)
-  allocate_buffers(compiled_info)
+  compiled_sched = compile_schedule(schedule)
+  allocate_buffers(compiled_sched)
 
   from tinygrad.jit import SchedCollector
-  SchedCollector.add([x for x in compiled_info])
-  run_compiled(compiled_info)
+  SchedCollector.add([x for x in compiled_sched])
+  run_compiled(compiled_sched)
 
-def run_compiled(compiled_info):
-  while len(compiled_info):
-    out,prog,buffers = compiled_info.pop(0)
+def run_compiled(compiled_sched):
+  while len(compiled_sched):
+    out,prog,buffers = compiled_sched.pop(0)
     if isinstance(prog, LazyOp):
       if prog.op in LoadOps: LOAD_OPS_DISPATCHER[cast(LoadOps, prog.op)](out)
       else: out.realized = Device[out.device].exec_ast(prog, output=out, inputs=[x.realized for x in buffers], var_vals=out.var_vals, **out._device_extra_args())
