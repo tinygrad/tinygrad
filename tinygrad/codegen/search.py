@@ -88,13 +88,14 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
   else:
     from extra.helpers import _CloudpickleFunctionWrapper
     best = 10_000
+    ran = 0
     with mp.Pool(num_workers) as pool:
       q = []
       while optimizer.num_tell < optimizer.budget:
-        while len(q) < num_workers * 4 and optimizer.num_ask < optimizer.budget:
+        while len(q) < num_workers and optimizer.num_ask < optimizer.budget:
           ask = optimizer.ask()
           q.append((ask, pool.apply_async(compile_kernel, (ask.value, _CloudpickleFunctionWrapper(create_k), _CloudpickleFunctionWrapper(to_prg)))))
-        while len(q) > num_workers * 2 or (optimizer.num_ask == optimizer.budget and q):
+        while len(q) > num_workers-1 or (optimizer.num_ask == optimizer.budget and q):
           ask, prg = q.pop(0)
           prg = prg.get()
           if prg is None: optimizer.tell(ask, 10_000, constraint_violation=1.0)
@@ -104,7 +105,8 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
             else:
               optimizer.tell(ask, tm)
               best = min(best, tm)
-              bar._progress_bar.set_description(f"{baseline:7.3f}/{best:7.3f} ({baseline/best*100:6.2f}%)")
+              ran += 1
+              bar._progress_bar.set_description(f"{baseline:7.3f}/{best:7.3f} ({baseline/best*100:6.2f}%) ran {ran}")
     recommendation = optimizer.provide_recommendation()
 
   et = time.perf_counter() - st
