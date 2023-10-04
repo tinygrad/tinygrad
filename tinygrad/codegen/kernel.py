@@ -1,7 +1,7 @@
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict
 import itertools
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, ReduceOps, MemBuffer, BufferOps, Device, Compiled
-from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int
+from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int, getenv
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
@@ -16,6 +16,10 @@ class TensorCore:
   threads: List[int]
   thread_local_aliases: List[List[List[int]]]
   thread_local_sizes: List[int]
+  use_upcast: Tuple[int, ...] = tuple([4,3,2]) if not getenv("TC_UPCAST","") else tuple(int(str) for str in getenv("TC_UPCAST","").split(","))
+  use_smem: bool = getenv("TC_SMEM", 0) == 1
+  use_warp_x: int = getenv("TC_WARP_X", 0)
+  use_warp_y: int = getenv("TC_WARP_Y", 0)
   arch: Optional[str] = None
   def __str__(self): return f"tensor_core<{self.device}, {self.dims}, {self.dtype_in}, {self.dtype_out}>"
 

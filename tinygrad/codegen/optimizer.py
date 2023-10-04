@@ -126,6 +126,7 @@ class OptimizedKernel(Kernel):
     self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
+    return self.bufs[-1]
 
   # ******************** high level optimizers ********************
 
@@ -192,10 +193,13 @@ class OptimizedKernel(Kernel):
         global_count = self.first_reduce
         if optim_conv2d:
           self.upcast()
-          self.shift_to(self.first_reduce, tc.dims[2], insert_before=self.shape_len-1)
-          self.shift_to(s0, tc.dims[0], insert_before=self.shape_len-1)
-          self.shift_to(s1, tc.dims[1], insert_before=self.shape_len-1)
-          self.upcasted += 3
+
+        self.shift_to(self.first_reduce, tc.dims[2], insert_before=self.shape_len-int(optim_conv2d))
+        self.shift_to(s0, tc.dims[0], insert_before=self.shape_len-int(optim_conv2d))
+        self.shift_to(s1, tc.dims[1], insert_before=self.shape_len-int(optim_conv2d))
+        self.upcasted += 3
+
+        if optim_conv2d:
           if max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 5:
             self.upcast()
             for upc in range(8, 1, -1):
@@ -210,18 +214,29 @@ class OptimizedKernel(Kernel):
                 self.upcast()
                 break
         else:
-          self.shift_to(self.first_reduce, tc.dims[2])
-          self.shift_to(s0, tc.dims[0])
-          self.shift_to(s1, tc.dims[1])
-          self.upcasted += 3
           for ax in [s1, s0]:
-            for upc in [4,3,2]:
-              if self.full_shape[ax]%upc == 0:
+            for upc in tc.use_upcast:
+              if upc > 0 and self.full_shape[ax]%upc == 0:
                 self.shift_to(ax, upc)
                 self.upcast()
                 break
-        self.alias_buffer(buf0, [0]*(self.shape_len-self.upcasted) + [1]*3 + [0]*(self.upcasted-3))
-        self.alias_buffer(buf1, [0]*(self.shape_len-self.upcasted) + [1]*3 + [0]*(self.upcasted-3))
+          if tc.use_warp_x > 0 and self.full_shape[s0]%tc.use_warp_x == 0:
+            self.shift_to(s0, tc.use_warp_x, insert_before=self.first_reduce)
+            self.local_dims += 1
+          if tc.use_warp_y > 0 and self.full_shape[s1]%tc.use_warp_y == 0:
+            self.shift_to(s1, tc.use_warp_y, insert_before=self.first_reduce)
+            self.local_dims += 1
+
+        wmma_alias = [0]*(self.shape_len-self.upcasted) + [1]*3 + [0]*(self.upcasted-3)
+        if tc.use_smem:
+          local_alias = [0]*self.global_dims+[3]*self.local_dims+[0]*(self.shape_len-self.upcasted-self.first_reduce)+[1]*3+[2]*(self.upcasted-3)
+          local_buf0 = self.alias_buffer(buf0, local_alias)
+          local_buf1 = self.alias_buffer(buf1, local_alias)
+          self.alias_buffer(self.bufs.index(local_buf0), wmma_alias)
+          self.alias_buffer(self.bufs.index(local_buf1), wmma_alias)
+        else:
+          self.alias_buffer(buf0, wmma_alias)
+          self.alias_buffer(buf1, wmma_alias)
         self.simplify_ones()
         return
 

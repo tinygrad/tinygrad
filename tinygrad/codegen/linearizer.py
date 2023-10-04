@@ -335,21 +335,37 @@ class Linearizer(OptimizedKernel):
       # reduce loop
       render_loop(reduce_idxs)
 
-      # TODO: local aliases - bring back in shared memory PRs and ignore wmma ones
-      # locals_to_store = []
-
       if self.tensor_core:
-        # load WMMA input values
-        wmma_vals = [self.global_load(i+1, global_idxs+local_idxs+reduce_idxs+aliased_wmma_idxs[i]+full_upcast_idxs) for i in range(2)]
-        wmma_sz = self.tensor_core.thread_local_sizes
+        if self.tensor_core.use_smem:
+          # load shared memory
+          self.uop(UOps.BARRIER, None, (), cachable=False)
+          for i in [x for x in self.local_alias if not isinstance(self.bufs[x], LocalBuffer)]:
+            localbuf_idx = self.bufs.index(self.local_alias[i])
+            strides = self.sts[i].real_strides()
+            extra_locals = [lidx for lidx,st in zip(local_idxs, strides[len(global_idxs):self.first_reduce]) if st == 0]
+            idxs = [idx*0 if s == 0 else idx for idx,s in zip(global_idxs+local_idxs+reduce_idxs+aliased_wmma_idxs[i-1]+full_upcast_idxs,strides)]
+            for elc in extra_locals:
+              for n, idx in enumerate(idxs):
+                for var in idx.vars():
+                  if var.expr is None and elc.max >= var.max:
+                    idx = idx.substitute({var:elc%(var.max+1)})
+                    elc //= (var.max+1)
+                idxs[n] = idx
+            if DEBUG >= 3: print(f"{localbuf_idx} alias {i}:", idxs)
+            self.global_store(localbuf_idx, idxs, self.global_load(i, idxs))
+          self.uop(UOps.BARRIER, None, (), cachable=False)
+          wmma_vals = [self.global_load(i, global_idxs+local_idxs+reduce_idxs+aliased_wmma_idxs[i-3]+full_upcast_idxs) for i in self.local_alias if isinstance(self.bufs[i], LocalBuffer)]
+        else:
+          wmma_vals = [self.global_load(i+1, global_idxs+local_idxs+reduce_idxs+aliased_wmma_idxs[i]+full_upcast_idxs) for i in range(2)]
 
         # calculate the number of local accumulator reduces and render WMMAs
+        wmma_sz = self.tensor_core.thread_local_sizes
         acc_reds = (len(wmma_vals[1])//wmma_sz[1])//(len(acc)//wmma_sz[2])
         for i in range(len(acc)//wmma_sz[2]):
           for j in range(acc_reds):
             off = i*acc_reds+j
             self.uop(UOps.WMMA, None, tuple(wmma_vals[0][off*wmma_sz[0]:(off+1)*wmma_sz[0]] + wmma_vals[1][off*wmma_sz[1]:(off+1)*wmma_sz[1]] + acc[i*wmma_sz[2]:(i+1)*wmma_sz[2]]), tuple([self.opts.device, self.tensor_core.dtype_in, self.tensor_core.dtype_out]))
-      else:
+      else: # not tensor core
         # load earlybufs
         loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs})
 
