@@ -4,8 +4,8 @@ from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapp
 from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
-from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, partition, all_int, dedup, merge_dicts
-from tinygrad.ops import Device, Compiled, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
+from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, partition, dedup, merge_dicts
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
 
@@ -16,7 +16,6 @@ from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 sys.setrecursionlimit(10000)
 
 OPT = getenv("OPT", 2)
-LAZY = getenv("LAZY", 1)
 LAZYCACHE = getenv("LAZYCACHE", 1)
 
 # TODO: movement ops that only change shape are really nops. treat them as such
@@ -115,7 +114,6 @@ class LazyBuffer:
     self._base = base
     if base: base.views.add(self)
     else: assert st.contiguous, "unbased LazyBuffers must be contiguous"
-    if not LAZY: self.realize()
 
   @property
   def var_vals_key(self): return tuple(sorted(self.var_vals.keys()))
@@ -123,7 +121,7 @@ class LazyBuffer:
   @property
   def base(self): return self._base if self._base is not None else self
 
-  def is_unrealized_const(self): return not self.realized and (self.base.op.op == LoadOps.CONST and isinstance(Device[self.device], Compiled))
+  def is_unrealized_const(self): return not self.realized and self.base.op.op == LoadOps.CONST
 
   @property
   def realized(self): return self.base._realized
@@ -166,7 +164,6 @@ class LazyBuffer:
     if self.optype is MovementOps: return self.base.schedule(seen)
 
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
-    if op.op in LoadOps: return [(self.op, self, ())]
 
     if self.optype is BinaryOps: op = _ast_binaryops(op, self.shape)
     elif self.optype is ReduceOps: op = _ast_reduceops(op)
@@ -177,27 +174,22 @@ class LazyBuffer:
       else: op = LazyOp(UnaryOps.CAST, (op,), (dtypes.float32, False))
       self.dtype = dtypes.float32
 
-    # contiguous can be a copy. must do this after the image hack
-    if self.op.op == LoadOps.CONTIGUOUS:
-      src = cast(LazyBuffer, self.op.src[0])
-      if src.st.contiguous and src.st.size() == src.base.st.size() and not src.is_unrealized_const():
-        return src.schedule(seen) + [(self.op, self, ())]
-
     # realize the past and exec the AST
     ret = []
     for x in op.buffers: ret += x.schedule(seen)
 
     # TODO: this belongs in the schedule in some way
-    self.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+    self.var_vals = dict(sorted(merge_dicts([self.var_vals] + [buf.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+
+    # contiguous can be a copy. must do this after the image hack
+    if self.op.op == LoadOps.CONTIGUOUS:
+      src = cast(LazyBuffer, self.op.src[0])
+      if src.st.contiguous and src.st.size() == src.base.st.size() and not src.is_unrealized_const():
+        op = self.op
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
     return ret + [(op, self, tuple(base_bufs))]
-
-  def realize(self:LazyBuffer) -> LazyBuffer:
-    from tinygrad.realize import run_schedule
-    if not self.realized: run_schedule(self.schedule())
-    return self
 
   # *** creation/special ops ***
 
@@ -217,15 +209,6 @@ class LazyBuffer:
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
     return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), {}, RawNumpyBuffer.fromCPU(x))
-
-  def prepare_transfer(self):
-    self_casted = self.e(UnaryOps.CAST, arg=(dtypes.from_np(self.dtype.np), False)) if dtypes.from_np(self.dtype.np) != self.dtype else self
-    return self_casted.contiguous().realize().realized
-
-  def toCPU(self) -> np.ndarray:
-    assert self.dtype.np, f"{self.dtype} is not supported in toCPU"
-    assert all_int(self.shape), f"no toCPU if shape is symbolic, {self.shape=}"
-    return cast(RawBuffer, self.prepare_transfer()).toCPU().reshape(self.shape)
 
   # *** elementwise ops ***
 
