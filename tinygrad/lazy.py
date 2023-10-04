@@ -16,6 +16,7 @@ from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 sys.setrecursionlimit(10000)
 
 OPT = getenv("OPT", 2)
+LAZY = getenv("LAZY", 1)
 LAZYCACHE = getenv("LAZYCACHE", 1)
 
 # TODO: movement ops that only change shape are really nops. treat them as such
@@ -114,6 +115,7 @@ class LazyBuffer:
     self._base = base
     if base: base.views.add(self)
     else: assert st.contiguous, "unbased LazyBuffers must be contiguous"
+    if not LAZY: self.realize()
 
   @property
   def var_vals_key(self): return tuple(sorted(self.var_vals.keys()))

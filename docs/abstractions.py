@@ -139,7 +139,7 @@ assert lazyop.src[0].op.src[0].op.src[0].realized._buf[0] == 2, "the src of the 
 assert result.lazydata.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer
-result.realize()
+result.lazydata.realize()
 assert result.lazydata.realized is not None, "the LazyBuffer is realized!"
 # this brings us nicely to DeviceBuffer, of which the realized ClangBuffer is a subclass
 assert 'RawMallocBuffer' in str(type(result.lazydata.realized))
