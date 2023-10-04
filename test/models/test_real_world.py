@@ -20,7 +20,6 @@ def kopt_search_hook(k, create_k, to_prg, baseline, bufs):
   def check_opt(x):
     try:
       k = create_k()
-      k.process()
       k.apply_auto_opt(x)
       prg = to_prg(k)
       first_tm = prg.exec(bufs, force_wait=True, optimizing=True)

@@ -55,9 +55,6 @@ class Kernel:
     self.var_vals = var_vals
     self.key = (ast, tuple(var_vals.keys())) if var_vals else ast
 
-  def process(self) -> None:
-    if hasattr(self, "sts"): return   # already processed
-
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
 
