@@ -72,14 +72,17 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor]):
     if start_pos > 0 and mask is None and getenv("JIT"):
-      start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
+      start_pos_var = Variable("start_pos", 1, MAX_CONTEXT).bind(cache_k.shape[1])
       cache_k = cache_k.reshape(cache_k.shape[0], start_pos_var, cache_k.shape[2], cache_k.shape[3])
       cache_v = cache_v.reshape(cache_v.shape[0], start_pos_var, cache_v.shape[2], cache_v.shape[3])
-      # need this because we don't reshape back to int shape in the jitted path and we don't have the correct var_vars in cache
-      cache_k.lazydata.var_vals[start_pos_var] = start_pos
-      cache_v.lazydata.var_vals[start_pos_var] = start_pos
 
     output, cache_k, cache_v = self.attn(self.ln_1(x), cache_k, cache_v, start_pos, mask)
+
+    if start_pos > 0 and mask is None and getenv("JIT"):
+      # reshape back to int shape to prepare the next reshape into variable
+      cache_k = cache_k.reshape(cache_k.shape[0], start_pos_var.val+1, cache_k.shape[2], cache_k.shape[3])
+      cache_v = cache_v.reshape(cache_v.shape[0], start_pos_var.val+1, cache_v.shape[2], cache_v.shape[3])
+
     h = x + output
     h = (h + self.mlp(self.ln_2(h)))
     return h, cache_k, cache_v
@@ -124,9 +127,8 @@ class Transformer:
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
     if seqlen == 1 and start_pos > 0 and getenv("JIT"):
-      start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
+      start_pos_var = Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos)
       pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var + seqlen)))
-      pos.lazydata.var_vals[start_pos_var] = start_pos
       logit_or_softmax, self.kv_caches = self.run_all_layers(tokens, pos, start_pos=start_pos, temperature=temperature, **self.kv_caches)
       return logit_or_softmax
     else:
