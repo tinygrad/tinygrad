@@ -1,5 +1,6 @@
 from __future__ import annotations
 import time, importlib, inspect, functools, pathlib
+import numpy as np
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
@@ -113,9 +114,12 @@ class Interpreted:
     self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
-    if ast.op == BufferOps.MEM and BufferOps.MEM not in self.fxn_for_op:
-      assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
-      buf = self.to_underlying(inputs[ast.arg.idx-1])
+    if ast.op in BufferOps and ast.op not in self.fxn_for_op:
+      if ast.op == BufferOps.MEM:
+        assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
+        buf = self.to_underlying(inputs[ast.arg.idx-1])
+      elif ast.op == BufferOps.CONST:
+        buf = self.to_underlying(self.buffer.fromCPU(np.array(ast.arg.val, dtype=ast.arg.dtype.np)))
       for mop,arg in ast.arg.st.to_movement_ops(): buf = self.fxn_for_op[mop](buf, arg)
       return self.from_underlying(buf)
     if TernaryOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
