@@ -176,18 +176,18 @@ class LazyBuffer:
       else: op = LazyOp(UnaryOps.CAST, (op,), (dtypes.float32, False))
       self.dtype = dtypes.float32
 
-    # contiguous can be a copy. must do this after the image hack
-    if self.op.op == LoadOps.CONTIGUOUS:
-      src = cast(LazyBuffer, self.op.src[0])
-      if src.st.contiguous and src.st.size() == src.base.st.size() and not src.is_unrealized_const():
-        return src.schedule(seen) + [(self.op, self, (src,))]
-
     # realize the past and exec the AST
     ret = []
     for x in op.buffers: ret += x.schedule(seen)
 
     # TODO: this belongs in the schedule in some way
-    self.var_vals = dict(sorted(merge_dicts([buf.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+    self.var_vals = dict(sorted(merge_dicts([self.var_vals] + [buf.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+
+    # contiguous can be a copy. must do this after the image hack
+    if self.op.op == LoadOps.CONTIGUOUS:
+      src = cast(LazyBuffer, self.op.src[0])
+      if src.st.contiguous and src.st.size() == src.base.st.size() and not src.is_unrealized_const():
+        return ret + [(self.op, self, (src,))]
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
