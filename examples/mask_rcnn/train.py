@@ -10,6 +10,7 @@ from infer import Resize, Normalize
 from models.resnet import ResNet
 from util import FileLoader
 from PIL import Image
+from loss import *
 
 def build_transforms(is_train=True):
   pixel_mean = [102.9801, 115.9465, 122.7717]
@@ -129,7 +130,60 @@ def main():
       print("&&&& MLPERF METRIC STATUS=ABORTED")
 
 
+def simple():
+  hq_fn, _ = make_match_fn(0.7, 0.4)
+  sampler = make_balanced_sampler_fn(10, 0.5)
+  coder = BoxCoder(weights=(1.0, 1.0, 1.0, 1.0))
+  loss = RPNLossComputation(hq_fn, sampler, coder, generate_rpn_labels)
+  channels=256
+  anchor_generator = AnchorGenerator()
+  backbone = ResNetFPN(ResNet(50, num_classes=None, stride_in_1x1=True), out_channels=channels)
+  rpn = RPNHead(
+    channels, anchor_generator.num_anchors_per_location()[0]
+  )
+  optimizer = optim.SGD(backbone.parameters() + rpn.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0005)
+
+  import random
+  from pycocotools.coco import COCO
+  import os
+  from PIL import Image
+
+  NUM_EPOCHS = 100  # or however many epochs you'd like
+
+  # Load COCO annotations
+  coco = COCO(os.path.join(BASEDIR, 'annotations', 'instances_train2017.json'))
+  img_ids = coco.getImgIds()
+
+  for epoch in range(NUM_EPOCHS):
+    # Select a random image ID
+    random_img_id = random.choice(img_ids)
+    img_metadata = coco.loadImgs(random_img_id)[0]
+    img_filename = os.path.join(BASEDIR, 'train2017', img_metadata['file_name'])
+    print("training", img_filename)
+    img = [Tensor(build_transforms()(Image.open(img_filename).convert("RGB")).numpy(), requires_grad=True)]
+    images = to_image_list(img)
+    features = backbone(images.tensors)
+    objectness, rpn_box_regression = rpn(features)
+    anchors = [anchor for anchor in anchor_generator(images, features)]
+    
+    annotations = coco.loadAnns(coco.getAnnIds(imgIds=[random_img_id]))
+    gt = []
+    for annotation in annotations:
+        bbox = annotation['bbox']  # [x,y,width,height]
+        x, y, width, height = bbox
+        gt.append([x, y, x + width, y + height])
+    
+    targets = [BoxList(Tensor(gt), image_size=anchors[0][0].size)]
+    objectness_loss, regression_loss = loss(anchors, objectness, rpn_box_regression, targets)
+    total_loss = objectness_loss + regression_loss
+
+    optimizer.zero_grad()
+    total_loss.backward()
+    optimizer.step()
+
+    print(f"Epoch {epoch + 1}/{NUM_EPOCHS}, Loss: {total_loss.numpy()}")
+
 if __name__ == "__main__":
   start = time.time()
-  main()
+  simple()
   print("&&&& MLPERF METRIC TIME=", time.time() - start)

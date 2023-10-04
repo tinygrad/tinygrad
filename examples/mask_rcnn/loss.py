@@ -280,7 +280,7 @@ def test_loss():
   images = to_image_list(img)
   features = backbone(images.tensors)
   objectness, rpn_box_regression = rpn(features)
-  anchors = [anchor[3:5] for anchor in anchor_generator(images, features)]
+  anchors = [anchor for anchor in anchor_generator(images, features)]
   coco = COCO(os.path.join(BASEDIR, 'annotations', 'instances_train2017.json'))
   annotations = coco.loadAnns(coco.getAnnIds(imgIds=[img_id]))
   gt = []
@@ -392,7 +392,6 @@ class RPNLossComputation:
     anchors = [cat_boxlist(anchors_per_image) for anchors_per_image in anchors]
     labels, regression_targets = self.prepare_targets(anchors, targets)
     sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
-    sampled_pos_inds = [[1, 69, 44, 111, 215]]
     sampled_pos_inds, sampled_neg_inds = Tensor(sampled_pos_inds).squeeze(0), Tensor(sampled_neg_inds).squeeze(0)
     sampled_inds = Tensor.cat(sampled_pos_inds, sampled_neg_inds, dim=0)
     objectness, box_regression = \
@@ -425,15 +424,3 @@ if __name__ == "__main__":
   test_rind()
   test_balanced_sampler()
   test_match_targets_to_anchors()
-  #PLAYGROUND
-  data = Tensor([[1, 2, 3],
-               [4, 5, 6],
-               [7, 8, 9],
-               [10, 11, 12]])
-  idx = Tensor([0, 2, 1, 1]).reshape(4, 1)
-  result = data.gather(idx, dim=1)
-  
-  ind = Tensor.arange(mask.shape[0])
-  nz = mask.sum().numpy().item()
-  mask = mask * ind
-  idx = mask.numpy().argsort()[-int(nz):]
