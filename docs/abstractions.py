@@ -256,7 +256,6 @@ class Linearizer:
   # create the kernel with the AST
   # NOTE: the AST contains the CompiledBuffers themselves as the root nodes. this will change
   def __init__(self, ast:LazyOp): pass
-  def process(self): pass
   def linearize(self): pass
 
   # when linearize is run, it fills in this list
