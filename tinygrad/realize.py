@@ -56,14 +56,10 @@ def _realize_empty(buffer: LazyBuffer) -> None:
   assert all_int(buffer.shape), "does not support symbolic shape"
   buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
 
-def _gen_rand(rng, shape, dt): return rng.random(size=shape, dtype=np.float32).astype(dtype=dt, copy=False)
 def _realize_rand(buffer: LazyBuffer) -> None:
+  assert all_int(buffer.shape), "does not support symbolic shape"
   rng = np.random.default_rng(buffer.op.arg)
-  buffer.realized = Device[buffer.device].buffer.fromCPU(_gen_rand(rng, buffer.shape, buffer.dtype.np), **buffer._device_extra_args()) # type: ignore
-
-  # Jit support
-  from tinygrad.jit import CacheCollector
-  CacheCollector.add(lambda args, vars, jit: args[0]._copyin(_gen_rand(*args[1:])), [buffer.realized, rng, buffer.shape, buffer.dtype.np], {})
+  buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args())
 
 LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
   LoadOps.CONTIGUOUS: _realize_contiguous,
