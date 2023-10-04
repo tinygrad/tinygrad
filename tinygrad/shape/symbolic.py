@@ -156,7 +156,11 @@ class Variable(Node):
     assert self.val is not None, f"cannot unbind {self}"
     return Variable(self.expr, self.min, self.max), self.val
   def vars(self): return [self]
-  def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return var_vals[self] if self in var_vals else NumNode(self.val) if self.val is not None else self
+  def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node:
+    for var, val in var_vals.items():
+      # ignore the bind value and only match expr for substitute
+      if isinstance(var, Variable) and self.expr == var.expr: return val
+    return self
 
 class NumNode(Node):
   def __init__(self, num:int):
@@ -325,7 +329,7 @@ def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if
 def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
   if isinstance(a, int): return a
   ret = a.substitute({k:Variable.num(v) for k, v in var_vals.items()})
-  assert isinstance(ret, NumNode)
+  assert isinstance(ret, NumNode), ret
   return ret.b
 
 # symbolic int
