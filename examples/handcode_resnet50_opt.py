@@ -38,7 +38,6 @@ if __name__ == "__main__":
         for lil_chomp in [2,4,7,8,14]:
           for upcasted in [0,1,2]:
             lin = Linearizer(op, LinearizerOptions(device="METAL"))
-            lin.process()
             lin.reshape_and_permute(lambda x: (4096//big_chomp,big_chomp,56//lil_chomp,lil_chomp,56//lil_chomp,lil_chomp)+x[-2:], [0,2,4,1,3,5,6,7])
             lin.upcasted += upcasted
             lin.local_dims += 3

@@ -38,7 +38,6 @@ def catch_exception(f, on_fail=None):
 
 def compile_kernel(x, create_k, to_prg):
   k = create_k()
-  k.process()
   if DEBUG >= 2: print(f"Shape: {k.full_shape}; Applying opt: {list(y for y in x if y[1] != 1)}")
   k.apply_auto_opt(x)
   k.linearize()
@@ -99,11 +98,10 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
 
 # optimization
 global_db = None
-def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, bufs):
+def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, bufs, key):
   global global_db
 
-  k.process()
-  skey = str(k.key)
+  skey = str(key)
 
   if getenv("KOPT") in [2, 3] and global_db is None:
     import shelve

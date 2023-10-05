@@ -71,14 +71,6 @@ class TransformerBlock:
     self.ln_2 = LayerNorm(dim, norm_eps)
 
   def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor]):
-    if start_pos > 0 and mask is None and getenv("JIT"):
-      start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
-      cache_k = cache_k.reshape(cache_k.shape[0], start_pos_var, cache_k.shape[2], cache_k.shape[3])
-      cache_v = cache_v.reshape(cache_v.shape[0], start_pos_var, cache_v.shape[2], cache_v.shape[3])
-      # need this because we don't reshape back to int shape in the jitted path and we don't have the correct var_vars in cache
-      cache_k.lazydata.var_vals[start_pos_var] = start_pos
-      cache_v.lazydata.var_vals[start_pos_var] = start_pos
-
     output, cache_k, cache_v = self.attn(self.ln_1(x), cache_k, cache_v, start_pos, mask)
     h = x + output
     h = (h + self.mlp(self.ln_2(h)))
@@ -93,10 +85,6 @@ class Transformer:
     self.n_layers = n_layers
     self.ln_f = LayerNorm(dim, norm_eps)
     self.lm_head = linear(dim, vocab_size, bias=False)
-
-    self.embed_jitted = TinyJit(self.embed)
-    self.postprocess_jitted = TinyJit(self.postprocess)
-    self.h_jitted = [TinyJit(h.__call__) for h in self.h]
 
   def embed(self, tokens:Tensor, pos:Tensor):
     tok_emb = self.wte(tokens)
@@ -127,6 +115,9 @@ class Transformer:
       start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
       pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var + seqlen)))
       pos.lazydata.var_vals[start_pos_var] = start_pos
+      for k,v in self.kv_caches.items():
+        v.lazydata.var_vals[start_pos_var] = start_pos
+        self.kv_caches[k] = v.reshape(v.shape[0], start_pos_var, v.shape[2], v.shape[3])
       logit_or_softmax, self.kv_caches = self.run_all_layers(tokens, pos, start_pos=start_pos, temperature=temperature, **self.kv_caches)
       return logit_or_softmax
     else:
@@ -134,14 +125,13 @@ class Transformer:
         if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
         self.kv_caches = {**{f'cache_k{i}':None  for i in range(self.n_layers)}, **{f'cache_v{i}':None for i in range(self.n_layers)}}
 
-      embed, hs, postprocess = (self.embed_jitted, self.h_jitted, self.postprocess_jitted) if getenv("JIT") else (self.embed, self.h, self.postprocess)
       pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos, start_pos+seqlen)))
       mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float16 if getenv('FP16') else dtypes.float32).triu(start_pos+1).realize()
-      h = embed(tokens, pos)
-      for i, hi in enumerate(hs):
+      h = self.embed(tokens, pos)
+      for i, hi in enumerate(self.h):
         h, self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'] = hi(h, self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'], start_pos=start_pos, mask=mask)
       for v in self.kv_caches.values(): v.realize()
-      return postprocess(h, temperature).realize()
+      return self.postprocess(h, temperature).realize()
 
 # **** files and arguments ****
 

@@ -135,11 +135,11 @@ assert len(lazyop.src) == 2
 # again, a LazyOp AST is like a GPU kernel. you have to copy the data on the device first
 assert lazyop.src[0].op.op == LoadOps.FROM
 assert lazyop.src[0].op.src[0].device == "CPU"
-assert lazyop.src[0].op.src[0].realized._buf[0] == 2, "the src of the FROM LazyOP is a LazyBuffer on the CPU holding [2.]"
+assert lazyop.src[0].op.src[0].op.src[0].realized._buf[0] == 2, "the src of the FROM LazyOP is a LazyBuffer on the CPU holding [2.]"
 assert result.lazydata.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer
-result.lazydata.realize()
+result.realize()
 assert result.lazydata.realized is not None, "the LazyBuffer is realized!"
 # this brings us nicely to DeviceBuffer, of which the realized ClangBuffer is a subclass
 assert 'RawMallocBuffer' in str(type(result.lazydata.realized))
@@ -256,7 +256,6 @@ class Linearizer:
   # create the kernel with the AST
   # NOTE: the AST contains the CompiledBuffers themselves as the root nodes. this will change
   def __init__(self, ast:LazyOp): pass
-  def process(self): pass
   def linearize(self): pass
 
   # when linearize is run, it fills in this list

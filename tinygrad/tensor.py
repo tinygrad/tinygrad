@@ -5,12 +5,13 @@ from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set
 
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device, LoadOps
 from tinygrad.shape.symbolic import sint
+from tinygrad.realize import run_schedule
 
 # An instantiation of the Function is the Context
 class Function:
@@ -70,7 +71,7 @@ class Tensor:
       data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
     else: raise RuntimeError(f"can't create Tensor from {data}")
 
-    self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
+    self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data.contiguous())
 
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
@@ -89,15 +90,22 @@ class Tensor:
 
   # ***** data handlers ****
 
+  @staticmethod
+  def corealize(lst:Iterable[Tensor]):
+    seen:Set[LazyBuffer] = set()
+    sched = []
+    for t in lst: sched += t.lazydata.schedule(seen)
+    run_schedule(sched)
+
   def realize(self) -> Tensor:
-    self.lazydata.realize()
+    run_schedule(self.lazydata.schedule())
     return self
 
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK
     if self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      self.lazydata.contiguous().realize().realized._copyin(x.numpy())  # type: ignore
+      self.contiguous().realize().lazydata.realized._copyin(x.numpy())  # type: ignore
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
@@ -107,8 +115,11 @@ class Tensor:
     self.lazydata = x.lazydata
     return self
 
-  def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
-  def numpy(self) -> np.ndarray: return self.lazydata.toCPU()
+  def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
+  def numpy(self) -> np.ndarray:
+    assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
+    assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
+    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().reshape(self.shape)
 
   # TODO: if things are realized this won't work
   def to_(self, device:str):
