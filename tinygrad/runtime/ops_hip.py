@@ -101,13 +101,12 @@ class HIPProgram:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
-    self.prg = prg
-    self.name = name
+    self.prg, self.name = prg, name
 
   def __call__(self, global_size, local_size, *args, wait=False):
+    # load modules only when called, so we can compile without interacting with hip device
     if not hasattr(self, 'modules'):
-      self.prgs = []
-      self.modules = []
+      self.prgs, self.modules = [], []
       for i in range(HIP.device_count):
         hip.hipSetDevice(i)
         self.modules.append(hip.hipModuleLoadData(self.prg))
