@@ -35,7 +35,7 @@ def kopt_search_hook(k, create_k, to_prg, baseline, bufs):
   recommendation = optimizer.minimize(check_opt)
   return recommendation.value if recommendation.loss < baseline else "BASELINE"
 
-def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed):
+def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed, all_jitted=False):
   tms = []
   for _ in range(4):
     GlobalCounters.reset()
@@ -50,6 +50,8 @@ def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed):
   print(f"{nm}: used {GlobalCounters.mem_used/1e9:.2f} GB and {kernels_used} kernels in {min(tms)/1e6:.2f} ms")
   assert GlobalCounters.mem_used/1e9 < max_memory_allowed, f"{nm} used more than {max_memory_allowed:.2f} GB"
   assert not kernels_used or kernels_used <= max_kernels_allowed, f"{nm} used more than {max_kernels_allowed} kernels"
+  if all_jitted:
+    assert kernels_used > 0 and kernels_used == GlobalCounters.kernel_count, f"only {kernels_used} out of {GlobalCounters.kernel_count} were jitted"
 
 # for speed
 def derandomize(x):
@@ -107,7 +109,7 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t): return model(t, 0).realize()
-    helper_test("test_gpt2", lambda: (Tensor([[1,]]),), test, 0.21 if CI else 0.9, 129 if CI else 369)
+    helper_test("test_gpt2", lambda: (Tensor([[1,]]),), test, 0.21 if CI else 0.9, 129 if CI else 369, True)
 
   @unittest.skipIf(getenv("KOPT"), "cifar hangs with KOPT")
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
