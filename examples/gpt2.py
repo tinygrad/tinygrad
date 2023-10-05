@@ -5,7 +5,7 @@ import argparse
 import numpy as np
 from tqdm import trange
 np.set_printoptions(linewidth=200)
-from typing import Optional, Dict
+from typing import Optional
 
 from tinygrad.helpers import Timing, getenv, dtypes, DEBUG
 from tinygrad.ops import GlobalCounters
@@ -177,7 +177,7 @@ class GPT2:
   def greedy_until(self, prompt:str, max_length:int, temperature:float, timing:bool=False):
     toks = self.tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})
     start_pos = 0
-    for _ in trange(max_length, disable=(timing==True)):
+    for i in trange(max_length, disable=(timing==True)):
       GlobalCounters.reset()
       if timing: print("")
       st = GlobalCounters.time_sum_s
@@ -186,6 +186,9 @@ class GPT2:
                     f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                     f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s") if DEBUG else None, enabled=timing):
           probs = self.model(Tensor([toks[start_pos:]]), start_pos, temperature)
+        if getenv("JIT") and i >=3:
+          # first run processes the prompt, and after 2 more runs it starts to call jitted functions
+          assert GlobalCounters.kernel_count > 0 and GlobalCounters.kernel_count == GlobalCounters.kernel_jitted_count, f"only {GlobalCounters.kernel_jitted_count} out of {GlobalCounters.kernel_count} are jitted"
         probs_np = probs.numpy()
         tok = int(np.random.choice(len(probs_np), p=probs_np))
       start_pos = len(toks)

@@ -137,7 +137,8 @@ class GlobalCounters:
   global_mem: ClassVar[int] = 0
   time_sum_s: ClassVar[float] = 0.0
   kernel_count: ClassVar[int] = 0
+  kernel_jitted_count: ClassVar[int] = 0
   mem_used: ClassVar[int] = 0   # NOTE: this is not reset
   mem_cached: ClassVar[int] = 0 # NOTE: this is not reset
   @staticmethod
-  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0
+  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.kernel_jitted_count = 0,0,0.0,0,0
