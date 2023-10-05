@@ -20,11 +20,6 @@ def fix_schedule_for_images(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBu
       if isinstance(buffers[b.arg.idx-1].dtype, ImageDType) and (b.arg.st.real_offset() % 4 != 0 or not any(b.arg.st.shape[x]%4 == 0 for x in b.arg.st.unit_stride_axes())):
         buffers[b.arg.idx-1].dtype = dtypes.float32
 
-  # fix the contiguous dtype, no cast required
-  for op,out,buffers in schedule:
-    if op.op == LoadOps.CONTIGUOUS and out.dtype != buffers[0].dtype:
-      out.dtype = buffers[0].dtype = dtypes.float32
-
   # now fix up the schedule to reflect the new dtypes
   fixed_schedule = []
   for op,out,buffers in schedule:
@@ -82,11 +77,6 @@ def _realize_rand(buffer: LazyBuffer) -> None:
 
 # *** one op LoadOps ***
 
-def _realize_contiguous(buffer: LazyBuffer, src: LazyBuffer) -> None:
-  # this is just a copy now, if it's not a copy schedule will handle it
-  buffer.realized = src.realized
-  assert buffer.dtype == src.dtype, f"contiguous dtype mismatch, expecting {buffer.dtype}, got {src.dtype}"
-
 def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
   assert src.realized.size == buffer.st.size(), f"size mismatch on FROM {src.realized.size} != {buffer.st.size()}"
   assert src.st.contiguous and buffer.st.contiguous, "all must be contiguous for from"
@@ -110,7 +100,6 @@ def _realize_custom(buffer: LazyBuffer, *inputs: LazyBuffer) -> None:
 LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
   LoadOps.EMPTY: _realize_empty,
   LoadOps.RAND: _realize_rand,
-  LoadOps.CONTIGUOUS: _realize_contiguous,
   LoadOps.FROM: _realize_from,
   LoadOps.CUSTOM: _realize_custom,
 }
