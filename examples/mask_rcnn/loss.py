@@ -4,6 +4,7 @@ from models.mask_rcnn import *
 from tinygrad.tensor import Tensor, dtypes, Function
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.lazy import LazyBuffer
+from tinygrad.helpers import DEBUG
 import tinygrad.nn.optim as optim
 import numpy as np
 from typing import List, Callable, Tuple
@@ -393,19 +394,21 @@ class RPNLossComputation:
     anchors = [cat_boxlist(anchors_per_image) for anchors_per_image in anchors]
     labels, regression_targets = self.prepare_targets(anchors, targets)
     sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
+    if DEBUG > 0: print("sampled_pos_inds", sampled_pos_inds.numpy(), "sampled_neg_inds", sampled_neg_inds.numpy())
     sampled_pos_inds, sampled_neg_inds = Tensor(sampled_pos_inds).squeeze(0), Tensor(sampled_neg_inds).squeeze(0)
     sampled_inds = Tensor.cat(sampled_pos_inds, sampled_neg_inds, dim=0)
     objectness, box_regression = \
             concat_box_prediction_layers(objectness, box_regression)
     objectness = objectness.squeeze()
     labels, regression_targets = Tensor.cat(*labels, dim=0), Tensor.cat(*regression_targets, dim=0)
+    if DEBUG > 0: print("pos box_regression samples", box_regression[sampled_pos_inds].numpy(), "regression_targets", regression_targets[sampled_pos_inds].numpy())
     box_loss = smooth_l1_loss(
         box_regression[sampled_pos_inds],
         regression_targets[sampled_pos_inds],
         beta=1.0 / 9,
         size_average=False,
     ) / sampled_inds.numel()
-
+    if DEBUG > 0: print("box_loss", box_loss.numpy(), "objectness", objectness[sampled_inds].numpy(), "objectness gt", labels[sampled_inds].numpy())
     objectness_loss = binary_cross_entropy_with_logits(
         objectness[sampled_inds], labels[sampled_inds]
     )
