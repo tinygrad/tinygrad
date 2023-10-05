@@ -124,7 +124,6 @@ class TestLinearizer(unittest.TestCase):
     # todo: why is s[1] just a contiguous?
     ast, l, bufs = s[i]
     k = Linearizer(ast)
-    k.process()
     k.apply_auto_opt(opt)
     k.linearize()
     prg = Device[Device.DEFAULT].to_program(k)  # renderer will succeed, but compile will take forever
