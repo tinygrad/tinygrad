@@ -48,11 +48,15 @@ class ConvGroup:
   def __call__(self, x):
     x = self.conv1(x)
     x = x.max_pool2d(2)
+    x = x.float()
     x = self.norm1(x)
+    x = x.cast(Tensor.default_type)
     x = x.gelu()
     residual = x
     x = self.conv2(x)
+    x = x.float()
     x = self.norm2(x)
+    x = x.cast(Tensor.default_type)
     x = x.gelu()
 
     return x + residual
