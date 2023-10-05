@@ -95,7 +95,7 @@ def get_run_onnx(onnx_model: ModelProto):
       print(inp.name, inp.dims, inp.data_type, len(inp.raw_data))
       print(inp)
       raise Exception("no data")
-    if DEBUG >= 1:
+    if DEBUG >= 3:
       print("realize", inp.name)
     tensors[inp.name].realize()
 
