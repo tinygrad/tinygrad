@@ -235,7 +235,8 @@ def Dropout(data, ratio=0.5, training_mode=False, seed=None):
   mask = Tensor((rng.random(data.shape) >= ratio), requires_grad=False, device=data.device)
   return data * mask * (1/(1.0 - ratio)), mask
 
-def Shape(data, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int64)
+# TODO: should this be int64?
+def Shape(data, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int32)
 def Size(data): return prod(data if isinstance(data, list) else data.shape)
 def Flatten(input, axis=1): return input.reshape(prod((1,) + input.shape[0:axis]), -1)
 
