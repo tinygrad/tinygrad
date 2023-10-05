@@ -19,8 +19,7 @@ def safe_numpy(t) -> np.ndarray:
   if not isinstance(t, Tensor): return t
   global numpy_cache
   if t not in numpy_cache:
-    if DEBUG >= 1:
-      print("numpy cache miss", t)
+    if DEBUG >= 3: print("numpy cache miss", t)
     tmp = t.numpy()
     numpy_cache[t] = tmp if len(tmp.shape) else tmp.reshape(1)
   assert len(numpy_cache[t].shape) > 0

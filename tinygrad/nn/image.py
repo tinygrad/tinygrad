@@ -1,6 +1,5 @@
 import numpy as np
 from tinygrad.helpers import prod, IMAGE, ImageDType, getenv, dtypes
-from tinygrad.lazy import get_single_root
 
 FLOAT16 = getenv("FLOAT16", 0)
 base_image_type = (100, 2, "imageh", np.float16) if FLOAT16 else (100, 4, "imagef", np.float32)
@@ -58,7 +57,6 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
   if IMAGE >= 2: x,w = x.cast(ImageDType(*base_image_type, shape=x.shape)), w.cast(ImageDType(*base_image_type, shape=w.shape))
   x, w = x.contiguous(), w.contiguous()
-  if get_single_root(w.lazydata).realized: w.realize()
 
   # expand out
   rcin_hi, rcin_lo = cin//4 if cin >= 4 else 1, 4 if cin >= 4 else 1

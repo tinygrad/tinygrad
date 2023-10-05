@@ -50,6 +50,7 @@ def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]
   while len(schedule):
     op,out,buffers = schedule.pop(0)
     log_schedule_item(op, out, buffers)
+    assert all(x.realized for x in buffers), "can't run schedule, some buffers aren't realized"
     if DEBUG >= 3:
       from extra.utils import print_tree   # type: ignore
       print_tree(op)
