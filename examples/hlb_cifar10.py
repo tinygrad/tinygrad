@@ -24,8 +24,12 @@ from extra.dist import collectives
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
-Tensor.default_dtype = dtypes.float32
-np_dtype = np.float32
+if getenv("HALF", 0):
+  Tensor.default_type = dtypes.float16
+  np_dtype = np.float16
+else:
+  Tensor.default_type = dtypes.float32
+  np_dtype = np.float32
 
 class BatchNorm(nn.BatchNorm2d):
   def __init__(self, num_features):
@@ -66,7 +70,6 @@ class SpeedyResNet:
       nn.Linear(512, 10, bias=False),
       lambda x: x.mul(1./9)
     ]
-    print(self.net[0].weight.dtype)
 
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
@@ -89,7 +92,7 @@ def train_cifar():
       'label_smoothing':    0.20,
       'momentum':           0.85,
       'percent_start':      0.23,
-      'loss_scale_scaler':  1./512,   # (range: ~1/512 - 16+, 1/128 w/ FP16)
+      'loss_scale_scaler':  1/32,   # (range: ~1/512 - 16+, 1/128 w/ FP16)
     },
     'net': {
         'kernel_size': 2,             # kernel size for the whitening layer
@@ -110,6 +113,7 @@ def train_cifar():
     random.seed(getenv('SEED', seed))
 
   # ========== Model ==========
+  # NOTE: np.linalg.eigh only supports float32 so the whitening layer weights need to be converted to float16 manually
   def whitening(X, kernel_size=hyp['net']['kernel_size']):
     def _cov(X):
       X = X/np.sqrt(X.shape[0] - 1)
@@ -127,8 +131,9 @@ def train_cifar():
       return np.flip(Λ, 0), np.flip(V.T.reshape(c*h*w, c, h, w), 0)
 
     Λ, V = _eigens(_patches(X.numpy()))
+    W = V/np.sqrt(Λ+1e-2)[:,None,None,None]
 
-    return Tensor(V/np.sqrt(Λ+1e-2)[:,None,None,None].astype(np_dtype), requires_grad=False)
+    return Tensor(W.astype(np_dtype), requires_grad=False)
 
   # ========== Loss ==========
   def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
@@ -173,7 +178,7 @@ def train_cifar():
   def random_crop(X, crop_size=32):
     mask = make_square_mask(X.shape, crop_size)
     mask = mask.repeat((1,3,1,1))
-    X_cropped = Tensor(X.flatten().numpy()[mask.flatten().numpy().astype(bool)].astype(np_dtype))
+    X_cropped = Tensor(X.flatten().numpy()[mask.flatten().numpy().astype(bool)])
 
     return X_cropped.reshape((-1, 3, crop_size, crop_size))
 
@@ -182,8 +187,8 @@ def train_cifar():
     mask = make_square_mask(X.shape, mask_size)
     order = list(range(0, X.shape[0]))
     random.shuffle(order)
-    X_patch = Tensor(X.numpy()[order,...].astype(np_dtype))
-    Y_patch = Tensor(Y.numpy()[order].astype(np_dtype))
+    X_patch = Tensor(X.numpy()[order,...])
+    Y_patch = Tensor(Y.numpy()[order])
     X_cutmix = Tensor.where(mask, X_patch, X)
     mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
@@ -200,7 +205,7 @@ def train_cifar():
         X = random_crop(X, crop_size=32)
         X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < 0.5, X[..., ::-1], X) # flip LR
         if step >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
-      X, Y = X.numpy().astype(np_dtype), Y.numpy().astype(np_dtype)
+      X, Y = X.numpy(), Y.numpy()
       for i in range(0, X.shape[0], BS):
         # pad the last batch
         batch_end = min(i+BS, Y.shape[0])
@@ -223,7 +228,7 @@ def train_cifar():
       self.net_ema = SpeedyResNet(w)
       for net_ema_param, net_param in zip(get_state_dict(self.net_ema).values(), get_state_dict(net).values()):
         net_ema_param.requires_grad = False
-        net_ema_param.assign(net_param.numpy().astype(np_dtype))
+        net_ema_param.assign(net_param.numpy())
 
     @TinyJit
     def update(self, net, decay):
@@ -250,13 +255,17 @@ def train_cifar():
   # preprocess data
   X_train, X_test = X_train.sequential(transform), X_test.sequential(transform)
 
-  # precompute whitening patches, X_train needs to be fp32 here for eigen decompositions
+  # precompute whitening patches
   W = whitening(X_train)
+
+  # initialize model weights
+  model = SpeedyResNet(W)
 
   # padding is not timed in the original repo since it can be done all at once
   X_train = pad_reflect(X_train, size=hyp['net']['pad_amount'])
 
-  model = SpeedyResNet(W)
+  # Convert data and labels to the default dtype
+  X_train, Y_train, X_test, Y_test = X_train.cast(Tensor.default_type), Y_train.cast(Tensor.default_type), X_test.cast(Tensor.default_type), Y_test.cast(Tensor.default_type)
 
   # parse the training params into bias and non-bias
   params_dict = get_state_dict(model)
@@ -383,9 +392,6 @@ def train_cifar():
 
       if STEPS == 0 or i==STEPS: break
       X, Y = next(batcher)
-      print(X.dtype)
-      print(model.net[0].weight.dtype)
-      # further split batch if distributed
       if getenv("DIST"):
         X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
       GlobalCounters.reset()
