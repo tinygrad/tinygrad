@@ -4,7 +4,7 @@ try:
 except ImportError:
   nx = None # graph won't work
 from collections import defaultdict
-from typing import Dict, List, TYPE_CHECKING, Tuple, cast
+from typing import Dict, List, TYPE_CHECKING, Tuple
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
 from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters
 
@@ -50,7 +50,7 @@ def str_dtype(dtyp):
 def log_schedule_item(iop: LazyOp, ret: 'LazyBuffer', inp: Tuple['LazyBuffer', ...]):
   show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
-  if iop.op == LoadOps.CONTIGUOUS: setattr(ret, 'node_id', nm(cast('LazyBuffer', iop.src[0]).base))
+  if iop.op == LoadOps.CONTIGUOUS: setattr(ret, 'node_id', nm(inp[0].base))
   if iop.op in {LoadOps.CONST, LoadOps.CONTIGUOUS}: return
 
   op: List[Op] = [x.op for x in iop.get_lazyops()]

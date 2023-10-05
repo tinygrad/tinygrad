@@ -5,12 +5,13 @@ from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set
 
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device, LoadOps
 from tinygrad.shape.symbolic import sint
+from tinygrad.realize import run_schedule
 
 # An instantiation of the Function is the Context
 class Function:
@@ -89,8 +90,15 @@ class Tensor:
 
   # ***** data handlers ****
 
+  @staticmethod
+  def corealize(lst:Iterable[Tensor]):
+    seen:Set[LazyBuffer] = set()
+    sched = []
+    for t in lst: sched += t.lazydata.schedule(seen)
+    run_schedule(sched)
+
   def realize(self) -> Tensor:
-    self.lazydata.realize()
+    run_schedule(self.lazydata.schedule())
     return self
 
   def assign(self, x) -> Tensor:
@@ -111,7 +119,7 @@ class Tensor:
   def numpy(self) -> np.ndarray:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
-    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized._buf.reshape(self.shape)
+    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().reshape(self.shape)
 
   # TODO: if things are realized this won't work
   def to_(self, device:str):

@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same, getenv
 from tinygrad.ops import LazyOp, UnaryOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -88,7 +88,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
   # This is the slow part
   # This part is for brute forcing all possible values of idx, idy and valid
   # If valid is both 0 and 1 for the same (idx, idy) we can not delete the valid
-  if valid.min == 0 and not isinstance(idx, ModNode):
+  if getenv("VALIDHACKS", 1) and valid.min == 0 and not isinstance(idx, ModNode):
     variables = tuple(val_vars | idy_vars | idx_vars)
     val_infer, idx_infer, idy_infer = valid.expand(variables), idx.expand(variables), idy.expand(variables)
     val_dict: Dict[int, Set[Tuple[int,int]]] = {0:set(), 1:set()}

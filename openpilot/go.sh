@@ -1,2 +1,2 @@
 #!/bin/bash
-FLOAT16=1 DEBUGCL=1 VALIDHACKS=1 IMAGE=2 GPU=1 ENABLE_METHOD_CACHE=1 python3 openpilot/compile.py
+FLOAT16=1 DEBUGCL=1 IMAGE=2 GPU=1 python3 openpilot/compile.py

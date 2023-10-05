@@ -56,7 +56,7 @@ class LazyOp:
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
-  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
+  def map_buffers(self, real_srcs: Mapping[Any, Union[LazyBuffer, LazyOp]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) if y not in real_srcs else real_srcs[y] for y in self.src]), self.arg)
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
@@ -67,14 +67,9 @@ class LazyOp:
   @property
   def st(self): raise NotImplementedError
   @property
-  def children(self): raise NotImplementedError
-  @property
-  def shape(self): raise NotImplementedError
-  @property
   def realized(self): raise NotImplementedError
   @property
-  def optype(self): raise NotImplementedError
-  def realize(self): raise NotImplementedError
+  def children(self): raise NotImplementedError
 
   # movement ops
   def reshape(self, _): raise NotImplementedError
@@ -117,7 +112,7 @@ class Interpreted:
     if ast.op in BufferOps and ast.op not in self.fxn_for_op:
       if ast.op == BufferOps.MEM:
         assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
-        buf = self.to_underlying(inputs[ast.arg.idx-1])
+        buf = self.to_underlying(inputs[ast.arg.idx-1].realized)
       elif ast.op == BufferOps.CONST:
         buf = self.to_underlying(self.buffer.fromCPU(np.array(ast.arg.val, dtype=ast.arg.dtype.np)))
       for mop,arg in ast.arg.st.to_movement_ops(): buf = self.fxn_for_op[mop](buf, arg)
@@ -226,7 +221,7 @@ class Compiled:
     if output.realized:
       for i,a in enumerate(inputs):
         # TODO: if this is contiguous it's fine
-        if a == output.realized:
+        if a.realized == output.realized:
           if any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
             output.realized = None
             break
@@ -238,23 +233,27 @@ class Compiled:
       from tinygrad.jit import CacheCollector
       CacheCollector._mark_output_buffer(output.output_buffer)
 
-    from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(ast, self.linearizer_opts, var_vals)
+    # all the rawbuffers
+    rawbuffers = [output.realized] + [x.realized for x in inputs]
+    key = (ast, tuple(var_vals.keys())) if var_vals else ast  # TODO: remove var_vals so the key can just be the AST
 
     # compilation time
     def get_program():
+      from tinygrad.codegen.linearizer import Linearizer
+      k = Linearizer(ast, self.linearizer_opts, var_vals)
+      assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
       from tinygrad.codegen.search import kernel_optimize
-      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program, [output.realized]+inputs)
+      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program, rawbuffers, key)
       elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
-    if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
-      if k.key not in self.method_cache: self.method_cache[k.key] = get_program()
-      prg = self.method_cache[k.key]
+    if getenv("ENABLE_METHOD_CACHE", 1):
+      if key not in self.method_cache: self.method_cache[key] = get_program()
+      prg = self.method_cache[key]
     else:
       prg = get_program()
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
-    prg.exec([output.realized]+inputs, var_vals=var_vals)
+    prg.exec(rawbuffers, var_vals=var_vals)
     return output.realized
