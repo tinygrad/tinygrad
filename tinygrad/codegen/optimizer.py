@@ -395,8 +395,8 @@ class OptimizedKernel(Kernel):
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
 
-    # no more opt if we are grouping, no suggestion
-    if self.group_for_reduce: return None
+    # no more opt if we are grouping
+    if self.group_for_reduce: return suggestion
 
     # **** below this line need to be optional and benchmarked ****
 
