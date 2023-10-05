@@ -4,7 +4,7 @@ from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapp
 from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
-from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, partition, dedup, merge_dicts
+from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, partition, dedup, merge_dicts
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
@@ -75,7 +75,7 @@ def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
 
 # **** lazy operations ****
 
-def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(cast(LazyBuffer, root.op.src[0])) if getattr(root, 'op', None) and len(root.op.src) == 1 else root
+def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(cast(LazyBuffer, root.op.src[0])) if getattr(root, 'op', None) and len(root.op.src) == 1 and isinstance(root.op.src[0], LazyBuffer) else root
 def get_movementroot(root:LazyBuffer, allow_contiguous=False) -> LazyBuffer: return get_movementroot(cast(LazyBuffer, root.op.src[0]), allow_contiguous) if not root.realized and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and allow_contiguous and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot_contiguous(cast(LazyBuffer, x.op.src[0])) if not x.realized and x.op.op == LoadOps.CONTIGUOUS else (get_movementroot(x, True) if x.optype == MovementOps and x.st.contiguous else x)
 
@@ -152,7 +152,7 @@ class LazyBuffer:
 
   @property
   def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
-  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
+  def map_buffers(self, real_srcs: Mapping[Any, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[LazyOp]: return []
 
   # *** scheduling ***
@@ -161,18 +161,13 @@ class LazyBuffer:
     if seen is None: seen = set()
     if self in seen or self.realized or self.is_unrealized_const(): return []
     seen.add(self)
-    if self.optype is MovementOps: return self.base.schedule(seen)
+    if self.base != self: return self.base.schedule(seen)
 
+    # rewrite unbased CONTIGUOUS into UnaryOps.NOOP
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
 
     if self.optype is BinaryOps: op = _ast_binaryops(op, self.shape)
     elif self.optype is ReduceOps: op = _ast_reduceops(op)
-
-    # HACK: image shape can be wrong, hot cast it back to a normal float
-    if isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
-      if op.op == MovementOps.RESHAPE: op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, op.src, (dtypes.float32, False)),), op.arg)
-      else: op = LazyOp(UnaryOps.CAST, (op,), (dtypes.float32, False))
-      self.dtype = dtypes.float32
 
     # realize the past and exec the AST
     ret = []
@@ -180,12 +175,6 @@ class LazyBuffer:
 
     # TODO: this belongs in the schedule in some way
     self.var_vals = dict(sorted(merge_dicts([self.var_vals] + [buf.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
-
-    # contiguous can be a copy. must do this after the image hack
-    if self.op.op == LoadOps.CONTIGUOUS:
-      src = cast(LazyBuffer, self.op.src[0])
-      if src.st.contiguous and src.st.size() == src.base.st.size() and not src.is_unrealized_const():
-        op = self.op
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
@@ -204,6 +193,11 @@ class LazyBuffer:
 
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
+    if self.st.contiguous and self.st.size() == self.base.st.size() and not self.is_unrealized_const():
+      # this will turn into nothing, it's based and a copy
+      # TODO: based lazybuffers shouldn't take dtype or var_vals, same issue in movementops
+      return create_lazybuffer(self.device, ShapeTracker.from_shape(tuple(self.shape)), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype, self.var_vals, base=self.base)
+    # real contiguous, this will turn into a UnaryOps.NOOP
     return self.loadop(LoadOps.CONTIGUOUS, self.shape, self.dtype, self.device, src=self, val_vals=self.var_vals)
 
   @staticmethod
