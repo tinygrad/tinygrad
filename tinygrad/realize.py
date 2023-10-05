@@ -80,7 +80,7 @@ def _realize_rand(buffer: LazyBuffer) -> None:
 def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
   assert src.realized.size == buffer.st.size(), f"size mismatch on FROM {src.realized.size} != {buffer.st.size()}"
   assert src.st.contiguous and buffer.st.contiguous, "all must be contiguous for from"
-  if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:16d} shape {str(buffer.shape):20s} dtype {src.realized.dtype}")
+  if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:16d} shape {str(buffer.shape):23s} dtype {src.realized.dtype}")
   # TODO: make this generic
   if isinstance(src.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
     assert all_int(buffer.shape), "does not support symbolic shape"
