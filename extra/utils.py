@@ -251,7 +251,6 @@ def profile_kernels(mdl: Callable, x: Any, metric: Union[Literal["time"], Litera
     if DEBUG >= 1: print(f"kernel {i:2d} {data[0]} {str(data[1]):18s} {str(data[2]):12s} takes {data[3]:7.2f} ms, {data[4]:6.0f} GFLOPS mem {data[5]:5.2f} GB")
 
   df = pd.DataFrame(stats, columns=["kernel", "global_size", "local_size", "time", "gflops", "mem", "code", "op"])
- 
   fig = px.bar(df, x=df.index, color="op" if group_ops else None, y=metric, title=f"Kernels for {mdl.__class__.__name__}", color_discrete_sequence=["#6D67E4","#46C2CB","#F2F7A1", "#98f5e1","#f1c0e8","#a3c4f3","#fbf8cc","#cfbaf0","#90dbf4","#ffcfd2","#8eecf5","#b9fbc0"], hover_data=["kernel", metric])
   fig.update_layout(plot_bgcolor="black", paper_bgcolor="black")
   fig.update_layout(xaxis_title="Kernel Index",yaxis_title=metric,font=dict(color="white"),legend_title="Operation")
