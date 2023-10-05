@@ -164,7 +164,6 @@ class BasicBatchExecutor:
   def recalc_stat(self, jit_cache: List[Tuple[Any, Any, Any]]):
     for prg, _, variables in jit_cache:
       GlobalCounters.kernel_count += 1
-      GlobalCounters.kernel_jitted_count += 1
       GlobalCounters.global_ops += sym_infer(prg.op_estimate, variables)
       GlobalCounters.global_mem += prg.mem_estimate
 
@@ -196,7 +195,6 @@ class ASTRunner:
       print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(37-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(global_size):18s} {str(local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {self.mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
     GlobalCounters.kernel_count += 1
-    if jit: GlobalCounters.kernel_jitted_count += 1
     GlobalCounters.global_ops += op_estimate
     GlobalCounters.global_mem += self.mem_estimate
     return et
