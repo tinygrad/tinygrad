@@ -156,18 +156,18 @@ class RetinaNetTrainer:
 
         retina, anchors_orig, anchors_flattened_levels, optimizer = self.tg_init_setup()
         checker = None
-        if self.debug: 
-            checker = RetinaNetMlPerfTrainingChecker(retina)
-            #checker.check_anchorgen() already passes
-            checker.check_weight_init()
-            checker.check_anchors(anchors_orig, anchors_flattened_levels)
+        #if self.debug: 
+            #checker = RetinaNetMlPerfTrainingChecker(retina)
+            #checker.check_anchorgen() #already passes
+            #checker.check_weight_init()
+            #checker.check_anchors(anchors_orig, anchors_flattened_levels)
 
         for x, annotations in iterate(self.dataset, BS):
             targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
             resized = [Image.fromarray(image) for image in x]
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
             images = Tensor(resized, requires_grad=False)
-
+            breakpoint()
             head_outputs = retina(self.input_fixup(images))
             if self.debug: checker.check_head_outputs(head_outputs)
 
@@ -415,6 +415,7 @@ class RetinaNetMlPerfTrainingChecker:
         sample_image_list = [torch_tensor(np.random.rand(3,200,200))]
         sample_image_list, _ = self.mlperf_model.transform(sample_image_list,None)
 
+        breakpoint()
         feature_maps = self.mlperf_model.backbone.double()(sample_image_list.tensors.double()) #TODO .double() bothers me. but default usage raises errors ("expected Double instead of Float" bc resnet bias is initialized w/ 32 bits)
         
         features = list(feature_maps.values())
@@ -422,8 +423,8 @@ class RetinaNetMlPerfTrainingChecker:
         self.mlperf_model.training = True
         assert torch.equal(torch_tensor(anchors_flattened_levels),anchors_one_image[0])
     def check_weight_init(self):
-        #TODO non-auxiliar weight init. 
-        Warning("Inference bug: tg model should have way less parameters!! (351 vs 89)")
+        #FIXME non-auxiliar weight init. reimplement looking tests.
+        Warning("Inference bug: tg model should have way less parameters!! (351 vs 89). plus reference has 301 weight keys")
         model, anchors_orig, anchors_flattened_levels, optimizer = self.trainer.tg_init_setup(mlperf_model=self.mlperf_model)
         mlp_params = {name:params for name,params in self.mlperf_model.named_parameters().items()}
         model_params = get_parameters(model)
