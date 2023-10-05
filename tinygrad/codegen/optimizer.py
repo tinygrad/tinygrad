@@ -145,11 +145,18 @@ class OptimizedKernel(Kernel):
     self.local_dims += 1
 
   # upcast amount off of the last reduce dimension
-  def shift_reduce(self, axis, suggestion, amount=None):
+  def shift_reduce(self, suggestion, amount=None):
+    axis = len(self.full_unupcasted_shape) - 1
     if amount is None: amount = self.full_shape[axis]
     suggestion['R', self.axis_idxs[axis]] = amount
     if amount != self.full_shape[axis]: self.shift_to(axis, amount=amount, insert_before=len(self.full_unupcasted_shape))
     self.upcast()
+
+  def shift_group_for_reduce(self, amount, suggestion):
+    axis = len(self.full_unupcasted_shape) - 1
+    suggestion['G', self.axis_idxs[axis]] = amount
+    self.shift_to(axis, amount, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
+    self.group_for_reduce.append(amount)
 
   # ******************** high level optimizers ********************
 
@@ -363,8 +370,7 @@ class OptimizedKernel(Kernel):
         # TODO: use 1024 if it's allowed in a smarter way
         for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
-            self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
-            self.group_for_reduce.append(sz)
+            self.shift_group_for_reduce(sz, suggestion)
             break
 
       # are we upcasting in mid reduce? (only for images)
@@ -372,8 +378,7 @@ class OptimizedKernel(Kernel):
         axes = self.sts[0].unit_stride_axes()
         assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
         if self.sts[0].shape[axes[0]]%4 == 0:
-          self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
-          self.group_for_reduce.append(4)
+          self.shift_group_for_reduce(4, suggestion)
 
     # now do everything required
     self.required_optimizations(suggestion)
@@ -429,13 +434,13 @@ class OptimizedKernel(Kernel):
     # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
     if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
       if (s:=self.full_unupcasted_shape[-1]) <= 32 and isinstance(s, int):  # NOTE: cannot loop unroll symbolic axis
-        self.shift_reduce(len(self.full_unupcasted_shape) - 1, suggestion)
+        self.shift_reduce(suggestion)
         # if it's small, upcast a second reduce dimension too
-        if self.first_reduce < (self.shape_len-self.upcasted) and s <= 3 and self.full_unupcasted_shape[-1] <= 3: self.shift_reduce(len(self.full_unupcasted_shape) - 1, suggestion)
+        if self.first_reduce < (self.shape_len-self.upcasted) and s <= 3 and self.full_unupcasted_shape[-1] <= 3: self.shift_reduce(suggestion)
       else:
         for splits in [4]:
           if self.full_unupcasted_shape[-1]%splits == 0:
-            self.shift_reduce(len(self.full_unupcasted_shape) - 1, suggestion, amount=splits)
+            self.shift_reduce(suggestion, amount=splits)
             break
 
     # if nothing at all is upcasted and it's easy to, do an upcast
