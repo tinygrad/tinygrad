@@ -133,7 +133,8 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
 
   if getenv("KOPT") in [2, 3] and global_db is None:
     import shelve
-    global_db = shelve.open("/tmp/kopt_cache")
+    KOPT_CACHE_PATH = getenv("KOPT_CACHE", "/tmp/kopt_cache")
+    global_db = shelve.open(KOPT_CACHE_PATH)
 
   if global_db is not None and skey in global_db:
     choice = global_db[skey]
