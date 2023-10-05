@@ -17,7 +17,7 @@ setup(name='tinygrad',
       packages = ['tinygrad', 'tinygrad.codegen', 'tinygrad.nn', 'tinygrad.renderer', 'tinygrad.runtime', 'tinygrad.shape'],
       package_data = {
         'tinygrad': ['py.typed'],
-      }
+      },
       classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
