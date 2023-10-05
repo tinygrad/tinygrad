@@ -1,7 +1,6 @@
+import time, functools, multiprocessing as mp, traceback
 from typing import Callable
-import time
-import functools
-import multiprocessing as mp
+
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.helpers import DEBUG, prod, getenv, GlobalCounters, ansilen
 
@@ -27,72 +26,53 @@ def kernel_optimize_opts(k:Linearizer, suggestion):
   # nevergrad parameters, default parameter choice
   return [ng.p.TransitionChoice(opt) for opt in opts], [opt[0] for opt in opts]
 
+def catch_exception(f, on_fail=None):
+  @functools.wraps(f)
+  def inner(*args, **kwargs):
+    try:
+      return f(*args, **kwargs)
+    except Exception:
+      if DEBUG >= 3: traceback.print_exc()
+      return on_fail
+  return inner
 
-@functools.lru_cache
 def compile_kernel(x, create_k, to_prg):
-  try:
-    k = create_k()
-    k.process()
-    if DEBUG >= 3: print(f"Shape: {k.full_shape}; Applying opt: {list(y for y in x if y[1] != 1)}")
-    k.apply_auto_opt(x)
-    k.linearize()
-    assert len(k.uops) < 2 ** 12, f"too many uops: {len(k.uops)}"  # device target compiler will take significantly longer than Linearizer
-    prg = to_prg(k)
-    return k.display_name, prg
-  except Exception:
-    if DEBUG >= 3:
-      import traceback
-      traceback.print_exc()
-    return None
+  k = create_k()
+  k.process()
+  if DEBUG >= 2: print(f"Shape: {k.full_shape}; Applying opt: {list(y for y in x if y[1] != 1)}")
+  k.apply_auto_opt(x)
+  k.linearize()
+  assert len(k.uops) < 2 ** 12, f"too many uops: {len(k.uops)}"  # device target compiler will take significantly longer than Linearizer
+  prg = to_prg(k)
+  return k.display_name, prg
 
+def run_and_time(prg, baseline, bufs):
+  first_tm = prg.exec(bufs, force_wait=True, optimizing=True)
+  if baseline*5 < first_tm*1000: return first_tm*1000  # very slow
+  return min([first_tm]+[prg.exec(bufs, force_wait=True, optimizing=True) for _ in range(10)])*1000
 
 def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, baseline, bufs, suggestion):
   import nevergrad as ng
 
-  def cheap(x):
-    try:
-      compile_kernel(x, create_k, to_prg)
-      return True
-    except Exception:
-      if DEBUG >= 3:
-        import traceback
-        traceback.print_exc()
-      return False
-  def run_and_time(prg):
-    if prg is None:
-      return None
-    try:
-      first_tm = prg.exec(bufs, force_wait=True, optimizing=True)
-      if baseline*5 < first_tm*1000: return first_tm*1000  # very slow
-      tm = min([first_tm]+[prg.exec(bufs, force_wait=True, optimizing=True) for _ in range(10)])*1000
-      return tm
-    except Exception:
-      if DEBUG >= 3:
-        import traceback
-        traceback.print_exc()
-      return None
+  def cheap(x): return catch_exception(compile_kernel)(x, create_k, to_prg) is not None
+
   opts, default_opt = kernel_optimize_opts(k, suggestion)
   if not opts: return "BASELINE"
   search_space = prod([len(x.choices) for x in opts])
   st = time.perf_counter()
-  budget = getenv("BUDGET", 200)
-  num_workers = getenv("KOPT_WORKERS", 16)
+  budget, num_workers = getenv("BUDGET", 200), getenv("KOPT_WORKERS", 16)
   optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, budget), num_workers=num_workers)
-  bar = ng.callbacks.ProgressBar()
-  optimizer.register_callback("tell", bar)
+  optimizer.register_callback("tell", (bar := ng.callbacks.ProgressBar()))
   if suggestion is not None: optimizer.suggest(tuple([(i, s, typ) for (typ, i), s in ({(typ, i): s for i,s,typ in default_opt} | suggestion).items()]))  # maintain ordering from default_opt
 
-  if num_workers == 1:
+  if num_workers == 0:
     optimizer.parametrization.register_cheap_constraint(cheap)
-    recommendation = optimizer.minimize(lambda x: run_and_time(compile_kernel(x, create_k, to_prg)[1]) or 10_000)
+    recommendation = optimizer.minimize(catch_exception(lambda x: run_and_time(compile_kernel(x, create_k, to_prg)[1], baseline, bufs), 10_000))
   else:
     from extra.helpers import _CloudpickleFunctionWrapper
-    best = 10_000
-    best_ran = 0
-    best_name = ""
-    ran = 0
+    best, best_ran, best_name = 10_000, 0, ""
+    q, ran = [], 0
     with mp.Pool(num_workers) as pool:
-      q = []
       while optimizer.num_tell < optimizer.budget:
         while len(q) < num_workers and optimizer.num_ask < optimizer.budget:
           ask = optimizer.ask()
@@ -100,22 +80,16 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
         while len(q) > num_workers-1 or (optimizer.num_ask == optimizer.budget and q):
           ask, prg = q.pop(0)
           try:
-            prg = prg.get(timeout=5)
-          except mp.TimeoutError:
-            prg = None
-          if prg is None: optimizer.tell(ask, 10_000, constraint_violation=1.0)
+            name, prg = prg.get(timeout=5)
+            tm = run_and_time(prg, baseline, bufs)
+          except Exception:
+            if DEBUG >= 3: traceback.print_exc()
+            optimizer.tell(ask, 10_000, constraint_violation=1.0)
           else:
-            name, prg = prg
-            tm = run_and_time(prg)
-            if tm is None: optimizer.tell(ask, 10_000, constraint_violation=1.0)
-            else:
-              optimizer.tell(ask, tm)
-              ran += 1
-              if tm < best:
-                best = tm
-                best_ran = ran
-                best_name = name
-              bar._progress_bar.set_description(f"{baseline:7.3f}/{best:7.3f} ({baseline/best*100:4.0f}%) @ {best_ran:4}/{ran:4} - {best_name+' '*(37-ansilen(best_name))}")
+            optimizer.tell(ask, tm)
+            ran += 1
+            if tm < best: best, best_ran, best_name = tm, ran, name
+            bar._progress_bar.set_description(f"{baseline:7.3f}/{best:7.3f} ({baseline / best * 100:4.0f}%) @ {best_ran:4}/{ran:4} - {best_name + ' ' * (37 - ansilen(best_name))}")
     recommendation = optimizer.provide_recommendation()
 
   et = time.perf_counter() - st
@@ -138,7 +112,7 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
 
   if global_db is not None and skey in global_db:
     choice = global_db[skey]
-    if DEBUG >= 1: print(f"Shape: {k.full_shape}; from kopt_cache: {list(y for y in choice if y[1] != 1) if not isinstance(choice, str) else choice}")
+    if DEBUG >= 3: print(f"Shape: {k.full_shape}; from kopt_cache: {list(y for y in choice if y[1] != 1) if not isinstance(choice, str) else choice}")
   elif k.has_variable_shape() or getenv("KOPT") == 3:
     # don't optimize variable shapes or if KOPT=3
     choice = "BASELINE"
