@@ -312,5 +312,15 @@ class TestSchedule(unittest.TestCase):
     out = bb(x)
     check_schedule(out, 4)
 
+  def test_contiguous_while_contiguous(self):
+    x = Tensor.empty(1, 64, 32, 32)
+    out = x.contiguous()
+    check_schedule(out, 1, filter_loadops=False)
+
+  def test_contiguous_while_not_contiguous(self):
+    x = Tensor.empty(1, 64, 32, 32)
+    out = x.permute(0,2,3,1).contiguous()
+    check_schedule(out, 2, filter_loadops=False)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
