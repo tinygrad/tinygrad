@@ -92,7 +92,7 @@ def train_cifar():
       'label_smoothing':    0.20,
       'momentum':           0.85,
       'percent_start':      0.23,
-      'loss_scale_scaler':  1/32,   # (range: ~1/512 - 16+, 1/128 w/ FP16)
+      'loss_scale_scaler':  1./128   # (range: ~1/512 - 16+, 1/128 w/ FP16)
     },
     'net': {
         'kernel_size': 2,             # kernel size for the whitening layer
