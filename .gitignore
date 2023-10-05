@@ -20,7 +20,7 @@ recognize*
 disassemblers/applegpu
 disassemblers/cuda_ioctl_sniffer
 *.prof
-extra/datasets/cifar-10-python.tar.gz
+extra/datasets/cifar-10-*
 extra/datasets/librispeech/
 extra/datasets/imagenet/
 extra/datasets/kits19/

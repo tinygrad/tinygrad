@@ -1,4 +1,4 @@
-import random, gzip, tarfile, pickle
+import random, gzip, tarfile, pickle, shutil
 import numpy as np
 from pathlib import Path
 from tinygrad.tensor import Tensor
@@ -35,9 +35,15 @@ def fetch_cifar(shuffle=False):
     return X, Y
   fn = Path(__file__).parent.resolve() / "cifar-10-python.tar.gz"
   download_file('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz', fn)
-  tt = tarfile.open(fn, mode='r:gz')
-  db = [pickle.load(tt.extractfile(f'cifar-10-batches-py/data_batch_{i}'), encoding="bytes") for i in range(1,6)]
-  X_train, Y_train = _load_disk_tensor(50000, 10000, db, "cifar_train", shuffle=shuffle)
-  db = [pickle.load(tt.extractfile('cifar-10-batches-py/test_batch'), encoding="bytes")]
-  X_test, Y_test = _load_disk_tensor(10000, 10000, db, "cifar_test", shuffle=shuffle)
+  tar = fn.with_suffix('')
+  if fn.suffix == ".gz" and not tar.exists():
+    with gzip.open(fn, 'rb') as read_handle:
+      with open(tar, 'wb') as write_handle:
+        shutil.copyfileobj(read_handle, write_handle)
+  assert tar.exists() 
+  with tarfile.open(tar, mode='r:') as tt:
+    db = [pickle.load(tt.extractfile(f'cifar-10-batches-py/data_batch_{i}'), encoding="bytes") for i in range(1,6)]
+    X_train, Y_train = _load_disk_tensor(50000, 10000, db, "cifar_train", shuffle=shuffle)
+    db = [pickle.load(tt.extractfile('cifar-10-batches-py/test_batch'), encoding="bytes")]
+    X_test, Y_test = _load_disk_tensor(10000, 10000, db, "cifar_test", shuffle=shuffle)
   return X_train, Y_train, X_test, Y_test
