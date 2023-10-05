@@ -89,8 +89,7 @@ class View:
 
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
-    if all_int(self.shape) and all_int(new_shape):
-      assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
+    assert prod(self.shape) == prod(new_shape) if all_int(self.shape + new_shape) else True, f"can't reshape {self.shape=} -> {new_shape=}"
 
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)
