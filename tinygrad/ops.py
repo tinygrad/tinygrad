@@ -235,7 +235,6 @@ class Compiled:
 
     # all the rawbuffers
     rawbuffers = [output.realized] + [x.realized for x in inputs]
-    key = (ast, tuple(var_vals.keys())) if var_vals else ast  # TODO: remove var_vals so the key can just be the AST
 
     # compilation time
     def get_program():
@@ -243,13 +242,13 @@ class Compiled:
       k = Linearizer(ast, self.linearizer_opts, var_vals)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
       from tinygrad.codegen.search import kernel_optimize
-      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program, rawbuffers, key)
+      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program, rawbuffers, ast)
       elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
     if getenv("ENABLE_METHOD_CACHE", 1):
-      if key not in self.method_cache: self.method_cache[key] = get_program()
-      prg = self.method_cache[key]
+      if ast not in self.method_cache: self.method_cache[ast] = get_program()
+      prg = self.method_cache[ast]
     else:
       prg = get_program()
 
