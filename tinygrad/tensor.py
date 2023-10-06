@@ -5,7 +5,7 @@ from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set, cast
 
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int
 from tinygrad.lazy import LazyBuffer
@@ -61,17 +61,25 @@ class Tensor:
     self._ctx: Optional[Function] = None
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, (int, float)):
-      self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
-      return
+      data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
     elif data.__class__ is list:
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
       data = LazyBuffer.fromCPU(np.array(data, dtype=(dtype or Tensor.default_type).np))
     elif isinstance(data, np.ndarray):
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
-      data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
+      if data.shape == ():
+        data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, float(data))
+      else:
+        data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
     else: raise RuntimeError(f"can't create Tensor from {data}")
 
-    self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data.contiguous())
+    # data is a LazyBuffer, but it might be on the wrong device. back off a FROM if it's a double
+    if data.device != device:
+      if not data.realized and data.op.op == LoadOps.FROM and cast(LazyBuffer, data.op.src[0]).device == device:
+        data = cast(LazyBuffer, data.op.src[0])
+      else:
+        data = LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data.contiguous())
+    self.lazydata = data
 
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"

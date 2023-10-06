@@ -192,7 +192,7 @@ class LazyBuffer:
     return self.loadop(LoadOps.CONST, tuple(), dtypes.from_np(self.dtype.np), self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
 
   def contiguous(self:LazyBuffer) -> LazyBuffer:
-    if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
+    if not self.realized and self.op.op in LoadOps and self.op.op != LoadOps.CONST: return self  # all LoadOps are already contiguous (except CONST)
     if self.st.contiguous and self.st.size() == self.base.st.size() and not self.is_unrealized_const():
       # this will turn into nothing, it's based and a copy
       # TODO: based lazybuffers shouldn't take dtype or var_vals, same issue in movementops
