@@ -333,7 +333,7 @@ class OptimizedKernel(Kernel):
     if self.opts.has_local and self.opts.has_shared and all(isinstance(s, int) for s in self.sts[0].shape[:self.first_reduce]) and not self.float4_axis(0):
       # are we grouping? (requires local shape support)
       if self.first_reduce + 1 <= self.shape_len and isinstance(self.full_shape[self.first_reduce], int):
-        divisors = [d for d in range(1, min(257, self.full_shape[self.first_reduce] + 1)) if self.full_shape[self.first_reduce] % d == 0]
+        divisors = [d for d in range(3, min(257, self.full_shape[self.first_reduce])) if self.full_shape[self.first_reduce] % d == 0]
         suitable_divisors = [d for d in divisors if self.full_shape[self.first_reduce] // d <= prod(self.sts[0].shape[:self.first_reduce]) // 4]
         if divisors and (sz := (suitable_divisors[0] if suitable_divisors and prod(self.sts[0].shape[:self.first_reduce]) > 512 else divisors[-1])) and sz > 1:
           self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce+len(self.group_for_reduce))
