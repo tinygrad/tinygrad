@@ -36,7 +36,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
-      run: python -m mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
+      run: python -m mypy
     - name: Install SLOCCount
       run: sudo apt install sloccount
     - name: Check <5000 lines
