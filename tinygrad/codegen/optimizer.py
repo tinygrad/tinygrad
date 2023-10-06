@@ -336,7 +336,7 @@ class OptimizedKernel(Kernel):
       # - The decision depends on the desired number of elements to be retained in the reduction loop.
       # - As the global dimensions increase, a larger reduction loop becomes acceptable.
       if self.first_reduce + 1 <= self.shape_len and isinstance(self.full_shape[self.first_reduce], int):
-        divisors = [d for d in range(1, min(257, self.full_shape[self.first_reduce])) if self.full_shape[self.first_reduce] % d == 0] # type: ignore
+        divisors = [d for d in range(2, min(257, self.full_shape[self.first_reduce])) if self.full_shape[self.first_reduce] % d == 0] # type: ignore
         divisors = [d for d in divisors if (self.full_shape[self.first_reduce] // d) % 4 == 0] if self.bufs[0].dtype.name.startswith('image') else divisors # images need a unit stride axis.
         suitable_divisors = [d for d in divisors if self.full_shape[self.first_reduce] // d <= prod(self.full_shape[:self.first_reduce]) // 4]
         if divisors and (sz := (suitable_divisors[0] if suitable_divisors and prod(self.full_shape[:self.first_reduce]) > 512 else divisors[-1])):
