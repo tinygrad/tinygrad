@@ -246,11 +246,9 @@ class Compiled:
       elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
-    if getenv("ENABLE_METHOD_CACHE", 1):
-      if ast not in self.method_cache: self.method_cache[ast] = get_program()
-      prg = self.method_cache[ast]
-    else:
-      prg = get_program()
+    # always use the method cache now
+    if ast not in self.method_cache: self.method_cache[ast] = get_program()
+    prg = self.method_cache[ast]
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
