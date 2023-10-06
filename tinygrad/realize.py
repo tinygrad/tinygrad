@@ -69,10 +69,12 @@ def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]
 
 def _realize_empty(buffer: LazyBuffer) -> None:
   assert all_int(buffer.shape), "does not support symbolic shape"
+  if DEBUG >= 2: print(f"***     empty {buffer.device}                              shape {str(buffer.shape):23s} dtype {buffer.dtype}")
   buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
 
 def _realize_rand(buffer: LazyBuffer) -> None:
   assert all_int(buffer.shape), "does not support symbolic shape"
+  if DEBUG >= 2: print(f"***      rand {buffer.device}                              shape {str(buffer.shape):23s} dtype {buffer.dtype}")
   rng = np.random.default_rng(buffer.op.arg)
   buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args())
 
@@ -96,6 +98,7 @@ def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
 # *** n op LoadOps ***
 
 def _realize_custom(buffer: LazyBuffer, *inputs: LazyBuffer) -> None:
+  if DEBUG >= 2: print(f"***    custom {buffer.device}                              shape {str(buffer.shape):23s} dtype {buffer.dtype}")
   buffer.realized = buffer.op.arg(buffer, *inputs)
 
 LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {

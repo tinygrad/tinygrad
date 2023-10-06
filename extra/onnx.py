@@ -94,9 +94,6 @@ def get_run_onnx(onnx_model: ModelProto):
       print(inp.name, inp.dims, inp.data_type, len(inp.raw_data))
       print(inp)
       raise Exception("no data")
-    if DEBUG >= 3:
-      print("realize", inp.name)
-    tensors[inp.name].realize()
 
   # preparse the attributes
   attribute_dict = {}
@@ -129,13 +126,6 @@ def get_run_onnx(onnx_model: ModelProto):
         if shape: # if only input_tensor is not variable type
           input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else (1, *[i.shape for i in input_tensors[inp.name]])
           assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
-        for _,v in input_tensors.items():
-          if isinstance(v, Tensor):
-            v.realize()
-          elif isinstance(v, list):
-            for v_ in v: v_.realize()
-          else:
-            raise Exception(f"unknown input type: {type(v)}")
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
 
