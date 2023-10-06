@@ -149,7 +149,7 @@ class Transformer:
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
-    if seqlen == 1 and JIT:
+    if seqlen == 1 and start_pos > 0 and JIT:
       pos = Variable("pos", 1, 1024)
       # get only the part of freqs_cis that we are using.
       freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (pos, pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
