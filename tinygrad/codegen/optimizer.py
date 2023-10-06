@@ -340,7 +340,7 @@ class OptimizedKernel(Kernel):
       if self.first_reduce + 1 <= self.shape_len and isinstance(self.full_shape[self.first_reduce], int):
         divisors = [d for d in range(1, min(257, self.full_shape[self.first_reduce])) if self.full_shape[self.first_reduce] % d == 0] # type: ignore
         divisors = [d for d in divisors if d % 4 == 0 and (self.full_shape[self.first_reduce] // d) % 4 == 0] if has_images else divisors # images need a unit stride axis (see required_optimizations()).
-        suitable_divisors = [d for d in divisors if self.full_shape[self.first_reduce] // d <= prod(self.full_shape[:self.first_reduce]) // 4]
+        suitable_divisors = [d for d in divisors if self.full_shape[self.first_reduce] // d <= prod(self.full_shape[:self.first_reduce]) // 8]
         if divisors and (sz := (suitable_divisors[0] if suitable_divisors and prod(self.full_shape[:self.first_reduce]) > 512 else divisors[-1])) and sz > 1:
           self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce+len(self.group_for_reduce))
           self.group_for_reduce.append(sz)
