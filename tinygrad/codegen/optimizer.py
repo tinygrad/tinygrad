@@ -333,11 +333,13 @@ class OptimizedKernel(Kernel):
     if self.opts.has_local and self.opts.has_shared and all(isinstance(s, int) for s in self.sts[0].shape[:self.first_reduce]) and not self.float4_axis(0):
       # are we grouping? (requires local shape support).
       # Determining the number of elements to group:
-      # - The decision depends on the desired number of elements to be retained in the reduction loop.
-      # - As the global dimensions increase, a larger reduction loop becomes acceptable.
+      # - The grouping is influenced by the number of elements we aim to retain in the reduction loop.
+      # - As global dimensions increase, larger reduction loops are acceptable because the GPU remains occupied and can run threads longer.
+      # - For small global dimensions (<=512), maximize the elements pulled into local memory to ensure GPU utilization.
+      has_images = any(self.bufs[buf_index].dtype.__class__ is ImageDType for buf_index,_ in enumerate(self.bufs))
       if self.first_reduce + 1 <= self.shape_len and isinstance(self.full_shape[self.first_reduce], int):
         divisors = [d for d in range(1, min(257, self.full_shape[self.first_reduce])) if self.full_shape[self.first_reduce] % d == 0] # type: ignore
-        divisors = [d for d in divisors if d % 4 == 0 and (self.full_shape[self.first_reduce] // d) % 4 == 0] if self.bufs[0].dtype.name.startswith('image') else divisors # images need a unit stride axis.
+        divisors = [d for d in divisors if d % 4 == 0 and (self.full_shape[self.first_reduce] // d) % 4 == 0] if has_images else divisors # images need a unit stride axis (see required_optimizations()).
         suitable_divisors = [d for d in divisors if self.full_shape[self.first_reduce] // d <= prod(self.full_shape[:self.first_reduce]) // 4]
         if divisors and (sz := (suitable_divisors[0] if suitable_divisors and prod(self.full_shape[:self.first_reduce]) > 512 else divisors[-1])) and sz > 1:
           self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce+len(self.group_for_reduce))
