@@ -7,6 +7,8 @@ directory = Path(__file__).resolve().parent
 with open(directory / 'README.md', encoding='utf-8') as f:
   long_description = f.read()
 
+PACKAGES = ['tinygrad', 'tinygrad.codegen', 'tinygrad.nn', 'tinygrad.renderer', 'tinygrad.runtime', 'tinygrad.shape']
+
 setup(name='tinygrad',
       version='0.7.0',
       description='You like pytorch? You like micrograd? You love tinygrad! <3',
@@ -14,10 +16,8 @@ setup(name='tinygrad',
       license='MIT',
       long_description=long_description,
       long_description_content_type='text/markdown',
-      packages = ['tinygrad', 'tinygrad.codegen', 'tinygrad.nn', 'tinygrad.renderer', 'tinygrad.runtime', 'tinygrad.shape'],
-      package_data = {
-        'tinygrad': ['py.typed'],
-      },
+      packages=PACKAGES,
+      package_data={package: ['py.typed'] for package in PACKAGES},
       classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
