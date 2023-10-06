@@ -225,7 +225,7 @@ def _tree(lazydata, prefix=""):
 def print_tree(tensor:Union[Tensor, LazyBuffer]):print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(tensor if not isinstance(tensor, Tensor) else tensor.lazydata))]))
 
 # pip install pandas plotly
-def profile_kernels(mdl: Callable, x: Any, metric: Union[Literal["time"], Literal["gflops"], Literal["mem"]], **kwargs):
+def profile_kernels(mdl: Callable, x: Any, metric: Union[Literal["time"], Literal["gflops"], Literal["mem"]]="time", **kwargs):
   assert isinstance(Device[Device.DEFAULT], Compiled), "only works with compiled backends"
   import pandas as pd
   import plotly.express as px
