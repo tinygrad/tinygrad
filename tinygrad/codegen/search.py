@@ -41,9 +41,18 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
   if not opts: return "BASELINE"
   search_space = prod([len(x.choices) for x in opts])
   st = time.perf_counter()
-  budget = getenv("BUDGET", 200)
-  optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, budget))
-  recommendation = optimizer.minimize(opt)
+  launch_budget = min(search_space, getenv("BUDGET", 200))
+  optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=launch_budget)
+  asked_set = set()
+  for _ in range(launch_budget):
+    for _ in range(launch_budget * 10): # Asking 10x of budget, can't come up with something new - exit.
+      x = optimizer.ask()
+      if tuple(x.args) not in asked_set: break
+    if tuple(x.args) in asked_set: break
+    asked_set.add(tuple(x.args))
+    res = opt(*x.args, **x.kwargs)
+    optimizer.tell(x, res)
+  recommendation = optimizer.recommend()
   et = time.perf_counter() - st
   if DEBUG >= 1: print(f"optimizer({et:6.2f} s to search) space {search_space:8d} with tm {recommendation.loss:5.2f} ms vs baseline {baseline:5.2f} ms, a {baseline/recommendation.loss:5.2f}x gain : {k.colored_shape()}")
   return recommendation.value if recommendation.loss < baseline else "BASELINE"
