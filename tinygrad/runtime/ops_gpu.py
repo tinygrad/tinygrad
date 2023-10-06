@@ -21,7 +21,7 @@ class CLAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs):
     if isinstance(dtype, ImageDType):
       # NOTE: the memory is a bit off here due to padding, it's buf.row_pitch * buf.height * 4 * dtype.itemsize
-      #assert size == prod(dtype.shape), f"image size mismatch {size} != {dtype.shape}"
+      assert size == prod(dtype.shape), f"image size mismatch {size} != {dtype.shape}"
       fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
       buf = cl.Image(CL.cl_ctxs[int(device)], cl.mem_flags.READ_WRITE, fmt, shape=(dtype.shape[1], dtype.shape[0]))
     else:
