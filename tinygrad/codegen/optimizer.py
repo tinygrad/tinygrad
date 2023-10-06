@@ -3,8 +3,8 @@ import itertools, math, os
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp, BufferOps
 from tinygrad.codegen.kernel import Kernel, LocalBuffer, LinearizerOptions
-from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View
+from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
+from tinygrad.shape.view import View, strides_for_shape
 
 class OptimizedKernel(Kernel):
   def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None, var_vals=None):
@@ -62,6 +62,19 @@ class OptimizedKernel(Kernel):
     if self.shape_len == 0: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
 
+    # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
+    if self.bufs[0].dtype.name.startswith('image'):
+      base_shape = self.bufs[0].dtype.shape
+      if shape_idx_groups := get_contraction(self.output_shape, base_shape):
+        special_strides = []
+        for i,g in enumerate(shape_idx_groups):
+          shape_piece = tuple(self.output_shape[x] for x in g)
+          assert prod(shape_piece) == base_shape[i], "get_contraction was wrong?"
+          special_strides += strides_for_shape(shape_piece)
+        # adding the fake image shape
+        shapes.append(self.output_shape)
+        strides.append(special_strides)
+
     # merge dimensions if we can, multi get_shape_strides
     # TODO: does this always preserve the reduce dimension, NO
     # TODO: move this into shapetracker, with tests!
@@ -78,7 +91,7 @@ class OptimizedKernel(Kernel):
         else: rets[j].append((shapes[j][i], strides[j][i]))
 
     # do the reshapes
-    for i,x in enumerate(rets): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
+    for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
 
   # ******************** GPU simplifiers ********************
   def _limit_size(self, x: Tuple[int], max_size: List) -> Tuple[int, ...]:
@@ -353,14 +366,6 @@ class OptimizedKernel(Kernel):
 
     # simplify (sets first_reduce)
     self.simplify_ones()
-
-    # use more opencl indexing if the output buffer is an image and we have room
-    if self.bufs[0].dtype.name.startswith('image') and self.first_reduce+len(self.group_for_reduce) < 3:
-      base_shape = self.bufs[0].dtype.shape
-      if (base_shape[0]*base_shape[1]) % self.sts[0].shape[0] == 0 and self.sts[0].shape[0]//base_shape[0] != 0:
-        if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
-        self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
-        self.simplify_ones()
 
     # no more opt if we are grouping
     if self.group_for_reduce: return
