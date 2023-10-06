@@ -1,7 +1,7 @@
 import sys
 import onnx
 import io
-from extra.utils import fetch
+from extra.utils import fetch, print_tree
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, partition, GlobalCounters, Context
@@ -60,10 +60,16 @@ def lb_to_numbers(schedule):
 
 if __name__ == "__main__":
   schedule, schedule_independent = get_schedule(sys.argv[1])
+
+  schedule_no_empty = [x for x in schedule if x[0].op not in LoadOps]
+  print(schedule_no_empty[11][0])
+  exit(0)
+
   #for op,out,buffers in lb_to_numbers(schedule): print(out,buffers)
+  #exit(0)
 
   run_schedule(schedule_independent)
   print("**** running real kernels ****")
-  GlobalCounters.reset()
   with Context(DEBUG=2):
+    GlobalCounters.reset()
     run_schedule(schedule)
