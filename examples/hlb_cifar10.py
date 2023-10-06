@@ -77,6 +77,7 @@ class SpeedyResNet:
 
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
+    # TODO: remove the pad but instead let the kernel optimizer itself
     forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
     return forward(x) if training else forward(x)*0.5 + forward(x[..., ::-1])*0.5
 
