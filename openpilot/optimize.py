@@ -25,8 +25,11 @@ if __name__ == "__main__":
       # global reshape
       base_shape = lin.info.dtype.shape
       lin.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
+      # upcast 4
+      lin.shift_to(1, 4)
+      lin.upcast()
       # local reshape
-      real_local = [8,4,6]
+      real_local = [8 if CLProgram.max_work_group_size() == 256 else 16,4,6]
       lin.reshape_and_permute(lambda x: flatten([(x[i]//l,l) for i,l in enumerate(real_local)])+list(x[3:]), [0,2,4,1,3,5] + [x+3 for x in range(3, lin.shape_len)])
       lin.local_dims += 3
     lin.linearize()
@@ -44,5 +47,4 @@ if __name__ == "__main__":
   prg = CLProgram(lin.function_name, fxn)
   tm = min([prg(lin.global_size, lin.local_size, *[bufs[i] for i in range(len(bufs))], wait=True) for _ in range(20)])
   print(f"{lin.info.flops*1e-9/tm:8.2f} GFLOPS")
-
 
