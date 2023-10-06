@@ -47,7 +47,6 @@ KOPT                | [1-2]      | kernel optimization, 1 turns it on, 2 caches 
 BUDGET              | [#]        | kernel optimization search budget
 GRAPH               | [1]        | create a graph of all operations (requires graphviz)
 GRAPHPATH           | [/path/to] | where to put the generated graph
-PRUNEGRAPH          | [1]        | prune MovementOps and LoadOps from the graph
 PRINT_PRG           | [1]        | print program code
 IMAGE               | [1]        | enable 2d specific optimizations
 FLOAT16             | [1]        | use float16 for images instead of float32
