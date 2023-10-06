@@ -1,7 +1,6 @@
 import unittest
-from extra.export_model import export_model
+from extra.export_model import export_model, EXPORT_SUPPORTED_DEVICE
 from tinygrad.tensor import Tensor, Device
-from tinygrad.jit import JIT_SUPPORTED_DEVICE
 import json
 
 class MockMultiInputModel:
@@ -9,7 +8,7 @@ class MockMultiInputModel:
     return x1 + x2 + x3
 
 # TODO: move compile_efficientnet tests here
-@unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE, f"no JIT on {Device.DEFAULT}")
+@unittest.skipUnless(Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, f"Model export is not supported on {Device.DEFAULT}")
 class TextModelExport(unittest.TestCase):
   def test_multi_input_model_export(self):
     model = MockMultiInputModel()
