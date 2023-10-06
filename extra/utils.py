@@ -6,11 +6,10 @@ import tempfile, platform
 from pathlib import Path
 from collections import defaultdict
 from typing import Union, Callable, Literal, Any
-from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.codegen.linearizer import Linearizer
 
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
-from tinygrad.ops import GlobalCounters, LoadOps
+from tinygrad.ops import Compiled, GlobalCounters, LoadOps
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device
@@ -226,7 +225,8 @@ def _tree(lazydata, prefix=""):
 def print_tree(tensor:Union[Tensor, LazyBuffer]):print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(tensor if not isinstance(tensor, Tensor) else tensor.lazydata))]))
 
 # pip install pandas plotly
-def profile_kernels(mdl: Callable, x: Any, metric: Union[Literal["time"], Literal["gflops"], Literal["mem"]], buffer, program, renderer, group_ops=True, **kwargs):
+def profile_kernels(mdl: Callable, x: Any, metric: Union[Literal["time"], Literal["gflops"], Literal["mem"]], **kwargs):
+  assert isinstance(Device[Device.DEFAULT], Compiled), "only works with compiled backends"
   import pandas as pd
   import plotly.express as px
   seen = set()
@@ -237,21 +237,19 @@ def profile_kernels(mdl: Callable, x: Any, metric: Union[Literal["time"], Litera
 
   stats = []
   for i,(op,out,inp) in enumerate(sched):
-    lin = Linearizer(op, LinearizerOptions(device="METAL"))
-    lin.hand_coded_optimizations(use_tensor_cores=1)
-    lin.linearize()
-    code = renderer(lin.function_name, lin.uops)
-    rout = buffer(out.st.size(), out.dtype)
-    rin = [buffer(x.st.size(), x.dtype) for x in inp]
-    prg = program(lin.function_name, code)
-    tm = prg(lin.global_size, lin.local_size, rout, *rin, wait=True)
+    lin = Linearizer(op, Device[Device.DEFAULT].linearizer_opts)
+    lin.hand_coded_optimizations()
+    rout = Device[Device.DEFAULT].buffer(out.st.size(), out.dtype)
+    rin = [Device[Device.DEFAULT].buffer(x.st.size(), x.dtype) for x in inp]
+    prg = Device[Device.DEFAULT].to_program(lin)
+    tm = prg.exec([rout] + rin, force_wait=True)
 
-    data = (re.sub(r'\x1b\[[0-9;]*m', '', lin.display_name), lin.global_size, lin.local_size, tm*1000, lin.info.flops*1e-9/tm,  GlobalCounters.mem_used/1e9, code, op.op)
+    data = (re.sub(r'\x1b\[[0-9;]*m', '', lin.display_name), lin.global_size, lin.local_size, tm*1000, lin.info.flops*1e-9/tm,  GlobalCounters.mem_used/1e9, prg.prg, op.op)
     stats.append(data)
     if DEBUG >= 1: print(f"kernel {i:2d} {data[0]} {str(data[1]):18s} {str(data[2]):12s} takes {data[3]:7.2f} ms, {data[4]:6.0f} GFLOPS mem {data[5]:5.2f} GB")
 
   df = pd.DataFrame(stats, columns=["kernel", "global_size", "local_size", "time", "gflops", "mem", "code", "op"])
-  fig = px.bar(df, x=df.index, color="op" if group_ops else None, y=metric, title=f"Kernels for {mdl.__class__.__name__}", color_discrete_sequence=["#6D67E4","#46C2CB","#F2F7A1", "#98f5e1","#f1c0e8","#a3c4f3","#fbf8cc","#cfbaf0","#90dbf4","#ffcfd2","#8eecf5","#b9fbc0"], hover_data=["kernel", metric])
+  fig = px.bar(df, x=df.index, color="op", y=metric, title=f"Kernels for {mdl.__class__.__name__} on device {Device.DEFAULT}", color_discrete_sequence=["#6D67E4","#46C2CB","#F2F7A1", "#98f5e1","#f1c0e8","#a3c4f3","#fbf8cc","#cfbaf0","#90dbf4","#ffcfd2","#8eecf5","#b9fbc0"], hover_data=["kernel", metric])
   fig.update_layout(plot_bgcolor="black", paper_bgcolor="black")
   fig.update_layout(xaxis_title="Kernel Index",yaxis_title=metric,font=dict(color="white"),legend_title="Operation")
   fig.update_xaxes(showline=True, linewidth=1, linecolor="white")
