@@ -44,17 +44,11 @@ def get_schedule(fn:str):
   schedule, schedule_independent = partition(schedule, lambda x: x[1] in depends)
   print(f"{len(schedule)} schedule items depend on the input, {len(schedule_independent)} don't")
 
-  # confirm no loadops in the schedule
+  # confirm no loadops in the (non independent) schedule except for the ones that load the input buffers
   assert all(op.op not in LoadOps or out in input_lb for op,out,_ in schedule), "has loadops, can't compile to Thneed"
+  return schedule, schedule_independent
 
-  # run the independent schedule
-  #run_schedule(schedule_independent)
-  return schedule
-
-if __name__ == "__main__":
-  schedule = get_schedule(sys.argv[1])
-  #exit(0)
-
+def lb_to_numbers(schedule):
   nschedule = []
   nlb = {}
   for op,out,buffers in schedule:
@@ -62,13 +56,14 @@ if __name__ == "__main__":
       if lb not in nlb:
         nlb[lb] = len(nlb)
     nschedule.append((op, nlb[out], tuple(nlb[x] for x in buffers)))
+  return nschedule
 
-  for op,out,buffers in nschedule:
-    print(out,buffers)
+if __name__ == "__main__":
+  schedule, schedule_independent = get_schedule(sys.argv[1])
+  #for op,out,buffers in lb_to_numbers(schedule): print(out,buffers)
 
-  """
+  run_schedule(schedule_independent)
   print("**** running real kernels ****")
   GlobalCounters.reset()
   with Context(DEBUG=2):
     run_schedule(schedule)
-  """
