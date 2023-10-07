@@ -8,6 +8,7 @@ from tinygrad.codegen.linearizer import UOps, UOp
 
 def _uops_to_prg(uops):
   src = Device[Device.DEFAULT].renderer("test", uops)
+  print(src, Device.DEFAULT, Device[Device.DEFAULT].renderer)
   return ASTRunner("test", src[0] if getenv("TRITON") else src, [1], [1], runtime_args=src[2] if getenv("TRITON") else {}).build(Device[Device.DEFAULT].runtime)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
