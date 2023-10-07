@@ -14,7 +14,7 @@ from tinygrad.ops import Device
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
-from tinygrad.helpers import colored, getenv, CI
+from tinygrad.helpers import colored, getenv, CI, dtypes
 from tinygrad.jit import TinyJit
 import pytest
 
@@ -22,6 +22,7 @@ pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exc
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 
+torch_dt = torch.float16 if getenv("HALF", 0) else torch.float32
 torch_device = torch.device('mps' if getenv("MPS", 0) else ('cuda' if getenv("TORCHCUDA", 0) else 'cpu'))
 if str(torch_device) == "mps":
   import torch.mps
@@ -78,8 +79,8 @@ def helper_test_speed(f1, *args):
 
 def helper_test_generic_square(name, N, f1, f2, onearg=False):
   torch.manual_seed(0)
-  torch_a = (torch.rand(N, N) - 0.5).to(torch_device)
-  torch_b = (torch.rand(N, N) - 0.5).to(torch_device) if not onearg else None
+  torch_a = (torch.rand(N, N, dtype=torch_dt) - 0.5).to(torch_device)
+  torch_b = (torch.rand(N, N, dtype=torch_dt) - 0.5).to(torch_device) if not onearg else None
 
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
@@ -88,9 +89,8 @@ def helper_test_generic_square(name, N, f1, f2, onearg=False):
 
 def helper_test_matvec(name, N, M):
   torch.manual_seed(0)
-  dt = torch.float32
-  torch_a = (torch.rand(N, dtype=dt) - 0.5).to(torch_device)
-  torch_b = (torch.rand(N, M, dtype=dt) - 0.5).to(torch_device)
+  torch_a = (torch.rand(N, dtype=torch_dt) - 0.5).to(torch_device)
+  torch_b = (torch.rand(N, M, dtype=torch_dt) - 0.5).to(torch_device)
 
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy())
@@ -112,8 +112,8 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
 
 def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_x):
   torch.manual_seed(0)
-  torch_dat = torch.rand(bs, in_chans, img_size_y, img_size_x).to(torch_device)
-  torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None).to(torch_device)
+  torch_dat = torch.rand(bs, in_chans, img_size_y, img_size_x, dtype=torch_dt).to(torch_device)
+  torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None, dtype=torch_dt).to(torch_device)
 
   tiny_dat = Tensor(torch_dat.cpu().numpy())
   tiny_conv = Conv2d(in_chans, out_chans, kernel_size, bias=None)
@@ -190,7 +190,7 @@ class TestSpeed(unittest.TestCase):
   def test_double_permute(self):
     N = 64
     torch.manual_seed(0)
-    torch_a = (torch.rand(N, N, N, N) - 0.5).to(torch_device)
+    torch_a = (torch.rand(N, N, N, N, dtype=torch_dt) - 0.5).to(torch_device)
     tiny_a = Tensor(torch_a.cpu().numpy())
     def f(a): return a.permute(1,0,3,2).contiguous()
     helper_test_generic(f"double_permute {tiny_a.shape}", f, (torch_a,), TinyJit(lambda a: f(a).realize()), (tiny_a,))
@@ -268,8 +268,8 @@ class TestSpeed(unittest.TestCase):
   def test_openpilot_conv2d(self):
     bs, in_chans, out_chans = 1,12,32
     torch.manual_seed(0)
-    torch_dat = torch.rand(bs, 64, 128, 12).to(torch_device)
-    torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None, padding=1).to(torch_device)
+    torch_dat = torch.rand(bs, 64, 128, 12, dtype=torch_dt).to(torch_device)
+    torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None, padding=1, dtype=torch_dt).to(torch_device)
 
     tiny_dat = Tensor(torch_dat.cpu().numpy())
     tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=1)

@@ -8,8 +8,8 @@ from tinygrad.helpers import prod, dtypes
 
 # *** first, we implement the atan2 op at the lowest level ***
 # `atan2_gpu` for GPUBuffers and `atan2_cpu` for CPUBuffers
-from tinygrad.lazy import LazyBuffer, create_lazybuffer, Device
-from tinygrad.ops import ASTRunner
+from tinygrad.lazy import LazyBuffer, create_lazybuffer
+from tinygrad.ops import ASTRunner, Device
 from tinygrad.shape.shapetracker import ShapeTracker
 import pytest
 

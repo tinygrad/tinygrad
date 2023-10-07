@@ -1,5 +1,6 @@
 from __future__ import annotations
 import time, importlib, inspect, functools, pathlib
+import numpy as np
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
@@ -11,8 +12,8 @@ from dataclasses import dataclass
 # NOTE: rdna3 only has RECIP and not DIV. DIV and POW are on the chopping block
 class UnaryOps(Enum): NOOP = auto(); EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto() # noqa: E702
-class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class TernaryOps(Enum): MULACC = auto(); WHERE = auto() # noqa: E702
+class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class BufferOps(Enum): MEM = auto(); CONST = auto() # noqa: E702
 # Ops below this line are not allowed in ASTs
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
@@ -55,7 +56,7 @@ class LazyOp:
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
-  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
+  def map_buffers(self, real_srcs: Mapping[Any, Union[LazyBuffer, LazyOp]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) if y not in real_srcs else real_srcs[y] for y in self.src]), self.arg)
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
@@ -66,14 +67,9 @@ class LazyOp:
   @property
   def st(self): raise NotImplementedError
   @property
-  def children(self): raise NotImplementedError
-  @property
-  def shape(self): raise NotImplementedError
-  @property
   def realized(self): raise NotImplementedError
   @property
-  def optype(self): raise NotImplementedError
-  def realize(self): raise NotImplementedError
+  def children(self): raise NotImplementedError
 
   # movement ops
   def reshape(self, _): raise NotImplementedError
@@ -113,9 +109,12 @@ class Interpreted:
     self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
-    if ast.op == BufferOps.MEM and BufferOps.MEM not in self.fxn_for_op:
-      assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
-      buf = self.to_underlying(inputs[ast.arg.idx-1])
+    if ast.op in BufferOps and ast.op not in self.fxn_for_op:
+      if ast.op == BufferOps.MEM:
+        assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
+        buf = self.to_underlying(inputs[ast.arg.idx-1].realized)
+      elif ast.op == BufferOps.CONST:
+        buf = self.to_underlying(self.buffer.fromCPU(np.array(ast.arg.val, dtype=ast.arg.dtype.np)))
       for mop,arg in ast.arg.st.to_movement_ops(): buf = self.fxn_for_op[mop](buf, arg)
       return self.from_underlying(buf)
     if TernaryOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
@@ -138,8 +137,6 @@ class Interpreted:
       return output.output_buffer
     return ret
 
-# --teenygrad--
-
 class FlopCounter:
   def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops, self._buf = *tup, self
   def consume_flops(self):
@@ -157,13 +154,18 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 
 # **************** for Compiled Buffers ****************
 
-from tinygrad.runtime.lib import RawBuffer, RawConst
+from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer
 
 class BasicBatchExecutor:
   def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): pass
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
     for prg, pargs, variables in jit_cache: prg(pargs, variables, jit=True)
+  def recalc_stat(self, jit_cache: List[Tuple[Any, Any, Any]]):
+    for prg, _, variables in jit_cache:
+      GlobalCounters.kernel_count += 1
+      GlobalCounters.global_ops += sym_infer(prg.op_estimate, variables)
+      GlobalCounters.global_mem += prg.mem_estimate
 
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
@@ -190,7 +192,7 @@ class ASTRunner:
     if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
     op_estimate = sym_infer(self.op_estimate, var_vals)
     if DEBUG >= 2:
-      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(33-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(global_size):18s} {str(local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(37-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(global_size):18s} {str(local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {self.mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
     GlobalCounters.kernel_count += 1
     GlobalCounters.global_ops += op_estimate
@@ -212,46 +214,46 @@ class Compiled:
                      display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime, self.batch_exec)
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
-    #if DEBUG >= 4:
-    #  from extra.utils import print_tree
-    #  print_tree(ast)
-
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
     output.realized = output.output_buffer
     if output.realized:
-      if output.realized.__class__ is RawConst: output.realized = None  # can't assign to RawConst
       for i,a in enumerate(inputs):
         # TODO: if this is contiguous it's fine
-        if a == output.realized:
+        if a.realized == output.realized:
           if any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
             output.realized = None
             break
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-    if not output.realized: output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
+    if not output.realized:
+      output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
     else:
       from tinygrad.jit import CacheCollector
       CacheCollector._mark_output_buffer(output.output_buffer)
 
-    from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(ast, self.linearizer_opts, var_vals)
+    # all the rawbuffers
+    rawbuffers = [output.realized] + [x.realized for x in inputs]
+    key = (ast, tuple(var_vals.keys())) if var_vals else ast  # TODO: remove var_vals so the key can just be the AST
 
     # compilation time
     def get_program():
+      from tinygrad.codegen.linearizer import Linearizer
+      k = Linearizer(ast, self.linearizer_opts, var_vals)
+      assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
       from tinygrad.codegen.search import kernel_optimize
-      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program, [output.realized]+inputs)
+      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program, rawbuffers, key)
       elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
-    if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
-      if k.key not in self.method_cache: self.method_cache[k.key] = get_program()
-      prg = self.method_cache[k.key]
+    if getenv("ENABLE_METHOD_CACHE", 1):
+      if key not in self.method_cache: self.method_cache[key] = get_program()
+      prg = self.method_cache[key]
     else:
       prg = get_program()
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
-    prg.exec([output.realized]+inputs, var_vals=var_vals)
+    prg.exec(rawbuffers, var_vals=var_vals)
     return output.realized
