@@ -99,7 +99,7 @@ class LazyBuffer:
   __deletable__ = ('op',)
   def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:Optional[LazyOp], dtype:DType, var_vals:Dict[Variable,int], src:Optional[RawBuffer]=None, base:Optional[LazyBuffer]=None):
     self.st: ShapeTracker = st
-    self._var_vals: Dict[Variable, int] = var_vals
+    self.var_vals: Dict[Variable, int] = var_vals
     self.device, self.shape, self.optype, self._dtype = device, self.st.shape, optype, dtype
     self._realized: Optional[RawBuffer] = src
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
@@ -135,12 +135,6 @@ class LazyBuffer:
   def dtype(self, val):
     assert self._base is None, "no setting dtype of based LazyBuffers"
     self._dtype = val
-  @property
-  def var_vals(self): return self.base._var_vals
-  @var_vals.setter
-  def var_vals(self, val):
-    assert self._base is None, "no setting var_vals of based LazyBuffers"
-    self._var_vals = val
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if hasattr(self, 'op') else self._realized} st={self.st}>"
   @property

@@ -1,5 +1,5 @@
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict
-import itertools
+import itertools #, functools, operator
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, ReduceOps, MemBuffer, BufferOps, Device, Compiled
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -53,6 +53,9 @@ class Kernel:
     self.opts = opts if opts else (cast(Compiled, Device[Device.DEFAULT]).linearizer_opts if isinstance(Device[Device.DEFAULT], Compiled) else LinearizerOptions())
     self.ast = ast
     self.var_vals = var_vals
+
+    #var_vals_ast = functools.reduce(operator.or_, [x.arg.st.var_vals() for x in ast.get_lazyops() if x.op in BufferOps])
+    #for x in var_vals_ast: assert x in var_vals, f"var_vals {x} missing from {var_vals}"
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
