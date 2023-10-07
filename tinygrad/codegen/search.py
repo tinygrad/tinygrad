@@ -2,6 +2,7 @@ from typing import Callable
 import time
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.helpers import DEBUG, prod, getenv
+from tinygrad.lazy import var_vals_from_ast
 
 def get_divisors(n, min_div = 1, max_div = 512):
   if min_div > 1: yield 1
@@ -28,9 +29,9 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
       k = create_k()
       k.apply_auto_opt(x)
       prg = to_prg(k)
-      first_tm = prg.exec(bufs, force_wait=True, optimizing=True)
+      first_tm = prg.exec(bufs, var_vals={k:k.min for k in var_vals_from_ast(k.ast)}, force_wait=True, optimizing=True)
       if baseline*5 < first_tm*1000: return first_tm*1000  # very slow
-      tm = min([first_tm]+[prg.exec(bufs, force_wait=True, optimizing=True) for _ in range(2)])*1000
+      tm = min([first_tm]+[prg.exec(bufs, var_vals={k:k.min for k in var_vals_from_ast(k.ast)}, force_wait=True, optimizing=True) for _ in range(2)])*1000
       return tm
     except Exception:
       if DEBUG >= 3:
@@ -70,7 +71,7 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
       k = create_k()
       k.hand_coded_optimizations()
       prg = to_prg(k)
-      return min([prg.exec(bufs, force_wait=True, optimizing=True) for _ in range(5)])*1000
+      return min([prg.exec(bufs, var_vals={k:k.min for k in var_vals_from_ast(k.ast)}, force_wait=True, optimizing=True) for _ in range(5)])*1000
     choice = kernel_optimize_search(k, create_k, to_prg, get_baseline(), bufs)
     if global_db is not None:
       global_db[skey] = choice

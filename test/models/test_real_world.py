@@ -4,10 +4,10 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
-from tinygrad.ops import GlobalCounters, LazyOp, LoadOps
-from tinygrad.ops import Device
+from tinygrad.ops import Device, GlobalCounters, LazyOp, LoadOps
 from tinygrad.helpers import CI, dtypes, getenv, prod
 from tinygrad.codegen.search import kernel_optimize_opts
+from tinygrad.lazy import var_vals_from_ast
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet
@@ -22,7 +22,7 @@ def kopt_search_hook(k, create_k, to_prg, baseline, bufs):
       k = create_k()
       k.apply_auto_opt(x)
       prg = to_prg(k)
-      first_tm = prg.exec(bufs, force_wait=True, optimizing=True)
+      first_tm = prg.exec(bufs, var_vals={k:k.min for k in var_vals_from_ast(k.ast)}, force_wait=True, optimizing=True)
       np.testing.assert_allclose(wanna_output, bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
       return first_tm
     except Exception:
