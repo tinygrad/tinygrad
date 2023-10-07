@@ -1,14 +1,12 @@
 from typing import List, Tuple, cast, Dict, Callable
 import numpy as np
 from tinygrad.ops import LazyOp, LoadOps, Device, UnaryOps, BufferOps, MemBuffer, get_lazyop_info
-from tinygrad.graph import log_schedule_item
+from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE, ImageDType, dtypes
 
 from tinygrad.runtime.lib import RawBufferMapped, RawBufferTransfer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
-
-P2P = getenv("P2P", 0)
 
 def fix_schedule_for_images(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]):
   # this is the fundamental fix, find unwritable or unreadable images and convert them to normal float32 (TODO: should it be float16?)
@@ -41,6 +39,7 @@ def fix_schedule_for_images(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBu
     fixed_schedule.append((op, out, buffers))
   return fixed_schedule
 
+# *** this is where things happen ***
 
 def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]):
   # HACK: images can be not usable due to shape
@@ -51,9 +50,7 @@ def run_schedule(schedule:List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]
     op,out,buffers = schedule.pop(0)
     log_schedule_item(op, out, buffers)
     assert all(x.realized for x in buffers), "can't run schedule, some buffers aren't realized"
-    if DEBUG >= 3:
-      from extra.utils import print_tree   # type: ignore
-      print_tree(op)
+    if DEBUG >= 3: print_tree(op)
     if op.op in LoadOps:
       # confirm the LoadOps are contiguous and in order
       for i,s in enumerate(op.src): assert isinstance(s, LazyOp) and s.op == BufferOps.MEM and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
@@ -89,7 +86,7 @@ def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
     assert all_int(buffer.shape), "does not support symbolic shape"
     buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
     src.realized.readinto(cast(RawBufferMapped, buffer.realized)._buffer())
-  elif isinstance(src.realized, RawBufferTransfer) and issubclass(Device[buffer.device].buffer, RawBufferTransfer) and P2P >= 1:
+  elif isinstance(src.realized, RawBufferTransfer) and issubclass(Device[buffer.device].buffer, RawBufferTransfer) and getenv("P2P", 0) >= 1:
     buffer.realized = cast(RawBufferTransfer, Device[buffer.device].buffer).transfer(src.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
   else:
     # TODO: schedule this as FROM to go to CPU, and a FROM to go to device
