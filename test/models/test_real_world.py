@@ -7,14 +7,13 @@ from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 from tinygrad.ops import Device, GlobalCounters, LazyOp, LoadOps
 from tinygrad.helpers import CI, dtypes, getenv, prod
 from tinygrad.codegen.search import kernel_optimize_opts
-from tinygrad.lazy import var_vals_from_ast
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet
 from examples.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
 from examples.stable_diffusion import UNetModel
 
-def kopt_search_hook(k, create_k, to_prg, baseline, bufs):
+def kopt_search_hook(k, create_k, to_prg, baseline, bufs, var_vals):
   import nevergrad as ng
   wanna_output = bufs[0].toCPU().copy()
   def check_opt(x):
@@ -22,7 +21,7 @@ def kopt_search_hook(k, create_k, to_prg, baseline, bufs):
       k = create_k()
       k.apply_auto_opt(x)
       prg = to_prg(k)
-      first_tm = prg.exec(bufs, var_vals={k:k.min for k in var_vals_from_ast(k.ast)}, force_wait=True, optimizing=True)
+      first_tm = prg.exec(bufs, var_vals, force_wait=True, optimizing=True)
       np.testing.assert_allclose(wanna_output, bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
       return first_tm
     except Exception:

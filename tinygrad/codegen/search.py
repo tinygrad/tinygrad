@@ -22,16 +22,16 @@ def kernel_optimize_opts(k:Linearizer):
     opts.append(ng.p.TransitionChoice([(i,s,"G") for s in get_divisors(k.full_shape[k.first_reduce+i], min_div=4) if all(st.shape[k.first_reduce+i] % s == 0 or st.shape[k.first_reduce+i] == 1 for st in k.sts)]))
   return opts
 
-def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, baseline, bufs):
+def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, baseline, bufs, var_vals):
   import nevergrad as ng
   def opt(x):
     try:
       k = create_k()
       k.apply_auto_opt(x)
       prg = to_prg(k)
-      first_tm = prg.exec(bufs, var_vals={k:k.min for k in var_vals_from_ast(k.ast)}, force_wait=True, optimizing=True)
+      first_tm = prg.exec(bufs, var_vals, force_wait=True, optimizing=True)
       if baseline*5 < first_tm*1000: return first_tm*1000  # very slow
-      tm = min([first_tm]+[prg.exec(bufs, var_vals={k:k.min for k in var_vals_from_ast(k.ast)}, force_wait=True, optimizing=True) for _ in range(2)])*1000
+      tm = min([first_tm]+[prg.exec(bufs, var_vals, force_wait=True, optimizing=True) for _ in range(2)])*1000
       return tm
     except Exception:
       if DEBUG >= 3:
@@ -66,13 +66,14 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
     # don't optimize variable shapes
     choice = "BASELINE"
   else:
+    var_vals = {k:k.min for k in var_vals_from_ast(k.ast)}
     # get baseline
     def get_baseline():
       k = create_k()
       k.hand_coded_optimizations()
       prg = to_prg(k)
-      return min([prg.exec(bufs, var_vals={k:k.min for k in var_vals_from_ast(k.ast)}, force_wait=True, optimizing=True) for _ in range(5)])*1000
-    choice = kernel_optimize_search(k, create_k, to_prg, get_baseline(), bufs)
+      return min([prg.exec(bufs, var_vals, force_wait=True, optimizing=True) for _ in range(5)])*1000
+    choice = kernel_optimize_search(k, create_k, to_prg, get_baseline(), bufs, var_vals)
     if global_db is not None:
       global_db[skey] = choice
       global_db.sync()
