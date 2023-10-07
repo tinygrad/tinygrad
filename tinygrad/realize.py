@@ -39,7 +39,7 @@ def _realize_empty(buffer: LazyBuffer) -> None:
 
 def _realize_rand(buffer: LazyBuffer) -> None:
   assert all_int(buffer.shape), "does not support symbolic shape"
-  if DEBUG >= 2: print(f"***      rand {buffer.device}                              shape {str(buffer.shape):23s} dtype {buffer.dtype}")
+  if DEBUG >= 2: print(f"***      rand {buffer.device}    seed {buffer.op.arg:<10d}  shape {str(buffer.shape):23s} dtype {buffer.dtype}")
   rng = np.random.default_rng(buffer.op.arg)
   buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args())
 
@@ -48,7 +48,7 @@ def _realize_rand(buffer: LazyBuffer) -> None:
 def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
   assert src.realized.size == buffer.st.size(), f"size mismatch on FROM {src.realized.size} != {buffer.st.size()}"
   assert src.st.contiguous and buffer.st.contiguous, "all must be contiguous for from"
-  if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:16d} shape {str(buffer.shape):23s} dtype {src.realized.dtype}")
+  if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:<16d} shape {str(buffer.shape):23s} dtype {src.realized.dtype}")
   # TODO: make this generic
   if isinstance(src.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
     assert all_int(buffer.shape), "does not support symbolic shape"
