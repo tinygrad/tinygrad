@@ -1,47 +1,13 @@
 from typing import List, cast, Dict, Callable
 import numpy as np
-import dataclasses
-from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, UnaryOps, BufferOps, MemBuffer, get_lazyop_info
+from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps
 from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE, ImageDType, dtypes
+from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE
 
 from tinygrad.runtime.lib import RawBufferMapped, RawBufferTransfer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
-
-def fix_schedule_for_images(schedule:List[ScheduleItem]):
-  # this is the fundamental fix, find unwritable or unreadable images and convert them to normal float32 (TODO: should it be float16?)
-  for si in schedule:
-    if isinstance(si.out.dtype, ImageDType) and (prod(si.out.shape) != prod(si.out.dtype.shape) or not any(si.out.shape[x]%4 == 0 for x in si.out.st.unit_stride_axes())):
-      si.out.dtype = dtypes.float32
-    for b in si.ast.get_lazyops():
-      if b.op != BufferOps.MEM: continue
-      if isinstance(si.inputs[b.arg.idx-1].dtype, ImageDType) and (b.arg.st.real_offset() % 4 != 0 or not any(b.arg.st.shape[x]%4 == 0 for x in b.arg.st.unit_stride_axes())):
-        si.inputs[b.arg.idx-1].dtype = dtypes.float32
-
-  # now fix up the schedule to reflect the new dtypes
-  fixed_schedule:List[ScheduleItem] = []
-  for si in schedule:
-    ast = si.ast
-    # fix input dtypes to match what they actually are
-    replacements = {}
-    for b in si.ast.get_lazyops():
-      if b.op != BufferOps.MEM: continue
-      if b.arg.dtype != si.inputs[b.arg.idx-1].dtype:
-        replacements[b] = LazyOp(BufferOps.MEM, (), MemBuffer(b.arg.idx, si.inputs[b.arg.idx-1].dtype, b.arg.st))
-    if replacements: ast = ast.map_buffers(replacements)
-
-    # fix the ops to create the output dtype
-    if ast.op not in LoadOps:
-      info = get_lazyop_info(ast)
-      if info.dtype != si.out.dtype:
-        ast = LazyOp(UnaryOps.CAST, (ast,), (si.out.dtype, False))
-
-    # put this in the fixed schedule
-    fixed_schedule.append(dataclasses.replace(si, ast=ast))
-  return fixed_schedule
-
-# *** this is where things happen ***
+from tinygrad.features.image import fix_schedule_for_images
 
 def run_schedule(schedule:List[ScheduleItem]):
   # HACK: images can be not usable due to shape

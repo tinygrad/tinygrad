@@ -262,7 +262,7 @@ class TestSchedule(unittest.TestCase):
   # this is the failing case in openpilot...it's very simple like this
   @unittest.skip("failing in old lazy")
   def test_image_conv_fusion(self):
-    from tinygrad.nn.image import image_conv2d
+    from tinygrad.features.image import image_conv2d
     w1 = Tensor.empty(16, 16, 1, 1)
     b1 = Tensor.empty(16)
     w2 = Tensor.empty(16, 16, 1, 1)

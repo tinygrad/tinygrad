@@ -6,7 +6,7 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 from tinygrad.ops import Device, GlobalCounters, LazyOp, LoadOps
 from tinygrad.helpers import CI, dtypes, getenv, prod
-from tinygrad.codegen.search import kernel_optimize_opts
+from tinygrad.features.kopt import kernel_optimize_opts
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet
