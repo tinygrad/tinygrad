@@ -3,9 +3,9 @@ from tinygrad.helpers import dtypes
 import time
 
 N = 1000000
-a = CLBuffer(N*4, dtypes.int16)
-b = CLBuffer(N*4, dtypes.int16)
-c = CLBuffer(N*4, dtypes.int16)
+a = CLBuffer(N*4, dtypes.float32)
+b = CLBuffer(N*4, dtypes.float32)
+c = CLBuffer(N*4, dtypes.float32)
 
 prg = CLProgram("test", """__kernel void test(__global float *a, __global float *b, __global float *c) {
   int idx = get_global_id(0);
