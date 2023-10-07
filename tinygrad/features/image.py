@@ -160,7 +160,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
         var_range[1] = nd.b - 1
     # We do not allow NumNode because it is constant
     # TODO: Remove mx != mn
-    sub_dict: dict[Union[Variable, NumNode], Node] = {v:Variable(v.expr, mn, mx) for v, (mn, mx) in var_dict.items() if mx != mn}
+    sub_dict: Dict[Union[Variable, NumNode], Node] = {v:Variable(v.expr, mn, mx) for v, (mn, mx) in var_dict.items() if mx != mn}
     valid, idxy = valid.substitute(sub_dict), idxy.substitute(sub_dict)
 
   idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))

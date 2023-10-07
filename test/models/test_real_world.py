@@ -70,14 +70,15 @@ class TestRealWorld(unittest.TestCase):
   def setUp(self):
     self.old_type = Tensor.default_type
     np.random.seed(2002)
+    # TODO: abstract better to remove this junk
     if getenv("KOPT"):
-      self.oldfunc = getattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search")
-      setattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search", kopt_search_hook)
+      self.oldfunc = getattr(__import__("tinygrad.features.kopt", fromlist=["kernel_optimize_search"]), "kernel_optimize_search")
+      setattr(__import__("tinygrad.features.kopt", fromlist=["kernel_optimize_search"]), "kernel_optimize_search", kopt_search_hook)
 
   def tearDown(self):
     Tensor.default_type = self.old_type
     if getenv("KOPT"):
-      setattr(__import__("tinygrad.codegen.search", fromlist=["kernel_optimize_search"]), "kernel_optimize_search", self.oldfunc)
+      setattr(__import__("tinygrad.features.kopt", fromlist=["kernel_optimize_search"]), "kernel_optimize_search", self.oldfunc)
 
   @unittest.skipUnless(not CI, "too big for CI")
   def test_stable_diffusion(self):
