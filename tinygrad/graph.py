@@ -4,7 +4,7 @@ try:
 except ImportError:
   nx = None # graph won't work
 from collections import defaultdict
-from typing import Dict, List, TYPE_CHECKING, Tuple, cast
+from typing import Dict, List, TYPE_CHECKING, Tuple
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
 from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters
 
@@ -50,7 +50,7 @@ def str_dtype(dtyp):
 def log_schedule_item(iop: LazyOp, ret: 'LazyBuffer', inp: Tuple['LazyBuffer', ...]):
   show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
-  if iop.op == LoadOps.CONTIGUOUS: setattr(ret, 'node_id', nm(cast('LazyBuffer', iop.src[0]).base))
+  if iop.op == LoadOps.CONTIGUOUS: setattr(ret, 'node_id', nm(inp[0].base))
   if iop.op in {LoadOps.CONST, LoadOps.CONTIGUOUS}: return
 
   op: List[Op] = [x.op for x in iop.get_lazyops()]
@@ -72,3 +72,13 @@ def log_schedule_item(iop: LazyOp, ret: 'LazyBuffer', inp: Tuple['LazyBuffer', .
     G.nodes[nm(ret)]['fillcolor'] = top_colors[optype]
     G.nodes[nm(ret)]['color'] = 'black'
     G.nodes[nm(ret)]['style'] = 'filled'
+
+def _tree(lazydata, prefix=""):
+  if type(lazydata).__name__ == "LazyBuffer": return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op, "LB ")
+  if len(lazydata.src) == 0: return [f"━━ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
+  lines = [f"━┳ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
+  childs = [_tree(c) for c in lazydata.src[:]]
+  for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
+  return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
+
+def print_tree(lazydata:LazyOp): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(lazydata))]))

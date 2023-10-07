@@ -36,7 +36,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
-      run: python -m mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
+      run: python -m mypy
     - name: Install SLOCCount
       run: sudo apt install sloccount
     - name: Check <5000 lines
@@ -152,6 +152,9 @@ jobs:
         name: Test openpilot model correctness (float32)
         run: DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile.py
       - if: ${{ matrix.task == 'openpilot' }}
+        name: Test openpilot alt model correctness (float32)
+        run: DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
+      - if: ${{ matrix.task == 'openpilot' }}
         name: Test tensor core ops
         run: GPU=1 TC=2 python -m pytest -n=auto test/test_ops.py
       - if: ${{ matrix.task == 'multigpu' }}
@@ -203,9 +206,11 @@ jobs:
     - name: Run linearizer and tensor core test
       run: METAL=1 python -m pytest -n=auto test/test_linearizer.py
     #- name: Run webgpu pytest
-    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto --ignore test/models/ --ignore test/unit/test_example.py --ignore test/extra/test_lr_scheduler.py --ignore test/test_linearizer.py test/
-    #- name: Build WEBGPU Efficientnet
-    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
+    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
+    - name: Run webgpu dtype tests
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_dtype.py
+    - name: Build WEBGPU Efficientnet
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
 
   tests:
     strategy:
@@ -268,7 +273,7 @@ jobs:
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT
-        run: python -c "from tinygrad.lazy import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
+        run: python -c "from tinygrad.ops import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
         run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}'
