@@ -4,7 +4,7 @@ import functools
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, cast
 from tinygrad.ops import MovementOps
-from tinygrad.helpers import prod, DEBUG
+from tinygrad.helpers import prod, DEBUG, dedup
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, sint
 from tinygrad.shape.view import View
 
@@ -81,6 +81,14 @@ class ShapeTracker:
 
   # this is the real size (ish)
   def size(self): return self.views[-1].size()
+
+  def var_vals(self) -> List[Variable]:
+    ret = []
+    for v in self.views:
+      for x in v.shape+v.strides+(v.offset,):
+        if isinstance(x, Node):
+          ret += x.vars()
+    return dedup(ret)
 
   def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
     to_apply:List[Tuple[MovementOps, Tuple]] = []
