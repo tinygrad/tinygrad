@@ -255,7 +255,7 @@ class LazyBuffer:
   # *** movement ops ***
 
   def _movement_op(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[sint, ...], Tuple[Tuple[sint, sint], ...]]) -> LazyBuffer:
-    if SHUFFLE_MOVEMENT_OPS and not self.realized and self.optype == BinaryOps and not self.children and (op is not MovementOps.PAD or all(x.op not in UNSAFE_PAD_OPS for x in self.op.get_lazyops())) and not all(x.realized or len(x.op.src) == 0 for x in self.op.buffers):
+    if SHUFFLE_MOVEMENT_OPS and not self.realized and self.optype == BinaryOps and not self.children and op is not MovementOps.EXPAND and (op is not MovementOps.PAD or all(x.op not in UNSAFE_PAD_OPS for x in self.op.get_lazyops())) and not all(x.realized or len(x.op.src) == 0 for x in self.op.buffers):
       return self.op.replace_with_movement_ops([(op, arg)])
     if REMOVE_MOVEMENT_NOPS and not self.realized and st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
@@ -336,13 +336,13 @@ def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
     mops: List[Tuple[MovementOps, Any]] = []
     bx = x
     # backwalk all the movement ops. don't push PAD or EXPAND
-    while not bx.realized and bx.optype is MovementOps and bx.op.op is not MovementOps.EXPAND and (SHUFFLE_PAD_OPS or bx.op.op is not MovementOps.PAD) and len(bx.children) <= 1 and not all(x.realized or len(x.op.src) == 0 for x in bx.op.buffers):
+    while not bx.realized and bx.optype is MovementOps and bx.op.op is not MovementOps.EXPAND and (SHUFFLE_PAD_OPS or bx.op.op is not MovementOps.PAD) and len(bx.children) <= 1 and not all(y.realized or len(y.op.src) == 0 for y in bx.op.buffers):
       assert isinstance(bx.op.op, MovementOps)
       mops.append((bx.op.op, bx.op.arg))
       assert isinstance(bx.op.src[0], LazyBuffer)
       bx = bx.op.src[0]
     # NOTE: can't push pads past anything where f(0, 0) != 0 or f(0) != 0
-    if mops and not bx.realized and bx.optype is BinaryOps and len(bx.children) <= 1 and (all(x[0] is not MovementOps.PAD for x in mops) or all(x.op not in UNSAFE_PAD_OPS for x in bx.op.get_lazyops())):
+    if mops and not bx.realized and bx.optype is BinaryOps and len(bx.children) <= 1 and (all(y[0] is not MovementOps.PAD for y in mops) or all(y.op not in UNSAFE_PAD_OPS for y in bx.op.get_lazyops())):
       new_srcs.append(bx.op.replace_with_movement_ops(mops[::-1]))
     else:
       new_srcs.append(x)

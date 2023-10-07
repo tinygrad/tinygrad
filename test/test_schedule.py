@@ -309,7 +309,7 @@ class TestSchedule(unittest.TestCase):
 
     x = Tensor.empty(1, 64, 32, 32)
     out = bb(x)
-    check_schedule(out, 2)
+    check_schedule(out, 4)
 
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
