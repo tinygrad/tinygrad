@@ -6,7 +6,7 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.runtime.ops_metal import renderer, MetalProgram, RawMetalBuffer
 from tinygrad.helpers import ansilen, DEBUG
-from extra.utils import print_tree
+from tinygrad.graph import print_tree
 
 if __name__ == "__main__":
   mdl = ResNet50()

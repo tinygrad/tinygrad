@@ -3,6 +3,7 @@ from tinygrad.helpers import Timing
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.codegen.linearizer import Linearizer
+from test.test_net_speed import start_profile, stop_profile
 
 class TestWinograd(unittest.TestCase):
   def setUp(self):
@@ -27,6 +28,13 @@ class TestWinograd(unittest.TestCase):
         l = Linearizer(s[0])
         l.hand_coded_optimizations()
         l.linearize()
+
+  def test_profile(self):
+    x,w = Tensor.rand(1,4,9,9).realize(), Tensor.rand(4,4,3,3).realize()
+    pr = start_profile()
+    out = Tensor.conv2d(x,w).realize()
+    stop_profile(pr, sort='time')
+    out.numpy()
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
