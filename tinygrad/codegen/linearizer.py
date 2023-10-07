@@ -11,6 +11,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, VariableOrNum, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.codegen.kernel import LocalBuffer
+from tinygrad.lazy import var_vals_from_ast
 
 # bottom ones are asm only
 class UOps(Enum):
@@ -243,10 +244,10 @@ class Linearizer(OptimizedKernel):
     for i,buf in enumerate(self.bufs):
       if isinstance(buf, MemBuffer):
         self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (f"data{buf.idx}", buf.dtype))
-    if self.var_vals:
-      for var in sorted(set(self.var_vals), key=lambda k: k.key):
-        assert var.expr is not None
-        self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), (var.expr, dtypes._arg_int32))
+    # add var vals
+    for var in sorted(var_vals_from_ast(self.ast), key=lambda k: k.key):
+      assert var.expr is not None
+      self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), (var.expr, dtypes._arg_int32))
     # define local buffers
     for lb in self.local_alias.values():
       self.buf_uops[self.bufs.index(lb)] = self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), (lb.name, self.sts[self.bufs.index(lb)].size()))

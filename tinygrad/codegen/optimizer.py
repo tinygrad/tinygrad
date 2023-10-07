@@ -7,8 +7,8 @@ from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.view import View, strides_for_shape
 
 class OptimizedKernel(Kernel):
-  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None, var_vals=None):
-    super().__init__(ast, opts, var_vals)
+  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
+    super().__init__(ast, opts)
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
