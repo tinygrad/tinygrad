@@ -38,6 +38,13 @@ class ConstBuffer:
   dtype: DType
   st: ShapeTracker
 
+@dataclass(frozen=True)
+class ScheduleItem:
+  ast: LazyOp
+  out: LazyBuffer
+  inputs: Tuple[LazyBuffer, ...]
+  # TODO: add var vals in here
+
 class LazyOp:
   __slots__ = "op", "src", "arg", "buffers", "__weakref__"
   op: Op

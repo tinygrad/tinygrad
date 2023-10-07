@@ -5,7 +5,7 @@ from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
 from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, partition, dedup, merge_dicts
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
+from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
 
@@ -159,7 +159,7 @@ class LazyBuffer:
 
   # *** scheduling ***
 
-  def schedule(self, seen=None) -> List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]:
+  def schedule(self, seen=None) -> List[ScheduleItem]:
     if seen is None: seen = set()
     if self in seen or self.realized or self.is_unrealized_const(): return []
     seen.add(self)
@@ -180,7 +180,7 @@ class LazyBuffer:
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
-    return ret + [(op, self, tuple(base_bufs))]
+    return ret + [ScheduleItem(op, self, tuple(base_bufs))]
 
   # *** creation/special ops ***
 
