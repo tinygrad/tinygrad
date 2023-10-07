@@ -5,7 +5,6 @@ from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
-from tinygrad.lazy import var_vals_from_ast
 from dataclasses import dataclass
 
 @dataclass(frozen=True)
@@ -53,7 +52,6 @@ class Kernel:
   def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
     self.opts = opts if opts else (cast(Compiled, Device[Device.DEFAULT]).linearizer_opts if isinstance(Device[Device.DEFAULT], Compiled) else LinearizerOptions())
     self.ast = ast
-    self.var_vals = var_vals_from_ast(ast)
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
