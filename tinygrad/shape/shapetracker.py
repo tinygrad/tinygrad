@@ -82,12 +82,12 @@ class ShapeTracker:
   # this is the real size (ish)
   def size(self): return self.views[-1].size()
 
-  def var_vals(self) -> Set[Node]:
+  def var_vals(self) -> Set[Variable]:
     ret = set()
     for v in self.views:
-      for x in v.shape+v.strides:
-        if isinstance(x, Node): ret.add(x)
-      if isinstance(v.offset, Node): ret.add(v.offset)
+      for x in v.shape+v.strides+(v.offset,):
+        if isinstance(x, Node):
+          ret |= set(x.vars())
     return ret
 
   def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:

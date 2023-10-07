@@ -23,6 +23,9 @@ class TestSymbolicOps(unittest.TestCase):
     for i in range(1, 5):
       a = Tensor.rand(3, i)
       b = Tensor.rand(3, i)
+      print("HREE", a.lazydata.var_vals)
+      sa = a.reshape(3, vi)
+      print("HREE", a.lazydata.var_vals)
       symbolic = f(a.reshape(3, vi), b.reshape(3, vi)).reshape(3, i).numpy()
       expected = f(a, b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
