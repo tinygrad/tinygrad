@@ -1,5 +1,6 @@
 from typing import List, cast, Dict, Callable
 import numpy as np
+import dataclasses
 from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, UnaryOps, BufferOps, MemBuffer, get_lazyop_info
 from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer
@@ -37,7 +38,7 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
         ast = LazyOp(UnaryOps.CAST, (ast,), (si.out.dtype, False))
 
     # put this in the fixed schedule
-    fixed_schedule.append(ScheduleItem(ast, si.out, si.inputs, si.var_vals))
+    fixed_schedule.append(dataclasses.replace(si, ast=ast))
   return fixed_schedule
 
 # *** this is where things happen ***

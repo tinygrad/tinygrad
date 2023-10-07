@@ -180,9 +180,7 @@ class LazyBuffer:
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
-
-    # get only the relevant var_vals for the schedule ast
-    return ret + [ScheduleItem(op, self, tuple(base_bufs), {k:self.var_vals[k] for k in var_vals_from_ast(op)})]
+    return ret + [ScheduleItem(op, self, tuple(base_bufs))]
 
   # *** creation/special ops ***
 

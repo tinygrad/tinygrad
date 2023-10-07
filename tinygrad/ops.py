@@ -45,7 +45,7 @@ class ScheduleItem:
   ast: LazyOp
   out: LazyBuffer
   inputs: Tuple[LazyBuffer, ...]
-  var_vals: Dict[Variable, int]
+  # TODO: move var_vals here
 
 class LazyOp:
   __slots__ = "op", "src", "arg", "buffers", "__weakref__"
@@ -262,5 +262,7 @@ class Compiled:
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
     # extract real var vals
-    prg.exec(rawbuffers, var_vals=var_vals)
+    from tinygrad.lazy import var_vals_from_ast
+    real_var_vals = var_vals_from_ast(ast)
+    prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in real_var_vals})
     return output.realized
