@@ -4,6 +4,8 @@ import numpy as np
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
+from tinygrad.runtime.lib import RawBuffer
+from tinygrad.shape.symbolic import Variable, sym_infer
 from dataclasses import dataclass
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -43,7 +45,7 @@ class ScheduleItem:
   ast: LazyOp
   out: LazyBuffer
   inputs: Tuple[LazyBuffer, ...]
-  # TODO: add var vals in here
+  var_vals: Dict[Variable, int]
 
 class LazyOp:
   __slots__ = "op", "src", "arg", "buffers", "__weakref__"
@@ -161,9 +163,6 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 
 # **************** for Compiled Buffers ****************
 
-from tinygrad.runtime.lib import RawBuffer
-from tinygrad.shape.symbolic import Variable, sym_infer
-
 class BasicBatchExecutor:
   def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): pass
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
@@ -263,7 +262,5 @@ class Compiled:
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
     # extract real var vals
-    from tinygrad.lazy import var_vals_from_ast
-    real_var_vals = var_vals_from_ast(ast)
-    prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in real_var_vals})
+    prg.exec(rawbuffers, var_vals=var_vals)
     return output.realized

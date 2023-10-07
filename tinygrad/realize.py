@@ -37,7 +37,7 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
         ast = LazyOp(UnaryOps.CAST, (ast,), (si.out.dtype, False))
 
     # put this in the fixed schedule
-    fixed_schedule.append(ScheduleItem(ast, si.out, si.inputs))
+    fixed_schedule.append(ScheduleItem(ast, si.out, si.inputs, si.var_vals))
   return fixed_schedule
 
 # *** this is where things happen ***
