@@ -45,7 +45,7 @@ class ScheduleItem:
   ast: LazyOp
   out: LazyBuffer
   inputs: Tuple[LazyBuffer, ...]
-  # TODO: move var_vals here
+  var_vals: Dict[Variable, int]
 
 class LazyOp:
   __slots__ = "op", "src", "arg", "buffers", "__weakref__"
@@ -214,7 +214,7 @@ class ASTRunner:
 class Compiled:
   def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, runtime, synchronize=lambda: None, batch_exec=BasicBatchExecutor):
     self.buffer, self.linearizer_opts, self.renderer, self.runtime, self.synchronize, self.batch_exec = buffer, linearizer_opts, renderer, runtime, synchronize, batch_exec
-    self.method_cache: Dict[Any, ASTRunner] = {}
+    self.method_cache: Dict[LazyOp, ASTRunner] = {}
 
   def to_program(self, k):
     k.linearize()

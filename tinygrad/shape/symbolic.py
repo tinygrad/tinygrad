@@ -149,14 +149,29 @@ class Variable(Node):
 
   def __init__(self, expr:Optional[str], nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
+    self.val:Optional[int] = None
+  def bind(self, val):
+    assert self.val is None and self.min<=val<=self.max, f"cannot bind {val} to {self}"
+    self.val = val
+    return self
+  def unbind(self) -> Tuple[Variable, int]:
+    assert self.val is not None, f"cannot unbind {self}"
+    return Variable(self.expr, self.min, self.max), self.val
   def vars(self): return [self]
-  def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return var_vals[self] if self in var_vals else self
+  def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node:
+    for var, val in var_vals.items():
+      # ignore the bind value and only match expr for substitute
+      if isinstance(var, Variable) and self.expr == var.expr: return val
+    return self
 
 class NumNode(Node):
   def __init__(self, num:int):
     assert isinstance(num, int), f"{num} is not an int"
     self.b:int = num
     self.min, self.max = num, num
+  def bind(self, val):
+    assert self.b == val, f"cannot bind {val} to {self}"
+    return self
   def __eq__(self, other): return self.b == other
   def __hash__(self): return self.hash  # needed with __eq__ override
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self
@@ -324,7 +339,7 @@ sint = Union[Node, int]
 VariableOrNum = Union[Variable, NumNode]
 
 render_python: Dict[Type, Callable] = {
-  Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}]" if ctx == "DEBUG" else (f"Variable('{self.expr}', {self.min}, {self.max})" if ctx == "REPR" else f"{self.expr}"),
+  Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self.val is not None else ''}]" if ctx == "DEBUG" else (f"Variable('{self.expr}', {self.min}, {self.max})" if ctx == "REPR" else f"{self.expr}"),
   NumNode: lambda self,ops,ctx: f"{self.b}",
   MulNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}*{sym_render(self.b,ops,ctx)})",
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",
