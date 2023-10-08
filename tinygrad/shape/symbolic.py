@@ -38,7 +38,8 @@ class Node:
   def key(self) -> str: return self.render(ctx="DEBUG")
   @functools.cached_property
   def hash(self) -> int: return hash(self.key)
-  def __repr__(self): return "<"+self.key+">"
+  def __repr__(self): return self.render(ctx="REPR")
+  def __str__(self): return "<"+self.key+">"
   def __hash__(self): return self.hash
   def __bool__(self): return not (self.max == self.min == 0)
   def __eq__(self, other:object) -> bool:
@@ -323,7 +324,7 @@ sint = Union[Node, int]
 VariableOrNum = Union[Variable, NumNode]
 
 render_python: Dict[Type, Callable] = {
-  Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}]" if ctx == "DEBUG" else f"{self.expr}",
+  Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}]" if ctx == "DEBUG" else (f"Variable('{self.expr}', {self.min}, {self.max})" if ctx == "REPR" else f"{self.expr}"),
   NumNode: lambda self,ops,ctx: f"{self.b}",
   MulNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}*{sym_render(self.b,ops,ctx)})",
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",

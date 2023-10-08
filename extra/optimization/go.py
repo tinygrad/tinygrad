@@ -8,6 +8,7 @@ from tinygrad.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, Buf
 from tinygrad.helpers import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
+from tinygrad.shape.symbolic import Variable
 inf = float('inf')
 
 if __name__ == "__main__":
@@ -16,8 +17,10 @@ if __name__ == "__main__":
 
   for ast in tqdm(asts):
     lin = Linearizer(ast)
+    #preopt = lin.colored_shape()
     lin.hand_coded_optimizations()
-    #print(lin.colored_shape())
+    #postopt = lin.colored_shape()
+    #print(preopt, "->", postopt)
     lin.linearize()
     #for u in lin.uops: print(u)
 

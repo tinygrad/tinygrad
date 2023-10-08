@@ -40,3 +40,4 @@ temp
 .coverage
 coverage.xml
 htmlcov
+outputs_yolov8
