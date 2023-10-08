@@ -316,7 +316,7 @@ def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if
 def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
   if isinstance(a, int): return a
   ret = a.substitute({k:Variable.num(v) for k, v in var_vals.items()})
-  assert isinstance(ret, NumNode)
+  assert isinstance(ret, NumNode), f"sym_infer didn't produce NumNode from {a} with {var_vals}"
   return ret.b
 
 # symbolic int
