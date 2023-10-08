@@ -280,18 +280,18 @@ class Linearizer(OptimizedKernel):
             i = 0
             for y0,y1 in zip(locals_to_store[1][2][::2], locals_to_store[1][2][1::2]):
               for x0,x1 in zip(locals_to_store[0][2][::2], locals_to_store[0][2][1::2]):
-                self.uop(UOps.WMMA, None, (x0, x1, y0, y1, acc[i], acc[i+1]), "METAL")
+                self.uop(UOps.WMMA, None, (x0, x1, y0, y1, acc[i], acc[i+1]), ("METAL",))
                 i += 2
           else:
             k = len(locals_to_store[1][2]) // 2
             for i in range(0, len(acc), 2):
               for y0,y1,x0,x1 in zip(locals_to_store[1][2][:k], locals_to_store[1][2][k:], locals_to_store[0][2][k*i:], locals_to_store[0][2][k*i+k:]):
-                self.uop(UOps.WMMA, None, (x0, x1, y0, y1, acc[i], acc[i+1]), "METAL")
+                self.uop(UOps.WMMA, None, (x0, x1, y0, y1, acc[i], acc[i+1]), ("METAL",))
         elif self.opts.device == "HIP":
           i = 0
           for y in range(0, len(locals_to_store[1][2]), 0x10):
             for x in range(0, len(locals_to_store[0][2]), 0x10):
-              self.uop(UOps.WMMA, None, tuple(acc[i:i+8]+locals_to_store[0][2][x:x+0x10]+locals_to_store[1][2][y:y+0x10]), "HIP")
+              self.uop(UOps.WMMA, None, tuple(locals_to_store[0][2][x:x+0x10]+locals_to_store[1][2][y:y+0x10]+acc[i:i+8]), ("HIP",))
               i += 8
       else:
         if locals_to_store:
