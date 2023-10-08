@@ -1,6 +1,6 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
-import functools
+import functools, operator
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, cast
 from tinygrad.ops import MovementOps
@@ -84,12 +84,8 @@ class ShapeTracker:
 
   @property
   def var_vals(self) -> Dict[Variable, int]:
-    variables:List[Variable] = []
-    for view in self.views:
-      for x in view.shape+view.strides+(view.offset,):
-        if isinstance(x, Node): variables += x.vars()
     ret:Dict[Variable, int] = {}
-    for v in dedup(variables):
+    for v in dedup(functools.reduce(operator.add, [v.vars() for v in self.views], [])):
       var, val = v.unbind()
       assert var not in ret or ret[var] == val, f"{var} has conflicted values {val} and {ret[var]}"
       ret[var] = val
