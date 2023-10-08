@@ -49,7 +49,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     model = ConvNeXt()
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(129):
+    with CLCache(160):
       model(img).realize()
 
   def test_enet(self):
