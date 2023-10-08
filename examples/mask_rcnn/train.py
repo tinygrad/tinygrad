@@ -195,9 +195,12 @@ def simple():
     objectness_loss, regression_loss = loss(anchors, objectness, rpn_box_regression, targets)
     if objectness_loss is None or regression_loss is None: continue # todo negative mine
     total_loss = objectness_loss + regression_loss
-
     optimizer.zero_grad()
-    total_loss.backward()
+    try:
+      total_loss.backward()
+    except Exception as e:
+      print(e) # some backwards overflow cuda blocks
+      continue
     optimizer.step()
     print(f"Epoch {epoch + 1}/{NUM_EPOCHS}, Loss: {total_loss.numpy()}")
     mem_info = get_gpu_memory()
