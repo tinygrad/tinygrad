@@ -183,7 +183,7 @@ def simple():
     features = backbone(images.tensors)
     objectness, rpn_box_regression = rpn(features)
     anchors = [anchor for anchor in anchor_generator(images, features)]
-    
+    if len(anchors[0][0].size) < 2: continue
     annotations = coco.loadAnns(coco.getAnnIds(imgIds=[random_img_id]))
     gt = []
     for annotation in annotations:
