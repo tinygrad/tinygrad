@@ -76,7 +76,8 @@ def make_match_fn(high: float, low: float) -> Callable[[Tensor], Tensor]:
     max_vals = hq.max(axis=1)
     max_vals = (max_vals == 0).where(-1, max_vals).unsqueeze(1) # -1 when pred == 0 for all gt
     best_matches = (hq == max_vals).float()
-    best_gt = (best_matches * Tensor.ones_like(best_matches).cumsum(axis=1)).max(axis=1)
+    # todo divide and concur cumsums
+    best_gt = (best_matches * Tensor(Tensor.ones_like(best_matches).numpy().cumsum(axis=1))).max(axis=1)
     return best_gt - 1
   
   # Returns matches that were greater than low and less than high
