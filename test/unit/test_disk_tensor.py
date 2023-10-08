@@ -135,18 +135,19 @@ class TestDiskTensor(unittest.TestCase):
     assert np.all(out == 1.)
 
   def test_assign_slice(self):
-    def assign_slice(x):
-      x[0:2] = [13, 12]
-      return x[0:2]
-    helper_test_disk_tensor("dt4", [0,1,2,3], lambda x: assign_slice(x), lambda x: x[0:2].assign([13, 12]))
+    def assign_slice(x, slice, val):
+      x[slice] = val
+      return x[slice]
+    helper_test_disk_tensor("dt3", [0,1,2,3], lambda x: assign_slice(x, slice(0,2), [13, 12]), lambda x: x[0:2].assign([13, 12]))
+    helper_test_disk_tensor("dt4", [[0,1,2,3],[4,5,6,7]], lambda x: assign_slice(x, slice(0,1), [[13, 12, 11, 10]]), lambda x: x[0:1].assign([[13, 12, 11, 10]]))
 
   def test_reshape(self):
-    helper_test_disk_tensor("dt6", [1,2,3,4,5], lambda x: x.reshape((1,5)), lambda x: x.reshape((1,5)))
+    helper_test_disk_tensor("dt5", [1,2,3,4,5], lambda x: x.reshape((1,5)), lambda x: x.reshape((1,5)))
     helper_test_disk_tensor("dt6", [1,2,3,4], lambda x: x.reshape((2,2)), lambda x: x.reshape((2,2)))
 
   def test_permute(self):
     helper_test_disk_tensor("dt7", [[1,2,3,4,5],[6,7,8,9,10]], lambda x: np.transpose(x, (0,1)), lambda x: x.permute(0,1))
-    # TODO permute 2D broken helper_test_disk_tensor("dt7", [[[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15]]], lambda x: np.transpose(x, (0,2,1)), lambda x: x.permute(0,2,1))
+    # helper_test_disk_tensor("dt7", [[[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15]]], lambda x: np.transpose(x, (0,2,1)), lambda x: x.permute(0,2,1))
 
 if __name__ == "__main__":
   unittest.main()
