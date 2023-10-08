@@ -227,7 +227,7 @@ if __name__ == "__main__":
         log_spec = prep_audio(waveform=Tensor(total).numpy(), sr=RATE)
         encoded_audio = model.encoder(Tensor(log_spec)).realize()
       out = model.decoder(Tensor([lst]), encoded_audio).realize()
-      idx = out[0,-1].argmax().numpy()
+      idx = out[0,-1].argmax().numpy().astype(dtype=np.int32)
       lst.append(idx)
       dec = enc.decode(lst)
       print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
