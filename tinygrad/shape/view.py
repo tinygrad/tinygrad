@@ -1,9 +1,9 @@
 from __future__ import annotations
 import functools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, cast
+from typing import Tuple, List, Optional, Dict, cast
 from tinygrad.helpers import prod, all_int
-from tinygrad.shape.symbolic import Node, NumNode, Variable, is_sym_int, sint
+from tinygrad.shape.symbolic import Node, NumNode, Variable, VariableOrNum, is_sym_int, sint
 
 @functools.lru_cache(maxsize=None)
 def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
@@ -37,11 +37,11 @@ class View:
     variables:List[Variable] = []
     for x in self.shape+self.strides+(self.offset,):
       if isinstance(x, Node): variables += x.vars()
-    unbound_vars = {v: v.unbind()[0] for v in variables if v.val is not None}
-    new_shape = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.shape]) # type: ignore
-    new_strides = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.strides]) # type: ignore
-    new_offset = self.offset if isinstance(self.offset, int) else self.offset.substitute(unbound_vars) # type: ignore
-    return View(new_shape, new_strides, new_offset, self.mask, self.contiguous) # type: ignore
+    unbound_vars:Dict[VariableOrNum,Node] = {v: v.unbind()[0] for v in variables if v.val is not None}
+    new_shape = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.shape])
+    new_strides = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.strides])
+    new_offset = self.offset if isinstance(self.offset, int) else self.offset.substitute(unbound_vars)
+    return View.create(new_shape, new_strides, new_offset, self.mask)
 
   # MovementOps live here now
 
