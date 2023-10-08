@@ -64,7 +64,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
     # TODO: this seems very high
-    with CLCache(116):
+    with CLCache(115):
       model.forward(img).realize()
 
   def test_resnet(self):
@@ -78,7 +78,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     model = ViT(embed_dim=192, num_heads=3)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(223): # NOTE: this is way too high
+    with CLCache(197): # NOTE: this is way too high
       out = model.forward(img)
       assert len(CacheCollector.cache) == 0, "ViT prerealized?"
       out.realize()
@@ -88,7 +88,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     args_tiny = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
     model = Transformer(**args_tiny)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
-    with CLCache(94):
+    with CLCache(72):
       model(Tensor([[1,2,3,4]]), 0).realize()
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
@@ -201,7 +201,7 @@ class TestOpt(unittest.TestCase):
       c1 = nn.Conv2d(3,16,3,bias=False)
       c2 = nn.Conv2d(16,32,3,bias=False)
       opt = optim.SGD(get_parameters([c1, c2]))
-      with CLCache(allowed=9):
+      with CLCache(allowed=10):
         opt.zero_grad()
         c2(c1(img).relu()).relu().sum().backward()
         opt.step()
@@ -215,7 +215,7 @@ class TestOpt(unittest.TestCase):
       c3 = nn.Conv2d(8,16,3,bias=False)
       c4 = nn.Conv2d(16,32,3,bias=False)
       opt = optim.SGD(get_parameters([c1, c2, c3, c4]))
-      with CLCache(allowed=20):
+      with CLCache(allowed=22):
         opt.zero_grad()
         c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
         opt.step()

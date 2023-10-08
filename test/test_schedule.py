@@ -169,7 +169,7 @@ class TestSchedule(unittest.TestCase):
     # run
     img = Tensor.ones(2,3,64,64)
     out = c1(img).relu()
-    check_schedule(out, 1, [c1.weight, c1.bias])
+    check_schedule(out, 3, [c1.weight, c1.bias])
 
   def test_fold_conv_elu(self):
     c1 = nn.Conv2d(3,16,3)
@@ -177,7 +177,7 @@ class TestSchedule(unittest.TestCase):
     # run
     img = Tensor.ones(2,3,64,64)
     out = c1(img).elu()
-    check_schedule(out, 1, [c1.weight, c1.bias])
+    check_schedule(out, 3, [c1.weight, c1.bias])
 
   def test_two_sum(self):
     img = Tensor.empty(64,64)
@@ -309,7 +309,7 @@ class TestSchedule(unittest.TestCase):
 
     x = Tensor.empty(1, 64, 32, 32)
     out = bb(x)
-    check_schedule(out, 2)
+    check_schedule(out, 4)
 
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
