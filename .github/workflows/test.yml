@@ -173,7 +173,7 @@ jobs:
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests
-    runs-on: macos-13
+    runs-on: macos-13-xlarge
     timeout-minutes: 20
 
     steps:
@@ -192,8 +192,8 @@ jobs:
       run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
-    #- name: Run dtype test
-    #  run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
+    - name: Run dtype test
+      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_dtype.py
     # dtype test has issues on test_half_to_int8
     - name: Run metal ops test
       run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
