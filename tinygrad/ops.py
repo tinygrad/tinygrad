@@ -4,6 +4,8 @@ import numpy as np
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
+from tinygrad.runtime.lib import RawBuffer
+from tinygrad.shape.symbolic import Variable, sym_infer
 from dataclasses import dataclass
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -37,6 +39,13 @@ class ConstBuffer:
   val: Any
   dtype: DType
   st: ShapeTracker
+
+@dataclass(frozen=True)
+class ScheduleItem:
+  ast: LazyOp
+  out: LazyBuffer
+  inputs: Tuple[LazyBuffer, ...]
+  # TODO: move var_vals here
 
 class LazyOp:
   __slots__ = "op", "src", "arg", "buffers", "__weakref__"
@@ -154,9 +163,6 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 
 # **************** for Compiled Buffers ****************
 
-from tinygrad.runtime.lib import RawBuffer
-from tinygrad.shape.symbolic import Variable, sym_infer
-
 class BasicBatchExecutor:
   def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): pass
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
@@ -242,7 +248,7 @@ class Compiled:
       from tinygrad.codegen.linearizer import Linearizer
       k = Linearizer(ast, self.linearizer_opts)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
-      from tinygrad.codegen.search import kernel_optimize
+      from tinygrad.features.kopt import kernel_optimize
       if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts), self.to_program, rawbuffers, ast)
       elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
