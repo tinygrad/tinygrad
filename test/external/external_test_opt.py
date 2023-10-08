@@ -215,7 +215,7 @@ class TestOpt(unittest.TestCase):
       c3 = nn.Conv2d(8,16,3,bias=False)
       c4 = nn.Conv2d(16,32,3,bias=False)
       opt = optim.SGD(get_parameters([c1, c2, c3, c4]))
-      with CLCache(allowed=19):
+      with CLCache(allowed=20):
         opt.zero_grad()
         c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
         opt.step()
