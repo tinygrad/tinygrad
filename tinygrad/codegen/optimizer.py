@@ -354,15 +354,12 @@ class OptimizedKernel(Kernel):
           if self.full_shape[self.first_reduce]%MV_THREADS_PER_ROW == 0 and self.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
             if DEBUG >= 3: print(f"MATVEC: full_shape={self.full_shape} first_reduce={self.first_reduce} buf0_strides={buf0_strides} blocksize={MV_BLOCKSIZE} threads_per_row={MV_THREADS_PER_ROW} rows_per_thread{MV_ROWS_PER_THREAD}")
             if MV_THREADS_PER_ROW > 1:
-              self.shift_to(self.first_reduce, MV_THREADS_PER_ROW, top=False, insert_before=self.first_reduce + len(self.group_for_reduce))
-              self.group_for_reduce.append(MV_THREADS_PER_ROW)
+              self.shift_group_for_reduce(MV_THREADS_PER_ROW, suggestion)
             if MV_BLOCKSIZE > 1:
-              self.shift_to(global_idx, MV_BLOCKSIZE, insert_before=self.first_reduce)
-              self.local_dims += 1
+              self.shift_local(global_idx, MV_BLOCKSIZE, suggestion)
             if MV_ROWS_PER_THREAD > 1:
-              self.shift_to(global_idx, MV_ROWS_PER_THREAD)
-              self.upcast()
-            return
+              self.shift_upcast(global_idx, MV_ROWS_PER_THREAD, suggestion)
+            return suggestion
 
     if self.opts.has_local and self.opts.has_shared and all(isinstance(s, int) for s in self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
