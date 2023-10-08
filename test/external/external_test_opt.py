@@ -49,7 +49,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     model = ConvNeXt()
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(160):
+    with CLCache(129):
       model(img).realize()
 
   def test_enet(self):
@@ -78,7 +78,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     model = ViT(embed_dim=192, num_heads=3)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(258): # NOTE: this is way too high
+    with CLCache(223): # NOTE: this is way too high
       out = model.forward(img)
       assert len(CacheCollector.cache) == 0, "ViT prerealized?"
       out.realize()
@@ -201,7 +201,7 @@ class TestOpt(unittest.TestCase):
       c1 = nn.Conv2d(3,16,3,bias=False)
       c2 = nn.Conv2d(16,32,3,bias=False)
       opt = optim.SGD(get_parameters([c1, c2]))
-      with CLCache(allowed=10):
+      with CLCache(allowed=9):
         opt.zero_grad()
         c2(c1(img).relu()).relu().sum().backward()
         opt.step()
@@ -215,7 +215,7 @@ class TestOpt(unittest.TestCase):
       c3 = nn.Conv2d(8,16,3,bias=False)
       c4 = nn.Conv2d(16,32,3,bias=False)
       opt = optim.SGD(get_parameters([c1, c2, c3, c4]))
-      with CLCache(allowed=22):
+      with CLCache(allowed=19):
         opt.zero_grad()
         c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
         opt.step()
