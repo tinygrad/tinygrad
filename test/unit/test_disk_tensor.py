@@ -134,15 +134,9 @@ class TestDiskTensor(unittest.TestCase):
     out = reloaded.numpy()
     assert np.all(out == 1.)
 
-
   def test_assign_slice(self):
-    pathlib.Path(temp("dt4")).unlink(missing_ok=True)
-    cc = Tensor.arange(10, device="CPU").to(f"disk:{temp('dt4')}").realize()
-
-    #cc.assign(np.ones(10)).realize()
-    print(cc[3:5].numpy())
-    cc[3:5].assign([13, 12]).realize()
-    print(cc.numpy())
+    def assign_slice(x): x[0:2] = [13, 12]; return x[0:2]
+    helper_test_disk_tensor("dt4", [0,1,2,3], lambda x: assign_slice(x), lambda x: x[0:2].assign([13, 12]))
 
   def test_reshape(self):
     helper_test_disk_tensor("dt6", [1,2,3,4,5], lambda x: x.reshape((1,5)), lambda x: x.reshape((1,5)))
