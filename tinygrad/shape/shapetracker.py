@@ -86,11 +86,9 @@ class ShapeTracker:
   def var_vals(self) -> Dict[Variable, int]:
     variables:List[Variable] = []
     for view in self.views:
-      # TODO: test case, symbolic shrink then reshape
       for x in view.shape+view.strides+(view.offset,):
-        if isinstance(x, Node):
-          variables += x.vars()
-    ret: Dict[Variable, int] = {}
+        if isinstance(x, Node): variables += x.vars()
+    ret:Dict[Variable, int] = {}
     for v in dedup(variables):
       var, val = v.unbind()
       assert var not in ret or ret[var] == val, f"{var} has conflicted values {val} and {ret[var]}"
