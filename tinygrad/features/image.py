@@ -203,10 +203,9 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
   # Check for var intersection, removing valid can affect other index
   if valid.min == 0 and not idx_vars.intersection(idy_vars):
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
-    flats = [id.flat_components for id in (idx, idy) if isinstance(id, SumNode)]
-    sym_sums = [Variable.sum([i for i in flat if not isinstance(i, NumNode)]) for flat in flats]
-    ones = [node for sym_sum in sym_sums for node in nds if (node.a == sym_sum) or (-(node.a) == sym_sum)] # type: ignore # AndNode always consists of LtNode
+    ones = [node for sym in (idx, idy) for node in nds if isinstance(sym + node.a, NumNode) or isinstance(sym - node.a, NumNode)] # type: ignore # AndNode always consists of LtNode
     valid = Variable.ands([i for i in nds if i not in ones])
+
 
   # This is the slow part
   # This part is for brute forcing all possible values of idx, idy and valid
