@@ -192,13 +192,20 @@ def simple():
         gt.append([x, y, x + width, y + height])
     
     targets = [BoxList(Tensor(gt), image_size=anchors[0][0].size)]
-    objectness_loss, regression_loss = loss(anchors, objectness, rpn_box_regression, targets)
-    if objectness_loss is None or regression_loss is None: continue # todo negative mine
+    objectness_loss, regression_loss = None, None
+    try:
+      objectness_loss, regression_loss = loss(anchors, objectness, rpn_box_regression, targets)
+      if objectness_loss is None or regression_loss is None: continue # todo negative mine
+    except Exception as e:
+      print("forward error")
+      print(e)
+      continue
     total_loss = objectness_loss + regression_loss
     optimizer.zero_grad()
     try:
       total_loss.backward()
     except Exception as e:
+      print("backward error")
       print(e) # some backwards overflow cuda blocks
       continue
     optimizer.step()
