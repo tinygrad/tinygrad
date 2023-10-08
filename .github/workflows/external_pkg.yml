@@ -1,0 +1,31 @@
+name: Using tinygrad as an external pacakge
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  install_test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+
+    - name: Create a clean env
+      run: |
+        mkdir $HOME/test_directory
+        cd $HOME/test_directory
+        python -m venv venv
+        source venv/bin/activate
+        pip install $GITHUB_WORKSPACE
+
+    - name: Run tinygrad externally
+      run: |
+        cd $HOME/test_directory
+        source venv/bin/activate
+        python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
