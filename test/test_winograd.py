@@ -22,10 +22,10 @@ class TestWinograd(unittest.TestCase):
       sched = out.lazydata.schedule()
 
     for i,s in enumerate(sched):
-      if s[0].op in LoadOps: continue
-      ops = s[0].get_lazyops()
+      if s.ast.op in LoadOps: continue
+      ops = s.ast.get_lazyops()
       with Timing(f"linearize {i} with {len(ops):4d} ops: "):
-        l = Linearizer(s[0])
+        l = Linearizer(s.ast)
         l.hand_coded_optimizations()
         l.linearize()
 

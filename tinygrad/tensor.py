@@ -763,6 +763,6 @@ for device in Device._buffers:
 
 if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)
-  from tinygrad.nn.image import image_conv2d, image_dot
+  from tinygrad.features.image import image_conv2d, image_dot
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
