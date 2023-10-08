@@ -20,18 +20,28 @@ class View:
   shape:Tuple[sint, ...]
   strides:Tuple[sint, ...]
   offset:sint
-  mask:Optional[Tuple[Tuple[sint, sint], ...]]
+  mask:Optional[Tuple[Tuple[int, int], ...]]
   contiguous:bool
 
   @staticmethod
   @functools.lru_cache(maxsize=None)
-  def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
+  def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[int, int], ...]]=None):
     strides = filter_strides(shape, strides) if strides else strides_for_shape(shape)
     contiguous = offset == 0 and mask is None and all(s1 == s2 for s1,s2 in zip(strides, strides_for_shape(shape)))
     return View(shape, strides, offset, mask, contiguous)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def size(self): return prod([s.max if isinstance(s, Node) else s for s,st in zip(self.shape, self.strides) if st != 0])
+
+  def unbind(self) -> View:
+    variables:List[Variable] = []
+    for x in self.shape+self.strides+(self.offset,):
+      if isinstance(x, Node): variables += x.vars()
+    unbound_vars = {v: v.unbind()[0] for v in variables if v.val is not None}
+    new_shape = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.shape]) # type: ignore
+    new_strides = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.strides]) # type: ignore
+    new_offset = self.offset if isinstance(self.offset, int) else self.offset.substitute(unbound_vars) # type: ignore
+    return View(new_shape, new_strides, new_offset, self.mask, self.contiguous) # type: ignore
 
   # MovementOps live here now
 

@@ -66,6 +66,24 @@ class TestSymbolicVarVals(unittest.TestCase):
     assert st.real_offset() == y * z
     assert st.var_vals == {Variable("x", 1, 100): 3, Variable("y", 1, 100):4, Variable("z", 1, 100): 5}
 
+class TestShapeTrackerUnbind(unittest.TestCase):
+  def test_view_unbind(self):
+    v = Variable("v", 1, 100)
+    bv = Variable("v", 1, 100).bind(3)
+    assert View.create(shape=(bv, 4)).unbind() == View.create(shape=(v, 4))
+
+  def test_reshape_unbind(self):
+    v = Variable("v", 1, 100)
+    bv = Variable("v", 1, 100).bind(3)
+    t = Tensor.rand(3, 4).reshape(bv, 4)
+    assert t.lazydata.st.unbind() == ShapeTracker((View.create(shape=(v, 4)),))
+
+  def test_shrink_unbind(self):
+    v = Variable("v", 1, 100)
+    bv = Variable("v", 1, 100).bind(2)
+    t = Tensor.rand(3, 4).shrink(((bv, bv+1), (0, 4)))
+    assert t.lazydata.st.unbind() == ShapeTracker((View.create(shape=(1, 4), offset=4*v),))
+
 class TestSymbolicReshape(unittest.TestCase):
   def test_reshape_into_symbols_simple(self):
     for i in range(1, 6):

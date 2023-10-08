@@ -85,9 +85,9 @@ class ShapeTracker:
   @property
   def var_vals(self) -> Dict[Variable, int]:
     variables:List[Variable] = []
-    for v in self.views:
+    for view in self.views:
       # TODO: test case, symbolic shrink then reshape
-      for x in v.shape+v.strides+(v.offset,):
+      for x in view.shape+view.strides+(view.offset,):
         if isinstance(x, Node):
           variables += x.vars()
     ret: Dict[Variable, int] = {}
@@ -96,6 +96,8 @@ class ShapeTracker:
       assert var not in ret or ret[var] == val, f"{var} has conflicted values {val} and {ret[var]}"
       ret[var] = val
     return ret
+
+  def unbind(self) -> ShapeTracker: return ShapeTracker(tuple(v.unbind() for v in self.views))
 
   def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
     to_apply:List[Tuple[MovementOps, Tuple]] = []
