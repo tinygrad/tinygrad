@@ -12,15 +12,21 @@ from tinygrad.shape.symbolic import Variable
 inf = float('inf')
 
 if __name__ == "__main__":
-  asts = [eval(x) for x in dedup(open(sys.argv[1]).read().strip().split("\n"))]
-  print(f"loaded {len(asts)} kernels")
+  ast_strs = dedup(open(sys.argv[1]).read().strip().split("\n"))
+  print(f"loaded {len(ast_strs)} kernels")
 
-  for ast in tqdm(asts):
+  for ast_str in tqdm(ast_strs):
+    ast = eval(ast_str)
     lin = Linearizer(ast)
-    #preopt = lin.colored_shape()
+    preopt = lin.colored_shape()
     lin.hand_coded_optimizations()
-    #postopt = lin.colored_shape()
-    #print(preopt, "->", postopt)
+    postopt = lin.colored_shape()
     lin.linearize()
+    try:
+      gflops = lin.info.flops/1e9
+    except Exception:
+      # TODO: fix symbolic
+      gflops = float('nan')
+    print(f"{len(lin.uops)} uops, {lin.global_size} {lin.local_size}, {gflops:.2f} GFLOPS", preopt, "->", postopt)
     #for u in lin.uops: print(u)
 

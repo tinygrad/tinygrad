@@ -47,7 +47,6 @@ def str_dtype(dtyp):
 
 logops = open(getenv("LOGOPS", ""),"a") if getenv("LOGOPS", "") else None
 def log_schedule_item(si: ScheduleItem):
-  # NOTE: these Ops aren't runnable if they contain symbolic shapes
   if logops and si.ast.op not in LoadOps: logops.write(str(si.ast)+"\n")
   show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return

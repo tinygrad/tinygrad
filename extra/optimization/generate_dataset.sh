@@ -4,6 +4,7 @@ rm $LOGOPS
 
 # generate many kernels
 STEPS=3 python3 examples/hlb_cifar10.py
+WINO=1 STEPS=3 python3 examples/hlb_cifar10.py
 python3 examples/stable_diffusion.py --noshow
 python3 examples/llama.py --prompt "hello" --count 5
 python3 examples/gpt2.py --count 5
