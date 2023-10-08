@@ -31,7 +31,7 @@ class RawTorchBuffer(RawBuffer):
   def __init__(self, size:int, dtype:DType, buf:Optional[torch.Tensor]=None): super().__init__(size, dtype, buf if buf is not None else torch.empty([size], dtype=inverse_type_map[dtype]))
   @classmethod
   def fromCPU(cls, x):
-    buf = torch.from_numpy(x).requires_grad_(False).to(device)
+    buf = torch.from_numpy(x if all(s>=0 for s in x.strides) else x.copy()).requires_grad_(False).to(device)
     return cls(prod(x.shape), type_map[buf.dtype], buf)
   def toCPU(self): return self._buf.cpu().numpy()
 TorchBuffer = Interpreted(RawTorchBuffer, torch_fxn_for_op, from_underlying=lambda x: RawTorchBuffer(prod(x.shape), type_map[x.dtype], x))
