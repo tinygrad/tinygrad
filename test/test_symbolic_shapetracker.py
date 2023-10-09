@@ -58,6 +58,12 @@ class TestSymbolicVarVals(unittest.TestCase):
     assert st.real_offset() == x * 3
     assert st.var_vals == {Variable("x", 1, 100): 3}
 
+  def test_var_vals_mask(self):
+    x = Variable("x", 1, 100).bind(3)
+    view = View.create(shape=(3,4), strides=(4,1), offset=0, mask=((0, x), (0, 4)))
+    st = ShapeTracker(views=(view,))
+    assert st.var_vals == {Variable("x", 1, 100): 3}
+
   def test_var_vals_complex(self):
     x = Variable("x", 1, 100).bind(3)
     y = Variable("y", 1, 100).bind(4)
