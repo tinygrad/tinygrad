@@ -190,7 +190,7 @@ def simple():
         bbox = annotation['bbox']  # [x,y,width,height]
         x, y, width, height = bbox
         gt.append([x, y, x + width, y + height])
-    
+    print("anchor size", anchors[0][0].size)
     targets = [BoxList(Tensor(gt), image_size=anchors[0][0].size)]
     objectness_loss, regression_loss = None, None
     try:

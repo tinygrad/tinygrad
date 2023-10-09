@@ -123,10 +123,12 @@ def make_balanced_sampler_fn(batch_size_per_image: int, positive_fraction: float
     neg_inds = []
     for matches in image_matches:
       # expected that positive samples are amped to 1
+      if DEBUG > 0: print("matches", matches.numpy())
       positive, negative = matches == 1, matches == 0 
       num_pos = int(batch_size_per_image * positive_fraction)
 
       # protect against not enough positive examples
+      if DEBUG > 0: print("positive", positive.numpy(), "negative", negative.numpy())
       pos_numel, neg_numel = positive.sum().numpy().item(), negative.sum().numpy().item()
       num_pos = int(min(pos_numel, num_pos))
       num_neg = int(min(neg_numel, int(batch_size_per_image * (1 - positive_fraction))))
@@ -343,23 +345,28 @@ class RPNLossComputation:
 
   def match_targets_to_anchors(self, anchors: BoxList, targets: BoxList):
     match_quality_matrix = boxlist_iou(anchors, targets)
+    if DEBUG > 0: print("match_quality_matrix", match_quality_matrix.numpy())
     matched_idxs = self.proposal_matcher(match_quality_matrix)
+    if DEBUG > 0: print("matched_idxs", matched_idxs.numpy())
     matched_targets = targets[matched_idxs.maximum(0)] # drop negatives
+    if DEBUG > 0: print("matched_targets", matched_targets.bbox.numpy())
     return matched_targets, matched_idxs
 
   def prepare_targets(self, anchors: List[BoxList], targets: List[BoxList]):
     labels = []
     regression_targets = []
     for anchors_per_image, targets_per_image in zip(anchors, targets):
+      if DEBUG > 0: print("anchors_per_image", anchors_per_image.bbox.numpy(), "targets_per_image", targets_per_image.bbox.numpy())
       matched_targets, matched_idxs = self.match_targets_to_anchors(
           anchors_per_image, targets_per_image
       )
+      if DEBUG > 0: print("matched_targets", matched_targets.bbox.numpy(), "matched_idxs", matched_idxs.numpy())
 
       # TODO this has fp errors
       regression_targets_per_image = self.box_coder.encode(
           matched_targets.bbox, anchors_per_image.bbox
       )
-
+      if DEBUG > 0: print("regression_targets_per_image", regression_targets_per_image.numpy())
       # all matches become 1 (roi head) (.7 and above amplified)
       labels_per_image = self.generate_labels_func(matched_idxs)
       labels_per_image = labels_per_image.cast(dtype=dtypes.float32)
@@ -372,7 +379,7 @@ class RPNLossComputation:
 
       # discards weak signals (when lq matches is False), -1 is ignored by fg_bg_sampler
       labels_per_image = (matched_idxs == -2).where(-1, labels_per_image)
-
+      if DEBUG > 0: print("labels_per_image", labels_per_image.numpy())
       labels.append(labels_per_image)
       regression_targets.append(regression_targets_per_image)
 
@@ -392,6 +399,8 @@ class RPNLossComputation:
         objectness_loss (Tensor)
         box_loss (Tensor
     """
+    if DEBUG > 0: print("anchors", anchors[0][0].bbox.numpy())
+    if DEBUG > 0: print("targets", targets[0].bbox.numpy())
     anchors = [cat_boxlist(anchors_per_image) for anchors_per_image in anchors]
     labels, regression_targets = self.prepare_targets(anchors, targets)
     sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
