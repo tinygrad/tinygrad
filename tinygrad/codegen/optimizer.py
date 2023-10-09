@@ -165,10 +165,9 @@ class OptimizedKernel(Kernel):
     if amount != self.full_shape[axis]: self.shift_to(axis, amount=amount, insert_before=len(self.full_unupcasted_shape))
     self.upcast()
 
-  def shift_group_for_reduce(self, amount, suggestion):
-    axis = len(self.full_unupcasted_shape) - 1
+  def shift_group_for_reduce(self, axis, amount, suggestion, top=False):
     suggestion['G', self.axis_idxs[axis]] = amount
-    self.shift_to(axis, amount, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
+    self.shift_to(axis, amount, top=top, insert_before=self.first_reduce + len(self.group_for_reduce))
     self.group_for_reduce.append(amount)
 
   # ******************** high level optimizers ********************
@@ -367,7 +366,7 @@ class OptimizedKernel(Kernel):
           if self.full_shape[self.first_reduce]%MV_THREADS_PER_ROW == 0 and self.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
             if DEBUG >= 3: print(f"MATVEC: full_shape={self.full_shape} first_reduce={self.first_reduce} buf0_strides={buf0_strides} blocksize={MV_BLOCKSIZE} threads_per_row={MV_THREADS_PER_ROW} rows_per_thread{MV_ROWS_PER_THREAD}")
             if MV_THREADS_PER_ROW > 1:
-              self.shift_group_for_reduce(MV_THREADS_PER_ROW, suggestion)
+              self.shift_group_for_reduce(self.first_reduce, MV_THREADS_PER_ROW, suggestion, top=False)
             if MV_BLOCKSIZE > 1:
               self.shift_local(global_idx, MV_BLOCKSIZE, suggestion)
             if MV_ROWS_PER_THREAD > 1:
@@ -380,7 +379,7 @@ class OptimizedKernel(Kernel):
         # TODO: use 1024 if it's allowed in a smarter way
         for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
-            self.shift_group_for_reduce(sz, suggestion)
+            self.shift_group_for_reduce(self.first_reduce, sz, suggestion, top=True)
             break
 
       # are we upcasting in mid reduce? (only for images)
@@ -388,7 +387,7 @@ class OptimizedKernel(Kernel):
         axes = self.sts[0].unit_stride_axes()
         assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
         if self.sts[0].shape[axes[0]]%4 == 0:
-          self.shift_group_for_reduce(4, suggestion)
+          self.shift_group_for_reduce(axes[0], 4, suggestion)
 
     # now do everything required
     self.required_optimizations(suggestion)
