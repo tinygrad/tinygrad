@@ -247,7 +247,7 @@ class Compiled:
       from tinygrad.codegen.linearizer import Linearizer
       k = Linearizer(ast, self.linearizer_opts)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
-      from tinygrad.codegen.search import kernel_optimize
+      from tinygrad.features.kopt import kernel_optimize
       if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts), self.to_program, rawbuffers, ast)
       elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)

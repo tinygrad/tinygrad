@@ -77,6 +77,14 @@ jobs:
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
       run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
+    - name: Use as an external pacakge
+      run: |
+        mkdir $HOME/test_external_dir
+        cd $HOME/test_external_dir
+        python -m venv venv
+        source venv/bin/activate
+        pip install $GITHUB_WORKSPACE
+        python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
 
   testtorch:
     name: Torch Tests
