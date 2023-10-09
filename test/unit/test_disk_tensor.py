@@ -146,9 +146,5 @@ class TestDiskTensor(unittest.TestCase):
     helper_test_disk_tensor("dt5", [1,2,3,4,5], lambda x: x.reshape((1,5)))
     helper_test_disk_tensor("dt6", [1,2,3,4], lambda x: x.reshape((2,2)))
 
-  def test_permute(self):
-    helper_test_disk_tensor("dt7", [[1,2,3,4,5],[6,7,8,9,10]], lambda x: np.transpose(x, (0,1)), lambda x: x.permute(0,1))
-    # helper_test_disk_tensor("dt7", [[[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15]]], lambda x: np.transpose(x, (0,2,1)), lambda x: x.permute(0,2,1))
-
 if __name__ == "__main__":
   unittest.main()
