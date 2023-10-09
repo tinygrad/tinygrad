@@ -122,4 +122,4 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   if getenv("CUDACPU"): prg = remove_single_scalar_curly_braces(prg.split(".file")[0].split(".visible .func")[0])
   max_local_size =  [int(x) for x in prg.split(".maxntid ")[1].split("\n")[0].split(", ")]
   for i in range(len(local_size)): local_size[i] = min(local_size[i], max_local_size[i])
-  return prg, local_size, {"binary":True, "shared":compiled.metadata["shared"]}
+  return prg, {"binary":True, "shared":compiled.metadata["shared"], "local_size_override":local_size +  [1]*(3-len(local_size))}

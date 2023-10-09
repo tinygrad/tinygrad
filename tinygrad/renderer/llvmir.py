@@ -139,4 +139,4 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
       lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin])
 
   bb[-1].ret_void()
-  return str(module)
+  return str(module), {}

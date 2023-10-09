@@ -212,12 +212,10 @@ class Compiled:
 
   def to_program(self, k):
     k.linearize()
-    src = self.renderer(k.function_name, k.uops)
-    if len(src) == 3:
-      return ASTRunner(k.function_name, src[0], k.global_size, src[1],display_name=k.display_name, runtime_args=src[2]).build(self.runtime)
+    src, runtime_args = self.renderer(k.function_name, k.uops)
     return ASTRunner(k.function_name, src, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
-                     display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime, self.batch_exec)
+                     display_name=k.display_name, runtime_args=runtime_args).build(self.runtime, self.batch_exec)
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
     # check if we can reuse the output buffer
