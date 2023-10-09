@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, operator
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, cast
-from tinygrad.helpers import prod, all_int, dedup, flatten
+from tinygrad.helpers import prod, all_int, dedup
 from tinygrad.shape.symbolic import Node, NumNode, Variable, VariableOrNum, is_sym_int, sint
 
 @functools.lru_cache(maxsize=None)
@@ -34,7 +34,7 @@ class View:
   def size(self): return prod([s.max if isinstance(s, Node) else s for s,st in zip(self.shape, self.strides) if st != 0])
 
   def vars(self) -> List[Variable]:
-    flatten_mask = tuple(flatten(self.mask)) if self.mask is not None else tuple()
+    flatten_mask = tuple(x for m in self.mask for x in m) if self.mask is not None else tuple()
     return dedup(functools.reduce(operator.add, [x.vars() for x in self.shape+self.strides+(self.offset,)+flatten_mask if isinstance(x, Node)], []))
 
   def unbind(self) -> View:
