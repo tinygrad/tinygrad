@@ -90,7 +90,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
             if tm < best: best, best_ran, best_name = tm, ran, name
             bar._progress_bar.set_description(f"{baseline:7.3f}/{best:7.3f} ({baseline / best * 100:4.0f}%) @ {best_ran:4}/{ran:4} - {best_name + ' ' * (37 - ansilen(best_name))}")
     recommendation = optimizer.provide_recommendation()
-    if ran == 0: print(f"WARNING: no kernels ran! Shape: {k.full_shape}; suggestion: {[(i, s, typ) for (typ, i), s in suggestion.items()] if suggestion is not None else None}")
+    if DEBUG >= 1 and ran == 0: print(f"WARNING: no kernels ran! Shape: {k.full_shape}; suggestion: {[(i, s, typ) for (typ, i), s in suggestion.items()] if suggestion is not None else None}")
 
   et = time.perf_counter() - st
   del bar, optimizer
