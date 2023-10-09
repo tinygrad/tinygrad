@@ -4,7 +4,7 @@ import numpy as np
 from examples.llama import Transformer, MODEL_PARAMS
 from test.test_net_speed import start_profile, stop_profile
 from tinygrad.tensor import Tensor
-from tinygrad.ops import Device
+from tinygrad.ops import Device, method_cache
 from tinygrad.nn.state import get_state_dict
 from tinygrad.ops import Compiled
 from tinygrad.helpers import dtypes, prod
@@ -35,7 +35,7 @@ class TestLLaMASpeed(unittest.TestCase):
     print("assigned empty tensors, doing warmup")
 
     def run_llama(st, empty_method_cache=True):
-      if empty_method_cache: Device[Device.DEFAULT].method_cache.clear()
+      if empty_method_cache: method_cache.clear()
       tms = [time.perf_counter()]
       for i in range(10):
         model(Tensor([[2]]), i).realize()
