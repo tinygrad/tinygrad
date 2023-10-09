@@ -177,10 +177,10 @@ class TestLinearizerOpts(unittest.TestCase):
     r = (b.sqrt() + ((a+1).sum(axis=3).exp()))
     # full_shape: (2048, 128)
     helper_linearizer_opt(r, [
-      [(1, 2, 'L')], [(0, 8, 'L')], [(0, 16, 'L')], # Checking how it works with locals
+      [(0, 2, 'L')], [(0, 8, 'L')], [(0, 16, 'L')], # Checking how it works with locals
       [(1, 2, 'G')], [(1, 16, 'G')], [(1, 16, 'G')], # Checking how it works with grouped reduce
-      [(1, 2, 'L'), (1, 2, 'G')], [(0, 16, 'L'), (1, 16, 'G')], [(0, 32, 'L'), (1, 2, 'G')], [(0, 2, 'L'), (1, 64, 'G')], # Checking how it works with locals + grouped reduce
-      [(1, 2, 'L'), (1, 2, 'G'), (0, 8, 'U'), (1, 4, 'R')], # Checking how it works with locals + grouped reduce + upcasts
+      [(0, 2, 'L'), (1, 2, 'G')], [(0, 16, 'L'), (1, 16, 'G')], [(0, 32, 'L'), (1, 2, 'G')], [(0, 2, 'L'), (1, 64, 'G')], # Checking how it works with locals + grouped reduce
+      [(0, 2, 'L'), (1, 2, 'G'), (0, 8, 'U'), (1, 4, 'R')], # Checking how it works with locals + grouped reduce + upcasts
     ])
 
   def test_upcasts(self):
