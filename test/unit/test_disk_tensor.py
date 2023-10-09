@@ -140,8 +140,8 @@ class TestDiskTensor(unittest.TestCase):
       x[s] = y
       return x[s]
 
-    helper_test_disk_tensor("dt3", [0,1,2,3], lambda x: assign(x, slice(0,2), [13, 12]), lambda x: x[0:2].assign([13, 12]))
-    helper_test_disk_tensor("dt4", [[0,1,2,3],[4,5,6,7]], lambda x: assign(x, slice(0,1), [[13, 12, 11, 10]]), lambda x: x[0:1].assign([[13, 12, 11, 10]]))
+    helper_test_disk_tensor("dt3", [0,1,2,3], lambda x: assign(x, slice(0,2), [13, 12]))
+    helper_test_disk_tensor("dt4", [[0,1,2,3],[4,5,6,7]], lambda x: assign(x, slice(0,1), [[13, 12, 11, 10]]))
 
   def test_reshape(self):
     helper_test_disk_tensor("dt5", [1,2,3,4,5], lambda x: x.reshape((1,5)))
