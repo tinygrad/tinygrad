@@ -132,7 +132,7 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
     if DEBUG >= 2: print(f"Shape: {k.full_shape}; suggestion: {[(i, s, typ) for (typ, i), s in suggestion.items()] if suggestion is not None else None}")
     KOPT_THRESH = getenv("KOPT_THRESH")  # us
     if baseline >= KOPT_THRESH / 1000:
-      choice = kernel_optimize_search(k, create_k, to_prg, baseline, bufs, suggestion, var_vals)
+      choice = kernel_optimize_search(k, create_k, to_prg, baseline, bufs, var_vals, suggestion)
       if global_db is not None:
         global_db[skey] = choice
         global_db.sync()
