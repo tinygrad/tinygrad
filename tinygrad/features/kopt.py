@@ -3,6 +3,7 @@ from typing import Callable
 
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.helpers import DEBUG, prod, getenv, GlobalCounters, ansilen
+from tinygrad.lazy import var_vals_from_ast
 
 def get_divisors(n, min_div = 1, max_div = 512, extra=None):
   if min_div > 1: yield 1
@@ -45,12 +46,12 @@ def compile_kernel(x, create_k, to_prg):
   prg = to_prg(k)
   return k.display_name, prg
 
-def run_and_time(prg, baseline, bufs):
-  first_tm = prg.exec(bufs, force_wait=True, optimizing=True)
+def run_and_time(prg, baseline, bufs, var_vals):
+  first_tm = prg.exec(bufs, var_vals, force_wait=True, optimizing=True)
   if baseline*5 < first_tm*1000: return first_tm*1000  # very slow
-  return min([first_tm]+[prg.exec(bufs, force_wait=True, optimizing=True) for _ in range(10)])*1000
+  return min([first_tm]+[prg.exec(bufs, var_vals, force_wait=True, optimizing=True) for _ in range(10)])*1000
 
-def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, baseline, bufs, suggestion):
+def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, baseline, bufs, var_vals, suggestion):
   import nevergrad as ng
 
   def cheap(x): return catch_exception(compile_kernel)(x, create_k, to_prg) is not None
@@ -66,7 +67,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
 
   if num_workers == 0:
     optimizer.parametrization.register_cheap_constraint(cheap)
-    recommendation = optimizer.minimize(catch_exception(lambda x: run_and_time(compile_kernel(x, create_k, to_prg)[1], baseline, bufs), 10_000))
+    recommendation = optimizer.minimize(catch_exception(lambda x: run_and_time(compile_kernel(x, create_k, to_prg)[1], baseline, bufs, var_vals), 10_000))
   else:
     from extra.helpers import _CloudpickleFunctionWrapper
     best, best_ran, best_name = 10_000, 0, ""
@@ -80,7 +81,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
           ask, prg = q.pop(0)
           try:
             name, prg = prg.get(timeout=5)
-            tm = run_and_time(prg, baseline, bufs)
+            tm = run_and_time(prg, baseline, bufs, var_vals)
           except Exception:
             if DEBUG >= 3: traceback.print_exc()
             optimizer.tell(ask, 10_000, constraint_violation=1.0)
@@ -117,17 +118,18 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
     choice = "BASELINE"
   else:
     orig_kernel_count = GlobalCounters.kernel_count
+    var_vals = {k:k.min for k in var_vals_from_ast(k.ast)}
     # get baseline
     def get_baseline():
       k = create_k()
       suggestion = k.hand_coded_optimizations()
       prg = to_prg(k)
-      return min([prg.exec(bufs, force_wait=True, optimizing=True) for _ in range(5)])*1000, suggestion
+      return min([prg.exec(bufs, var_vals, force_wait=True, optimizing=True) for _ in range(5)])*1000, suggestion
     baseline, suggestion = get_baseline()
     if DEBUG >= 2: print(f"Shape: {k.full_shape}; suggestion: {[(i, s, typ) for (typ, i), s in suggestion.items()] if suggestion is not None else None}")
     KOPT_THRESH = getenv("KOPT_THRESH")  # us
     if baseline >= KOPT_THRESH / 1000:
-      choice = kernel_optimize_search(k, create_k, to_prg, baseline, bufs, suggestion)
+      choice = kernel_optimize_search(k, create_k, to_prg, baseline, bufs, suggestion, var_vals)
       if global_db is not None:
         global_db[skey] = choice
         global_db.sync()
