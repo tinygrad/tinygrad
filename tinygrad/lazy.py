@@ -1,11 +1,11 @@
 from __future__ import annotations
-import sys, operator, math
+import sys, operator, math, functools
 from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapping
 from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
 from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, partition, dedup, merge_dicts
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
+from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
 
@@ -78,6 +78,8 @@ def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
 def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(cast(LazyBuffer, root.op.src[0])) if getattr(root, 'op', None) and len(root.op.src) == 1 and isinstance(root.op.src[0], LazyBuffer) else root
 def get_movementroot(root:LazyBuffer, allow_contiguous=False) -> LazyBuffer: return get_movementroot(cast(LazyBuffer, root.op.src[0]), allow_contiguous) if not root.realized and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and allow_contiguous and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot_contiguous(cast(LazyBuffer, x.op.src[0])) if not x.realized and x.op.op == LoadOps.CONTIGUOUS else (get_movementroot(x, True) if x.optype == MovementOps and x.st.contiguous else x)
+
+def var_vals_from_ast(ast:LazyOp) -> List[Variable]: return dedup(functools.reduce(operator.add, [x.arg.st.var_vals() for x in ast.get_lazyops() if x.op in BufferOps], []))
 
 lazycache: WeakValueDictionary = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, var_vals:Dict[Variable,int], base:Optional[LazyBuffer]=None):
@@ -157,7 +159,7 @@ class LazyBuffer:
 
   # *** scheduling ***
 
-  def schedule(self, seen=None) -> List[Tuple[LazyOp, LazyBuffer, Tuple[LazyBuffer, ...]]]:
+  def schedule(self, seen=None) -> List[ScheduleItem]:
     if seen is None: seen = set()
     if self in seen or self.realized or self.is_unrealized_const(): return []
     seen.add(self)
@@ -178,7 +180,7 @@ class LazyBuffer:
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
-    return ret + [(op, self, tuple(base_bufs))]
+    return ret + [ScheduleItem(op, self, tuple(base_bufs))]
 
   # *** creation/special ops ***
 
@@ -191,8 +193,13 @@ class LazyBuffer:
     # NOTE: dtypes.from_np(self.dtype.np) to deal with image types
     return self.loadop(LoadOps.CONST, tuple(), dtypes.from_np(self.dtype.np), self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
 
+  def copy_to_device(self, device:str) -> LazyBuffer:
+    # back off a FROM if it's a double FROM
+    if not self.realized and self.op.op == LoadOps.FROM and cast(LazyBuffer, self.op.src[0]).device == device: return cast(LazyBuffer, self.op.src[0])
+    return LazyBuffer.loadop(LoadOps.FROM, self.shape, self.dtype, device, src=self.contiguous())
+
   def contiguous(self:LazyBuffer) -> LazyBuffer:
-    if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
+    if not self.realized and self.op.op in LoadOps and self.op.op != LoadOps.CONST: return self  # all LoadOps are already contiguous (except CONST)
     if self.st.contiguous and self.st.size() == self.base.st.size() and not self.is_unrealized_const():
       # this will turn into nothing, it's based and a copy
       # TODO: based lazybuffers shouldn't take dtype or var_vals, same issue in movementops

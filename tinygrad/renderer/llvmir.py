@@ -71,7 +71,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
   for a in func.args:
     if a.type.is_pointer: a.add_attribute("noalias")
 
-  # force llvmlite to allow us to add function attribute then add the attribute
+  # add the function attribute "no-nans-fp-math"="true", which informs llvm that it allowed to use vectorization optimizations
   func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
   func.attributes.add('"no-nans-fp-math"="true"')
 
