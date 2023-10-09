@@ -417,7 +417,6 @@ class OptimizedKernel(Kernel):
           to_upcast.append(axis)
       for axis in to_upcast[::-1]:
         self.shift_upcast(axis, self.full_shape[axis], suggestion)
-        pass
       self.simplify_ones()
 
     # potentially do more upcasts of non reduce axes based on a heuristic
