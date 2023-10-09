@@ -90,6 +90,36 @@ jobs:
     - name: Test EfficientNet
       run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
 
+  testhip:
+    name: HIP CPU Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Checkout HIP-CPU
+      uses: actions/checkout@v3
+      with:
+        repository: ROCm-Developer-Tools/HIP-CPU
+        ref: 1bf89aa04804fdb9ca6306a4d357cf4dfa5aa74d
+        path: HIP-CPU
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+    - name: Install Dependencies
+      run: |
+        sudo apt update -y
+        sudo apt install -y cmake build-essential clang-15 libstdc++-12-dev libtbb-dev
+    - name: Install HIP-CPU
+      run: |
+        mkdir HIP-CPU/build && pushd HIP-CPU/build
+        cmake -Dhip_cpu_rt_BUILD_TESTING=False -Dhip_cpu_rt_BUILD_EXAMPLES=False ../ && cmake --build ./ && sudo cmake --build ./ --target install && popd
+    - name: Install Python Dependencies
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Run Pytest
+      run: CXX=clang-15 HIP=1 HIP_CPU=1 python -m pytest -n=auto test/test_ops.py
+
   testtorch:
     name: Torch Tests
     runs-on: ubuntu-latest

@@ -1,9 +1,8 @@
 import ctypes
-from tinygrad.helpers import DEBUG
-import sys
-import numpy as np
-from typing import Any, Dict, List, Tuple
 from dataclasses import dataclass
+from tinygrad.helpers import DEBUG
+from tinygrad.renderer.cstyle import CStyleLanguage
+from typing import Any, Dict, List, Tuple
 
 try:
   _libhip = ctypes.cdll.LoadLibrary("libamdhip64.so")
@@ -681,5 +680,6 @@ try:
     status = _libhiprtc.hiprtcGetCode(prog, e_code)
     hipCheckStatus(status)
     return e_code
+
 except:
   if DEBUG >= 1: print("WARNING: libamdhip64.so or libhiprtc.so not found. HIP support will not work.")

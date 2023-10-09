@@ -1,12 +1,16 @@
 import numpy as np
 import ctypes, functools, math, collections
-import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
 from tinygrad.helpers import DEBUG, getenv, cache_compiled
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
+from tinygrad.renderer.cstyle import CStyleLanguage, uops_to_cstyle
+
+if getenv("HIP_CPU"):
+  import extra.hip_cpu_wrapper as hip
+else:
+  import extra.hip_wrapper as hip # type: ignore[no-redef]
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
 if DEBUG >= 6:
@@ -100,6 +104,7 @@ class HIPProgram:
       self.modules.append(hip.hipModuleLoadData(prg))
       self.prgs.append(hip.hipModuleGetFunction(self.modules[-1], name))
 
+  cache_compiled = lambda _: _ if getenv("HIP_CPU") else cache_compiled # noqa: E731
   @cache_compiled
   def compile(self, prg, name) -> bytes:
     try:
@@ -127,7 +132,8 @@ class HIPProgram:
   def __del__(self):
     for module in self.modules: hip.hipModuleUnload(module)
 
-renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
+language = hip.language if getenv("HIP_CPU") else CStyleLanguage
+renderer = functools.partial(uops_to_cstyle, language( # type: ignore
   kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
 __device__ float4 max(float4 x, float4 y) { return float4(max(x.x, y.x), max(x.y, y.y), max(x.z, y.z), max(x.w, y.w)); }
 __device__ float4 pow(float x, float4 y) { return float4(pow(x, y.x), pow(x, y.y), pow(x, y.z), pow(x, y.w)); }
