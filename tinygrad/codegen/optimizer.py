@@ -8,7 +8,7 @@ from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.view import View, strides_for_shape
 from enum import Enum, auto
 
-class OptOps(Enum): UPCAST = auto(); UNROLL = auto(); LOCAL = auto(); GROUP = auto()
+class OptOps(Enum): UPCAST = auto(); UNROLL = auto(); LOCAL = auto(); GROUP = auto() # noqa: E702
 
 @dataclass(frozen=True)
 class Opt:
@@ -29,6 +29,8 @@ class OptimizedKernel(Kernel):
     # group simplifies
     self.simplify_ones()
     self.simplify_merge_adjacent()
+
+    self.applied_opts = []
 
   # ******************** base simplifiers ********************
 
@@ -153,60 +155,7 @@ class OptimizedKernel(Kernel):
 
   # ******************** high level optimizers ********************
 
-  def apply_auto_opt(self, x):
-    for axis, amt, typ in x:
-      if axis is None or amt == 1: continue
-      if typ == "G" and self.opts.has_shared:
-        assert self.full_shape[self.first_reduce+axis+len(self.group_for_reduce)] % amt == 0, "no longer valid shift"
-        self.shift_to(self.first_reduce+axis+len(self.group_for_reduce), amt, top=True, insert_before=self.first_reduce+len(self.group_for_reduce))
-        self.group_for_reduce.append(amt)
-      if typ == "R":
-        typ = "U"
-        axis += self.first_reduce + len(self.group_for_reduce)
-      if typ == "U":
-        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-        self.shift_to(axis, amt)
-        self.upcast()
-      elif typ == "L":
-        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-        self.shift_to(axis, amt, insert_before=self.first_reduce)
-        self.local_dims += 1
-    self.simplify_ones()
-
-  def apply_opt(self, opt:Opt):
-    assert self.full_shape[opt.axis] % opt.amt == 0, "no longer valid shift"
-    if opt.op == OptOps.LOCAL:       # cyan
-      assert opt.axis < self.first_reduce, "can't local reduce axis"
-      self.shift_to(opt.axis, opt.amt, top=opt.top, insert_before=self.first_reduce)
-      self.local_dims += 1
-    elif opt.op == OptOps.GROUP:     # green
-      self.shift_to(opt.axis, opt.amt, top=opt.top, insert_before=self.first_reduce + len(self.group_for_reduce))
-      self.group_for_reduce.append(opt.amt)
-    elif opt.op == OptOps.UNROLL:    # purple
-      assert opt.axis >= self.first_reduce, "can't unroll nonreduce axis"
-      self.shift_to(opt.axis, opt.amt, top=opt.top, insert_before=len(self.full_unupcasted_shape))
-      self.upcast()
-    elif opt.op == OptOps.UPCAST:    # yellow
-      assert opt.axis < self.first_reduce, "can't upcast reduce axis"
-      self.shift_to(opt.axis, opt.amt, top=opt.top)
-      self.upcast()
-
-  def required_optimizations(self, early_only=False):
-    for buf_index,buf in enumerate(self.bufs):
-      unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes(ignore_valid=True) if self.sts[buf_index].shape[i]%4 == 0]
-      if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype.__class__ is ImageDType:
-        assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
-        if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
-          self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
-
-
-  def hand_coded_optimizations(self, use_tensor_cores=getenv("TC", 1)):
-    # if there's images in the earlybufs, we have to make an axis the 4 loading one
-    self.required_optimizations(early_only=True)
-
-    # simplify
-    self.simplify_ones()
-
+  def apply_tensor_cores(self, use_tensor_cores):
     # should use HIP tensor cores?
     if use_tensor_cores != 0 and self.opts.device == "HIP" and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
         isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == UnaryOps.CAST and \
@@ -264,7 +213,7 @@ class OptimizedKernel(Kernel):
           self.exclude_local_upcast += 2
 
         # early exit
-        return
+        return True
 
     # should use METAL tensor cores?
     # first, confirm it's a straightforward mulacc on a device with real locals
@@ -344,7 +293,63 @@ class OptimizedKernel(Kernel):
           self.exclude_local_upcast += 1
 
         # early exit
-        return
+        return True
+    return False
+
+  def apply_auto_opt(self, x):
+    for axis, amt, typ in x:
+      if axis is None or amt == 1: continue
+      if typ == "G" and self.opts.has_shared:
+        assert self.full_shape[self.first_reduce+axis+len(self.group_for_reduce)] % amt == 0, "no longer valid shift"
+        self.shift_to(self.first_reduce+axis+len(self.group_for_reduce), amt, top=True, insert_before=self.first_reduce+len(self.group_for_reduce))
+        self.group_for_reduce.append(amt)
+      if typ == "R":
+        typ = "U"
+        axis += self.first_reduce + len(self.group_for_reduce)
+      if typ == "U":
+        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
+        self.shift_to(axis, amt)
+        self.upcast()
+      elif typ == "L":
+        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
+        self.shift_to(axis, amt, insert_before=self.first_reduce)
+        self.local_dims += 1
+    self.simplify_ones()
+
+  def apply_opt(self, opt:Opt):
+    self.applied_opts.append(opt)
+    assert self.full_shape[opt.axis] % opt.amt == 0, "no longer valid shift"
+    if opt.op == OptOps.LOCAL:       # cyan
+      assert opt.axis < self.first_reduce, "can't local reduce axis"
+      self.shift_to(opt.axis, opt.amt, top=opt.top, insert_before=self.first_reduce)
+      self.local_dims += 1
+    elif opt.op == OptOps.GROUP:     # green
+      self.shift_to(opt.axis, opt.amt, top=opt.top, insert_before=self.first_reduce + len(self.group_for_reduce))
+      self.group_for_reduce.append(opt.amt)
+    elif opt.op == OptOps.UNROLL:    # purple
+      assert opt.axis >= self.first_reduce, "can't unroll nonreduce axis"
+      self.shift_to(opt.axis, opt.amt, top=opt.top, insert_before=len(self.full_unupcasted_shape))
+      self.upcast()
+    elif opt.op == OptOps.UPCAST:    # yellow
+      assert opt.axis < self.first_reduce, "can't upcast reduce axis"
+      self.shift_to(opt.axis, opt.amt, top=opt.top)
+      self.upcast()
+    self.simplify_ones()
+
+  def required_optimizations(self, early_only=False):
+    for buf_index,buf in enumerate(self.bufs):
+      unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes(ignore_valid=True) if self.sts[buf_index].shape[i]%4 == 0]
+      if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype.__class__ is ImageDType:
+        assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
+        if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
+          self.apply_opt(Opt(OptOps.UNROLL if unit_stride_axes_mul_4[0] >= self.first_reduce else OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
+
+  def hand_coded_optimizations(self, use_tensor_cores=getenv("TC", 1)):
+    # if there's images in the earlybufs, we have to make an axis the 4 loading one
+    self.required_optimizations(early_only=True)
+
+    # might use tensor cores
+    if use_tensor_cores and self.apply_tensor_cores(use_tensor_cores): return
 
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
     MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
@@ -388,9 +393,6 @@ class OptimizedKernel(Kernel):
     # now do everything required
     self.required_optimizations()
 
-    # simplify (sets first_reduce)
-    self.simplify_ones()
-
     # no more opt if we are grouping
     if self.group_for_reduce: return
 
@@ -408,7 +410,6 @@ class OptimizedKernel(Kernel):
         to_upcast.append(axis)
     for axis in to_upcast[::-1]:
       self.apply_opt(Opt(OptOps.UPCAST, axis, self.full_shape[axis]))
-      self.simplify_ones()
 
     # potentially do more upcasts of non reduce axes based on a heuristic
     upcasted_axis = set()
@@ -422,7 +423,6 @@ class OptimizedKernel(Kernel):
         xb_choices = sorted(xb_choices)
         if DEBUG >= 4: print(f"float4 merging axis : {xb_choices}")
         self.apply_opt(Opt(OptOps.UPCAST, xb_choices[0][2], xb_choices[0][3]))
-        self.simplify_ones()
         upcasted_axis.add(xb_choices[0][2])
       else:
         break
@@ -443,7 +443,7 @@ class OptimizedKernel(Kernel):
     # TODO: this is breaking the tests
     for splits in [4]:
       if self.upcasted == 0 and self.full_unupcasted_shape and self.full_unupcasted_shape[-1] % splits == 0:
-        self.apply_opt(Opt(OptOps.UNROLL, len(self.full_unupcasted_shape)-1, splits))
+        self.apply_opt(Opt(OptOps.UNROLL if len(self.full_unupcasted_shape)-1 >= self.first_reduce else OptOps.UPCAST, len(self.full_unupcasted_shape)-1, splits))
 
     # **** local groups ****
 
@@ -455,10 +455,12 @@ class OptimizedKernel(Kernel):
         local_size = prod(sz for _, sz in to_local)
         local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)
         if local_sz is not None: to_local.append((axis, local_sz))
+      deleted_shape = 0
       for axis, local_sz in sorted(to_local[:3]):
+        axis = axis - deleted_shape
+        will_delete_shape = local_sz == self.full_shape[axis]
         self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
-    self.simplify_ones()
-
+        if will_delete_shape: deleted_shape += 1
 
   def hand_coded_optimizations_old(self, use_tensor_cores=getenv("TC", 1)):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
@@ -630,6 +632,7 @@ class OptimizedKernel(Kernel):
             if MV_ROWS_PER_THREAD > 1:
               self.shift_to(global_idx, MV_ROWS_PER_THREAD)
               self.upcast()
+            self.simplify_ones()
             return
 
     if self.opts.has_local and self.opts.has_shared and all(isinstance(s, int) for s in self.sts[0].shape[:self.first_reduce]):

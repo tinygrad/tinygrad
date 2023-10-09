@@ -21,7 +21,7 @@ if __name__ == "__main__":
   ast_strs = dedup(open(sys.argv[1]).read().strip().split("\n"))
 
   # reduce kernels only, no ImageDType
-  ast_strs = [x for x in ast_strs if "ReduceOps" in x and "dtypes.image" not in x]
+  #ast_strs = [x for x in ast_strs if "ReduceOps" in x and "dtypes.image" not in x]
 
   # the device we are optimizing for
   device: Compiled = Device[Device.DEFAULT]
@@ -30,7 +30,7 @@ if __name__ == "__main__":
   # random first kernels
   random.seed(1337)
   random.shuffle(ast_strs)
-  ast_strs = ast_strs[:5000]
+  #ast_strs = ast_strs[:5000]
 
   print(f"loaded {len(ast_strs)} kernels")
 
@@ -50,11 +50,11 @@ if __name__ == "__main__":
     lin2.hand_coded_optimizations()
     postopt_alt = lin2.colored_shape()
 
-    for s1,s2 in zip(lin.sts, lin2.sts):
-      assert s1 == s2
+    #print(lin2.applied_opts)
 
     print(preopt+' '*(37-ansilen(preopt)), "->", postopt)
     assert postopt == postopt_alt, f"{postopt} != {postopt_alt}"
+    for s1,s2 in zip(lin.sts, lin2.sts): assert s1 == s2
 
     """
     lin.linearize()
