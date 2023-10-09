@@ -1,4 +1,4 @@
-from typing import Tuple, List, cast, Optional
+from typing import Tuple, List, cast, Optional, Dict
 import itertools, math, os
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp, BufferOps
@@ -203,7 +203,7 @@ class OptimizedKernel(Kernel):
           self.shift_upcast(unit_stride_axes_mul_4[0], 4, suggestion)
 
   def hand_coded_optimizations(self, use_tensor_cores=getenv("TC", 1)):
-    suggestion = {}
+    suggestion: Dict[Tuple[str, int], int] = {}
 
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     self.required_optimizations(suggestion, early_only=True)
@@ -402,7 +402,7 @@ class OptimizedKernel(Kernel):
 
     # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
     # this can be made much smarter
-    to_upcast = []
+    to_upcast: List[int] = []
     # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
     for axis in range(self.first_reduce):
       # we might want to be able to split axes that are masked, or refuse to merge them in simplify_merge_adjacent

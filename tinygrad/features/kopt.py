@@ -1,5 +1,5 @@
 import time, functools, multiprocessing as mp, traceback
-from typing import Callable
+from typing import Callable, List, Any, cast
 
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.helpers import DEBUG, prod, getenv, GlobalCounters, ansilen
@@ -74,10 +74,11 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
   else:
     from extra.helpers import _CloudpickleFunctionWrapper
     best, best_ran, best_name = 10_000, 0, ""
-    q, ran = [], 0
+    q: List[Any] = []
+    ran = 0
     with mp.Pool(num_workers) as pool:
-      while optimizer.num_tell < optimizer.budget:
-        while len(q) < num_workers and optimizer.num_ask < optimizer.budget:
+      while optimizer.num_tell < cast(int, optimizer.budget):
+        while len(q) < num_workers and optimizer.num_ask < cast(int, optimizer.budget):
           ask = optimizer.ask()
           q.append((ask, pool.apply_async(compile_kernel, (ask.value, _CloudpickleFunctionWrapper(create_k), _CloudpickleFunctionWrapper(to_prg)))))
         while len(q) > num_workers-1 or (optimizer.num_ask == optimizer.budget and q):
