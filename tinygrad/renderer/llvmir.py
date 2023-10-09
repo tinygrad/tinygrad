@@ -1,4 +1,4 @@
-from typing import Final, Dict, Callable, Any, List, Optional
+from typing import Final, Dict, Callable, Any, List, Optional, Tuple
 from llvmlite import ir  # type: ignore
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.helpers import dtypes
@@ -57,7 +57,7 @@ def cast(bb, val, input_type, output_type):
 
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
-def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
+def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 
@@ -139,4 +139,4 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
       lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin])
 
   bb[-1].ret_void()
-  return str(module), {}
+  return str(module), {"binary":False}
