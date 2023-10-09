@@ -7,7 +7,7 @@ import numpy as np
 from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, dedup, merge_dicts
 from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
-from tinygrad.shape.symbolic import Variable, sint
+from tinygrad.shape.symbolic import Variable, MulNode, SumNode, sint
 
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
@@ -31,7 +31,7 @@ def _ast_reduceops(op:LazyOp) -> LazyOp:
   if not src.realized:
     assert isinstance(src.op, LazyOp), "if not src.realized, then src.op must be a LazyOp"
     if MERGE_ELEMENTWISE_INTO_REDUCE and src.optype is BinaryOps and len(src.children) <= 1: src = src.op
-  return LazyOp(op.op, (src,), tuple(a if isinstance(a, int) else a.unbind()[0] for a in op.arg) if op.arg is not None else None)
+  return LazyOp(op.op, (src,), tuple(a.unbind()[0] if isinstance(a, (Variable, MulNode, SumNode)) else a for a in op.arg) if op.arg is not None else None)
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _ast_binaryops(op:LazyOp, shape: Tuple[sint, ...]) -> LazyOp:
