@@ -6,14 +6,14 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 from tinygrad.ops import Device, GlobalCounters, LazyOp, LoadOps
 from tinygrad.helpers import CI, dtypes, getenv, prod
-from tinygrad.features.kopt import kernel_optimize_opts
+from tinygrad.features.kopt import kernel_optimize_opts, normalize_suggestion
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet
 from examples.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
 from examples.stable_diffusion import UNetModel
 
-def kopt_search_hook(k, create_k, to_prg, baseline, bufs, var_vals):
+def kopt_search_hook(k, create_k, to_prg, baseline, bufs, var_vals, suggestion):
   import nevergrad as ng
   wanna_output = bufs[0].toCPU().copy()
   def check_opt(x):
@@ -26,11 +26,12 @@ def kopt_search_hook(k, create_k, to_prg, baseline, bufs, var_vals):
       return first_tm
     except Exception:
       return 10000_000   # 10000 seconds is infinity
-  opts = kernel_optimize_opts(k)
+  opts, default_opt = kernel_optimize_opts(k, suggestion)
   if not opts: return "BASELINE"
   search_space = prod([len(x.choices) for x in opts])
   budget = getenv("BUDGET", 20) # THIS IS TEST BUDGET
   optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, budget))
+  if suggestion is not None: optimizer.suggest(normalize_suggestion(default_opt, suggestion))
   recommendation = optimizer.minimize(check_opt)
   return recommendation.value if recommendation.loss < baseline else "BASELINE"
 

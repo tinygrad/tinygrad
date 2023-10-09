@@ -27,6 +27,9 @@ def kernel_optimize_opts(k:Linearizer, suggestion):
   # nevergrad parameters, default parameter choice
   return [ng.p.TransitionChoice(opt) for opt in opts], [opt[0] for opt in opts]
 
+def normalize_suggestion(default_opt, suggestion):
+  return tuple([(i, s, typ) for (typ, i), s in ({(typ, i): s for i,s,typ in default_opt} | suggestion).items()])  # maintain ordering from default_opt
+
 def catch_exception(f, on_fail=None):
   @functools.wraps(f)
   def inner(*args, **kwargs):
@@ -63,7 +66,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
   budget, num_workers = getenv("BUDGET", 200), getenv("KOPT_WORKERS", 16)
   optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, budget), num_workers=num_workers)
   optimizer.register_callback("tell", (bar := ng.callbacks.ProgressBar()))
-  if suggestion is not None: optimizer.suggest(tuple([(i, s, typ) for (typ, i), s in ({(typ, i): s for i,s,typ in default_opt} | suggestion).items()]))  # maintain ordering from default_opt
+  if suggestion is not None: optimizer.suggest(normalize_suggestion(default_opt, suggestion))
 
   if num_workers == 0:
     optimizer.parametrization.register_cheap_constraint(cheap)
