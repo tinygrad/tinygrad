@@ -82,10 +82,12 @@ class ShapeTracker:
   # this is the real size (ish)
   def size(self): return self.views[-1].size()
 
+  def vars(self) -> List[Variable]: return dedup(functools.reduce(operator.add, [v.vars() for v in self.views], []))
+
   @property
   def var_vals(self) -> Dict[Variable, int]:
     ret:Dict[Variable, int] = {}
-    for v in dedup(functools.reduce(operator.add, [v.vars() for v in self.views], [])):
+    for v in self.vars():
       var, val = v.unbind()
       assert var not in ret or ret[var] == val, f"{var} has conflicted values {val} and {ret[var]}"
       ret[var] = val

@@ -31,7 +31,7 @@ def _ast_reduceops(op:LazyOp) -> LazyOp:
   if not src.realized:
     assert isinstance(src.op, LazyOp), "if not src.realized, then src.op must be a LazyOp"
     if MERGE_ELEMENTWISE_INTO_REDUCE and src.optype is BinaryOps and len(src.children) <= 1: src = src.op
-  return LazyOp(op.op, (src,), op.arg)
+  return LazyOp(op.op, (src,), tuple(a if isinstance(a, int) else a.unbind()[0] for a in op.arg) if op.arg is not None else None)
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _ast_binaryops(op:LazyOp, shape: Tuple[sint, ...]) -> LazyOp:
@@ -64,7 +64,7 @@ def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
   replacements:Dict[LazyBuffer, LazyOp] = {}
   base_bufs = dedup([x.base for x in op.buffers if not x.is_unrealized_const()])
   for x in op.buffers:
-    st = x.st.simplify()
+    st = x.st.simplify().unbind()
     if x.base in base_bufs:
       replacements[x] = LazyOp(BufferOps.MEM, (), MemBuffer(base_bufs.index(x.base)+1, x.dtype, st))
     elif not x.realized and x.base.op.op == LoadOps.CONST:
@@ -79,7 +79,7 @@ def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(cast(
 def get_movementroot(root:LazyBuffer, allow_contiguous=False) -> LazyBuffer: return get_movementroot(cast(LazyBuffer, root.op.src[0]), allow_contiguous) if not root.realized and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and allow_contiguous and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot_contiguous(cast(LazyBuffer, x.op.src[0])) if not x.realized and x.op.op == LoadOps.CONTIGUOUS else (get_movementroot(x, True) if x.optype == MovementOps and x.st.contiguous else x)
 
-def var_vals_from_ast(ast:LazyOp) -> List[Variable]: return dedup(functools.reduce(operator.add, [list(x.arg.st.var_vals.keys()) for x in ast.get_lazyops() if x.op in BufferOps], []))
+def var_vals_from_ast(ast:LazyOp) -> List[Variable]: return dedup(functools.reduce(operator.add, [x.arg.st.vars() for x in ast.get_lazyops() if x.op in BufferOps], []))
 
 lazycache: WeakValueDictionary = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, base:Optional[LazyBuffer]=None):
@@ -165,7 +165,6 @@ class LazyBuffer:
     ret = []
     for x in op.buffers: ret += x.schedule(seen)
 
-    # TODO: unbind self.st shapetracker here?
     var_vals = dict(sorted(merge_dicts([self.st.var_vals] + [buf.st.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 
     # run the ast and log the op
