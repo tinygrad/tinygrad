@@ -411,7 +411,8 @@ class OptimizedKernel(Kernel):
       for axis in range(self.first_reduce):
         # we might want to be able to split axes that are masked, or refuse to merge them in simplify_merge_adjacent
         # for now skip upcasting here if there is a symbolic axis
-        if isinstance(self.full_shape[axis], int) and self.full_shape[axis] <= 7 and any(st.axis_is_masked(axis) for st in self.sts) and prod(self.full_shape[j] for j in to_upcast) * self.full_shape[axis] <= 7 * 7:
+        if isinstance(self.full_shape[axis], int) and self.full_shape[axis] <= 7 and any(st.axis_is_masked(axis) for st in self.sts) and \
+          prod(self.full_shape[self.shape_len - self.upcasted:]) * prod(self.full_shape[j] for j in to_upcast) * self.full_shape[axis] <= 7 * 7:
           if DEBUG >= 4 or True: print(f"upcasting masked axis : {axis}")
           to_upcast.append(axis)
       for axis in to_upcast[::-1]:
