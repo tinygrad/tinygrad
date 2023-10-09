@@ -105,7 +105,8 @@ class TestSafetensors(unittest.TestCase):
     import json
     assert json.loads(dat[8:8+sz])['__metadata__']['hello'] == 'world'
 
-def helper_test_disk_tensor(fn, data, np_fxn, tinygrad_fxn):
+def helper_test_disk_tensor(fn, data, np_fxn, tinygrad_fxn=None):
+  if tinygrad_fxn is None: tinygrad_fxn = np_fxn
   pathlib.Path(temp(fn)).unlink(missing_ok=True)
   tinygrad_tensor = Tensor(data, device="CPU").to(f"disk:{temp(fn)}")
   numpy_arr = np.array(data)
@@ -139,8 +140,8 @@ class TestDiskTensor(unittest.TestCase):
     helper_test_disk_tensor("dt4", [[0,1,2,3],[4,5,6,7]], lambda x: ((x.__setitem__(slice(0,1), [[13, 12, 11, 10]]), x[0:1])[1]), lambda x: x[0:1].assign([[13, 12, 11, 10]]))
 
   def test_reshape(self):
-    helper_test_disk_tensor("dt5", [1,2,3,4,5],lambda x: x.reshape((1,5)), lambda x: x.reshape((1,5)))
-    helper_test_disk_tensor("dt6", [1,2,3,4], lambda x: x.reshape((2,2)), lambda x: x.reshape((2,2)))
+    helper_test_disk_tensor("dt5", [1,2,3,4,5], lambda x: x.reshape((1,5)))
+    helper_test_disk_tensor("dt6", [1,2,3,4], lambda x: x.reshape((2,2)))
 
   def test_permute(self):
     helper_test_disk_tensor("dt7", [[1,2,3,4,5],[6,7,8,9,10]], lambda x: np.transpose(x, (0,1)), lambda x: x.permute(0,1))
