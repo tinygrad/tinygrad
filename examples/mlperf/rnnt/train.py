@@ -60,13 +60,11 @@ def iterate(bs=1, start=0):
   for i in range(start, len(ci), bs):
     samples, sample_lens = zip(*[load_wav(BASEDIR / v["files"][0]["fname"]) for v in ci[i : i + bs]])
     samples = list(samples)
-    # pad to same length
-    max_len = max(sample_lens)
-    for j in range(len(samples)):
-      samples[j] = np.pad(samples[j], (0, max_len - sample_lens[j]), "constant")
-    samples, sample_lens = np.array(samples), np.array(sample_lens)
+    X,X_lens = list(zip(*[feature_extract(np.array(samples[i:i+1]),np.array(sample_lens[i:i+1])) for i in range(bs)]))
+    max_len = max(X_lens)
+    X = [np.pad(X[j],((0,int(max_len[0]-X_lens[j][0])),(0,0),(0,0)),'constant') for j in range (len(X))]
+    yield np.concatenate(X,axis=1),(np.array(X_lens)),*text_encode([v['transcript'] for v in ci[i:i+bs]])
 
-    yield feature_extract(samples, sample_lens), np.array([v["transcript"] for v in ci[i : i + bs]])
 
 characters = [*" 'abcdefghijklmnopqrstuvwxyz","<skip>"]
 c2i= dict([(c,i) for i,c in enumerate(characters)])
@@ -74,7 +72,10 @@ charn = len(characters)
 
 def text_encode(text:list[str]):
     if isinstance(text,str):text = [text]
-    return [[np.array(c2i[char]) for char in seq] for seq in text]
+    seqs = [np.array([np.array(c2i[char]) for char in seq]) for seq in text]
+    seq_lens = [len(s) for s in seqs]
+    seqs = list(map (lambda s: np.pad(s,(0,max(seq_lens)-len(s)),"constant"),seqs))
+    return Tensor(seqs,dtype=dtypes.int16), seq_lens
 
 def text_decode(toks:Tensor):
     ret = []
@@ -132,6 +133,7 @@ class RNNT:
   
 class LSTMCell:
   def __init__(self, input_size, hidden_size, dropout):
+    self.input_size,self.hidden_size = input_size,hidden_size
     self.dropout = dropout
 
     self.weights_ih = Tensor.uniform(hidden_size * 4, input_size)
@@ -140,16 +142,21 @@ class LSTMCell:
     self.bias_hh = Tensor.uniform(hidden_size * 4)
 
   def __call__(self, x:Tensor, hc:Tensor):
-    gates = x.linear(self.weights_ih.T, self.bias_ih) + hc[:x.shape[0]].linear(self.weights_hh.T, self.bias_hh)
+
+    assert (BS, self.input_size) == x.shape, f"{self.input_size} {x.shape}"
+    assert (2,BS,self.hidden_size) == hc.shape
+    last_h,last_c = hc
+    gates = x.linear(self.weights_ih.T, self.bias_ih) + last_h.linear(self.weights_hh.T, self.bias_hh)
 
     i, f, g, o = gates.chunk(4, 1)
     i, f, g, o = i.sigmoid(), f.sigmoid(), g.tanh(), o.sigmoid()
 
-    c = (f * hc[x.shape[0]:]) + (i * g)
+    c = ((f * last_c) + (i * g)).unsqueeze(0)
     h = (o * c.tanh()).dropout(self.dropout)
 
     return Tensor.cat(h, c).realize()
 
+T = BS = 0
 class LSTM:
   def __init__(self, input_size, hidden_size, layers, dropout):
     self.input_size = input_size
@@ -161,28 +168,40 @@ class LSTM:
     self.params = list(itertools.chain(*[[cell.bias_hh,cell.bias_ih,cell.weights_hh,cell.weights_ih] for cell in self.cells]))
 
   def do_step(self, x, hc):
-    new_hc = [x]
+    assert (self.layers,2,BS,self.hidden_size) == hc.shape
+    h = x
+    new_hc = []
     for i, cell in enumerate(self.cells):
-      new_hc.append(cell(new_hc[i][:x.shape[0]], hc[i]))
-    return Tensor.stack(new_hc[1:]).realize()
+      res = cell(h, hc[i])
+      assert (2,BS,self.hidden_size) == res.shape, f"{(2,BS,self.hidden_size)} {res.shape}"
+      h = res[0]
+      new_hc.append(res)
+    return Tensor.stack(new_hc)
 
   def __call__(self, x, hc):
     @TinyJit
     def _do_step(x_, hc_):
       return self.do_step(x_, hc_)
 
+    global BS,T
+    T,BS,IS = x.shape
+    assert IS == self.input_size
+    
     if hc is None:
-      hc = Tensor.zeros(self.layers, 2 * x.shape[1], self.hidden_size, requires_grad=False)
+      hc = Tensor.zeros(self.layers, 2, BS, self.hidden_size, requires_grad=False)
 
     output = None
-    for t in range(x.shape[0]):
+    for t in range(T):
       hc = _do_step(x[t] + 1 - 1, hc) # TODO: why do we need to do this?
+      assert (self.layers,2,BS,self.hidden_size) == hc.shape
       if output is None:
-        output = hc[-1:, :x.shape[1]]
+        output = hc[-1][:1]
       else:
-        output = output.cat(hc[-1:, :x.shape[1]], dim=0).realize()
+        output = output.cat(hc[-1][:1], dim=0).realize()
 
     return output, hc
+
+rnnt = RNNT()
 
 class Joint:
   def __init__(self, vocab_size, pred_hidden_size, enc_hidden_size, joint_hidden_size, dropout):
@@ -218,9 +237,9 @@ class StackTime:
   def __init__(self, factor):
     self.factor = factor
 
-  def __call__(self, x, x_lens):
-    x = x.pad(((0, (-x.shape[0]) % self.factor), (0, 0), (0, 0)))
-    x = x.reshape(x.shape[0] // self.factor, x.shape[1], x.shape[2] * self.factor)
+  def __call__(self, x:Tensor, x_lens):
+    x = x.pad(((0, x.shape[0] % self.factor), (0, 0), (0, 0))).permute((1,0,2))
+    x = x.reshape( x.shape[0], x.shape[1] // self.factor, x.shape[2] * self.factor).permute((1,0,2))
     return x, x_lens / self.factor if x_lens is not None else None
 
 class Prediction:
@@ -236,6 +255,40 @@ class Prediction:
     emb = self.emb(x) * m
     x_, hc = self.rnn(emb.transpose(0, 1), hc)
     return x_.transpose(0, 1), hc
+
+# %% autocompare
+def autocompare(x,x2):
+  if type(x) == Tensor: 
+    x = x.numpy()
+    x2 = x2.numpy()
+  shape = tuple(min(a,b) for a,b in zip (x.shape,x2.shape))
+  def forceshape(x:np.ndarray):
+    x = x.reshape ((1,*x.shape))
+    for i in range(len(shape)):
+      x = x[:,:shape[i]]
+      x = x.reshape ((-1,*x.shape[2:]))
+    return x
+  x2= forceshape(x2).reshape(shape)
+  x = forceshape(x).reshape(shape)
+  shape = tuple(s for s in shape if s > 1)
+  x2= x2.reshape(shape)
+  x= x.reshape(shape)
+
+  if np.allclose(x,x2):
+    return shape
+  else:
+    err = np.abs(x-x2).max()
+    print(err)
+    return False
+autocompare(X,X2)
+
+
+# %%
+
+rnnt = RNNT()
+self = rnnt.encoder
+
+
 
  #%%
 def check32(arg):assert arg.dtype == np.float32 or arg.dtype == dtypes.float32 , f'{arg.dtype}'
@@ -311,19 +364,27 @@ class RNNTLoss(Function):
     return LazyBuffer.fromCPU(-dgrad), None
   
 #%% encode
-def encode(X,labels):
-  enc, enc_lens  = rnnt.encoder(Tensor(X[0]),Tensor(X[1]))
-  preds = None
-  hc = Tensor.zeros(rnnt.prediction.rnn.layers, 2, rnnt.prediction.hidden_size)
-  for x in [0] + list(labels.numpy()):
-    pred,hc = rnnt.prediction.__call__(Tensor([[x]]),hc,1)
-    preds = pred if preds is None else preds.cat(pred,dim=1).realize()
+def encode(X,X_lens,Y,Y_lens):
+
+  enc, enc_lens  = rnnt.encoder(Tensor(X),Tensor(X_lens))
+
+  bs = X.shape[1]
+  preds,hc = rnnt.prediction(Tensor.zeros((bs,1)).cat(Y,dim=1),None,1)
 
   distribution_tensor = rnnt.joint.__call__(preds, enc).softmax(3).realize()
   distribution = distribution_tensor.numpy()
   return enc,distribution,distribution_tensor
+#%% compare encode
 
-opt = LAMB(rnnt.params)
+X,X_lens,Y,Y_lens = next(iterate())
+X2,X2_lens,Y2,Y2_lens = next(iterate(2))
+
+enc,_,dis = encode(X,X_lens,Y,Y_lens)
+enc2,_,dis2 = encode(X2,X2_lens,Y2,Y2_lens)
+
+autocompare(enc,enc2)
+#%%
+
 def train_step(X,Y):
   opt.zero_grad()
   labels = Tensor(text_encode(Y[0])[0],dtype=dtypes.int16)
@@ -343,7 +404,7 @@ opt = LAMB(rnnt.params)
 # %%
 hist = []
 def epoch ():
-  for i,(X,Y) in enumerate(iterate()):
+  for i,(X,X_lens,Y,Y_lens) in enumerate(iterate()):
     print(end=(f'{i}: ').rjust(5))
     Loss = train_step(X,Y)
     hist.append(Loss)
