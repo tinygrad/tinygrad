@@ -413,7 +413,7 @@ class OptimizedKernel(Kernel):
         # for now skip upcasting here if there is a symbolic axis
         if isinstance(self.full_shape[axis], int) and self.full_shape[axis] <= 7 and any(st.axis_is_masked(axis) for st in self.sts) and \
           prod(self.full_shape[self.shape_len - self.upcasted:]) * prod(self.full_shape[j] for j in to_upcast) * self.full_shape[axis] <= 7 * 7:
-          if DEBUG >= 4 or True: print(f"upcasting masked axis : {axis}")
+          if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
           to_upcast.append(axis)
       for axis in to_upcast[::-1]:
         self.shift_upcast(axis, self.full_shape[axis], suggestion)
