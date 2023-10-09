@@ -449,7 +449,10 @@ class OptimizedKernel(Kernel):
     # TODO: this is breaking the tests
     for splits in [4]:
       if self.upcasted == 0 and self.full_unupcasted_shape and self.full_unupcasted_shape[-1] % splits == 0:
-        self.shift_upcast(len(self.full_unupcasted_shape)-1, splits, suggestion)
+        if self.first_reduce < self.shape_len - self.upcasted:
+          self.shift_upcast(len(self.full_unupcasted_shape)-1, splits, suggestion)
+        else:
+          self.shift_reduce(suggestion, amount=splits)
 
     # **** local groups ****
 
