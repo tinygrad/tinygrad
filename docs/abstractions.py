@@ -139,7 +139,7 @@ assert lazyop.src[0].op.src[0].op.src[0].realized._buf[0] == 2, "the src of the 
 assert result.lazydata.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer
-result.lazydata.realize()
+result.realize()
 assert result.lazydata.realized is not None, "the LazyBuffer is realized!"
 # this brings us nicely to DeviceBuffer, of which the realized ClangBuffer is a subclass
 assert 'RawMallocBuffer' in str(type(result.lazydata.realized))
@@ -256,7 +256,6 @@ class Linearizer:
   # create the kernel with the AST
   # NOTE: the AST contains the CompiledBuffers themselves as the root nodes. this will change
   def __init__(self, ast:LazyOp): pass
-  def process(self): pass
   def linearize(self): pass
 
   # when linearize is run, it fills in this list
@@ -268,7 +267,7 @@ result = Tensor(2).realize() + Tensor(3).realize()
 # use the real Linearizer to linearize 2+3
 from tinygrad.codegen.linearizer import Linearizer
 sched = result.lazydata.schedule()
-linearizer = Linearizer(sched[-1][0])
+linearizer = Linearizer(sched[-1].ast)
 linearizer.linearize()
 
 # print the uops

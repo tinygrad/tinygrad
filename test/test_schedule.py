@@ -8,7 +8,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, Device, Compiled
 from tinygrad.helpers import DEBUG, dtypes
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.graph import log_schedule_item
+from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad import nn
 
 def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
@@ -16,22 +16,21 @@ def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=N
   if to_prerealize:
     for pre in to_prerealize:
       for s in pre.lazydata.schedule(seen.copy()):
-        log_schedule_item(*s)
-        seen.add(s[1])
+        log_schedule_item(s)
+        seen.add(s.out)
   sched = t.lazydata.schedule(seen)
-  for s in sched: log_schedule_item(*s)
-  if filter_loadops: sched = [s for s in sched if s[0].op not in LoadOps]
+  for s in sched: log_schedule_item(s)
+  if filter_loadops: sched = [s for s in sched if s.ast.op not in LoadOps]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
-    from extra.utils import print_tree
     for i, s in enumerate(sched):
       print("op", i)
-      print_tree(s[0])
+      print_tree(s.ast)
   assert len(sched) == allowed
   # test the (non loadops) ops linearize
   for s in sched:
-    if s[0].op in LoadOps: continue
-    l = Linearizer(s[0])
+    if s.ast.op in LoadOps: continue
+    l = Linearizer(s.ast)
     l.hand_coded_optimizations()
     l.linearize()
 
@@ -263,7 +262,7 @@ class TestSchedule(unittest.TestCase):
   # this is the failing case in openpilot...it's very simple like this
   @unittest.skip("failing in old lazy")
   def test_image_conv_fusion(self):
-    from tinygrad.nn.image import image_conv2d
+    from tinygrad.features.image import image_conv2d
     w1 = Tensor.empty(16, 16, 1, 1)
     b1 = Tensor.empty(16)
     w2 = Tensor.empty(16, 16, 1, 1)
@@ -311,6 +310,21 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.empty(1, 64, 32, 32)
     out = bb(x)
     check_schedule(out, 4)
+
+  def test_contiguous_while_contiguous(self):
+    x = Tensor.empty(1, 64, 32, 32)
+    out = x.contiguous()
+    check_schedule(out, 1, filter_loadops=False)
+
+  def test_contiguous_while_not_contiguous(self):
+    x = Tensor.empty(1, 64, 32, 32)
+    out = x.permute(0,2,3,1).contiguous()
+    check_schedule(out, 2, filter_loadops=False)
+
+  def test_double_from(self):
+    x = Tensor([1,2,3,4])
+    out = x.to('cpu')
+    check_schedule(out, 0, filter_loadops=False)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

@@ -9,7 +9,7 @@ from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTran
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
-OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
+OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
 ROCM_LLVM_PATH = pathlib.Path("/opt/rocm/llvm/bin")
@@ -104,7 +104,7 @@ class CLProgram:
     return None
 
 renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
-  kernel_prefix = "__kernel ", buffer_prefix = "__global ", smem_prefix = "__local ", arg_int_prefix = "const int",
+  kernel_prefix = "__kernel ", buffer_prefix = "__global ", smem_align = "__attribute__ ((aligned (16))) ", smem_prefix = "__local ", arg_int_prefix = "const int",
   half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
   gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True))

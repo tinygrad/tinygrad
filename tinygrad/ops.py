@@ -4,6 +4,8 @@ import numpy as np
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
+from tinygrad.runtime.lib import RawBuffer
+from tinygrad.shape.symbolic import Variable, sym_infer
 from dataclasses import dataclass
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -38,6 +40,13 @@ class ConstBuffer:
   dtype: DType
   st: ShapeTracker
 
+@dataclass(frozen=True)
+class ScheduleItem:
+  ast: LazyOp
+  out: LazyBuffer
+  inputs: Tuple[LazyBuffer, ...]
+  # TODO: move var_vals here
+
 class LazyOp:
   __slots__ = "op", "src", "arg", "buffers", "__weakref__"
   op: Op
@@ -56,7 +65,7 @@ class LazyOp:
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
-  def map_buffers(self, real_srcs: Mapping[LazyBuffer, Union[LazyBuffer, LazyOp]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
+  def map_buffers(self, real_srcs: Mapping[Any, Union[LazyBuffer, LazyOp]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) if y not in real_srcs else real_srcs[y] for y in self.src]), self.arg)
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
@@ -67,14 +76,9 @@ class LazyOp:
   @property
   def st(self): raise NotImplementedError
   @property
-  def children(self): raise NotImplementedError
-  @property
-  def shape(self): raise NotImplementedError
-  @property
   def realized(self): raise NotImplementedError
   @property
-  def optype(self): raise NotImplementedError
-  def realize(self): raise NotImplementedError
+  def children(self): raise NotImplementedError
 
   # movement ops
   def reshape(self, _): raise NotImplementedError
@@ -117,7 +121,7 @@ class Interpreted:
     if ast.op in BufferOps and ast.op not in self.fxn_for_op:
       if ast.op == BufferOps.MEM:
         assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
-        buf = self.to_underlying(inputs[ast.arg.idx-1])
+        buf = self.to_underlying(inputs[ast.arg.idx-1].realized)
       elif ast.op == BufferOps.CONST:
         buf = self.to_underlying(self.buffer.fromCPU(np.array(ast.arg.val, dtype=ast.arg.dtype.np)))
       for mop,arg in ast.arg.st.to_movement_ops(): buf = self.fxn_for_op[mop](buf, arg)
@@ -159,9 +163,6 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 
 # **************** for Compiled Buffers ****************
 
-from tinygrad.runtime.lib import RawBuffer
-from tinygrad.shape.symbolic import Variable, sym_infer
-
 class BasicBatchExecutor:
   def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): pass
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
@@ -176,6 +177,12 @@ class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
     if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args or not runtime_args['binary']): print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
+
+  @staticmethod
+  def from_linearizer(k, src:str):
+    return ASTRunner(k.function_name, src, k.global_size, k.local_size,
+                     op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
+                     display_name=k.display_name, runtime_args={"binary": False})
 
   def build(self, runtime, batch_exec=BasicBatchExecutor):
     self.clprg, self.batch_exec = runtime(self.name, self.prg, **self.runtime_args), batch_exec
@@ -211,12 +218,7 @@ class Compiled:
 
   def to_program(self, k):
     k.linearize()
-    src = self.renderer(k.function_name, k.uops)
-    if len(src) == 3:
-      return ASTRunner(k.function_name, src[0], k.global_size, src[1],display_name=k.display_name, runtime_args=src[2]).build(self.runtime)
-    return ASTRunner(k.function_name, src, k.global_size, k.local_size,
-                     op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
-                     display_name=k.display_name, runtime_args={"binary": False}).build(self.runtime, self.batch_exec)
+    return ASTRunner.from_linearizer(k, self.renderer(k.function_name, k.uops)).build(self.runtime, self.batch_exec)
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
     # check if we can reuse the output buffer
@@ -226,7 +228,7 @@ class Compiled:
     if output.realized:
       for i,a in enumerate(inputs):
         # TODO: if this is contiguous it's fine
-        if a == output.realized:
+        if a.realized == output.realized:
           if any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
             output.realized = None
             break
@@ -238,23 +240,29 @@ class Compiled:
       from tinygrad.jit import CacheCollector
       CacheCollector._mark_output_buffer(output.output_buffer)
 
-    from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(ast, self.linearizer_opts, var_vals)
+    # all the rawbuffers
+    rawbuffers = [output.realized] + [x.realized for x in inputs]
 
     # compilation time
     def get_program():
-      from tinygrad.codegen.search import kernel_optimize
-      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts, var_vals), self.to_program, [output.realized]+inputs)
+      from tinygrad.codegen.linearizer import Linearizer
+      k = Linearizer(ast, self.linearizer_opts)
+      assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
+      from tinygrad.features.kopt import kernel_optimize
+      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts), self.to_program, rawbuffers, ast)
       elif not getenv("NOOPT"): k.hand_coded_optimizations()
       return self.to_program(k)
 
-    if hasattr(k, 'key') and getenv("ENABLE_METHOD_CACHE", 1):
-      if k.key not in self.method_cache: self.method_cache[k.key] = get_program()
-      prg = self.method_cache[k.key]
+    if getenv("ENABLE_METHOD_CACHE", 1):
+      if ast not in self.method_cache: self.method_cache[ast] = get_program()
+      prg = self.method_cache[ast]
     else:
       prg = get_program()
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
-    prg.exec([output.realized]+inputs, var_vals=var_vals)
+    # extract real var vals
+    from tinygrad.lazy import var_vals_from_ast
+    real_var_vals = var_vals_from_ast(ast)
+    prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in real_var_vals})
     return output.realized

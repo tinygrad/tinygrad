@@ -32,8 +32,7 @@ class TestLinearizer(unittest.TestCase):
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
 
-    k = Linearizer(r.lazydata.schedule()[-1][0])
-    k.process()
+    k = Linearizer(r.lazydata.schedule()[-1].ast)
     k.upcast()
     k.linearize()
     num_loads = len([uop for uop in k.uops if uop.uop == UOps.LOAD])
@@ -49,8 +48,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = a.expand([2]) + b.expand([2])
 
-    k = Linearizer(r.lazydata.schedule()[-1][0])
-    k.process()
+    k = Linearizer(r.lazydata.schedule()[-1].ast)
     k.upcast()
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
@@ -63,8 +61,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack([a, b])
 
-    k = Linearizer(r.lazydata.schedule()[-1][0])
-    k.process()
+    k = Linearizer(r.lazydata.schedule()[-1].ast)
     k.upcast()
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
@@ -79,7 +76,6 @@ class TestLinearizer(unittest.TestCase):
     r = a * b
 
     k = Linearizer(r.lazydata.schedule()[-1][0])
-    k.process()
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
     assert num_ops <= 0, "more load or alu uops than needed"
@@ -100,7 +96,6 @@ class TestLinearizer(unittest.TestCase):
         r = a @ b
       realized_ast, _ = helper_realized_ast(r)
       k = Linearizer(realized_ast)
-      k.process()
       k.hand_coded_optimizations()
       k.linearize()
       assert len([uop for uop in k.uops if uop.uop == UOps.WMMA]) == 1, "tensor core not triggered"
@@ -111,8 +106,8 @@ def helper_realized_ast(r:Tensor):
   s = r.lazydata.schedule()
   run_schedule(s[:-1])  # run all kernels except the last one
   # now all input LazyBuffers buffers in s[-1] should be realized
-  output_buffer = Device[s[-1][1].device].buffer(prod((s if isinstance(s, int) else s.max for s in s[-1][1].shape)), s[-1][1].dtype, **s[-1][1]._device_extra_args())  # allocate an output buffer
-  return s[-1][0], [output_buffer] + [l.realized for l in s[-1][2]]
+  output_buffer = Device[s[-1].out.device].buffer(prod((s if isinstance(s, int) else s.max for s in s[-1].out.shape)), s[-1].out.dtype, **s[-1].out._device_extra_args())  # allocate an output buffer
+  return s[-1].ast, [output_buffer] + [l.realized for l in s[-1].inputs]
 
 def helper_linearizer_opt(r:Tensor, opts=[]):
   wanna_output = None
@@ -120,7 +115,6 @@ def helper_linearizer_opt(r:Tensor, opts=[]):
 
   def check_opt(x, create_k, to_prg):
     k = create_k()
-    k.process()
     k.apply_auto_opt(x)
     prg = to_prg(k)
     real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
@@ -129,7 +123,6 @@ def helper_linearizer_opt(r:Tensor, opts=[]):
 
   # Get baseline, which is not optimized at all.
   k = Linearizer(realized_ast)
-  k.process()
   prg = Device[Device.DEFAULT].to_program(k)
   prg.exec(real_bufs, force_wait=True)
   wanna_output = real_bufs[0].toCPU().copy()
@@ -239,7 +232,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
+    k = Linearizer(s.ast)
     k.hand_coded_optimizations()
     k.linearize()
 
@@ -251,8 +244,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
-    k.process()
+    k = Linearizer(s.ast)
     k.shift_to(0, 4)  # float4 dimension
     k.shift_to(0, 2, insert_before=k.shape_len-1)
     k.upcast()
@@ -268,7 +260,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
+    k = Linearizer(s.ast)
     k.hand_coded_optimizations()  # implicit trigger float4 dim
     k.linearize()
 
@@ -280,8 +272,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
-    k.process()
+    k = Linearizer(s.ast)
     k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
     k.upcast()
     k.shift_to(len(k.full_unupcasted_shape)-1, 2, insert_before=k.shape_len-1)
@@ -299,8 +290,7 @@ class TestFloat4(unittest.TestCase):
     # float4 should be emitted (the reduce axis of size 4 is the float4 axis here)
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
-    k.process()
+    k = Linearizer(s.ast)
     k.upcast()
     k.linearize()
 
@@ -315,8 +305,7 @@ class TestFloat4(unittest.TestCase):
     # don't.
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
-    k.process()
+    k = Linearizer(s.ast)
     k.upcast()
     k.upcast()
     k.linearize()
@@ -332,8 +321,7 @@ class TestFloat4(unittest.TestCase):
     # since the top axis is not contiguous.
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
-    k.process()
+    k = Linearizer(s.ast)
     k.shift_to(0, 4, top=True)  # top axes are float4 axes
     k.upcast()
     k.linearize()
@@ -349,8 +337,7 @@ class TestFloat4(unittest.TestCase):
     # since the top axis is not contiguous.
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
-    k.process()
+    k = Linearizer(s.ast)
     k.shift_to(0, 4)  # float4 axis
     k.upcast()
     k.linearize()
@@ -365,8 +352,7 @@ class TestFloat4(unittest.TestCase):
     # should float4 b but not a
 
     s = c.lazydata.schedule()[0]
-    k = Linearizer(s[0])
-    k.process()
+    k = Linearizer(s.ast)
     k.shift_to(0, 4)  # float4 axis
     k.upcast()
     k.linearize()

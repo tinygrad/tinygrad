@@ -11,7 +11,7 @@ if __name__ == "__main__":
   model = EfficientNet(0)
   model.load_from_pretrained()
   mode = "clang" if getenv("CLANG", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else ""
-  prg, inp_size, out_size, state = export_model(model, Tensor.randn(1,3,224,224), mode)
+  prg, inp_sizes, out_size, state = export_model(model, mode, Tensor.randn(1,3,224,224))
   dirname = Path(__file__).parent
   if getenv("CLANG", "") == "":
     safe_save(state, (dirname / "net.safetensors").as_posix())
@@ -27,8 +27,9 @@ if __name__ == "__main__":
     lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt")
     lbls = ast.literal_eval(lbls.decode('utf-8'))
     lbls = ['"'+lbls[i]+'"' for i in range(1000)]
+    inputs = "\n".join([f"float {inp}[{inp_size}];" for inp,inp_size in inp_sizes.items()])
     cprog.append(f"char *lbls[] = {{{','.join(lbls)}}};")
-    cprog.append(f"float input[{inp_size}];")
+    cprog.append(inputs)
     cprog.append(f"float outputs[{out_size}];")
 
     # buffers (empty + weights)
@@ -47,11 +48,11 @@ if __name__ == "__main__":
         int tx = (x/224.)*X;
         int ty = (y/224.)*Y;
         for (int c = 0; c < 3; c++) {
-          input[c*224*224 + y*224 + x] = (image[ty*X*chan + tx*chan + c] / 255.0 - 0.45) / 0.225;
+          input0[c*224*224 + y*224 + x] = (image[ty*X*chan + tx*chan + c] / 255.0 - 0.45) / 0.225;
         }
       }
     }
-    net(input, outputs);
+    net(input0, outputs);
     float best = -INFINITY;
     int best_idx = -1;
     for (int i = 0; i < 1000; i++) {
