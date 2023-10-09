@@ -136,9 +136,9 @@ class TestDiskTensor(unittest.TestCase):
     assert np.all(out == 1.)
 
   def test_assign_slice(self):
-    def assign(x,s,y): 
+    def assign(x,s,y):
       x[s] = y
-      return x[s]
+      return x
 
     helper_test_disk_tensor("dt3", [0,1,2,3], lambda x: assign(x, slice(0,2), [13, 12]))
     helper_test_disk_tensor("dt4", [[0,1,2,3],[4,5,6,7]], lambda x: assign(x, slice(0,1), [[13, 12, 11, 10]]))
