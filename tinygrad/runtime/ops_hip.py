@@ -1,5 +1,5 @@
 import numpy as np
-import ctypes, functools, math, collections
+import ctypes, functools, math, collections, pathlib
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
 from tinygrad.helpers import DEBUG, getenv, cache_compiled
@@ -88,18 +88,16 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
-    bin_path = self.compile(prg, name=name, binary=binary)
-    with open(bin_path, "rb") as f:
-      prg_bin = f.read()
+    prg_bin = pathlib.Path(self.compile(prg, name=name, binary=binary)).read_bytes()
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg_bin))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
-    module = hip.hipModuleLoadData(prg_bin)
+    self.module = hip.hipModuleLoadData(prg_bin)
     self.prgs = []
     for i in range(HIP.device_count):
       hip.hipSetDevice(i)
-      self.prgs.append(hip.hipModuleGetFunction(module, name))
+      self.prgs.append(hip.hipModuleGetFunction(self.module, name))
 
   @cache_compiled(f"hip{'-'.join(map(str, hip.hiprtcVersion()))}")
   def compile(self, prg:str, name="", binary=False):
@@ -108,13 +106,11 @@ class HIPProgram:
         prog = hip.hiprtcCreateProgram(prg, name, [], [])
         device_properties = hip.hipGetDeviceProperties(HIP.default_device)
         hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
-        return hip.hiprtcGetCode(prog)
+        prg = hip.hiprtcGetCode(prog)
+      return prg
     except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
-    if DEBUG >= 6:
-      asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
-      print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
   def __call__(self, global_size, local_size, *args, wait=False):
     hip.hipSetDevice(args[0]._device)

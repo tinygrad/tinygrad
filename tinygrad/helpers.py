@@ -161,9 +161,8 @@ def cache_compiled(folder:str):
       cache_path = os.path.join(cache_dir, prg_hash)
 
       if not os.path.exists(cache_path):
-        result = func(self, prg, **kwargs)
         with open(f"{cache_path}.tmp.{os.getpid()}", "wb") as f:
-          f.write(result)
+          f.write(func(self, prg, **kwargs))
         os.rename(f"{cache_path}.tmp.{os.getpid()}", cache_path)
       return cache_path
 

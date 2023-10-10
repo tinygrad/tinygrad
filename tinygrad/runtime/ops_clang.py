@@ -1,4 +1,4 @@
-import time, ctypes, hashlib, subprocess, platform, tempfile, functools
+import time, ctypes, hashlib, subprocess, platform, tempfile, functools, pathlib
 from functools import partial, reduce
 from tinygrad.ops import Compiled
 from tinygrad.helpers import fromimport, getenv, DEBUG, CI, cache_compiled
@@ -37,8 +37,7 @@ class ClangProgram:
       prg_lines = prg.splitlines()
       self.varsize = align(int(prg_lines[0].split(" ")[1]))
       self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg_lines[6:-3])) if ins[:2] == 'bl'}
-      with open(bin_path, "rb") as f:
-        self.prg = f.read()
+      self.prg = pathlib.Path(bin_path).read_bytes()
     else:
       self.lib = ctypes.CDLL(bin_path)
       self.fxn = self.lib[name]
@@ -52,19 +51,17 @@ class ClangProgram:
       prg = CLANG_PROGRAM_HEADER + prg
       with tempfile.NamedTemporaryFile() as path:
         subprocess.check_output(args=(f'clang -shared -O2 -Wall -Werror -x c {args["cflags"]} - -o {path.name}').split(), input=prg.encode('utf-8'))
-        with open(path.name, "rb") as f:
-          return f.read()
+        return pathlib.Path(path.name).read_bytes()
     else:
       with tempfile.NamedTemporaryFile() as as_path, tempfile.NamedTemporaryFile() as final_path:
-        if CI and ARM64:
-          prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg.splitlines()[6:-3]] + ['\n'])
-          subprocess.check_output(args=(f'aarch64-linux-gnu-as -o {as_path.name}').split(), input=prg.encode('utf-8'))
-          subprocess.check_output(args=(f'aarch64-linux-gnu-objcopy -O binary --only-section=.text {as_path.name} {final_path.name}').split())
-        else:
-          subprocess.check_output(args=(f'as -o {as_path.name}').split(), input=prg.encode('utf-8'))
-          subprocess.check_output(args=(f'clang -lm -shared {as_path.name} {final_path.name}').split())
-        with open(final_path.name, "rb") as f:
-          return f.read()
+        if CI and ARM64: prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg.splitlines()[6:-3]] + ['\n'])
+
+        assembly_cmd = 'aarch64-linux-gnu-as' if CI and ARM64 else 'as'
+        link_cmd = 'aarch64-linux-gnu-objcopy -O binary --only-section=.text' if CI and ARM64 else 'clang -lm -shared'
+        subprocess.check_output(args=(f'{assembly_cmd} {as_path.name}').split(), input=prg.encode('utf-8'))
+        subprocess.check_output(args=(f'{link_cmd} {as_path.name} {final_path.name}').split())
+        return pathlib.Path(final_path.name).read_bytes()
+
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()
     if CI and ARM64:
