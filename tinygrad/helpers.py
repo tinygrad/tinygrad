@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib
+import os, functools, platform, time, re, contextlib, operator, hashlib, pathlib
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -152,19 +152,14 @@ class GlobalCounters:
 # *** cache compiled files ***
 
 def cache_compiled(folder:str):
-  cache_dir = os.path.join(os.path.expanduser("~/.cache/tinygrad"), folder)
-  os.makedirs(cache_dir, exist_ok=True)
+  cache_dir = pathlib.Path("~/.cache/tinygrad").expanduser() / folder
+  cache_dir.mkdir(parents=True, exist_ok=True)
 
   def decorator(func):
     def wrapper(self, prg:str, **kwargs) -> str:
-      prg_hash = hashlib.sha256(prg.encode()).hexdigest()
-      cache_path = os.path.join(cache_dir, prg_hash)
-
-      if not os.path.exists(cache_path):
-        with open(f"{cache_path}.tmp.{os.getpid()}", "wb") as f:
-          f.write(func(self, prg, **kwargs))
-        os.rename(f"{cache_path}.tmp.{os.getpid()}", cache_path)
-      return cache_path
-
+      cache_path = cache_dir / hashlib.sha256(prg.encode()).hexdigest()
+      if not cache_path.exists():
+          (cache_dir / f"{cache_path.name}.tmp.{os.getpid()}").write_bytes(func(self, prg, **kwargs)).rename(cache_path)
+      return str(cache_path)
     return wrapper
   return decorator

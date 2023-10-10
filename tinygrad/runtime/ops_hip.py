@@ -93,11 +93,10 @@ class HIPProgram:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg_bin))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
-    self.module = hip.hipModuleLoadData(prg_bin)
     self.prgs = []
     for i in range(HIP.device_count):
       hip.hipSetDevice(i)
-      self.prgs.append(hip.hipModuleGetFunction(self.module, name))
+      self.prgs.append(hip.hipModuleGetFunction(hip.hipModuleLoadData(prg_bin), name))
 
   @cache_compiled(f"hip{'-'.join(map(str, hip.hiprtcVersion()))}")
   def compile(self, prg:str, name="", binary=False):
