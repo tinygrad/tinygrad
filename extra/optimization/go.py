@@ -17,12 +17,17 @@ from tinygrad.shape.view import View
 from tinygrad.shape.symbolic import Variable
 inf, nan = float('inf'), float('nan')
 
+# optimizer
+from tinygrad.codegen.optimizer import Opt, OptOps
+opt_options = {Opt(op=OptOps.LOCAL, axis=0, amt=3), Opt(op=OptOps.UPCAST, axis=3, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.UPCAST, axis=3, amt=7), Opt(op=OptOps.UPCAST, axis=2, amt=5), Opt(op=OptOps.LOCAL, axis=4, amt=3), Opt(op=OptOps.GROUP, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=4, amt=2), Opt(op=OptOps.UPCAST, axis=4, amt=5), Opt(op=OptOps.GROUPTOP, axis=0, amt=256), Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=2, amt=3), Opt(op=OptOps.UPCAST, axis=1, amt=6), Opt(op=OptOps.UPCAST, axis=0, amt=4), Opt(op=OptOps.LOCAL, axis=3, amt=4), Opt(op=OptOps.UPCAST, axis=1, amt=3), Opt(op=OptOps.GROUPTOP, axis=2, amt=256), Opt(op=OptOps.LOCAL, axis=1, amt=16), Opt(op=OptOps.UPCAST, axis=0, amt=7), Opt(op=OptOps.UPCAST, axis=5, amt=3), Opt(op=OptOps.LOCAL, axis=3, amt=16), Opt(op=OptOps.LOCAL, axis=0, amt=2), Opt(op=OptOps.GROUPTOP, axis=1, amt=16), Opt(op=OptOps.LOCAL, axis=0, amt=8), Opt(op=OptOps.UPCAST, axis=3, amt=6), Opt(op=OptOps.UPCAST, axis=2, amt=4), Opt(op=OptOps.LOCAL, axis=4, amt=2), Opt(op=OptOps.UPCAST, axis=3, amt=3), Opt(op=OptOps.UPCAST, axis=2, amt=7), Opt(op=OptOps.UPCAST, axis=4, amt=4), Opt(op=OptOps.GROUP, axis=2, amt=8), Opt(op=OptOps.LOCAL, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=0, amt=32), Opt(op=OptOps.UPCAST, axis=0, amt=3), Opt(op=OptOps.LOCAL, axis=1, amt=3), Opt(op=OptOps.UPCAST, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=0, amt=6), Opt(op=OptOps.LOCAL, axis=2, amt=8), Opt(op=OptOps.UPCAST, axis=1, amt=5), Opt(op=OptOps.LOCAL, axis=3, amt=3), Opt(op=OptOps.UPCAST, axis=6, amt=4), Opt(op=OptOps.GROUPTOP, axis=1, amt=256), Opt(op=OptOps.UPCAST, axis=2, amt=3), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=3, amt=2), Opt(op=OptOps.LOCAL, axis=0, amt=16), Opt(op=OptOps.UPCAST, axis=2, amt=6), Opt(op=OptOps.UPCAST, axis=5, amt=4), Opt(op=OptOps.UPCAST, axis=4, amt=3), Opt(op=OptOps.UPCAST, axis=3, amt=5), Opt(op=OptOps.GROUP, axis=1, amt=8), Opt(op=OptOps.LOCAL, axis=4, amt=16), Opt(op=OptOps.GROUPTOP, axis=0, amt=16), Opt(op=OptOps.LOCAL, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=0, amt=5), Opt(op=OptOps.GROUPTOP, axis=2, amt=16), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=2), Opt(op=OptOps.LOCAL, axis=2, amt=4), Opt(op=OptOps.LOCAL, axis=3, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8), Opt(op=OptOps.UPCAST, axis=1, amt=7), Opt(op=OptOps.LOCAL, axis=3, amt=8), Opt(op=OptOps.LOCAL, axis=2, amt=16)}
+
 if __name__ == "__main__":
   ast_strs = dedup(open(sys.argv[1]).read().strip().split("\n"))
+  print(len(opt_options))
 
   # reduce kernels only, no ImageDType
-  ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
-  #ast_strs = [x for x in ast_strs if "ReduceOps" in x and "dtypes.image" not in x]
+  #ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
+  ast_strs = [x for x in ast_strs if "ReduceOps" in x and "dtypes.image" not in x]
 
   # the device we are optimizing for
   device: Compiled = Device[Device.DEFAULT]
@@ -31,21 +36,32 @@ if __name__ == "__main__":
   # random first kernels
   random.seed(1337)
   random.shuffle(ast_strs)
-  #ast_strs = ast_strs[:5000]
+  ast_strs = ast_strs[1:2]
 
   print(f"loaded {len(ast_strs)} kernels")
 
   atm = []
   agflops = []
+  all_opts = set()
   for ast_str in tqdm(ast_strs):
     ast = eval(ast_str)
 
     # linearize
     lin = Linearizer(ast)
     preopt = lin.colored_shape()
-    if not lin.apply_tensor_cores(getenv("TC", 1)): lin.hand_coded_optimizations()
+    lin.hand_coded_optimizations()
     postopt = lin.colored_shape()
-    #print(lin.applied_opts)
+    print(lin.applied_opts)
+    """
+    #if not lin.apply_tensor_cores(getenv("TC", 1)):
+    lin.hand_coded_optimizations()
+    postopt = lin.colored_shape()
+
+    for x in lin.applied_opts: all_opts.add(x)
+
+    print(len(all_opts))
+    continue
+    """
 
     """
     # linearize_alt
@@ -89,6 +105,7 @@ if __name__ == "__main__":
       print(f"{len(lin.uops):4d} uops, {str(lin.global_size):18s} {str(lin.local_size):12s} {tm*1e6:8.2f} us {gflops:7.2f} GFLOPS", preopt+' '*(37-ansilen(preopt)), "->", postopt)
 
   print(f"all kernels ran in {sum(atm)*1e3:.2f} ms")
+  print(all_opts)
 
   if getenv("SHOW"):
     import matplotlib.pyplot as plt
