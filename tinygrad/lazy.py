@@ -257,8 +257,14 @@ class LazyBuffer:
   # *** movement ops ***
 
   def _movement_op(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[sint, ...], Tuple[Tuple[sint, sint], ...]]) -> LazyBuffer:
-    if SHUFFLE_MOVEMENT_OPS and not self.realized and self.optype == BinaryOps and not self.children and (op is not MovementOps.EXPAND or all(x.op.op not in LoadOps for x in map(functools.partial(get_movementroot, allow_contiguous = True), self.op.buffers))) and (op is not MovementOps.PAD or (SHUFFLE_PAD_OPS and all(x.op not in UNSAFE_PAD_OPS for x in self.op.get_lazyops()))) and not all(x.realized or len(x.op.src) == 0 for x in map(functools.partial(get_movementroot, allow_contiguous = True), self.op.buffers)):
-      return self.op.replace_with_movement_ops([(op, arg)])
+    if SHUFFLE_MOVEMENT_OPS and not self.realized and self.optype == BinaryOps and not self.children:
+      root_bufs = map(functools.partial(get_movementroot, allow_contiguous = True), self.op.buffers)
+      # don't push if all ast buffers (movement roots) are realized or sourceless
+      if not all(x.realized or len(x.op.src) == 0 for x in root_bufs):
+        push_expand_safe = all(x.realized or x.op.op not in LoadOps for x in root_bufs)
+        push_pad_safe = (SHUFFLE_PAD_OPS and all(x.op not in UNSAFE_PAD_OPS for x in self.op.get_lazyops()))
+        if (op is not MovementOps.EXPAND or push_expand_safe) and (op is not MovementOps.PAD or push_pad_safe):
+          return self.op.replace_with_movement_ops([(op, arg)])
     if REMOVE_MOVEMENT_NOPS and not self.realized and st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
       root = get_movementroot(self)
