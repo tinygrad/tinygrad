@@ -105,6 +105,15 @@ class TestSafetensors(unittest.TestCase):
     import json
     assert json.loads(dat[8:8+sz])['__metadata__']['hello'] == 'world'
 
+def helper_test_disk_tensor(fn, data, np_fxn, tinygrad_fxn=None):
+  if tinygrad_fxn is None: tinygrad_fxn = np_fxn
+  pathlib.Path(temp(fn)).unlink(missing_ok=True)
+  tinygrad_tensor = Tensor(data, device="CPU").to(f"disk:{temp(fn)}")
+  numpy_arr = np.array(data)
+  tinygrad_fxn(tinygrad_tensor)
+  np_fxn(numpy_arr)
+  np.testing.assert_allclose(tinygrad_tensor.numpy(), numpy_arr)
+
 class TestDiskTensor(unittest.TestCase):
   def test_empty(self):
     pathlib.Path(temp("dt1")).unlink(missing_ok=True)
@@ -128,32 +137,14 @@ class TestDiskTensor(unittest.TestCase):
     out = reloaded.numpy()
     assert np.all(out == 1.)
 
-  def test_slice(self):
-    pathlib.Path(temp("dt3")).unlink(missing_ok=True)
-    Tensor.arange(10, device="CPU").to(f"disk:{temp('dt3')}").realize()
-
-    slice_me = Tensor.empty(10, device=f"disk:{temp('dt3')}")
-    print(slice_me)
-    is_3 = slice_me[3:4].cpu()
-    assert is_3.numpy()[0] == 3
-
-  def test_slice_2d(self):
-    pathlib.Path(temp("dt5")).unlink(missing_ok=True)
-    Tensor.arange(100, device="CPU").to(f"disk:{temp('dt5')}").realize()
-    slice_me = Tensor.empty(10, 10, device=f"disk:{temp('dt5')}")
-    tst = slice_me[1].numpy()
-    print(tst)
-    np.testing.assert_allclose(tst, np.arange(10, 20))
-
   def test_assign_slice(self):
-    pathlib.Path(temp("dt4")).unlink(missing_ok=True)
-    cc = Tensor.arange(10, device="CPU").to(f"disk:{temp('dt4')}").realize()
+    def assign(x,s,y): x[s] = y
+    helper_test_disk_tensor("dt3", [0,1,2,3], lambda x: assign(x, slice(0,2), [13, 12]))
+    helper_test_disk_tensor("dt4", [[0,1,2,3],[4,5,6,7]], lambda x: assign(x, slice(0,1), [[13, 12, 11, 10]]))
 
-    #cc.assign(np.ones(10)).realize()
-    print(cc[3:5].numpy())
-    cc[3:5].assign([13, 12]).realize()
-    print(cc.numpy())
+  def test_reshape(self):
+    helper_test_disk_tensor("dt5", [1,2,3,4,5], lambda x: x.reshape((1,5)))
+    helper_test_disk_tensor("dt6", [1,2,3,4], lambda x: x.reshape((2,2)))
 
 if __name__ == "__main__":
   unittest.main()
-
