@@ -50,17 +50,21 @@ class ClangProgram:
     #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
     if not binary:
       prg = CLANG_PROGRAM_HEADER + prg
-      return subprocess.check_output(args=(f'clang -shared -O2 -Wall -Werror -x c {args["cflags"]} - -o /dev/stdout').split(), input=prg.encode('utf-8'))  
+      with tempfile.NamedTemporaryFile() as path:
+        subprocess.check_output(args=(f'clang -shared -O2 -Wall -Werror -x c {args["cflags"]} - -o {path.name}').split(), input=prg.encode('utf-8'))
+        with open(path.name, "rb") as f:
+          return f.read()
     else:
-      with tempfile.NamedTemporaryFile() as as_path:
+      with tempfile.NamedTemporaryFile() as as_path, tempfile.NamedTemporaryFile() as final_path:
         if CI and ARM64:
           prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg.splitlines()[6:-3]] + ['\n'])
           subprocess.check_output(args=(f'aarch64-linux-gnu-as -o {as_path.name}').split(), input=prg.encode('utf-8'))
-          return subprocess.check_output(args=(f'aarch64-linux-gnu-objcopy -O binary --only-section=.text {as_path.name} /dev/stdout').split())
+          subprocess.check_output(args=(f'aarch64-linux-gnu-objcopy -O binary --only-section=.text {as_path.name} {final_path.name}').split())
         else:
           subprocess.check_output(args=(f'as -o {as_path.name}').split(), input=prg.encode('utf-8'))
-          return subprocess.check_output(args=(f'clang -lm -shared {as_path.name} /dev/stdout').split())
-
+          subprocess.check_output(args=(f'clang -lm -shared {as_path.name} {final_path.name}').split())
+        with open(final_path.name, "rb") as f:
+          return f.read()
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()
     if CI and ARM64:
