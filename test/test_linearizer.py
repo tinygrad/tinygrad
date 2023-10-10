@@ -175,12 +175,11 @@ class TestLinearizerOpts(unittest.TestCase):
     a = Tensor.rand(4, 4, N, N)
     b = Tensor.rand(4, 4, N)
     r = (b.sqrt() + ((a+1).sum(axis=3).exp()))
-    # full_shape: (2048, 128)
     helper_linearizer_opt(r, [
       [(0, 2, 'L')], [(0, 8, 'L')], [(0, 16, 'L')], # Checking how it works with locals
-      [(1, 2, 'G')], [(1, 16, 'G')], [(1, 16, 'G')], # Checking how it works with grouped reduce
-      [(0, 2, 'L'), (1, 2, 'G')], [(0, 16, 'L'), (1, 16, 'G')], [(0, 32, 'L'), (1, 2, 'G')], [(0, 2, 'L'), (1, 64, 'G')], # Checking how it works with locals + grouped reduce
-      [(0, 2, 'L'), (1, 2, 'G'), (0, 8, 'U'), (1, 4, 'R')], # Checking how it works with locals + grouped reduce + upcasts
+      [(0, 2, 'G')], [(0, 32, 'G')], [(0, 64, 'G')], # Checking how it works with grouped reduce
+      [(0, 2, 'L'), (0, 2, 'G')], [(0, 16, 'L'), (0, 16, 'G')], [(0, 32, 'L'), (0, 2, 'G')], [(0, 2, 'L'), (0, 64, 'G')], # Checking how it works with locals + grouped reduce
+      [(0, 2, 'L'), (0, 2, 'G'), (0, 8, 'U'), (0, 4, 'R')], # Checking how it works with locals + grouped reduce + upcasts
     ])
 
   def test_upcasts(self):
@@ -217,14 +216,13 @@ class TestLinearizerOpts(unittest.TestCase):
     a = Tensor.rand(N, N)
     b = Tensor.rand(N, N)
     r = a@b
-    # full_shape: (128, 128, 128)
     helper_linearizer_opt(r, [
       [(0, 2, 'U')], [(0, 4, 'U'), (1, 4, 'U')], # Checking how it works with upcasts
       [(0, 2, 'L')], [(1, 32, 'L')], [(0, 4, 'L'), (1, 4, 'L')], [(0, 4, 'L'), (1, 32, 'L')], [(0, 16, 'L'), (1, 8, 'L')], # Checking how it works with locals
-      [(2, 2, 'G')], [(2, 32, 'G')], [(2, 32, 'G'), (2, 4, 'R')], # Checking how it works with grouped_reduce
-      [(0, 2, 'L'), (1, 2, 'L'), (2, 32, 'G')], [(0, 4, 'L'), (2, 8, 'G')], [(0, 4, 'L'), (0, 2, 'L'), (2, 2, 'G')], # Checking how it works with local+grouped_reduce
-      [(0, 4, 'L'), (0, 4, 'L'), (2, 16, 'G'), (2, 4, 'R'), (0, 4, 'U'), (1, 2, 'U')], # Checking all together
-      [(0, 4, 'L'), (0, 4, 'L'), (2, 16, 'G'), (2, 4, 'R'), (0, 8, 'U')], # Full global upcast + local
+      [(0, 2, 'G')], [(0, 32, 'G')], [(0, 32, 'G'), (0, 4, 'R')], # Checking how it works with grouped_reduce
+      [(0, 2, 'L'), (1, 2, 'L'), (0, 32, 'G')], [(0, 16, 'L'), (0, 32, 'G')], [(0, 16, 'L'), (0, 8, 'L'), (0, 4, 'G')], # Checking how it works with local+grouped_reduce
+      [(0, 4, 'L'), (0, 4, 'L'), (0, 16, 'G'), (0, 4, 'R'), (0, 4, 'U'), (1, 2, 'U')], # Checking all together
+      [(0, 4, 'L'), (0, 4, 'L'), (0, 16, 'G'), (0, 4, 'R'), (0, 8, 'U')], # Full global upcast + local
     ])
 
   def test_double_reduce(self):
@@ -235,14 +233,13 @@ class TestLinearizerOpts(unittest.TestCase):
     Tensor.manual_seed(1552)
     a = Tensor.rand(8, N, 8, N)
     r = a.sum(axis=(1,3))
-    # full_shape = (8, 8, 128, 128)
     helper_linearizer_opt(r, [
-      [(2, 2, 'G')], [(2, 32, 'G')], [(3, 2, 'G')], [(3, 32, 'G')], # Checking how it works with 1 grouped_reduce.
-      [(2, 2, 'G'), (3, 2, 'G')], [(2, 16, 'G'), (3, 2, 'G')], [(2, 4, 'G'), (3, 64, 'G')], # Checking how it works with 2 grouped_reduces.
-      [(2, 16, 'G'), (3, 2, 'G'), (3, 4, 'R')], [(2, 2, 'G'), (3, 32, 'G'), (3, 4, 'R')], # Checking how it works with 2 grouped_reduces + upcasts.
-      [(0, 4, 'L'), (1, 4, 'L'), (2, 4, 'G'), (3, 4, 'G')], [(0, 4, 'L'), (1, 4, 'L'), (2, 2, 'G'), (3, 8, 'G'), (3, 4, 'R')], # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [(0, 2, 'L'), (1, 2, 'L'), (2, 8, 'G'), (3, 4, 'G'), (0, 2, 'U')], [(0, 2, 'L'), (1, 2, 'L'), (2, 8, 'G'), (3, 4, 'G'), (0, 2, 'U'), (2, 4, 'R'), (3, 4, 'R')], # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [(0, 4, 'L'), (1, 4, 'L'), (2, 4, 'G'), (3, 4, 'G'), (0, 2, 'U'), (1, 2, 'U')], # No globals
+      [(0, 2, 'G')], [(0, 32, 'G')], [(1, 2, 'G')], [(1, 32, 'G')], # Checking how it works with 1 grouped_reduce.
+      [(0, 2, 'G'), (1, 2, 'G')], [(0, 16, 'G'), (1, 2, 'G')], [(0, 4, 'G'), (1, 64, 'G')], # Checking how it works with 2 grouped_reduces.
+      [(0, 16, 'G'), (1, 2, 'G'), (1, 4, 'R')], [(0, 2, 'G'), (1, 32, 'G'), (1, 4, 'R')], # Checking how it works with 2 grouped_reduces + upcasts.
+      [(0, 4, 'L'), (1, 4, 'L'), (0, 8, 'G'), (1, 4, 'G')], [(0, 4, 'L'), (1, 4, 'L'), (0, 2, 'G'), (1, 32, 'G'), (1, 4, 'R')], # Checking how it works with 2 grouped_reduces + upcasts + locals.
+      [(0, 2, 'L'), (1, 2, 'L'), (0, 8, 'G'), (1, 4, 'G'), (0, 2, 'U')], [(0, 2, 'L'), (1, 2, 'L'), (0, 8, 'G'), (1, 4, 'G'), (0, 2, 'U'), (0, 4, 'R'), (1, 4, 'R')], # Checking how it works with 2 grouped_reduces + upcasts + locals.
+      [(0, 4, 'L'), (1, 4, 'L'), (0, 8, 'G'), (1, 4, 'G'), (0, 2, 'U'), (1, 2, 'U')], # No globals
     ])
 
 class TestFloat4(unittest.TestCase):

@@ -1,4 +1,4 @@
-from typing import Tuple, List, cast, Optional, Dict
+from typing import Tuple, List, cast, Optional
 import itertools, math, os
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp, BufferOps
@@ -18,8 +18,6 @@ class OptimizedKernel(Kernel):
     # group simplifies
     self.simplify_ones()
     self.simplify_merge_adjacent()
-
-    self.axis_idxs: List[Optional[int]] = list(range(len(self.full_shape)))  # mapping from axes to canonical/original shape (before upcasts etc)
 
   # ******************** base simplifiers ********************
 
@@ -45,7 +43,6 @@ class OptimizedKernel(Kernel):
     if insert_before is None: insert_before = self.shape_len
     move_axis = axis if top else axis+1
     if move_axis < insert_before: insert_before += 1
-    self.axis_idxs.insert(insert_before, None)
     self.reshape_and_permute(
       lambda x: list(x[0:axis]) + (([amount, x[axis]//amount] if top else [x[axis]//amount, amount]) if x[axis] > 1 else [1,1]) + list(x[axis+1:]),
       [i for i in range(insert_before) if i != move_axis] + [move_axis] + [i for i in range(insert_before, self.shape_len+1) if i != move_axis])
@@ -59,7 +56,6 @@ class OptimizedKernel(Kernel):
     all_ones = [s==1 for s in self.full_shape]
     self.local_dims -= sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce])
     self.upcasted -= sum(all_ones[self.shape_len-self.upcasted:])
-    if hasattr(self, "axis_idxs"): self.axis_idxs = [x for b, x in zip(all_ones, self.axis_idxs) if not b]
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
 
   def simplify_merge_adjacent(self):
@@ -144,46 +140,18 @@ class OptimizedKernel(Kernel):
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
 
-  # ******************** optimizer transformations ********************
-  # these take in axes in the current view, and store suggestions with axes indexed in the canonical/original shape.
-
-  def shift_upcast(self, axis, amount, suggestion):
-    suggestion['U', self.axis_idxs[axis]] = amount
-    self.shift_to(axis, amount=amount)
-    self.upcast()
-
-  def shift_local(self, axis, amount, suggestion):
-    suggestion['L', self.axis_idxs[axis]] = amount
-    self.shift_to(axis, amount=amount, insert_before=self.first_reduce - self.local_dims)
-    self.local_dims += 1
-
-  # upcast amount off of the last reduce dimension
-  def shift_reduce(self, suggestion, amount=None):
-    axis = len(self.full_unupcasted_shape) - 1
-    if amount is None: amount = self.full_shape[axis]
-    suggestion['R', self.axis_idxs[axis]] = amount
-    if amount != self.full_shape[axis]: self.shift_to(axis, amount=amount, insert_before=len(self.full_unupcasted_shape))
-    self.upcast()
-
-  def shift_group_for_reduce(self, axis, amount, suggestion, top=False):
-    suggestion['G', self.axis_idxs[axis]] = amount
-    self.shift_to(axis, amount, top=top, insert_before=self.first_reduce + len(self.group_for_reduce))
-    self.group_for_reduce.append(amount)
-
   # ******************** high level optimizers ********************
 
   def apply_auto_opt(self, x):
     for axis, amt, typ in x:
       if axis is None or amt == 1: continue
-      if typ in ["G", "R"]: assert self.first_reduce+len(self.group_for_reduce) <= axis+self.local_dims+len(self.group_for_reduce) < len(self.full_unupcasted_shape)
-      if typ in ["U", "L"]: assert axis < self.first_reduce - self.local_dims
       if typ == "G" and self.opts.has_shared:
-        assert self.full_shape[axis+self.local_dims+len(self.group_for_reduce)] % amt == 0, "no longer valid shift"
-        self.shift_to(axis+self.local_dims+len(self.group_for_reduce), amt, top=True, insert_before=self.first_reduce+len(self.group_for_reduce))
+        assert self.full_shape[self.first_reduce+axis+len(self.group_for_reduce)] % amt == 0, "no longer valid shift"
+        self.shift_to(self.first_reduce+axis+len(self.group_for_reduce), amt, top=True, insert_before=self.first_reduce+len(self.group_for_reduce))
         self.group_for_reduce.append(amt)
       if typ == "R":
         typ = "U"
-        axis += self.local_dims + len(self.group_for_reduce)
+        axis += self.first_reduce + len(self.group_for_reduce)
       if typ == "U":
         assert self.full_shape[axis] % amt == 0, "no longer valid shift"
         self.shift_to(axis, amt)
@@ -193,22 +161,19 @@ class OptimizedKernel(Kernel):
         self.shift_to(axis, amt, insert_before=self.first_reduce)
         self.local_dims += 1
     self.simplify_ones()
-    assert prod(self.full_shape[self.shape_len-self.upcasted:self.shape_len]) <= 512, "too many upcasts!"
-    assert prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce+len(self.group_for_reduce)]) <= 1024, "too many locals!"
 
-  def required_optimizations(self, suggestion, early_only=False):
+  def required_optimizations(self, early_only=False):
     for buf_index,buf in enumerate(self.bufs):
       unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes(ignore_valid=True) if self.sts[buf_index].shape[i]%4 == 0]
       if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype.__class__ is ImageDType:
         assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
         if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
-          self.shift_upcast(unit_stride_axes_mul_4[0], 4, suggestion)
+          self.shift_to(unit_stride_axes_mul_4[0], 4)
+          self.upcast()
 
   def hand_coded_optimizations(self, use_tensor_cores=getenv("TC", 1)):
-    suggestion: Dict[Tuple[str, int], int] = {}
-
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
-    self.required_optimizations(suggestion, early_only=True)
+    self.required_optimizations(early_only=True)
 
     # simplify
     self.simplify_ones()
@@ -269,8 +234,8 @@ class OptimizedKernel(Kernel):
           self.local_dims += 2
           self.exclude_local_upcast += 2
 
-        # early exit, no suggestion
-        return None
+        # early exit
+        return
 
     # should use METAL tensor cores?
     # first, confirm it's a straightforward mulacc on a device with real locals
@@ -349,8 +314,8 @@ class OptimizedKernel(Kernel):
           self.local_dims += 1
           self.exclude_local_upcast += 1
 
-        # early exit, no suggestion
-        return None
+        # early exit
+        return
 
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
     MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
@@ -368,12 +333,15 @@ class OptimizedKernel(Kernel):
           if self.full_shape[self.first_reduce]%MV_THREADS_PER_ROW == 0 and self.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
             if DEBUG >= 3: print(f"MATVEC: full_shape={self.full_shape} first_reduce={self.first_reduce} buf0_strides={buf0_strides} blocksize={MV_BLOCKSIZE} threads_per_row={MV_THREADS_PER_ROW} rows_per_thread{MV_ROWS_PER_THREAD}")
             if MV_THREADS_PER_ROW > 1:
-              self.shift_group_for_reduce(self.first_reduce, MV_THREADS_PER_ROW, suggestion, top=False)
+              self.shift_to(self.first_reduce, MV_THREADS_PER_ROW, top=False, insert_before=self.first_reduce + len(self.group_for_reduce))
+              self.group_for_reduce.append(MV_THREADS_PER_ROW)
             if MV_BLOCKSIZE > 1:
-              self.shift_local(global_idx, MV_BLOCKSIZE, suggestion)
+              self.shift_to(global_idx, MV_BLOCKSIZE, insert_before=self.first_reduce)
+              self.local_dims += 1
             if MV_ROWS_PER_THREAD > 1:
-              self.shift_upcast(global_idx, MV_ROWS_PER_THREAD, suggestion)
-            return suggestion
+              self.shift_to(global_idx, MV_ROWS_PER_THREAD)
+              self.upcast()
+            return
 
     if self.opts.has_local and self.opts.has_shared and all(isinstance(s, int) for s in self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
@@ -381,7 +349,8 @@ class OptimizedKernel(Kernel):
         # TODO: use 1024 if it's allowed in a smarter way
         for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
-            self.shift_group_for_reduce(self.first_reduce, sz, suggestion, top=True)
+            self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
+            self.group_for_reduce.append(sz)
             break
 
       # are we upcasting in mid reduce? (only for images)
@@ -389,36 +358,34 @@ class OptimizedKernel(Kernel):
         axes = self.sts[0].unit_stride_axes()
         assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
         if self.sts[0].shape[axes[0]]%4 == 0:
-          self.shift_group_for_reduce(axes[0], 4, suggestion)
+          self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
+          self.group_for_reduce.append(4)
 
     # now do everything required
-    self.required_optimizations(suggestion)
+    self.required_optimizations()
 
     # simplify (sets first_reduce)
     self.simplify_ones()
 
     # no more opt if we are grouping
-    if self.group_for_reduce: return suggestion
+    if self.group_for_reduce: return
 
     # **** below this line need to be optional and benchmarked ****
 
-    # TODO: doing extra upcasts with images doesn't work for some reason (maybe has to do with to_image_idx)
-    # to trigger the above bug, remove prod(self.full_shape[self.shape_len - self.upcasted:]) from the below
-    # expression.
     # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
     # this can be made much smarter
-    to_upcast: List[int] = []
+    to_upcast = []
     # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
     for axis in range(self.first_reduce):
       # we might want to be able to split axes that are masked, or refuse to merge them in simplify_merge_adjacent
       # for now skip upcasting here if there is a symbolic axis
-      if isinstance(self.full_shape[axis], int) and self.full_shape[axis] <= 7 and any(st.axis_is_masked(axis) for st in self.sts) and \
-        prod(self.full_shape[self.shape_len - self.upcasted:]) * prod(self.full_shape[j] for j in to_upcast) * self.full_shape[axis] <= 7 * 7:
+      if isinstance(self.full_shape[axis], int) and self.full_shape[axis] <= 7 and any(st.axis_is_masked(axis) for st in self.sts) and prod(self.full_shape[self.shape_len - self.upcasted:]) * self.full_shape[axis] <= 7 * 7:
         if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
         to_upcast.append(axis)
     for axis in to_upcast[::-1]:
-      self.shift_upcast(axis, self.full_shape[axis], suggestion)
-    self.simplify_ones()
+      self.shift_to(axis, amount=self.full_shape[axis])
+      self.upcast()
+      self.simplify_ones()
 
     # potentially do more upcasts of non reduce axes based on a heuristic
     upcasted_axis = set()
@@ -431,7 +398,8 @@ class OptimizedKernel(Kernel):
       if xb_choices:
         xb_choices = sorted(xb_choices)
         if DEBUG >= 4: print(f"float4 merging axis : {xb_choices}")
-        self.shift_upcast(xb_choices[0][2], xb_choices[0][3], suggestion)
+        self.shift_to(xb_choices[0][2], amount=xb_choices[0][3])
+        self.upcast()
         self.simplify_ones()
         upcasted_axis.add(xb_choices[0][2])
       else:
@@ -440,23 +408,22 @@ class OptimizedKernel(Kernel):
     # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
     if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
       if (s:=self.full_unupcasted_shape[-1]) <= 32 and isinstance(s, int):  # NOTE: cannot loop unroll symbolic axis
-        self.shift_reduce(suggestion)
+        self.upcast()
         # if it's small, upcast a second reduce dimension too
-        if self.first_reduce < (self.shape_len-self.upcasted) and s <= 3 and self.full_unupcasted_shape[-1] <= 3: self.shift_reduce(suggestion)
+        if self.first_reduce < (self.shape_len-self.upcasted) and s <= 3 and self.full_unupcasted_shape[-1] <= 3: self.upcast()
       else:
         for splits in [4]:
           if self.full_unupcasted_shape[-1]%splits == 0:
-            self.shift_reduce(suggestion, amount=splits)
+            self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
+            self.upcast()
             break
 
     # if nothing at all is upcasted and it's easy to, do an upcast
     # TODO: this is breaking the tests
     for splits in [4]:
       if self.upcasted == 0 and self.full_unupcasted_shape and self.full_unupcasted_shape[-1] % splits == 0:
-        if self.first_reduce < self.shape_len - self.upcasted:
-          self.shift_reduce(suggestion, amount=splits)
-        else:
-          self.shift_upcast(len(self.full_unupcasted_shape)-1, splits, suggestion)
+        self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
+        self.upcast()
 
     # **** local groups ****
 
@@ -469,7 +436,6 @@ class OptimizedKernel(Kernel):
         local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)
         if local_sz is not None: to_local.append((axis, local_sz))
       for axis, local_sz in sorted(to_local[:3]):
-        self.shift_local(axis, local_sz, suggestion)
+        self.shift_to(axis, local_sz, insert_before=self.first_reduce)
+        self.local_dims += 1
     self.simplify_ones()
-
-    return suggestion
