@@ -21,6 +21,7 @@ if __name__ == "__main__":
   ast_strs = dedup(open(sys.argv[1]).read().strip().split("\n"))
 
   # reduce kernels only, no ImageDType
+  #ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
   #ast_strs = [x for x in ast_strs if "ReduceOps" in x and "dtypes.image" not in x]
 
   # the device we are optimizing for
@@ -42,21 +43,20 @@ if __name__ == "__main__":
     # linearize
     lin = Linearizer(ast)
     preopt = lin.colored_shape()
-    lin.hand_coded_optimizations_old()
+    lin.hand_coded_optimizations()
     postopt = lin.colored_shape()
+    #print(lin.applied_opts)
 
     # linearize_alt
     lin2 = Linearizer(ast)
-    lin2.hand_coded_optimizations()
+    lin2.hand_coded_optimizations_old()
     postopt_alt = lin2.colored_shape()
-
-    #print(lin2.applied_opts)
 
     print(preopt+' '*(37-ansilen(preopt)), "->", postopt)
     assert postopt == postopt_alt, f"{postopt} != {postopt_alt}"
     for s1,s2 in zip(lin.sts, lin2.sts): assert s1 == s2
+    continue
 
-    """
     lin.linearize()
 
     # create output/input buffers
@@ -85,7 +85,6 @@ if __name__ == "__main__":
     agflops.append(gflops)
     if tm*1e6 > 100:
       print(f"{len(lin.uops):4d} uops, {str(lin.global_size):18s} {str(lin.local_size):12s} {tm*1e6:8.2f} us {gflops:7.2f} GFLOPS", preopt+' '*(37-ansilen(preopt)), "->", postopt)
-    """
 
   print(f"all kernels ran in {sum(atm)*1e3:.2f} ms")
 
