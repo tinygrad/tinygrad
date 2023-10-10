@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator
+import os, functools, platform, time, re, contextlib, operator, hashlib
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -148,3 +148,24 @@ class GlobalCounters:
   mem_cached: ClassVar[int] = 0 # NOTE: this is not reset
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0
+
+# *** cache compiled files ***
+
+def cache_compiled(folder:str):
+  cache_dir = os.path.join(os.path.expanduser("~/.cache/tinygrad"), folder)
+  os.makedirs(cache_dir, exist_ok=True)
+
+  def decorator(func):
+    def wrapper(self, prg:str, binary:bool=False) -> str:
+      prg_hash = hashlib.sha256(prg.encode()).hexdigest()
+      cache_path = os.path.join(cache_dir, prg_hash)
+
+      if not os.path.exists(cache_path):
+        result = func(self, prg, binary=binary)
+        with open(f"{cache_path}.tmp.{os.getpid()}", "wb") as f:
+          f.write(result)
+        os.rename(f"{cache_path}.tmp.{os.getpid()}", cache_path)
+      return cache_path
+
+    return wrapper
+  return decorator

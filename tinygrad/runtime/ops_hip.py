@@ -2,7 +2,7 @@ import numpy as np
 import ctypes, functools, math, collections
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
-from tinygrad.helpers import DEBUG, getenv
+from tinygrad.helpers import DEBUG, getenv, cache_compiled
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -88,23 +88,33 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
+    bin_path = self.compile(name, prg, binary=binary)
+    with open(bin_path, "rb") as f:
+      prg_bin = f.read()
+    if DEBUG >= 6:
+      asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg_bin))
+      print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
+
+    module = hip.hipModuleLoadData(prg_bin)
+    self.prgs = []
+    for i in range(HIP.device_count):
+      hip.hipSetDevice(i)
+      self.prgs.append(hip.hipModuleGetFunction(module, name))
+
+  @cache_compiled(f"hip{'-'.join(map(str, hip.hiprtcVersion()))}")
+  def compile(self, name:str, prg:str, binary=False):
     try:
       if not binary:
         prog = hip.hiprtcCreateProgram(prg, name, [], [])
         device_properties = hip.hipGetDeviceProperties(HIP.default_device)
         hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
-        prg = hip.hiprtcGetCode(prog)
+        return hip.hiprtcGetCode(prog)
     except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
-
-    self.prgs = []
-    for i in range(HIP.device_count):
-      hip.hipSetDevice(i)
-      self.prgs.append(hip.hipModuleGetFunction(hip.hipModuleLoadData(prg), name))
 
   def __call__(self, global_size, local_size, *args, wait=False):
     hip.hipSetDevice(args[0]._device)

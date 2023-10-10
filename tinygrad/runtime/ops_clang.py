@@ -1,7 +1,7 @@
-import os, time, ctypes, hashlib, subprocess, platform, tempfile, functools
+import time, ctypes, hashlib, subprocess, platform, tempfile, functools
 from functools import partial, reduce
 from tinygrad.ops import Compiled
-from tinygrad.helpers import fromimport, getenv, DEBUG, CI
+from tinygrad.helpers import fromimport, getenv, DEBUG, CI, cache_compiled
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
@@ -27,34 +27,40 @@ def emulate_ext_calls(fn, uc, address, size, user_data):
   s_in = struct.unpack('f', struct.pack('I', uc.reg_read(getattr(arm64_const, f'UC_ARM64_REG_S{fn[2][1:]}'))))[0]
   uc.reg_write(getattr(arm64_const, f'UC_ARM64_REG_S{fn[1][1:]}'), struct.unpack('I', struct.pack('f', mock_lm[fn[0]](s_in)))[0])  # type: ignore
 
+def toolchain_hash(): return hashlib.sha256(subprocess.check_output(args=("clang --version" if not ARM64 else "aarch64-linux-gnu-as --version").split())).digest().hex()
 class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False):
+    if binary and DEBUG >= 5: print(prg)
+
+    bin_path = self.compile(prg, binary=binary)
+    if binary and CI and ARM64:
+      prg_lines = prg.splitlines()
+      self.varsize = align(int(prg_lines[0].split(" ")[1]))
+      self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg_lines[6:-3])) if ins[:2] == 'bl'}
+      with open(bin_path, "rb") as f:
+        self.prg = f.read()
+    else:
+      self.lib = ctypes.CDLL(bin_path)
+      self.fxn = self.lib[name]
+
+  @cache_compiled(f"clang-{toolchain_hash()}")
+  def compile(self, prg:str, binary:bool=False):
     # TODO: is there a way to not write this to disk?
     # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
     #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
-    fn = f"{tempfile.gettempdir()}/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{args['ext']}"
-    if binary and DEBUG >= 5: print(prg)
-    if not os.path.exists(fn):
-      tmp = f"{fn}.{os.getpid()}.tmp"
-      if not binary:
-        prg = CLANG_PROGRAM_HEADER + prg
-        subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+tmp).split(), input=prg.encode('utf-8'))
-        os.rename(tmp, fn)
-      else:
+    if not binary:
+      prg = CLANG_PROGRAM_HEADER + prg
+      return subprocess.check_output(args=(f'clang -shared -O2 -Wall -Werror -x c {args["cflags"]} - -o /dev/stdout').split(), input=prg.encode('utf-8'))  
+    else:
+      with tempfile.NamedTemporaryFile() as as_path:
         if CI and ARM64:
-          prg = prg.split('\n') # type: ignore
-          self.varsize = align(int(prg[0].split(" ")[1]))
-          self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
-          prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n'])
-          subprocess.check_output(args=('aarch64-linux-gnu-as -o '+tmp).split(), input=prg.encode('utf-8'))
-          subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+tmp+' '+fn+'.bin').split())
-          with open(fn + '.bin', 'rb') as f:
-            self.prg = f.read()
-          return
-        subprocess.check_output(args=('as -o' + tmp).split(), input=prg.encode('utf-8'))
-        subprocess.check_output(args=('clang -lm -shared '+tmp+' -o'+fn).split())
-    self.lib = ctypes.CDLL(fn)
-    self.fxn = self.lib[name]
+          prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg.splitlines()[6:-3]] + ['\n'])
+          subprocess.check_output(args=(f'aarch64-linux-gnu-as -o {as_path.name}').split(), input=prg.encode('utf-8'))
+          return subprocess.check_output(args=(f'aarch64-linux-gnu-objcopy -O binary --only-section=.text {as_path.name} /dev/stdout').split())
+        else:
+          subprocess.check_output(args=(f'as -o {as_path.name}').split(), input=prg.encode('utf-8'))
+          return subprocess.check_output(args=(f'clang -lm -shared {as_path.name} /dev/stdout').split())
+
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()
     if CI and ARM64:
