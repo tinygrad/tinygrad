@@ -1,5 +1,5 @@
 import numpy as np
-import ctypes, functools, math, collections, pathlib
+import os, ctypes, functools, math, collections, pathlib
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
 from tinygrad.helpers import DEBUG, getenv, cache_filepath
@@ -101,14 +101,18 @@ class HIPProgram:
       hip.hipSetDevice(i)
       self.prgs.append(hip.hipModuleGetFunction(hip.hipModuleLoadData(prg_bin), name))
 
-  def compile(self, prg, name, binary, cached_file):
+  def compile(self, prg, name, binary, cachefile_path):
     try:
       if not binary:
         prog = hip.hiprtcCreateProgram(prg, name, [], [])
         device_properties = hip.hipGetDeviceProperties(HIP.default_device)
         hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
         prg = hip.hiprtcGetCode(prog)
-        cached_file.write_bytes(prg)
+
+        # Writing to cache file for later reuse.
+        tmp_path = cachefile_path.with_name(f"{cachefile_path.name}.tmp.{os.getpid()}")
+        tmp_path.write_bytes(prg)
+        tmp_path.rename(cachefile_path)
       return prg
     except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
