@@ -33,6 +33,7 @@ class Node:
     yield from (x[::-1] for x in product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
+  def unbind(self) -> Tuple[Node, Optional[int]]: return self.substitute({v: v.unbind()[0] for v in self.vars() if v.val is not None}), None
 
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
@@ -205,7 +206,6 @@ class MulNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
     return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) * (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
-  def unbind(self) -> Tuple[Node, None]: return self.substitute({v: v.unbind()[0] for v in self.vars() if v.val is not None}), None
 
 class DivNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], _=False): return self.a//(self.b*b) # two divs is one div
@@ -300,7 +300,6 @@ class SumNode(RedNode):
     return Node.__lt__(lhs, b)
 
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return Variable.sum([node.substitute(var_vals) for node in self.nodes])
-  def unbind(self) -> Tuple[Node, None]: return self.substitute({v: v.unbind()[0] for v in self.vars() if v.val is not None}), None
 
   @property
   def flat_components(self): # recursively expand sumnode components
