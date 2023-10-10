@@ -183,14 +183,13 @@ def simple():
     features = backbone(images.tensors)
     objectness, rpn_box_regression = rpn(features)
     anchors = [anchor for anchor in anchor_generator(images, features)]
-    if len(anchors[0][0].size) < 2: continue
     annotations = coco.loadAnns(coco.getAnnIds(imgIds=[random_img_id]))
     gt = []
     for annotation in annotations:
         bbox = annotation['bbox']  # [x,y,width,height]
         x, y, width, height = bbox
         gt.append([x, y, x + width, y + height])
-    print("anchor size", anchors[0][0].size)
+    if len(gt) == 0: continue
     targets = [BoxList(Tensor(gt), image_size=anchors[0][0].size)]
     objectness_loss, regression_loss = None, None
     try:
