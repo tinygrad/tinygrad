@@ -1,12 +1,11 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
-import os, subprocess, pathlib, functools, ctypes
+import os, subprocess, pathlib, ctypes
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any, Tuple
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.cstyle import uops_to_cstyle
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
-from tinygrad.renderer.metal import MetalLanguage
+from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, LRUAllocator
 
 METAL_XCODE = getenv("METAL_XCODE")
@@ -101,5 +100,4 @@ class MetalProgram:
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     METAL.mtl_buffers_in_flight.append(command_buffer)
 
-renderer = functools.partial(uops_to_cstyle, MetalLanguage())
-MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), renderer, MetalProgram, METAL.synchronize, MetalBatchExecutor)
+MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, MetalProgram, METAL.synchronize, MetalBatchExecutor)

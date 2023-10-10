@@ -1,14 +1,13 @@
 from __future__ import annotations
-import pathlib, functools
+import pathlib
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
 from tinygrad.ops import Compiled
-from tinygrad.renderer.opencl import OpenCLLanguage
+from tinygrad.renderer.opencl import OpenCLRenderer
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.cstyle import uops_to_cstyle
 
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
@@ -104,5 +103,4 @@ class CLProgram:
         return None
     return None
 
-renderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
-GPUBuffer = Compiled(CLBuffer, LinearizerOptions(), renderer, CLProgram, CL.synchronize)
+GPUBuffer = Compiled(CLBuffer, LinearizerOptions(), OpenCLRenderer, CLProgram, CL.synchronize)

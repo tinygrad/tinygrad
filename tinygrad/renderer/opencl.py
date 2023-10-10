@@ -1,5 +1,6 @@
+import functools
 from tinygrad.helpers import dtypes
-from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint64: "ulong" }
 class OpenCLLanguage(CStyleLanguage):
@@ -14,3 +15,5 @@ class OpenCLLanguage(CStyleLanguage):
   gid = [f'get_group_id({i})' for i in range(3)]
   lid = [f'get_local_id({i})' for i in range(3)]
   uses_vload=True
+
+OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
