@@ -1,7 +1,8 @@
-import time, ctypes, hashlib, subprocess, platform, tempfile, functools, pathlib
+import os, time, ctypes, hashlib, subprocess, platform, tempfile, functools, pathlib
 from functools import partial, reduce
+from typing import Tuple, Optional, Any
 from tinygrad.ops import Compiled
-from tinygrad.helpers import fromimport, getenv, DEBUG, CI, cache_compiled
+from tinygrad.helpers import fromimport, getenv, DEBUG, CI, cache_filepath
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
@@ -17,6 +18,7 @@ args = {
   'Darwin': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'dylib', 'exp':''}
 }[platform.system()]
 
+TOOLCHAIN_HASH = hashlib.sha256(subprocess.check_output(args=("clang --version" if not ARM64 else "aarch64-linux-gnu-as --version").split())).digest().hex()
 CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n'
 ADDRESS = 0x10000
 
@@ -27,40 +29,38 @@ def emulate_ext_calls(fn, uc, address, size, user_data):
   s_in = struct.unpack('f', struct.pack('I', uc.reg_read(getattr(arm64_const, f'UC_ARM64_REG_S{fn[2][1:]}'))))[0]
   uc.reg_write(getattr(arm64_const, f'UC_ARM64_REG_S{fn[1][1:]}'), struct.unpack('I', struct.pack('f', mock_lm[fn[0]](s_in)))[0])  # type: ignore
 
-def toolchain_hash(): return hashlib.sha256(subprocess.check_output(args=("clang --version" if not ARM64 else "aarch64-linux-gnu-as --version").split())).digest().hex()
 class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False):
     if binary and DEBUG >= 5: print(prg)
 
-    bin_path = self.compile(prg, binary=binary)
+    cached_file = cache_filepath(f"clang-{TOOLCHAIN_HASH}", prg)
+    if not cached_file.exists(): self.compile(prg, binary, cached_file)
     if binary and CI and ARM64:
       prg_lines = prg.splitlines()
       self.varsize = align(int(prg_lines[0].split(" ")[1]))
       self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg_lines[6:-3])) if ins[:2] == 'bl'}
-      self.prg = pathlib.Path(bin_path).read_bytes()
+      self.prg = pathlib.Path(cached_file).read_bytes()
     else:
-      self.lib = ctypes.CDLL(bin_path)
+      self.lib = ctypes.CDLL(cached_file)
       self.fxn = self.lib[name]
 
-  @cache_compiled(f"clang-{toolchain_hash()}")
-  def compile(self, prg:str, binary:bool=False):
+  def compile(self, prg, binary, cachefile_path):
     # TODO: is there a way to not write this to disk?
     # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
     #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
+    tmp_path = cachefile_path.with_name(f"{cachefile_path.name}.tmp.{os.getpid()}")
     if not binary:
       prg = CLANG_PROGRAM_HEADER + prg
-      with tempfile.NamedTemporaryFile() as path:
-        subprocess.check_output(args=(f'clang -shared -O2 -Wall -Werror -x c {args["cflags"]} - -o {path.name}').split(), input=prg.encode('utf-8'))
-        return pathlib.Path(path.name).read_bytes()
+      subprocess.check_output(args=(f'clang -shared -O2 -Wall -Werror -x c {args["cflags"]} - -o {str(tmp_path)}').split(), input=prg.encode('utf-8'))
     else:
-      with tempfile.NamedTemporaryFile() as as_path, tempfile.NamedTemporaryFile() as final_path:
+      with tempfile.NamedTemporaryFile() as as_path:
         if CI and ARM64: prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg.splitlines()[6:-3]] + ['\n'])
 
         assembly_cmd = 'aarch64-linux-gnu-as' if CI and ARM64 else 'as'
         link_cmd = 'aarch64-linux-gnu-objcopy -O binary --only-section=.text' if CI and ARM64 else 'clang -lm -shared'
         subprocess.check_output(args=(f'{assembly_cmd} {as_path.name}').split(), input=prg.encode('utf-8'))
-        subprocess.check_output(args=(f'{link_cmd} {as_path.name} {final_path.name}').split())
-        return pathlib.Path(final_path.name).read_bytes()
+        subprocess.check_output(args=(f'{link_cmd} {as_path.name} {str(tmp_path)}').split())
+    tmp_path.rename(cachefile_path)
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()

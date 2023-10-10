@@ -1,7 +1,7 @@
 import numpy as np
 import ctypes, functools, math, collections, pathlib
 import extra.hip_wrapper as hip
-from typing import Tuple, Any, List
+from typing import Tuple, Any, List, Optional
 from tinygrad.helpers import DEBUG, getenv, cache_compiled
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer

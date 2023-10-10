@@ -164,3 +164,8 @@ def cache_compiled(folder:str):
       return str(cache_path)
     return wrapper
   return decorator
+
+def cache_filepath(folder:str, prg:str):
+  cache_dir = pathlib.Path("~/.cache/tinygrad").expanduser() / folder
+  cache_dir.mkdir(parents=True, exist_ok=True)
+  return cache_dir / hashlib.sha256(prg.encode()).hexdigest()
