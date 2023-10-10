@@ -651,12 +651,18 @@ if __name__ == "__main__":
 
   # make image correct size and scale
   x = (x + 1.0) / 2.0
-  x = (x.reshape(3,512,512).permute(1,2,0).clip(0,1)*255).cast(dtypes.uint8)
+  x = (x.reshape(3,512,512).permute(1,2,0).clip(0,1)*255)
   print(x.shape)
 
   # save image
   from PIL import Image
-  im = Image.fromarray(x.numpy())
+  import numpy as np
+
+  # TODO: without this hack numpy array will be zero. Bug in wgpu_device.queue.read_buffer?
+  if Device.DEFAULT == "WEBGPU":
+    x.numpy()
+
+  im = Image.fromarray(x.numpy().astype(np.uint8))
   print(f"saving {args.out}")
   im.save(args.out)
   # Open image.
