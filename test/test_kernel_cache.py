@@ -14,13 +14,12 @@ def generate_random_string(length=16):
 
 def check_compile_folder(directory):
   return [file for file in directory.iterdir() if file.is_file()]
-  
 
 class TestKernelCache(unittest.TestCase):
   def test_kernel_cache(self):
     if Device.DEFAULT not in ["CLANG"]:
       self.skipTest("No custom kernel cache is implemented")
-    
+
     orig_toolchain_hash = tinygrad.runtime.ops_clang.TOOLCHAIN_HASH
     tinygrad.runtime.ops_clang.TOOLCHAIN_HASH = "ci-"+generate_random_string()
     cache_dir = cache_filepath(f"clang-{tinygrad.runtime.ops_clang.TOOLCHAIN_HASH}", "").parent
