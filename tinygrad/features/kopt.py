@@ -56,7 +56,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
   if not opts: return "BASELINE"
   search_space = prod([len(x.choices) for x in opts])
   st = time.perf_counter()
-  budget, num_workers = getenv("BUDGET", 200), getenv("KOPT_WORKERS", 16)
+  budget, num_workers = getenv("BUDGET", 200), getenv("KOPT_WORKERS", 0)
   optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, budget), num_workers=num_workers)
   optimizer.register_callback("tell", (bar := ng.callbacks.ProgressBar()))
 
