@@ -5,7 +5,6 @@ from math import gcd
 from itertools import product
 from tinygrad.helpers import partition
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Iterator
-from typing_extensions import TypeGuard
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
@@ -97,6 +96,7 @@ class Node:
     assert b > 0
     if b == 1: return NumNode(0)
     if self.min >= 0 and self.max < b: return self
+    if (self.min//b) == (self.max//b): return self - (b*(self.min//b))
     if self.min < 0: return (self - ((self.min//b)*b)) % b
     return create_node(ModNode(self, b))
 
@@ -156,8 +156,6 @@ class NumNode(Node):
     assert isinstance(num, int), f"{num} is not an int"
     self.b:int = num
     self.min, self.max = num, num
-  def __int__(self): return self.b
-  def __index__(self): return self.b
   def __eq__(self, other): return self.b == other
   def __hash__(self): return self.hash  # needed with __eq__ override
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self
@@ -176,11 +174,11 @@ class OpNode(Node):
   def get_bounds(self) -> Tuple[int, int]: pass
 
 class LtNode(OpNode):
-  def __mul__(self, b: Union[Node, int]): return (self.a*b) < (self.b*b)
   def __floordiv__(self, b: Union[Node, int], _=False): return (self.a//b) < (self.b//b)
   def get_bounds(self) -> Tuple[int, int]:
-    if isinstance(self.b, int): return int(self.a.max < self.b), int(self.a.min < self.b)
-    return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min > self.b.max else (0, 1)
+    if isinstance(self.b, int):
+      return (1, 1) if self.a.max < self.b else (0, 0) if self.a.min >= self.b else (0, 1)
+    return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min >= self.b.max else (0, 1)
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) < (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class MulNode(OpNode):
@@ -297,7 +295,6 @@ class SumNode(RedNode):
     return new_nodes
 
 class AndNode(RedNode):
-  def __mul__(self, b: Union[Node, int]): Variable.ands([x*b for x in self.nodes])
   def __floordiv__(self, b: Union[Node, int], _=True): return Variable.ands([x//b for x in self.nodes])
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node:
     subed = []
@@ -323,9 +320,6 @@ def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
 
 # symbolic int
 sint = Union[Node, int]
-
-def all_int(t: Tuple[sint, ...]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
-
 VariableOrNum = Union[Variable, NumNode]
 
 render_python: Dict[Type, Callable] = {

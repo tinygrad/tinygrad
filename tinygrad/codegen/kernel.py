@@ -1,12 +1,34 @@
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict
 import itertools
-from tinygrad.ops import LazyOp, MovementOps, FlopCounter, get_lazyop_info, ReduceOps
-from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType
-from tinygrad.runtime.lib import buf_is_kernel_arg
+from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, ReduceOps, MemBuffer, BufferOps, Device, Compiled
+from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class TensorCore:
+  device: str
+  dims: List[int]
+  dtype_in: DType
+  dtype_out: DType
+  threads: List[int]
+  thread_local_aliases: List[List[List[int]]]
+  thread_local_sizes: List[int]
+  arch: Optional[str] = None
+  def __str__(self): return f"tensor_core<{self.device}, {self.dims}, {self.dtype_in}, {self.dtype_out}>"
+
+# TODO(TC): doesn't belong here!!!
+tensor_cores: Dict[str, List[TensorCore]] = {
+  "METAL": [
+    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.float, dtype_out=dtypes.float, threads=[2,4,2,2], thread_local_sizes=[2,2,2], thread_local_aliases=[ [[-1, 1, 3], [0], [2, 4]], [[2, 4], [-1, 1, 3], [0]], [[0], [-1, 1, 3], [2, 4]] ], arch="arm64"),
+    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  threads=[2,4,2,2], thread_local_sizes=[2,2,2], thread_local_aliases=[ [[-1, 1, 3], [0], [2, 4]], [[2, 4], [-1, 1, 3], [0]], [[0], [-1, 1, 3], [2, 4]] ], arch="arm64")
+  ],
+  "HIP": [
+    TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, threads=[16,2], thread_local_sizes=[16,16,8], thread_local_aliases=[ [[-1], [0], [1]], [[-1], [1], [0]], [[0], [1], [2, -1]] ]),
+  ]
+}
 
 class LocalBuffer(NamedTuple):
   name: str
@@ -16,52 +38,39 @@ class LocalBuffer(NamedTuple):
   def __str__(self): return f"localbuffer<{self.name}[{self.size}]>"
 
 class LinearizerOptions(NamedTuple):
+  device: str = ""
   # TODO: make this generic with a list of supported types
   supported_vector_sizes: Dict[DType, List[int]] = {dtypes.float: []}
   supported_vector_sizes_alu: Dict[DType, List[int]] = {dtypes.float: []}
   uses_float32_calculations: bool = True
   has_local: bool = True
+  has_shared: bool = True
   # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
   global_max: Optional[List[int]] = None
   local_max: Optional[List[int]] = None
   is_nvidia: Optional[bool] = None
 
 class Kernel:
-  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer, opts:Optional[LinearizerOptions]=None):
-    # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
-    self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
-    self.opts = opts if opts else LinearizerOptions()
-
-    # get the output buffers
-    self.bufs = [output_buffer] + dedup(ast.buffers)
-    self.arg_bufs = {x:f"data{i}" for i,x in enumerate(dedup([x.realized for x in self.bufs if buf_is_kernel_arg(x)]))}
-
-    # key for lookup in cache (can change, str might not be right)
-    # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
-    # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
-    self.key = (ast.map_buffers({x:(self.arg_bufs[x.realized] if x.realized in self.arg_bufs else x) for x in self.bufs}).key, tuple([x.key for x in self.bufs]))
-
-  def process(self) -> None:
-    if hasattr(self, "sts"): return   # already processed
+  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
+    self.opts = opts if opts else (cast(Compiled, Device[Device.DEFAULT]).linearizer_opts if isinstance(Device[Device.DEFAULT], Compiled) else LinearizerOptions())
+    self.ast = ast
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
-    self.mem_estimate: int = sum(x.dtype.itemsize*x.size for x in self.arg_bufs.keys())
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
     assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None
 
-    # get earlybufs, before the one reduce op
-    self.earlybufs = dedup(self.reduceop.buffers) if self.reduceop else []
-
     # create new shapetrackers inside this kernel, we will permute them
-    self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]
-    for st in self.sts: st.simplify()
+    self.bufs = [MemBuffer(0, self.info.dtype, ShapeTracker.from_shape(self.info.shape))] + dedup([x.arg for x in self.ast.get_lazyops() if x.op in BufferOps])
+    self.sts: List[ShapeTracker] = [x.st for x in self.bufs]
 
-    # make the output buffer shape correct in here
-    self.sts[0].reshape(self.info.shape)
+    self.mem_estimate: int = sum(x.dtype.itemsize*x.st.size() for x in self.bufs)
+
+    # get earlybufs, before the one reduce op
+    self.earlybufs = [x.arg for x in self.reduceop.get_lazyops() if x.op in BufferOps] if self.reduceop else []
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
     # parameters
@@ -78,7 +87,7 @@ class Kernel:
 
   def has_variable_shape(self) -> bool:
     for b in self.bufs:
-      if any(not isinstance(x, int) for x in b.st.shape): return True
+      if not all_int(b.st.views[-1].shape): return True
     return False
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
@@ -149,6 +158,6 @@ class Kernel:
   def colored_shape(self) -> str: return ' '.join(colored(s, color) for s,color in zip([f"{s:4d}" if isinstance(s, int) else s for s in self.full_shape], self.colors()))
   def printbufs(self, prefix=""):
     for i,st in enumerate(self.sts):
-      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i].realized is not None else str(self.bufs[i]):47s}", st.views)
+      print(prefix, f"{i:3d} {str(self.bufs[i]):47s}", st.views)
     print(self.colored_shape())
 

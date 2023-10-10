@@ -135,11 +135,11 @@ assert len(lazyop.src) == 2
 # again, a LazyOp AST is like a GPU kernel. you have to copy the data on the device first
 assert lazyop.src[0].op.op == LoadOps.FROM
 assert lazyop.src[0].op.src[0].device == "CPU"
-assert lazyop.src[0].op.src[0].realized._buf[0] == 2, "the src of the FROM LazyOP is a LazyBuffer on the CPU holding [2.]"
+assert lazyop.src[0].op.src[0].op.src[0].realized._buf[0] == 2, "the src of the FROM LazyOP is a LazyBuffer on the CPU holding [2.]"
 assert result.lazydata.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer
-result.lazydata.realize()
+result.realize()
 assert result.lazydata.realized is not None, "the LazyBuffer is realized!"
 # this brings us nicely to DeviceBuffer, of which the realized ClangBuffer is a subclass
 assert 'RawMallocBuffer' in str(type(result.lazydata.realized))
@@ -256,21 +256,18 @@ class Linearizer:
   # create the kernel with the AST
   # NOTE: the AST contains the CompiledBuffers themselves as the root nodes. this will change
   def __init__(self, ast:LazyOp): pass
-  def process(self): pass
   def linearize(self): pass
 
   # when linearize is run, it fills in this list
   uops: List[UOp]
 
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
 result = Tensor(2).realize() + Tensor(3).realize()
-result.lazydata.realized = Device[Device.DEFAULT].buffer(prod(result.shape), result.dtype)
 
 # use the real Linearizer to linearize 2+3
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.codegen.kernel import LinearizerOptions
-linearizer = Linearizer(result.lazydata.op, result.lazydata, LinearizerOptions())
+sched = result.lazydata.schedule()
+linearizer = Linearizer(sched[-1].ast)
 linearizer.linearize()
 
 # print the uops
@@ -279,13 +276,11 @@ for uop in linearizer.uops: print(uop)
 # output:
 """
    0 UOps.DEFINE_GLOBAL  : ptr.dtypes.float          []                               ('data0', dtypes.float)
-   1 UOps.LOOP           :                           []                               ([], 'global')
-   2 UOps.LOOP           :                           []                               ([], 'local')
-   3 UOps.CONST          : dtypes.float              []                               2.0
-   4 UOps.CONST          : dtypes.float              []                               3.0
-   5 UOps.ALU            : dtypes.float              [3, 4]                           BinaryOps.ADD
-   6 UOps.STORE          :                           [5]                              MemOp(name='data0', idx=<0>, local=False, memory_dtype=dtypes.float, valid=<1>, invalid_value=0.0)
-   7 UOps.ENDLOOP        :                           []                               ([], 'global+local')
+   1 UOps.CONST          : dtypes.float              []                               2.0
+   2 UOps.CONST          : dtypes.float              []                               3.0
+   3 UOps.ALU            : dtypes.float              [1, 2]                           BinaryOps.ADD
+   4 UOps.CONST          : dtypes.int                []                               0
+   5 UOps.STORE          :                           [0, 4, 3]                        None
 """
 
 # %%
@@ -329,22 +324,22 @@ void E_1(float* data0) {
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # create a virtual (10, 10) Tensor. this is just a shape, there's no actual tensor
-a = ShapeTracker((10, 10))
+a = ShapeTracker.from_shape((10, 10))
 
 # you'll see it has one view. the (10, 1 are the strides)
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (10, 1), 0)])
 
 # we can permute it, and the strides change
-a.permute((1,0))
+a = a.permute((1,0))
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (1, 10), 0)])
 
 # we can then reshape it, and the strides change again
 # note how the permute stays applied
-a.reshape((5,2,5,2))
+a = a.reshape((5,2,5,2))
 print(a) # ShapeTracker(shape=(5, 2, 5, 2), views=[View((5, 2, 5, 2), (2, 1, 20, 10), 0)])
 
 # now, if we were to reshape it to a (100,) shape tensor, we have to create a second view
-a.reshape((100,))
+a = a.reshape((100,))
 print(a) # ShapeTracker(shape=(100,), views=[
          #   View((5, 2, 5, 2), (2, 1, 20, 10), 0),
          #   View((100,), (1,), 0)])
@@ -355,7 +350,7 @@ idx, _ = a.expr_idxs()
 print(idx.render())  # (((idx0%10)*10)+(idx0//10))
 
 # of course, if we reshape it back, the indexes get simple again
-a.reshape((10,10))
+a = a.reshape((10,10))
 idx, _ = a.expr_idxs()
 print(idx.render())  # ((idx1*10)+idx0)
 
@@ -365,11 +360,11 @@ print(a) # ShapeTracker(shape=(10, 10), views=[
          #   View((10, 10), (10, 1), 0)])
 
 # ...until we simplify it!
-a.simplify()
+a = a.simplify()
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (1, 10), 0)])
 
 # and now we permute it back
-a.permute((1,0))
+a = a.permute((1,0))
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (10, 1), 0)])
 
 # and it's even contiguous

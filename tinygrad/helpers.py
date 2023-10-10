@@ -1,7 +1,9 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator
 import numpy as np
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
+if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
+  from typing_extensions import TypeGuard
 
 T = TypeVar("T")
 # NOTE: it returns int 1 if x is empty regardless of the type of x
@@ -15,6 +17,7 @@ def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x): return tuple(x[0]) if x and x[0].__class__ in (tuple, list) else x
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def all_same(items): return all(x == items[0] for x in items)
+def all_int(t: Tuple[Any, ...]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
 def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
@@ -57,7 +60,7 @@ class ContextVar:
   def __lt__(self, x): return self.value < x
 
 DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
-GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
+GRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 
 class Timing(contextlib.ContextDecorator):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
@@ -137,6 +140,12 @@ class dtypes:
 for attr in list(dtypes.__dict__.values()):
   for amt in [2,4,8]:
     if isinstance(attr, DType): setattr(dtypes, f"_{attr.name}{amt}",  DType(attr.priority, attr.itemsize*amt, f"{attr.name}{amt}", None, amt, True))
+
+  # NOTE: these are image dtypes
+  @staticmethod
+  def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp)
+  @staticmethod
+  def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}

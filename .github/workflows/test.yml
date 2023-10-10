@@ -36,7 +36,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
-      run: python -m mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
+      run: python -m mypy
     - name: Install SLOCCount
       run: sudo apt install sloccount
     - name: Check <5000 lines
@@ -114,15 +114,11 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
-      # - name: Find faster apt mirror
-      #   uses: vegardit/fast-apt-mirror.sh@v1
       - name: Install OpenCL
-        #run: sudo apt install -y pocl-opencl-icd
         run: |
-          wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt update
-          sudo apt install -y --no-install-recommends intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
+          sudo apt install --allow-unauthenticated -y --no-install-recommends intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
       - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
@@ -140,6 +136,9 @@ jobs:
           PYTHONPATH="." OPT=2 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
           PYTHONPATH="." OPT=3 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
       - if: ${{ matrix.task == 'optimage'}}
+        name: Test WINO=1
+        run: GPU=1 DEBUG=2 WINO=1 python3 test/test_ops.py TestOps.test_simple_conv2d
+      - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE ops
         run: |
           GPU=1 IMAGE=1 python -m pytest -n=auto test/test_ops.py
@@ -147,11 +146,14 @@ jobs:
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model compile and size
         run: |
-          DEBUG=2 ALLOWED_KERNEL_COUNT=209 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile.py
+          DEBUG=2 ALLOWED_KERNEL_COUNT=209 VALIDTEST=1 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile.py
           python -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model correctness (float32)
         run: DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile.py
+      - if: ${{ matrix.task == 'openpilot' }}
+        name: Test openpilot alt model correctness (float32)
+        run: DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test tensor core ops
         run: GPU=1 TC=2 python -m pytest -n=auto test/test_ops.py
@@ -201,16 +203,20 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py test/test_symbolic_ops.py test/test_symbolic_jit.py
     - name: Check Device.DEFAULT
       run: WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
+    - name: Run linearizer and tensor core test
+      run: METAL=1 python -m pytest -n=auto test/test_linearizer.py
     #- name: Run webgpu pytest
-    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto --ignore test/models/ --ignore test/unit/test_example.py --ignore test/extra/test_lr_scheduler.py --ignore test/test_linearizer.py test/
-    #- name: Build WEBGPU Efficientnet
-    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
+    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
+    - name: Run webgpu dtype tests
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_dtype.py
+    - name: Build WEBGPU Efficientnet
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
 
   tests:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda] #, ptx]
+        backend: [llvm, clang, gpu, cuda] #, triton] #, ptx]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
@@ -229,57 +235,56 @@ jobs:
           path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
           key: ${{ matrix.backend }}-packages-${{ hashFiles('*/setup.py') }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' }}" >> $GITHUB_ENV
-      - name: Find faster apt mirror
-      #   uses: vegardit/fast-apt-mirror.sh@v1
-      # - name: Install packages (gpu)
+        run: printf "${{ matrix.backend == 'llvm' && 'ENABLE_METHOD_CACHE=1\nLLVM=1' || matrix.backend == 'clang' && 'CLANG=1\nENABLED_METHOD_CACHE=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas'}}" >> $GITHUB_ENV
+      - name: Install OpenCL
         if: matrix.backend == 'gpu'
         run: |
-          wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-          sudo apt update -y
-          sudo apt install -y --no-install-recommends intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
+          echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt update
+          sudo apt install --allow-unauthenticated -y --no-install-recommends intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
       - name: Install packages (cuda)
-        if: matrix.backend == 'cuda' || matrix.backend == 'ptx'
+        if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         run: |
           sudo apt update -y
           sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
       - name: Cache gpuocelot
-        if: matrix.backend == 'cuda' || matrix.backend == 'ptx'
+        if: matrix.backend == 'cuda' || matrix.backend == 'ptx'|| matrix.backend == 'triton'
         id: cache-build
         uses: actions/cache@v3
         env:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-19626fc00b6ee321638c3111074269c69050e091
+          key: ubuntu22.04-gpuocelot-szymonozog-tinygrad
       - name: Clone/compile gpuocelot
-        if: (matrix.backend == 'cuda' || matrix.backend == 'ptx') && steps.cache-build.outputs.cache-hit != 'true'
+        if: (matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
-          git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
+          git clone --recurse-submodules --single-branch --branch tinygrad https://github.com/SzymonOzog/gpuocelot.git ${{ github.workspace }}/gpuocelot
           cd ${{ github.workspace }}/gpuocelot/ocelot
-          git checkout 19626fc00b6ee321638c3111074269c69050e091
           mkdir build
           cd build
           cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
           ninja
       - name: Install gpuocelot
-        if: matrix.backend == 'cuda' || matrix.backend == 'ptx'
+        if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         run: |
           cd ${{ github.workspace }}/gpuocelot/ocelot/build
           sudo ninja install
       - name: Install dependencies
-        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT
         run: python -c "from tinygrad.ops import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
       - name: Run pytest (not cuda)
-        if: matrix.backend!='cuda' && matrix.backend!='ptx'
-        run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test and not (half)'}}' -m 'not exclude_${{matrix.backend}}'
+        if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
+        run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}'
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
       - name: Run pytest (ptx)
         if: matrix.backend=='ptx'
+        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
+      - name: Run pytest (triton)
+        if: matrix.backend=='triton'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
 
   testunicorn:

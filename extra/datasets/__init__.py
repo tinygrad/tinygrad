@@ -1,4 +1,4 @@
-import random, gzip, tarfile, pickle
+import os, gzip, tarfile, pickle
 import numpy as np
 from pathlib import Path
 from tinygrad.tensor import Tensor
@@ -17,27 +17,29 @@ def fetch_mnist():
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
 
-def fetch_cifar(shuffle=False):
-  def _load_disk_tensor(sz, bs, db_list, path, shuffle=False):
-    idx=0
-    X, Y = None, None
-    for db in db_list:
-      x = db[b'data']
-      y = np.array(db[b'labels'])
-      order = list(range(0, len(y)))
-      if shuffle: random.shuffle(order)
-      if X is None:
-        X = Tensor.empty(sz, *x.shape[1:], device=f'disk:/tmp/{path}'+'_x', dtype=dtypes.uint8)
-        Y = Tensor.empty(sz, *y.shape[1:], device=f'disk:/tmp/{path}'+'_y', dtype=dtypes.int64)
-      X[idx:idx+bs].assign(x[order,:])
-      Y[idx:idx+bs].assign(y[order])
-      idx += bs
-    return X, Y  
-  fn = Path(__file__).parent.resolve() / "cifar-10-python.tar.gz"
-  download_file('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz', fn)
-  tt = tarfile.open(fn, mode='r:gz')
-  db = [pickle.load(tt.extractfile(f'cifar-10-batches-py/data_batch_{i}'), encoding="bytes") for i in range(1,6)]
-  X_train, Y_train = _load_disk_tensor(50000, 10000, db, "cifar_train", shuffle=shuffle)
-  db = [pickle.load(tt.extractfile('cifar-10-batches-py/test_batch'), encoding="bytes")]
-  X_test, Y_test = _load_disk_tensor(10000, 10000, db, "cifar_test", shuffle=shuffle)
+def fetch_cifar():
+  X_train = Tensor.empty(50000, 3*32*32, device=f'disk:/tmp/cifar_train_x', dtype=dtypes.uint8)
+  Y_train = Tensor.empty(50000, device=f'disk:/tmp/cifar_train_y', dtype=dtypes.int64)
+  X_test = Tensor.empty(10000, 3*32*32, device=f'disk:/tmp/cifar_test_x', dtype=dtypes.uint8)
+  Y_test = Tensor.empty(10000, device=f'disk:/tmp/cifar_test_y', dtype=dtypes.int64)
+
+  if not os.path.isfile("/tmp/cifar_extracted"):
+    def _load_disk_tensor(X, Y, db_list):
+      idx = 0
+      for db in db_list:
+        x, y = db[b'data'], np.array(db[b'labels'])
+        assert x.shape[0] == y.shape[0]
+        X[idx:idx+x.shape[0]].assign(x)
+        Y[idx:idx+x.shape[0]].assign(y)
+        idx += x.shape[0]
+      assert idx == X.shape[0] and X.shape[0] == Y.shape[0]
+
+    print("downloading and extracting CIFAR...")
+    fn = Path(__file__).parent.resolve() / "cifar-10-python.tar.gz"
+    download_file('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz', fn)
+    tt = tarfile.open(fn, mode='r:gz')
+    _load_disk_tensor(X_train, Y_train, [pickle.load(tt.extractfile(f'cifar-10-batches-py/data_batch_{i}'), encoding="bytes") for i in range(1,6)])
+    _load_disk_tensor(X_test, Y_test, [pickle.load(tt.extractfile('cifar-10-batches-py/test_batch'), encoding="bytes")])
+    open("/tmp/cifar_extracted", "wb").close()
+
   return X_train, Y_train, X_test, Y_test

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # pip3 install tiktoken
 
-import functools, argparse
+import argparse
 import numpy as np
 from tqdm import trange
 np.set_printoptions(linewidth=200)
@@ -34,7 +34,7 @@ class Attention:
     self.dim = dim
     self.head_dim = dim // n_heads
 
-  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor], jit_ctx:Optional[Dict[Variable,int]]=None) -> Tensor:
+  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor]) -> Tensor:
     xqkv = self.c_attn(x)
     xq, xk, xv = [xqkv.slice([None, None, (i*self.dim, (i+1)*self.dim)]) for i in range(3)]
     xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], self.n_heads, self.head_dim) for x in (xq, xk, xv)]
@@ -50,7 +50,7 @@ class Attention:
       keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
 
     # save the cache
-    cache_k, cache_v = keys.realize(), values.realize()
+    cache_k, cache_v = keys, values
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     output = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1)
     return self.c_proj(output), cache_k, cache_v
@@ -70,63 +70,68 @@ class TransformerBlock:
     self.ln_1 = LayerNorm(dim, norm_eps)
     self.ln_2 = LayerNorm(dim, norm_eps)
 
-  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor], jit_ctx:Optional[Dict[Variable,int]]=None):
-    if start_pos > 0 and mask is None and getenv("JIT"):
-      start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
-      cache_k = cache_k.reshape(cache_k.shape[0], start_pos_var, cache_k.shape[2], cache_k.shape[3])
-      cache_v = cache_v.reshape(cache_v.shape[0], start_pos_var, cache_v.shape[2], cache_v.shape[3])
-      # need this because we don't reshape back to int shape in the jitted path and we don't have the correct var_vars in cache
-      cache_k.lazydata.var_vals[start_pos_var] = start_pos
-      cache_v.lazydata.var_vals[start_pos_var] = start_pos
-
-    output, cache_k, cache_v = self.attn(self.ln_1(x), cache_k, cache_v, start_pos, mask, jit_ctx=jit_ctx)
+  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor]):
+    output, cache_k, cache_v = self.attn(self.ln_1(x), cache_k, cache_v, start_pos, mask)
     h = x + output
-    return (h + self.mlp(self.ln_2(h))).realize(), cache_k.realize(), cache_v.realize()
+    h = (h + self.mlp(self.ln_2(h)))
+    return h, cache_k, cache_v
 
 class Transformer:
   def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_seq_len=1024):
     self.wte = Embedding(vocab_size, dim)
     self.wpe = Embedding(max_seq_len, dim)
     self.h = [TransformerBlock(dim, n_heads, norm_eps, linear) for _ in range(n_layers)]
-    self.kv_caches = [(None, None) for _ in range(n_layers)]
+    self.kv_caches = None
+    self.n_layers = n_layers
     self.ln_f = LayerNorm(dim, norm_eps)
     self.lm_head = linear(dim, vocab_size, bias=False)
 
-    self.embed_jitted = TinyJit(self.embed)
-    self.postprocess_jitted = TinyJit(self.postprocess)
-    self.h_jitted = [TinyJit(h.__call__) for h in self.h]
-
-  def embed(self, tokens, pos):
+  def embed(self, tokens:Tensor, pos:Tensor):
     tok_emb = self.wte(tokens)
     pos_emb = self.wpe(pos)
     h = tok_emb + pos_emb
-    return h.realize()
+    if getenv("FP16"): h = h.half()
+    return h
 
   def postprocess(self, x, temperature:Optional[float]):
     logits = self.lm_head(self.ln_f(x))
-    if temperature is not None: return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
-    return logits.realize()
+    if temperature is not None: return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten()
+    return logits
+
+  @TinyJit
+  def run_all_layers(self, tokens:Tensor, pos:Tensor, start_pos:int, temperature:float, **kv_cache):
+    h = self.embed(tokens, pos)
+
+    for i, hi in enumerate(self.h):
+      h, kv_cache[f'cache_k{i}'], kv_cache[f'cache_v{i}'] = hi(h, kv_cache[f'cache_k{i}'], kv_cache[f'cache_v{i}'], start_pos=start_pos, mask=None)
+
+    # don't realize until here
+    for v in kv_cache.values(): v.realize()
+    return self.postprocess(h, temperature).realize(), kv_cache
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
-    if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
     if seqlen == 1 and start_pos > 0 and getenv("JIT"):
       start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
-      pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var+seqlen)))
+      pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var + seqlen)))
       pos.lazydata.var_vals[start_pos_var] = start_pos
-      h = self.embed_jitted(tokens, pos)
-      for i, (hi, (cache_k, cache_v)) in enumerate(zip(self.h_jitted, self.kv_caches)):
-        h, cache_k, cache_v = hi(h, cache_k, cache_v, start_pos=start_pos, mask=None, jit_ctx={start_pos_var: start_pos})
-        self.kv_caches[i] = (cache_k, cache_v)
-      return self.postprocess_jitted(h, temperature)
+      for k,v in self.kv_caches.items():
+        v.lazydata.var_vals[start_pos_var] = start_pos
+        self.kv_caches[k] = v.reshape(v.shape[0], start_pos_var, v.shape[2], v.shape[3])
+      logit_or_softmax, self.kv_caches = self.run_all_layers(tokens, pos, start_pos=start_pos, temperature=temperature, **self.kv_caches)
+      return logit_or_softmax
     else:
+      if start_pos == 0:
+        if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
+        self.kv_caches = {**{f'cache_k{i}':None  for i in range(self.n_layers)}, **{f'cache_v{i}':None for i in range(self.n_layers)}}
+
       pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos, start_pos+seqlen)))
-      mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize()
+      mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float16 if getenv('FP16') else dtypes.float32).triu(start_pos+1).realize()
       h = self.embed(tokens, pos)
-      for i, (hi, (cache_k, cache_v)) in enumerate(zip(self.h, self.kv_caches)):
-        h, cache_k, cache_v = hi(h, cache_k, cache_v, start_pos=start_pos, mask=mask)
-        self.kv_caches[i] = (cache_k, cache_v)
-      return self.postprocess(h, temperature)
+      for i, hi in enumerate(self.h):
+        h, self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'] = hi(h, self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'], start_pos=start_pos, mask=mask)
+      for v in self.kv_caches.values(): v.realize()
+      return self.postprocess(h, temperature).realize()
 
 # **** files and arguments ****
 
@@ -159,9 +164,10 @@ class GPT2:
     # lm head and wte are tied
     weights['lm_head.weight'] = Tensor(weights['wte.weight'].numpy())
 
-    load_state_dict(model, weights)
     if getenv("FP16"):
-      for v in get_state_dict(model).values(): v.assign(v.cast(dtypes.float16).realize())
+      for k, v in weights.items():
+        weights[k] = v.cpu().half().realize()
+    load_state_dict(model, weights)
     return GPT2(model, tokenizer)
 
   def __init__(self, model, tokenizer):
@@ -173,7 +179,7 @@ class GPT2:
     start_pos = 0
     for _ in trange(max_length, disable=(timing==True)):
       GlobalCounters.reset()
-      if args.timing: print("")
+      if timing: print("")
       st = GlobalCounters.time_sum_s
       with Timing("total ", enabled=timing):
         with Timing(f"ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU"+

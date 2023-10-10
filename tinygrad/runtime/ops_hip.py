@@ -1,8 +1,9 @@
 import numpy as np
-import ctypes, functools
+import ctypes, functools, math, collections
 import extra.hip_wrapper as hip
+from typing import Tuple, Any, List
 from tinygrad.helpers import DEBUG, getenv, dtypes
-from tinygrad.ops import Compiled
+from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
@@ -28,10 +29,61 @@ class _HIP:
     self.allocator = HIPAllocator(hip.hipGetDeviceProperties(self.default_device).totalGlobalMem)
 HIP = _HIP()
 
+class HIPGraph(BasicBatchExecutor):
+  def __init__(self, jit_cache: List[Tuple[Any, Any, Any]]):
+    self.info, self.graphs, self.instances = [], [], []
+
+    # Check if HIPGraph could run the given jit_cache. If not, no hip graph is created and HIPGraph is a BasicBatchExecutor.
+    if DEBUG>0 or not all(isinstance(prg, ASTRunner) and isinstance(prg.clprg, HIPProgram) for prg,_,_ in jit_cache): return # Only HIPProgram can be captured.
+    if len(set([pargs[0]._device for _,pargs,_ in jit_cache])) != 1: return # Only one device is supported now.
+
+    # Splitting the JIT cache into batches to enable parallel execution (cpu+gpu). Batch sizes follow a logarithmic pattern: 4, 8, 16, 32, and so on.
+    # This helps push tasks to the GPU while the CPU updates the next graph.
+    capture_stream = hip.hipStreamCreate()
+    hip.hipStreamBeginCapture(capture_stream)
+    for j,(prg, pargs, variables) in enumerate(jit_cache):
+      # Capture node
+      global_size, local_size = prg.launch_dims(variables)
+      _, _, graph, deps = hip.hipStreamGetCaptureInfo_v2(capture_stream)
+      params = hip.buildKernelNodeParams(*pargs, *variables.values(), func=prg.clprg.prgs[pargs[0]._device], grid=global_size, block=local_size)
+      graph_node = hip.hipGraphAddKernelNode(graph, deps, params)
+      hip.hipStreamUpdateCaptureDependencies(capture_stream, [graph_node], hip.hipStreamSetCaptureDependencies)
+      self.info.append((self.__get_batch(j), graph_node, params))
+
+      # If the next batch is different or this is the last entry, finish the graph.
+      if self.__get_batch(j) != self.__get_batch(j+1) or j==len(jit_cache)-1:
+        self.graphs.append(hip.hipStreamEndCapture(capture_stream))
+        self.instances.append(hip.hipGraphInstantiate(self.graphs[-1]))
+        if j!=len(jit_cache)-1: hip.hipStreamBeginCapture(capture_stream)
+    hip.hipStreamDestroy(capture_stream)
+
+  def __del__(self):
+    for inst in self.instances: hip.hipGraphExecDestroy(inst)
+    for gr in self.graphs: hip.hipGraphDestroy(gr)
+
+  def __update(self, nodeid, inst, prg, pargs, variables, updated_args=None):
+    batchid, graph_node, params = self.info[nodeid]
+    global_size, local_size = prg.launch_dims(variables)
+    hip.updateKernelNodeParams(params, *pargs, *variables.values(), grid=global_size, block=local_size, updated_args=updated_args)
+    hip.hipGraphExecKernelNodeSetParams(inst, graph_node, params)
+    self.info[nodeid] = (batchid, graph_node, params)
+
+  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
+    if not self.instances: return super().exec(jit_cache, updatable_entries) # No graph is created switch to basic executor.
+    update_keys_per_batch = collections.defaultdict(list)
+    for j in updatable_entries.keys(): update_keys_per_batch[self.info[j][0]].append(j)
+    for i,inst in enumerate(self.instances):
+      for j in update_keys_per_batch[i]: self.__update(j, inst, jit_cache[j][0], jit_cache[j][1], jit_cache[j][2], updated_args=updatable_entries[j])
+      hip.hipGraphLaunch(inst)
+    super().recalc_stat(jit_cache)
+  def __get_batch(self, j): return int(math.log(j+4,2)-2) # Batch sizes are logarithmic 4,8,16,32,...
+
 class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device=str(HIP.default_device)): super().__init__(size, dtype, allocator=HIP.allocator, **{'device': int(device)})
-  def _copyin(self, x:np.ndarray): hip.hipMemcpyAsync_htod(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, 0)
-  def _copyout(self, x:np.ndarray): hip.hipMemcpy_dtoh(x.ctypes.data, self._buf, self.size * self.dtype.itemsize)
+  def _copyin(self, x:np.ndarray):
+    x = np.require(x, requirements='C')
+    hip.hipMemcpyAsync(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, hip.hipMemcpyHostToDevice, 0)
+  def _copyout(self, x:np.ndarray): hip.hipMemcpy(x.ctypes.data, self._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToHost)
   def _transfer(self, x): hip.hipMemcpyAsync(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice, 0)
 
 class HIPProgram:
@@ -60,8 +112,8 @@ class HIPProgram:
       start, end = hip.hipEventCreate(), hip.hipEventCreate()
       hip.hipEventRecord(start)
     class PackageStruct(ctypes.Structure):
-      _fields_ = [(f'field{idx}', ctypes.c_void_p) for idx in range(len(args))]
-    struct = PackageStruct(*[data._buf for data in args])
+      _fields_ = [(f'field{idx}', ctypes.c_void_p if not isinstance(args[idx], int) else ctypes.c_int) for idx in range(len(args))]
+    struct = PackageStruct(*[data._buf if not isinstance(data, int) else np.int32(data) for data in args])
     hip.hipModuleLaunchKernel(self.prgs[args[0]._device], global_size[0], global_size[1], global_size[2], local_size[0], local_size[1], local_size[2], 0, 0, struct)
     if wait:
       hip.hipEventRecord(end)
@@ -80,7 +132,7 @@ typedef float float8 __attribute__((ext_vector_type(8)));
 typedef _Float16 half16 __attribute__((ext_vector_type(16)));
 extern "C" __global__
   """, launch_bounds=True,
-  smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4", uses_vload=True, uses_ptr_arithmetic=True,
+  smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4", uses_vload=True, uses_ptr_arithmetic=True, arg_int_prefix = "const int",
   half_prekernel = "#include <hip/hip_fp16.h>\nusing half4 = HIP_vector_type<half, 4>;" + """
 __device__ float vload_half(size_t offset, const half *p) { return (float)*(p + offset); }
 __device__ float2 vload_half2(size_t offset, const half *p) { return make_float2((float)*(p + offset*2), (float)*(p + offset*2 + 1)); }
@@ -93,4 +145,4 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]))
 HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(supported_vector_sizes={dtypes.float: [2,4], dtypes.half: [2]},
                                                      supported_vector_sizes_alu = {dtypes.float: [2,4], dtypes.half: [2]},
-                                                     uses_float32_calculations = False), renderer, HIPProgram, hip.hipDeviceSynchronize)
+                                                     uses_float32_calculations = False, device='HIP'), renderer, HIPProgram, hip.hipDeviceSynchronize, HIPGraph)

@@ -5,12 +5,13 @@ from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set
 
-from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod
+from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device, LoadOps
-from tinygrad.shape.symbolic import NumNode, sint, all_int
+from tinygrad.shape.symbolic import sint
+from tinygrad.realize import run_schedule
 
 # An instantiation of the Function is the Context
 class Function:
@@ -38,6 +39,12 @@ class Tensor:
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
+  class train:
+    def __enter__(self):
+      self.prev = Tensor.training
+      Tensor.training = True
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any): Tensor.training = self.prev
+
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
   def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
@@ -54,17 +61,20 @@ class Tensor:
     self._ctx: Optional[Function] = None
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, (int, float)):
-      self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
-      return
+      data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
     elif data.__class__ is list:
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
       data = LazyBuffer.fromCPU(np.array(data, dtype=(dtype or Tensor.default_type).np))
     elif isinstance(data, np.ndarray):
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
-      data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
+      if data.shape == ():
+        data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
+      else:
+        data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
     else: raise RuntimeError(f"can't create Tensor from {data}")
 
-    self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
+    # data is a LazyBuffer, but it might be on the wrong device
+    self.lazydata = data if data.device == device else data.copy_to_device(device)
 
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
@@ -83,15 +93,22 @@ class Tensor:
 
   # ***** data handlers ****
 
+  @staticmethod
+  def corealize(lst:Iterable[Tensor]):
+    seen:Set[LazyBuffer] = set()
+    sched = []
+    for t in lst: sched += t.lazydata.schedule(seen)
+    run_schedule(sched)
+
   def realize(self) -> Tensor:
-    self.lazydata.realize()
+    run_schedule(self.lazydata.schedule())
     return self
 
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK
     if self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      self.lazydata.realize().realized._copyin(x.numpy())  # type: ignore
+      self.contiguous().realize().lazydata.realized._copyin(x.numpy())  # type: ignore
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
@@ -101,8 +118,11 @@ class Tensor:
     self.lazydata = x.lazydata
     return self
 
-  def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
-  def numpy(self) -> np.ndarray: return self.lazydata.toCPU()
+  def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
+  def numpy(self) -> np.ndarray:
+    assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
+    assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
+    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().reshape(self.shape)
 
   # TODO: if things are realized this won't work
   def to_(self, device:str):
@@ -119,7 +139,7 @@ class Tensor:
 
   @staticmethod
   def _loadop(op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
-    return Tensor(LazyBuffer.loadop(op, [sz], Tensor.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
+    return Tensor(LazyBuffer.loadop(op, (sz,), Tensor.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
 
   @staticmethod
   def empty(*shape, **kwargs):
@@ -303,9 +323,8 @@ class Tensor:
         if isinstance(s, int):
           dim_collapsed += 1
         else:
-          # TODO: replace NumNode with int in shape
-          assert isinstance(dim_shape, (int, NumNode)), f"does not support symbolic shape {dim_shape}"
-          final_shape.append(int(dim_shape))
+          assert isinstance(dim_shape, int), f"does not support symbolic shape {dim_shape}"
+          final_shape.append(dim_shape)
           if isinstance(s, Tensor):
             tensors.append(s)
             dim.append(i-dim_collapsed)
@@ -509,7 +528,7 @@ class Tensor:
       return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
 
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
-    def apply_matrix(mat, t, dim=0): return t if dim == len(HW) else Tensor.stack([apply_matrix(mat, sum(mat[i][j] * t[j] for j in range(len(mat[i])) if mat[i][j]), dim=dim+1) for i in range(len(mat))])
+    def apply_matrix(mat, t, dim=0): return t if dim == len(HW) else Tensor.stack([apply_matrix(mat, sum(mm*t[j] for j,mm in enumerate(m) if mm), dim=dim+1) for m in mat])
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
     winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
     winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
@@ -625,7 +644,7 @@ class Tensor:
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     if x.__class__ is not Tensor and not reverse:
       # simple pow identities
-      if x < 0: return (1.0/self).pow(-x)
+      if x < 0: return self.reciprocal().pow(-x)
       if x == 3.0: return self*self*self
       if x == 2.0: return self*self
       if x == 1.0: return self
@@ -744,6 +763,6 @@ for device in Device._buffers:
 
 if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)
-  from tinygrad.nn.image import image_conv2d, image_dot
+  from tinygrad.features.image import image_conv2d, image_dot
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)

@@ -1,16 +1,14 @@
 from typing import Tuple, List, cast, Optional
 import itertools, math, os
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
-from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp
-from tinygrad.codegen.kernel import Kernel, LocalBuffer
-from tinygrad.lazy import LazyBuffer
-from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View
+from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp, BufferOps
+from tinygrad.codegen.kernel import Kernel, LocalBuffer, LinearizerOptions
+from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
+from tinygrad.shape.view import View, strides_for_shape
 
 class OptimizedKernel(Kernel):
-  def process(self) -> None:
-    if hasattr(self, "sts"): return   # already processed
-    super().process()
+  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
+    super().__init__(ast, opts)
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
@@ -25,9 +23,12 @@ class OptimizedKernel(Kernel):
 
   # apply reshape and permute to all shapetrackers
   def reshape_and_permute(self, new_shape_fxn, axis):
+    new_sts = []
     for st in self.sts:
-      if new_shape_fxn is not None: st.reshape(tuple(new_shape_fxn(st.shape)))
-      if axis is not None: st.permute(tuple(axis))
+      if new_shape_fxn is not None: st = st.reshape(tuple(new_shape_fxn(st.shape)))
+      if axis is not None: st = st.permute(tuple(axis))
+      new_sts.append(st)
+    self.sts = new_sts
 
   # drops the final dimension
   def upcast(self):
@@ -61,6 +62,19 @@ class OptimizedKernel(Kernel):
     if self.shape_len == 0: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
 
+    # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
+    if self.bufs[0].dtype.name.startswith('image'):
+      base_shape = self.bufs[0].dtype.shape
+      if shape_idx_groups := get_contraction(self.output_shape, base_shape):
+        special_strides: Tuple[int, ...] = tuple()
+        for i,g in enumerate(shape_idx_groups):
+          shape_piece = tuple(self.output_shape[x] for x in g)
+          assert prod(shape_piece) == base_shape[i], "get_contraction was wrong?"
+          special_strides += strides_for_shape(shape_piece)
+        # adding the fake image shape
+        shapes.append(self.output_shape)
+        strides.append(special_strides)
+
     # merge dimensions if we can, multi get_shape_strides
     # TODO: does this always preserve the reduce dimension, NO
     # TODO: move this into shapetracker, with tests!
@@ -77,7 +91,7 @@ class OptimizedKernel(Kernel):
         else: rets[j].append((shapes[j][i], strides[j][i]))
 
     # do the reshapes
-    for i,x in enumerate(rets): self.sts[i].reshape(tuple([y[0] for y in x]))
+    for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
 
   # ******************** GPU simplifiers ********************
   def _limit_size(self, x: Tuple[int], max_size: List) -> Tuple[int, ...]:
@@ -121,7 +135,7 @@ class OptimizedKernel(Kernel):
           stride[j] = bst
           bst *= shp[j]
 
-    self.sts.append(ShapeTracker(tuple(shp), [View.create(tuple(shp), tuple(stride))]))
+    self.sts.append(ShapeTracker((View.create(tuple(shp), tuple(stride)),)))
     self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = self.bufs[-1]
@@ -131,7 +145,7 @@ class OptimizedKernel(Kernel):
   def apply_auto_opt(self, x):
     for axis, amt, typ in x:
       if axis is None or amt == 1: continue
-      if typ == "G":
+      if typ == "G" and self.opts.has_shared:
         assert self.full_shape[self.first_reduce+axis+len(self.group_for_reduce)] % amt == 0, "no longer valid shift"
         self.shift_to(self.first_reduce+axis+len(self.group_for_reduce), amt, top=True, insert_before=self.first_reduce+len(self.group_for_reduce))
         self.group_for_reduce.append(amt)
@@ -157,9 +171,7 @@ class OptimizedKernel(Kernel):
           self.shift_to(unit_stride_axes_mul_4[0], 4)
           self.upcast()
 
-  def hand_coded_optimizations(self):
-    self.process()
-
+  def hand_coded_optimizations(self, use_tensor_cores=getenv("TC", 1)):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     self.required_optimizations(early_only=True)
 
@@ -167,21 +179,21 @@ class OptimizedKernel(Kernel):
     self.simplify_ones()
 
     # should use HIP tensor cores?
-    if getenv("TC", 1) != 0 and self.bufs[0].device == "HIP" and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
+    if use_tensor_cores != 0 and self.opts.device == "HIP" and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
         isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == UnaryOps.CAST and \
         isinstance(self.reduceop.src[0].src[0], LazyOp) and self.reduceop.src[0].src[0].op == BinaryOps.MUL and \
-        isinstance(self.reduceop.src[0].src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[0].src[1], LazyBuffer) and self.opts.has_local and \
-        self.reduceop.src[0].src[0].src[0].dtype == dtypes.half and self.reduceop.src[0].src[0].src[1].dtype == dtypes.half:
+        self.reduceop.src[0].src[0].src[0].op == BufferOps.MEM and self.reduceop.src[0].src[0].src[1].op == BufferOps.MEM and self.opts.has_local and \
+        cast(LazyOp, self.reduceop.src[0].src[0].src[0]).arg.dtype == dtypes.half and cast(LazyOp, self.reduceop.src[0].src[0].src[1]).arg.dtype == dtypes.half:
       # HIP tensor cores are 16x16x16
-      buf0 = self.bufs.index(self.reduceop.src[0].src[0].src[0])
-      buf1 = self.bufs.index(self.reduceop.src[0].src[0].src[1])
+      buf0 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[0].src[0]).arg)
+      buf1 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[0].src[1]).arg)
       buf0_strides = self.sts[buf0].real_strides()
       buf1_strides = self.sts[buf1].real_strides()
       axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%16 == 0 and i < self.first_reduce]
       axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%16 == 0 and i < self.first_reduce]
       if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce) == 1:
         if DEBUG >= 3: print("HIP TENSOR CORES", axis_buf0, axis_buf1)
-        self.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
+        self.use_tensor_cores = use_tensor_cores == 1  # TC=2 will do the shape ops without the WMMA
         self.reverse_upcast_dir = True
 
         # TODO: select axis in smart way
@@ -227,21 +239,24 @@ class OptimizedKernel(Kernel):
 
     # should use METAL tensor cores?
     # first, confirm it's a straightforward mulacc on a device with real locals
-    tensor_cores_allowed = getenv("TC", 1) != 0 and (getenv("TC", 1) == 2 or (self.bufs[0].device == "METAL" and os.uname().machine == "arm64"))
+    tensor_cores_allowed = use_tensor_cores != 0 and (use_tensor_cores == 2 or (self.opts.device == "METAL" and os.uname().machine == "arm64"))
     if tensor_cores_allowed and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
         isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
-        isinstance(self.reduceop.src[0].src[0], LazyBuffer) and isinstance(self.reduceop.src[0].src[1], LazyBuffer) and self.opts.has_local:
+        self.reduceop.src[0].src[0].op == BufferOps.MEM and self.reduceop.src[0].src[1].op == BufferOps.MEM and self.opts.has_local:
       # METAL tensor cores are 8x8x8, with 2 elements per thread in the 32 thread warp
-      buf0 = self.bufs.index(self.reduceop.src[0].src[0])
-      buf1 = self.bufs.index(self.reduceop.src[0].src[1])
+      buf0 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[0]).arg)
+      buf1 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[1]).arg)
       buf0_strides = self.sts[buf0].real_strides()
       buf1_strides = self.sts[buf1].real_strides()
       axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
       axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
-      optim_conv2d = (self.shape_len-self.first_reduce) == 3 and self.full_shape[self.first_reduce+1]%2 == 1 and self.full_shape[self.first_reduce+2]%2 == 1 and max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 21
+      #optim_conv2d = (self.shape_len-self.first_reduce) == 3 and self.full_shape[self.first_reduce+1]%2 == 1 and self.full_shape[self.first_reduce+2]%2 == 1 and max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 21
+      # enabling this gives wrong answers!! https://github.com/tinygrad/tinygrad/issues/1967
+      # TODO: WMMA must be a lot better before reenabling things like this
+      optim_conv2d = False
       if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce == 1 or optim_conv2d):
         if DEBUG >= 3: print("METAL TENSOR CORES", axis_buf0, axis_buf1)
-        self.use_tensor_cores = getenv("TC", 1) == 1  # TC=2 will do the shape ops without the WMMA
+        self.use_tensor_cores = use_tensor_cores == 1  # TC=2 will do the shape ops without the WMMA
 
         # TODO: select axis in smart way
         s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
@@ -302,7 +317,33 @@ class OptimizedKernel(Kernel):
         # early exit
         return
 
-    if self.opts.has_local and all(isinstance(s, int) for s in self.sts[0].shape[:self.first_reduce]):
+    # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
+    MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
+    if self.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
+        self.reduceop and self.reduceop.op == ReduceOps.SUM and len(self.full_shape) >= 2 and \
+        isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
+        self.reduceop.src[0].src[0].op == BufferOps.MEM and self.reduceop.src[0].src[1].op == BufferOps.MEM:
+      buf0 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[0]).arg)
+      buf1 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[1]).arg)
+      buf0_strides = self.sts[buf0].real_strides()
+      buf1_strides = self.sts[buf1].real_strides()
+      def has_expanded_axis(s, st): return any(x > 1 and y == 0 for x,y in zip(s,st))
+      if buf0_strides[self.first_reduce] == 1 and not (has_expanded_axis(self.sts[buf0].shape, buf0_strides) and has_expanded_axis(self.sts[buf1].shape, buf1_strides)):
+        for global_idx in range(self.global_dims):
+          if self.full_shape[self.first_reduce]%MV_THREADS_PER_ROW == 0 and self.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
+            if DEBUG >= 3: print(f"MATVEC: full_shape={self.full_shape} first_reduce={self.first_reduce} buf0_strides={buf0_strides} blocksize={MV_BLOCKSIZE} threads_per_row={MV_THREADS_PER_ROW} rows_per_thread{MV_ROWS_PER_THREAD}")
+            if MV_THREADS_PER_ROW > 1:
+              self.shift_to(self.first_reduce, MV_THREADS_PER_ROW, top=False, insert_before=self.first_reduce + len(self.group_for_reduce))
+              self.group_for_reduce.append(MV_THREADS_PER_ROW)
+            if MV_BLOCKSIZE > 1:
+              self.shift_to(global_idx, MV_BLOCKSIZE, insert_before=self.first_reduce)
+              self.local_dims += 1
+            if MV_ROWS_PER_THREAD > 1:
+              self.shift_to(global_idx, MV_ROWS_PER_THREAD)
+              self.upcast()
+            return
+
+    if self.opts.has_local and self.opts.has_shared and all(isinstance(s, int) for s in self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
       if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
         # TODO: use 1024 if it's allowed in a smarter way
@@ -326,20 +367,8 @@ class OptimizedKernel(Kernel):
     # simplify (sets first_reduce)
     self.simplify_ones()
 
-    # use more opencl indexing if the output buffer is an image and we have room
-    if self.bufs[0].dtype.name.startswith('image') and self.first_reduce+len(self.group_for_reduce) < 3:
-      base_shape = self.bufs[0].dtype.shape
-      if (base_shape[0]*base_shape[1]) % self.sts[0].shape[0] == 0 and self.sts[0].shape[0]//base_shape[0] != 0:
-        if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
-        self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
-        self.simplify_ones()
-
     # no more opt if we are grouping
     if self.group_for_reduce: return
-
-    # no more opt if there's non ints in any shapes
-    # TODO: this is due to a bug. repro by commenting this one while running GPT-2 with the JIT
-    if self.has_variable_shape(): return
 
     # **** below this line need to be optional and benchmarked ****
 
@@ -349,7 +378,8 @@ class OptimizedKernel(Kernel):
     # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
     for axis in range(self.first_reduce):
       # we might want to be able to split axes that are masked, or refuse to merge them in simplify_merge_adjacent
-      if self.full_shape[axis] <= 7 and any(st.axis_is_masked(axis) for st in self.sts) and prod(self.full_shape[self.shape_len - self.upcasted:]) * self.full_shape[axis] <= 7 * 7:
+      # for now skip upcasting here if there is a symbolic axis
+      if isinstance(self.full_shape[axis], int) and self.full_shape[axis] <= 7 and any(st.axis_is_masked(axis) for st in self.sts) and prod(self.full_shape[self.shape_len - self.upcasted:]) * self.full_shape[axis] <= 7 * 7:
         if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
         to_upcast.append(axis)
     for axis in to_upcast[::-1]:

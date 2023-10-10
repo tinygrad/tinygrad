@@ -86,6 +86,25 @@ class TestSafetensors(unittest.TestCase):
       for k in f.keys():
         np.testing.assert_array_equal(f.get_tensor(k).numpy(), state_dict[k].numpy())
 
+  def test_huggingface_enet_safetensors(self):
+    # test a real file
+    fn = fetch_as_file("https://huggingface.co/timm/mobilenetv3_small_075.lamb_in1k/resolve/main/model.safetensors")
+    state_dict = safe_load(fn)
+    assert len(state_dict.keys()) == 244
+    assert 'blocks.2.2.se.conv_reduce.weight' in state_dict
+    assert state_dict['blocks.0.0.bn1.num_batches_tracked'].numpy() == 276570
+    assert state_dict['blocks.2.0.bn2.num_batches_tracked'].numpy() == 276570
+
+  def test_metadata(self):
+    metadata = {"hello": "world"}
+    safe_save({}, temp('metadata.safetensors'), metadata)
+    import struct
+    with open(temp('metadata.safetensors'), 'rb') as f:
+      dat = f.read()
+    sz = struct.unpack(">Q", dat[0:8])[0]
+    import json
+    assert json.loads(dat[8:8+sz])['__metadata__']['hello'] == 'world'
+
 class TestDiskTensor(unittest.TestCase):
   def test_empty(self):
     pathlib.Path(temp("dt1")).unlink(missing_ok=True)

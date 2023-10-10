@@ -25,6 +25,9 @@ class FakeAllocator(LRUAllocator):
   def _do_free(self, buf):
     buf.id -= 1
     assert buf.id == 0, f"Free should be called once, but {buf.id}"
+  def __del__(self): # Fake allocator should clear all buffers after each test.
+    for v in self.cached_buffers.values():
+      for buf, _ in v: self._free_buffer(buf)
 
 FAKE_GLOBAL_ALLOCATOR = None
 class FakeBuffer(RawBuffer):
@@ -87,7 +90,7 @@ def check_gc():
 def derandomize(x):
   if isinstance(x, LazyOp):
     if x.op == LoadOps.RAND: x.op = LoadOps.EMPTY
-    x.src = [derandomize(s) for s in x.src]
+    x.src = tuple([derandomize(s) for s in x.src])
   else:
     x.op = derandomize(x.op)
   return x

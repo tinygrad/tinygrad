@@ -1,21 +1,9 @@
 from __future__ import annotations
 import functools
-from typing import Tuple, List, Optional, NamedTuple
-from tinygrad.helpers import prod
-from tinygrad.shape.symbolic import Variable, Node, is_sym_int, sint, all_int
-
-@functools.lru_cache(maxsize=None)
-def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
-  assert len(shape) == len(strides)
-  ret = [(shape[0], strides[0])] if shape else []
-  for i in range(1, len(shape)):
-    if ret[-1][1] == shape[i]*strides[i] or ret[-1][0] == 1:
-      ret[-1] = (ret[-1][0] * shape[i], strides[i])
-    elif shape[i] == 1:
-      continue
-    else:
-      ret.append((shape[i], strides[i]))
-  return tuple(ret)
+from dataclasses import dataclass
+from typing import Tuple, List, Optional
+from tinygrad.helpers import prod, all_int
+from tinygrad.shape.symbolic import Node, NumNode, is_sym_int, sint
 
 @functools.lru_cache(maxsize=None)
 def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
@@ -27,7 +15,8 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   for d in shape[::-1][:-1]: strides = [d*strides[0]] + strides
   return filter_strides(shape, tuple(strides))
 
-class View(NamedTuple):
+@dataclass(frozen=True)
+class View:
   shape:Tuple[sint, ...]
   strides:Tuple[sint, ...]
   offset:sint
@@ -42,44 +31,19 @@ class View(NamedTuple):
     return View(shape, strides, offset, mask, contiguous)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def size(self): return prod([s for s,st in zip(self.shape, self.strides) if st != 0])
-
-  def expr_node_mask(self, idx, valid=None) -> Node:
-    expr = [valid] if valid is not None else []
-    if self.mask is not None:
-      acc = 1
-      for ns,(x,y) in reversed(list(zip(self.shape, self.mask))):
-        if x != 0 or y != ns:
-          base = ((idx//acc) % ns)
-          expr += [base >= x, base < y]
-        acc *= ns
-    return Variable.ands(expr)
-
-  # generate an expression if you have a single idx variable
-  def expr_node(self, idx=None) -> Node:
-    if idx is None: idx = Variable('idx', 0, prod(self.shape)-1)
-    ret: List[Node] = [Variable.num(self.offset) if isinstance(self.offset, int) else self.offset] if self.offset else []
-    acc = 1
-    for d,s in reversed(to_shape_strides(self.shape, self.strides)):
-      ret.append(((idx//acc)%d)*s)
-      acc *= d
-    return Variable.sum(ret)
-
-  # generate an expression if you have a variable or expression for each index
-  def expr_idxs(self, idxs) -> Node:
-    assert len(idxs) == len(self.shape), f"need an idx for all dimensions {idxs} vs {self.shape}"
-    return Variable.sum([Variable.num(self.offset) if isinstance(self.offset, int) else self.offset] + [idx*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
+  def size(self): return prod([s.max if isinstance(s, Node) else s for s,st in zip(self.shape, self.strides) if st != 0])
 
   # MovementOps live here now
 
-  def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...], mask=None) -> View:
+  def __unsafe_resize(self, arg: Tuple[Tuple[sint, sint], ...], mask=None) -> View:
     offset = sum([s * x[0] for s, x in zip(self.strides,arg)])
     if self.mask:
       # move the old mask
       nmask = tuple([(max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.mask, arg)])
       # merge the masks if we have two
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
-    return View.create(tuple([y-x for x,y in arg]), self.strides, self.offset+offset, mask)
+    shape = [y-x for x,y in arg]
+    return View.create(tuple(s.b if isinstance(s, NumNode) else s for s in shape), self.strides, self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: Tuple[Tuple[int, int], ...]) -> View:
@@ -91,7 +55,7 @@ class View(NamedTuple):
     return self
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def shrink(self, arg: Tuple[Tuple[int, int], ...]) -> View:
+  def shrink(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
     assert all((b>=0 and e<=s) for s,(b,e) in zip(self.shape,arg)) and len(arg) == len(self.shape)
     return self.__unsafe_resize(arg)
 
@@ -125,8 +89,7 @@ class View(NamedTuple):
 
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
-    if all_int(self.shape) and all_int(new_shape):
-      assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
+    assert prod(self.shape) == prod(new_shape) if all_int(self.shape + new_shape) else True, f"can't reshape {self.shape=} -> {new_shape=}"
 
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)

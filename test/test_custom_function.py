@@ -8,8 +8,8 @@ from tinygrad.helpers import prod, dtypes
 
 # *** first, we implement the atan2 op at the lowest level ***
 # `atan2_gpu` for GPUBuffers and `atan2_cpu` for CPUBuffers
-from tinygrad.lazy import LazyBuffer, create_lazybuffer, Device
-from tinygrad.ops import ASTRunner
+from tinygrad.lazy import LazyBuffer, create_lazybuffer
+from tinygrad.ops import ASTRunner, Device
 from tinygrad.shape.shapetracker import ShapeTracker
 import pytest
 
@@ -24,7 +24,7 @@ def atan2_gpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
     __kernel void atan2_gpu(global float *c, global float *a, global float *b) {
       int idx = get_global_id(0);
       c[idx] = atan2(a[idx], b[idx]);
-    }""", global_size=[prod(ret.shape)]).build(Device[ret.device].runtime).exec([ret, a, b])
+    }""", global_size=[prod(ret.shape)]).build(Device[ret.device].runtime).exec([ret.realized, a.realized, b.realized])
   return ret.realized
 
 def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
@@ -43,7 +43,7 @@ class ATan2(Function):
     assert prod(a.shape) == prod(b.shape) and a.device == b.device, "shape or device mismatch"
     self.a, self.b = a, b
     ast = LazyOp(LoadOps.CUSTOM, (a.contiguous(), b.contiguous()), {"GPU": atan2_gpu, "CPU": atan2_cpu}[a.device])
-    return create_lazybuffer(a.device, ShapeTracker(a.shape), LoadOps, ast, max(a.dtype, b.dtype), {})
+    return create_lazybuffer(a.device, ShapeTracker.from_shape(a.shape), LoadOps, ast, max(a.dtype, b.dtype), {})
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     denom = (self.a.e(BinaryOps.MUL, self.a)).e(BinaryOps.ADD, self.b.e(BinaryOps.MUL, self.b))
     return grad_output.e(BinaryOps.MUL, self.b.e(BinaryOps.DIV, denom)) if self.needs_input_grad[0] else None, \

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, time, io, pathlib, sys, traceback
+import os, time, io, pathlib, sys, traceback, re
 sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
 
 if os.getenv("OPT", None) is None:
@@ -72,6 +72,11 @@ def compile(dat, output_fn):
     # pass these to thneed
     setattr(prg.clprg, 'op_estimate', prg.op_estimate)
     setattr(prg.clprg, 'prg', prg.prg)
+
+    if getenv("VALIDTEST") == 1:
+      src = re.search(r"=.*\?.*?read_image", prg.prg)
+      if src is not None: raise Exception("Openpilot has valid checks!")
+
     global_size = prg.global_size + [1]*(3-len(prg.global_size))
     local_size = prg.local_size + [1]*(3-len(prg.local_size))
     cl_cache.append((prg.clprg, [[g*l for g,l in zip(global_size, local_size)], local_size, *[x._buf for x in args]]))
@@ -140,10 +145,5 @@ def compile(dat, output_fn):
 # UNSAFE_FLOAT4=1 DEBUGCL=1 FLOAT16=1 python3 openpilot/compile.py
 # 22.59 ms
 if __name__ == "__main__":
-  if len(sys.argv) >= 3:
-    with open(sys.argv[1], "rb") as f:
-      dat = f.read()
-    compile(dat, sys.argv[2])
-  else:
-    dat = fetch(OPENPILOT_MODEL)
-    compile(dat, "/tmp/output.thneed")
+  dat = fetch(OPENPILOT_MODEL if len(sys.argv) == 1 else sys.argv[1])
+  compile(dat, sys.argv[2] if len(sys.argv) >= 3 else "/tmp/output.thneed")

@@ -194,14 +194,17 @@ class TestOps(unittest.TestCase):
     tt2 = Tensor.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (tt1 < tt2).sum().backward)
 
+  #@unittest.skip("this is broken with contiguous")
   def test_trunc(self):
     helper_test_op([(45,65)], lambda x: torch.trunc(x), lambda x: x.trunc(), forward_only=True)
     a, b = Tensor([1.0, 2.1, 0.0, -5.0, -2.5]), torch.tensor([1.0, 2.1, 0.0, -5.0, -2.5])
     helper_test_op([], lambda: torch.trunc(b), lambda: Tensor.trunc(a), forward_only=True)
+  #@unittest.skip("this is broken with contiguous")
   def test_floor(self):
     helper_test_op([(45,65)], lambda x: torch.floor(x), lambda x: x.floor(), forward_only=True)
     a, b = Tensor([1.0, 2.1, 0.0, -5.0, -2.5]), torch.tensor([1.0, 2.1, 0.0, -5.0, -2.5])
     helper_test_op([], lambda: torch.floor(b), lambda: Tensor.floor(a), forward_only=True)
+  #@unittest.skip("this is broken with contiguous")
   def test_ceil(self):
     helper_test_op([(45,65)], lambda x: torch.ceil(x), lambda x: x.ceil(), forward_only=True)
     a, b = Tensor([1.0, 2.1, 0.0, -5.0, -2.5]), torch.tensor([1.0, 2.1, 0.0, -5.0, -2.5])
