@@ -18,7 +18,7 @@ from tinygrad.ops import GlobalCounters
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 from tinygrad.shape.symbolic import Variable, sym_infer
 
-JIT = getenv("JIT", 0 if CI else Device.DEFAULT in JIT_SUPPORTED_DEVICE)
+JIT = getenv("JIT", 0 if CI else int(Device.DEFAULT in JIT_SUPPORTED_DEVICE))
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
@@ -82,7 +82,7 @@ class Attention:
       keys, values = xk, xv
     else:
       assert cache_k is not None and cache_v is not None, "no cache"
-      assert start_pos == sym_infer(cache_k.shape[1], cache_k.lazydata.var_vals) == sym_infer(cache_v.shape[1], cache_v.lazydata.var_vals), f"cache has wrong shape, not ({start_pos} == {sym_infer(cache_k.shape[1], cache_k.lazydata.var_vals)} == {sym_infer(cache_v.shape[1], cache_v.lazydata.var_vals)})"
+      assert start_pos == (cache_k.shape[1].val if isinstance(cache_k.shape[1], Variable) else cache_k.shape[1]) == (cache_v.shape[1].val if isinstance(cache_v.shape[1], Variable) else cache_v.shape[1]), f"cache has wrong shape, {start_pos=}, {cache_k.shape[1]=}, {cache_v.shape[1]=}"
       assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
       keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
 
@@ -117,12 +117,9 @@ class TransformerBlock:
     bsz, seqlen, _ = x.shape
     if JIT and mask is None:
       assert cache_k is not None and cache_v is not None, "no cache"
-      pos = Variable("pos", 1, 1024)
+      pos = Variable("pos", 1, 1024).bind(start_pos)
       cache_k = cache_k.reshape(cache_k.shape[0], pos, cache_k.shape[2], cache_k.shape[3])
       cache_v = cache_v.reshape(cache_v.shape[0], pos, cache_v.shape[2], cache_v.shape[3])
-      # need this because we don't reshape back to int shape in the jitted path and we don't have the correct var_vars in cache
-      cache_k.lazydata.var_vals[pos] = start_pos
-      cache_v.lazydata.var_vals[pos] = start_pos
 
     output, cache_k, cache_v = self.attention(self.attention_norm(x), cache_k, cache_v, start_pos, freqs_cis, mask, jit_ctx=jit_ctx)
     h = x + output
@@ -150,14 +147,12 @@ class Transformer:
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
     if seqlen == 1 and start_pos > 0 and JIT:
-      pos = Variable("pos", 1, 1024)
+      pos = Variable("pos", 1, 1024).bind(start_pos)
       # get only the part of freqs_cis that we are using.
       freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (pos, pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
-      freqs_cis.lazydata.var_vals[pos] = start_pos
       h = self.tok_embeddings_jitted(tokens)
       for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.layers_jitted, self.kv_caches)):
-        h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=freqs_cis, mask=None, jit_ctx={pos: start_pos})
-        # TODO: move the kv cache into Attention, pre-allocate the cache and instead of cat, update the cache in-place
+        h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=freqs_cis, mask=None, jit_ctx={pos.unbind()[0]: start_pos})
         self.kv_caches[i] = (cache_k, cache_v)
       return self.postprocess_jitted(h, temperature)
     else:
