@@ -151,21 +151,7 @@ class GlobalCounters:
 
 # *** cache compiled files ***
 
-def cache_compiled(folder:str):
-  cache_dir = pathlib.Path("~/.cache/tinygrad").expanduser() / folder
-  cache_dir.mkdir(parents=True, exist_ok=True)
-
-  def decorator(func):
-    def wrapper(self, prg:str, **kwargs) -> str:
-      cache_path, tmp_path = cache_dir / hashlib.sha256(prg.encode()).hexdigest(), cache_dir / f"tmp.{os.getpid()}"
-      if not cache_path.exists():
-        tmp_path.write_bytes(func(self, prg, **kwargs))
-        tmp_path.rename(cache_path)
-      return str(cache_path)
-    return wrapper
-  return decorator
-
-def cache_filepath(folder:str, prg:str):
+def cache_filepath(folder:str, prg:str) -> pathlib.Path:
   cache_dir = pathlib.Path("~/.cache/tinygrad").expanduser() / folder
   cache_dir.mkdir(parents=True, exist_ok=True)
   return cache_dir / hashlib.sha256(prg.encode()).hexdigest()

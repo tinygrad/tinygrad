@@ -1,8 +1,8 @@
 import numpy as np
 import ctypes, functools, math, collections, pathlib
 import extra.hip_wrapper as hip
-from typing import Tuple, Any, List, Optional
-from tinygrad.helpers import DEBUG, getenv, cache_compiled
+from typing import Tuple, Any, List
+from tinygrad.helpers import DEBUG, getenv, cache_filepath
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -88,7 +88,10 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
-    prg_bin = pathlib.Path(self.compile(prg, name=name, binary=binary)).read_bytes()
+    cached_file = cache_filepath(f"hip{'-'.join(map(str, hip.hiprtcVersion()))}", prg)
+    if cached_file.exists(): prg_bin = pathlib.Path(cached_file).read_bytes()
+    else: prg_bin = self.compile(prg, name, binary, cached_file)
+
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg_bin))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
@@ -98,14 +101,14 @@ class HIPProgram:
       hip.hipSetDevice(i)
       self.prgs.append(hip.hipModuleGetFunction(hip.hipModuleLoadData(prg_bin), name))
 
-  @cache_compiled(f"hip{'-'.join(map(str, hip.hiprtcVersion()))}")
-  def compile(self, prg:str, name="", binary=False):
+  def compile(self, prg, name, binary, cached_file):
     try:
       if not binary:
         prog = hip.hiprtcCreateProgram(prg, name, [], [])
         device_properties = hip.hipGetDeviceProperties(HIP.default_device)
         hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
         prg = hip.hiprtcGetCode(prog)
+        cached_file.write_bytes(prg)
       return prg
     except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
