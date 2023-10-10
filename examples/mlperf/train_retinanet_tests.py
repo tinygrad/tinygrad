@@ -1,5 +1,4 @@
 from train_retinanet import *
-from threading import *
 import sys
 sys.path.insert(0, r'C:\Users\msoro\Desktop\mlperf\training\single_stage_detector\ssd') # modified for people who don't have 16 CPUs + Nvidia P100 
 from model import retinanet as mlp_retinanet 
@@ -39,12 +38,13 @@ class RetinaNetTrainingInitializer:
                 sd[k].requires_grad = p.requires_grad
             
         else:
-            Warning("Strange stuff to be resolved")
+            Warning("Strange stuff to be resolved, weights and grads copied directly from MLPerf")
             self.set_classification_weights()
             self.set_regression_weights()
             self.set_fpn_weights()
 
-class RetinaNetInferenceChecker:
+
+class RetinaNetWeightsChecker:
     def __init__(self):
         self.init = RetinaNetTrainingInitializer()
         self.reference = self.init.reference
@@ -60,9 +60,8 @@ class RetinaNetInferenceChecker:
         for item in mlp_weights.keys():
             try:
                 assert(torch.allclose(torch_tensor(model_weights[item].numpy()),mlp_weights[item]))
-                print("Correct weight init")
             except AssertionError: breakpoint()
-    def check_forward(self):
+    def check_weight_init_forward(self):
         td, rd = get_state_dict(self.model), self.reference.state_dict()
         assert all(item in td.keys() for item in rd.keys())
         assert all(np.allclose(td[item].numpy(),rd[item].numpy()) for item in rd.keys())
@@ -71,34 +70,36 @@ class RetinaNetInferenceChecker:
         sample_image_list = [torch_tensor(np.random.rand(3,200,200)) for _ in range(4)]
 
         reference_head_outs = self.reference_forward(sample_image_list)
-        reference_head_cls_logits = reference_head_outs["cls_logits"].detach().numpy()
-        reference_head_bbox_regression = reference_head_outs["bbox_regression"].detach().numpy()
         tg_head_outs = self.model_forward(sample_image_list).numpy()
-        breakpoint()
-        assert(np.allclose(tg_head_outs[:,:,:4],reference_head_bbox_regression, atol=1e-3))
-        assert(np.allclose(tg_head_outs[:,:,4:],reference_head_cls_logits, atol=1e-3))
-        assert("Equal forward for weights.")
+
+
+
+        Warning("Tinygrad implementation runs sigmoid on cls_logits, mlperf not. Adding sigmoid to mlperf for tests")
+        reference_head_cls_logits = torch.sigmoid(reference_head_outs["cls_logits"].detach()).numpy()
+        reference_head_bbox_regression = reference_head_outs["bbox_regression"].detach().numpy()
+        assert(np.allclose(tg_head_outs[:,:,:4],reference_head_bbox_regression, atol=1e-5))
+        assert(np.allclose(tg_head_outs[:,:,4:],reference_head_cls_logits, atol=1e-5))
+        print("Equal forward for initial mlperf weights.")
 
         
 
-    def reference_forward(self, images):
+    def reference_forward(self, images,):
         #for parallel debugging
         #from model.resnet import ResNet
-        forward = self.reference.backbone.forward
         reference_sample_image_list, _ = self.reference.transform(images,None)
         reference_input = reference_sample_image_list.tensors.double()
         reference_feature_maps = self.reference.backbone.double()(reference_input) #TODO .double() bothers me. but default usage raises errors ("expected Double instead of Float" bc resnet bias is initialized w/ 32 bits)
         reference_features = list(reference_feature_maps.values())
 
-        
-        head_outs = self.reference.head.double()(reference_features)
+        self.reference.head.classification_head.__class__.forward = reference_forward_debug_cls
+        head_outs = self.reference.head.double().forward(reference_features)
         return head_outs
     
     def model_forward(self, images):
         #from models.resnet import ResNet
         Tensor.training = False
-        forward = self.model.backbone.__call__
         model_input = self.input_fixup(Tensor(images), normalize=False)
+        self.model.head.classification_head.__class__.__call__ = tg_forward_debug_cls
         outs = self.model(model_input)
         return outs
 
@@ -110,16 +111,37 @@ class RetinaNetInferenceChecker:
         x /= input_std
         return x
 
-    def check_head_outputs(self):
-        raise NotImplementedError
 
+def reference_forward_debug_cls(self,x):
+    all_cls_logits = []
+    for features in x:
+        cls_logits = self.conv(features)
+        cls_logits = self.cls_logits(cls_logits)
+
+        # Permute classification output from (N, A * K, H, W) to (N, HWA, K).
+        N, _, H, W = cls_logits.shape
+        cls_logits = cls_logits.view(N, -1, self.num_classes, H, W)
+        cls_logits = cls_logits.permute(0, 3, 4, 1, 2)
+        cls_logits = cls_logits.reshape(N, -1, self.num_classes)  # Size=(N, HWA, 4)
+
+        all_cls_logits.append(cls_logits)
+    return torch.cat(all_cls_logits, dim=1)
+
+def tg_forward_debug_cls(self, x):
+    out = []
+    for feat in x:
+      
+      cls_logits = self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes)
+      out.append(cls_logits)
+      
+    return out[0].cat(*out[1:], dim=1).sigmoid()
 
 if __name__=="__main__":
     #init = RetinaNetTrainingInitializer()
     #init.setup()
     #trainable = [(k,p) for k,p in get_state_dict(init.model).items() if p.requires_grad]
-    #RetinaNetInferenceChecker().check_weight_init()
-    RetinaNetInferenceChecker().check_forward()
+    RetinaNetWeightsChecker().check_weight_init()
+    RetinaNetWeightsChecker().check_weight_init_forward()
     """rnic = RetinaNetInferenceChecker()
     rf,nf = None,None
     with open("random_image.pkl",'rb') as file: sample_image_list = loadp(file)
