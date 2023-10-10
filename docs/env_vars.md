@@ -43,8 +43,10 @@ LLVM                | [1]        | enable LLVM backend
 LLVMOPT             | [1]        | enable slightly more expensive LLVM optimizations
 LAZY                | [1]        | enable lazy operations (this is the default)
 OPT                 | [1-3]      | optimization level
-KOPT                | [1-2]      | kernel optimization, 1 turns it on, 2 caches the found optimizations
+KOPT                | [1-2]      | kernel optimization, 1 turns it on, 2 caches the found optimizations, 3 only reads from cache
 BUDGET              | [#]        | kernel optimization search budget
+KOPT_WORKERS        | [# >= 0]   | number of multiprocessing compilation workers to use for KOPT. KOPT_WORKERS=0 to disable multiprocessing.
+KOPT_THRESH         | [# >= 0]   | only kopt for kernels above KOPT_THRESH number of microseconds
 GRAPH               | [1]        | create a graph of all operations (requires graphviz)
 GRAPHPATH           | [/path/to] | where to put the generated graph
 PRINT_PRG           | [1]        | print program code
