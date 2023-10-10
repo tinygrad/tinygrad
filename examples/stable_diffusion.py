@@ -658,7 +658,7 @@ if __name__ == "__main__":
   # save image
   from PIL import Image
   import numpy as np
-  im = Image.fromarray(x.numpy().astype(np.uint8) if Device.DEFAULT == "WEBGPU" else x.numpy())
+  im = Image.fromarray(x.numpy().astype(np.uint8, copy=False))
   print(f"saving {args.out}")
   im.save(args.out)
   # Open image.
