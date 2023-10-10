@@ -88,7 +88,7 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
-    bin_path = self.compile(name, prg, binary=binary)
+    bin_path = self.compile(prg, name=name, binary=binary)
     with open(bin_path, "rb") as f:
       prg_bin = f.read()
     if DEBUG >= 6:
@@ -102,7 +102,7 @@ class HIPProgram:
       self.prgs.append(hip.hipModuleGetFunction(module, name))
 
   @cache_compiled(f"hip{'-'.join(map(str, hip.hiprtcVersion()))}")
-  def compile(self, name:str, prg:str, binary=False):
+  def compile(self, prg:str, name="", binary=False):
     try:
       if not binary:
         prog = hip.hiprtcCreateProgram(prg, name, [], [])

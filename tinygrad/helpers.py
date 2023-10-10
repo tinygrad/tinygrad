@@ -156,12 +156,12 @@ def cache_compiled(folder:str):
   os.makedirs(cache_dir, exist_ok=True)
 
   def decorator(func):
-    def wrapper(self, prg:str, binary:bool=False) -> str:
+    def wrapper(self, prg:str, **kwargs) -> str:
       prg_hash = hashlib.sha256(prg.encode()).hexdigest()
       cache_path = os.path.join(cache_dir, prg_hash)
 
       if not os.path.exists(cache_path):
-        result = func(self, prg, binary=binary)
+        result = func(self, prg, **kwargs)
         with open(f"{cache_path}.tmp.{os.getpid()}", "wb") as f:
           f.write(result)
         os.rename(f"{cache_path}.tmp.{os.getpid()}", cache_path)
