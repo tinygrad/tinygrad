@@ -3,7 +3,7 @@ import os, subprocess, pathlib, functools, ctypes
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any, Tuple
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
+from tinygrad.renderer.cstyle import uops_to_cstyle
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.renderer.metal import MetalLanguage

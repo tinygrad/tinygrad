@@ -8,7 +8,7 @@ from tinygrad.ops import Compiled
 from tinygrad.renderer.opencl import OpenCLLanguage
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
+from tinygrad.renderer.cstyle import uops_to_cstyle
 
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
