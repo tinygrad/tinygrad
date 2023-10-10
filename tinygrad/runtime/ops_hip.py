@@ -89,9 +89,7 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
     cached_file = cache_filepath(f"hip{'-'.join(map(str, hip.hiprtcVersion()))}", prg)
-    if cached_file.exists(): prg_bin = pathlib.Path(cached_file).read_bytes()
-    else: prg_bin = self.compile(prg, name, binary, cached_file)
-
+    prg_bin = cached_file.read_bytes() if cached_file.exists() else self.compile(prg, name, binary, cached_file)
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg_bin))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
