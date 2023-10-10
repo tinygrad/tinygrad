@@ -40,7 +40,7 @@ class ClangProgram:
       self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg_lines[6:-3])) if ins[:2] == 'bl'}
       self.prg = pathlib.Path(cached_file).read_bytes()
     else:
-      self.lib = ctypes.CDLL(cached_file)
+      self.lib = ctypes.CDLL(str(cached_file))
       self.fxn = self.lib[name]
 
   def compile(self, prg, binary, cachefile_path):
