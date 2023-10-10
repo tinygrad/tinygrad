@@ -79,10 +79,6 @@ class CUDAProgram:
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
-    print("tuple(local_size)", tuple(local_size))
-    print("tuple(global_size)", tuple(global_size))
-    print("tself.shared", self.shared)
-    print("args", [x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) if (isinstance(x, int) and not getenv("CUDACPU")) else x for x in args])
     self.prg(*[x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) if (isinstance(x, int) and not getenv("CUDACPU")) else x for x in args], block=tuple(local_size), grid=tuple(global_size), shared=self.shared)
     if wait:
       end.record()
