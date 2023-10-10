@@ -1,6 +1,5 @@
 import os, time, ctypes, hashlib, subprocess, platform, tempfile, functools, pathlib
 from functools import partial, reduce
-from typing import Tuple, Optional, Any
 from tinygrad.ops import Compiled
 from tinygrad.helpers import fromimport, getenv, DEBUG, CI, cache_filepath
 from tinygrad.runtime.lib import RawMallocBuffer
