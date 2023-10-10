@@ -258,10 +258,10 @@ class LazyBuffer:
 
   def _movement_op(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[sint, ...], Tuple[Tuple[sint, sint], ...]]) -> LazyBuffer:
     if SHUFFLE_MOVEMENT_OPS and not self.realized and self.optype == BinaryOps and not self.children:
-      root_bufs = map(functools.partial(get_movementroot, allow_contiguous = True), self.op.buffers)
-      # don't push if all ast buffers (movement roots) are realized or sourceless
-      if not all(x.realized or len(x.op.src) == 0 for x in root_bufs):
-        push_expand_safe = all(x.realized or x.op.op not in LoadOps for x in root_bufs)
+      base_bufs = (x.base for x in self.op.buffers)
+      # don't push if all ast buffers (.base) are realized or sourceless
+      if not all(x.realized or len(x.op.src) == 0 for x in base_bufs):
+        push_expand_safe = all(x.realized or x.op.op not in LoadOps for x in base_bufs)
         push_pad_safe = (SHUFFLE_PAD_OPS and all(x.op not in UNSAFE_PAD_OPS for x in self.op.get_lazyops()))
         if (op is not MovementOps.EXPAND or push_expand_safe) and (op is not MovementOps.PAD or push_pad_safe):
           return self.op.replace_with_movement_ops([(op, arg)])
