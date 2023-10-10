@@ -21,7 +21,7 @@ if __name__ == "__main__":
   ast_strs = dedup(open(sys.argv[1]).read().strip().split("\n"))
 
   # reduce kernels only, no ImageDType
-  #ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
+  ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
   #ast_strs = [x for x in ast_strs if "ReduceOps" in x and "dtypes.image" not in x]
 
   # the device we are optimizing for
@@ -43,10 +43,11 @@ if __name__ == "__main__":
     # linearize
     lin = Linearizer(ast)
     preopt = lin.colored_shape()
-    lin.hand_coded_optimizations()
+    if not lin.apply_tensor_cores(getenv("TC", 1)): lin.hand_coded_optimizations()
     postopt = lin.colored_shape()
     #print(lin.applied_opts)
 
+    """
     # linearize_alt
     lin2 = Linearizer(ast)
     lin2.hand_coded_optimizations_old()
@@ -56,6 +57,7 @@ if __name__ == "__main__":
     assert postopt == postopt_alt, f"{postopt} != {postopt_alt}"
     for s1,s2 in zip(lin.sts, lin2.sts): assert s1 == s2
     continue
+    """
 
     lin.linearize()
 
