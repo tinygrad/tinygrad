@@ -213,7 +213,7 @@ def simple():
     print(f"Total memory: {mem_info['total'] / (1024**2):.2f} MB")
     print(f"Used memory: {mem_info['used'] / (1024**2):.2f} MB")
     print(f"Free memory: {mem_info['free'] / (1024**2):.2f} MB")
-    del total_loss, images, img, features, objectness, rpn_box_regression, anchors
+    del total_loss, images, img, features, objectness, rpn_box_regression, anchors, targets, objectness_loss, regression_loss, img_metadata
 
 if __name__ == "__main__":
   start = time.time()
