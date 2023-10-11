@@ -681,14 +681,5 @@ try:
     status = _libhiprtc.hiprtcGetCode(prog, e_code)
     hipCheckStatus(status)
     return e_code
-
-  _libhiprtc.hiprtcVersion.restype = int
-  _libhiprtc.hiprtcVersion.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
-  def hiprtcVersion() -> Tuple[int, int]:
-    major = ctypes.c_int()
-    minor = ctypes.c_int()
-    status = _libhiprtc.hiprtcVersion(ctypes.byref(major), ctypes.byref(minor))
-    hipCheckStatus(status)
-    return (major.value, minor.value)
 except:
   if DEBUG >= 1: print("WARNING: libamdhip64.so or libhiprtc.so not found. HIP support will not work.")
