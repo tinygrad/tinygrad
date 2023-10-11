@@ -1,7 +1,6 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, pathlib, hashlib
+import os, functools, platform, time, re, contextlib, operator, pathlib, hashlib, tempfile
 import numpy as np
-from contextlib import contextmanager
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
@@ -150,9 +149,11 @@ class GlobalCounters:
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0
 
-@contextmanager
-def compiled_cache(prg):
-  cachefile_path = pathlib.Path(f"/tmp/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}")
-  tmp_path = cachefile_path.with_suffix(f".tmp.{os.getpid()}")
-  yield (cachefile_path, tmp_path)
-  if tmp_path.exists(): tmp_path.rename(cachefile_path)
+def cache_compiled(func):
+  def wrapper(self, prg:str, **kwargs) -> str:
+    cache_path, shadow_path = pathlib.Path(f"/tmp/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}"), pathlib.Path(f"/tmp/tinygrad_cc_tmp.{os.getpid()}")
+    if not cache_path.exists():
+      if ret := func(self, prg, shadow_file=shadow_path, temp_file=tempfile.mktemp(suffix="tinygrad_tmp_"), **kwargs) is not None: shadow_path.write_bytes(ret)
+      shadow_path.rename(cache_path)
+    return str(cache_path)
+  return wrapper
