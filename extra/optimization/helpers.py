@@ -10,11 +10,14 @@ inf, nan = float('inf'), float('nan')
 from tinygrad.codegen.linearizer import Linearizer
 def ast_str_to_lin(ast_str): return Linearizer(eval(ast_str))
 
-# load worlds
+# load worlds, a dataset of about 12k kernels
+import gzip
+from pathlib import Path
 import random
 from tinygrad.helpers import dedup
 def load_worlds(filter_reduce=True, filter_noimage=True, filter_novariable=True):
-  ast_strs = dedup(open("/tmp/sops").read().strip().split("\n"))
+  fn = Path(__file__).parent.parent / "datasets/sops.gz"
+  ast_strs = dedup(gzip.open(fn).read().decode('utf-8').strip().split("\n"))
   if filter_reduce: ast_strs = [x for x in ast_strs if "ReduceOps" in x]
   if filter_noimage: ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
   if filter_novariable: ast_strs = [x for x in ast_strs if "Variable" not in x]
