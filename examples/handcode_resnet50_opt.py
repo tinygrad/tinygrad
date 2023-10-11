@@ -2,10 +2,13 @@ from typing import List
 from models.resnet import ResNet50
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, Device, Compiled
-from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.helpers import ansilen, DEBUG
+from tinygrad.codegen.search import bufs_from_lin, time_linearizer, get_linearizer_actions
+from tinygrad.helpers import ansilen, DEBUG, getenv
 from tinygrad.graph import print_tree
+
+import shelve
+global_db = shelve.open("/tmp/greedy_cache")
 
 if __name__ == "__main__":
   mdl = ResNet50()
@@ -26,50 +29,55 @@ if __name__ == "__main__":
 
   # work with the schedule
   total_tm = 0
+  running_gflops = 0
   for i,si in enumerate(sched):
     if DEBUG >= 2: print_tree(si.ast)
 
-    # enable only one kernel to focus on it
-    #if i != 1: continue
+    # create output/input buffers (NOTE: bufs_from_lin is slower, so we don't use it. TODO: fix)
+    rawbufs = [device.buffer(si.out.st.size(), si.out.dtype)] + [device.buffer(x.st.size(), x.dtype) for x in si.inputs]
+    #rawbufs = bufs_from_lin(lin)
 
     # "linearize" the op into uops in different ways
     lins:List[Linearizer] = []
 
-    if Device.DEFAULT == "METAL" and i == 1:
-      # through careful work, we discovered 1,8,0
-      for big_chomp in [1,2]: #[1,2,4,8,16]:
-        for lil_chomp in [2,4,7,8,14]:
-          for upcasted in [0,1,2]:
-            lin = Linearizer(si.ast, device.linearizer_opts)
-            lin.reshape_and_permute(lambda x: (4096//big_chomp,big_chomp,56//lil_chomp,lil_chomp,56//lil_chomp,lil_chomp)+x[-2:], [0,2,4,1,3,5,6,7])
-            lin.upcasted += upcasted
-            lin.local_dims += 3
-            lins.append(lin)
-    else:
-      # try with and without tensor cores
-      for tc in [0,1]:
-        lin = Linearizer(si.ast, device.linearizer_opts)
-        lin.hand_coded_optimizations(use_tensor_cores=tc)
-        lins.append(lin)
+    # always try hand coded opt
+    lin = Linearizer(si.ast, device.linearizer_opts)
+    lin.hand_coded_optimizations()
+    lins.append(lin)
 
-    # create output/input buffers
-    rawbufs = [device.buffer(si.out.st.size(), si.out.dtype)] + [device.buffer(x.st.size(), x.dtype) for x in si.inputs]
+    # maybe try tensor cores
+    lin = Linearizer(si.ast, device.linearizer_opts)
+    if lin.apply_tensor_cores():
+      lins.append(lin)
+
+    # try a greedy search
+    if getenv("GREEDY"):
+      lin = Linearizer(si.ast, device.linearizer_opts)
+      if str(lin.ast) in global_db:
+        for ao in global_db[str(lin.ast)]:
+          lin.apply_opt(ao)
+      else:
+        while 1:
+          acted_lins = get_linearizer_actions(lin)
+          tm, gflops = time_linearizer(lin, rawbufs)
+          timed_lins = {k:time_linearizer(v, rawbufs)[0] for k,v in acted_lins.items()}
+          opts = sorted(timed_lins.items(), key=lambda x: x[1])
+          if len(opts) == 0 or opts[0][1] >= tm: break   # we are done
+          lin = acted_lins[opts[0][0]]
+          if DEBUG >= 1: print(f"{opts[0][1]*1e3:10.2f} ms from {len(opts):3d} actions", lin.colored_shape())
+        global_db[str(lin.ast)] = lin.applied_opts
+      lins.append(lin)
 
     # benchmark the programs
     choices = []
     for lin in lins:
-      prg = device.to_program(lin)
-
-      # benchmark it by running 10 times
-      try:
-        tm = min([prg(rawbufs, force_wait=True) for _ in range(10)])
-        choices.append((tm, lin))
-      except AssertionError:
-        tm = float('inf')
+      tm, gflops = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10, should_copy=False)
+      choices.append((tm, gflops, lin))
 
       # print all kernels
-      if DEBUG >= 1: print(f"                 kernel {i:2d} {lin.display_name+' '*(37-ansilen(lin.display_name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {lin.info.flops*1e-9/tm:6.0f} GFLOPS")
-    tm, lin = sorted(choices, key=lambda x: x[0])[0]
-    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.display_name+' '*(37-ansilen(lin.display_name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {lin.info.flops*1e-9/tm:6.0f} GFLOPS")
+      if DEBUG >= 1: print(f"                 kernel {i:2d} {lin.display_name+' '*(37-ansilen(lin.display_name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS")
+    tm, gflops, lin = sorted(choices, key=lambda x: x[0])[0]
+    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.display_name+' '*(37-ansilen(lin.display_name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS")
     total_tm += tm
-  print(f"******* total {total_tm*1000:.2f} ms")
+    running_gflops += gflops * tm
+  print(f"******* total {total_tm*1000:.2f} ms, {running_gflops/total_tm:6.0f} GFLOPS")

@@ -74,7 +74,7 @@ class Linear:
     bound = 1 / math.sqrt(self.weight.shape[1])
     self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
 
-  def __call__(self, x):
+  def __call__(self, x:Tensor):
     return x.linear(self.weight.transpose(), self.bias)
 
 class GroupNorm:
