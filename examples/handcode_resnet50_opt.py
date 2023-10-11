@@ -29,6 +29,7 @@ if __name__ == "__main__":
 
   # work with the schedule
   total_tm = 0
+  running_gflops = 0
   for i,si in enumerate(sched):
     if DEBUG >= 2: print_tree(si.ast)
 
@@ -78,4 +79,5 @@ if __name__ == "__main__":
     tm, gflops, lin = sorted(choices, key=lambda x: x[0])[0]
     print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.display_name+' '*(37-ansilen(lin.display_name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS")
     total_tm += tm
-  print(f"******* total {total_tm*1000:.2f} ms")
+    running_gflops += gflops * tm
+  print(f"******* total {total_tm*1000:.2f} ms, {running_gflops/total_tm:6.0f} GFLOPS")
