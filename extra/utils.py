@@ -1,8 +1,7 @@
 # type: ignore
-import pickle
+import pickle, hashlib, zipfile, io, requests, struct, tempfile, platform, concurrent.futures
 import numpy as np
 from tqdm import tqdm
-import tempfile, platform
 from pathlib import Path
 from collections import defaultdict
 from typing import Union
@@ -22,7 +21,6 @@ def fetch(url):
   if url.startswith("/") or url.startswith("."):
     with open(url, "rb") as f:
       return f.read()
-  import hashlib
   fp = temp(hashlib.md5(url.encode('utf-8')).hexdigest())
   download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
   with open(fp, "rb") as f:
@@ -32,13 +30,11 @@ def fetch_as_file(url):
   if url.startswith("/") or url.startswith("."):
     with open(url, "rb") as f:
       return f.read()
-  import hashlib
   fp = temp(hashlib.md5(url.encode('utf-8')).hexdigest())
   download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
   return fp
 
 def download_file(url, fp, skip_if_exists=True):
-  import requests
   if skip_if_exists and Path(fp).is_file() and Path(fp).stat().st_size > 0:
     return
   r = requests.get(url, stream=True)
@@ -143,8 +139,6 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
 
 def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True):
   if Device.DEFAULT in ["TORCH", "GPU", "CUDA"]: multithreaded = False  # multithreaded doesn't work with CUDA or TORCH. for GPU it's a wash with _mmap
-
-  import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
     base_name = myzip.namelist()[0].split('/', 1)[0]
     with myzip.open(f'{base_name}/data.pkl') as myfile:
@@ -155,7 +149,6 @@ def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True):
           for v in vv:
             load_single_weight(v[2], myfile, v[3], v[4], v[0], v[5], mmap_allowed=True)
       if multithreaded:
-        import concurrent.futures
         # 2 seems fastest
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
           futures = {executor.submit(load_weight, k, v):k for k,v in ret[1].items()}
@@ -170,8 +163,6 @@ def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True):
   return ret[0]
 
 def fake_torch_load(b0):
-  import io
-  import struct
 
   # convert it to a file
   fb0 = io.BytesIO(b0)
@@ -212,13 +203,3 @@ def get_child(parent, key):
     else:
       obj = getattr(obj, k)
   return obj
-
-def _tree(lazydata, prefix=""):
-  if type(lazydata).__name__ == "LazyBuffer": return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op, "LB ")
-  if len(lazydata.src) == 0: return [f"━━ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
-  lines = [f"━┳ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
-  childs = [_tree(c) for c in lazydata.src[:]]
-  for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
-  return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
-
-def print_tree(tensor:Union[Tensor, LazyBuffer]):print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(tensor if not isinstance(tensor, Tensor) else tensor.lazydata))]))

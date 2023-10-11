@@ -267,7 +267,7 @@ result = Tensor(2).realize() + Tensor(3).realize()
 # use the real Linearizer to linearize 2+3
 from tinygrad.codegen.linearizer import Linearizer
 sched = result.lazydata.schedule()
-linearizer = Linearizer(sched[-1][0])
+linearizer = Linearizer(sched[-1].ast)
 linearizer.linearize()
 
 # print the uops
