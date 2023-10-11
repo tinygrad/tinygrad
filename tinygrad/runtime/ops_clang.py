@@ -1,5 +1,5 @@
 import time, ctypes, subprocess, platform, functools, pathlib, tempfile
-from typing import Any, Tuple
+from typing import Any, Tuple, Optional
 from functools import partial, reduce
 from tinygrad.ops import Compiled
 from tinygrad.helpers import fromimport, getenv, DEBUG, CI, cache_compiled
@@ -39,7 +39,7 @@ class ClangProgram:
     self.prg: Any = ctypes.CDLL(str(cached_file))[name] if not (CI and ARM64) else cached_file.read_bytes()
 
   @cache_compiled
-  def compile(self, prg, binary, output_file, temp_file=tempfile.mktemp()) -> Tuple[Any, pathlib.Path]:
+  def compile(self, prg, binary, output_file, temp_file=tempfile.mktemp()) -> Tuple[Any, Optional[pathlib.Path]]:
     if not binary:
       subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+str(output_file)).split(), input=prg.encode('utf-8'))
     elif CI and ARM64:
