@@ -156,7 +156,7 @@ class OptimizedKernel(Kernel):
   # ******************** high level optimizers ********************
 
   # TODO: unify this
-  def apply_tensor_cores(self, use_tensor_cores):
+  def apply_tensor_cores(self, use_tensor_cores=1):
     # should use HIP tensor cores?
     if use_tensor_cores != 0 and self.opts.device == "HIP" and self.reduceop and self.reduceop.op == ReduceOps.SUM and \
         isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == UnaryOps.CAST and \
