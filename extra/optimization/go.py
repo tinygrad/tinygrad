@@ -18,36 +18,6 @@ from tinygrad.shape.view import View
 from tinygrad.shape.symbolic import Variable
 inf, nan = float('inf'), float('nan')
 
-MAX_DIMS = 16
-
-def lin_to_feats(lin):
-  all_colors = ["blue", "cyan", "white", "green", "red", "magenta", "yellow"]
-  lc = [all_colors.index(x) for x in lin.colors()]
-  #my_sts = dedup([(x.shape == lin.full_shape, x.real_strides()) for x in lin.sts[1:]])
-
-  # first, the full shape, including the colors
-  ret = []
-  for s,c in zip(lin.full_shape,lc):
-    if isinstance(s, Node):
-      ret.append(False)
-      ret += [0]*7
-    else:
-      ret.append(True)
-      ret.append(math.log2(s))
-      ret.append(min(33, s))
-      ret.append(s%2 == 0)
-      ret.append(s%3 == 0)
-      ret.append(s%4 == 0)
-      ret.append(s%8 == 0)
-      ret.append(s%16 == 0)
-    cc = [0]*7
-    cc[c] = 1
-    ret += cc
-  ret += [0] * (15*(MAX_DIMS-len(lin.full_shape)))
-  ret = [float(x) for x in ret]
-
-  assert len(ret) == 240, f"wrong len {len(ret)}"
-  return ret
 
 def bufs_from_lin(lin):
   bufsts = defaultdict(list)
