@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Tuple, List, cast, Optional
 from dataclasses import dataclass
 import itertools, math, os
@@ -8,9 +9,11 @@ from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.view import View, strides_for_shape
 from enum import Enum, auto
 
-class OptOps(Enum): UPCAST = auto(); LOCAL = auto(); GROUP = auto(); GROUPTOP = auto() # noqa: E702
+class OptOps(Enum):
+  UPCAST = auto(); LOCAL = auto(); GROUP = auto(); GROUPTOP = auto() # noqa: E702
+  def __lt__(self, x:OptOps): return self.value < x.value
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class Opt:
   op: OptOps
   axis: int

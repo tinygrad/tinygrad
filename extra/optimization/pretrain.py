@@ -1,3 +1,4 @@
+import os
 from copy import deepcopy
 from tinygrad.nn import Linear
 from tinygrad.tensor import Tensor
@@ -18,10 +19,10 @@ class PolicyNet:
     return self.l3(x).log_softmax()
 
 if __name__ == "__main__":
-  ast_strs = load_worlds()
+  ast_strs = load_worlds(False, False, filter_novariable=True)
 
   net = PolicyNet()
-  load_state_dict(net, safe_load("/tmp/policynet.safetensors"))
+  if os.path.isfile("/tmp/policynet.safetensors"): load_state_dict(net, safe_load("/tmp/policynet.safetensors"))
   optim = Adam(get_parameters(net))
 
   X,Y = [], []

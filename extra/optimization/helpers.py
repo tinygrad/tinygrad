@@ -13,9 +13,11 @@ def ast_str_to_lin(ast_str): return Linearizer(eval(ast_str))
 # load worlds
 import random
 from tinygrad.helpers import dedup
-def load_worlds():
+def load_worlds(filter_reduce=True, filter_noimage=True, filter_novariable=True):
   ast_strs = dedup(open("/tmp/sops").read().strip().split("\n"))
-  ast_strs = [x for x in ast_strs if "ReduceOps" in x and "dtypes.image" not in x and "Variable" not in x]
+  if filter_reduce: ast_strs = [x for x in ast_strs if "ReduceOps" in x]
+  if filter_noimage: ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
+  if filter_novariable: ast_strs = [x for x in ast_strs if "Variable" not in x]
   random.seed(1337)
   random.shuffle(ast_strs)
   return ast_strs
