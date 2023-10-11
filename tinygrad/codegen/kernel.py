@@ -83,6 +83,9 @@ class Kernel:
     self.global_size: Optional[List[int]] = None
     self.local_size: Optional[List[int]] = None
 
+  @property
+  def membufs(self) -> List[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
+
   def has_variable_shape(self) -> bool:
     for b in self.bufs:
       if not all_int(b.st.views[-1].shape): return True
