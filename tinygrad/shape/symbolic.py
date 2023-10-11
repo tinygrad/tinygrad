@@ -215,6 +215,9 @@ class DivNode(OpNode):
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) // self.b
 
 class ModNode(OpNode):
+  def __mod__(self, b: Union[Node, int]):
+    if isinstance(b, Node): return Node.__mod__(self, b)
+    return self.a % b if gcd(self.b, b) == b else Node.__mod__(self, b)
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     if (self.b % b == 0): return (self.a//b) % (self.b//b) # put the div inside mod
     return Node.__floordiv__(self, b, factoring_allowed)
