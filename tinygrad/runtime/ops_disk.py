@@ -1,3 +1,4 @@
+import getpass
 import os, mmap
 from typing import Optional
 from typing import Callable, Dict, Tuple
@@ -11,6 +12,7 @@ class RawDiskBuffer(RawBufferMapped):
     self.offset = offset  # this is an offset in bytes
     assert device is not None or buf is not None, "disk tensor needs a path or a buf"
     if device is not None:
+      device = device+getpass.getuser()
       f = open(device, "a+b")
       if os.path.getsize(device) < size * dtype.itemsize: os.ftruncate(f.fileno(), size * dtype.itemsize)
       buf = [f, mmap.mmap(f.fileno(), size * dtype.itemsize), 1]
