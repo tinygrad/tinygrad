@@ -2,7 +2,7 @@ from typing import Callable
 import time
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.helpers import DEBUG, prod, getenv
-from tinygrad.lazy import var_vals_from_ast
+from tinygrad.lazy import vars_from_ast
 
 def get_divisors(n, min_div = 1, max_div = 512):
   if min_div > 1: yield 1
@@ -66,7 +66,7 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
     # don't optimize variable shapes
     choice = "BASELINE"
   else:
-    var_vals = {k:k.min for k in var_vals_from_ast(k.ast)}
+    var_vals = {k:k.min for k in vars_from_ast(k.ast)}
     # get baseline
     def get_baseline():
       k = create_k()
