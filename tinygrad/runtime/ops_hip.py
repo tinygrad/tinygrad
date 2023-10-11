@@ -1,5 +1,5 @@
 import numpy as np
-import ctypes, functools, math, collections, pathlib
+import ctypes, functools, math, collections
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
 from tinygrad.helpers import DEBUG, getenv, cache_compiled
@@ -100,7 +100,7 @@ class HIPProgram:
       self.prgs.append(hip.hipModuleGetFunction(hip.hipModuleLoadData(prg), name))
 
   @cache_compiled
-  def compile(self, prg, name, **kwargs) -> pathlib.Path:
+  def compile(self, prg, name, **kwargs):
     try:
       prog = hip.hiprtcCreateProgram(prg, name, [], [])
       hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
