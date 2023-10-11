@@ -1,6 +1,7 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pathlib
+import os, functools, platform, time, re, contextlib, operator, pathlib, hashlib
 import numpy as np
+from contextlib import contextmanager
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
@@ -149,9 +150,9 @@ class GlobalCounters:
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0
 
-# *** cache compiled files ***
-
-def cache_filepath(folder:str, prg:str) -> pathlib.Path:
-  cache_dir = pathlib.Path("~/.cache/tinygrad").expanduser() / folder
-  cache_dir.mkdir(parents=True, exist_ok=True)
-  return cache_dir / hashlib.sha256(prg.encode()).hexdigest()
+@contextmanager
+def compiled_cache(prg):
+  cachefile_path = pathlib.Path(f"/tmp/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}")
+  tmp_path = cachefile_path.with_suffix(f".tmp.{os.getpid()}")
+  yield (cachefile_path, tmp_path)
+  if tmp_path.exists(): tmp_path.rename(cachefile_path)

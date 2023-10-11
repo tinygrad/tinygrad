@@ -1,7 +1,7 @@
 import os, time, ctypes, hashlib, subprocess, platform, tempfile, functools, pathlib
 from functools import partial, reduce
 from tinygrad.ops import Compiled
-from tinygrad.helpers import fromimport, getenv, DEBUG, CI, cache_filepath
+from tinygrad.helpers import fromimport, getenv, DEBUG, CI, compiled_cache
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
@@ -17,7 +17,6 @@ args = {
   'Darwin': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'dylib', 'exp':''}
 }[platform.system()]
 
-TOOLCHAIN_HASH = hashlib.sha256(subprocess.check_output(args=("clang --version" if not ARM64 else "aarch64-linux-gnu-as --version").split())).digest().hex()
 CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#define bool uchar\n'
 ADDRESS = 0x10000
 
@@ -32,34 +31,28 @@ class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False):
     if binary and DEBUG >= 5: print(prg)
 
-    cached_file = cache_filepath(f"clang-{TOOLCHAIN_HASH}", prg)
-    if not cached_file.exists(): self.compile(prg, binary, cached_file)
-    if binary and CI and ARM64:
-      prg_lines = prg.splitlines()
-      self.varsize = align(int(prg_lines[0].split(" ")[1]))
-      self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg_lines[6:-3])) if ins[:2] == 'bl'}
-      self.prg = pathlib.Path(cached_file).read_bytes()
-    else:
-      self.lib = ctypes.CDLL(str(cached_file))
-      self.fxn = self.lib[name]
-
-  def compile(self, prg, binary, cachefile_path):
     # TODO: is there a way to not write this to disk?
     # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
     #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
-    tmp_path = cachefile_path.with_name(f"{cachefile_path.name}.tmp.{os.getpid()}")
-    if not binary:
-      prg = CLANG_PROGRAM_HEADER + prg
-      subprocess.check_output(args=(f'clang -shared -O2 -Wall -Werror -x c {args["cflags"]} - -o {str(tmp_path)}').split(), input=prg.encode('utf-8'))
-    else:
-      with tempfile.NamedTemporaryFile() as as_path:
-        if CI and ARM64: prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg.splitlines()[6:-3]] + ['\n'])
+    with compiled_cache(prg) as (fn, tmp):
+      if not fn.exists():
+        if not binary:
+          prg = CLANG_PROGRAM_HEADER + prg
+          subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+str(tmp)).split(), input=prg.encode('utf-8'))
+        else:
+          if CI and ARM64:
+            prg = prg.split('\n') # type: ignore
+            self.varsize = align(int(prg[0].split(" ")[1]))
+            self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
+            prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n'])
+            subprocess.check_output(args=('aarch64-linux-gnu-as -o '+str(tmp)).split(), input=prg.encode('utf-8'))
+            subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+str(tmp)+' '+str(fn)+'.bin').split())
+            self.prg = pathlib.Path(str(fn) + '.bin').read_bytes()
+            return
 
-        assembly_cmd = 'aarch64-linux-gnu-as' if CI and ARM64 else 'as'
-        link_cmd = 'aarch64-linux-gnu-objcopy -O binary --only-section=.text' if CI and ARM64 else 'clang -lm -shared'
-        subprocess.check_output(args=(f'{assembly_cmd} {as_path.name}').split(), input=prg.encode('utf-8'))
-        subprocess.check_output(args=(f'{link_cmd} {as_path.name} {str(tmp_path)}').split())
-    tmp_path.rename(cachefile_path)
+          subprocess.check_output(args=('as -o' + str(tmp)).split(), input=prg.encode('utf-8'))
+          subprocess.check_output(args=('clang -lm -shared '+str(tmp)+' -o'+str(fn)).split())
+    self.fxn = ctypes.CDLL(str(fn))[name]
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()
