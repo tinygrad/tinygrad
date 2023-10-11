@@ -429,10 +429,10 @@ class OptimizedKernel(Kernel):
     # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
     if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
       if (s:=self.full_unupcasted_shape[-1]) <= 32 and isinstance(s, int):  # NOTE: cannot loop unroll symbolic axis
-        self.apply_opt(Opt(OptOps.UPCAST, len(self.full_unupcasted_shape)-1, self.full_unupcasted_shape[-1]))
+        self.apply_opt(Opt(OptOps.UPCAST, len(self.full_unupcasted_shape)-1, cast(int, self.full_unupcasted_shape[-1])))
         # if it's small, upcast a second reduce dimension too
         if self.first_reduce < (self.shape_len-self.upcasted) and s <= 3 and self.full_unupcasted_shape[-1] <= 3:
-          self.apply_opt(Opt(OptOps.UPCAST, len(self.full_unupcasted_shape)-1, self.full_unupcasted_shape[-1]))
+          self.apply_opt(Opt(OptOps.UPCAST, len(self.full_unupcasted_shape)-1, cast(int, self.full_unupcasted_shape[-1])))
       else:
         for splits in [4]:
           if self.full_unupcasted_shape[-1]%splits == 0:

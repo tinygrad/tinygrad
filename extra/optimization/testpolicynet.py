@@ -3,7 +3,8 @@ np.set_printoptions(suppress=True)
 from copy import deepcopy
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_save, safe_load, load_state_dict
-from extra.optimization.helpers import bufs_from_lin, time_linearizer, actions, load_worlds, ast_str_to_lin, lin_to_feats
+from tinygrad.codegen.search import bufs_from_lin, time_linearizer, actions
+from extra.optimization.helpers import load_worlds, ast_str_to_lin, lin_to_feats
 from extra.optimization.pretrain import PolicyNet
 
 if __name__ == "__main__":
@@ -11,7 +12,7 @@ if __name__ == "__main__":
   load_state_dict(net, safe_load("/tmp/policynet.safetensors"))
 
   ast_strs = load_worlds()
-  #ast_strs = ast_strs[268:269]
+
   for ep_num,ast_str in enumerate(ast_strs):
     print("\nEPISODE", ep_num)
     lin = ast_str_to_lin(ast_str)
@@ -22,14 +23,9 @@ if __name__ == "__main__":
     tm, gflops = time_linearizer(linhc, rawbufs)
     print(f"{tm:10.2f}", linhc.colored_shape())
 
-    #tm_real, gflops_real = time_linearizer(linhc, rawbufs, False)
-    #print(tm, tm_real)
-    #print(gflops, gflops_real)
-
     while 1:
       probs = net(Tensor([lin_to_feats(lin)]))
       dist = probs.exp().numpy()
-      #print(dist)
       act = dist.argmax()
       if act == 0: break
       try:
@@ -39,5 +35,3 @@ if __name__ == "__main__":
         break
       tm, gflops = time_linearizer(lin, rawbufs)
       print(f"{tm:10.2f}", lin.colored_shape())
-
-    #break

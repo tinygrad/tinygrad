@@ -38,13 +38,6 @@ if __name__ == "__main__":
       best_tm, best_lin = tm, lin
       for l in list(acted_lins.values()):
         tm, gflops = time_linearizer(l, rawbufs)
-
-        #real_tm, _ = time_linearizer(l, rawbufs, False)
-        #real_tm_alt, _ = time_linearizer(l, rawbufs, False)
-        #print(f"{tm:10.2f} {real_tm:10.2f} {real_tm_alt:10.2f}")
-
-        #print(f"{tm:10.2f}", l.colored_shape())
-        if tm < best_tm:
-          best_tm, best_lin = tm, l
+        if tm < best_tm: best_tm, best_lin = tm, l
       if lin == best_lin: break
       lin = best_lin
