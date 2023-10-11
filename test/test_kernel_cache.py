@@ -18,20 +18,18 @@ class TestKernelCache(unittest.TestCase):
   @cache_compiled
   def __helper_test_compile(self, prg, **kwargs):
     self.compile_call_count += 1
-    return hashlib.sha256(prg.encode()).digest()
+    return prg.encode()
 
   def test_compile_cache(self):
     prg1 = generate_random_string(64) + "a"
     prg2 = generate_random_string(64) + "b"
-    cold_compile_res = self.__helper_test_compile(prg1)
-    warm_compile_res = self.__helper_test_compile(prg1)
-    assert len(cold_compile_res) > 0
-    assert cold_compile_res == warm_compile_res
+    cold_compile_res = self.__helper_test_compile(prg1).read_bytes()
+    warm_compile_res = self.__helper_test_compile(prg1).read_bytes()
+    assert cold_compile_res == warm_compile_res == prg1.encode()
     assert self.compile_call_count == 1
 
-    prg2_res = self.__helper_test_compile(prg2)
-    self.__helper_test_compile(prg2)
-    assert len(prg2_res) > 0
+    prg2_res = self.__helper_test_compile(prg2).read_bytes()
+    assert prg2_res == prg2.encode()
     assert self.compile_call_count == 2
 
   def test_kernel_cache_in_action(self):
