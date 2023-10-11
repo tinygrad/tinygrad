@@ -1,4 +1,4 @@
-import os, time, ctypes, hashlib, subprocess, platform, tempfile, functools, pathlib
+import time, ctypes, subprocess, platform, functools, pathlib
 from functools import partial, reduce
 from tinygrad.ops import Compiled
 from tinygrad.helpers import fromimport, getenv, DEBUG, CI, cache_compiled
@@ -31,13 +31,14 @@ class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False):
     if binary and DEBUG >= 5: print(prg)
     cached_file = self.compile(prg if binary else CLANG_PROGRAM_HEADER+prg, binary=binary)
+
+    # TODO: is there a way to not write this to disk?
+    # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
+    #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
     self.prg = ctypes.CDLL(str(cached_file))[name] if not (CI and ARM64) else pathlib.Path(str(cached_file)).read_bytes()
 
   @cache_compiled
   def compile(self, prg, binary, shadow_file=None, temp_file=None) -> pathlib.Path:
-    # TODO: is there a way to not write this to disk?
-    # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
-    #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
     if not binary:
       subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+str(shadow_file)).split(), input=prg.encode('utf-8'))
     elif CI and ARM64:
