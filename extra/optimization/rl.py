@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import math, random
 from tinygrad.tensor import Tensor
@@ -9,7 +10,7 @@ from extra.optimization.helpers import load_worlds, ast_str_to_lin, lin_to_feats
 
 if __name__ == "__main__":
   net = PolicyNet()
-  load_state_dict(net, safe_load("/tmp/policynet.safetensors"))
+  if os.path.isfile("/tmp/policynet.safetensors"): load_state_dict(net, safe_load("/tmp/policynet.safetensors"))
   optim = Adam(get_parameters(net))
 
   ast_strs = load_worlds()
@@ -40,7 +41,7 @@ if __name__ == "__main__":
         rews.append(((last_tm-tm)/base_tm))
         last_tm = tm
       except Exception:
-        rews.append(-1.0)
+        rews.append(-0.5)
         break
       #print(f"{tm*1e6:10.2f}", lin.colored_shape())
 
@@ -49,7 +50,7 @@ if __name__ == "__main__":
     print(f"***** EPISODE {len(rews)} steps, {sum(rews):5.2f} reward, {base_tm*1e6:12.2f} -> {tm*1e6:12.2f} : {lin.colored_shape()}")
     all_feats += feats
     all_acts += acts
-    all_rews += rews
+    all_rews += np.cumsum(rews).tolist()
 
     BS = 32
     if len(all_feats) >= BS:
