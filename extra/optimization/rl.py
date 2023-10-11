@@ -7,7 +7,7 @@ from tinygrad.nn import Linear
 from tinygrad.ops import Device
 from tinygrad.helpers import dedup, ansilen
 from tinygrad.lazy import var_vals_from_ast
-from tinygrad.nn.state import get_parameters
+from tinygrad.nn.state import get_parameters, get_state_dict, safe_save, safe_load, load_state_dict
 from tinygrad.nn.optim import Adam
 from tinygrad.shape.symbolic import sym_infer
 from tinygrad.codegen.optimizer import Opt, OptOps
@@ -63,17 +63,29 @@ def time_linearizer(lin, rawbufs):
   gflops = sym_infer(lin.info.flops, var_vals)*1e-9/tm
   return tm*1e6, gflops
 
+def get_linearizer_actions(lin):
+  acted_lins = {}
+  for i,a in enumerate(actions):
+    lin2 = deepcopy(lin)
+    try:
+      lin2.apply_opt(a)
+      acted_lins[i] = lin2
+    except Exception:
+      pass
+  return acted_lins
+
 if __name__ == "__main__":
   # load worlds
   ast_strs = dedup(open("/tmp/sops").read().strip().split("\n"))
   ast_strs = [x for x in ast_strs if "ReduceOps" in x and "dtypes.image" not in x and "Variable" not in x]
 
-  #ast_strs = ast_strs[:100]
-
   # deterministic
   random.seed(1337)
+  steps = 0
 
+  # load net
   net = PolicyNet()
+  load_state_dict(net, safe_load("/tmp/speednet.safetensors"))
   optim = Adam(get_parameters(net))
 
   feats, acts, rews, gts = [], [], [], []
@@ -81,7 +93,7 @@ if __name__ == "__main__":
   old_worlds = []
   for i in range(20000):
     Tensor.no_grad, Tensor.training = True, False
-    if random.random() < 0.7 or len(old_worlds) < 3:
+    if random.random() < 0.5 or len(old_worlds) < 3:
       ast_str = random.choice(ast_strs)
       ast = eval(ast_str)
       lin = Linearizer(ast)
@@ -92,23 +104,13 @@ if __name__ == "__main__":
     cs = lin.colored_shape()
     cs += ' '*(50-ansilen(cs))
 
-    # enumerate all the actions as linearizers
-    acted_lins = {}
-    for i,a in enumerate(actions):
-      lin2 = deepcopy(lin)
-      try:
-        lin2.apply_opt(a)
-        acted_lins[i] = lin2
-      except Exception:
-        pass
-
-    # run the model on all possible
+    # enumerate all the actions as linearizers and run the model
+    acted_lins = get_linearizer_actions(lin)
     lfeats = [lin_to_feats(lin)] + [lin_to_feats(x) for x in acted_lins.values()]
     preds = net(Tensor(lfeats)).exp().numpy()
 
     tact = np.argmin(preds[:, 0])
-    # stop if slow or no action
-    if tact == 0 or preds[0, 0] > 5000: continue
+    if tact == 0 or preds[0, 0] > 5000: continue  # stop if slow or no action
     act = list(acted_lins.keys())[(tact-1)]
     lin2 = acted_lins[act]
 
@@ -135,66 +137,7 @@ if __name__ == "__main__":
       optim.step()
       feats, acts, rews, gts = [], [], [], []
       print(f"trained {loss.numpy()}")
-
-    """
-    mask = np.zeros((len(acts), len(actions)), dtype=np.float32)
-    mask[np.arange(len(acts)), acts] = 1
-    logp = net(Tensor(feats)) * Tensor(mask)
-    loss = -(logp * Tensor(rews).reshape(-1,1)).mean()
-    """
-
-
-    """
-    continue
-
-    # model first
-    feat = lin_to_feats(lin)
-    pred_tm, pred_gflops = net(Tensor(feat)).exp().numpy()
-    if pred_tm > 100:   # 100 us
-      #print("skipping slow")
-      continue
-
-
-
-    continue
-
-    didnt_act = True
-    for i in range(100):
-      act = random.randint(0, len(actions)-1)
-      lin2 = copy(lin)
-      try:
-        lin2.apply_opt(actions[act])
-        didnt_act = False
-        break
-      except Exception:
-        pass
-    if didnt_act:
-      print("DIDN'T ACT")
-      continue
-
-    rawbufs = bufs_from_lin(lin)
-    tm1, gf1 = time_linearizer(lin, rawbufs)
-    #print(act, f"pred_time: {pred_tm:7.2f}  time: {tm1:7.2f}", f"pred_gflops: {pred_gflops:7.2f}  gflops: {gf1:7.2f}")
-
-    #act = np.random.choice(len(act), p=act)
-    try:
-      lin2 = copy(lin)
-      lin2.apply_opt(actions[act])
-      #rews.append(1)
-      #print(cs, "okay", act, lin2.colored_shape())
-      tm2, gf2 = time_linearizer(lin2, rawbufs)
-      rews.append((tm1-tm2)/tm2)
-      print(cs, "okay", actions[act], lin2.colored_shape(), f"{tm1:7.2f} -> {tm2:7.2f}, rew {rews[-1]}")
-
-      feats.append(feat)
-      gts.append((tm1, gf1))
-
-      feats.append(lin_to_feats(lin2))
-      gts.append((tm2, gf2))
-
-      acts.append(act)
-      old_worlds.append(lin2)
-    except Exception:
-      print(cs, f"INVALID ACTION {act} {actions[act]}")
-      #rews.append(-3)
-    """
+      if steps%10 == 0:
+        safe_save(get_state_dict(net), "/tmp/speednet.safetensors")
+        print("saved model")
+      steps += 1
