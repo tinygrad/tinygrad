@@ -223,8 +223,7 @@ def train_cifar():
 
   transform = [
     lambda x: x / 255.0,
-    lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1),
-    lambda x: x.reshape((-1,3,32,32))
+    lambda x: (x.reshape((-1,3,32,32)) - Tensor(cifar_mean).reshape((1,3,1,1)))/Tensor(cifar_std).reshape((1,3,1,1))
   ]
 
   class modelEMA():
