@@ -35,7 +35,7 @@ class CStyleLanguage(NamedTuple):
     BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
     BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
     BinaryOps.MAX: lambda a,b: f"max({a},{b})", BinaryOps.MOD: lambda a,b: f"({a}%{b})",
-    BinaryOps.CMPLT: lambda a,b: f"({a}<{b})", TernaryOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})",
+    BinaryOps.CMPLT: lambda a,b: f"({a}<{b})", TernaryOps.MULACC: lambda a,b,c: f"fma({a}, {b}, {c})",
     TernaryOps.WHERE: lambda a,b,c: f"({a}!=0?{b}:{c})"
   }
 
@@ -50,8 +50,14 @@ class CStyleLanguage(NamedTuple):
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    else: val = f"{x}f" if dtypes.is_float(var_dtype) and isinstance(x, float) else f"{int(x)}"
-    return self.render_cast([val]*var_dtype.sz, var_dtype) if dtypes.is_int(var_dtype) or dtypes.is_float(var_dtype) else val
+    else: 
+      if var_dtype == dtypes.float32 and isinstance(x, float):
+        val = f"{x}f"
+      elif var_dtype == dtypes.float16 and isinstance(x, float):
+        val = f"{x}h"
+      else:
+        val = f"{int(x)}"
+    return val
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
