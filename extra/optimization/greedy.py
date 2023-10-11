@@ -7,15 +7,16 @@ from tinygrad.nn.state import get_parameters, get_state_dict, safe_save, safe_lo
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.tensor import Tensor
 
+from tinygrad.codegen.search import get_linearizer_actions, time_linearizer, bufs_from_lin, actions
+
 #from extra.optimization.pretrain import PolicyNet
-from extra.optimization.helpers import load_worlds, ast_str_to_lin, get_linearizer_actions, time_linearizer, bufs_from_lin, actions, lin_to_feats
+from extra.optimization.helpers import load_worlds, ast_str_to_lin, lin_to_feats
 
 if __name__ == "__main__":
   # load worlds
   ast_strs = load_worlds()
-
-  for ast_str in ast_strs:
-    print("\nEPISODE")
+  for ep_num,ast_str in enumerate(ast_strs):
+    print("\nEPISODE", ep_num)
     lin = ast_str_to_lin(ast_str)
 
     linhc = deepcopy(lin)
@@ -37,6 +38,11 @@ if __name__ == "__main__":
       best_tm, best_lin = tm, lin
       for l in list(acted_lins.values()):
         tm, gflops = time_linearizer(l, rawbufs)
+
+        #real_tm, _ = time_linearizer(l, rawbufs, False)
+        #real_tm_alt, _ = time_linearizer(l, rawbufs, False)
+        #print(f"{tm:10.2f} {real_tm:10.2f} {real_tm_alt:10.2f}")
+
         #print(f"{tm:10.2f}", l.colored_shape())
         if tm < best_tm:
           best_tm, best_lin = tm, l
