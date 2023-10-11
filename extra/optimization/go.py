@@ -5,7 +5,7 @@ from tqdm import tqdm
 from tinygrad.helpers import dedup, ImageDType, getenv, ansilen
 from tinygrad.graph import print_tree
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.lazy import var_vals_from_ast
+from tinygrad.lazy import vars_from_ast
 from tinygrad.shape.symbolic import sym_infer
 from tinygrad.ops import Device, Compiled, MemBuffer
 
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     assert all(x is not None for x in rawbufs)
 
     # example var vals
-    var_vals = {k:k.min for k in var_vals_from_ast(ast)}
+    var_vals = {k:k.min for k in vars_from_ast(ast)}
 
     # time
     prg = device.to_program(lin)
