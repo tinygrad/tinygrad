@@ -30,7 +30,7 @@ def emulate_ext_calls(fn, uc, address, size, user_data):
 class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False):
     if binary and DEBUG >= 5: print(prg)
-    cached_file = self.compile(prg, binary=binary)
+    cached_file = self.compile(prg if binary else CLANG_PROGRAM_HEADER+prg, binary=binary)
     self.prg = ctypes.CDLL(str(cached_file))[name] if not (CI and ARM64) else pathlib.Path(str(cached_file)).read_bytes()
 
   @cache_compiled
@@ -39,7 +39,6 @@ class ClangProgram:
     # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
     #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
     if not binary:
-      prg = CLANG_PROGRAM_HEADER + prg
       subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+str(shadow_file)).split(), input=prg.encode('utf-8'))
     elif CI and ARM64:
       prg = prg.split('\n') # type: ignore

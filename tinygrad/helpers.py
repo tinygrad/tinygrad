@@ -149,11 +149,13 @@ class GlobalCounters:
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0
 
+# *** compiled cache decorator ***
+
 def cache_compiled(func):
   def wrapper(self, prg:str, **kwargs) -> str:
     cache_path, shadow_path = pathlib.Path(f"/tmp/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}"), pathlib.Path(f"/tmp/tinygrad_cc_tmp.{os.getpid()}")
     if not cache_path.exists():
-      if ret := func(self, prg, shadow_file=shadow_path, temp_file=tempfile.mktemp(suffix="tinygrad_tmp_"), **kwargs) is not None: shadow_path.write_bytes(ret)
+      if (ret := func(self, prg, shadow_file=shadow_path, temp_file=tempfile.mktemp(suffix="tinygrad_tmp_"), **kwargs)) and ret is not None: shadow_path.write_bytes(ret)
       shadow_path.rename(cache_path)
     return str(cache_path)
   return wrapper

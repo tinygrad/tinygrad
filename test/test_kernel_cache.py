@@ -1,36 +1,47 @@
 #!/usr/bin/env python
-import numpy as np
 import unittest
 import secrets
 import string
+import hashlib
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
-from tinygrad.helpers import cache_filepath
+from tinygrad.helpers import cache_compiled
 import tinygrad.runtime.ops_clang
 
 def generate_random_string(length=16):
   alphabet = string.ascii_letters + string.digits
   return ''.join(secrets.choice(alphabet) for _ in range(length))
 
-def check_compile_folder(directory):
-  return [file for file in directory.iterdir() if file.is_file()]
-
 class TestKernelCache(unittest.TestCase):
-  def test_kernel_cache(self):
+  compile_call_count = 0
+
+  @cache_compiled
+  def __helper_test_compile(self, prg, **kwargs):
+    self.compile_call_count += 1
+    return hashlib.sha256(prg.encode()).digest()
+
+  def test_compile_cache(self):
+    prg1 = generate_random_string(64) + "a"
+    prg2 = generate_random_string(64) + "b"
+    cold_compile_res = self.__helper_test_compile(prg1)
+    warm_compile_res = self.__helper_test_compile(prg1)
+    assert len(cold_compile_res) > 0
+    assert cold_compile_res == warm_compile_res
+    assert self.compile_call_count == 1
+
+    prg2_res = self.__helper_test_compile(prg2)
+    self.__helper_test_compile(prg2)
+    assert len(prg2_res) > 0
+    assert self.compile_call_count == 2
+
+  def test_kernel_cache_in_action(self):
     if Device.DEFAULT not in ["CLANG"]:
       self.skipTest("No custom kernel cache is implemented")
-
-    orig_toolchain_hash = tinygrad.runtime.ops_clang.TOOLCHAIN_HASH
-    tinygrad.runtime.ops_clang.TOOLCHAIN_HASH = "ci-"+generate_random_string()
-    cache_dir = cache_filepath(f"clang-{tinygrad.runtime.ops_clang.TOOLCHAIN_HASH}", "").parent
-    assert len(check_compile_folder(cache_dir)) == 0, "should be empty"
 
     a = Tensor.rand(4,4)
     b = Tensor.rand(4,4)
     x = a + b
     x.realize()
-
-    assert len(check_compile_folder(cache_dir)) == 1, "kernel is not cached"
 
     orig_compile_func = tinygrad.runtime.ops_clang.ClangBuffer.runtime.compile
     tinygrad.runtime.ops_clang.ClangBuffer.runtime.compile = None # making it not callable
@@ -41,7 +52,6 @@ class TestKernelCache(unittest.TestCase):
     x1.realize() # Same kernel should be from cache.
 
     tinygrad.runtime.ops_clang.ClangBuffer.runtime.compile = orig_compile_func
-    tinygrad.runtime.ops_clang.TOOLCHAIN_HASH = orig_toolchain_hash
 
 if __name__ == "__main__":
   unittest.main()
