@@ -45,7 +45,7 @@ class ScheduleItem:
   ast: LazyOp
   out: LazyBuffer
   inputs: Tuple[LazyBuffer, ...]
-  # TODO: move var_vals here
+  var_vals: Dict[Variable, int]
 
 class LazyOp:
   __slots__ = "op", "src", "arg", "buffers", "__weakref__"
@@ -214,7 +214,7 @@ class ASTRunner:
 class Compiled:
   def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, runtime, synchronize=lambda: None, batch_exec=BasicBatchExecutor):
     self.buffer, self.linearizer_opts, self.renderer, self.runtime, self.synchronize, self.batch_exec = buffer, linearizer_opts, renderer, runtime, synchronize, batch_exec
-    self.method_cache: Dict[Any, ASTRunner] = {}
+    self.method_cache: Dict[LazyOp, ASTRunner] = {}
 
   def to_program(self, k):
     k.linearize()
@@ -243,6 +243,11 @@ class Compiled:
     # all the rawbuffers
     rawbuffers = [output.realized] + [x.realized for x in inputs]
 
+    # extract real vars used in ast
+    from tinygrad.lazy import vars_from_ast
+    ast_vars = vars_from_ast(ast)
+    assert all(v.val is None for v in ast_vars), f"ast contains bound Variable {ast_vars}"
+
     # compilation time
     def get_program():
       from tinygrad.codegen.linearizer import Linearizer
@@ -262,8 +267,5 @@ class Compiled:
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
-    # extract real var vals
-    from tinygrad.lazy import var_vals_from_ast
-    real_var_vals = var_vals_from_ast(ast)
-    prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in real_var_vals})
+    prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in ast_vars})
     return output.realized

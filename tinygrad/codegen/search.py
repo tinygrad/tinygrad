@@ -1,6 +1,6 @@
 from typing import Tuple, Dict, List, cast, DefaultDict, Optional
 from copy import deepcopy
-from tinygrad.lazy import var_vals_from_ast
+from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
 from tinygrad.helpers import prod
 from tinygrad.shape.symbolic import sym_infer
@@ -15,7 +15,7 @@ device:Compiled = cast(Compiled, Device[Device.DEFAULT])
 # returns time(s) and GFLOPS
 def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, cnt=3, should_copy=True) -> Tuple[float, float]:
   if should_copy: lin = deepcopy(lin)  # TODO: remove the need for this
-  var_vals = {k:k.min for k in var_vals_from_ast(lin.ast)}
+  var_vals = {k:k.min for k in vars_from_ast(lin.ast)}
   try:
     lin.linearize()
     prg = device.to_program(lin)

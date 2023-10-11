@@ -96,7 +96,7 @@ class TestLinearizer(unittest.TestCase):
         r = a @ b
       realized_ast, _ = helper_realized_ast(r)
       k = Linearizer(realized_ast)
-      k.hand_coded_optimizations()
+      k.apply_tensor_cores(1)
       k.linearize()
       assert len([uop for uop in k.uops if uop.uop == UOps.WMMA]) == 1, "tensor core not triggered"
       np_c = np_a @ np_b
