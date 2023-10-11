@@ -1,5 +1,5 @@
 import numpy as np
-import ctypes, functools, math, collections
+import ctypes, functools, math, collections, pathlib
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
 from tinygrad.helpers import DEBUG, getenv, cache_compiled
@@ -88,7 +88,7 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
-    prg = prg if binary else self.compile(prg, name=name).read_bytes()
+    prg = prg if binary else self.compile(prg, name=name)[0]
 
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
@@ -100,11 +100,11 @@ class HIPProgram:
       self.prgs.append(hip.hipModuleGetFunction(hip.hipModuleLoadData(prg), name))
 
   @cache_compiled
-  def compile(self, prg, name, **kwargs):
+  def compile(self, prg, name, **kwargs) -> Tuple[Any, pathlib.Path]:
     try:
       prog = hip.hiprtcCreateProgram(prg, name, [], [])
       hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
-      return hip.hiprtcGetCode(prog)
+      return hip.hiprtcGetCode(prog), None
     except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
