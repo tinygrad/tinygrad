@@ -99,12 +99,14 @@ class ShapeTracker:
     to_apply:List[Tuple[MovementOps, Tuple]] = []
     for v in self.views:
       real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-      real_offset = v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
       # first, we apply the offset
       # then, we make it the correct shape
       # then, we apply permutations
-      # TODO: don't use as_strided
-      to_apply.append((MovementOps.AS_STRIDED, ([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)], v.strides, real_offset)))
+      order = sorted(range(len(v.strides)), key=lambda k: v.strides[k], reverse=True)
+      shape = [s if st != 0 else 1 for s, st in zip(v.shape, v.strides)]
+      to_apply.extend([(MovementOps.RESHAPE, -1), (MovementOps.SHRINK, ((v.offset,v.offset+prod(shape)),)), (MovementOps.RESHAPE, [shape[i] for i in order])])
+      if v.mask is not None: to_apply.append((MovementOps.SHRINK, [v.mask[i] for i in order]))
+      to_apply.extend([(MovementOps.PERMUTE, [order.index(i) for i in range(len(order))]), (MovementOps.RESHAPE, [s if st != 0 else 1 for s, st in zip(real_shape, v.strides)])])
       # then, we apply pre expand pads
       if v.mask is not None:
         pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
