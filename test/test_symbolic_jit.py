@@ -82,7 +82,7 @@ class TestSymbolicJit(unittest.TestCase):
       symbolic = jf(q, k.reshape(2, vi, 4, 8), v.reshape(2, vi, 4, 8)).reshape(2, 4, 1, 8).numpy()
       expected = f(q, k, v).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 5
+    assert len(jf.jit_cache) == 6
 
   def test_cat_dim0(self):
     def f(a, b): return a.cat(b, dim=0).realize()
