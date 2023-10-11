@@ -12,8 +12,6 @@ from tinygrad.nn.optim import Adam
 from tinygrad.shape.symbolic import sym_infer
 from tinygrad.codegen.optimizer import Opt, OptOps
 from tinygrad.codegen.linearizer import Linearizer
-actions = [Opt(op=OptOps.LOCAL, axis=0, amt=3), Opt(op=OptOps.UPCAST, axis=3, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.UPCAST, axis=3, amt=7), Opt(op=OptOps.UPCAST, axis=2, amt=5), Opt(op=OptOps.LOCAL, axis=4, amt=3), Opt(op=OptOps.GROUP, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=4, amt=2), Opt(op=OptOps.UPCAST, axis=4, amt=5), Opt(op=OptOps.GROUPTOP, axis=0, amt=256), Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=2, amt=3), Opt(op=OptOps.UPCAST, axis=1, amt=6), Opt(op=OptOps.UPCAST, axis=0, amt=4), Opt(op=OptOps.LOCAL, axis=3, amt=4), Opt(op=OptOps.UPCAST, axis=1, amt=3), Opt(op=OptOps.GROUPTOP, axis=2, amt=256), Opt(op=OptOps.LOCAL, axis=1, amt=16), Opt(op=OptOps.UPCAST, axis=0, amt=7), Opt(op=OptOps.UPCAST, axis=5, amt=3), Opt(op=OptOps.LOCAL, axis=3, amt=16), Opt(op=OptOps.LOCAL, axis=0, amt=2), Opt(op=OptOps.GROUPTOP, axis=1, amt=16), Opt(op=OptOps.LOCAL, axis=0, amt=8), Opt(op=OptOps.UPCAST, axis=3, amt=6), Opt(op=OptOps.UPCAST, axis=2, amt=4), Opt(op=OptOps.LOCAL, axis=4, amt=2), Opt(op=OptOps.UPCAST, axis=3, amt=3), Opt(op=OptOps.UPCAST, axis=2, amt=7), Opt(op=OptOps.UPCAST, axis=4, amt=4), Opt(op=OptOps.GROUP, axis=2, amt=8), Opt(op=OptOps.LOCAL, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=0, amt=32), Opt(op=OptOps.UPCAST, axis=0, amt=3), Opt(op=OptOps.LOCAL, axis=1, amt=3), Opt(op=OptOps.UPCAST, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=0, amt=6), Opt(op=OptOps.LOCAL, axis=2, amt=8), Opt(op=OptOps.UPCAST, axis=1, amt=5), Opt(op=OptOps.LOCAL, axis=3, amt=3), Opt(op=OptOps.UPCAST, axis=6, amt=4), Opt(op=OptOps.GROUPTOP, axis=1, amt=256), Opt(op=OptOps.UPCAST, axis=2, amt=3), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=3, amt=2), Opt(op=OptOps.LOCAL, axis=0, amt=16), Opt(op=OptOps.UPCAST, axis=2, amt=6), Opt(op=OptOps.UPCAST, axis=5, amt=4), Opt(op=OptOps.UPCAST, axis=4, amt=3), Opt(op=OptOps.UPCAST, axis=3, amt=5), Opt(op=OptOps.GROUP, axis=1, amt=8), Opt(op=OptOps.LOCAL, axis=4, amt=16), Opt(op=OptOps.GROUPTOP, axis=0, amt=16), Opt(op=OptOps.LOCAL, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=0, amt=5), Opt(op=OptOps.GROUPTOP, axis=2, amt=16), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=2), Opt(op=OptOps.LOCAL, axis=2, amt=4), Opt(op=OptOps.LOCAL, axis=3, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8), Opt(op=OptOps.UPCAST, axis=1, amt=7), Opt(op=OptOps.LOCAL, axis=3, amt=8), Opt(op=OptOps.LOCAL, axis=2, amt=16)]
-actions = [x for x in actions if x.op not in [OptOps.GROUP, OptOps.GROUPTOP]]
 
 device = Device[Device.DEFAULT]
 
@@ -63,16 +61,6 @@ def time_linearizer(lin, rawbufs):
   gflops = sym_infer(lin.info.flops, var_vals)*1e-9/tm
   return tm*1e6, gflops
 
-def get_linearizer_actions(lin):
-  acted_lins = {}
-  for i,a in enumerate(actions):
-    lin2 = deepcopy(lin)
-    try:
-      lin2.apply_opt(a)
-      acted_lins[i] = lin2
-    except Exception:
-      pass
-  return acted_lins
 
 if __name__ == "__main__":
   # load worlds
