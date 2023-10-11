@@ -1,7 +1,6 @@
 from __future__ import annotations
 import time, importlib, inspect, functools, pathlib
 import numpy as np
-
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
@@ -53,15 +52,13 @@ class LazyOp:
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Any = None
-
   @property
   def buffers(self):
     buffers = ()
-    try:
+    try:  # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
       for x in self.src: buffers += x.buffers
-    except AttributeError: return () # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
+    except AttributeError: buffers = ()
     return buffers
-
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
