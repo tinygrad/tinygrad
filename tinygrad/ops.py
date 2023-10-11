@@ -47,7 +47,7 @@ class ScheduleItem:
   inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
 
-@dataclass(unsafe_hash=True)
+@dataclass
 class LazyOp:
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
@@ -59,6 +59,7 @@ class LazyOp:
       for x in self.src: buffers += x.buffers
     except AttributeError: buffers = ()
     return buffers
+  def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
