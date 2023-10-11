@@ -47,14 +47,14 @@ class ScheduleItem:
   inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
 
-@dataclass(frozen=True)
+@dataclass(unsafe_hash=True)
 class LazyOp:
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Any = None
   @property
   def buffers(self):
-    buffers = ()
+    buffers: Tuple[Union[LazyOp, LazyBuffer], ...] = ()
     try:  # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
       for x in self.src: buffers += x.buffers
     except AttributeError: buffers = ()
