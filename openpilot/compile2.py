@@ -1,12 +1,18 @@
+import os
+if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
+if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
+
 import sys
 import onnx
 import io
-from extra.utils import fetch, print_tree
+from extra.utils import fetch
 from extra.onnx import get_run_onnx
+from tinygrad.graph import print_tree
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, partition, GlobalCounters, Context
 from tinygrad.realize import run_schedule
-from tinygrad.ops import LoadOps
+from tinygrad.ops import LoadOps, Device
+Device.DEFAULT = "GPU"
 
 """
 def get_random_input_tensors(input_shapes):
@@ -29,23 +35,23 @@ def get_schedule(fn:str):
 
   # run the model
   inputs = {k:Tensor.empty(*shp) for k,shp in input_shapes.items()}
-  ret = next(iter(run_onnx(inputs).values())).cast(dtypes.float32).contiguous()
+  ret: Tensor = next(iter(run_onnx(inputs).values())).cast(dtypes.float32).contiguous()
   schedule = ret.lazydata.schedule()
 
   # filter schedule that don't depend on the inputs
   input_lb = [x.lazydata.base for x in inputs.values()]
   depends = set(input_lb)
-  for op,out,buffers in schedule:
-    if any(b in depends for b in buffers):
-      depends.add(out)
+  for si in schedule:
+    if any(b in depends for b in si.inputs):
+      depends.add(si.out)
 
   # run all kernels that don't depend on the inputs
   # NOTE: there's two extra kernels due to fusions that now happen since the weights aren't realized
-  schedule, schedule_independent = partition(schedule, lambda x: x[1] in depends)
+  schedule, schedule_independent = partition(schedule, lambda si: si.out in depends)
   print(f"{len(schedule)} schedule items depend on the input, {len(schedule_independent)} don't")
 
   # confirm no loadops in the (non independent) schedule except for the ones that load the input buffers
-  assert all(op.op not in LoadOps or out in input_lb for op,out,_ in schedule), "has loadops, can't compile to Thneed"
+  assert all(si.ast.op not in LoadOps or si.out in input_lb for si in schedule), "has loadops, can't compile to Thneed"
   return schedule, schedule_independent
 
 def lb_to_numbers(schedule):
@@ -68,7 +74,7 @@ if __name__ == "__main__":
   #exit(0)
 
   run_schedule(schedule_independent)
-  schedule = schedule[0:72]  # first model should be 8.85 ms
+  #schedule = schedule[0:72]  # first model should be 8.85 ms
   print("**** running real kernels ****")
   with Context(DEBUG=2):
     GlobalCounters.reset()
