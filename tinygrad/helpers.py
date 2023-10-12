@@ -156,7 +156,7 @@ def cache_compiled(func):
     # cache_path is where the cache is stored, output_file is save to write.
     cache_path, output_file = pathlib.Path(f"{tempfile.gettempdir()}/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}"), pathlib.Path(kwargs.get('output_file', tempfile.mktemp()))
     if not cache_path.exists():
-      # If we compile in a file, just rename it into the case and return it later. Otherwise, write a temp file and rename it (for atomicity).
+      # If we compile into a file (has output_file in args), just rename it into the cache. Otherwise, write a temp file and rename it (for atomicity).
       if (res := func(self, prg, **kwargs)) and 'output_file' not in kwargs: output_file.write_bytes(res)
       output_file.rename(cache_path)
 
