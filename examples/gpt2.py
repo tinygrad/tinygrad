@@ -112,11 +112,9 @@ class Transformer:
   def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
     if seqlen == 1 and start_pos > 0 and getenv("JIT"):
-      start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
+      start_pos_var = Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos)
       pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var + seqlen)))
-      pos.lazydata.var_vals[start_pos_var] = start_pos
       for k,v in self.kv_caches.items():
-        v.lazydata.var_vals[start_pos_var] = start_pos
         self.kv_caches[k] = v.reshape(v.shape[0], start_pos_var, v.shape[2], v.shape[3])
       logit_or_softmax, self.kv_caches = self.run_all_layers(tokens, pos, start_pos=start_pos, temperature=temperature, **self.kv_caches)
       return logit_or_softmax

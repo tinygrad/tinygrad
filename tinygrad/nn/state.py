@@ -1,6 +1,6 @@
 import os, json, pathlib, zipfile, pickle
 from tqdm import tqdm
-from typing import Dict, Union, List
+from typing import Dict, Union, List, Optional, Any
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters, CI
 from tinygrad.shape.view import strides_for_shape
@@ -12,15 +12,16 @@ inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
   json_len = t[0:1].cast(dtypes.int64).numpy()[0]
-  metadata = json.loads(t[8:8+json_len].numpy().tobytes())
-  return {k:t[8+json_len+v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']])[:prod(v['shape'])].reshape(v['shape']) for k,v in metadata.items() if k != "__metadata__"}
+  headers = json.loads(t[8:8+json_len].numpy().tobytes())
+  return {k:t[8+json_len+v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']])[:prod(v['shape'])].reshape(v['shape']) for k,v in headers.items() if k != "__metadata__"}
 
-def safe_save(tensors:Dict[str, Tensor], fn:str):
-  metadata, offset = {}, 0
+def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
+  headers, offset = {}, 0
+  if metadata: headers['__metadata__'] = metadata
   for k,v in tensors.items():
-    metadata[k] = {'dtype': inverse_safe_dtypes[v.dtype], 'shape': list(v.shape), 'data_offsets':[offset, offset+v.nbytes()]}
+    headers[k] = {'dtype': inverse_safe_dtypes[v.dtype], 'shape': list(v.shape), 'data_offsets':[offset, offset+v.nbytes()]}
     offset += v.nbytes()
-  j = json.dumps(metadata, separators=(',', ':'))
+  j = json.dumps(headers, separators=(',', ':'))
   j += "\x20"*((8-len(j)%8)%8)
   pathlib.Path(fn).unlink(missing_ok=True)
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")

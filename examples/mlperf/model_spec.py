@@ -29,14 +29,14 @@ def spec_unet3d():
   # 3D UNET
   from models.unet3d import UNet3D
   mdl = UNet3D()
-  mdl.load_from_pretrained()
+  #mdl.load_from_pretrained()
   img = Tensor.randn(1, 1, 128, 128, 128)
   test_model(mdl, img)
 
 def spec_rnnt():
   from models.rnnt import RNNT
   mdl = RNNT()
-  mdl.load_from_pretrained()
+  #mdl.load_from_pretrained()
   x = Tensor.randn(220, 1, 240)
   y = Tensor.randn(1, 220)
   test_model(mdl, x, y)
@@ -44,7 +44,7 @@ def spec_rnnt():
 def spec_bert():
   from models.bert import BertForQuestionAnswering
   mdl = BertForQuestionAnswering()
-  mdl.load_from_pretrained()
+  #mdl.load_from_pretrained()
   x = Tensor.randn(1, 384)
   am = Tensor.randn(1, 384)
   tt = Tensor(np.random.randint(0, 2, (1, 384)).astype(np.float32))
@@ -53,7 +53,7 @@ def spec_bert():
 def spec_mrcnn():
   from models.mask_rcnn import MaskRCNN, ResNet
   mdl = MaskRCNN(ResNet(50, num_classes=None, stride_in_1x1=True))
-  mdl.load_from_pretrained()
+  #mdl.load_from_pretrained()
   x = Tensor.randn(3, 224, 224)
   test_model(mdl, [x])
 

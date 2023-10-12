@@ -33,12 +33,14 @@ class Node:
     yield from (x[::-1] for x in product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
+  def unbind(self) -> Tuple[Node, Optional[int]]: return self.substitute({v: v.unbind()[0] for v in self.vars() if v.val is not None}), None
 
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
   @functools.cached_property
   def hash(self) -> int: return hash(self.key)
-  def __repr__(self): return "<"+self.key+">"
+  def __repr__(self): return self.render(ctx="REPR")
+  def __str__(self): return "<"+self.key+">"
   def __hash__(self): return self.hash
   def __bool__(self): return not (self.max == self.min == 0)
   def __eq__(self, other:object) -> bool:
@@ -148,6 +150,14 @@ class Variable(Node):
 
   def __init__(self, expr:Optional[str], nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
+    self.val:Optional[int] = None
+  def bind(self, val):
+    assert self.val is None and self.min<=val<=self.max, f"cannot bind {val} to {self}"
+    self.val = val
+    return self
+  def unbind(self) -> Tuple[Variable, int]:
+    assert self.val is not None, f"cannot unbind {self}"
+    return Variable(self.expr, self.min, self.max), self.val
   def vars(self): return [self]
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return var_vals[self] if self in var_vals else self
 
@@ -156,6 +166,9 @@ class NumNode(Node):
     assert isinstance(num, int), f"{num} is not an int"
     self.b:int = num
     self.min, self.max = num, num
+  def bind(self, val):
+    assert self.b == val, f"cannot bind {val} to {self}"
+    return self
   def __eq__(self, other): return self.b == other
   def __hash__(self): return self.hash  # needed with __eq__ override
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self
@@ -315,7 +328,7 @@ def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if
 def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
   if isinstance(a, int): return a
   ret = a.substitute({k:Variable.num(v) for k, v in var_vals.items()})
-  assert isinstance(ret, NumNode)
+  assert isinstance(ret, NumNode), f"sym_infer didn't produce NumNode from {a} with {var_vals}"
   return ret.b
 
 # symbolic int
@@ -323,7 +336,7 @@ sint = Union[Node, int]
 VariableOrNum = Union[Variable, NumNode]
 
 render_python: Dict[Type, Callable] = {
-  Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}]" if ctx == "DEBUG" else f"{self.expr}",
+  Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self.val is not None else ''}]" if ctx == "DEBUG" else (f"Variable('{self.expr}', {self.min}, {self.max})" if ctx == "REPR" else f"{self.expr}"),
   NumNode: lambda self,ops,ctx: f"{self.b}",
   MulNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}*{sym_render(self.b,ops,ctx)})",
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",

@@ -61,17 +61,20 @@ class Tensor:
     self._ctx: Optional[Function] = None
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, (int, float)):
-      self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
-      return
+      data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
     elif data.__class__ is list:
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
       data = LazyBuffer.fromCPU(np.array(data, dtype=(dtype or Tensor.default_type).np))
     elif isinstance(data, np.ndarray):
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
-      data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
+      if data.shape == ():
+        data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
+      else:
+        data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
     else: raise RuntimeError(f"can't create Tensor from {data}")
 
-    self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data.contiguous())
+    # data is a LazyBuffer, but it might be on the wrong device
+    self.lazydata = data if data.device == device else data.copy_to_device(device)
 
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
@@ -347,6 +350,8 @@ class Tensor:
         ret = ret.permute(ret_dims[dim[0]:dim[0]+max_dim] + ret_dims[:dim[0]] + ret_dims[dim[0]+max_dim:])
     return ret
 
+  def __setitem__(self,s,v): return self.__getitem__(s).assign(v)
+
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
     arg_ = tuple([a if a is not None else (0,s) for s,a in zip(self.shape, arg)])
@@ -420,7 +425,7 @@ class Tensor:
 
   # ***** reduce ops *****
 
-  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False):
+  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
     axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if axis.__class__ is int else list(axis)) # type: ignore
     axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
     shape = [s for i,s in enumerate(self.shape) if i not in axis_]
@@ -434,11 +439,11 @@ class Tensor:
   def mean(self, axis=None, keepdim=False):
     assert all_int(self.shape), "does not support symbolic shape"
     out = self.sum(axis=axis, keepdim=keepdim)
-    return out * (prod(out.shape)/prod(self.shape))
+    return out.mul(prod(out.shape)/prod(self.shape))
   def std(self, axis=None, keepdim=False, correction=1):
     assert all_int(self.shape), "does not support symbolic shape"
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
-    return (square_sum / (prod(self.shape)/prod(square_sum.shape)-correction)).sqrt()
+    return square_sum.div(prod(self.shape)/prod(square_sum.shape)-correction).sqrt()
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()
@@ -760,6 +765,6 @@ for device in Device._buffers:
 
 if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)
-  from tinygrad.nn.image import image_conv2d, image_dot
+  from tinygrad.features.image import image_conv2d, image_dot
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
