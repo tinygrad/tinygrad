@@ -1,6 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, cast, Optional
-from dataclasses import dataclass
+from typing import Tuple, List, cast, Optional, NamedTuple
 import itertools, math, os
 from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp, BufferOps
@@ -13,8 +12,7 @@ class OptOps(Enum):
   UPCAST = auto(); LOCAL = auto(); GROUP = auto(); GROUPTOP = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
-@dataclass(frozen=True, order=True)
-class Opt:
+class Opt(NamedTuple):
   op: OptOps
   axis: int
   amt: int

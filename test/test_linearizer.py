@@ -3,11 +3,13 @@ import unittest, os
 
 from tinygrad.codegen.kernel import tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOps
+from tinygrad.codegen.search import OptOps, Opt
 from tinygrad.ops import Compiled, Device, MovementOps, LazyOp
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
 from tinygrad.helpers import dtypes, prod
+from tinygrad.features.kopt import apply_ng_opt
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -110,12 +112,14 @@ def helper_realized_ast(r:Tensor):
   return s[-1].ast, [output_buffer] + [l.realized for l in s[-1].inputs]
 
 def helper_linearizer_opt(r:Tensor, opts=[]):
+  letter_to_optops = {'U': OptOps.UPCAST, 'L': OptOps.LOCAL, 'G': OptOps.GROUP, 'R': OptOps.UPCAST}
+  opts = [[Opt(letter_to_optops[op], axis, amt) for op, axis, amt in opt] for opt in opts]
   wanna_output = None
   realized_ast, real_bufs = helper_realized_ast(r)
 
   def check_opt(x, create_k, to_prg):
     k = create_k()
-    k.apply_auto_opt(x)
+    apply_ng_opt(k, x)
     prg = to_prg(k)
     real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
     prg.exec(real_bufs, force_wait=True)
@@ -147,11 +151,12 @@ class TestLinearizerOpts(unittest.TestCase):
     a = Tensor.rand(4, 4, N, N)
     b = Tensor.rand(4, 4, N)
     r = (b.sqrt() + ((a+1).sum(axis=3).exp()))
+    # full_shape: (2048, 128)
     helper_linearizer_opt(r, [
-      [(0, 2, 'L')], [(0, 8, 'L')], [(0, 16, 'L')], # Checking how it works with locals
-      [(0, 2, 'G')], [(0, 32, 'G')], [(0, 64, 'G')], # Checking how it works with grouped reduce
-      [(0, 2, 'L'), (0, 2, 'G')], [(0, 16, 'L'), (0, 16, 'G')], [(0, 32, 'L'), (0, 2, 'G')], [(0, 2, 'L'), (0, 64, 'G')], # Checking how it works with locals + grouped reduce
-      [(0, 2, 'L'), (0, 2, 'G'), (0, 8, 'U'), (0, 4, 'R')], # Checking how it works with locals + grouped reduce + upcasts
+      [('L', 0, 2)], [('L', 0, 8)], [('L', 0, 16)], # Checking how it works with locals
+      [('G', 1, 2)], [('G', 1, 16)], [('G', 1, 16)], # Checking how it works with grouped reduce
+      [('L', 0, 2), ('G', 1, 2)], [('L', 0, 16), ('G', 1, 16)], [('L', 0, 32), ('G', 1, 2)], [('L', 0, 2), ('G', 1, 64)], # Checking how it works with locals + grouped reduce
+      [('L', 0, 2), ('G', 1, 2), ('U', 0, 8), ('R', 1, 4)], # Checking how it works with locals + grouped reduce + upcasts
     ])
 
   def test_upcasts(self):
@@ -164,7 +169,7 @@ class TestLinearizerOpts(unittest.TestCase):
     b = Tensor.rand(N, N)
     r = (a+b).sqrt() * ((a+1).exp())
     helper_linearizer_opt(r, [
-      [(0, 2, 'U')], [(0, 4, 'U')], [(0, 8, 'U')], # Checking how it works with upcasts
+      [('U', 0, 2)], [('U', 0, 4)], [('U', 0, 8)], # Checking how it works with upcasts
     ])
 
   def test_full_upcast(self):
@@ -176,7 +181,7 @@ class TestLinearizerOpts(unittest.TestCase):
     b = Tensor.rand(4)
     r = (a+b).sqrt() * ((a+1).exp())
     helper_linearizer_opt(r, [
-      [(0, 4, 'U')], # Checking how it works with upcasts
+      [('U', 0, 4)], # Checking how it works with upcasts
     ])
 
   def test_matmul(self):
@@ -188,13 +193,14 @@ class TestLinearizerOpts(unittest.TestCase):
     a = Tensor.rand(N, N)
     b = Tensor.rand(N, N)
     r = a@b
+    # full_shape: (128, 128, 128)
     helper_linearizer_opt(r, [
-      [(0, 2, 'U')], [(0, 4, 'U'), (1, 4, 'U')], # Checking how it works with upcasts
-      [(0, 2, 'L')], [(1, 32, 'L')], [(0, 4, 'L'), (1, 4, 'L')], [(0, 4, 'L'), (1, 32, 'L')], [(0, 16, 'L'), (1, 8, 'L')], # Checking how it works with locals
-      [(0, 2, 'G')], [(0, 32, 'G')], [(0, 32, 'G'), (0, 4, 'R')], # Checking how it works with grouped_reduce
-      [(0, 2, 'L'), (1, 2, 'L'), (0, 32, 'G')], [(0, 16, 'L'), (0, 32, 'G')], [(0, 16, 'L'), (0, 8, 'L'), (0, 4, 'G')], # Checking how it works with local+grouped_reduce
-      [(0, 4, 'L'), (0, 4, 'L'), (0, 16, 'G'), (0, 4, 'R'), (0, 4, 'U'), (1, 2, 'U')], # Checking all together
-      [(0, 4, 'L'), (0, 4, 'L'), (0, 16, 'G'), (0, 4, 'R'), (0, 8, 'U')], # Full global upcast + local
+      [('U', 0, 2)], [('U', 0, 4), ('U', 1, 4)], # Checking how it works with upcasts
+      [('L', 0, 2)], [('L', 1, 32)], [('L', 0, 4), ('L', 1, 4)], [('L', 0, 4), ('L', 1, 32)], [('L', 0, 16), ('L', 1, 8)], # Checking how it works with locals
+      [('G', 2, 2)], [('G', 2, 32)], [('G', 2, 32), ('R', 2, 4)], # Checking how it works with grouped_reduce
+      [('L', 0, 2), ('L', 1, 2), ('G', 2, 32)], [('L', 0, 4), ('G', 2, 8)], [('L', 0, 4), ('L', 0, 2), ('G', 2, 2)], # Checking how it works with local+grouped_reduce
+      [('L', 0, 4), ('L', 0, 4), ('G', 2, 16), ('R', 2, 4), ('U', 0, 4), ('U', 1, 2)], # Checking all together
+      [('L', 0, 4), ('L', 0, 4), ('G', 2, 16), ('R', 2, 4), ('U', 0, 8)], # Full global upcast + local
     ])
 
   def test_double_reduce(self):
@@ -205,13 +211,14 @@ class TestLinearizerOpts(unittest.TestCase):
     Tensor.manual_seed(1552)
     a = Tensor.rand(8, N, 8, N)
     r = a.sum(axis=(1,3))
+    # full_shape = (8, 8, 128, 128)
     helper_linearizer_opt(r, [
-      [(0, 2, 'G')], [(0, 32, 'G')], [(1, 2, 'G')], [(1, 32, 'G')], # Checking how it works with 1 grouped_reduce.
-      [(0, 2, 'G'), (1, 2, 'G')], [(0, 16, 'G'), (1, 2, 'G')], [(0, 4, 'G'), (1, 64, 'G')], # Checking how it works with 2 grouped_reduces.
-      [(0, 16, 'G'), (1, 2, 'G'), (1, 4, 'R')], [(0, 2, 'G'), (1, 32, 'G'), (1, 4, 'R')], # Checking how it works with 2 grouped_reduces + upcasts.
-      [(0, 4, 'L'), (1, 4, 'L'), (0, 8, 'G'), (1, 4, 'G')], [(0, 4, 'L'), (1, 4, 'L'), (0, 2, 'G'), (1, 32, 'G'), (1, 4, 'R')], # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [(0, 2, 'L'), (1, 2, 'L'), (0, 8, 'G'), (1, 4, 'G'), (0, 2, 'U')], [(0, 2, 'L'), (1, 2, 'L'), (0, 8, 'G'), (1, 4, 'G'), (0, 2, 'U'), (0, 4, 'R'), (1, 4, 'R')], # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [(0, 4, 'L'), (1, 4, 'L'), (0, 8, 'G'), (1, 4, 'G'), (0, 2, 'U'), (1, 2, 'U')], # No globals
+      [('G', 2, 2)], [('G', 2, 32)], [('G', 3, 2)], [('G', 3, 32)], # Checking how it works with 1 grouped_reduce.
+      [('G', 2, 2), ('G', 3, 2)], [('G', 2, 16), ('G', 3, 2)], [('G', 2, 4), ('G', 3, 64)], # Checking how it works with 2 grouped_reduces.
+      [('G', 2, 16), ('G', 3, 2), ('R', 3, 4)], [('G', 2, 2), ('G', 3, 32), ('R', 3, 4)], # Checking how it works with 2 grouped_reduces + upcasts.
+      [('L', 0, 4), ('L', 1, 4), ('G', 2, 4), ('G', 3, 4)], [('L', 0, 4), ('L', 1, 4), ('G', 2, 2), ('G', 3, 8), ('R', 3, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
+      [('L', 0, 2), ('L', 1, 2), ('G', 2, 8), ('G', 3, 4), ('U', 0, 2)], [('L', 0, 2), ('L', 1, 2), ('G', 2, 8), ('G', 3, 4), ('U', 0, 2), ('R', 2, 4), ('R', 3, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
+      [('L', 0, 4), ('L', 1, 4), ('G', 2, 4), ('G', 3, 4), ('U', 0, 2), ('U', 1, 2)], # No globals
     ])
 
 class TestFloat4(unittest.TestCase):
