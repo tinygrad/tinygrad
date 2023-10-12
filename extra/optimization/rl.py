@@ -3,14 +3,14 @@ import numpy as np
 import math, random
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_save, safe_load, load_state_dict
-from tinygrad.codegen.search import actions, bufs_from_lin, time_linearizer
+from tinygrad.codegen.search import actions, bufs_from_lin, time_linearizer, get_linearizer_actions
 from tinygrad.nn.optim import Adam
 from extra.optimization.pretrain import PolicyNet
 from extra.optimization.helpers import load_worlds, ast_str_to_lin, lin_to_feats
 
 if __name__ == "__main__":
   net = PolicyNet()
-  if os.path.isfile("/tmp/policynet.safetensors"): load_state_dict(net, safe_load("/tmp/policynet.safetensors"))
+  #if os.path.isfile("/tmp/policynet.safetensors"): load_state_dict(net, safe_load("/tmp/policynet.safetensors"))
   optim = Adam(get_parameters(net))
 
   ast_strs = load_worlds()
@@ -21,7 +21,7 @@ if __name__ == "__main__":
     Tensor.no_grad, Tensor.training = True, False
     lin = ast_str_to_lin(random.choice(ast_strs))
     rawbufs = bufs_from_lin(lin)
-    tm = last_tm = base_tm = time_linearizer(lin, rawbufs)[0]
+    tm = last_tm = base_tm = time_linearizer(lin, rawbufs)
 
     # take actions
     feats, acts, rews = [], [], []
@@ -29,6 +29,13 @@ if __name__ == "__main__":
       feat = lin_to_feats(lin)
       feats.append(feat)
       probs = net(Tensor([feat])).exp()[0].numpy()
+
+      # mask valid actions
+      valid_action_mask = np.zeros((len(actions)+1), dtype=np.float32)
+      for x in get_linearizer_actions(lin): valid_action_mask[x] = 1
+      probs *= valid_action_mask
+      probs /= sum(probs)
+
       act = np.random.choice(len(probs), p=probs)
       acts.append(act)
       if act == 0:
@@ -36,7 +43,7 @@ if __name__ == "__main__":
         break
       try:
         lin.apply_opt(actions[act-1])
-        tm = time_linearizer(lin, rawbufs)[0]
+        tm = time_linearizer(lin, rawbufs)
         if math.isinf(tm): raise Exception("failed")
         rews.append(((last_tm-tm)/base_tm))
         last_tm = tm
@@ -50,7 +57,9 @@ if __name__ == "__main__":
     print(f"***** EPISODE {len(rews)} steps, {sum(rews):5.2f} reward, {base_tm*1e6:12.2f} -> {tm*1e6:12.2f} : {lin.colored_shape()}")
     all_feats += feats
     all_acts += acts
-    all_rews += np.cumsum(rews).tolist()
+    # rewards to go
+    for i in range(len(rews)-2, -1, -1): rews[i] += rews[i+1]
+    all_rews += rews
 
     BS = 32
     if len(all_feats) >= BS:
@@ -65,6 +74,3 @@ if __name__ == "__main__":
       all_feats = all_feats[BS:]
       all_acts = all_acts[BS:]
       all_rews = all_rews[BS:]
-
-    #print(rews)
-

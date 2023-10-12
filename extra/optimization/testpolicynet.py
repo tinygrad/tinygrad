@@ -20,8 +20,8 @@ if __name__ == "__main__":
 
     linhc = deepcopy(lin)
     linhc.hand_coded_optimizations()
-    tm, gflops = time_linearizer(linhc, rawbufs)
-    print(f"{tm:10.2f}", linhc.colored_shape())
+    tm = time_linearizer(linhc, rawbufs)
+    print(f"{tm*1e6:10.2f}", linhc.colored_shape())
 
     while 1:
       probs = net(Tensor([lin_to_feats(lin)]))
@@ -33,5 +33,5 @@ if __name__ == "__main__":
       except Exception:
         print("FAILED")
         break
-      tm, gflops = time_linearizer(lin, rawbufs)
-      print(f"{tm:10.2f}", lin.colored_shape())
+      tm = time_linearizer(lin, rawbufs)
+      print(f"{tm*1e6:10.2f}", lin.colored_shape())

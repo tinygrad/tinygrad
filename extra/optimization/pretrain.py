@@ -7,7 +7,7 @@ from tinygrad.nn.state import get_parameters, get_state_dict, safe_save, safe_lo
 from tinygrad.codegen.search import actions
 from extra.optimization.helpers import load_worlds, ast_str_to_lin, lin_to_feats, assert_same_lin
 
-INNER = 256
+INNER = 32
 class PolicyNet:
   def __init__(self):
     self.l1 = Linear(240,INNER)
