@@ -19,22 +19,24 @@ from tinygrad.codegen.optimizer import Opt, OptOps
 from extra.optimization.helpers import lin_to_feats, MAX_DIMS
 
 # NOTE: this is not real value of the state, it's just a prediction of the runtime
-INNER = 256
+INNER = 512
 class ValueNet:
   def __init__(self):
     self.l1 = Linear(240,INNER)
     self.l2 = Linear(INNER,INNER)
-    self.l3 = Linear(INNER,1)
+    self.l3 = Linear(INNER,INNER)
+    self.l4 = Linear(INNER,1)
   def __call__(self, x):
     x = self.l1(x).relu()
     x = self.l2(x).relu()
-    return self.l3(x)
+    x = self.l3(x).relu()
+    return self.l4(x)
 
 if __name__ == "__main__":
   net = ValueNet()
   optim = Adam(get_parameters(net))
 
-  TRAIN_SIZE = 2000
+  TRAIN_SIZE = 5000
   TEST_SIZE = 128
 
   dset = open("/tmp/logtm").read().strip().split("\n")
@@ -50,7 +52,7 @@ if __name__ == "__main__":
     if lin.shape_len >= MAX_DIMS: continue
     if min(tms) == float('inf'): continue
     X.append(lin_to_feats(lin))
-    Y.append([math.log(min(tms)*1e6)])
+    Y.append([math.log(min(tms))])
   print(f"got {len(X)} samples")
 
   X_test,Y_test = Tensor(X[TRAIN_SIZE:]), Tensor(Y[TRAIN_SIZE:])
@@ -83,6 +85,6 @@ if __name__ == "__main__":
   safe_save(get_state_dict(net), "/tmp/valuenet.safetensors")
 
   import matplotlib.pyplot as plt
-  plt.plot(losses[50:])
-  plt.plot(test_losses[50:])
+  plt.plot(losses[200:])
+  plt.plot(test_losses[200:])
   plt.show()

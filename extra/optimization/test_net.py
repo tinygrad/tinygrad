@@ -55,4 +55,4 @@ if __name__ == "__main__":
         print("FAILED")
         break
       tm = time_linearizer(lin, rawbufs)
-      print(f"{tm*1e6:10.2f} {pred_time:10.2f}", lin.colored_shape())
+      print(f"{tm*1e6:10.2f} {pred_time*1e6:10.2f}", lin.colored_shape())
