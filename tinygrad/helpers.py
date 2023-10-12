@@ -152,14 +152,10 @@ class GlobalCounters:
 # *** compiled cache decorator ***
 
 def cache_compiled(func):
-  def wrapper(self, prg:str, **kwargs):
-    # cache_path is where the cache is stored, output_file is save to write.
-    cache_path, output_file = pathlib.Path(f"{tempfile.gettempdir()}/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}"), pathlib.Path(kwargs.get('output_file', tempfile.mktemp()))
+  def wrapper(self, prg:str, output_file=pathlib.Path(tempfile.mktemp()), **kwargs):
+    cache_path = pathlib.Path(f"{tempfile.gettempdir()}/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}")
     if not cache_path.exists():
-      # If we compile into a file (has output_file in args), just rename it into the cache. Otherwise, write a temp file and rename it (for atomicity).
-      if (res := func(self, prg, **kwargs)) and 'output_file' not in kwargs: output_file.write_bytes(res)
+      func(self, prg, output_file=output_file, **kwargs)
       output_file.rename(cache_path)
-
-    # If we compile into a file, return the filepath. Otherwise, return the content.
-    return cache_path if 'output_file' in kwargs else cache_path.read_bytes()
+    return cache_path
   return wrapper
