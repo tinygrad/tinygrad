@@ -2,7 +2,8 @@
 import unittest
 import secrets
 import string
-import hashlib
+import tempfile
+import pathlib
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
 from tinygrad.helpers import cache_compiled
@@ -29,6 +30,25 @@ class TestKernelCache(unittest.TestCase):
     assert self.compile_call_count == 1
 
     prg2_res = self.__helper_test_compile(prg2)
+    assert prg2_res == prg2.encode()
+    assert self.compile_call_count == 2
+
+  @cache_compiled
+  def __helper_test_compile_into_file(self, prg, output_file, **kwargs):
+    self.compile_call_count += 1
+    pathlib.Path(output_file).write_bytes(prg.encode())
+    return pathlib.Path(output_file)
+
+  def test_compile_cache_into_file(self):
+    output_file=tempfile.mktemp()
+    prg1 = generate_random_string(64) + "a"
+    prg2 = generate_random_string(64) + "b"
+    cold_compile_res = self.__helper_test_compile_into_file(prg1, output_file=output_file).read_bytes()
+    warm_compile_res = self.__helper_test_compile_into_file(prg1, output_file=output_file).read_bytes()
+    assert cold_compile_res == warm_compile_res == prg1.encode()
+    assert self.compile_call_count == 1
+
+    prg2_res = self.__helper_test_compile_into_file(prg2, output_file=output_file).read_bytes()
     assert prg2_res == prg2.encode()
     assert self.compile_call_count == 2
 
