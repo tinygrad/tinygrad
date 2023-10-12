@@ -49,7 +49,7 @@ class Tensor:
   default_type: ClassVar[DType] = dtypes.float32
   def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
-    device = Device.canonicalize(device)
+    device = Device.canonicalize(device) if device is not None else Device.DEFAULT
     # tensors have gradients, buffers do not
     self.grad: Optional[Tensor] = None
 

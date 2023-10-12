@@ -68,7 +68,7 @@ class OptimizedKernel(Kernel):
   def simplify_ones(self):
     # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride
-    if self.shape_len == 0: return
+    if self.shape_len == 0 or 1 not in self.full_shape: return
     all_ones = [s==1 for s in self.full_shape]
     self.local_dims -= sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce])
     self.upcasted -= sum(all_ones[self.shape_len-self.upcasted:])

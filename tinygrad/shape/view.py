@@ -33,11 +33,16 @@ class View:
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def size(self): return prod([s.max if isinstance(s, Node) else s for s,st in zip(self.shape, self.strides) if st != 0])
 
+  @functools.cached_property
+  def has_sint(self): return not all_int(self.shape + self.strides + (self.offset,) + tuple(x for m in self.mask for x in m) if self.mask is not None else tuple())
+
   def vars(self) -> List[Variable]:
+    if not self.has_sint: return []
     flatten_mask = tuple(x for m in self.mask for x in m) if self.mask is not None else tuple()
     return dedup(functools.reduce(operator.add, [x.vars() for x in self.shape+self.strides+(self.offset,)+flatten_mask if isinstance(x, Node)], []))
 
   def unbind(self) -> View:
+    if not self.has_sint: return self
     unbound_vars:Dict[VariableOrNum,Node] = {v: v.unbind()[0] for v in self.vars() if v.val is not None}
     new_shape = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.shape])
     new_strides = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.strides])

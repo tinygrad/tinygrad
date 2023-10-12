@@ -21,6 +21,7 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tu
       ret.append((shape[i], strides[i]))
   return tuple(ret)
 
+@functools.lru_cache(maxsize=None)
 def expr_node_mask(view:View, idx, valid=None) -> Node:
   expr = [valid] if valid is not None else []
   if view.mask is not None:
@@ -33,6 +34,7 @@ def expr_node_mask(view:View, idx, valid=None) -> Node:
   return Variable.ands(expr)
 
 # generate an expression if you have a single idx variable
+@functools.lru_cache(maxsize=None)
 def expr_node(view:View, idx=None) -> Node:
   if idx is None: idx = Variable('idx', 0, prod(view.shape)-1)
   ret: List[Node] = [Variable.num(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
@@ -43,6 +45,7 @@ def expr_node(view:View, idx=None) -> Node:
   return Variable.sum(ret)
 
 # generate an expression if you have a variable or expression for each index
+@functools.lru_cache(maxsize=None)
 def expr_idxs(view:View, idxs) -> Node:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
   return Variable.sum([Variable.num(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])
@@ -79,13 +82,17 @@ class ShapeTracker:
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
 
+  @property
+  def has_sint(self) -> bool: return any(v.has_sint for v in self.views)
+
   # this is the real size (ish)
   def size(self): return self.views[-1].size()
 
-  def vars(self) -> List[Variable]: return dedup(functools.reduce(operator.add, [v.vars() for v in self.views], []))
+  def vars(self) -> List[Variable]: return dedup(functools.reduce(operator.add, [v.vars() for v in self.views], [])) if self.has_sint else []
 
   @property
   def var_vals(self) -> Dict[Variable, int]:
+    if not self.has_sint: return {}
     ret:Dict[Variable, int] = {}
     for v in self.vars():
       var, val = v.unbind()
@@ -93,7 +100,8 @@ class ShapeTracker:
       ret[var] = val
     return ret
 
-  def unbind(self) -> ShapeTracker: return ShapeTracker(tuple(v.unbind() for v in self.views))
+  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  def unbind(self) -> ShapeTracker: return ShapeTracker(tuple(v.unbind() for v in self.views)) if self.has_sint else self
 
   def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
     to_apply:List[Tuple[MovementOps, Tuple]] = []
@@ -188,7 +196,9 @@ class ShapeTracker:
   def stride(self, mul: Tuple[int, ...]) -> ShapeTracker:
     return ShapeTracker(self.views[0:-1] + (self.views[-1].stride(mul), ))
 
+  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def reshape(self, new_shape: Tuple[sint, ...]) -> ShapeTracker:
+    if self.views[-1].shape == new_shape: return self
     new_view = self.views[-1].reshape(new_shape)
     if new_view is None:
       extra_view = View.create(new_shape)

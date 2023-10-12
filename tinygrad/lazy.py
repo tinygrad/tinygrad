@@ -88,9 +88,10 @@ def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dty
 
   # wop is the deduping key. i feel this used to compare more deeply
   wop = (device, dtype, optype, ref(op), ref(base) if base else None)
-  if wop in lazycache:
-    for x in op.buffers: x.children.add(lazycache[wop])
-    return lazycache[wop]
+  ret = lazycache.get(wop, None)
+  if ret is not None:
+    for x in op.buffers: x.children.add(ret)
+    return ret
 
   lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype, base=base)
   return ret
@@ -252,7 +253,7 @@ class LazyBuffer:
     if REMOVE_MOVEMENT_NOPS and not self.realized and st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
       root = get_movementroot(self)
-      if root.st.contiguous and root != self and prod(st.shape) == prod(root.shape):
+      if root != self and root.st.contiguous and prod(st.shape) == prod(root.st.shape):
         return root.reshape(st.shape)
     return create_lazybuffer(self.device, st, MovementOps, LazyOp(op, (self,), arg), self.dtype, base=self.base)
 

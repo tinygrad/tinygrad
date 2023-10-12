@@ -47,25 +47,23 @@ class ScheduleItem:
   inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
 
+@dataclass
 class LazyOp:
-  __slots__ = "op", "src", "arg", "buffers", "__weakref__"
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
-  arg: Any
-  buffers: Tuple[LazyBuffer, ...]
-  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None):
-    self.op, self.src, self.arg, self.buffers = op, src, arg, ()
-    try:  # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
-      for x in src: self.buffers += x.buffers
-    except AttributeError: self.buffers = ()
-
-  def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
-  def __eq__(self, __value: object) -> bool: return isinstance(__value, LazyOp) and self.op is __value.op and self.src == __value.src and self.arg == __value.arg
-  def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
+  arg: Any = None
   @property
+  def buffers(self):
+    buffers: Tuple[Union[LazyOp, LazyBuffer], ...] = ()
+    try:  # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
+      for x in self.src: buffers += x.buffers
+    except AttributeError: buffers = ()
+    return buffers
+  def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
+  @functools.cached_property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
-  def map_buffers(self, real_srcs: Mapping[Any, Union[LazyBuffer, LazyOp]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) if y not in real_srcs else real_srcs[y] for y in self.src]), self.arg)
+  def map_buffers(self, real_srcs: Mapping[Any, Union[LazyBuffer, LazyOp]]) -> LazyOp: return LazyOp(self.op, tuple([real_srcs.get(y, y.map_buffers(real_srcs)) for y in self.src]), self.arg)
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
@@ -92,7 +90,10 @@ class LazyOp:
 
 class _Device:
   def __init__(self) -> None: self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
-  def canonicalize(self, device:Optional[str]) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "") if device is not None else self.DEFAULT
+  def canonicalize(self, device:Optional[str]) -> str: return Device.canonical(device) if device is not None else self.DEFAULT
+  @staticmethod
+  @functools.lru_cache(None)
+  def canonical(device): return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __getitem__(self, x:str) -> Union[Interpreted, Compiled]:
     x = x.split(":")[0].upper()
