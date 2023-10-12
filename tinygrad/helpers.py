@@ -152,12 +152,14 @@ class GlobalCounters:
 # *** compiled cache decorator ***
 
 def cache_compiled(func):
-  def wrapper(self, prg:str, **kwargs) -> Tuple[Any, pathlib.Path]:
+  def wrapper(self, prg:str, **kwargs):
     # cache_path is where the cache is stored, shadow_path is for atomicity.
     cache_path, output_file = pathlib.Path(f"{tempfile.gettempdir()}/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}"), pathlib.Path(kwargs.get('output_file', tempfile.mktemp()))
     if not cache_path.exists():
-      # If we receive any output to cache, we write and cache it. Otherwise, if we get None, the callback itself has already written to shadow_path.
-      if (res := func(self, prg, **kwargs)) and res[0] is not None: output_file.write_bytes(res[0])
+      # If we compile in a file, just rename it into the case and return it later. Otherwise, write a temp file and rename it (for atomicity).
+      if (res := func(self, prg, **kwargs)) and 'output_file' not in kwargs: output_file.write_bytes(res)
       output_file.rename(cache_path)
-    return cache_path.read_bytes(), cache_path
+
+    # If we compile into a file, return the file itself. Otherwise, return the content.
+    return cache_path if 'output_file' in kwargs else cache_path.read_bytes()
   return wrapper
