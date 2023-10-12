@@ -1,9 +1,8 @@
-from typing import Tuple, Dict, List, cast, DefaultDict, Optional
+from typing import Dict, List, cast, DefaultDict, Optional
 from copy import deepcopy
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
-from tinygrad.helpers import prod
-from tinygrad.shape.symbolic import sym_infer
+from tinygrad.helpers import prod, getenv
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
@@ -29,39 +28,35 @@ actions = [
   Opt(op=OptOps.GROUPTOP, axis=2, amt=16), Opt(op=OptOps.GROUPTOP, axis=2, amt=256)]
 device:Compiled = cast(Compiled, Device[Device.DEFAULT])
 
-# returns time(s) and GFLOPS
-def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, cnt=3, should_copy=True) -> Tuple[float, float]:
+# returns time in seconds
+logtm = open(getenv("LOGTM", ""),"a") if getenv("LOGTM", "") else None
+def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, cnt=3, should_copy=True) -> float:
   if should_copy: lin = deepcopy(lin)  # TODO: remove the need for this
   var_vals = {k:k.min for k in vars_from_ast(lin.ast)}
   try:
     lin.linearize()
     prg = device.to_program(lin)
     real_global_size = prg.global_size[:]
-    prg.global_size = [1,1,1]
-    tm = prg(rawbufs, var_vals, force_wait=True)
+    if allow_test_size:
+      test_global_size = prg.global_size[:]
+      while prod(test_global_size) > 16384:
+        for j in range(2,-1,-1):
+          if test_global_size[j] > 1:
+            test_global_size[j] //= 2
+            break
+      factor = prod(prg.global_size) / prod(test_global_size)
+      prg.global_size = test_global_size
+    else:
+      factor = 1
+    tms = [prg(rawbufs, var_vals, force_wait=True)*factor for _ in range(cnt)]
+    prg.global_size = real_global_size
   except Exception:
     print("FAILED")
     print(lin.ast)
     print(lin.applied_opts)
-    return float('inf'), 0
-
-  if allow_test_size:
-    test_global_size = real_global_size[:]
-    while prod(test_global_size) > 16384:
-      for j in range(2,-1,-1):
-        if test_global_size[j] > 1:
-          test_global_size[j] //= 2
-          break
-    factor = prod(real_global_size) / prod(test_global_size)
-    prg.global_size = test_global_size
-  else:
-    prg.global_size = real_global_size
-    factor = 1
-
-  tm = min([prg(rawbufs, var_vals, force_wait=True) for _ in range(cnt)])
-  tm *= factor
-  gflops = sym_infer(lin.info.flops, var_vals)*1e-9/tm
-  return tm, gflops
+    tms = [float('inf')]
+  if logtm: logtm.write(str((lin.ast, lin.applied_opts, tms))+"\n")
+  return min(tms)
 
 # get (scrap) buffers for timing the linearizer
 def bufs_from_lin(lin:Linearizer) -> List[RawBuffer]:
@@ -75,7 +70,7 @@ def bufs_from_lin(lin:Linearizer) -> List[RawBuffer]:
 
 # get dictionary of all possible actions
 def get_linearizer_actions(lin:Linearizer) -> Dict[int, Linearizer]:
-  acted_lins = {}
+  acted_lins = {0:deepcopy(lin)}
   for i,a in enumerate(actions):
     lin2 = deepcopy(lin)
     try:
@@ -85,7 +80,7 @@ def get_linearizer_actions(lin:Linearizer) -> Dict[int, Linearizer]:
         if c in {"magenta", "yellow"}: up *= s
         if c in {"cyan", "green", "white"}: lcl *= s
       if up > 256 or lcl > 256: continue
-      acted_lins[i] = lin2
+      acted_lins[i+1] = lin2
     except Exception:
       pass
   return acted_lins
