@@ -19,6 +19,7 @@ from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters
 from extra.lr_scheduler import OneCycleLR
+from extra.helpers import get_net_size
 from tinygrad.jit import TinyJit
 from extra.dist import collectives
 
@@ -264,6 +265,7 @@ def train_cifar():
 
   # initialize model weights
   model = SpeedyResNet(W)
+  get_net_size(model)
 
   # padding is not timed in the original repo since it can be done all at once
   X_train = pad_reflect(X_train, size=hyp['net']['pad_amount'])
