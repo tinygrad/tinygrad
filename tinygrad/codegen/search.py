@@ -7,6 +7,7 @@ from tinygrad.shape.symbolic import sym_infer
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
+import inspect
 
 from tinygrad.codegen.optimizer import Opt, OptOps
 actions = [
@@ -89,3 +90,7 @@ def get_linearizer_actions(lin:Linearizer) -> Dict[int, Linearizer]:
     except Exception:
       pass
   return acted_lins
+
+# get the list of all function calls leading to the current function from the stack
+def generate_stack():
+  for i in list(reversed(inspect.stack())): print(f"Function = {i.function} called from {i.filename} at line number ={i.lineno}")
