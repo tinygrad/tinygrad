@@ -51,9 +51,9 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
     tms = [prg(rawbufs, var_vals, force_wait=True)*factor for _ in range(cnt)]
     prg.global_size = real_global_size
   except Exception:
-    print("FAILED")
-    print(lin.ast)
-    print(lin.applied_opts)
+    #print("FAILED")
+    #print(lin.ast)
+    #print(lin.applied_opts)
     tms = [float('inf')]
   if logtm: logtm.write(str((lin.ast, lin.applied_opts, tms))+"\n")
   return min(tms)

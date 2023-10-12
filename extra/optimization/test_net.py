@@ -21,7 +21,7 @@ if __name__ == "__main__":
     net = PolicyNet()
     load_state_dict(net, safe_load("/tmp/policynet.safetensors"))
 
-  ast_strs = load_worlds()
+  ast_strs = load_worlds(filter_reduce=False)
 
   # real randomness
   random.seed()

@@ -22,7 +22,7 @@ from extra.optimization.helpers import lin_to_feats, MAX_DIMS
 INNER = 512
 class ValueNet:
   def __init__(self):
-    self.l1 = Linear(240,INNER)
+    self.l1 = Linear(888,INNER)
     self.l2 = Linear(INNER,INNER)
     self.l3 = Linear(INNER,INNER)
     self.l4 = Linear(INNER,1)
@@ -41,6 +41,7 @@ if __name__ == "__main__":
   dset = open("/tmp/logtm").read().strip().split("\n")
   random.seed(1337)
   random.shuffle(dset)
+  #dset = dset[:2000]
 
   X,Y = [], []
   for i,x in enumerate(tqdm(dset)):

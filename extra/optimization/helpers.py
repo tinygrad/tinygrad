@@ -34,12 +34,12 @@ import math
 from tinygrad.shape.symbolic import Node
 
 MAX_DIMS = 16
-def lin_to_feats(lin):
+MAX_BUFS = 8
+def lin_to_feats(lin, use_sts=True):
   assert lin.shape_len < MAX_DIMS, "too many dims"
 
   all_colors = ["blue", "cyan", "white", "green", "red", "magenta", "yellow"]
   lc = [all_colors.index(x) for x in lin.colors()]
-  #my_sts = dedup([(x.shape == lin.full_shape, x.real_strides()) for x in lin.sts[1:]])
 
   # first, the full shape, including the colors
   ret = []
@@ -62,5 +62,22 @@ def lin_to_feats(lin):
   ret += [0] * (15*(MAX_DIMS-len(lin.full_shape)))
   ret = [float(x) for x in ret]
 
-  assert len(ret) == 240, f"wrong len {len(ret)}"
+  if use_sts:
+    my_sts = dedup([(x.shape == lin.full_shape, x.real_strides()) for x in lin.sts[1:]])
+    assert len(my_sts) < MAX_BUFS
+    sts_len = 1 + 5*MAX_DIMS
+    for s in my_sts:
+      ret.append(s[0])  # reduce
+      for d in s[1]:
+        ret.append(d is None)
+        ret.append(d == 0)
+        ret.append(d == 1)
+        ret.append(d <= 16 if d is not None else 0)
+        if d is not None and d >= 1: ret.append(math.log2(d))
+        else: ret.append(0)
+      ret += [0] * (5*(MAX_DIMS - len(s[1])))
+    ret += [0] * (sts_len*(MAX_BUFS - len(my_sts)))
+    assert len(ret) == 888, f"wrong len {len(ret)}"
+  else:
+    assert len(ret) == 240, f"wrong len {len(ret)}"
   return ret
