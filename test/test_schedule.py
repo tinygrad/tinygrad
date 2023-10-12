@@ -136,7 +136,6 @@ class TestSchedule(unittest.TestCase):
     d = a.reshape(10,1)+b.reshape(10,1)
     check_schedule(d, 0, [c])
 
-  @unittest.skip("not pushing movement ops through sourceless buffers")
   def test_cache_binaryop_transpose(self):
     a = Tensor.empty(10,10)
     b = Tensor.empty(10,10)
