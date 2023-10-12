@@ -74,7 +74,8 @@ if __name__ == "__main__":
   if getenv("GREEDY"):
     from tinygrad.codegen.linearizer import Linearizer
     from tinygrad.codegen.search import bufs_from_lin, time_linearizer, get_linearizer_actions
-    for i,si in enumerate(schedule):
+    kernel_num = 0
+    for si in schedule:
       if si.ast.op in LoadOps: continue
       linhc = Linearizer(si.ast)
       rawbufs = bufs_from_lin(linhc)
@@ -91,7 +92,8 @@ if __name__ == "__main__":
         if DEBUG >= 1: print(f"{opts[0][1]*1e6:10.2f} us from {len(opts):3d} actions", lin.colored_shape())
       tmhc = time_linearizer(linhc, rawbufs)
       tm = time_linearizer(lin, rawbufs)
-      print(f"opt kernel {i:3d}: {tmhc*1e6:10.2f} -> {tm*1e6:10.2f} hc: {linhc.colored_shape()}")
+      print(f"opt kernel {kernel_num:3d}: {tmhc*1e6:10.2f} -> {tm*1e6:10.2f} *** {linhc.colored_shape()} -> {lin.colored_shape()}")
+      kernel_num += 1
 
   #schedule = schedule[0:72]  # first model should be 8.85 ms
   print("**** running real kernels ****")
