@@ -77,7 +77,7 @@ class DType(NamedTuple):
   name: str
   np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
   sz: int = 1
-  def __repr__(self): return f"dtypes.{self.name}"
+  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}"
 
 # dependent typing?
 class ImageDType(DType):
@@ -137,6 +137,7 @@ class dtypes:
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}
+INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()}
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0

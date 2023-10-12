@@ -1,7 +1,7 @@
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict
 import itertools
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, ReduceOps, MemBuffer, BufferOps, Device, Compiled
-from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int
+from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int, ansilen
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
@@ -49,10 +49,9 @@ class LinearizerOptions(NamedTuple):
   local_max: Optional[List[int]] = None
 
 class Kernel:
-  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None, var_vals=None):
+  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
     self.opts = opts if opts else (cast(Compiled, Device[Device.DEFAULT]).linearizer_opts if isinstance(Device[Device.DEFAULT], Compiled) else LinearizerOptions())
     self.ast = ast
-    self.var_vals = var_vals
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
@@ -83,6 +82,9 @@ class Kernel:
 
     self.global_size: Optional[List[int]] = None
     self.local_size: Optional[List[int]] = None
+
+  @property
+  def membufs(self) -> List[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
 
   def has_variable_shape(self) -> bool:
     for b in self.bufs:
@@ -153,7 +155,10 @@ class Kernel:
     assert len(colors) == self.shape_len, "colors size mismatch"
     return colors
 
-  def colored_shape(self) -> str: return ' '.join(colored(s, color) for s,color in zip([f"{s:4d}" if isinstance(s, int) else s for s in self.full_shape], self.colors()))
+  def colored_shape(self, pad=None) -> str:
+    ret = ' '.join(colored(s, color) for s,color in zip([f"{s:4d}" if isinstance(s, int) else s for s in self.full_shape], self.colors()))
+    if pad: ret += ' '*(pad-ansilen(ret))
+    return ret
   def printbufs(self, prefix=""):
     for i,st in enumerate(self.sts):
       print(prefix, f"{i:3d} {str(self.bufs[i]):47s}", st.views)
