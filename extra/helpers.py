@@ -1,7 +1,7 @@
 import multiprocessing, subprocess
 import cloudpickle  # type: ignore
 from typing import Any
-from tabulate import tabulate
+from tabulate import tabulate  # type: ignore
 from tinygrad.nn.state import get_state_dict
 
 def get_net_size(model):
