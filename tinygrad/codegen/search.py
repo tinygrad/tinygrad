@@ -54,8 +54,8 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
     print("FAILED")
     print(lin.ast)
     print(lin.applied_opts)
-    return float('inf')
-  if logtm: logtm.write(str((lin.ast, lin.applied_opts, tms)))
+    tms = [float('inf')]
+  if logtm: logtm.write(str((lin.ast, lin.applied_opts, tms))+"\n")
   return min(tms)
 
 # get (scrap) buffers for timing the linearizer
