@@ -26,12 +26,12 @@ def kopt_search_hook(k, create_k, to_prg, baseline, bufs, var_vals, suggestion):
       return first_tm
     except Exception:
       return 10000_000   # 10000 seconds is infinity
-  opts, default_opts = kernel_optimize_opts(k, suggestion)
+  opts, default_opt = kernel_optimize_opts(k, suggestion)
   if not opts: return "BASELINE"
   search_space = prod([len(x.choices) for x in opts])
   budget = getenv("BUDGET", 20) # THIS IS TEST BUDGET
   optimizer = ng.optimizers.NGOpt(parametrization=ng.p.Tuple(*opts), budget=min(search_space, budget))
-  optimizer.suggest(normalize_suggestion(suggestion))
+  optimizer.suggest(normalize_suggestion(default_opt, suggestion))
   recommendation = optimizer.minimize(check_opt)
   return apply_ng_opt(create_k(), recommendation.value) if recommendation.loss < baseline else "BASELINE"
 
