@@ -398,14 +398,18 @@ class OptimizedKernel(Kernel):
 
     # **** below this line need to be optional and benchmarked ****
 
+    # TODO: doing extra upcasts with images doesn't work for some reason (maybe has to do with to_image_idx)
+    # to trigger the above bug, remove prod(self.full_shape[self.shape_len - self.upcasted:]) from the below
+    # expression.
     # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
     # this can be made much smarter
-    to_upcast = []
+    to_upcast: List[int] = []
     # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
     for axis in range(self.first_reduce):
       # we might want to be able to split axes that are masked, or refuse to merge them in simplify_merge_adjacent
       # for now skip upcasting here if there is a symbolic axis
-      if isinstance(self.full_shape[axis], int) and self.full_shape[axis] <= 7 and any(st.axis_is_masked(axis) for st in self.sts) and prod(self.full_shape[self.shape_len - self.upcasted:]) * self.full_shape[axis] <= 7 * 7:
+      if isinstance(self.full_shape[axis], int) and self.full_shape[axis] <= 7 and any(st.axis_is_masked(axis) for st in self.sts) and \
+        prod(self.full_shape[self.shape_len - self.upcasted:]) * prod(self.full_shape[j] for j in to_upcast) * self.full_shape[axis] <= 7 * 7:
         if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
         to_upcast.append(axis)
     for axis in to_upcast[::-1]:
