@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools, operator
+import functools, operator, sys
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, cast
 from tinygrad.helpers import prod, all_int, dedup
@@ -101,12 +101,13 @@ class View:
 
     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
     # check for the same size
-    if all_int(self.shape):
-      if all_int(new_shape):
-        assert prod(self.shape) == prod(new_shape), f"size mismatched, can't reshape {self.shape=} -> {new_shape=}"
-      else:
-        assert all(isinstance(s, (int, Variable)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
-        assert prod(self.shape) == prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]), f"size mismatched, can't reshape {self.shape=} -> {new_shape=}"
+    if not sys.flags.optimize == 1:
+      if all_int(self.shape):
+        if all_int(new_shape):
+          assert prod(self.shape) == prod(new_shape), f"size mismatched, can't reshape {self.shape=} -> {new_shape=}"
+        else:
+          assert all(isinstance(s, (int, Variable)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
+          assert prod(self.shape) == prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]), f"size mismatched, can't reshape {self.shape=} -> {new_shape=}"
 
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)
