@@ -1,5 +1,4 @@
 import os
-from copy import deepcopy
 from tinygrad.nn import Linear
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import Adam
@@ -29,12 +28,11 @@ if __name__ == "__main__":
   steps = 0
 
   for ast_str in ast_strs:
-    lin = ast_str_to_lin(ast_str)
-    linhc = deepcopy(lin)
+    lin2 = ast_str_to_lin(ast_str)
+    linhc = ast_str_to_lin(ast_str)
     linhc.hand_coded_optimizations()
-    print(lin.colored_shape(50), "->", linhc.colored_shape())
+    print(lin2.colored_shape(50), "->", linhc.colored_shape())
 
-    lin2 = deepcopy(lin)
     for o in linhc.applied_opts:
       X.append(lin_to_feats(lin2))
       Y.append(actions.index(o)+1)
