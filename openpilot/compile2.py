@@ -1,6 +1,7 @@
 import os
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
 if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
+os.environ["PREREALIZE"] = "0"
 
 import sys
 import onnx

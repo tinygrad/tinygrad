@@ -3,6 +3,8 @@ from tinygrad.helpers import ImageDType, prod, IMAGE, getenv, dtypes, DEBUG
 
 # *** image Tensor function replacements ***
 
+from tinygrad.lazy import get_single_root
+
 def image_dot(self, w):
   # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
   n1, n2 = len(self.shape), len(w.shape)
@@ -58,6 +60,7 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
   if IMAGE >= 2: x,w = x.cast(base_image_type(x.shape)), w.cast(base_image_type(w.shape))
   x, w = x.contiguous(), w.contiguous()
+  if getenv("PREREALIZE", 1) and get_single_root(w.lazydata).realized: w.realize()
 
   # expand out
   rcin_hi, rcin_lo = cin//4 if cin >= 4 else 1, 4 if cin >= 4 else 1
