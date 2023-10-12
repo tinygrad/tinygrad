@@ -298,26 +298,6 @@ class OptimizedKernel(Kernel):
         return True
     return False
 
-  def apply_auto_opt(self, x):
-    for axis, amt, typ in x:
-      if axis is None or amt == 1: continue
-      if typ == "G" and self.opts.has_shared:
-        assert self.full_shape[self.first_reduce+axis+len(self.group_for_reduce)] % amt == 0, "no longer valid shift"
-        self.shift_to(self.first_reduce+axis+len(self.group_for_reduce), amt, top=True, insert_before=self.first_reduce+len(self.group_for_reduce))
-        self.group_for_reduce.append(amt)
-      if typ == "R":
-        typ = "U"
-        axis += self.first_reduce + len(self.group_for_reduce)
-      if typ == "U":
-        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-        self.shift_to(axis, amt)
-        self.upcast()
-      elif typ == "L":
-        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-        self.shift_to(axis, amt, insert_before=self.first_reduce)
-        self.local_dims += 1
-    self.simplify_ones()
-
   def apply_opt(self, opt:Opt):
     self.applied_opts.append(opt)
     assert self.full_shape[opt.axis] % opt.amt == 0, "no longer valid shift"
