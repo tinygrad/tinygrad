@@ -17,38 +17,20 @@ class TestKernelCache(unittest.TestCase):
   compile_call_count = 0
 
   @cache_compiled
-  def __helper_test_compile(self, prg, **kwargs):
+  def __helper_test_compile(self, prg, output_file=pathlib.Path(tempfile.mktemp()), **kwargs):
     self.compile_call_count += 1
-    return prg.encode()
+    output_file.write_bytes(prg.encode())
+    return output_file
 
   def test_compile_cache(self):
     prg1 = generate_random_string(64) + "a"
     prg2 = generate_random_string(64) + "b"
-    cold_compile_res = self.__helper_test_compile(prg1)
-    warm_compile_res = self.__helper_test_compile(prg1)
+    cold_compile_res = self.__helper_test_compile(prg1).read_bytes()
+    warm_compile_res = self.__helper_test_compile(prg1).read_bytes()
     assert cold_compile_res == warm_compile_res == prg1.encode()
     assert self.compile_call_count == 1
 
-    prg2_res = self.__helper_test_compile(prg2)
-    assert prg2_res == prg2.encode()
-    assert self.compile_call_count == 2
-
-  @cache_compiled
-  def __helper_test_compile_into_file(self, prg, output_file, **kwargs):
-    self.compile_call_count += 1
-    pathlib.Path(output_file).write_bytes(prg.encode())
-    return pathlib.Path(output_file)
-
-  def test_compile_cache_into_file(self):
-    output_file=tempfile.mktemp()
-    prg1 = generate_random_string(64) + "a"
-    prg2 = generate_random_string(64) + "b"
-    cold_compile_res = self.__helper_test_compile_into_file(prg1, output_file=output_file).read_bytes()
-    warm_compile_res = self.__helper_test_compile_into_file(prg1, output_file=output_file).read_bytes()
-    assert cold_compile_res == warm_compile_res == prg1.encode()
-    assert self.compile_call_count == 1
-
-    prg2_res = self.__helper_test_compile_into_file(prg2, output_file=output_file).read_bytes()
+    prg2_res = self.__helper_test_compile(prg2).read_bytes()
     assert prg2_res == prg2.encode()
     assert self.compile_call_count == 2
 

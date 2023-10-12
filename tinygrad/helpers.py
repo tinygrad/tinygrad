@@ -152,10 +152,8 @@ class GlobalCounters:
 # *** compiled cache decorator ***
 
 def cache_compiled(func):
-  def wrapper(self, prg:str, output_file=pathlib.Path(tempfile.mktemp()), **kwargs):
+  def wrapper(self, prg:str, *args, **kwargs):
     cache_path = pathlib.Path(f"{tempfile.gettempdir()}/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}")
-    if not cache_path.exists():
-      func(self, prg, output_file=output_file, **kwargs)
-      output_file.rename(cache_path)
+    if not cache_path.exists(): func(self, prg, *args, **kwargs).rename(cache_path)
     return cache_path
   return wrapper
