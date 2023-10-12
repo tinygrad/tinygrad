@@ -262,7 +262,8 @@ class LazyBuffer:
       # don't push if all ast buffers (.base) are realized or sourceless
       if not all(x.realized or len(x.op.src) == 0 for x in base_bufs):
         push_pad_safe = (SHUFFLE_PAD_OPS and all(x.op not in UNSAFE_PAD_OPS for x in self.op.get_lazyops()))
-        if (op is not MovementOps.EXPAND) and (op is not MovementOps.PAD or push_pad_safe):
+        push_reshape_safe = any(isinstance(x, LazyOp) or not x.children for x in self.op.src)
+        if (op is not MovementOps.EXPAND) and (op is not MovementOps.PAD or push_pad_safe) and (op is not MovementOps.RESHAPE or push_reshape_safe):
           return self.op.replace_with_movement_ops([(op, arg)])
     if REMOVE_MOVEMENT_NOPS and not self.realized and st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
