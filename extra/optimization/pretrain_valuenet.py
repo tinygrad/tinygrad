@@ -18,7 +18,7 @@ from tinygrad.codegen.optimizer import Opt, OptOps
 
 from extra.optimization.helpers import lin_to_feats, MAX_DIMS
 
-# NOTE: this is not rela value of the state, it's just a prediction of the runtime
+# NOTE: this is not real value of the state, it's just a prediction of the runtime
 INNER = 32
 class ValueNet:
   def __init__(self):
@@ -71,7 +71,3 @@ if __name__ == "__main__":
   import matplotlib.pyplot as plt
   plt.plot(losses[50:])
   plt.show()
-
-
-
-
