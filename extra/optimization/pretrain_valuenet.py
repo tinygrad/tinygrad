@@ -36,13 +36,11 @@ if __name__ == "__main__":
   net = ValueNet()
   optim = Adam(get_parameters(net))
 
-  TRAIN_SIZE = 6000
-  TEST_SIZE = 128
+  TEST_SIZE = 256
 
   dset = open("/tmp/logtm").read().strip().split("\n")
   random.seed(1337)
   random.shuffle(dset)
-  dset = dset[:TRAIN_SIZE+TEST_SIZE]
 
   X,Y = [], []
   for i,x in enumerate(tqdm(dset)):
@@ -55,8 +53,8 @@ if __name__ == "__main__":
     Y.append([math.log(min(tms))])
   print(f"got {len(X)} samples")
 
-  X_test,Y_test = Tensor(X[TRAIN_SIZE:]), Tensor(Y[TRAIN_SIZE:])
-  X,Y = X[:TRAIN_SIZE], Y[:TRAIN_SIZE]
+  X_test,Y_test = Tensor(X[-TEST_SIZE:]), Tensor(Y[-TEST_SIZE:])
+  X,Y = X[:-TEST_SIZE], Y[:-TEST_SIZE]
 
   def get_minibatch(X,Y,bs):
     xs, ys = [], []
