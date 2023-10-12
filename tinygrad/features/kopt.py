@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Dict, Tuple
 import time
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.optimizer import OptOps, Opt
@@ -29,7 +29,7 @@ def kernel_optimize_opts(k:Linearizer, suggestion):
   return [ng.p.TransitionChoice(opt) for opt in opts], [opt[0] for opt in opts]
 
 def suggestion_to_dict(suggestion):
-  result = {}
+  result: Dict[Tuple[OptOps, int], int] = {}
   # this is lossy
   for op in (suggestion or []): result[(op.op, op.axis)] = result.get((op.op, op.axis), 1) * op.amt
   return result
@@ -104,7 +104,7 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
 
   if getenv("KOPT") == 2 and global_db is None:
     import shelve
-    global_db = shelve.open("/tmp/kopt_cache")
+    global_db = shelve.open("./kopt_cache")
 
   if global_db is not None and skey in global_db:
     choice = global_db[skey]
@@ -126,4 +126,4 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
       global_db.sync()
 
   if choice == "BASELINE": k.hand_coded_optimizations()
-  else: k.apply_auto_opt(choice)
+  else: [k.apply_opt(x) for x in choice]
