@@ -11,7 +11,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, VariableOrNum, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.codegen.kernel import LocalBuffer
-from tinygrad.lazy import var_vals_from_ast
+from tinygrad.lazy import vars_from_ast
 from tinygrad.features.image import to_image_idx
 
 # bottom ones are asm only
@@ -164,7 +164,7 @@ class Linearizer(OptimizedKernel):
       if isinstance(buf, MemBuffer):
         self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (f"data{buf.idx}", buf.dtype))
     # add var vals
-    for var in sorted(var_vals_from_ast(self.ast), key=lambda k: k.key):
+    for var in sorted(vars_from_ast(self.ast), key=lambda k: k.key):
       assert var.expr is not None
       self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), (var.expr, dtypes._arg_int32))
     # define local buffers
@@ -198,8 +198,8 @@ class Linearizer(OptimizedKernel):
     # global and local loops
     def render_loop(xx:List[Variable]):
       self.loop_uops.update({x.expr:self.uop(UOps.LOOP, dtypes.int32, (
-        self.const(x.min) if isinstance(x.min, int) else cast(Variable, x.min).render(self.render_ops, self),
-        self.const(x.max) if isinstance(x.max, int) else cast(Variable, x.max).render(self.render_ops, self)), cachable=False) for x in xx if not isinstance(x, NumNode) and x.expr is not None})
+        self.const(x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
+        self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), cachable=False) for x in xx if not isinstance(x, NumNode) and x.expr is not None})
     def end_loop(xx:List[Variable]):
       for x in xx[::-1]:
         if not isinstance(x, NumNode) and x.expr is not None:

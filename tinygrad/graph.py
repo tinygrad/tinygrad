@@ -6,7 +6,7 @@ except ImportError:
 from collections import defaultdict
 from typing import Dict, List
 from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
-from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters
+from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters, getenv
 
 # **** debugging and graphing ****
 
@@ -45,7 +45,9 @@ def str_dtype(dtyp):
   ret = str(dtyp)[7:]
   return "" if ret == 'float' else f"\n{ret}"
 
+logops = open(getenv("LOGOPS", ""),"a") if getenv("LOGOPS", "") else None
 def log_schedule_item(si: ScheduleItem):
+  if logops and si.ast.op not in LoadOps: logops.write(str(si.ast)+"\n")
   show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
   if si.ast.op == LoadOps.CONTIGUOUS: setattr(si.out, 'node_id', nm(si.inputs[0].base))
