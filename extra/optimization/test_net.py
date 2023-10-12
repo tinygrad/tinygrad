@@ -21,7 +21,7 @@ if __name__ == "__main__":
     net = PolicyNet()
     load_state_dict(net, safe_load("/tmp/policynet.safetensors"))
 
-  ast_strs = load_worlds(filter_reduce=False)
+  ast_strs = load_worlds(filter_reduce=True)
 
   # real randomness
   random.seed()
@@ -47,8 +47,20 @@ if __name__ == "__main__":
           acts.append(k)
           feats.append(lin_to_feats(v))
         preds = net(Tensor(feats))
-        pred_time = math.exp(preds.numpy().min())
-        act = acts[preds.numpy().argmin()]
+        tms, sigmas = preds[:, 0], preds[:, 2].exp()
+        gflops = preds[:, 1]
+        # 1 stddev of overest
+        #preds = tms + sigmas
+        ngflops = gflops.exp().numpy()
+        ntms = tms.exp().numpy()
+        gain = ((ngflops/ngflops[0]) + (ntms[0]/ntms))/2
+        #print(gain)
+        #print(gflops.numpy().argmax(), tms.numpy().argmin())
+        #act = acts[tms.numpy().argmin()]
+        #act = acts[gflops.numpy().argmax()]
+        act = acts[gain.argmax()]
+
+        pred_time = math.exp(tms.numpy().min())
       else:
         probs = net(Tensor([lin_to_feats(lin)]))
         dist = probs.exp().numpy()
