@@ -78,7 +78,6 @@ if __name__ == "__main__":
       linhc = Linearizer(si.ast)
       rawbufs = bufs_from_lin(linhc)
       linhc.hand_coded_optimizations()
-      tmhc = time_linearizer(linhc, rawbufs)
 
       lin = Linearizer(si.ast)
       lin.required_optimizations()
@@ -89,8 +88,9 @@ if __name__ == "__main__":
         if opts[0][0] == 0: break   # we are done
         lin = acted_lins[opts[0][0]]
         if DEBUG >= 1: print(f"{opts[0][1]*1e6:10.2f} us from {len(opts):3d} actions", lin.colored_shape())
+      tmhc = time_linearizer(linhc, rawbufs)
       tm = time_linearizer(lin, rawbufs)
-      print(f"opt kernel {i:3d}: {tmhc*1e6:10.2f} -> {tm*1e6:10.2f}")
+      print(f"opt kernel {i:3d}: {tmhc*1e6:10.2f} -> {tm*1e6:10.2f} hc: {linhc.colored_shape()}")
 
   #schedule = schedule[0:72]  # first model should be 8.85 ms
   print("**** running real kernels ****")
