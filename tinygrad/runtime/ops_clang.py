@@ -31,7 +31,7 @@ def emulate_ext_calls(fn, uc, address, size, user_data):
 class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False):
     if binary and DEBUG >= 5: print(prg)
-    cached_file = self.compile(prg if binary else CLANG_PROGRAM_HEADER+prg, binary=binary)
+    cached_file = self.compile(prg if binary else CLANG_PROGRAM_HEADER+prg, binary)
 
     # TODO: is there a way to not write this to disk?
     # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
@@ -39,7 +39,8 @@ class ClangProgram:
     self.prg: Any = ctypes.CDLL(str(cached_file))[name] if not (CI and ARM64) else cached_file.read_bytes()
 
   @cache_compiled
-  def compile(self, prg, binary, output_file=pathlib.Path(tempfile.mktemp()), temp_file=tempfile.mktemp()) -> pathlib.Path:
+  def compile(self, prg, binary) -> pathlib.Path:
+    output_file, temp_file = pathlib.Path(tempfile.mktemp()), pathlib.Path(tempfile.mktemp())
     if not binary:
       subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+str(output_file)).split(), input=prg.encode('utf-8'))
     elif CI and ARM64:

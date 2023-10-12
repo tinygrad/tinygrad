@@ -100,7 +100,8 @@ class HIPProgram:
       self.prgs.append(hip.hipModuleGetFunction(hip.hipModuleLoadData(prg), name))
 
   @cache_compiled
-  def compile(self, prg, name, output_file=pathlib.Path(tempfile.mktemp())):
+  def compile(self, prg, name):
+    output_file = pathlib.Path(tempfile.mktemp())
     try:
       prog = hip.hiprtcCreateProgram(prg, name, [], [])
       hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
