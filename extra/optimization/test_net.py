@@ -1,5 +1,6 @@
 import numpy as np
 import math
+import random
 np.set_printoptions(suppress=True)
 from copy import deepcopy
 from tinygrad.helpers import getenv
@@ -22,17 +23,19 @@ if __name__ == "__main__":
 
   ast_strs = load_worlds()
 
+  # real randomness
+  random.seed()
+  random.shuffle(ast_strs)
+
   for ep_num,ast_str in enumerate(ast_strs):
     print("\nEPISODE", ep_num)
     lin = ast_str_to_lin(ast_str)
     rawbufs = bufs_from_lin(lin)
 
-    """
     linhc = deepcopy(lin)
     linhc.hand_coded_optimizations()
     tm = time_linearizer(linhc, rawbufs)
-    print(f"{tm*1e6:10.2f}", linhc.colored_shape())
-    """
+    print(f"{tm*1e6:10.2f}     HC    ", linhc.colored_shape())
 
     pred_time = float('nan')
     while 1:

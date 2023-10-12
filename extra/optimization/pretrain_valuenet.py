@@ -36,7 +36,7 @@ if __name__ == "__main__":
   net = ValueNet()
   optim = Adam(get_parameters(net))
 
-  TRAIN_SIZE = 5000
+  TRAIN_SIZE = 6000
   TEST_SIZE = 128
 
   dset = open("/tmp/logtm").read().strip().split("\n")
@@ -70,8 +70,8 @@ if __name__ == "__main__":
   losses = []
   test_losses = []
   test_loss = float('inf')
-  for i in (t:=trange(1000)):
-    x,y = get_minibatch(X,Y,bs=128)
+  for i in (t:=trange(2000)):
+    x,y = get_minibatch(X,Y,bs=256)
     out = net(x)
     loss = (out-y).square().mean()
     optim.zero_grad()
