@@ -31,14 +31,15 @@ def emulate_ext_calls(fn, uc, address, size, user_data):
 class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False):
     if binary and DEBUG >= 5: print(prg)
-    prg = self.compile(prg if binary else CLANG_PROGRAM_HEADER+prg, binary)
+    self.prg: Any = self.compile(prg if binary else CLANG_PROGRAM_HEADER+prg, binary)
 
     # TODO: is there a way to not write this to disk?
     # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
     #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
-    cached_file_path = pathlib.Path(tempfile.mktemp())
-    cached_file_path.write_bytes(prg)
-    self.prg: Any = ctypes.CDLL(str(cached_file_path))[name] if not (CI and ARM64) else prg
+    if not (CI and ARM64):
+      cached_file_path = pathlib.Path(tempfile.mktemp())
+      cached_file_path.write_bytes(self.prg)
+      self.fxn: Any = ctypes.CDLL(str(cached_file_path))[name]
 
   @cache_compiled
   def compile(self, prg, binary) -> bytes:
@@ -77,7 +78,7 @@ class ClangProgram:
       mu.emu_start(ADDRESS, ADDRESS + len(self.prg))
       args[0]._buf = mu.mem_read(mu.reg_read(arm64_const.UC_ARM64_REG_X0), args[0].size * args[0].dtype.itemsize)
     else:
-      self.prg(*[x._buf if isinstance(x, RawMallocBuffer) else x for x in args])
+      self.fxn(*[x._buf if isinstance(x, RawMallocBuffer) else x for x in args])
     if wait: return time.monotonic()-st
 
 renderer = fromimport("tinygrad.renderer.assembly_arm64", "uops_to_arm64_asm") if ARM64 else functools.partial(uops_to_cstyle, CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict", arg_int_prefix="const int"))
