@@ -109,12 +109,14 @@ class Whisper:
 RATE = 16000
 CHUNK = 1600
 RECORD_SECONDS = 10
+HOP_LENGTH = 160
 
-def prep_audio(waveform=None, sr=RATE) -> Tensor:
+def prep_audio(waveform=None, sr=RATE, padding:int=0) -> Tensor:
   N_FFT = 400
-  HOP_LENGTH = 160
   N_MELS = 80
   if waveform is None: waveform = np.zeros(N_FFT, dtype=np.float32)
+  if padding > 0:
+    waveform = np.pad(waveform[0], (0, padding), 'constant', constant_values=(0, 0)).reshape(1, -1)
   stft = librosa.stft(waveform, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.float32)
   magnitudes = stft[..., :-1] ** 2
   mel_spec = librosa.filters.mel(sr=sr, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
@@ -169,6 +171,14 @@ def img(x):
   plt.imshow(x.numpy())
   plt.show()
 
+def pad_or_trim(array, length: int, *, axis: int = -1):
+  if array.shape[axis] > length:
+      return array.take(indices=range(length), axis=axis)
+  elif array.shape[axis] < length:
+      pad_widths = [(0, 0)] * array.ndim
+      pad_widths[axis] = (0, length - array.shape[axis])
+      return np.pad(array, pad_widths)
+
 def listener(q):
   prep_audio()
   import pyaudio
@@ -192,22 +202,36 @@ if __name__ == "__main__":
   model = Whisper(state['dims'])
   load_state_dict(model, state['model_state_dict'])
   enc = get_encoding(state['dims']['n_vocab'])
-
   if len(sys.argv) > 1:
     # offline
-    waveform, sample_rate = librosa.load(sys.argv[1], dtype=np.float32)
-    log_spec = prep_audio(waveform.reshape(1, -1), sample_rate)
-    lst = [enc._special_tokens["<|startoftranscript|>"]]
-    dat = model.encoder(Tensor(log_spec)).realize()
-    for i in range(50):
-      out = model.decoder(Tensor([lst]), dat)
-      out.realize()
-      idx = out[0,-1].argmax().numpy().astype(dtype=np.int32)
-      lst.append(idx)
-      dec = enc.decode(lst)
-      print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
-      if dec.endswith("<|endoftext|>"):
-        lst = [enc._special_tokens["<|startoftranscript|>"]]
+    waveform, sample_rate = librosa.load(sys.argv[1], dtype=np.float32, sr=RATE)
+    n_samples = 30*sample_rate # 30 seconds chuncks
+    assert n_samples%HOP_LENGTH==0
+    n_frames = n_samples//HOP_LENGTH
+
+    log_spec = prep_audio(waveform.reshape(1, -1), sample_rate, padding=n_samples)
+    content_frames = log_spec.shape[-1]-n_frames
+    seek = 0
+    while seek < content_frames:
+      #time_offset = float(seek*HOP_LENGTH/sample_rate)
+      log_spec_segment = log_spec[:, seek:seek+n_frames]
+      segment_size = min(n_frames, content_frames - seek)
+      segment_duration = segment_size * HOP_LENGTH / sample_rate # seconds occupied by segment
+      log_spec_segment = pad_or_trim(log_spec_segment, n_frames)
+      seek += segment_size
+      if not log_spec_segment.shape[1]:
+        continue
+
+      lst = [enc._special_tokens["<|startoftranscript|>"]]
+      dat = model.encoder(Tensor(log_spec_segment)).realize()
+      for _ in range(int(sample_rate/n_frames*segment_duration)):
+        out = model.decoder(Tensor([lst]), dat).realize()
+        idx = out[0,-1].argmax().numpy().astype(dtype=np.int32)
+        lst.append(idx)
+        dec = enc.decode(lst)
+        print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
+        if dec.endswith("<|endoftext|>"):
+          lst = [enc._special_tokens["<|startoftranscript|>"]]
   else:
     # online
 
