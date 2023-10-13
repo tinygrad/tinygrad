@@ -99,14 +99,24 @@ class ShapeTracker:
     to_apply:List[Tuple[MovementOps, Tuple]] = []
     for v in self.views:
       real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
+      real_mask = v.mask if v.mask else tuple((0,s) for s in v.shape)
       # first, we apply the offset
       # then, we make it the correct shape
       # then, we apply permutations
-      order = sorted(range(len(v.strides)), key=lambda k: v.strides[k], reverse=True)
-      shape = [s if st != 0 else 1 for s, st in zip(v.shape, v.strides)]
-      to_apply.extend([(MovementOps.RESHAPE, -1), (MovementOps.SHRINK, ((v.offset,v.offset+prod(shape)),)), (MovementOps.RESHAPE, [shape[i] for i in order])])
-      if v.mask is not None: to_apply.append((MovementOps.SHRINK, [v.mask[i] for i in order]))
-      to_apply.extend([(MovementOps.PERMUTE, [order.index(i) for i in range(len(order))]), (MovementOps.RESHAPE, [s if st != 0 else 1 for s, st in zip(real_shape, v.strides)])])
+      strides = [st if st!= 0 else 1 for st in v.strides]
+      n = sum((s-1)*st for s,st in zip(v.shape, strides)) + 1
+      # flatten
+      to_apply.extend([(MovementOps.RESHAPE, -1), (MovementOps.SHRINK, ((v.offset,v.offset + n),))])
+      for i in range(len(real_shape)-1):
+          new_shape = () if i == 0 else tuple(real_shape[-i:])
+          to_apply.append((MovementOps.EXPAND, (n+1, n) + new_shape))
+          to_apply.append((MovementOps.RESHAPE, (n, n+1) + new_shape))
+          to_apply.append((MovementOps.STRIDE, (strides[-(i+1)],) + tuple(1 for _ in range(i+1))))
+          to_apply.append((MovementOps.PERMUTE, (1,0) + tuple(range(2, i+2))))
+          to_apply.append((MovementOps.SHRINK, ((0,n),) + (real_mask[-(i+1)],)))
+      to_apply.append((MovementOps.STRIDE, (strides[0],) + tuple(1 for _ in range(len(strides)-1))))
+      to_apply.append((MovementOps.SHRINK, tuple((0,s) for s in real_shape)))
+      to_apply.append((MovementOps.RESHAPE, tuple(real_shape)))
       # then, we apply pre expand pads
       if v.mask is not None:
         pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
