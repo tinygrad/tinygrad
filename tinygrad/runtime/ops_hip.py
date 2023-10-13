@@ -2,7 +2,7 @@ import numpy as np
 import ctypes, functools, math, collections
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
-from tinygrad.helpers import DEBUG, getenv, dtypes
+from tinygrad.helpers import DEBUG, getenv, cache_compiled, dtypes
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -88,15 +88,8 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
-    try:
-      if not binary:
-        prog = hip.hiprtcCreateProgram(prg, name, [], [])
-        device_properties = hip.hipGetDeviceProperties(HIP.default_device)
-        hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
-        prg = hip.hiprtcGetCode(prog)
-    except Exception as e:
-      if DEBUG >= 3: print("FAILED TO BUILD", prg)
-      raise e
+    prg = prg if binary else self.compile(prg, name)
+
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
@@ -105,6 +98,16 @@ class HIPProgram:
     for i in range(HIP.device_count):
       hip.hipSetDevice(i)
       self.prgs.append(hip.hipModuleGetFunction(hip.hipModuleLoadData(prg), name))
+
+  @cache_compiled
+  def compile(self, prg, name) -> bytes:
+    try:
+      prog = hip.hiprtcCreateProgram(prg, name, [], [])
+      hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
+      return hip.hiprtcGetCode(prog)
+    except Exception as e:
+      if DEBUG >= 3: print("FAILED TO BUILD", prg)
+      raise e
 
   def __call__(self, global_size, local_size, *args, wait=False):
     hip.hipSetDevice(args[0]._device)
