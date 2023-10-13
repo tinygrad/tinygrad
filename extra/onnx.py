@@ -186,7 +186,6 @@ def get_run_onnx(onnx_model: ModelProto):
           arg[opt['axis']] = (i,i+s)
           intermediate_tensors[o] = inp[0].slice(arg=arg)
           i = i+s
-        continue
       elif n.op_type == "Slice":
         if onnx_model_version < 10:
           axes = list(opt.get("axes", range(inp[0].ndim)))

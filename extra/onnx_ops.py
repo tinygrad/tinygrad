@@ -10,6 +10,112 @@ import functools
 from typing import Union, Tuple, Optional
 import math
 
+# **** free ops ****
+
+def Identity(input: Tensor): return input
+def Neg(input: Tensor): return -input
+def Reciprocal(input: Tensor): return input.reciprocal()
+def Sqrt(input: Tensor): return input.sqrt()
+def Sign(input: Tensor): return input.sign()
+def Abs(input: Tensor): return input.abs()
+def Exp(input: Tensor): return input.exp()
+def Log(input: Tensor): return input.log()
+def Mish(input: Tensor): return input.mish()
+def Sin(x: Tensor): return x.sin()
+def Cos(x: Tensor): return x.cos()
+def Tan(x: Tensor): return x.tan()
+def Relu(input: Tensor): return input.relu()
+def Sigmoid(input: Tensor): return input.sigmoid()
+def Tanh(input: Tensor): return input.tanh()
+def MatMul(input: Tensor, other: Tensor): return input.matmul(other)
+def Floor(x:Tensor): return x.floor()
+def Ceil(x:Tensor): return x.ceil()
+
+# **** simple ops ****
+
+def Softsign(input): return input / (1+input.abs())
+def Cosh(x): return (math.e ** x + math.e ** -x) / 2
+def Sinh(x): return (math.e ** x - math.e ** -x) / 2
+def Tanh(x): return Sinh(x) / Cosh(x)
+
+def Less(x:Tensor,y:Tensor): return (x<y).cast(dtypes.bool)
+def LessOrEqual(x:Tensor,y:Tensor): return (x<=y).cast(dtypes.bool)
+def Greater(x:Tensor,y:Tensor): return (x>y).cast(dtypes.bool)
+def GreaterOrEqual(x:Tensor,y:Tensor): return (x>=y).cast(dtypes.bool)
+def Equal(x:Tensor,y:Tensor): return (x==y).cast(dtypes.bool)
+
+def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
+def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
+def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
+def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
+
+def HardSigmoid(input: Tensor, alpha=0.2, beta=0.5): return (alpha*input + beta).clip(0, 1)
+def HardSwish(input: Tensor): return input * HardSigmoid(input, 1/6, 0.5)
+def Celu(X: Tensor, alpha=1.0): return X.relu() - (-alpha*(X/alpha).exp()+1).relu()
+def Selu(X: Tensor, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
+def Softplus(X: Tensor): return X.softplus()
+def PRelu(X:Tensor, slope:Tensor):
+  slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope # HACK OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
+  return X.clip(0, float("inf")) + X.clip(float("-inf"), 0) * slope
+def LeakyRelu(X: Tensor, alpha=0.01): return X.leakyrelu(alpha)
+def ThresholdedRelu(X: Tensor, alpha=1.0): return (X-alpha).relu() + (X-alpha).relu().sign() * alpha
+def Softmax_1(input: Tensor, axis=1): return input.softmax(axis)
+def Softmax_13(input: Tensor, axis=-1): return input.softmax(axis)
+Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
+def LogSoftmax(input: Tensor, axis=-1): return input.log_softmax(axis)
+def Clip(input: Tensor, min=None, max=None): return input.clip(float('-inf') if min is None else min, float('inf') if max is None else max)
+
+def _axes(axes, noop_with_empty_axes):
+  return [int(x) for x in safe_numpy(axes)] if axes is not None and not (isinstance(axes, Tensor) and axes.shape == (0,)) else ([] if noop_with_empty_axes else None)
+# ReduceProd would require a new llop
+def ReduceMax(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.max(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceMin(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.min(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceMean(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.mean(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceSumSquare(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceL1(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.abs().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceL2(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).sqrt()
+def ReduceLogSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
+def ReduceLogSumExp(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
+
+def GlobalAveragePool(X): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
+def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
+def OptionalHasElement(x: Tensor=None): return Tensor(x is not None and x.numel() > 0, dtype=dtypes.bool)
+def OptionalGetElement(x: Tensor=None): return x if x is not None else Tensor([], dtype=dtypes.float32)
+
+def Tile(input, repeats): return input.repeat([int(x) for x in safe_numpy(repeats)])
+def Range(start, limit, delta): return Tensor.arange(start=int(safe_numpy(start)), stop=int(safe_numpy(limit)), step=int(safe_numpy(delta))).cast(dtype=start.dtype) # DeprecationWarning: Conversion of an array with ndim > 0 to a scalar is deprecated, and will error in future. Ensure you extract a single element from your array before performing this operation. (Deprecated NumPy 1.25.)
+def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
+def Cast(input, to): return input.cast(dtypes.from_np(tensor_dtype_to_np_dtype(to)))
+def Shape(data, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int64)
+def Size(data): return prod(data if isinstance(data, list) else data.shape)
+def Flatten(input, axis=1): return input.reshape(prod((1,) + input.shape[0:axis]), -1)
+
+def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
+def Or(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.ones(*x.shape)).cast(dtypes.bool)
+def Xor(x:Tensor, y:Tensor): return Where((x==y), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
+def Not(x:Tensor): return Where((x==1), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
+
+def Asin(x): return Atan(x / Tensor.sqrt(1 - x * x))
+def Asinh(x): return Tensor.log(x + Tensor.sqrt(x * x + 1))
+def Acosh(x): return Tensor.log(x + Tensor.sqrt(x * x - 1))
+def Atanh(x): return 0.5 * Tensor.log((1 + x)/(1 - x))
+
+def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
+  k = int(k.numpy().item()) if k != 0 else 0 # onnx passes k as a tensor int64 with one element, default is 0
+  return x.triu(k) if upper else x.tril(k)
+
+def Binarizer(input, threshold=0.0): return input > threshold
+
+def ArgMax(x, axis=0, keepdims=1, select_last_index=0):
+  axis = axis + x.ndim if axis < 0 else axis
+  m = x == (x.max(axis=axis, keepdim=keepdims) if keepdims else x.max(axis=axis, keepdim=keepdims).unsqueeze(axis))
+  c = Tensor.arange(x.shape[axis]).reshape(*[1]*(axis), x.shape[axis], *[1]*(x.ndim - axis-1)) * m
+  return c.max(axis=axis,keepdim=keepdims).cast(dtypes.int64)
+def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
+  
+
+
 # TODO not entirely sure these optimizers are correct
 def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
   groups = len(inputs) // 3
@@ -235,9 +341,6 @@ def Dropout(data, ratio=0.5, training_mode=False, seed=None):
   mask = Tensor((rng.random(data.shape) >= ratio), requires_grad=False, device=data.device)
   return data * mask * (1/(1.0 - ratio)), mask
 
-def Shape(data, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int64)
-def Size(data): return prod(data if isinstance(data, list) else data.shape)
-def Flatten(input, axis=1): return input.reshape(prod((1,) + input.shape[0:axis]), -1)
 
 # TODO: abstract out the broadcast logic in tensor
 def Expand(input, shape):
@@ -251,102 +354,18 @@ def LRN(input, size, alpha=1e-4, beta=0.75, bias=1.0):
   bs, c, iy, ix = input.shape
   return input / input.mul(input).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
 
-def Identity(input): return input
-def Neg(input): return -input
-def Reciprocal(input): return input.reciprocal()
-def Sqrt(input): return input.sqrt()
-def Sign(input): return input.sign()
-def Softsign(input): return input / (1+input.abs())
-def Abs(input): return input.abs()
-def Exp(input): return input.exp()
-def Log(input): return input.log()
-def Mish(input): return input.mish()
-def HardSigmoid(input, alpha=0.2, beta=0.5): return (alpha*input + beta).clip(0, 1)
-def HardSwish(input): return input * HardSigmoid(input, 1/6, 0.5)
-def Celu(X, alpha=1.0): return X.relu() - (-alpha*(X/alpha).exp()+1).relu()
-def Selu(X, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
-def Softplus(X): return X.softplus()
-def PRelu(X:Tensor, slope:Tensor):
-  slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope # OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
-  return X.clip(0, float("inf")) + X.clip(float("-inf"), 0) * slope
-def LeakyRelu(X, alpha=0.01): return X.leakyrelu(alpha)
-def ThresholdedRelu(X, alpha=1.0): return (X-alpha).relu() + (X-alpha).relu().sign() * alpha
-def Softmax_1(input, axis=1): return input.softmax(axis)
-def Softmax_13(input, axis=-1): return input.softmax(axis)
-Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
-def LogSoftmax(input, axis=-1): return input.log_softmax(axis)
-def Clip(input, min=None, max=None):
-  if min is None: min = float("-inf")
-  if max is None: max = float("inf")
-  return input.clip(min, max)
-
-def Sin(x): return x.sin()
-def Cos(x): return x.cos()
-def Tan(x): return x.tan()
-def Cosh(x): return (math.e ** x + math.e ** -x) / 2
-def Sinh(x): return (math.e ** x - math.e ** -x) / 2
-def Tanh(x): return Sinh(x) / Cosh(x)
-
-def Less(x:Tensor,y:Tensor): return (x<y).cast(dtypes.bool)
-def LessOrEqual(x:Tensor,y:Tensor): return (x<=y).cast(dtypes.bool)
-def Greater(x:Tensor,y:Tensor): return (x>y).cast(dtypes.bool)
-def GreaterOrEqual(x:Tensor,y:Tensor): return (x>=y).cast(dtypes.bool)
-def Equal(x:Tensor,y:Tensor): return (x==y).cast(dtypes.bool)
-
-def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
-def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
-def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
-def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
-
-def _axes(axes, noop_with_empty_axes):
-  return [int(x) for x in safe_numpy(axes)] if axes is not None and not (isinstance(axes, Tensor) and axes.shape == (0,)) else ([] if noop_with_empty_axes else None)
-
-# ReduceProd would require a new llop
-def ReduceMax(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.max(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
-def ReduceMin(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.min(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
-def ReduceSum(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
-def ReduceMean(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.mean(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
-def ReduceSumSquare(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
-def ReduceL1(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.abs().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
-def ReduceL2(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).sqrt()
-def ReduceLogSum(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
-def ReduceLogSumExp(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
-
-
-def GlobalAveragePool(X): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
-def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
-def OptionalHasElement(x: Tensor=None): return Tensor(x is not None and x.numel() > 0, dtype=dtypes.bool)
-def OptionalGetElement(x: Tensor=None): return x if x is not None else Tensor([], dtype=dtypes.float32)
-
-def Tile(input, repeats): return input.repeat([int(x) for x in safe_numpy(repeats)])
-
-def Range(start, limit, delta): return Tensor.arange(start=int(safe_numpy(start)), stop=int(safe_numpy(limit)), step=int(safe_numpy(delta))).cast(dtype=start.dtype) # DeprecationWarning: Conversion of an array with ndim > 0 to a scalar is deprecated, and will error in future. Ensure you extract a single element from your array before performing this operation. (Deprecated NumPy 1.25.)
-def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
-
-def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
-def Or(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.ones(*x.shape)).cast(dtypes.bool)
-def Xor(x:Tensor, y:Tensor): return Where((x==y), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
-def Not(x:Tensor): return Where((x==1), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
-
-def Floor(x:Tensor): return x.floor()
-def Ceil(x:Tensor): return x.ceil()
-def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
-  k = int(k.numpy().item()) if k != 0 else 0 # onnx passes k as a tensor int64 with one element, default is 0
-  return x.triu(k) if upper else x.tril(k)
 
 def ConstantOfShape(input, value:Tensor=None):
   if value is None: value=Tensor([0.0])
   shape = [int(x) for x in safe_numpy(input)]
   return Tensor.ones(*shape, dtype=value.dtype) * (value if shape[0]!=0 else 1)
 
-def Cast(input, to): return input.cast(dtypes.from_np(tensor_dtype_to_np_dtype(to)))
 
 # NOTE: since we only have one type, this is valid!
 def CastLike(input, target_type):
   assert isinstance(target_type, Tensor), "can only CastLike Tensor"
   return input
 
-def Binarizer(input, threshold=0.0): return input > threshold
 
 def MeanVarianceNormalization(input, axis=(0, 2, 3)):
   data_mean = input.mean(axis=axis, keepdim=True)
@@ -574,11 +593,6 @@ def Atan(y):
   t3 = (y.abs() > x.abs()).where(1.570796327 - t3, t3)
   return (y < 0).where(-t3, t3)
 
-def Asin(x): return Atan(x / Tensor.sqrt(1 - x * x))
-
-def Asinh(x): return Tensor.log(x + Tensor.sqrt(x * x + 1))
-def Acosh(x): return Tensor.log(x + Tensor.sqrt(x * x - 1))
-def Atanh(x): return 0.5 * Tensor.log((1 + x)/(1 - x))
 
 # Needs work
 def IsInf(x,detect_negative=1,detect_positive=1):
@@ -663,16 +677,7 @@ def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
   x = x + bias
   return 0.5 * x * (1 + (x * 0.797885 + 0.035677 * x ** 3).tanh())
 
-def ArgMax(x, axis=0, keepdims=1, select_last_index=0):
-  axis = axis + x.ndim if axis < 0 else axis
-  m = x == (x.max(axis=axis, keepdim=keepdims) if keepdims else x.max(axis=axis, keepdim=keepdims).unsqueeze(axis))
-  c = Tensor.arange(x.shape[axis]).reshape(*[1]*(axis), x.shape[axis], *[1]*(x.ndim - axis-1)) * m
-  return c.max(axis=axis,keepdim=keepdims).cast(dtypes.int64)
 
-def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
-
-def Upsample(X, scales, mode):
-  return Resize(X=X, scales=scales, mode=mode)
 
 type_map = {TensorProto.DOUBLE: dtypes.double, TensorProto.FLOAT: dtypes.float32}
 def EyeLike(x, dtype=None, k=0):
@@ -685,3 +690,5 @@ def EyeLike(x, dtype=None, k=0):
     diff = (shape[0]-dim, shape[1]-dim)
     padarg = tuple([(d, d) if d == 0 else (k, d-k) for d in diff])
     return Tensor.eye(dim=dim, dtype=dtype).pad(padarg)
+
+def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)

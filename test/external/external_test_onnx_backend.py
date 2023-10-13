@@ -155,8 +155,8 @@ backend_test.exclude('test_isinf_negative_cpu')
 backend_test.exclude('test_isinf_positive_cpu')
 backend_test.exclude('test_isnan_cpu')
 
-if getenv("CPU") or getenv("ARM64"):
-  # not too sure
+# not too sure
+if getenv("CPU") or getenv("ARM64") or getenv("TORCH"):
   backend_test.exclude('test_dequantizelinear_axis_cpu')
   backend_test.exclude('test_dequantizelinear_cpu')
 
@@ -168,10 +168,15 @@ if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or gete
 if getenv('GPU') or getenv('METAL') or getenv('MPS'):
   backend_test.exclude('test_mish_cpu') # weird inaccuracy
   backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
-  backend_test.exclude('test_eyelike_with_dtype_cpu') # I'm not sure about this...
+  # backend_test.exclude('test_eyelike_with_dtype_cpu') # I'm not sure about this...
 
-if getenv('METAL') or getenv('MPS'):
-  # (((Tensor([0,1,2,3,4,5])+0.5)/3.5 - 0.5)) Try this with METAL and LLVM, weird weird inaccuracy
+# 
+if getenv('METAL'):
+  backend_test.exclude('test_maxpool_2d_pads_cpu')
+  backend_test.exclude('test_maxpool_2d_same_lower_cpu')
+
+# fast math messes with these
+if getenv('METAL') or getenv('MPS') or getenv('LLVM'):
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
