@@ -1,5 +1,5 @@
 import numpy as np
-import ctypes, functools, math, collections, tempfile, pathlib
+import ctypes, functools, math, collections
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
 from tinygrad.helpers import DEBUG, getenv, cache_compiled
