@@ -144,16 +144,8 @@ def get_run_onnx(onnx_model: ModelProto):
         inp.append(t)
       opt = attribute_dict[num]
       if debug: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
-      # free ones
-      if n.op_type == "Relu": ret = inp[0].relu()
-      elif n.op_type == "Sigmoid": ret = inp[0].sigmoid()
-      elif n.op_type == "Tanh": ret = inp[0].tanh()
-      elif n.op_type == "MatMul": ret = inp[0].matmul(inp[1])
       # one liners
-      elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt.get('alpha', 1.0))
-      elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
-      elif n.op_type == "Transpose": ret = inp[0].permute(order=opt.get('perm', list(range(len(inp[0].shape))[::-1])))
-      elif n.op_type == "Squeeze":
+      if n.op_type == "Squeeze":
         axes = opt['axes'] if 'axes' in opt else safe_numpy(inp[1])
         axes = [int(x) if x >= 0 else int(x+inp[0].ndim) for x in axes]
         ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in axes])

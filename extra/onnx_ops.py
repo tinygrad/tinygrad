@@ -7,7 +7,7 @@ from onnx.helper import tensor_dtype_to_np_dtype
 from onnx.onnx_pb import TensorProto
 import numpy as np
 import functools
-from typing import Union, Tuple, Optional
+from typing import Union, Tuple, Optional, List
 import math
 
 # **** free ops ****
@@ -67,7 +67,7 @@ def Clip(input: Tensor, min=None, max=None): return input.clip(float('-inf') if 
 
 def _axes(axes, noop_with_empty_axes):
   return [int(x) for x in safe_numpy(axes)] if axes is not None and not (isinstance(axes, Tensor) and axes.shape == (0,)) else ([] if noop_with_empty_axes else None)
-# ReduceProd would require a new llop
+# NOTE ReduceProd would require a new llop
 def ReduceMax(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.max(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 def ReduceMin(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.min(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 def ReduceSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
@@ -107,13 +107,16 @@ def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
 
 def Binarizer(input, threshold=0.0): return input > threshold
 
-def ArgMax(x, axis=0, keepdims=1, select_last_index=0):
+def ArgMax(x: Tensor, axis=0, keepdims=1, select_last_index=0):
   axis = axis + x.ndim if axis < 0 else axis
   m = x == (x.max(axis=axis, keepdim=keepdims) if keepdims else x.max(axis=axis, keepdim=keepdims).unsqueeze(axis))
   c = Tensor.arange(x.shape[axis]).reshape(*[1]*(axis), x.shape[axis], *[1]*(x.ndim - axis-1)) * m
   return c.max(axis=axis,keepdim=keepdims).cast(dtypes.int64)
 def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
   
+def Elu(input: Tensor, alpha=1.0): return input.elu(alpha=alpha)
+def Concat(*inputs: List[Tensor], axis): return inputs[0].cat(*inputs[1:], dim=axis)
+def Transpose(input: Tensor, perm=None): return input.permute(order=list(range(len(input.shape))[::-1]) if perm is None else perm)
 
 
 # TODO not entirely sure these optimizers are correct
