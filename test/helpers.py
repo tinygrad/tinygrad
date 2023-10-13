@@ -1,7 +1,7 @@
 from tinygrad.ops import LazyOp, LoadOps
 from tinygrad.nn.state import get_parameters
 
-# # for speed
+# for speed
 def derandomize(x):
   if isinstance(x, LazyOp):
     new_op = LoadOps.EMPTY if x.op == LoadOps.RAND else x.op
