@@ -31,15 +31,17 @@ def emulate_ext_calls(fn, uc, address, size, user_data):
 class ClangProgram:
   def __init__(self, name:str, prg:str, binary:bool=False):
     if binary and DEBUG >= 5: print(prg)
-    cached_file = self.compile(prg if binary else CLANG_PROGRAM_HEADER+prg, binary)
+    prg = self.compile(prg if binary else CLANG_PROGRAM_HEADER+prg, binary)
 
     # TODO: is there a way to not write this to disk?
     # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
     #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
-    self.prg: Any = ctypes.CDLL(str(cached_file))[name] if not (CI and ARM64) else cached_file.read_bytes()
+    cached_file_path = pathlib.Path(tempfile.mktemp())
+    cached_file_path.write_bytes(prg)
+    self.prg: Any = ctypes.CDLL(str(cached_file_path))[name] if not (CI and ARM64) else prg
 
   @cache_compiled
-  def compile(self, prg, binary) -> pathlib.Path:
+  def compile(self, prg, binary) -> bytes:
     output_file, temp_file = pathlib.Path(tempfile.mktemp()), pathlib.Path(tempfile.mktemp())
     if not binary:
       subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+str(output_file)).split(), input=prg.encode('utf-8'))
@@ -53,7 +55,7 @@ class ClangProgram:
     else:
       subprocess.check_output(args=('as -o' + str(temp_file)).split(), input=prg.encode('utf-8'))
       subprocess.check_output(args=('clang -lm -shared '+str(temp_file)+' -o'+str(output_file)).split())
-    return output_file
+    return output_file.read_bytes()
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()

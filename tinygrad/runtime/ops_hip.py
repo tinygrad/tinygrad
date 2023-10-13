@@ -88,7 +88,7 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
-    prg = prg if binary else self.compile(prg, name).read_bytes()
+    prg = prg if binary else self.compile(prg, name)
 
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
@@ -100,13 +100,11 @@ class HIPProgram:
       self.prgs.append(hip.hipModuleGetFunction(hip.hipModuleLoadData(prg), name))
 
   @cache_compiled
-  def compile(self, prg, name):
-    output_file = pathlib.Path(tempfile.mktemp())
+  def compile(self, prg, name) -> bytes:
     try:
       prog = hip.hiprtcCreateProgram(prg, name, [], [])
       hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
-      output_file.write_bytes(hip.hiprtcGetCode(prog))
-      return output_file
+      return hip.hiprtcGetCode(prog)
     except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
