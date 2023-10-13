@@ -300,26 +300,6 @@ class OptimizedKernel(Kernel):
         return True
     return False
 
-  def apply_auto_opt(self, x):
-    for axis, amt, typ in x:
-      if axis is None or amt == 1: continue
-      if typ == "G" and self.opts.has_shared:
-        assert self.full_shape[self.first_reduce+axis+len(self.group_for_reduce)] % amt == 0, "no longer valid shift"
-        self.shift_to(self.first_reduce+axis+len(self.group_for_reduce), amt, top=True, insert_before=self.first_reduce+len(self.group_for_reduce))
-        self.group_for_reduce.append(amt)
-      if typ == "R":
-        typ = "U"
-        axis += self.first_reduce + len(self.group_for_reduce)
-      if typ == "U":
-        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-        self.shift_to(axis, amt)
-        self.upcast()
-      elif typ == "L":
-        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-        self.shift_to(axis, amt, insert_before=self.first_reduce)
-        self.local_dims += 1
-    self.simplify_ones()
-
   def apply_opt(self, opt:Opt):
     self.applied_opts.append(opt)
     axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else 0)
@@ -350,8 +330,10 @@ class OptimizedKernel(Kernel):
       if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype.__class__ is ImageDType:
         assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
         if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
-          if unit_stride_axes_mul_4[0] < self.first_reduce: self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
-          else: self.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-self.first_reduce, 4))
+          if unit_stride_axes_mul_4[0] < self.first_reduce:
+            self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
+          else:
+            self.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-self.first_reduce, 4))
 
   def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
