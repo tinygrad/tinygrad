@@ -101,17 +101,13 @@ class HIPProgram:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
-    self.prg, self.name = prg, name
+    self.modules, self.prgs = [], []
+    for i in range(HIP.device_count):
+      hip.hipSetDevice(i)
+      self.modules.append(hip.hipModuleLoadData(prg))
+      self.prgs.append(hip.hipModuleGetFunction(self.modules[-1], name))
 
   def __call__(self, global_size, local_size, *args, wait=False):
-    # load modules only when called, so we can compile without interacting with hip device
-    if not hasattr(self, 'modules'):
-      self.prgs, self.modules = [], []
-      for i in range(HIP.device_count):
-        hip.hipSetDevice(i)
-        self.modules.append(hip.hipModuleLoadData(self.prg))
-        self.prgs.append(hip.hipModuleGetFunction(self.modules[-1], self.name))
-
     hip.hipSetDevice(args[0]._device)
     if wait:
       start, end = hip.hipEventCreate(), hip.hipEventCreate()
@@ -126,9 +122,7 @@ class HIPProgram:
       return hip.hipEventElapsedTime(start, end)*1e-3
 
   def __del__(self):
-    if hasattr(self, 'modules'):
-      for module in self.modules:
-        hip.hipModuleUnload(module)
+    for module in self.modules: hip.hipModuleUnload(module)
 
 renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
   kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
