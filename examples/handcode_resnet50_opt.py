@@ -65,7 +65,7 @@ if __name__ == "__main__":
           acted_lins = flatten([get_linearizer_actions(lin).items() for lin in beam])
           timed_lins = [(v,time_linearizer(v, rawbufs)) for k,v in acted_lins if k != 0]
           opts = sorted(timed_lins, key=lambda x: x[1])
-          if best_tm <= opts[0][1]: break  # we didn't get faster
+          if len(opts) == 0 or best_tm <= opts[0][1]: break  # we didn't get faster
           best_tm = opts[0][1]
           beam = [x[0] for x in opts[:getenv("BEAM")]]
           if DEBUG >= 1: print(f"{opts[0][1]*1e3:10.2f} ms from {len(opts):3d} actions", beam[0].colored_shape())
