@@ -29,6 +29,13 @@ if __name__ == "__main__":
   sched = out.lazydata.schedule(seen)
   sched = [x for x in sched if x.ast.op not in LoadOps]
 
+  if getenv("BEAM"):
+    from extra.optimization.helpers import lin_to_feats
+    from extra.optimization.pretrain_valuenet import ValueNet
+    from tinygrad.nn.state import safe_load, load_state_dict
+    net = ValueNet()
+    load_state_dict(net, safe_load("/tmp/valuenet.safetensors"))
+
   # work with the schedule
   total_tm = 0
   running_gflops = 0
@@ -68,6 +75,32 @@ if __name__ == "__main__":
           if DEBUG >= 1: print(f"{opts[0][1]*1e3:10.2f} ms from {len(opts):3d} actions", lin.colored_shape())
         global_db[str(lin.ast)] = lin.applied_opts
       lins.append(lin)
+
+    # try a beam search in the policy model
+    if getenv("BEAM"):
+      beam = [Linearizer(si.ast, device.linearizer_opts)]
+      #best = []
+      for _ in range(8):
+        gains, acteds = [], []
+        for lin in beam:
+          acted,feats = [], []
+          for k,v in get_linearizer_actions(lin).items():
+            acted.append(v)
+            feats.append(lin_to_feats(v))
+          preds = net(Tensor(feats))
+          ntms = preds[:, 0].exp().numpy()
+          ngflops = preds[:, 1].exp().numpy()
+          gain = ((ngflops/ngflops[0]) + (ntms[0]/ntms))/2
+          if all(gain[1:] < 1):
+            lins.append(acted[0])
+          gains += gain[1:].tolist()
+          acteds += acted[1:]
+        top_k = sorted(zip(gains, acteds), key=lambda x: x[0], reverse=True)[:8]
+        beam = [x[1] for x in top_k]
+        #for g,a in top_k: print(g, a.applied_opts)
+      #best = sorted(best, key=lambda x: x[0], reverse=False)[0:3]
+      #print(best)
+      #lins += [x[1] for x in best]
 
     # benchmark the programs
     choices = []
