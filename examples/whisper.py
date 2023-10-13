@@ -195,16 +195,20 @@ if __name__ == "__main__":
 
   if len(sys.argv) > 1:
     # offline
-    waveform, sample_rate = librosa.load(sys.argv[1], normalize=True)
-    log_spec = prep_audio(waveform, sample_rate)
+    waveform, sample_rate = librosa.load(sys.argv[1], dtype=np.float32)        
+    log_spec = prep_audio(waveform.reshape(1, -1), sample_rate)
     lst = [enc._special_tokens["<|startoftranscript|>"]]
+    print(log_spec.shape)
     dat = model.encoder(Tensor(log_spec)).realize()
     for i in range(50):
       out = model.decoder(Tensor([lst]), dat)
       out.realize()
-      idx = out[0,-1].argmax().numpy()
-      lst.append(idx)
-      print(enc.decode(lst))
+      idx = out[0,-1].argmax().numpy().astype(dtype=np.int32)
+      lst.append(idx)        
+      dec = enc.decode(lst)
+      print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
+      if dec.endswith("<|endoftext|>"):
+        lst = [enc._special_tokens["<|startoftranscript|>"]]
   else:
     # online
 
