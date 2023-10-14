@@ -1,6 +1,7 @@
 from typing import Callable
 import time
 from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.optimizer import Opt, OptOps
 from tinygrad.helpers import DEBUG, prod, getenv
 from tinygrad.lazy import vars_from_ast
 
@@ -15,11 +16,10 @@ def kernel_optimize_opts(k:Linearizer):
   for i in range(k.first_reduce):
     # TODO: the upcast always happen first, you might want to reverse this?
     # TODO: the order of the locals might improve things too
-    opts.append(ng.p.TransitionChoice([(i,s,"U") for s in get_divisors(k.full_shape[i], max_div=8)]))
-    opts.append(ng.p.TransitionChoice([(i,s,"L") for s in get_divisors(k.full_shape[i], min_div=4)]))
+    opts.append(ng.p.TransitionChoice([Opt(OptOps.UPCAST,i,s) for s in get_divisors(k.full_shape[i], max_div=8)]))
+    opts.append(ng.p.TransitionChoice([Opt(OptOps.LOCAL,i,s) for s in get_divisors(k.full_shape[i], min_div=4)]))
   for i in range(k.shape_len-k.first_reduce):
-    opts.append(ng.p.TransitionChoice([(i,s,"R") for s in get_divisors(k.full_shape[k.first_reduce+i], max_div=8)]))
-    opts.append(ng.p.TransitionChoice([(i,s,"G") for s in get_divisors(k.full_shape[k.first_reduce+i], min_div=4) if all(st.shape[k.first_reduce+i] % s == 0 or st.shape[k.first_reduce+i] == 1 for st in k.sts)]))
+    opts.append(ng.p.TransitionChoice([Opt(OptOps.UNROLL,i,s) for s in get_divisors(k.full_shape[k.first_reduce+i], max_div=8)]))
   return opts
 
 def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, baseline, bufs, var_vals):
@@ -27,7 +27,7 @@ def kernel_optimize_search(k:Linearizer, create_k:Callable[[], Linearizer], to_p
   def opt(x):
     try:
       k = create_k()
-      k.apply_auto_opt(x)
+      for o in x: k.apply_opt(o)
       prg = to_prg(k)
       first_tm = prg.exec(bufs, var_vals, force_wait=True, optimizing=True)
       if baseline*5 < first_tm*1000: return first_tm*1000  # very slow
@@ -78,5 +78,7 @@ def kernel_optimize(k:Linearizer, create_k:Callable[[], Linearizer], to_prg, buf
       global_db[skey] = choice
       global_db.sync()
 
-  if choice == "BASELINE": k.hand_coded_optimizations()
-  else: k.apply_auto_opt(choice)
+  if choice == "BASELINE":
+    k.hand_coded_optimizations()
+  else:
+    for o in choice: k.apply_opt(o)
