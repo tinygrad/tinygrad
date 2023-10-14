@@ -131,8 +131,9 @@ class Kernel:
   @property
   def global_dims(self) -> int: return self.first_reduce-self.local_dims
 
-  # there's seven chunks of the shape
+  # there's eight chunks of the shape
   # blue   -- global dims
+  # CYAN   -- excluded local dims (non-warp)
   # cyan   -- local dims
   #  *** self.first_reduce
   # green  -- reduce-local dims
@@ -142,10 +143,12 @@ class Kernel:
   # purple -- reduce upcasted
   # yellow -- normal upcasted dimensions
   def colors(self) -> List[str]:
-    # up to first_reduce, they are all global (blue)
+    # first non local non reduce dims are global (blue)
     colors = ["blue"] * self.global_dims
+    # some special local_dims are excluded from the local upcast
+    colors += ["CYAN"] * self.exclude_local_upcast
     # except the local_dims, these are non-reduce locals (cyan)
-    colors += ["cyan"] * self.local_dims
+    colors += ["cyan"] * (self.local_dims - self.exclude_local_upcast)
     # between first_reduce and first_reduce + group_for_reduce, they are either local (cyan), or late upcasted (green)
     colors += ["white" if i in self.upcast_in_mid_reduce_axes else "green" for i in range(self.first_reduce, self.first_reduce + len(self.group_for_reduce))]
     # between first_reduce + group_for_reduce and upcasted, they are reduce (red)
