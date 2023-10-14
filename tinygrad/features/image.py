@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union, Dict, Set, Any
+from typing import List, Tuple, Dict, Any
 from tinygrad.helpers import ImageDType, prod, IMAGE, getenv, dtypes, DEBUG
 
 # *** image Tensor function replacements ***
@@ -159,10 +159,9 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       f_b = 1 if isinstance(first, Variable) else first.b
       s_b = 1 if isinstance(second, Variable) else second.b
       katla = f_b//s_b
-
-      lim = (-node.b) + 1 if s_b < 0 else node.b - 1
-      anan = (-(node.a)) if s_b < 0 else node.a
-      val_dict[anan] = val_dict.get(anan, []) + [(lim, katla)]
+      sig = -1 if s_b < 0 else 1
+      key_node = sig*node.a
+      val_dict[key_node] = val_dict.get(key_node, []) + [(sig*(node.b - 1), katla)]
 
     fakes = []
     for cnt, anan in enumerate(val_dict.keys()):
