@@ -298,7 +298,9 @@ jobs:
       - name: Run pytest (triton)
         if: matrix.backend=='triton'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
-        # Try idk
+        # Segfaults on llvm
+          # FAILED test/external/external_test_onnx_backend.py::OnnxBackendNodeModelTest::test_max_float16_cpu
+          # FAILED test/external/external_test_onnx_backend.py::OnnxBackendNodeModelTest::test_min_float16_cpu
       - name: Run ONNX
         run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
 
