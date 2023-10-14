@@ -149,13 +149,6 @@ def get_run_onnx(onnx_model: ModelProto):
         axes = opt['axes'] if 'axes' in opt else safe_numpy(inp[1])
         axes = [int(x) if x >= 0 else int(x+inp[0].ndim) for x in axes]
         ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in axes])
-      elif n.op_type == "Constant":
-        if 'value' in opt: ret = opt['value'] # tensor
-        elif 'value_float' in opt: ret = Tensor(np.array(opt['value_float'], dtype=np.float32), requires_grad=False)
-        elif 'value_int' in opt: ret = Tensor(np.array(opt['value_int'], dtype=np.int64), requires_grad=False)
-        elif 'value_floats' in opt: ret = Tensor(np.array(opt['value_floats'], dtype=np.float32), requires_grad=False)
-        elif 'value_ints' in opt: ret = Tensor(np.array(opt['value_ints'], dtype=np.int64), requires_grad=False)
-        else: raise NotImplementedError(f'Constant not implemented for {opt}')
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type == "Split":
         if 'axis' not in opt: opt['axis'] = 0

@@ -149,11 +149,16 @@ backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # anti
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
 backend_test.exclude('test_operator_addconstant_cpu') # bad data type
 
-# 1556
+# issue 1556
 backend_test.exclude('test_isinf_cpu')
 backend_test.exclude('test_isinf_negative_cpu')
 backend_test.exclude('test_isinf_positive_cpu')
 backend_test.exclude('test_isnan_cpu')
+
+# issue 2067
+if getenv('METAL'):
+  backend_test.exclude('test_maxpool_2d_pads_cpu')
+  backend_test.exclude('test_maxpool_2d_same_lower_cpu')
 
 # not too sure
 if getenv("CPU") or getenv("ARM64") or getenv("TORCH"):
@@ -169,11 +174,6 @@ if getenv('GPU') or getenv('METAL') or getenv('MPS'):
   backend_test.exclude('test_mish_cpu') # weird inaccuracy
   backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
   backend_test.exclude('test_eyelike_with_dtype_cpu') # I'm not sure about this...
-
-# 
-if getenv('METAL'):
-  backend_test.exclude('test_maxpool_2d_pads_cpu')
-  backend_test.exclude('test_maxpool_2d_same_lower_cpu')
 
 # fast math messes with these
 if getenv('METAL') or getenv('MPS') or getenv('LLVM'):

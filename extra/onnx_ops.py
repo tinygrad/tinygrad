@@ -46,9 +46,25 @@ def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
 def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
 def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
-def Cast(input, to): return input.cast(dtypes.from_np(tensor_dtype_to_np_dtype(to)))
-
+def Cast(input: Tensor, to): return input.cast(dtypes.from_np(tensor_dtype_to_np_dtype(to)))
+'''
+      elif n.op_type == "Constant":
+        if 'value' in opt: ret = opt['value'] # tensor
+        elif 'value_float' in opt: ret = Tensor(np.array(opt['value_float'], dtype=np.float32), requires_grad=False)
+        elif 'value_int' in opt: ret = Tensor(np.array(opt['value_int'], dtype=np.int64), requires_grad=False)
+        elif 'value_floats' in opt: ret = Tensor(np.array(opt['value_floats'], dtype=np.float32), requires_grad=False)
+        elif 'value_ints' in opt: ret = Tensor(np.array(opt['value_ints'], dtype=np.int64), requires_grad=False)
+        else: raise NotImplementedError(f'Constant not implemented for {opt}')
+'''
 # **************** Simple Ops ****************
+
+def Constant(value: Tensor=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None, value_strings=None):
+  if value: return value
+  elif value_float: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False) 
+  elif value_floats: return Tensor(value_floats, dtype=dtypes.float32, requires_grad=False) 
+  elif value_int: return Tensor(value_int, dtype=dtypes.float32, requires_grad=False)
+  elif value_ints: return Tensor(value_ints, dtype=dtypes.float32, requires_grad=False)
+  elif value_string or value_strings: raise NotImplementedError(f'value_string or value_strings not implemented for Constant op')
 
 def Softsign(input): return input / (1+input.abs())
 def Cosh(x): return (math.e ** x + math.e ** -x) / 2
