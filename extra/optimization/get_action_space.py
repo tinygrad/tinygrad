@@ -8,6 +8,10 @@ if __name__ == "__main__":
   tactions = set()
   for ast_str in tqdm(ast_strs):
     lin = ast_str_to_lin(ast_str)
+    #if not lin.apply_tensor_cores():
+    lin.hand_coded_optimizations()
+
+    """
     if lin.apply_tensor_cores_old():
       linr = ast_str_to_lin(ast_str)
       linr.apply_tensor_cores()
@@ -16,16 +20,17 @@ if __name__ == "__main__":
       continue
       #lin.hand_coded_optimizations_old()
       #linr = ast_str_to_lin(ast_str)
+    """
 
     """
     if True or not lin.apply_tensor_cores():
       lin.hand_coded_optimizations()
+    """
     linr = Linearizer(lin.ast)
     for o in lin.applied_opts:
-      assert o in actions
+      #assert o in actions
       tactions.add(o)
       linr.apply_opt(o)
-    """
 
     assert len(lin.sts) == len(linr.sts)
     for st1,st2 in zip(lin.sts, linr.sts):
