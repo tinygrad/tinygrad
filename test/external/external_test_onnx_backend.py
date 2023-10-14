@@ -182,7 +182,10 @@ if getenv('METAL') or getenv('MPS') or getenv('LLVM'):
   backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
 
 # Segfaults in CI
-if (getenv('LLVM') or getenv('CUDA')) and getenv("CI"):
+if getenv('LLVM') and getenv("CI"):
+  backend_test.exclude('test_max_float16_cpu')
+  backend_test.exclude('test_min_float16_cpu')
+if getenv('CUDA') and getenv("CI"):
   backend_test.exclude('test_max_float16_cpu')
   backend_test.exclude('test_min_float16_cpu')
 
