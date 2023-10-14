@@ -140,21 +140,18 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
 
 # *** images have weird indexing requirements ***
 
-from tinygrad.shape.symbolic import Node, AndNode, MulNode, Variable, NumNode, ModNode, SumNode, LtNode
+from tinygrad.shape.symbolic import Node, AndNode, MulNode, Variable, NumNode, ModNode
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
-  # This part is substituting variables by just looking at single var LtNodes in valid
-  # Basically if var[0-5] < 3 -> var[0-2]
-
 
   idx = (idxy // 4) % base_shape[1]
   idy = (idxy // (4 * base_shape[1]))
 
   if valid.min == 0:
-    nds = valid.nodes if isinstance(valid, AndNode) else [valid]
+    nodes = valid.nodes if isinstance(valid, AndNode) else [valid]
     val_dict = {}
     idxy_flat = idxy.flat_components
-    for node in nds:
+    for node in nodes:
       node_flat = [node.a] if isinstance(node.a, (Variable, MulNode)) else node.a.flat_components
       k = [i for i in idxy_flat if not isinstance(i, NumNode) and i.vars()[0] in node.vars()]
       first = sorted(k)[0]
@@ -167,37 +164,35 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       anan = (-(node.a)) if s_b < 0 else node.a
       val_dict[anan] = val_dict.get(anan, []) + [(lim, katla)]
 
-    used = []
+    fakes = []
     for cnt, anan in enumerate(val_dict.keys()):
-      cnt += 1
-      katla = abs(val_dict[anan][0][1])
-      if len(val_dict[anan]) == 1:
-        if val_dict[anan][0][1] < 0:
-          mnn, mxn = val_dict[anan][0][0], anan.max
-        else:
-          mnn, mxn = anan.min, val_dict[anan][0][0]
+      katla = val_dict[anan][0][1]
+      ranges = [r[0] for r in val_dict[anan]]
+      if len(ranges) == 1:
+        mnn, mxn = (ranges[0], anan.max) if katla < 0 else (anan.min, ranges[0])
       else:
-        mnn, mxn = min(val_dict[anan][0][0], val_dict[anan][1][0]), max(val_dict[anan][0][0], val_dict[anan][1][0])
+        mnn, mxn = min(ranges), max(ranges)
       if mnn == mxn: continue
-      used.append((Variable("fake_" + str(cnt), mnn, mxn), anan))
-      idxy = idxy - anan*katla + katla*Variable("fake_" + str(cnt), mnn, mxn)
-
+      fake_var = Variable("fake_" + str(cnt), mnn, mxn)
+      fakes.append((fake_var, anan))
+      idxy += abs(katla)*(fake_var - anan)
     idx = (idxy // 4) % base_shape[1]
     idy = (idxy // (4 * base_shape[1]))
 
-    for u in used:
-      idx = idx.substitute({u[0] : u[1]})
-      idy = idy.substitute({u[0] : u[1]})
+    fake_rep = {fake[0]: fake[1] for fake in fakes}
+
+    idx = idx.substitute(fake_rep)
+    idy = idy.substitute(fake_rep)
 
     if not isinstance(idx, ModNode):
       ones = []
-      for node in nds:
+      for node in nodes:
         if set(idy.vars()) - set(node.vars()) == set() or set(idy.vars()) - set(node.vars()) == set():
           ones.append(node)
         if set(node.vars()) - set(idx.vars()) == set():
           ones.append(node)
 
-      valid = Variable.ands([i for i in nds if i not in ones])
+      valid = Variable.ands([i for i in nodes if i not in ones])
 
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
