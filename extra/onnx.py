@@ -145,11 +145,7 @@ def get_run_onnx(onnx_model: ModelProto):
       opt = attribute_dict[num]
       if debug: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
       # one liners
-      if n.op_type == "Squeeze":
-        axes = opt['axes'] if 'axes' in opt else safe_numpy(inp[1])
-        axes = [int(x) if x >= 0 else int(x+inp[0].ndim) for x in axes]
-        ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in axes])
-      elif n.op_type == "Split":
+      if n.op_type == "Split":
         if 'axis' not in opt: opt['axis'] = 0
         if 'num_outputs' in opt or len(inp) == 1:
           opt['split'] = [inp[0].shape[opt['axis']] // len(n.output)] * len(n.output)
@@ -165,10 +161,7 @@ def get_run_onnx(onnx_model: ModelProto):
         continue
       elif n.op_type == "Slice":
         if onnx_model_version < 10:
-          axes = list(opt.get("axes", range(inp[0].ndim)))
-          ends = list(opt["ends"])
-          starts = list(opt["starts"])
-          steps = [1]*inp[0].ndim
+          axes, ends, starts, steps = list(opt.get("axes", range(inp[0].ndim))), list(opt["ends"]), list(opt["starts"]), [1]*inp[0].ndim
         else:
           starts, ends = inp[1:3]
           axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3]).tolist()
@@ -184,9 +177,6 @@ def get_run_onnx(onnx_model: ModelProto):
         new_shape = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in arg)
         if any(s==e for s,e in new_shape): ret = inp[0].shrink(new_shape)
         else: ret = inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
-      elif n.op_type == "Shrink":
-        bias = opt['bias'] if 'bias' in opt else 0
-        ret = (inp[0] < -opt['lambd'])*(inp[0]+bias) + (inp[0] > opt['lambd'])*(inp[0]-bias)
       elif n.op_type == "Gradient":
         assert len(opt["xs"]) == len(inp), f"len(opt['xs']):{len(opt['xs'])}, len(inp):{len(inp)} output and input has to match"
         y = opt["y"]
