@@ -1,6 +1,7 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
 import sys
+import argparse
 import pathlib
 import base64
 import multiprocessing
@@ -13,6 +14,44 @@ import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
 import itertools
 import librosa
+
+RATE = 16000
+CHUNK = 1600
+RECORD_SECONDS = 10
+BASE = pathlib.Path(__file__).parents[1] / "weights"
+
+TIKTOKEN_URLS = {
+  "gpt2": "https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/gpt2.tiktoken",
+  "multilingual": "https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/multilingual.tiktoken",
+}
+
+MODELS = {
+  "tiny.en": "https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt",
+  "tiny": "https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt",
+  "base.en": "https://openaipublic.azureedge.net/main/whisper/models/25a8566e1d0c1e2231d1c762132cd20e0f96a85d16145c3a00adf5d1ac670ead/base.en.pt",
+  "base": "https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e/base.pt",
+  "small.en": "https://openaipublic.azureedge.net/main/whisper/models/f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872/small.en.pt",
+  "small": "https://openaipublic.azureedge.net/main/whisper/models/9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt",
+  "medium.en": "https://openaipublic.azureedge.net/main/whisper/models/d7440d1dc186f76616474e0ff0b3b6b879abc9d1a4926b7adfa41db2d497ab4f/medium.en.pt",
+  "medium": "https://openaipublic.azureedge.net/main/whisper/models/345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1/medium.pt",
+  "large-v1": "https://openaipublic.azureedge.net/main/whisper/models/e4b87e7e0bf463eb8e6956e646f1e277e901512310def2c24bf0e11bd3c28e9a/large-v1.pt",
+  "large-v2": "https://openaipublic.azureedge.net/main/whisper/models/81f7c96c852ee8fc832187b0132e569d6c3065a3252ed18e56effd0b6a73e524/large-v2.pt",
+  "large": "https://openaipublic.azureedge.net/main/whisper/models/81f7c96c852ee8fc832187b0132e569d6c3065a3252ed18e56effd0b6a73e524/large-v2.pt",
+}
+
+LANGUAGES = {
+  "en": "english", "zh": "chinese", "de": "german", "es": "spanish", "ru": "russian", "ko": "korean", "fr": "french", "ja": "japanese", "pt": "portuguese", "tr": "turkish",
+  "pl": "polish", "ca": "catalan", "nl": "dutch", "ar": "arabic", "sv": "swedish", "it": "italian", "id": "indonesian", "hi": "hindi", "fi": "finnish", "vi": "vietnamese",
+  "he": "hebrew", "uk": "ukrainian", "el": "greek", "ms": "malay", "cs": "czech", "ro": "romanian", "da": "danish", "hu": "hungarian", "ta": "tamil", "no": "norwegian",
+  "th": "thai", "ur": "urdu", "hr": "croatian", "bg": "bulgarian", "lt": "lithuanian", "la": "latin", "mi": "maori", "ml": "malayalam", "cy": "welsh", "sk": "slovak", "te": "telugu",
+  "fa": "persian", "lv": "latvian", "bn": "bengali", "sr": "serbian", "az": "azerbaijani", "sl": "slovenian", "kn": "kannada", "et": "estonian", "mk": "macedonian",
+  "br": "breton", "eu": "basque", "is": "icelandic", "hy": "armenian", "ne": "nepali", "mn": "mongolian", "bs": "bosnian", "kk": "kazakh", "sq": "albanian", "sw": "swahili",
+  "gl": "galician", "mr": "marathi", "pa": "punjabi", "si": "sinhala", "km": "khmer", "sn": "shona", "yo": "yoruba", "so": "somali", "af": "afrikaans", "oc": "occitan", "ka": "georgian",
+  "be": "belarusian", "tg": "tajik", "sd": "sindhi", "gu": "gujarati", "am": "amharic", "yi": "yiddish", "lo": "lao", "uz": "uzbek", "fo": "faroese", "ht": "haitian creole",
+  "ps": "pashto", "tk": "turkmen", "nn": "nynorsk", "mt": "maltese", "sa": "sanskrit", "lb": "luxembourgish", "my": "myanmar", "bo": "tibetan", "tl": "tagalog", "mg": "malagasy",
+  "as": "assamese", "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa", "ba": "bashkir", "jw": "javanese", "su": "sundanese",
+}
+
 
 # TODO: you have written this fifteen times
 class MultiHeadAttention:
@@ -106,9 +145,6 @@ class Whisper:
   def __call__(self, mel:Tensor, tokens:Tensor):
     return self.decoder(tokens, self.encoder(mel))
 
-RATE = 16000
-CHUNK = 1600
-RECORD_SECONDS = 10
 
 def prep_audio(waveform) -> Tensor:
   N_FFT = 400
@@ -131,23 +167,11 @@ def prep_audio(waveform) -> Tensor:
   #print(waveform.shape, log_spec.shape)
   return log_spec
 
-LANGUAGES = {
-  "en": "english", "zh": "chinese", "de": "german", "es": "spanish", "ru": "russian", "ko": "korean", "fr": "french", "ja": "japanese", "pt": "portuguese", "tr": "turkish",
-  "pl": "polish", "ca": "catalan", "nl": "dutch", "ar": "arabic", "sv": "swedish", "it": "italian", "id": "indonesian", "hi": "hindi", "fi": "finnish", "vi": "vietnamese",
-  "he": "hebrew", "uk": "ukrainian", "el": "greek", "ms": "malay", "cs": "czech", "ro": "romanian", "da": "danish", "hu": "hungarian", "ta": "tamil", "no": "norwegian",
-  "th": "thai", "ur": "urdu", "hr": "croatian", "bg": "bulgarian", "lt": "lithuanian", "la": "latin", "mi": "maori", "ml": "malayalam", "cy": "welsh", "sk": "slovak", "te": "telugu",
-  "fa": "persian", "lv": "latvian", "bn": "bengali", "sr": "serbian", "az": "azerbaijani", "sl": "slovenian", "kn": "kannada", "et": "estonian", "mk": "macedonian",
-  "br": "breton", "eu": "basque", "is": "icelandic", "hy": "armenian", "ne": "nepali", "mn": "mongolian", "bs": "bosnian", "kk": "kazakh", "sq": "albanian", "sw": "swahili",
-  "gl": "galician", "mr": "marathi", "pa": "punjabi", "si": "sinhala", "km": "khmer", "sn": "shona", "yo": "yoruba", "so": "somali", "af": "afrikaans", "oc": "occitan", "ka": "georgian",
-  "be": "belarusian", "tg": "tajik", "sd": "sindhi", "gu": "gujarati", "am": "amharic", "yi": "yiddish", "lo": "lao", "uz": "uzbek", "fo": "faroese", "ht": "haitian creole",
-  "ps": "pashto", "tk": "turkmen", "nn": "nynorsk", "mt": "maltese", "sa": "sanskrit", "lb": "luxembourgish", "my": "myanmar", "bo": "tibetan", "tl": "tagalog", "mg": "malagasy",
-  "as": "assamese", "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa", "ba": "bashkir", "jw": "javanese", "su": "sundanese",
-}
 
-BASE = pathlib.Path(__file__).parents[1] / "weights"
-def get_encoding(n_vocab_in):
-  download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/gpt2.tiktoken", BASE / "gpt2.tiktoken")
-  ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(BASE / "gpt2.tiktoken") if line)}
+def get_encoding(name:str, n_vocab_in):
+  vocab_path = f"{name}.tiktoken"
+  download_file(TIKTOKEN_URLS[name], BASE / vocab_path)
+  ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in open(BASE / vocab_path) if line)}
   n_vocab = len(ranks)
   specials = [
     "<|endoftext|>",
@@ -172,11 +196,6 @@ def get_encoding(n_vocab_in):
     mergeable_ranks=ranks,
     special_tokens=special_tokens)
 
-def img(x):
-  import matplotlib.pyplot as plt
-  plt.imshow(x.numpy())
-  plt.show()
-
 def listener(q):
   import pyaudio
   p = pyaudio.PyAudio()
@@ -187,32 +206,6 @@ def listener(q):
     waveform = ((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3)
     q.put(waveform)
   print("done listening")
-
-
-MODEL_URLS = {
-  "tiny.en": "https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt",
-  "tiny": "https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt",
-  "base.en": "https://openaipublic.azureedge.net/main/whisper/models/25a8566e1d0c1e2231d1c762132cd20e0f96a85d16145c3a00adf5d1ac670ead/base.en.pt",
-  "base": "https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e/base.pt",
-  "small.en": "https://openaipublic.azureedge.net/main/whisper/models/f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872/small.en.pt",
-  "small": "https://openaipublic.azureedge.net/main/whisper/models/9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt",
-  "medium.en": "https://openaipublic.azureedge.net/main/whisper/models/d7440d1dc186f76616474e0ff0b3b6b879abc9d1a4926b7adfa41db2d497ab4f/medium.en.pt",
-  "medium": "https://openaipublic.azureedge.net/main/whisper/models/345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1/medium.pt",
-  "large-v1": "https://openaipublic.azureedge.net/main/whisper/models/e4b87e7e0bf463eb8e6956e646f1e277e901512310def2c24bf0e11bd3c28e9a/large-v1.pt",
-  "large-v2": "https://openaipublic.azureedge.net/main/whisper/models/81f7c96c852ee8fc832187b0132e569d6c3065a3252ed18e56effd0b6a73e524/large-v2.pt",
-  "large": "https://openaipublic.azureedge.net/main/whisper/models/81f7c96c852ee8fc832187b0132e569d6c3065a3252ed18e56effd0b6a73e524/large-v2.pt",
-}
-def init_whisper(model_name="tiny.en"):
-  assert MODEL_URLS[model_name] is not None
-
-  filename = BASE / "whisper-{}.pt".format(model_name)
-  download_file(MODEL_URLS[model_name], filename)
-  state = torch_load(filename)
-  model = Whisper(state['dims'])
-  load_state_dict(model, state['model_state_dict'])
-
-  enc = get_encoding(state['dims']['n_vocab'])
-  return model, enc
 
 def transcribe_file(model, enc, filename):
   waveform, sample_rate = librosa.load(filename, sr=RATE)
@@ -229,12 +222,28 @@ def transcribe_file(model, enc, filename):
     if lst[-1] == enc._special_tokens["<|endoftext|>"]:
       return  transcription
 
+def init_whisper(model_name):
+  filename = BASE / "whisper-{}".format(MODELS[model_name].split('/')[-1])
+  download_file(MODELS[model_name], filename)
+  state = torch_load(filename)
+  model = Whisper(state['dims'])
+  load_state_dict(model, state['model_state_dict'])
+  enc = get_encoding('gpt2' if model_name.endswith(".en") else 'multilingual', state['dims']['n_vocab'])
+  return model, enc
 
 if __name__ == "__main__":
-  model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en")
+  parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser.add_argument("--audio", default=None, type=str, help="audio file to transcribe")
+  parser.add_argument("--model", default="tiny.en", choices=MODELS.keys(), help="name of the Whisper model to use")
 
-  if len(sys.argv) > 1:
-    transcribe_file(model, enc, sys.argv[1])
+  args = parser.parse_args().__dict__
+  model_name: str = args.pop("model")
+  audio_file: str = args.pop("audio")
+
+  model, enc = init_whisper(model_name)
+
+  if (audio_file is not None):
+    transcribe_file(model, enc, audio_file)
   else:
     # online
 
