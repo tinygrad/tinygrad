@@ -145,23 +145,7 @@ from tinygrad.shape.symbolic import Node, AndNode, MulNode, Variable, NumNode, M
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
   # This part is substituting variables by just looking at single var LtNodes in valid
   # Basically if var[0-5] < 3 -> var[0-2]
-  if valid.min == 0:
-    nodes: List = valid.nodes if isinstance(valid, AndNode) else [valid]
-    var_dict = {var:[var.min, var.max] for var in valid.vars()}
 
-    for nd in nodes:
-      var_range = var_dict[nd.vars()[0]]
-      if isinstance(nd.a, MulNode):
-        if nd.a.b < 0:
-          var_range[0] = (nd.b // nd.a.b) + 1
-        elif nd.a.b > 0:
-          var_range[1] = (nd.b // nd.a.b) - 1 if nd.b % nd.a.b == 0 else nd.b // nd.a.b
-      elif isinstance(nd.a, Variable):
-        var_range[1] = nd.b - 1
-    # We do not allow NumNode because it is constant
-    # TODO: Remove mx != mn
-    sub_dict: Dict[Union[Variable, NumNode], Node] = {v:Variable(v.expr, mn, mx) for v, (mn, mx) in var_dict.items() if mx != mn}
-    valid, idxy = valid.substitute(sub_dict), idxy.substitute(sub_dict)
 
   idx = (idxy // 4) % base_shape[1]
   idy = (idxy // (4 * base_shape[1]))
@@ -171,39 +155,33 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     val_dict = {}
     idxy_flat = idxy.flat_components
     for node in nds:
-      if isinstance(node.a, Variable): continue
-      node_flat = node.a.flat_components
-      if len(set(idxy.vars()) - set(node.vars())) != 0:
-        k = [i for i in idxy_flat if not isinstance(i, NumNode) and i.vars()[0] in node.vars()]
-        first = sorted(k)[0]
-        second = sorted(node_flat)[0]
-        f_b = 1 if isinstance(first, Variable) else first.b
-        s_b = 1 if isinstance(second, Variable) else second.b
-        katla = abs(f_b//s_b)
+      node_flat = [node.a] if isinstance(node.a, (Variable, MulNode)) else node.a.flat_components
+      k = [i for i in idxy_flat if not isinstance(i, NumNode) and i.vars()[0] in node.vars()]
+      first = sorted(k)[0]
+      second = sorted(node_flat)[0]
+      f_b = 1 if isinstance(first, Variable) else first.b
+      s_b = 1 if isinstance(second, Variable) else second.b
+      katla = f_b//s_b
 
-        if s_b < 0:
-          anan = (-(node.a))
-          if anan in val_dict: val_dict[anan].append(((-node.b) + 1, katla, -10))
-          else: val_dict[anan] = [((-node.b) + 1, katla, -10)]
-        else:
-          anan = node.a
-          if anan in val_dict: val_dict[anan].append((node.b - 1, katla, 10))
-          else: val_dict[anan] = [(node.b - 1, katla, 10)]
+      lim = (-node.b) + 1 if s_b < 0 else node.b - 1
+      anan = (-(node.a)) if s_b < 0 else node.a
+      val_dict[anan] = val_dict.get(anan, []) + [(lim, katla)]
 
-    cnt = 0
     used = []
-    for anan in val_dict.keys():
+    for cnt, anan in enumerate(val_dict.keys()):
       cnt += 1
-      katla = val_dict[anan][0][1]
+      katla = abs(val_dict[anan][0][1])
       if len(val_dict[anan]) == 1:
-        if val_dict[anan][0][2] < 0:
+        if val_dict[anan][0][1] < 0:
           mnn, mxn = val_dict[anan][0][0], anan.max
         else:
           mnn, mxn = anan.min, val_dict[anan][0][0]
       else:
         mnn, mxn = min(val_dict[anan][0][0], val_dict[anan][1][0]), max(val_dict[anan][0][0], val_dict[anan][1][0])
+      if mnn == mxn: continue
       used.append((Variable("fake_" + str(cnt), mnn, mxn), anan))
       idxy = idxy - anan*katla + katla*Variable("fake_" + str(cnt), mnn, mxn)
+
     idx = (idxy // 4) % base_shape[1]
     idy = (idxy // (4 * base_shape[1]))
 
@@ -211,20 +189,15 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       idx = idx.substitute({u[0] : u[1]})
       idy = idy.substitute({u[0] : u[1]})
 
-  idx_vars, idy_vars, val_vars = set(idx.vars()), set(idy.vars()), set(valid.vars())
+    if not isinstance(idx, ModNode):
+      ones = []
+      for node in nds:
+        if set(idy.vars()) - set(node.vars()) == set() or set(idy.vars()) - set(node.vars()) == set():
+          ones.append(node)
+        if set(node.vars()) - set(idx.vars()) == set():
+          ones.append(node)
 
-  if valid.min == 0:
-    nds = valid.nodes if isinstance(valid, AndNode) else [valid]
-    ones = []
-    for node in nds:
-      if isinstance(node.a, Variable): continue
-      if set(idy.vars()) - set(node.vars()) == set() or set(idy.vars()) - set(node.vars()) == set():
-        ones.append(node)
-    for node in nds:
-      if isinstance(node.a, Variable): continue
-      if set(node.vars()) - set(idx.vars()) == set():
-        ones.append(node)
-    valid = Variable.ands([i for i in nds if i not in ones])
+      valid = Variable.ands([i for i in nds if i not in ones])
 
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
