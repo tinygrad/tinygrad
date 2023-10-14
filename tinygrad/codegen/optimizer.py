@@ -65,14 +65,15 @@ class OptimizedKernel(Kernel):
 
   # ******************** complex simplifiers ********************
 
-  def simplify_ones(self):
+  def simplify_ones(self) -> bool:
     # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride
-    if self.shape_len == 0: return
+    if self.shape_len == 0: return False
     all_ones = [s==1 for s in self.full_shape]
     self.local_dims -= sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce])
     self.upcasted -= sum(all_ones[self.shape_len-self.upcasted:])
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
+    return any(all_ones)
 
   def simplify_merge_adjacent(self):
     if self.shape_len == 0: return
@@ -232,81 +233,62 @@ class OptimizedKernel(Kernel):
       buf1_strides = self.sts[buf1].real_strides()
       axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
       axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides) if s == 0 and self.full_shape[i]%8 == 0 and i < self.first_reduce]
-      #optim_conv2d = (self.shape_len-self.first_reduce) == 3 and self.full_shape[self.first_reduce+1]%2 == 1 and self.full_shape[self.first_reduce+2]%2 == 1 and max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 21
-      # enabling this gives wrong answers!! https://github.com/tinygrad/tinygrad/issues/1967
-      # TODO: WMMA must be a lot better before reenabling things like this
-      optim_conv2d = False
-      if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and (self.shape_len-self.first_reduce == 1 or optim_conv2d):
+      if axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%8 == 0 and self.shape_len-self.first_reduce == 1:
         if DEBUG >= 3: print("METAL TENSOR CORES", axis_buf0, axis_buf1)
-        self.use_tensor_cores = use_tensor_cores == 1  # TC=2 will do the shape ops without the WMMA
 
         # TODO: select axis in smart way
         s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0]
-        global_count = self.first_reduce
+        s0_exists, s1_exists = True, True
+        assert s0 != s1 and self.full_shape[s0]%8 == 0 and self.full_shape[s1]%8 == 0
+        def fix(needed, ax):
+          nonlocal s0, s1, s0_exists, s1_exists
+          if not needed: return
+          if s0_exists and ax == s0:
+            if s1_exists and s0 < s1: s1 -= 1
+            s0_exists = False
+          elif s1_exists and ax == s1:
+            if s0_exists and s1 < s0: s0 -= 1
+            s1_exists = False
 
-        # upcast first
-        if self.full_shape[self.first_reduce] > 8: self.shift_to(self.first_reduce, 8)
-        self.upcast()
+        # tensor core (6 ops) -- creates the (2,2,4,2) pattern, an upcasted 2, and a unrolled 8
+        self.apply_opt(Opt(OptOps.UNROLL, 0, 8))
+        self.apply_opt(Opt(OptOps.UPCAST, s0, 2))
+        self.apply_opt(Opt(OptOps.LOCAL, s0, 2))
+        self.apply_opt(Opt(OptOps.LOCAL, s1, 4))
+        fix(self.apply_opt(Opt(OptOps.LOCAL, s0, 2)), s0)
+        fix(self.apply_opt(Opt(OptOps.LOCAL, s1, 2)), s1)
 
-        # 2 locals
-        self.shift_to(s1, 8, insert_before=self.first_reduce)  # axis 2
-        self.shift_to(s0, 8, insert_before=self.first_reduce)  # axis 3
+        # final optional global upcast
+        if s1_exists:
+          s1_div = [upc for upc in [4,3,2,1] if self.full_shape[s1]%upc == 0][0]
+          fix(self.apply_opt(Opt(OptOps.UPCAST, s1, s1_div)), s1)
+        if s0_exists:
+          s0_div = [upc for upc in [4,3,2,1] if self.full_shape[s0]%upc == 0][0]
+          fix(self.apply_opt(Opt(OptOps.UPCAST, s0, s0_div)), s0)
 
-        # permuted+upcast for tensor cores
-        self.shift_to(global_count, 4, insert_before=self.first_reduce)
-        self.shift_to(global_count+1, 4, insert_before=self.first_reduce)
-        self.shift_to(self.first_reduce-1, 2)
-        self.upcast()
-
-        # final global upcast
-        if not optim_conv2d:
-          for ax in [s1, s0]:
-            for upc in [4,3,2]:
-              if self.full_shape[ax]%upc == 0:
-                self.shift_to(ax, upc)
-                self.upcast()
-                break
+        # very late (optional) upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
+        self.use_tensor_cores = use_tensor_cores == 1  # TC=2 will do the shape ops without the WMMA
+        if self.use_tensor_cores and s0_exists and self.full_shape[s0] % 2 == 0:
+          self.apply_opt(Opt(OptOps.LOCAL, s0, 2))
+          self.exclude_local_upcast += 1
 
         # alias buffer
-        self.local_dims = self.first_reduce - global_count
-        alias_pattern = [0]*global_count + [2] * self.local_dims + [0] * (self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3] * (self.upcasted-2)
+        alias_pattern = [0]*(self.global_dims+self.exclude_local_upcast) + [2]*(self.local_dims-self.exclude_local_upcast) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)
         self.alias_buffer(buf0, alias_pattern)
         self.alias_buffer(buf1, alias_pattern)
 
-        if self.use_tensor_cores and optim_conv2d:
-          self.upcast()
-
-          if max(self.full_shape[self.first_reduce+1:self.first_reduce+3]) < 5:
-            self.upcast()
-            for upc in range(8, 1, -1):
-              if self.full_shape[global_count-2]%upc == 0:
-                self.shift_to(global_count-2, upc)
-                self.upcast()
-                break
-          else:
-            for upc in range(16, 1, -1):
-              if self.full_shape[global_count-1]%upc == 0:
-                self.shift_to(global_count-1, upc)
-                self.upcast()
-                break
-
-        # very late upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
-        if self.use_tensor_cores and self.full_shape[s0] % 2 == 0:
-          self.shift_to(s0, 2, insert_before=self.first_reduce-self.local_dims)
-          self.local_dims += 1
-          self.exclude_local_upcast += 1
-
-        # early exit
         return True
     return False
 
   def apply_opt(self, opt:Opt):
+    assert opt.amt is not None and opt.amt != 0, "amount can't be 0"
+    if opt.amt == 1: return False
     self.applied_opts.append(opt)
     axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else 0)
     assert self.full_shape[axis] % opt.amt == 0, "no longer valid shift"
     if opt.op == OptOps.LOCAL:        # cyan
       assert axis < (self.first_reduce-self.local_dims), "can't local a local or reduce"
-      self.shift_to(axis, opt.amt, insert_before=self.first_reduce)
+      self.shift_to(axis, opt.amt, insert_before=self.first_reduce - self.local_dims)
       self.local_dims += 1
     elif opt.op == OptOps.GROUP:      # green
       self.shift_to(axis, opt.amt, insert_before=self.first_reduce + len(self.group_for_reduce))
@@ -322,7 +304,7 @@ class OptimizedKernel(Kernel):
       assert axis < self.first_reduce, "upcast is for non-reduce"
       self.shift_to(axis, opt.amt, insert_before=None)
       self.upcast()
-    self.simplify_ones()
+    return self.simplify_ones()
 
   def required_optimizations(self, early_only=False):
     for buf_index,buf in enumerate(self.bufs):
@@ -446,9 +428,5 @@ class OptimizedKernel(Kernel):
         local_size = prod(sz for _, sz in to_local)
         local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)
         if local_sz is not None: to_local.append((axis, local_sz))
-      deleted_shape = 0
-      for axis, local_sz in sorted(to_local[:3]):
-        axis = axis - deleted_shape
-        will_delete_shape = local_sz == self.full_shape[axis]
+      for axis, local_sz in sorted(to_local[:3])[::-1]:
         self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
-        if will_delete_shape: deleted_shape += 1
