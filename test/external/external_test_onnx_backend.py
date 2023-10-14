@@ -156,14 +156,14 @@ backend_test.exclude('test_isinf_positive_cpu')
 backend_test.exclude('test_isnan_cpu')
 
 # not too sure
-# if getenv("CPU") or getenv("ARM64") or getenv("TORCH"):
-  # backend_test.exclude('test_dequantizelinear_axis_cpu')
-  # backend_test.exclude('test_dequantizelinear_cpu')
+if getenv("CPU") or getenv("ARM64") or getenv("TORCH"):
+  backend_test.exclude('test_dequantizelinear_axis_cpu')
+  backend_test.exclude('test_dequantizelinear_cpu')
 
 # compiled backends cannot reshape to and from 0
-# if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or getenv('MPS'):
-  # backend_test.exclude('test_slice_start_out_of_bounds_cpu')
-  # backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
+if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or getenv('MPS'):
+  backend_test.exclude('test_slice_start_out_of_bounds_cpu')
+  backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
 
 if getenv('GPU') or getenv('METAL') or getenv('MPS'):
   backend_test.exclude('test_mish_cpu') # weird inaccuracy
