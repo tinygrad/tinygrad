@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union, Dict, Set
+from typing import List, Tuple, Union, Dict, Set, Any
 from tinygrad.helpers import ImageDType, prod, IMAGE, getenv, dtypes, DEBUG
 
 # *** image Tensor function replacements ***
@@ -140,22 +140,22 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
 
 # *** images have weird indexing requirements ***
 
-from tinygrad.shape.symbolic import Node, AndNode, MulNode, Variable, NumNode, ModNode
+from tinygrad.shape.symbolic import Node, AndNode, MulNode, Variable, NumNode, ModNode, SumNode, LtNode
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
 
   idx = (idxy // 4) % base_shape[1]
   idy = (idxy // (4 * base_shape[1]))
 
-  if valid.min == 0:
+  if valid.min == 0 and isinstance(idxy, SumNode):
     nodes = valid.nodes if isinstance(valid, AndNode) else [valid]
-    val_dict = {}
+    val_dict: Dict[Node, Any] = {}
     idxy_flat = idxy.flat_components
     for node in nodes:
-      node_flat = [node.a] if isinstance(node.a, (Variable, MulNode)) else node.a.flat_components
-      k = [i for i in idxy_flat if not isinstance(i, NumNode) and i.vars()[0] in node.vars()]
-      first = sorted(k)[0]
-      second = sorted(node_flat)[0]
+      assert isinstance(node, LtNode)
+      node_flat = node.a.flat_components if isinstance(node.a, SumNode) else [node.a]
+      same_sym = [i for i in idxy_flat if not isinstance(i, NumNode) and i.vars()[0] in node.vars()]
+      first, second = sorted(same_sym)[0], sorted(node_flat)[0]
       f_b = 1 if isinstance(first, Variable) else first.b
       s_b = 1 if isinstance(second, Variable) else second.b
       katla = f_b//s_b
@@ -166,8 +166,8 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
 
     fakes = []
     for cnt, anan in enumerate(val_dict.keys()):
-      katla = val_dict[anan][0][1]
-      ranges = [r[0] for r in val_dict[anan]]
+      katla = val_dict[anan][0][1] # type: ignore
+      ranges = [r[0] for r in val_dict[anan]] # type: ignore
       if len(ranges) == 1:
         mnn, mxn = (ranges[0], anan.max) if katla < 0 else (anan.min, ranges[0])
       else:
@@ -176,6 +176,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       fake_var = Variable("fake_" + str(cnt), mnn, mxn)
       fakes.append((fake_var, anan))
       idxy += abs(katla)*(fake_var - anan)
+
     idx = (idxy // 4) % base_shape[1]
     idy = (idxy // (4 * base_shape[1]))
 
