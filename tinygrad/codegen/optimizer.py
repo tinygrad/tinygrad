@@ -439,16 +439,19 @@ class OptimizedKernel(Kernel):
     # **** local groups ****
 
     if self.opts.has_local:
-      # prioritize making expand axes local
-      local_axis_ranking = [(any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))), axis) for axis in range(len(self.full_shape[:self.first_reduce]))]
-      to_local: List[Tuple[int, int]] = []
-      for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
-        local_size = prod(sz for _, sz in to_local)
-        local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)
-        if local_sz is not None: to_local.append((axis, local_sz))
-      deleted_shape = 0
-      for axis, local_sz in sorted(to_local[:3]):
-        axis = axis - deleted_shape
-        will_delete_shape = local_sz == self.full_shape[axis]
-        self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
-        if will_delete_shape: deleted_shape += 1
+      if getenv("NOLOCALS") and self.local_dims == 0 and not self.group_for_reduce:
+        self.dont_use_locals = True
+      else:
+        # prioritize making expand axes local
+        local_axis_ranking = [(any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))), axis) for axis in range(len(self.full_shape[:self.first_reduce]))]
+        to_local: List[Tuple[int, int]] = []
+        for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
+          local_size = prod(sz for _, sz in to_local)
+          local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)
+          if local_sz is not None: to_local.append((axis, local_sz))
+        deleted_shape = 0
+        for axis, local_sz in sorted(to_local[:3]):
+          axis = axis - deleted_shape
+          will_delete_shape = local_sz == self.full_shape[axis]
+          self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
+          if will_delete_shape: deleted_shape += 1
