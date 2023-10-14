@@ -185,9 +185,9 @@ if getenv('METAL') or getenv('MPS') or getenv('LLVM'):
 if getenv('LLVM') and getenv("CI", "") != "":
   backend_test.exclude('test_max_float16_cpu')
   backend_test.exclude('test_min_float16_cpu')
-if getenv('CUDA') and getenv("CI", "") != "":
-  backend_test.exclude('test_max_float16_cpu')
-  backend_test.exclude('test_min_float16_cpu')
+# if getenv('CUDA') and getenv("CI", "") != "":
+  # backend_test.exclude('test_max_float16_cpu')
+  # backend_test.exclude('test_min_float16_cpu')
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):

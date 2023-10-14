@@ -47,15 +47,6 @@ def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
 def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
 def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
 def Cast(input: Tensor, to): return input.cast(dtypes.from_np(tensor_dtype_to_np_dtype(to)))
-'''
-      elif n.op_type == "Constant":
-        if 'value' in opt: ret = opt['value'] # tensor
-        elif 'value_float' in opt: ret = Tensor(np.array(opt['value_float'], dtype=np.float32), requires_grad=False)
-        elif 'value_int' in opt: ret = Tensor(np.array(opt['value_int'], dtype=np.int64), requires_grad=False)
-        elif 'value_floats' in opt: ret = Tensor(np.array(opt['value_floats'], dtype=np.float32), requires_grad=False)
-        elif 'value_ints' in opt: ret = Tensor(np.array(opt['value_ints'], dtype=np.int64), requires_grad=False)
-        else: raise NotImplementedError(f'Constant not implemented for {opt}')
-'''
 
 # **************** Simple Ops ****************
 
@@ -530,7 +521,7 @@ def CenterCropPad(input: Tensor, shape: Tensor, axes=None):
     else: pass
   return input.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
-def OneHot(indices, depth, values, axis=-1):
+def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
   depth = int(safe_numpy(depth).item())
   indices, rank = (indices < 0).where(indices+depth, indices), len(indices.shape)
   if axis < 0: axis += rank + 1
@@ -577,7 +568,7 @@ def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point=0, axis=1):
 def IsNaN(x):
   return (x < float("-inf")).cast(dtypes.bool)
 
-def EmbedLayerNormalization(input_ids, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None, segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
+def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None, segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
   assert (segment_ids is None) is (segment_embedding is None)
   assert (mask is None) is (mask_index_type is None)
