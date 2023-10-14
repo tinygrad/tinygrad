@@ -68,7 +68,7 @@ jobs:
     - name: Run Pytest
       run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)"
     - name: Run ONNX
-      run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+      run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
@@ -110,7 +110,7 @@ jobs:
     - name: Run Pytest
       run: TORCH=1 python -m pytest -n=auto test/
     - name: Run ONNX
-      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings
 
   testopencl:
     strategy:
@@ -212,7 +212,7 @@ jobs:
     - name: Run symbolic shapetracker test
       run: METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py test/test_symbolic_ops.py test/test_symbolic_jit.py
     - name: Run ONNX
-      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings
     - name: Run whisper test
       run: METAL=1 python -m pytest test/models/test_whisper.py
     - name: Check Device.DEFAULT
@@ -304,7 +304,7 @@ jobs:
           # FAILED test/external/external_test_onnx_backend.py::OnnxBackendNodeModelTest::test_max_float16_cpu
           # FAILED test/external/external_test_onnx_backend.py::OnnxBackendNodeModelTest::test_min_float16_cpu
       - name: Run ONNX
-        run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+        run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings
 
   testunicorn:
     name: ARM64 unicorn Test
