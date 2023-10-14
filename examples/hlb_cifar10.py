@@ -350,6 +350,7 @@ def train_cifar():
         correct_sum, correct_len = sum(corrects), len(corrects)
         if model_ema: correct_sum_ema, correct_len_ema = sum(corrects_ema), len(corrects_ema)
         if getenv("DIST"):
+          OOB.wait()
           if rank == 0:
             for j in range(1, min(world_size, 5)):
               if model_ema:
