@@ -29,7 +29,6 @@ def allreduce(t:Tensor, cache_id=None) -> Tensor:
     recv_buf = Tensor.empty(*chunks[current_chunk_index].shape)
     world.recv(recv_buf, prev_rank)
     chunks[current_chunk_index] += recv_buf
-  world.wait()
 
   # gather
   current_chunk_index = (RANK + 1) % WORLD_SIZE
@@ -39,6 +38,5 @@ def allreduce(t:Tensor, cache_id=None) -> Tensor:
     recv_buf = Tensor.empty(*chunks[current_chunk_index].shape)
     world.recv(recv_buf, prev_rank)
     chunks[current_chunk_index].assign(recv_buf)
-  world.wait()
 
   return Tensor.cat(*chunks, dim=0).shrink(((0, t.numel()),)).reshape(*t.shape)

@@ -131,12 +131,3 @@ class Recv(Function):
 
 def send(x:Tensor, target_rank:int, cache_id:Optional[str]=None) -> Tensor: return Send.apply(x.contiguous().realize(), target_rank=target_rank, cache_id=cache_id)
 def recv(x:Tensor, target_rank:int, cache_id:Optional[str]=None) -> Tensor: return Recv.apply(x.contiguous().realize(), target_rank=target_rank, cache_id=cache_id)
-
-def _wait(args, variables=None, jit=False, force_wait=False): args[0].wait()
-def wait():
-  barrier = dist.OOB.barrier
-  setattr(barrier, "size", None)
-  setattr(barrier, "dtype", None)
-  setattr(barrier, "_device", None)
-  CacheCollector.add(_wait, [barrier], {})
-  barrier.wait()
