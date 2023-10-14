@@ -125,10 +125,8 @@ def prep_audio(waveform) -> Tensor:
 
   # https://github.com/openai/whisper/blob/b38a1f20f4b23f3f3099af2c3e0ca95627276ddf/whisper/audio.py#L19
   n_frames = log_spec.shape[2]
-  pad = (0, 0)
-  if n_frames < 3000: pad = (0, 3000 - n_frames)
-  elif n_frames > 3000: pad = (0, int((1-(n_frames/3000)%1)*3000))
-  log_spec = np.pad(log_spec, ((0, 0), (0, 0), pad))
+  if n_frames < 3000: log_spec = np.pad(log_spec, ((0, 0), (0, 0), (0, 3000 - n_frames)))
+  elif n_frames > 3000: log_spec = np.pad(log_spec, ((0, 0), (0, 0), (0, int((1-(n_frames/3000)%1)*3000))))
 
   #print(waveform.shape, log_spec.shape)
   return log_spec
