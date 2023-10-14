@@ -112,8 +112,8 @@ RECORD_SECONDS = 10
 
 def prep_audio(waveform) -> Tensor:
   N_FFT = 400
-  HOP_LENGTH = 160
   N_MELS = 80
+  HOP_LENGTH = 160
   assert waveform is not None
   waveform = waveform.reshape(1, -1)
 
@@ -125,8 +125,10 @@ def prep_audio(waveform) -> Tensor:
 
   # https://github.com/openai/whisper/blob/b38a1f20f4b23f3f3099af2c3e0ca95627276ddf/whisper/audio.py#L19
   n_frames = log_spec.shape[2]
-  if n_frames < 3000:
-    log_spec = np.pad(log_spec, ((0, 0), (0, 0), (0, 3000 - n_frames)))
+  pad = (0, 0)
+  if n_frames < 3000: pad = (0, 3000 - n_frames)
+  elif n_frames > 3000: pad = (0, int((1-(n_frames/3000)%1)*3000))
+  log_spec = np.pad(log_spec, ((0, 0), (0, 0), pad))
 
   #print(waveform.shape, log_spec.shape)
   return log_spec
@@ -188,6 +190,17 @@ def listener(q):
     q.put(waveform)
   print("done listening")
 
+def pad_or_trim(array, length: int, *, axis: int = -1):
+  """
+  Pad or trim the audio array to length, as expected by the encoder.
+  """
+  if array.shape[axis] > length:
+      print("test")
+      return  array.take(indices=range(length), axis=axis)
+  elif array.shape[axis] < length:
+      pad_widths = [(0, 0)] * array.ndim
+      pad_widths[axis] = (0, length - array.shape[axis])
+      return np.pad(array, pad_widths)
 
 MODEL_URLS = {
   "tiny.en": "https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt",
@@ -215,19 +228,27 @@ def init_whisper(model_name="tiny.en"):
   return model, enc
 
 def transcribe_file(model, enc, filename):
-  waveform, sample_rate = librosa.load(filename, sr=RATE)
+  waveform, _ = librosa.load(filename, sr=RATE)
+  n_frames = 3000
   log_spec = prep_audio(waveform)
-  lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
-  dat = model.encoder(Tensor(log_spec)).realize()
 
-  for i in range(50):
-    out = model.decoder(Tensor([lst]), dat).realize()
-    idx = int(out[0,-1].argmax().numpy().item())
-    lst.append(idx)
-    transcription = enc.decode(lst)
-    print(transcription)
-    if lst[-1] == enc._special_tokens["<|endoftext|>"]:
-      return  transcription
+  seek = 0
+  lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
+  while seek < log_spec.shape[-1]:
+    log_spec_segment = log_spec[:, :, seek:seek+n_frames]
+    seek += n_frames
+
+    dat = model.encoder(Tensor(log_spec_segment)).realize()
+    for i in range(50):
+      out = model.decoder(Tensor([lst]), dat).realize()
+      idx = int(out[0,-1].argmax().numpy().item())
+      lst.append(idx)
+      transcription = enc.decode(lst)
+      print(transcription)
+      if lst[-1] == enc._special_tokens["<|endoftext|>"]:
+        if seek == log_spec.shape[-1]:
+          return  transcription
+        lst.pop()
 
 
 if __name__ == "__main__":
