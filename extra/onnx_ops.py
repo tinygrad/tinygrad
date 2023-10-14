@@ -61,8 +61,8 @@ def Cast(input: Tensor, to): return input.cast(dtypes.from_np(tensor_dtype_to_np
 
 def Constant(value: Tensor=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None, value_strings=None):
   if value: return value
-  elif value_float: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False) 
-  elif value_floats: return Tensor(list(value_floats), dtype=dtypes.float32, requires_grad=False) 
+  elif value_float: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False)
+  elif value_floats: return Tensor(list(value_floats), dtype=dtypes.float32, requires_grad=False)
   elif value_int: return Tensor(value_int, dtype=dtypes.int64, requires_grad=False)
   elif value_ints: return Tensor(list(value_ints), dtype=dtypes.int64, requires_grad=False)
   elif value_string or value_strings: raise NotImplementedError(f'value_string or value_strings not implemented for Constant op')
