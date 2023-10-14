@@ -149,7 +149,6 @@ def get_run_onnx(onnx_model: ModelProto):
         axes = opt['axes'] if 'axes' in opt else safe_numpy(inp[1])
         axes = [int(x) if x >= 0 else int(x+inp[0].ndim) for x in axes]
         ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in axes])
-      elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type == "Split":
         if 'axis' not in opt: opt['axis'] = 0
         if 'num_outputs' in opt or len(inp) == 1:

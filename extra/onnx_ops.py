@@ -56,14 +56,15 @@ def Cast(input: Tensor, to): return input.cast(dtypes.from_np(tensor_dtype_to_np
         elif 'value_ints' in opt: ret = Tensor(np.array(opt['value_ints'], dtype=np.int64), requires_grad=False)
         else: raise NotImplementedError(f'Constant not implemented for {opt}')
 '''
+
 # **************** Simple Ops ****************
 
 def Constant(value: Tensor=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None, value_strings=None):
   if value: return value
   elif value_float: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False) 
-  elif value_floats: return Tensor(value_floats, dtype=dtypes.float32, requires_grad=False) 
-  elif value_int: return Tensor(value_int, dtype=dtypes.float32, requires_grad=False)
-  elif value_ints: return Tensor(value_ints, dtype=dtypes.float32, requires_grad=False)
+  elif value_floats: return Tensor(list(value_floats), dtype=dtypes.float32, requires_grad=False) 
+  elif value_int: return Tensor(value_int, dtype=dtypes.int64, requires_grad=False)
+  elif value_ints: return Tensor(list(value_ints), dtype=dtypes.int64, requires_grad=False)
   elif value_string or value_strings: raise NotImplementedError(f'value_string or value_strings not implemented for Constant op')
 
 def Softsign(input): return input / (1+input.abs())
@@ -105,11 +106,13 @@ def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=T
 def OptionalHasElement(x: Tensor=None): return Tensor(x is not None and x.numel() > 0, dtype=dtypes.bool)
 def OptionalGetElement(x: Tensor=None): return x if x is not None else Tensor([], dtype=dtypes.float32)
 
-def Tile(input, repeats): return input.repeat([int(x) for x in safe_numpy(repeats)])
+def Tile(input: Tensor, repeats): return input.repeat([int(x) for x in safe_numpy(repeats)])
 def Range(start, limit, delta): return Tensor.arange(start=int(safe_numpy(start)), stop=int(safe_numpy(limit)), step=int(safe_numpy(delta))).cast(dtype=start.dtype) # DeprecationWarning: Conversion of an array with ndim > 0 to a scalar is deprecated, and will error in future. Ensure you extract a single element from your array before performing this operation. (Deprecated NumPy 1.25.)
-def Shape(data, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int64)
-def Size(data): return prod(data if isinstance(data, list) else data.shape)
-def Flatten(input, axis=1): return input.reshape(prod((1,) + input.shape[0:axis]), -1)
+def Shape(data: Tensor, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int64)
+def Size(data: Tensor): return prod(data if isinstance(data, list) else data.shape)
+def Flatten(input: Tensor, axis=1): return input.reshape(prod((1,) + input.shape[0:axis]), -1)
+      # elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
+def Reshape(data: Tensor, shape: Tensor, allowzero=None): return data.reshape([int(x) if x != 0 else data.shape[i] for i,x in enumerate(safe_numpy(shape))])
 
 def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
 def Or(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.ones(*x.shape)).cast(dtypes.bool)
