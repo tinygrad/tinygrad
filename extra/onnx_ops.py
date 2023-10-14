@@ -127,6 +127,10 @@ def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
   k = int(k.numpy().item()) if k != 0 else 0 # onnx passes k as a tensor int64 with one element, default is 0
   return x.triu(k) if upper else x.tril(k)
 
+def Squeeze(input: Tensor, axes):
+  if isinstance(axes, Tensor): axes = safe_numpy(axes)
+  axes = [int(x) if x >= 0 else int(x+input.ndim) for x in axes]
+  return input.reshape([s for i,s in enumerate(input.shape) if i not in axes])
 def Unsqueeze(data: Tensor, axes):
   axes = [len(data.shape) + int(x) if x < 0 else int(x) for x in safe_numpy(axes)]
   new_shape = [1] * (len(data.shape) + len(axes))
@@ -144,7 +148,7 @@ def ArgMax(x: Tensor, axis=0, keepdims=1, select_last_index=0):
   c = Tensor.arange(x.shape[axis]).reshape(*[1]*(axis), x.shape[axis], *[1]*(x.ndim - axis-1)) * m
   return c.max(axis=axis,keepdim=keepdims).cast(dtypes.int64)
 def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
-  
+
 def Elu(input: Tensor, alpha=1.0): return input.elu(alpha=alpha)
 def Concat(*inputs: List[Tensor], axis): return inputs[0].cat(*inputs[1:], dim=axis)
 def Transpose(input: Tensor, perm=None): return input.permute(order=list(range(len(input.shape))[::-1]) if perm is None else perm)
@@ -160,7 +164,7 @@ def ConstantOfShape(input, value:Tensor=None):
   return Tensor.ones(*shape, dtype=value.dtype) * (value if shape[0]!=0 else 1)
 
 # TODO: abstract out the broadcast logic in tensor
-def Expand(input, shape):
+def Expand(input: Tensor, shape):
   x_shape, y_shape = input.shape, [int(x) for x in safe_numpy(shape)]
   # copied from _broadcasted
   x_shape, y_shape = [([1]*(max(len(x_shape), len(y_shape))-len(t_shape)) + list(t_shape)) for t_shape in [x_shape, y_shape]]

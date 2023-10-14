@@ -67,6 +67,8 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Run Pytest
       run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)"
+    - name: Run ONNX
+      run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
@@ -296,6 +298,9 @@ jobs:
       - name: Run pytest (triton)
         if: matrix.backend=='triton'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
+        # Try idk
+      - name: Run ONNX
+        run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
 
   testunicorn:
     name: ARM64 unicorn Test
