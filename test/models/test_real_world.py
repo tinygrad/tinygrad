@@ -19,7 +19,7 @@ def kopt_search_hook(k, create_k, to_prg, baseline, bufs, var_vals):
   def check_opt(x):
     try:
       k = create_k()
-      k.apply_auto_opt(x)
+      for o in x: k.apply_opt(o)
       prg = to_prg(k)
       first_tm = prg.exec(bufs, var_vals, force_wait=True, optimizing=True)
       np.testing.assert_allclose(wanna_output, bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
