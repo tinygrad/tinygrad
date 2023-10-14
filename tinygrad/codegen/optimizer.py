@@ -10,7 +10,7 @@ from tinygrad.shape.view import View, strides_for_shape
 from enum import Enum, auto
 
 class OptOps(Enum):
-  UPCAST = auto(); UNROLL = auto(); LOCAL = auto(); GROUP = auto(); GROUPTOP = auto() # noqa: E702
+  UPCAST = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto(); GROUP = auto(); GROUPTOP = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 @dataclass(frozen=True, order=True)
@@ -253,10 +253,10 @@ class OptimizedKernel(Kernel):
         # tensor core (6 ops) -- creates the (2,2,4,2) pattern, an upcasted 2, and a unrolled 8
         self.apply_opt(Opt(OptOps.UNROLL, 0, 8))
         self.apply_opt(Opt(OptOps.UPCAST, s0, 2))
-        self.apply_opt(Opt(OptOps.LOCAL, s0, 2))
-        self.apply_opt(Opt(OptOps.LOCAL, s1, 4))
-        fix(self.apply_opt(Opt(OptOps.LOCAL, s0, 2)), s0)
-        fix(self.apply_opt(Opt(OptOps.LOCAL, s1, 2)), s1)
+        fix(self.apply_opt(Opt(OptOps.LOCAL, s1, 8)), s1)
+        fix(self.apply_opt(Opt(OptOps.LOCAL, s0, 4)), s0)
+        self.apply_opt(Opt(OptOps.LOCAL, self.global_dims, 4))
+        self.apply_opt(Opt(OptOps.LOCAL, self.global_dims+1, 2))
 
         # final optional global upcast
         if s1_exists:
@@ -269,7 +269,7 @@ class OptimizedKernel(Kernel):
         # very late (optional) upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
         self.use_tensor_cores = use_tensor_cores == 1  # TC=2 will do the shape ops without the WMMA
         if self.use_tensor_cores and s0_exists and self.full_shape[s0] % 2 == 0:
-          self.apply_opt(Opt(OptOps.LOCAL, s0, 2))
+          self.apply_opt(Opt(OptOps.LASTLOCAL, s0, 2))
           self.exclude_local_upcast += 1
 
         # alias buffer
@@ -287,9 +287,14 @@ class OptimizedKernel(Kernel):
     axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else 0)
     assert self.full_shape[axis] % opt.amt == 0, "no longer valid shift"
     if opt.op == OptOps.LOCAL:        # cyan
-      assert axis < (self.first_reduce-self.local_dims), "can't local a local or reduce"
-      self.shift_to(axis, opt.amt, insert_before=self.first_reduce - self.local_dims)
+      assert axis < self.first_reduce, "can't local a reduce"
+      self.shift_to(axis, opt.amt, insert_before=self.first_reduce)
       self.local_dims += 1
+    elif opt.op == OptOps.LASTLOCAL:        # cyan
+      assert axis < self.first_reduce, "can't local a reduce"
+      self.shift_to(axis, opt.amt, insert_before=self.first_reduce-self.local_dims)
+      self.local_dims += 1
+      # TOOD: include exclude_local_upcast here
     elif opt.op == OptOps.GROUP:      # green
       self.shift_to(axis, opt.amt, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(opt.amt)
@@ -428,5 +433,9 @@ class OptimizedKernel(Kernel):
         local_size = prod(sz for _, sz in to_local)
         local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)
         if local_sz is not None: to_local.append((axis, local_sz))
-      for axis, local_sz in sorted(to_local[:3])[::-1]:
+      deleted_shape = 0
+      for axis, local_sz in sorted(to_local[:3]):
+        axis = axis - deleted_shape
+        will_delete_shape = local_sz == self.full_shape[axis]
         self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
+        if will_delete_shape: deleted_shape += 1
