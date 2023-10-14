@@ -65,6 +65,8 @@ def bufs_from_lin(lin:Linearizer) -> List[RawBuffer]:
 def get_linearizer_actions(lin:Linearizer) -> Dict[int, Linearizer]:
   acted_lins = {0:deepcopy(lin)}
   for i,a in enumerate(actions):
+    if a.axis >= lin.shape_len: continue
+    if lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) in actions: continue
     lin2 = deepcopy(lin)
     try:
       lin2.apply_opt(a)
