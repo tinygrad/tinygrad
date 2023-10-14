@@ -5,11 +5,26 @@ Most of these are self-explanatory, and are usually used to set an option at run
 
 Example: `GPU=1 DEBUG=4 python3 -m pytest`
 
-The columns are: Variable, Possible Value(s) and Description.
+However you can also decorate a function to set a value only inside that function.
 
-- A `#` means that the variable can take any integer value.
+```python
+# in tensor.py (probably only useful if you are a tinygrad developer)
+@Context(DEBUG=4)
+def numpy(self) -> ...
+```
+
+Or use contextmanager to temporarily set a value inside some scope:
+
+```python
+with Context(DEBUG=0):
+  a = Tensor.ones(10, 10)
+  a *= 2
+```
 
 ## Global Variables
+The columns of this list are are: Variable, Possible Value(s) and Description.
+
+- A `#` means that the variable can take any integer value.
 
 These control the behavior of core tinygrad even when used as a library.
 
@@ -27,15 +42,15 @@ CLANG               | [1]        | enable Clang backend
 LLVM                | [1]        | enable LLVM backend
 LLVMOPT             | [1]        | enable slightly more expensive LLVM optimizations
 LAZY                | [1]        | enable lazy operations (this is the default)
-OPT                 | [1-4]      | optimization level
+OPT                 | [1-3]      | optimization level
+KOPT                | [1-2]      | kernel optimization, 1 turns it on, 2 caches the found optimizations
+BUDGET              | [#]        | kernel optimization search budget
 GRAPH               | [1]        | create a graph of all operations (requires graphviz)
 GRAPHPATH           | [/path/to] | where to put the generated graph
-PRUNEGRAPH          | [1]        | prune MovementOps and LoadOps from the graph
 PRINT_PRG           | [1]        | print program code
 IMAGE               | [1]        | enable 2d specific optimizations
 FLOAT16             | [1]        | use float16 for images instead of float32
 ENABLE_METHOD_CACHE | [1]        | enable method cache (this is the default)
-EARLY_STOPPING      | [# > 0]  | stop after this many kernels
 DISALLOW_ASSIGN     | [1]        | disallow assignment of tensors
 CL_EXCLUDE          | [name0,name1] | comma-separated list of device names to exclude when using OpenCL GPU backend (like `CL_EXCLUDE=gfx1036`)
 CL_PLATFORM         | [# >= 0]   | index of the OpenCL [platform](https://documen.tician.de/pyopencl/runtime_platform.html#pyopencl.Platform) to run on. Defaults to 0.
@@ -116,19 +131,14 @@ Variable | Possible Value(s) | Description
 ---|---|---
 TORCHWEIGHTS     | [1] | use torch to initialize weights
 DISABLE_BACKWARD | [1] | don't do backward pass
+DIST             | [1] | enable distributed training
+STEPS            | [#] | number of steps
 
 ### examples/benchmark_train_efficientnet.py & examples/hlb_cifar10.py
 
 Variable | Possible Value(s) | Description
 ---|---|---
 ADAM | [1] | use the Adam optimizer
-
-### examples/hlb_cifar10.py & xamples/hlb_cifar10_torch.py
-
-Variable | Possible Value(s) | Description
----|---|---
-STEPS    | [0-10] | number of steps
-FAKEDATA | [1]    | enable to use random data
 
 ### examples/train_efficientnet.py
 

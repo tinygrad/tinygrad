@@ -1,9 +1,9 @@
 from os import path
-from examples.compile_efficientnet import compile_net, jit_model
+from extra.export_model import compile_net, jit_model
 from examples.stable_diffusion import StableDiffusion, ClipTokenizer
-from tinygrad.state import get_state_dict, safe_save, safe_load_metadata, torch_load, load_state_dict
+from tinygrad.nn.state import get_state_dict, safe_save, safe_load_metadata, torch_load, load_state_dict
 from tinygrad.tensor import Tensor
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 from extra.utils import download_file
 from tinygrad.helpers import prod
 import numpy as np
@@ -59,27 +59,28 @@ if __name__ == "__main__":
   
   def diffusor(model):
     def forward(latent, timestep, unconditional_context, context):
-      latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep.expand(2, *timestep.shape[1:]), unconditional_context.cat(context, dim=0))
+      latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep, unconditional_context.cat(context, dim=0))
       unconditional_latent, latent = latents[0:1], latents[1:2]
 
-      unconditional_guidance_scale = 11.5
+      unconditional_guidance_scale = 3.5
       e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
       return e_t
 
     return {'forward': forward, 'name': 'diffusor'}
   
   def get_x_prev_and_pred_x0():
-    def forward(x, e_t, alphas, alphas_prev):
-      a_t, a_prev = alphas, alphas_prev
+    def forward(x, e_t, a_t, a_prev):
+      temperature = 1
       sigma_t = 0
-      sqrt_one_minus_at = Tensor.sqrt(1-a_t)
+      sqrt_one_minus_at = (1-a_t).sqrt()
+      #print(a_t, a_prev, sigma_t, sqrt_one_minus_at)
 
-      pred_x0 = (x - sqrt_one_minus_at * e_t) / Tensor.sqrt(a_t)
+      pred_x0 = (x - sqrt_one_minus_at * e_t) / a_t.sqrt()
 
-      dir_xt = Tensor.sqrt(1. - a_prev - sigma_t**2) * e_t
+      # direction pointing to x_t
+      dir_xt = (1. - a_prev - sigma_t**2).sqrt() * e_t
 
-      x_prev = Tensor.sqrt(a_prev) * pred_x0 + dir_xt
-    
+      x_prev = a_prev.sqrt() * pred_x0 + dir_xt
       return x_prev
     
     return {'forward': forward, 'name': 'get_x_prev_and_pred_x0'}
@@ -123,9 +124,9 @@ if __name__ == "__main__":
 
 
     kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
-    kernel_names = ', '.join([name for (name, _args, _global_size) in statements])
-    kernel_calls = '\n    '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size) in enumerate(statements) ])
-    bufs =  '\n    '.join([f"const {buf[0]} = " + (f"createEmptyBuf(device, {buf[1]});" if buf[2] not in weights  else f"createWeightBuf(device, {buf[1]}, getTensorBuffer(safetensor, metadata['{weights[buf[2]]}'], '{weights[buf[2]]}'))") + ";"  for buf in bufs.values()])
+    kernel_names = ', '.join([name for (name, _args, _global_size, _local_size) in statements])
+    kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
+    bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}']))") + ";"  for name,(size,dtype,_key) in bufs.items()])
     gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate(special_names.items()) if value != "outputs"])
     input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new Float32Array(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,(_,value) in enumerate(special_names.items()) if value != "outputs"])
     return f"""\n    var {step_data["name"]}Model = function() {{

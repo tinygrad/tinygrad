@@ -22,7 +22,7 @@ from abc import ABC
 # let's trace an addition down through the layers of abstraction.
 
 # we will be using the clang backend
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 Device.DEFAULT = "CLANG"
 
 # first, 2+3 as a Tensor, the highest level
@@ -100,7 +100,7 @@ class LazyOp:
 
 # there's currently 28 Ops you have to implement for an accelerator.
 class UnaryOps(Enum):    NOOP = auto(); EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto();   SQRT = auto()
-class BinaryOps(Enum):   ADD = auto();  SUB = auto();  MUL = auto();  DIV = auto();  CMPEQ = auto(); MAX = auto()
+class BinaryOps(Enum):   ADD = auto();  SUB = auto();  MUL = auto();  DIV = auto();  CMPLT = auto(); MAX = auto()
 class ReduceOps(Enum):   SUM = auto();  MAX = auto()
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto()
 class TernaryOps(Enum):  MULACC = auto(); WHERE = auto()
@@ -135,11 +135,11 @@ assert len(lazyop.src) == 2
 # again, a LazyOp AST is like a GPU kernel. you have to copy the data on the device first
 assert lazyop.src[0].op.op == LoadOps.FROM
 assert lazyop.src[0].op.src[0].device == "CPU"
-assert lazyop.src[0].op.src[0].realized._buf[0] == 2, "the src of the FROM LazyOP is a LazyBuffer on the CPU holding [2.]"
+assert lazyop.src[0].op.src[0].op.src[0].realized._buf[0] == 2, "the src of the FROM LazyOP is a LazyBuffer on the CPU holding [2.]"
 assert result.lazydata.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer
-result.lazydata.realize()
+result.realize()
 assert result.lazydata.realized is not None, "the LazyBuffer is realized!"
 # this brings us nicely to DeviceBuffer, of which the realized ClangBuffer is a subclass
 assert 'RawMallocBuffer' in str(type(result.lazydata.realized))
@@ -217,7 +217,7 @@ from tinygrad.runtime.lib import RawMallocBuffer
 # ClangProgram is the simplest runtime (in tinygrad/runtime/ops_clang.py, code 7/10)
 # __init__ calls clang, and __call__ calls the function in the *.so outputted by clang
 # in CLANG, global_size and local_size are ignored
-from tinygrad.runtime.ops_clang import ClangProgram, ClangCodegen
+from tinygrad.runtime.ops_clang import ClangProgram
 
 # a concrete example looks like this, this adds two size 1 RawBuffer
 # first we create two numpy buffers containing 2 and 3
@@ -229,7 +229,7 @@ input_a, input_b = RawMallocBuffer.fromCPU(numpy_a), RawMallocBuffer.fromCPU(num
 output = RawMallocBuffer(1, dtypes.float32)
 
 # compile the program, run it, and 2+3 does indeed equal 5
-program = ClangProgram("add", f"{ClangCodegen.lang.kernel_prefix} void add(float *a, float *b, float *c) {{ *a = *b + *c; }}")
+program = ClangProgram("add", f"void add(float *a, float *b, float *c) {{ *a = *b + *c; }}")
 program(None, None, output, input_a, input_b)  # NOTE: the None are for global_size and local_size
 print(output.toCPU())
 assert output.toCPU()[0] == 5, "it's still 5"
@@ -245,34 +245,29 @@ np.testing.assert_allclose(output.toCPU(), numpy_a+numpy_b)
 
 class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto();
 
-class Token:
-  name: str
-
 class UOp:
   uop: UOps
-  out: Optional[Token]
-  vin: List[Token]
+  dtype: Optional[DType]
+  vin: Tuple[UOp, ...]
   arg: Any
+  num: int  # UOps are unique
 
 class Linearizer:
   # create the kernel with the AST
   # NOTE: the AST contains the CompiledBuffers themselves as the root nodes. this will change
   def __init__(self, ast:LazyOp): pass
-  def process(self): pass
   def linearize(self): pass
 
   # when linearize is run, it fills in this list
   uops: List[UOp]
 
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
 result = Tensor(2).realize() + Tensor(3).realize()
-result.lazydata.realized = Device[Device.DEFAULT].buffer(prod(result.shape), result.dtype)
 
 # use the real Linearizer to linearize 2+3
 from tinygrad.codegen.linearizer import Linearizer
-linearizer = Linearizer(result.lazydata.op, result.lazydata)
-linearizer.process()
+sched = result.lazydata.schedule()
+linearizer = Linearizer(sched[-1].ast)
 linearizer.linearize()
 
 # print the uops
@@ -280,13 +275,12 @@ for uop in linearizer.uops: print(uop)
 
 # output:
 """
-UOps.LOOP           :                           []                               ([], 'global')
-UOps.LOOP           :                           []                               ([], 'local')
-UOps.LOAD           : <val1_0>                  []                               MemOp(i=1, idx=<0>, valid=<1>)
-UOps.LOAD           : <val2_0>                  []                               MemOp(i=2, idx=<0>, valid=<1>)
-UOps.ALU            : <alu0>                    [<val1_0>, <val2_0>]             BinaryOps.ADD
-UOps.STORE          :                           [<alu0>]                         MemOp(i=0, idx=<0>, valid=<1>)
-UOps.ENDLOOP        :                           []                               ([], 'global+local')
+   0 UOps.DEFINE_GLOBAL  : ptr.dtypes.float          []                               ('data0', dtypes.float)
+   1 UOps.CONST          : dtypes.float              []                               2.0
+   2 UOps.CONST          : dtypes.float              []                               3.0
+   3 UOps.ALU            : dtypes.float              [1, 2]                           BinaryOps.ADD
+   4 UOps.CONST          : dtypes.int                []                               0
+   5 UOps.STORE          :                           [0, 4, 3]                        None
 """
 
 # %%
@@ -299,15 +293,14 @@ result = Tensor(2) + Tensor(3)
 
 # we have a global cache used by the JIT
 # from there, we can see the generated clang code
-from tinygrad.helpers import GlobalCounters
-GlobalCounters.cache = []    # enables the cache
+from tinygrad.jit import CacheCollector
+CacheCollector.start()       # enables the cache
 result.realize()             # create the program and runs it
-cache_saved = GlobalCounters.cache
-GlobalCounters.cache = None  # disable the cache
+cache_saved = CacheCollector.finish()  # disable the cache
 
 # there's one ASTRunner in the cache
 assert len(cache_saved) == 1
-prg, bufs = cache_saved[0]
+prg, bufs, _ = cache_saved[0]
 
 # print the C Program :)
 print(prg.prg)
@@ -331,22 +324,22 @@ void E_1(float* data0) {
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # create a virtual (10, 10) Tensor. this is just a shape, there's no actual tensor
-a = ShapeTracker((10, 10))
+a = ShapeTracker.from_shape((10, 10))
 
 # you'll see it has one view. the (10, 1 are the strides)
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (10, 1), 0)])
 
 # we can permute it, and the strides change
-a.permute((1,0))
+a = a.permute((1,0))
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (1, 10), 0)])
 
 # we can then reshape it, and the strides change again
 # note how the permute stays applied
-a.reshape((5,2,5,2))
+a = a.reshape((5,2,5,2))
 print(a) # ShapeTracker(shape=(5, 2, 5, 2), views=[View((5, 2, 5, 2), (2, 1, 20, 10), 0)])
 
 # now, if we were to reshape it to a (100,) shape tensor, we have to create a second view
-a.reshape((100,))
+a = a.reshape((100,))
 print(a) # ShapeTracker(shape=(100,), views=[
          #   View((5, 2, 5, 2), (2, 1, 20, 10), 0),
          #   View((100,), (1,), 0)])
@@ -357,7 +350,7 @@ idx, _ = a.expr_idxs()
 print(idx.render())  # (((idx0%10)*10)+(idx0//10))
 
 # of course, if we reshape it back, the indexes get simple again
-a.reshape((10,10))
+a = a.reshape((10,10))
 idx, _ = a.expr_idxs()
 print(idx.render())  # ((idx1*10)+idx0)
 
@@ -367,11 +360,11 @@ print(a) # ShapeTracker(shape=(10, 10), views=[
          #   View((10, 10), (10, 1), 0)])
 
 # ...until we simplify it!
-a.simplify()
+a = a.simplify()
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (1, 10), 0)])
 
 # and now we permute it back
-a.permute((1,0))
+a = a.permute((1,0))
 print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (10, 1), 0)])
 
 # and it's even contiguous

@@ -10,9 +10,9 @@ class BertForQuestionAnswering:
     self.qa_outputs = Linear(hidden_size, 2)
 
   def load_from_pretrained(self):
-    fn = Path(__file__).parent.parent / "weights/bert_for_qa.pt"
+    fn = Path(__file__).parents[1] / "weights/bert_for_qa.pt"
     download_file("https://zenodo.org/record/3733896/files/model.pytorch?download=1", fn)
-    fn_vocab = Path(__file__).parent.parent / "weights/bert_vocab.txt"
+    fn_vocab = Path(__file__).parents[1] / "weights/bert_vocab.txt"
     download_file("https://zenodo.org/record/3733896/files/vocab.txt?download=1", fn_vocab)
 
     import torch
@@ -102,7 +102,7 @@ class BertOutput:
     hidden_states = self.LayerNorm(hidden_states + input_tensor)
     return hidden_states
 
-# approixmation of the error function
+# approximation of the error function
 def erf(x):
   t = (1 + 0.3275911 * x.abs()).reciprocal()
   return x.sign() * (1 - ((((1.061405429 * t + -1.453152027) * t + 1.421413741) * t + -0.284496736) * t + 0.254829592) * t * (-(x.square())).exp())
@@ -147,13 +147,8 @@ class BertSelfAttention:
     key_layer = self.transpose_for_scores(mixed_key_layer)
     value_layer = self.transpose_for_scores(mixed_value_layer)
 
-    attention_scores = query_layer @ key_layer.transpose(2, 3)
-    attention_scores = attention_scores / self.attention_head_size**0.5
-    attention_scores = attention_scores + attention_mask
-    attention_probs = attention_scores.softmax()
-    attention_probs = attention_probs.dropout(self.dropout)
+    context_layer = Tensor.scaled_dot_product_attention(query_layer, key_layer, value_layer, attention_mask, self.dropout)
 
-    context_layer = attention_probs @ value_layer
     context_layer = context_layer.transpose(1, 2)
     context_layer = context_layer.reshape(context_layer.shape[0], context_layer.shape[1], self.all_head_size)
 

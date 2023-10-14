@@ -1,11 +1,11 @@
-import json, logging, math, os, re, sys, time, wave, argparse, numpy as np
+import json, logging, math, re, sys, time, wave, argparse, numpy as np
 from functools import reduce
 from pathlib import Path
 from typing import List
 from extra.utils import download_file
 from tinygrad import nn
 from tinygrad.helpers import dtypes
-from tinygrad.state import torch_load
+from tinygrad.nn.state import torch_load
 from tinygrad.tensor import Tensor
 from unidecode import unidecode
 
@@ -521,8 +521,8 @@ def load_model(symbols, hps, model) -> Synthesizer:
   net_g = Synthesizer(len(symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
   _ = load_checkpoint(weights_path, net_g, None)
   return net_g
-def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None):
-  assert os.path.isfile(checkpoint_path)
+def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None, skip_list=[]):
+  assert Path(checkpoint_path).is_file()
   start_time = time.time()
   checkpoint_dict = torch_load(checkpoint_path)
   iteration, learning_rate = checkpoint_dict['iteration'], checkpoint_dict['learning_rate']
@@ -530,6 +530,7 @@ def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None):
   saved_state_dict = checkpoint_dict['model']
   weight_g, weight_v, parent = None, None, None
   for key, v in saved_state_dict.items():
+    if any(layer in key for layer in skip_list): continue
     try:
       obj, skip = model, False
       for k in key.split('.'):
@@ -555,8 +556,8 @@ def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None):
   return model, optimizer, learning_rate, iteration
 
 def download_if_not_present(file_path: Path, url: str):
-  if not os.path.isfile(file_path):
-    logging.info(f"Did not find {file_path}, downloading...")
+  if not file_path.is_file():
+    logging.info(f"Did not find {file_path.as_posix()}, downloading...")
     download_file(url, file_path)
   return file_path
 
@@ -648,7 +649,7 @@ class TextMapper: # Based on https://github.com/keithito/tacotron
 # anime lady 1 | --model_to_use uma_trilingual --speaker_id 36
 # anime lady 2 | --model_to_use uma_trilingual --speaker_id 121
 #########################################################################################
-VITS_PATH = Path(__file__).parent.parent / "weights/VITS/"
+VITS_PATH = Path(__file__).parents[1] / "weights/VITS/"
 MODELS = { # config_path, weights_path, config_url, weights_url
   "ljs": (VITS_PATH / "config_ljs.json", VITS_PATH / "pretrained_ljs.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/ljs_base.json", "https://drive.google.com/uc?export=download&id=1q86w74Ygw2hNzYP9cWkeClGT5X25PvBT&confirm=t"),
   "vctk": (VITS_PATH / "config_vctk.json", VITS_PATH / "pretrained_vctk.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/vctk_base.json", "https://drive.google.com/uc?export=download&id=11aHOlhnxzjpdWDpsz1vFDCzbeEfoIxru&confirm=t"),
@@ -664,7 +665,7 @@ if __name__ == '__main__':
   parser.add_argument("--model_to_use", default="vctk", help="Specify the model to use. Default is 'vctk'.")
   parser.add_argument("--speaker_id", type=int, default=6, help="Specify the speaker ID. Default is 6.")
   parser.add_argument("--out_path", default=None, help="Specify the full output path. Overrides the --out_dir and --name parameter.")
-  parser.add_argument("--out_dir", default=str(Path(__file__).parent.parent / "temp"), help="Specify the output path.")
+  parser.add_argument("--out_dir", default=str(Path(__file__).parents[1] / "temp"), help="Specify the output path.")
   parser.add_argument("--base_name", default="test", help="Specify the base of the output file name. Default is 'test'.")
   parser.add_argument("--text_to_synthesize", default="""Hello person. If the code you are contributing isn't some of the highest quality code you've written in your life, either put in the effort to make it great, or don't bother.""", help="Specify the text to synthesize. Default is a greeting message.")
   parser.add_argument("--noise_scale", type=float, default=0.667, help="Specify the noise scale. Default is 0.667.")
@@ -685,8 +686,8 @@ if __name__ == '__main__':
   hps = get_hparams_from_file(config_path)
 
   # If model has multiple speakers, validate speaker id and retrieve name if available.
-  model_has_multiple_spakers = hps.data.n_speakers > 0
-  if model_has_multiple_spakers:
+  model_has_multiple_speakers = hps.data.n_speakers > 0
+  if model_has_multiple_speakers:
     logging.info(f"Model has {hps.data.n_speakers} speakers")
     if args.speaker_id >= hps.data.n_speakers: raise ValueError(f"Speaker ID {args.speaker_id} is invalid for this model.")
     speaker_name = "?"
@@ -722,7 +723,7 @@ if __name__ == '__main__':
   stn_tst = text_mapper.get_text(text_to_synthesize, hps.data.add_blank, hps.data.text_cleaners)
   logging.debug(f"Converted input text to tensor \"{text_to_synthesize}\" -> Tensor({stn_tst.shape}): {stn_tst.numpy()}")
   x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
-  sid = Tensor([args.speaker_id], dtype=dtypes.int64) if model_has_multiple_spakers else None
+  sid = Tensor([args.speaker_id], dtype=dtypes.int64) if model_has_multiple_speakers else None
 
   # Perform inference.
   start_time = time.time()
@@ -732,7 +733,7 @@ if __name__ == '__main__':
 
   # Save the audio output.
   audio_data = (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
-  out_path = Path(args.out_path or Path(args.out_dir)/f"{args.model_to_use}{f'_sid_{args.speaker_id}' if model_has_multiple_spakers else ''}_{args.base_name}.wav")
+  out_path = Path(args.out_path or Path(args.out_dir)/f"{args.model_to_use}{f'_sid_{args.speaker_id}' if model_has_multiple_speakers else ''}_{args.base_name}.wav")
   out_path.parent.mkdir(parents=True, exist_ok=True)
   with wave.open(str(out_path), 'wb') as wav_file:
     wav_file.setnchannels(args.num_channels)

@@ -1,17 +1,18 @@
 import unittest
 from tinygrad.helpers import prod
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters
+from tinygrad.jit import CacheCollector
 
 class TestCopy(unittest.TestCase):
   def test_add1(self):
     pts = []
     for i in range(16384, 16384*256, 16384):
       t = Tensor.randn(i).realize()
-      GlobalCounters.cache = []
+      CacheCollector.start()
       t.assign(t+1).realize()
-      fxn, args = GlobalCounters.cache[0]
+      fxn, args, _ = CacheCollector.finish()[0]
       GlobalCounters.reset()
       def run(): return fxn(args, force_wait=True)
       ct = min([run() for _ in range(10)])

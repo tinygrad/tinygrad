@@ -1,7 +1,7 @@
 import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 import pytest
 # similar to test/external/external_test_gpu_ast.py, but universal
 

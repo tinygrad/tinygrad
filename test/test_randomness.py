@@ -5,6 +5,7 @@ import torch
 from tinygrad.tensor import Tensor
 import tinygrad.nn as nn
 import pytest
+from tinygrad.helpers import dtypes
 
 pytestmark = pytest.mark.webgpu
 
@@ -45,15 +46,22 @@ def kstest(l1, l2):
 def normal_test(func, shape=(20, 23), alpha=0.05):
   Tensor.manual_seed(1337)
   np.random.seed(1337)
-  x = func(*shape).cpu().numpy().flatten()
+  x = func(*shape).numpy().flatten()
   y = np.random.randn(*shape).flatten()
+  return kstest(x, y) >= alpha
+
+def equal_distrib_ints(tiny_func, numpy_func, shape=(20, 23), low=-100, high=100, dtype=dtypes.int32, alpha=0.05):
+  Tensor.manual_seed(1337)
+  np.random.seed(1337)
+  x = tiny_func(*shape, low=low, high=high, dtype=dtype).cpu().numpy().flatten()
+  y = numpy_func(shape).flatten()
   return kstest(x, y) >= alpha
 
 def equal_distribution(tiny_func, torch_func, numpy_func=None, shape=(20, 23), alpha=0.05):
   Tensor.manual_seed(1337)
   torch.manual_seed(1337)
   np.random.seed(1337)
-  x = tiny_func(*shape).cpu().numpy().flatten()
+  x = tiny_func(*shape).numpy().flatten()
   if numpy_func is not None: y = numpy_func(shape).flatten()
   z = torch_func(shape).numpy().flatten()
   return (numpy_func is None or kstest(x, y) >= alpha) and kstest(x, z) >= alpha
@@ -74,6 +82,7 @@ class TestRandomness(unittest.TestCase):
   def test_uniform(self):
     self.assertFalse(normal_test(Tensor.uniform))
     self.assertTrue(equal_distribution(Tensor.uniform, lambda x: torch.nn.init.uniform_(torch.empty(x), a=-1, b=1), lambda x: np.random.uniform(low=-1, high=1, size=x)))
+    self.assertTrue(equal_distrib_ints(Tensor.uniform, lambda x: np.random.randint(low=-100, high=100, size=x)))
 
   def test_scaled_uniform(self):
     self.assertFalse(normal_test(Tensor.scaled_uniform))

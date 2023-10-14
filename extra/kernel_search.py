@@ -16,7 +16,6 @@ intervention_cache = None
 
 Interventions = Enum("Interventions", ["SWAP", "UPCAST", "SHIFT", "REDUCE"])
 def get_interventions(k, winning_interventions=[]):
-  k.process()
   p1, p2, p3, p4, p5 = [], [], [], [], []
   p1 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce), 2)]
   p2 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce + len(k.group_for_reduce), k.shape_len), 2)]
@@ -48,7 +47,6 @@ def get_interventions(k, winning_interventions=[]):
   return p1+p2+p3+p4+p5
 
 def apply_intervention(k, typ, dat):
-  k.process()
   if typ == Interventions.SWAP:
     # swap axes
     a1, a2 = dat

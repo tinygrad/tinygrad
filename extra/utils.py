@@ -1,23 +1,26 @@
-import pickle
+# type: ignore
+import pickle, hashlib, zipfile, io, requests, struct, tempfile, platform, concurrent.futures
 import numpy as np
 from tqdm import tqdm
-import tempfile, platform, os
+from pathlib import Path
 from collections import defaultdict
+from typing import Union
+
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
-from tinygrad.lazy import Device
-from tinygrad.shape.shapetracker import strides_for_shape
+from tinygrad.lazy import LazyBuffer
+from tinygrad.ops import Device
+from tinygrad.shape.view import strides_for_shape
 OSX = platform.system() == "Darwin"
 WINDOWS = platform.system() == "Windows"
 
-def temp(x:str) -> str: return os.path.join(tempfile.gettempdir(), x)
+def temp(x:str) -> str: return (Path(tempfile.gettempdir()) / x).as_posix()
 
 def fetch(url):
   if url.startswith("/") or url.startswith("."):
     with open(url, "rb") as f:
       return f.read()
-  import hashlib
   fp = temp(hashlib.md5(url.encode('utf-8')).hexdigest())
   download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
   with open(fp, "rb") as f:
@@ -27,25 +30,22 @@ def fetch_as_file(url):
   if url.startswith("/") or url.startswith("."):
     with open(url, "rb") as f:
       return f.read()
-  import hashlib
   fp = temp(hashlib.md5(url.encode('utf-8')).hexdigest())
   download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
   return fp
 
 def download_file(url, fp, skip_if_exists=True):
-  import requests, pathlib
-  if skip_if_exists and os.path.isfile(fp) and os.stat(fp).st_size > 0:
+  if skip_if_exists and Path(fp).is_file() and Path(fp).stat().st_size > 0:
     return
   r = requests.get(url, stream=True)
   assert r.status_code == 200
   progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
-  (path := pathlib.Path(fp).parent).mkdir(parents=True, exist_ok=True)
+  (path := Path(fp).parent).mkdir(parents=True, exist_ok=True)
   with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
     for chunk in r.iter_content(chunk_size=16384):
       progress_bar.update(f.write(chunk))
     f.close()
-    os.rename(f.name, fp)
-
+    Path(f.name).rename(fp)
 
 def my_unpickle(fb0):
   key_prelookup = defaultdict(list)
@@ -139,8 +139,6 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
 
 def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True):
   if Device.DEFAULT in ["TORCH", "GPU", "CUDA"]: multithreaded = False  # multithreaded doesn't work with CUDA or TORCH. for GPU it's a wash with _mmap
-
-  import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
     base_name = myzip.namelist()[0].split('/', 1)[0]
     with myzip.open(f'{base_name}/data.pkl') as myfile:
@@ -151,7 +149,6 @@ def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True):
           for v in vv:
             load_single_weight(v[2], myfile, v[3], v[4], v[0], v[5], mmap_allowed=True)
       if multithreaded:
-        import concurrent.futures
         # 2 seems fastest
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
           futures = {executor.submit(load_weight, k, v):k for k,v in ret[1].items()}
@@ -166,8 +163,6 @@ def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True):
   return ret[0]
 
 def fake_torch_load(b0):
-  import io
-  import struct
 
   # convert it to a file
   fb0 = io.BytesIO(b0)
