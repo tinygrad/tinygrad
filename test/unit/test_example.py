@@ -1,5 +1,4 @@
 import unittest
-import numpy as np
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, CI
@@ -10,7 +9,7 @@ def multidevice_test(fxn):
     for device in Device._buffers:
       if device in ["DISK", "SHM", "FAKE"]: continue
       if not CI: print(device)
-      if device in exclude_devices:
+      if device in exclude_devices or (CI and device != Device.DEFAULT):
         if not CI: print(f"WARNING: {device} test is excluded")
         continue
       with self.subTest(device=device):

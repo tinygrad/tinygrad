@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
+
+from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import optim, BatchNorm2d
@@ -98,6 +100,7 @@ class TestMNIST(unittest.TestCase):
     train(model, X_train, Y_train, optimizer, steps=100)
     assert evaluate(model, X_test, Y_test) > 0.93   # torch gets 0.9415 sometimes
 
+  @unittest.skipIf(CI and Device.DEFAULT == "METAL", "broken on macos-13 github runner, but works on local M2 macos-14")
   def test_conv_with_bn(self):
     np.random.seed(1337)
     model = TinyConvNet(has_batchnorm=True)

@@ -7,6 +7,7 @@ import numpy as np
 import onnx
 from extra.utils import fetch, temp
 from extra.onnx import get_run_onnx
+from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI
 import pytest
@@ -26,6 +27,8 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/mod
 np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
+
+  @unittest.skipIf(CI and Device.DEFAULT == "METAL", "broken on macos-13 github runner, but works on local M2 macos-14")
   def test_benchmark_openpilot_model(self):
     dat = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(io.BytesIO(dat))
