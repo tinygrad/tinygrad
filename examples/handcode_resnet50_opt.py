@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.search import bufs_from_lin, time_linearizer, get_linearizer_actions
-from tinygrad.helpers import ansilen, DEBUG, getenv, flatten
+from tinygrad.helpers import ansilen, DEBUG, getenv, flatten, dedup
 from tinygrad.graph import print_tree
 from tinygrad.lazy import vars_from_ast
 from tinygrad.shape.symbolic import sym_infer
@@ -65,8 +65,8 @@ if __name__ == "__main__":
         best_tm = float('inf')
         beam = [lin]
         while 1:
-          acted_lins = flatten([get_linearizer_actions(lin).items() for lin in beam])
-          timed_lins = [(v,time_linearizer(v, rawbufs)) for k,v in acted_lins if k != 0]
+          acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin in beam])
+          timed_lins = [(v,time_linearizer(v, rawbufs)) for v in acted_lins]
           opts = sorted(timed_lins, key=lambda x: x[1])
           if len(opts) == 0 or best_tm <= opts[0][1]: break  # we didn't get faster
           best_tm = opts[0][1]

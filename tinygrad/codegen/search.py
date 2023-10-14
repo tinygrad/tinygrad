@@ -1,5 +1,4 @@
 from typing import Dict, List, cast, DefaultDict, Optional
-from copy import deepcopy
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
 from tinygrad.helpers import prod, getenv, flatten
@@ -21,9 +20,12 @@ actions += [
 device:Compiled = cast(Compiled, Device[Device.DEFAULT])
 
 # returns time in seconds
-logtm = open(getenv("LOGTM", ""),"a") if getenv("LOGTM", "") else None
+import shelve
+logtm = shelve.open(getenv("LOGTM", "")) if getenv("LOGTM", "") else None
 def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, should_copy=True) -> float:
-  if should_copy: lin = deepcopy(lin)  # TODO: remove the need for this
+  key = str((lin.ast, lin.applied_opts))
+  if should_copy and logtm is not None and key in logtm: return min(logtm[key])  # NOTE: we check should_copy since this may have side effects
+  if should_copy: lin = lin.copy() # TODO: remove the need for this
   var_vals = {k:k.min for k in vars_from_ast(lin.ast)}
   try:
     lin.linearize()
@@ -48,7 +50,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
     #print(lin.ast)
     #print(lin.applied_opts)
     tms = [float('inf')]
-  if logtm: logtm.write(str((lin.ast, lin.applied_opts, tms))+"\n")
+  if logtm is not None: logtm[key] = tms
   return min(tms)
 
 # get (scrap) buffers for timing the linearizer
@@ -62,12 +64,12 @@ def bufs_from_lin(lin:Linearizer) -> List[RawBuffer]:
   return cast(List[RawBuffer], rawbufs)
 
 # get dictionary of all possible actions
-def get_linearizer_actions(lin:Linearizer) -> Dict[int, Linearizer]:
-  acted_lins = {0:deepcopy(lin)}
+def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
+  acted_lins = {0:lin.copy()} if include_0 else {}
   for i,a in enumerate(actions):
     if a.axis >= lin.shape_len: continue
     if lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) in actions: continue
-    lin2 = deepcopy(lin)
+    lin2 = lin.copy()
     try:
       lin2.apply_opt(a)
       up, lcl = 1, 1
