@@ -163,61 +163,68 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     sub_dict: Dict[Union[Variable, NumNode], Node] = {v:Variable(v.expr, mn, mx) for v, (mn, mx) in var_dict.items() if mx != mn}
     valid, idxy = valid.substitute(sub_dict), idxy.substitute(sub_dict)
 
-  idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
+  idx = (idxy // 4) % base_shape[1]
+  idy = (idxy // (4 * base_shape[1]))
+
+  if valid.min == 0:
+    nds = valid.nodes if isinstance(valid, AndNode) else [valid]
+    val_dict = {}
+    idxy_flat = idxy.flat_components
+    for node in nds:
+      if isinstance(node.a, Variable): continue
+      node_flat = node.a.flat_components
+      if len(set(idxy.vars()) - set(node.vars())) != 0:
+        k = [i for i in idxy_flat if not isinstance(i, NumNode) and i.vars()[0] in node.vars()]
+        first = sorted(k)[0]
+        second = sorted(node_flat)[0]
+        f_b = 1 if isinstance(first, Variable) else first.b
+        s_b = 1 if isinstance(second, Variable) else second.b
+        katla = abs(f_b//s_b)
+
+        if s_b < 0:
+          anan = (-(node.a))
+          if anan in val_dict: val_dict[anan].append(((-node.b) + 1, katla, -10))
+          else: val_dict[anan] = [((-node.b) + 1, katla, -10)]
+        else:
+          anan = node.a
+          if anan in val_dict: val_dict[anan].append((node.b - 1, katla, 10))
+          else: val_dict[anan] = [(node.b - 1, katla, 10)]
+
+    cnt = 0
+    used = []
+    for anan in val_dict.keys():
+      cnt += 1
+      katla = val_dict[anan][0][1]
+      if len(val_dict[anan]) == 1:
+        if val_dict[anan][0][2] < 0:
+          mnn, mxn = val_dict[anan][0][0], anan.max
+        else:
+          mnn, mxn = anan.min, val_dict[anan][0][0]
+      else:
+        mnn, mxn = min(val_dict[anan][0][0], val_dict[anan][1][0]), max(val_dict[anan][0][0], val_dict[anan][1][0])
+      used.append((Variable("fake_" + str(cnt), mnn, mxn), anan))
+      idxy = idxy - anan*katla + katla*Variable("fake_" + str(cnt), mnn, mxn)
+    idx = (idxy // 4) % base_shape[1]
+    idy = (idxy // (4 * base_shape[1]))
+
+    for u in used:
+      idx = idx.substitute({u[0] : u[1]})
+      idy = idy.substitute({u[0] : u[1]})
+
   idx_vars, idy_vars, val_vars = set(idx.vars()), set(idy.vars()), set(valid.vars())
 
-  # Simplify ModNode if possibe # test_padded_conv_transpose2d, Needs much more thinking
-  if valid.min == 0 and isinstance(idx, ModNode) and isinstance(idx.a, SumNode):
-    nodes = valid.nodes if isinstance(valid, AndNode) else [valid]
-    same_dict: Dict[Node, List[Tuple[int, Node]]] = {}
-    idx_nodes = idx.a.flat_components
-
-    for node in nodes:
-      if not isinstance(node, LtNode) or not isinstance(node.a, SumNode): continue
-
-      nd_flat, nd_vars = node.a.flat_components, node.vars()
-
-      same = [x for x in idx_nodes if (x.a if isinstance(x, MulNode) else x) in nd_vars]
-
-      if len(same) != len(nd_vars): continue
-
-      first_b, second_b = nd_flat[0].b if isinstance(nd_flat[0], MulNode) else 1, same[0].b if isinstance(same[0], MulNode) else 1
-      k, same_sum = second_b//first_b, Variable.sum(same)
-
-      if k*(node.a) == same_sum: same_dict[same_sum] = same_dict.get(same_sum, []) + [(k, node)]
-
-    for key in same_dict.keys():
-      same, mnn, mxn = key.flat_components, key.min, key.max # type: ignore # Same is sumnode because node.a is SumNode
-      for k, node in same_dict[key]: # TODO: This part may need more thinking
-        if k < 0: mnn = (-k)*max((-node.b) + 1, min([-lal.b if isinstance(lal, MulNode) else 1 for lal in same]))
-        else: mxn = (node.b - 1)*k
-
-      fake_var = Variable("valid_fake", mnn, mxn)
-      total = (Variable.sum([x for x in idx_nodes if x not in same]) + fake_var) % idx.b
-      idx = total.substitute({fake_var: key})
-      # TODO: If idx has no ModNode we may can remove the valid node, but removing it needs careful thinking
-
-  # Simplify SumNodes
-  # This part just removes valid nodes if node is exactly same as idx or idy
-  # idx = 3*a + b (+ 5), valid = 3*a + b < 10 # Valid will be removed as idx will go out of bounds
-  # Check for var intersection, removing valid can affect other index
-  if valid.min == 0 and not idx_vars.intersection(idy_vars):
+  if valid.min == 0:
     nds = valid.nodes if isinstance(valid, AndNode) else [valid]
-    ones = [node for sym in (idx, idy) for node in nds if isinstance(sym + node.a, NumNode) or isinstance(sym - node.a, NumNode)] # type: ignore # AndNode always consists of LtNode
+    ones = []
+    for node in nds:
+      if isinstance(node.a, Variable): continue
+      if set(idy.vars()) - set(node.vars()) == set() or set(idy.vars()) - set(node.vars()) == set():
+        ones.append(node)
+    for node in nds:
+      if isinstance(node.a, Variable): continue
+      if set(node.vars()) - set(idx.vars()) == set():
+        ones.append(node)
     valid = Variable.ands([i for i in nds if i not in ones])
-
-
-  # This is the slow part
-  # This part is for brute forcing all possible values of idx, idy and valid
-  # If valid is both 0 and 1 for the same (idx, idy) we can not delete the valid
-  if getenv("VALIDHACKS", 1) and valid.min == 0 and not isinstance(idx, ModNode):
-    variables = tuple(val_vars | idy_vars | idx_vars)
-    val_infer, idx_infer, idy_infer = valid.expand(variables), idx.expand(variables), idy.expand(variables)
-    val_dict: Dict[int, Set[Tuple[int,int]]] = {0:set(), 1:set()}
-
-    for v, x, y in zip(val_infer, idx_infer, idy_infer): val_dict[v.min].add((x.min, y.min))
-
-    if not val_dict[1].intersection(val_dict[0]): valid = NumNode(1)
 
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
