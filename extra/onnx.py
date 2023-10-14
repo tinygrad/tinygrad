@@ -149,9 +149,6 @@ def get_run_onnx(onnx_model: ModelProto):
         axes = opt['axes'] if 'axes' in opt else safe_numpy(inp[1])
         axes = [int(x) if x >= 0 else int(x+inp[0].ndim) for x in axes]
         ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in axes])
-      elif n.op_type == "Div":
-        # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
-        ret = inp[0].div(inp[1]) if inp[0].dtype == dtypes.float else inp[0].div(inp[1]).floor()
       elif n.op_type == "Constant":
         if 'value' in opt: ret = opt['value'] # tensor
         elif 'value_float' in opt: ret = Tensor(np.array(opt['value_float'], dtype=np.float32), requires_grad=False)
@@ -160,11 +157,6 @@ def get_run_onnx(onnx_model: ModelProto):
         elif 'value_ints' in opt: ret = Tensor(np.array(opt['value_ints'], dtype=np.int64), requires_grad=False)
         else: raise NotImplementedError(f'Constant not implemented for {opt}')
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
-      elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
-        if n.op_type == "Add": ret = inp[0] + inp[1] if inp[0].dtype == dtypes.float else (inp[0] + inp[1]).cast(inp[0].dtype)
-        if n.op_type == "Sub": ret = inp[0] - inp[1] # some tests have ints as inp
-        if n.op_type == "Mul": ret = inp[0] * inp[1] if inp[0].dtype == dtypes.float else (inp[0] * inp[1]).cast(inp[0].dtype)
-        if n.op_type == "Pow": ret = (inp[0].float() ** inp[1].float()).cast(inp[0].dtype)
       elif n.op_type == "Split":
         if 'axis' not in opt: opt['axis'] = 0
         if 'num_outputs' in opt or len(inp) == 1:

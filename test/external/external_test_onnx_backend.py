@@ -66,8 +66,8 @@ backend_test.exclude('test_reduce_log_sum_exp*') # dependent on actual float64 i
 backend_test.exclude('test_operator_add*') # dependent on float64 math. Without it values default to 0 or inf
 
 # we don't support indexes
-# backend_test.exclude('test_argmax_*') # Needs more work #select_last_index
-# backend_test.exclude('test_argmin_*') # Needs more work #select_last_index
+# backend_test.exclude('test_argmax_*') # Needs more work: select_last_index
+# backend_test.exclude('test_argmin_*') # Needs more work: select_last_index
 backend_test.exclude('test_nonzero_*')
 
 # no support for mod
@@ -160,15 +160,15 @@ if getenv("CPU") or getenv("ARM64") or getenv("TORCH"):
   backend_test.exclude('test_dequantizelinear_axis_cpu')
   backend_test.exclude('test_dequantizelinear_cpu')
 
+# compiled backends cannot reshape to and from 0
 if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or getenv('MPS'):
-  # compiled backends cannot reshape to 0 or from 0
   backend_test.exclude('test_slice_start_out_of_bounds_cpu')
   backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
 
 if getenv('GPU') or getenv('METAL') or getenv('MPS'):
   backend_test.exclude('test_mish_cpu') # weird inaccuracy
   backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
-  # backend_test.exclude('test_eyelike_with_dtype_cpu') # I'm not sure about this...
+  backend_test.exclude('test_eyelike_with_dtype_cpu') # I'm not sure about this...
 
 # 
 if getenv('METAL'):
