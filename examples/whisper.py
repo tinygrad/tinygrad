@@ -190,18 +190,6 @@ def listener(q):
     q.put(waveform)
   print("done listening")
 
-def pad_or_trim(array, length: int, *, axis: int = -1):
-  """
-  Pad or trim the audio array to length, as expected by the encoder.
-  """
-  if array.shape[axis] > length:
-      print("test")
-      return  array.take(indices=range(length), axis=axis)
-  elif array.shape[axis] < length:
-      pad_widths = [(0, 0)] * array.ndim
-      pad_widths[axis] = (0, length - array.shape[axis])
-      return np.pad(array, pad_widths)
-
 MODEL_URLS = {
   "tiny.en": "https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt",
   "tiny": "https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt",
