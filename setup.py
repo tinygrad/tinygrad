@@ -54,6 +54,7 @@ setup(name='tinygrad',
             "nevergrad",
             "sentencepiece",
             "tiktoken",
+            "librosa"
         ],
       },
       include_package_data=True)
