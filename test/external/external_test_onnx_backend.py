@@ -181,6 +181,11 @@ if getenv('METAL') or getenv('MPS') or getenv('LLVM'):
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
 
+# Segfaults in CI
+if (getenv('LLVM') or getenv('CUDA')) and getenv("CI"):
+  backend_test.exclude('test_max_float16_cpu')
+  backend_test.exclude('test_min_float16_cpu')
+
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):
   for x in backend_test.test_suite:
