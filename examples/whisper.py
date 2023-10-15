@@ -223,6 +223,7 @@ def transcribe_file(model, enc, filename):
       return  transcription
 
 def init_whisper(model_name):
+  assert model_name in MODELS.keys()
   filename = BASE / "whisper-{}".format(MODELS[model_name].split('/')[-1])
   download_file(MODELS[model_name], filename)
   state = torch_load(filename)
