@@ -179,11 +179,12 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     idx = idx.substitute(fake_rep)
     idy = idy.substitute(fake_rep)
 
-    # This part is bit shady, idy is problematic
+    idy_vars = set(idy.vars())
     if not isinstance(idx, ModNode):
       ones = []
       for node in nodes:
-        if set(idy.vars()) == set(node.vars()) or set(idy.vars()) & set(node.vars()) == set():
+        # NOTE: Why does only idy is problematic? and not the idx
+        if idy_vars == set(node.vars()) or idy_vars & set(node.vars()) == set():
           ones.append(node)
       valid = Variable.ands([i for i in nodes if i not in ones])
 
