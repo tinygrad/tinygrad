@@ -62,7 +62,7 @@ if __name__ == "__main__":
       latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep, unconditional_context.cat(context, dim=0))
       unconditional_latent, latent = latents[0:1], latents[1:2]
 
-      unconditional_guidance_scale = 3.5
+      unconditional_guidance_scale = 7.5
       e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
       return e_t
 
@@ -210,6 +210,20 @@ if __name__ == "__main__":
       }}
 
       counter++;
+    }}
+
+    let allZero = true;
+    let out = safetensorParts[selectedPart].subarray(...correctedOffsets);
+
+    for (let i = 0; i < out.length; i++) {{
+        if (out[i] !== 0) {{
+            allZero = false;
+            break;
+        }}
+    }}
+
+    if (allZero) {{
+        console.log("Error: weight '" + key + "' is all zero.");
     }}
 
     return safetensorParts[selectedPart].subarray(...correctedOffsets);
