@@ -41,243 +41,137 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
 </div>
 <script>
     window.addEventListener('load', function() {
-    console.log(window.clipTokenizer.encodeForCLIP("A horse sized cat eating a bagel."));
-	var NumpyLoader = (function () {
-    function asciiDecode(buf) {
-        return String.fromCharCode.apply(null, new Uint8Array(buf));
-    }
+        const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
+        const resultText = document.getElementById('result');
+        let labels, nets;
 
-    function readUint16LE(buffer) {
-        var view = new DataView(buffer);
-        var val = view.getUint8(0);
-        val |= view.getUint8(1) << 8;
-        return val;
-    }
+        const error = (err) => {
+            resultText.innerHTML = `Error: ${err}`;
+            throw new Error(err);
+        }
 
-    function fromArrayBuffer(buf) {
-      // Check the magic number
-      var magic = asciiDecode(buf.slice(0,6));
-      if (magic.slice(1,6) != 'NUMPY') {
-          throw new Error('unknown file type');
-      }
-
-      var version = new Uint8Array(buf.slice(6,8)),
-          headerLength = readUint16LE(buf.slice(8,10)),
-          headerStr = asciiDecode(buf.slice(10, 10+headerLength));
-          offsetBytes = 10 + headerLength;
-          //rest = buf.slice(10+headerLength);  XXX -- This makes a copy!!! https://www.khronos.org/registry/typedarray/specs/latest/#5
-
-      // Hacky conversion of dict literal string to JS Object
-      eval("var info = " + headerStr.toLowerCase().replace('(','[').replace('),',']'));
-    
-      // Intepret the bytes according to the specified dtype
-      var data;
-      if (info.descr === "|u1") {
-          data = new Uint8Array(buf, offsetBytes);
-      } else if (info.descr === "|i1") {
-          data = new Int8Array(buf, offsetBytes);
-      } else if (info.descr === "<u2") {
-          data = new Uint16Array(buf, offsetBytes);
-      } else if (info.descr === "<i2") {
-          data = new Int16Array(buf, offsetBytes);
-      } else if (info.descr === "<u4") {
-          data = new Uint32Array(buf, offsetBytes);
-      } else if (info.descr === "<i4") {
-          data = new Int32Array(buf, offsetBytes);
-      } else if (info.descr === "<f4") {
-          data = new Float32Array(buf, offsetBytes);
-      } else if (info.descr === "<f8") {
-          data = new Float64Array(buf, offsetBytes);
-      } else {
-          throw new Error('unknown numeric dtype')
-      }
-
-      return {
-          shape: info.shape,
-          fortran_order: info.fortran_order,
-          data: data
-      };
-    }
-
-    function open(file, callback) {
-        var reader = new FileReader();
-        reader.onload = function() {
-            // the file contents have been read as an array buffer
-            var buf = reader.result;
-            var ndarray = fromArrayBuffer(buf);
-            callback(ndarray);
+        const getDevice = async () => {
+            if (!navigator.gpu) error("WebGPU not supported.");
+            const adapter = await navigator.gpu.requestAdapter();
+            const requiredLimits = {};
+            const maxBufferSizeInSDModel = 1073741824;
+            requiredLimits.maxStorageBufferBindingSize = maxBufferSizeInSDModel;
+            requiredLimits.maxBufferSize = maxBufferSizeInSDModel;
+            
+            return await adapter.requestDevice({
+            requiredLimits,
+            }	);
         };
-        reader.readAsArrayBuffer(file);
-    }
 
-    function ajax(url, callback) {
-        var xhr = new XMLHttpRequest();
-        xhr.onload = function(e) {
-            var buf = xhr.response; // not responseText
-            var ndarray = fromArrayBuffer(buf);
-            callback(ndarray);
-        };
-        xhr.open("GET", url, true);
-        xhr.responseType = "arraybuffer";
-        xhr.send(null);
-    }
+        const timer = async (func, label = "") => {
+            document.getElementById('time').innerHTML = "";
+            const start = performance.now();
+            const out = await func();
+            const delta = (performance.now() - start).toFixed(1)
+            console.log(`${delta} ms ${label}`);
+            document.getElementById('time').innerHTML = `${delta} ms ${label}`;
+            return out;
+        }	
 
-    return {
-        open: open,
-        ajax: ajax
-    };
-	})();
-
-	const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
-	const resultText = document.getElementById('result');
-	let labels, nets;
-
-	const error = (err) => {
-		resultText.innerHTML = `Error: ${err}`;
-		throw new Error(err);
-	}
-
-	const getDevice = async () => {
-		if (!navigator.gpu) error("WebGPU not supported.");
-		const adapter = await navigator.gpu.requestAdapter();
-		const requiredLimits = {};
-		requiredLimits.maxStorageBufferBindingSize = 1073741824;
-
-		requiredLimits.maxBufferSize = 1073741824;
-		
-		return await adapter.requestDevice({
-    	requiredLimits,
-  		}	);
-	};
-
-	const timer = async (func, label = "") => {
-		document.getElementById('time').innerHTML = "";
-		const start = performance.now();
-		const out = await func();
-		const delta = (performance.now() - start).toFixed(1)
-		console.log(`${delta} ms ${label}`);
-		document.getElementById('time').innerHTML = `${delta} ms ${label}`;
-		return out;
-	}	
-
-	function checkStatus(response) {
-		if (!response.ok) {
-			throw new Error(`HTTP ${response.status} - ${response.statusText}`);
-		}
-		return response;
-	}
-
-	const loadLet = async () => {
-		resultText.innerHTML = "loading..."
-		const safetensorParts = await getSafetensorParts();
-		const device = await getDevice();
-
-        nets = await timer(() => Promise.all([
-            text_modelModel().setup(device, safetensorParts),
-            diffusorModel().setup(device, safetensorParts),
-            get_x_prev_and_pred_x0Model().setup(device, safetensorParts),
-            decoderModel().setup(device, safetensorParts)]
-        ), "(compilation)")
-        console.log(nets)
-		resultText.innerHTML = "ready"
-	}
-
-    function runStableDiffusion(prompt) {
-        return new Promise(async (resolve, reject) => {
-            let prompt_encoded = clipTokenizer.encodeForCLIP(prompt);
-            let context = await timer(() => nets[0](prompt_encoded));
-            context = context.subarray(0, context.length/4);
-            
-            console.log("Got context: " + context);
-
-            prompt_encoded = clipTokenizer.encodeForCLIP("");
-            let unconditional_context = await timer(() => nets[0](prompt_encoded));
-            unconditional_context = unconditional_context.subarray(0, unconditional_context.length/4);
-
-
-            console.log("Got unconditional context: " + context.length);
-
-            let timesteps = [];
-            let steps = 10;
-
-            for (let i = 1; i < 1000; i += (1000/steps)) {
-                timesteps.push(i);
+        function checkStatus(response) {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status} - ${response.statusText}`);
             }
+            return response;
+        }
 
-            console.log("Timesteps: " + timesteps);
+        const loadNet = async () => {
+            resultText.innerHTML = "loading..."
+            const safetensorParts = await getSafetensorParts();
+            const device = await getDevice();
 
-            let alphasCumprod = window.alphas_cumprod;
-            let alphas = [];
+            nets = await timer(() => Promise.all([
+                text_modelModel().setup(device, safetensorParts),
+                diffusorModel().setup(device, safetensorParts),
+                get_x_prev_and_pred_x0Model().setup(device, safetensorParts),
+                decoderModel().setup(device, safetensorParts)]
+            ), "(compilation)")
+            console.log(nets)
+            resultText.innerHTML = "ready"
+        }
 
-            for (t of timesteps) {
-                alphas.push(alphasCumprod[Math.floor(t)]);
-            }
+        function runStableDiffusion(prompt) {
+            return new Promise(async (resolve, reject) => {
+                let prompt_encoded = clipTokenizer.encodeForCLIP(prompt);
+                let context = await timer(() => nets[0](prompt_encoded));
+                context = context.subarray(0, context.length/4);
 
-            console.log("Alphas: " + alphas);
+                prompt_encoded = clipTokenizer.encodeForCLIP("");
+                let unconditional_context = await timer(() => nets[0](prompt_encoded));
+                unconditional_context = unconditional_context.subarray(0, unconditional_context.length/4);
 
-            alphas_prev = [1.0];
+                let timesteps = [];
+                let steps = 10;
 
-            for (let i = 0; i < alphas.length-1; i++) {
-                alphas_prev.push(alphas[i]);
-            }
+                for (let i = 1; i < 1000; i += (1000/steps)) {
+                    timesteps.push(i);
+                }
 
-            console.log("Alphas prev: " + alphas_prev);
+                console.log("Timesteps: " + timesteps);
 
-            function boxMullerRandom() {
-                let u = 0, v = 0;
-                while (u === 0) u = Math.random(); // Converting [0,1) to (0,1)
-                while (v === 0) v = Math.random();
-                return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
-            }
+                let alphasCumprod = window.alphas_cumprod;
+                let alphas = [];
 
-            let inpSize = 4*64*64;
-            latent = new Float32Array(inpSize);
+                for (t of timesteps) {
+                    alphas.push(alphasCumprod[Math.floor(t)]);
+                }
 
-            for (let i = 0; i < inpSize; i++) {
-                latent[i] = boxMullerRandom();
-                console.log(latent[i]);
-            }
-            
-            for (let i = timesteps.length - 1; i >= 0; i--) {
-                let timestep = new Float32Array([timesteps[i]]);
-                let e_t = await timer(() => nets[1](latent, timestep, unconditional_context, context));
-                e_t = e_t.subarray(0, e_t.length/4);
-                let x_prev = await timer(() => nets[2](latent, e_t, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]])));
-                x_prev = x_prev.subarray(0, x_prev.length/4);
-                latent = x_prev;
-            }
-            
-            resolve(await timer(() => nets[3](latent)));
-        });
-    }
+                alphas_prev = [1.0];
 
-    document.getElementById("btnRunNet").addEventListener("click", function(e) {
-            if (!nets || nets.length != 4) error("Net not loaded yet.");
+                for (let i = 0; i < alphas.length-1; i++) {
+                    alphas_prev.push(alphas[i]);
+                }
 
-            runStableDiffusion(document.getElementById("prompt_text").value).then((image) => {
+                let inpSize = 4*64*64;
+                latent = new Float32Array(inpSize);
 
-                let pixels = []
-                let pixelCounter = 0
-
-                for (let j = 0; j < 512; j++) {
-                    for (let k = 0; k < 512; k++) {
-                        pixels.push(image[pixelCounter])
-                        pixels.push(image[pixelCounter+1])
-                        pixels.push(image[pixelCounter+2])
-                        pixels.push(255)
-                        pixelCounter += 3
-                    }
+                for (let i = 0; i < inpSize; i++) {
+                    latent[i] = Math.sqrt(-2.0 * Math.log(Math.random())) * Math.cos(2.0 * Math.PI * Math.random());
                 }
                 
-                ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), 512, 512), 0, 0);
-                console.log(image);
-                console.log("Success");
+                for (let i = timesteps.length - 1; i >= 0; i--) {
+                    let timestep = new Float32Array([timesteps[i]]);
+                    let e_t = await timer(() => nets[1](latent, timestep, unconditional_context, context));
+                    e_t = e_t.subarray(0, e_t.length/4);
+                    let x_prev = await timer(() => nets[2](latent, e_t, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]])));
+                    x_prev = x_prev.subarray(0, x_prev.length/4);
+                    latent = x_prev;
+                }
+                
+                resolve(await timer(() => nets[3](latent)));
             });
-        }, false);
+        }
 
-	    loadLet();
-    })
-    
+        document.getElementById("btnRunNet").addEventListener("click", function(e) {
+            if (!nets || nets.length != 4) error("Net not loaded yet.");
+                runStableDiffusion(document.getElementById("prompt_text").value).then((image) => {
+                    let pixels = []
+                    let pixelCounter = 0
+
+                    for (let j = 0; j < 512; j++) {
+                        for (let k = 0; k < 512; k++) {
+                            pixels.push(image[pixelCounter])
+                            pixels.push(image[pixelCounter+1])
+                            pixels.push(image[pixelCounter+2])
+                            pixels.push(255)
+                            pixelCounter += 3
+                        }
+                    }
+                    
+                    ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), 512, 512), 0, 0);
+                    console.log(image);
+                    console.log("Success");
+                });
+            }, false);
+
+            loadNet();
+        }
+    )
 </script>
 </body>
 </html>
