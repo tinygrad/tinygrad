@@ -29,6 +29,9 @@ if __name__ == "__main__":
   sched = out.lazydata.schedule(seen)
   sched = [x for x in sched if x.ast.op not in LoadOps]
 
+  # focus on one kernel
+  if getenv("KERNEL", -1) >= 0: sched = sched[getenv("KERNEL", -1):getenv("KERNEL", -1)+1]
+
   # work with the schedule
   total_tm = 0
   running_gflops = 0
