@@ -26,16 +26,15 @@ class TestSymbolic(unittest.TestCase):
 
   def test_ge_divides(self):
     expr = (Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512
-    self.helper_test_variable(expr, 0, 1, "((idx*4)<512)")
-    self.helper_test_variable(expr//4, 0, 1, "(idx<128)")
+    self.helper_test_variable(expr, 0, 1, "(idx<128)")
 
   def test_ge_divides_and(self):
     expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
                           (Variable("idx2", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512])
-    self.helper_test_variable(expr//4, 0, 1, "((idx1<128) and (idx2<128))")
+    self.helper_test_variable(expr, 0, 1, "((idx1<128) and (idx2<128))")
     expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
                           (Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7)) < 512])
-    self.helper_test_variable(expr//4, 0, 1, "((((FLOAT8_INDEX//4)+idx2)<128) and (idx1<128))")
+    self.helper_test_variable(expr//4, 0, 1, "((((FLOAT8_INDEX//4)+idx2)<128) and ((idx1//4)<32))")
 
   def test_lt_factors(self):
     expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256)) < 512])
@@ -139,6 +138,10 @@ class TestSymbolic(unittest.TestCase):
 
   def test_sum_div_const_big(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*4, Variable.num(3)]) // 16, 0, 1, "(a//4)")
+
+  def test_sum_lt_fold(self):
+    self.helper_test_variable(Variable.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 3)]) < 16, 0, 1, "(a<4)")
+    self.helper_test_variable(Variable.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]) < 16, 0, 1, "(((a*4)+b)<16)")
 
   def test_mod_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)%9, 0, 5, "a")
