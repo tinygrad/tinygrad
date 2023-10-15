@@ -289,17 +289,17 @@ class SumNode(RedNode):
         if isinstance(x, NumNode): b -= x.b
         else: new_sum.append(x)
       lhs = Node.sum(new_sum)
-      if isinstance(lhs, SumNode):
-        muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
-        if muls:
-          # NOTE: gcd in python 3.8 takes exactly 2 args
-          mul_gcd = muls[0].b
-          for x in muls[1:]: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell x.b is int here
-          if b%mul_gcd == 0:
-            all_others = Variable.sum(others)
-            if all_others.min >= 0 and all_others.max < mul_gcd:
-              # TODO: should we divide both by mul_gcd here?
-              lhs = Variable.sum(muls)
+      nodes = lhs.nodes if isinstance(lhs, SumNode) else [lhs]
+      muls, others = partition(nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
+      if muls:
+        # NOTE: gcd in python 3.8 takes exactly 2 args
+        mul_gcd = muls[0].b
+        for x in muls[1:]: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell x.b is int here
+        if b%mul_gcd == 0:
+          all_others = Variable.sum(others)
+          if all_others.min >= 0 and all_others.max < mul_gcd:
+            lhs, b = Variable.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
+
     return Node.__lt__(lhs, b)
 
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return Variable.sum([node.substitute(var_vals) for node in self.nodes])
