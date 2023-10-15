@@ -24,10 +24,8 @@ FILTER_BANK = np.expand_dims(librosa.filters.mel(sr=16000, n_fft=512, n_mels=80,
 WINDOW = librosa.filters.get_window("hann", 320)
 
 def feature_extract(x, x_lens):
-  x_lens = np.ceil((x_lens / 160) / 3).astype(np.int32)
-
+  x_lens = np.int32(x_lens / 160 / 3) + 1
   x = np.concatenate((np.expand_dims(x[:, 0], 1), x[:, 1:] - 0.97 * x[:, :-1]), axis=1)
-
   x = librosa.stft(x, n_fft=512, window=WINDOW, hop_length=160, win_length=320, center=True, pad_mode="reflect")
   x = np.stack((x.real, x.imag), axis=-1)
 
@@ -50,7 +48,6 @@ def feature_extract(x, x_lens):
     features_std[i, :] = features[i, :, :x_lens[i]].std(axis=1, ddof=1)
   features_std += 1e-5
   features = (features - np.expand_dims(features_mean, 2)) / np.expand_dims(features_std, 2)
-
   return features.transpose(2, 0, 1), x_lens.astype(np.float32)
 def load_wav(file):
   sample = soundfile.read(file)[0].astype(np.float32)
@@ -58,13 +55,23 @@ def load_wav(file):
 def iterate(bs=1, start=0):
   print(f"there are {len(ci)} samples in the dataset")
   for i in range(start, len(ci), bs):
+    print()
     samples, sample_lens = zip(*[load_wav(BASEDIR / v["files"][0]["fname"]) for v in ci[i : i + bs]])
     samples = list(samples)
     X,X_lens = list(zip(*[feature_extract(np.array(samples[i:i+1]),np.array(sample_lens[i:i+1])) for i in range(bs)]))
-    max_len = max(X_lens)
-    X = [np.pad(X[j],((0,int(max_len[0]-X_lens[j][0])),(0,0),(0,0)),'constant') for j in range (len(X))]
-    yield np.concatenate(X,axis=1),(np.array(X_lens)),*text_encode([v['transcript'] for v in ci[i:i+bs]])
 
+
+    max_len = max(X_lens)
+    print (max_len[0])
+    X = [np.pad(X[j],((0,int(max_len[0]-X_lens[j][0])),(0,0),(0,0)),'constant') for j in range (len(X))]
+    yield (
+      np.concatenate(X,axis=1),
+      (np.array(X_lens)),
+      *text_encode([v['transcript'] for v in ci[i:i+bs]]))
+
+it = iterate(2)
+for i in range(7):
+  _=next(it)
 
 characters = [*" 'abcdefghijklmnopqrstuvwxyz","<skip>"]
 c2i= dict([(c,i) for i,c in enumerate(characters)])
@@ -201,8 +208,6 @@ class LSTM:
 
     return output, hc
 
-rnnt = RNNT()
-
 class Joint:
   def __init__(self, vocab_size, pred_hidden_size, enc_hidden_size, joint_hidden_size, dropout):
     self.dropout = dropout
@@ -256,6 +261,7 @@ class Prediction:
     x_, hc = self.rnn(emb.transpose(0, 1), hc)
     return x_.transpose(0, 1), hc
 
+rnnt = RNNT()
 # %% autocompare
 def autocompare(x,x2):
   if type(x) == Tensor: 
@@ -275,37 +281,31 @@ def autocompare(x,x2):
   x= x.reshape(shape)
 
   if np.allclose(x,x2):
-    return shape
+    return shape,True
   else:
     err = np.abs(x-x2).max()
     print(err)
     return False
-autocompare(X,X2)
 
-
-# %%
+# %% rnnt instance
 
 rnnt = RNNT()
 self = rnnt.encoder
 
-
-
- #%%
+ #%% check f32
 def check32(arg):assert arg.dtype == np.float32 or arg.dtype == dtypes.float32 , f'{arg.dtype}'
 #%% Loss
 class RNNTLoss(Function):
   def forward(self,distribution:LazyBuffer,labels:LazyBuffer):
     self.device = distribution.device
     self.distribution = distribution.toCPU()
-    assert isinstance(self.distribution,np.ndarray)
     self.labels=labels.toCPU()
-
     self.T,self.U = distribution.shape[2],distribution.shape[1]
-    assert len(self.labels) == self.U-1, f"len labels {len(self.labels)} doesnt match U-1 {self.U-1}"
-
     self.alpha = np.zeros((self.T,self.U),dtype=np.float32)
     self.alpha [0,0] = 1
 
+    assert isinstance(self.distribution,np.ndarray)
+    assert self.labels.shape[0] == self.U-1, f"len labels shape:{labels.shape} doesnt match U-1: {self.U-1}"
     alpha_norm_log = np.zeros((),np.float32)
 
     for i in range(1,self.T+self.U-1):
@@ -315,7 +315,6 @@ class RNNTLoss(Function):
       t=i-u
 
       _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
-
       self.alpha[_t,_u] += self.alpha[_t-1,_u] * self.distribution[0,_u,_t-1,-1]
 
       _t,_u = t[np.where(u>0)], u[np.where(u>0)]
@@ -324,7 +323,6 @@ class RNNTLoss(Function):
       alpha_norm = self.alpha[t,u].sum()
       self.alpha [t,u] /= alpha_norm
       alpha_norm_log += np.log(alpha_norm,dtype=np.float32)
-    
     Loss= -alpha_norm_log - np.log(self.distribution[0,-1,-1,-1])
     return LazyBuffer.fromCPU(Loss)
 
@@ -360,54 +358,151 @@ class RNNTLoss(Function):
 
     dgrad[0,u,:-1,self.labels[u]] = ab[:-1,:-1].T / (self.distribution[0,:-1,:-1,-1]* (beta[1:,:-1]/beta[:-1,1:]).T + self.distribution[0,u,:-1,self.labels[u]])
     dgrad[0,u,-1,self.labels[u]] = ab[-1,:-1].T / ( self.distribution[0,u,-1,self.labels[u]])
+    print (dgrad[0,:3,:3,-1])
+    print (dgrad[0,-3:,-3:,-1])
 
     return LazyBuffer.fromCPU(-dgrad), None
-  
+#%% batch loss
+class RNNTIterLoss(Function):
+
+  def forward(self,distribution:LazyBuffer,X_lens:LazyBuffer,Y:LazyBuffer, Y_lens:LazyBuffer):
+    bs=Y.shape[0]
+    self.device = distribution.device
+    distribution = distribution.toCPU()
+    self.labels=Y.toCPU()
+    self.dists, self.alphas, self.Ts, self.Us, self.dists = [],[],[],[],[]
+    Loss = []
+
+    for bi in range(bs):
+      T,U = round(X_lens.toCPU()[bi][0]), int(Y_lens.toCPU()[bi])+1
+      self.Ts.append(T)
+      self.Us.append(U)
+
+      _, du,dt, _ = distribution.shape
+      dist = distribution[bi,:U,:T]
+      self.dists.append(dist)
+
+      alpha = np.zeros((T,U),dtype=np.float32)
+      alpha [0,0] = 1
+      self.alphas.append(alpha)
+      alpha_norm_log = np.zeros((),np.float32)
+      for i in range(1,T+U-1):
+        offset = max(0,i-T+1)
+        u=np.arange(offset,min(i+1,U))
+        t=i-u
+        _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
+        alpha[_t,_u] += alpha[_t-1,_u] * dist[_u,_t-1,-1]
+        _t,_u = t[np.where(u>0)], u[np.where(u>0)]
+        alpha[_t,_u] += alpha[_t,_u-1] * dist[_u-1,_t,self.labels[bi,_u-1]]
+        
+        alpha_norm = alpha[t,u].sum()
+        alpha [t,u] /= alpha_norm
+        alpha_norm_log += np.log(alpha_norm,dtype=np.float32)
+      Loss .append(-alpha_norm_log - np.log(dist[-1,-1,-1]))
+
+    return LazyBuffer.fromCPU(np.sum(Loss))
+
+  def backward(self,grad):
+
+    bn = len(self.alphas)
+    dgrads=[]
+
+    for bi in range(bn):
+      alpha,dist = self.alphas[bi],self.dists[bi]
+      T,U = self.Ts[bi], self.Us[bi]
+      beta = np.zeros((T,U))
+      beta [-1,-1] = 1
+      ab = alpha # we store a * b normalized across diagonal dont use alpha after this.
+
+      for i in range(T+U-2,-1,-1):
+
+        offset= max(0,i-T+1)
+        u=np.arange(offset,min(i+1,U))
+        t=i-u
+
+        beta[t,u] /= beta[t,u].sum()
+        ab [t,u] *= beta [t,u]
+        ab [t,u] /= ab[t,u].sum()
+        _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
+        beta[_t-1,_u] += beta[_t,_u] * dist[_u,_t-1,-1]
+        _t,_u = t[np.where(u>0)], u[np.where(u>0)]
+        beta[_t,_u-1] += (
+          beta[_t,_u] * 
+          dist[_u-1,_t,self.labels[bi,_u-1]])
+      dgrad = np.zeros_like(dist)
+      t = np.arange(T-1)
+      u = np.arange(U-1)
+      dgrad[:-1,:-1,-1] = ab[:-1,:-1].T / (dist[:-1,:-1,-1] + (beta[:-1,1:]/beta[1:,:-1]).T * dist[u,:-1,self.labels[bi,u]] )
+      dgrad[-1,:,-1] = ab[:,-1].T / (dist[-1,:,-1]  )
+
+      dgrad[u,:-1,self.labels[bi,u]] = ab[:-1,:-1].T / (dist[:-1,:-1,-1]* (beta[1:,:-1]/beta[:-1,1:]).T + dist[u,:-1,self.labels[bi,u]])
+      dgrad[u,-1,self.labels[bi,u]] = ab[-1,:-1].T / ( dist[u,-1,self.labels[bi,u]])
+
+      dgrad = np.pad(dgrad, [[0,max(self.Us)-dgrad.shape[0]],[0,max(self.Ts)-dgrad.shape[1]],[0,0]],"constant")
+      dgrads.append(dgrad)
+    
+    return LazyBuffer.fromCPU(- np.array(dgrads)), None
+
 #%% encode
 def encode(X,X_lens,Y,Y_lens):
 
   enc, enc_lens  = rnnt.encoder(Tensor(X),Tensor(X_lens))
-
   bs = X.shape[1]
   preds,hc = rnnt.prediction(Tensor.zeros((bs,1)).cat(Y,dim=1),None,1)
-
-  distribution_tensor = rnnt.joint.__call__(preds, enc).softmax(3).realize()
-  distribution = distribution_tensor.numpy()
-  return enc,distribution,distribution_tensor
-#%% compare encode
+  distribution = rnnt.joint.__call__(preds, enc).softmax(3).realize()
+  return enc,enc_lens,distribution
 
 X,X_lens,Y,Y_lens = next(iterate())
-X2,X2_lens,Y2,Y2_lens = next(iterate(2))
+enc,enclens,dis = encode(X,X_lens,Y,Y_lens)
 
-enc,_,dis = encode(X,X_lens,Y,Y_lens)
-enc2,_,dis2 = encode(X2,X2_lens,Y2,Y2_lens)
+X2,X2_lens,Y2,Y2_lens = next(iterate(2))
+enc2,enc2lens,dis2 = encode(X2,X2_lens,Y2,Y2_lens)
 
 autocompare(enc,enc2)
-#%%
 
-def train_step(X,Y):
-  opt.zero_grad()
-  labels = Tensor(text_encode(Y[0])[0],dtype=dtypes.int16)
-  enc,distribution,distribution_tensor = encode(X,labels)
+#%% timer
+import time
+class Timer:
+  self.last_time = time.time()
+  def reset ():
+    self.last_time = time.time()
+  def stop(title = 'step'):
+    self.last_time += (delta:=time.time()-self.last_time)
+    print (f'{str(title).ljust(15)}: {delta:.5} s')
 
-  loss = RNNTLoss.apply(distribution_tensor,labels)
-  ll = loss.numpy()
-  print (f'loss: {ll:.5} latice shape: {distribution_tensor.shape} normalized: {ll/sum(distribution.shape[:-1]):.5}')
+#%% rnnt instance 
 
-  loss.backward()
-  opt.step()
-  return ll
-# %%
+Timer.reset()
 rnnt= RNNT()
 opt = LAMB(rnnt.params)
+opt.zero_grad()
+Timer.stop("model init")
+# enc,distribution,distribution_tensor = encode(X,X_lens, Y,Y_lens)
+
+it = iterate(4)
+X2,X2_lens,Y2,Y2_lens = next(it)
+Timer.stop("getdata")
+
+for i in range(20):
+  enc2,enc2lens,dis2 = encode(X2,X2_lens,Y2,Y2_lens)
+  Timer.stop("encode")
+  loss = RNNTIterLoss.apply(dis2,enc2lens, Y2,Tensor(Y2_lens,requires_grad=False))
+  Timer.stop(f"loss:{loss.numpy():.5}")
+  loss.backward()
+  Timer.stop("backward")
+  opt.step()
+  Timer.stop("opt step")
+  print()
+
+
 
 # %%
-hist = []
-def epoch ():
-  for i,(X,X_lens,Y,Y_lens) in enumerate(iterate()):
-    print(end=(f'{i}: ').rjust(5))
-    Loss = train_step(X,Y)
-    hist.append(Loss)
+# hist = []
+# def epoch ():
+#   for i,(X,X_lens,Y,Y_lens) in enumerate(iterate()):
+#     print(end=(f'{i}: ').rjust(5))
+#     Loss = train_step(X,X_lens,Y,Y_lens)
+#     hist.append(Loss)
 
-epoch()
+# epoch()
 
