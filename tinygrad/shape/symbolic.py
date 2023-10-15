@@ -296,7 +296,7 @@ class SumNode(RedNode):
         mul_gcd = b
         for x in muls: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell x.b is int here
         all_others = Variable.sum(others)
-        if mul_gcd != 1 and all_others.min >= 0 and all_others.max < mul_gcd:
+        if all_others.min >= 0 and all_others.max < mul_gcd:
           lhs, b = Variable.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
     return Node.__lt__(lhs, b)
 
