@@ -2,7 +2,6 @@
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
 import tempfile
 from pathlib import Path
-import numpy as np
 import gzip, argparse, math, re
 from functools import lru_cache
 from collections import namedtuple
@@ -44,19 +43,9 @@ class ResnetBlock:
     self.nin_shortcut = Conv2d(in_channels, out_channels, 1) if in_channels != out_channels else lambda x: x
 
   def __call__(self, x):
-    '''
-      TODO: Needs general solution
-      Breaking up the computations into smaller sub-steps and realizing early
-      seems to circumvent the 8 storage buffer per compute stage limit in WebGPU
-    '''
-    a = self.norm1(x).realize()
-    a = a.swish().realize()
-    b = self.conv1(a)
-    b = self.norm2(b).realize()
-    b = b.swish().realize()
-    b = self.conv2(b).realize()
-    c = self.nin_shortcut(x)
-    return c + b
+    h = self.conv1(self.norm1(x).swish())
+    h = self.conv2(self.norm2(h).swish())
+    return self.nin_shortcut(x) + h
 
 class Mid:
   def __init__(self, block_in):
@@ -86,27 +75,20 @@ class Decoder:
     self.conv_out = Conv2d(128, 3, 3, padding=1)
 
   def __call__(self, x):
-    x = self.conv_in(x).realize()
-    x = self.mid(x).realize()
-    
+    x = self.conv_in(x)
+    x = self.mid(x)
+
     for l in self.up[::-1]:
       print("decode", x.shape)
-      for b in l['block']: 
-        # TODO: It produces bad result without this weight.numpy() call. Why?
-        if hasattr(b.nin_shortcut, 'weight'):
-          b.nin_shortcut.weight.numpy()
-        x = b(x)
+      for b in l['block']: x = b(x)
       if 'upsample' in l:
         # https://pytorch.org/docs/stable/generated/torch.nn.functional.interpolate.html ?
         bs,c,py,px = x.shape
         x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
         x = l['upsample']['conv'](x)
       x.realize()
-  
-    t = self.norm_out(x).realize()
-    t = t.swish().realize()
 
-    return self.conv_out(t)
+    return self.conv_out(self.norm_out(x).swish())
 
 class Encoder:
   def __init__(self):
@@ -144,11 +126,11 @@ class AutoencoderKL:
     self.post_quant_conv = Conv2d(4, 4, 1)
 
   def __call__(self, x):
-    latent = self.encoder(x).realize()
-    latent = self.quant_conv(latent).realize()
+    latent = self.encoder(x)
+    latent = self.quant_conv(latent)
     latent = latent[:, 0:4]  # only the means
     print("latent", latent.shape)
-    latent = self.post_quant_conv(latent).realize()
+    latent = self.post_quant_conv(latent)
     return self.decoder(latent)
 
 # not to be confused with ResnetBlock
@@ -172,11 +154,11 @@ class ResBlock:
     self.skip_connection = Conv2d(channels, out_channels, 1) if channels != out_channels else lambda x: x
 
   def __call__(self, x, emb):
-    h = x.sequential(self.in_layers).realize()
-    emb_out = emb.sequential(self.emb_layers).realize()
-    h = h + emb_out.reshape(*emb_out.shape, 1, 1).realize()
-    h = h.sequential(self.out_layers).realize()
-    ret = (self.skip_connection(x) + h).realize()
+    h = x.sequential(self.in_layers)
+    emb_out = emb.sequential(self.emb_layers)
+    h = h + emb_out.reshape(*emb_out.shape, 1, 1)
+    h = h.sequential(self.out_layers)
+    ret = self.skip_connection(x) + h
     return ret
 
 class CrossAttention:
@@ -242,13 +224,13 @@ class SpatialTransformer:
   def __call__(self, x, context=None):
     b, c, h, w = x.shape
     x_in = x
-    x = self.norm(x).realize()
-    x = self.proj_in(x).realize()
-    x = x.reshape(b, c, h*w).permute(0,2,1).realize()
+    x = self.norm(x)
+    x = self.proj_in(x)
+    x = x.reshape(b, c, h*w).permute(0,2,1)
     for block in self.transformer_blocks:
       x = block(x, context=context)
-    x = x.permute(0,2,1).reshape(b, c, h, w).realize()
-    ret = (self.proj_out(x) + x_in).realize()
+    x = x.permute(0,2,1).reshape(b, c, h, w)
+    ret = self.proj_out(x) + x_in
     return ret
 
 class Downsample:
@@ -269,8 +251,8 @@ class Upsample:
 
 def timestep_embedding(timesteps, dim, max_period=10000):
   half = dim // 2
-  freqs = (-math.log(max_period) * Tensor.arange(half) / half).exp().realize()
-  args = (timesteps * freqs).realize()
+  freqs = (-math.log(max_period) * Tensor.arange(half) / half).exp()
+  args = timesteps * freqs
   return Tensor.cat(args.cos(), args.sin()).reshape(1, -1)
 
 class UNetModel:
@@ -323,7 +305,6 @@ class UNetModel:
     # TODO: real time embedding
     t_emb = timestep_embedding(timesteps, 320)
     emb = t_emb.sequential(self.time_embed)
-    
 
     def run(x, bb):
       if isinstance(bb, ResBlock): x = bb(x, emb)
@@ -550,7 +531,7 @@ class ClipTokenizer:
     if len(bpe_tokens) > 75:
       bpe_tokens = bpe_tokens[:75]
     return [49406] + bpe_tokens + [49407] * (77 - len(bpe_tokens) - 1)
-  
+
 class StableDiffusion:
   def __init__(self):
     self.alphas_cumprod = Tensor.empty(1000)
@@ -608,7 +589,6 @@ if __name__ == "__main__":
   print("got CLIP context", context.shape)
 
   prompt = Tensor([tokenizer.encode("")])
-  print(prompt)
   unconditional_context = model.cond_stage_model.transformer.text_model(prompt).realize()
   print("got unconditional CLIP context", unconditional_context.shape)
 
@@ -620,7 +600,7 @@ if __name__ == "__main__":
     latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep, unconditional_context.cat(context, dim=0))
     unconditional_latent, latent = latents[0:1], latents[1:2]
 
-    unconditional_guidance_scale = 3.5
+    unconditional_guidance_scale = 7.5
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
     return e_t
 
@@ -631,7 +611,7 @@ if __name__ == "__main__":
 
   def get_x_prev_and_pred_x0(x, e_t, index):
     temperature = 1
-    a_t, a_prev = Tensor(float(alphas[index])), Tensor(float(alphas_prev[index]))
+    a_t, a_prev = alphas[index], alphas_prev[index]
     sigma_t = 0
     sqrt_one_minus_at = (1-a_t).sqrt()
     #print(a_t, a_prev, sigma_t, sqrt_one_minus_at)
@@ -656,21 +636,15 @@ if __name__ == "__main__":
   # start with random noise
   if args.seed is not None: Tensor._seed = args.seed
   latent = Tensor.randn(1,4,64,64)
-  np.save("./random_tensor", latent.numpy())
-
 
   # this is diffusion
   for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
-    print(f'index={index}')
     GlobalCounters.reset()
     t.set_description("%3d %3d" % (index, timestep))
     with Timing("step in ", enabled=args.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
       latent = do_step(latent, Tensor([timestep]), Tensor([index]))
       if args.timing: Device[Device.DEFAULT].synchronize()
   del do_step
-
-  # Uncomment it to save the latent tensor to be used in the browser
-  # numpy.save("./latent_tensor", latent.numpy())
 
   # upsample latent space to image with autoencoder
   x = model.first_stage_model.post_quant_conv(1/0.18215 * latent)
