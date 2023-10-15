@@ -1,44 +1,94 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
+
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-#result {  font-size: 48px; }
-#time {  font-size: 16px;  color: grey; }
-#mybox {  padding: 20px; }
-#resultbox {  padding: 50px; }
-.bigggg {  font-size: 18px;  margin-top: 10px; }
-.bigg {  font-size: 18px; }
-#url {  font-size: 18px;  width: 70%; }
-a {  text-decoration: none; }
-h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: normal; }
-#video {  height:0px;  width:0px;  border: 1px dotted black;  object-fit: cover;}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>tinygrad has WebGPU</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            text-align: center;
+            padding: 50px;
+        }
 
-* {  text-align: center;  font-family: monospace; }
-</style>
-<title>tinygrad has WebGPU</title>
+        a {
+            text-decoration: none;
+            color: inherit;
+        }
 
-<script type="module">
-    import ClipTokenizer from './clip_tokenizer.js';
-    window.clipTokenizer = new ClipTokenizer();
-</script>
+        h1 {
+            font-size: 36px;
+            font-weight: normal;
+            margin-bottom: 20px;
+        }
 
-<script src="./alphas_cumprod.js"></script>
-<script src="./net.js"></script>
+        #mybox {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            width: 50%; /* reduce the width */
+            margin: 0 auto;
+        }
+
+        #prompt_text, #step_range, #btnRunNet {
+            font-size: 18px;
+            width: 100%; /* make them take full width within the #mybox container */
+        }
+
+        #result {
+            font-size: 48px;
+        }
+
+        #time {
+            font-size: 16px;
+            color: grey;
+        }
+
+        canvas {
+            margin-top: 20px;
+        }
+
+        label {
+            display: flex;
+            align-items: center;
+            gap: 10px; /* Add a gap between the label elements */
+            width: 100%; /* To ensure it takes the full width */
+        }
+        
+        #sliderValue {
+            margin-right: 10px; /* Additional margin for visual spacing */
+        }
+    </style>
+
+    <script type="module">
+        import ClipTokenizer from './clip_tokenizer.js';
+        window.clipTokenizer = new ClipTokenizer();
+    </script>
+
+    <script src="./alphas_cumprod.js"></script>
+    <script src="./net.js"></script>
 </head>
+
 <body>
 <h1>WebGPU <a href="https://github.com/geohot/tinygrad">tinygrad</a> StableDiffusion!</h1>
 <div id="mybox">
-<input type="text" id="prompt" placeholder="write your prompt here" value="a horse sized cat eating a bagel" hidden>
-<input id="prompt_text" type="text" placeholder="Enter your prompt here">
-<input id="step_range" type="range" min="1" max="20" value="10" step="1">
-<input id="btnRunNet" class="bigg" type="button"  value="Run">
+    <input id="prompt_text" type="text" placeholder="Enter your prompt here" value="a horse sized cat eating a bagel">
+    
+    <label>
+        Steps: <span id="sliderValue">8</span>
+        <input id="step_range" type="range" min="5" max="20" value="8" step="1">
+    </label>
+    
+    <input id="btnRunNet" type="button" value="Run">
 </div>
-<br/>
-<canvas id="canvas" width="512" height="512"> </canvas>
-<div id="resultbox">
-<div id="result">result will go here</div>
-<div id="time"></div>
+<canvas id="canvas" width="512" height="512"></canvas>
+<div>
+    <div id="result">result will go here</div>
+    <div id="time"></div>
 </div>
+
 <script>
     window.addEventListener('load', function() {
         const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
@@ -95,7 +145,7 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
             resultText.innerHTML = "ready"
         }
 
-        function runStableDiffusion(prompt) {
+        function runStableDiffusion(prompt, steps) {
             return new Promise(async (resolve, reject) => {
                 let prompt_encoded = clipTokenizer.encodeForCLIP(prompt);
                 let context = await timer(() => nets[0](prompt_encoded));
@@ -106,7 +156,6 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
                 unconditional_context = unconditional_context.subarray(0, unconditional_context.length/4);
 
                 let timesteps = [];
-                let steps = 10;
 
                 for (let i = 1; i < 1000; i += (1000/steps)) {
                     timesteps.push(i);
@@ -149,7 +198,7 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
 
         document.getElementById("btnRunNet").addEventListener("click", function(e) {
             if (!nets || nets.length != 4) error("Net not loaded yet.");
-                runStableDiffusion(document.getElementById("prompt_text").value).then((image) => {
+                runStableDiffusion(document.getElementById("prompt_text").value, document.getElementById("step_range").value).then((image) => {
                     let pixels = []
                     let pixelCounter = 0
 
@@ -168,6 +217,13 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
                     console.log("Success");
                 });
             }, false);
+
+            const slider = document.getElementById('step_range');
+            const sliderValueDisplay = document.getElementById('sliderValue');
+
+            slider.addEventListener('input', function() {
+                sliderValueDisplay.textContent = slider.value;
+            });
 
             loadNet();
         }
