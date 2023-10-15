@@ -15,7 +15,7 @@ class Node:
   b: Union[Node, int]
   min: int
   max: int
-  def render(self, ops=None, ctx=None) -> str:
+  def render(self, ops=None, ctx=None) -> Any:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
