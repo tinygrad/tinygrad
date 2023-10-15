@@ -44,7 +44,7 @@ class WGSLLanguage(CStyleLanguage):
     return f"for(var {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
 
   def render_if(self, cond: str):
-    return f"if ({cond}==1.0) {{"
+    return f"if (bool({cond})) {{"
 
   def render_conditional(self, cond:str, x:str, y:str) -> str:
     return f"select(f32({y}), {x}, bool({cond}))"
