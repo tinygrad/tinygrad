@@ -125,8 +125,7 @@ def prep_audio(waveform) -> Tensor:
 
   # https://github.com/openai/whisper/blob/b38a1f20f4b23f3f3099af2c3e0ca95627276ddf/whisper/audio.py#L19
   n_frames = log_spec.shape[2]
-  if n_frames < 3000: log_spec = np.pad(log_spec, ((0, 0), (0, 0), (0, 3000 - n_frames)))
-  elif n_frames > 3000: log_spec = np.pad(log_spec, ((0, 0), (0, 0), (0, int((1-(n_frames/3000)%1)*3000))))
+  if n_frames%3000 != 0: log_spec = np.pad(log_spec, ((0, 0), (0, 0), (0, int(round((1-(n_frames/3000)%1)*3000, 0)))))
 
   #print(waveform.shape, log_spec.shape)
   return log_spec
@@ -220,21 +219,26 @@ def transcribe_file(model, enc, filename):
 
   seek = 0
   lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
+  final_transcription = ""
   while seek < log_spec.shape[-1]:
     log_spec_segment = log_spec[:, :, seek:seek+n_frames]
     seek += n_frames
 
     dat = model.encoder(Tensor(log_spec_segment)).realize()
-    for i in range(50):
+    #https://github.com/openai/whisper/blob/b38a1f20f4b23f3f3099af2c3e0ca95627276ddf/whisper/decoding.py#L524C70-L524C70
+    n_sample = model.decoder.positional_embedding.shape[0] // 2 # max number of tokens
+    for i in range(n_sample):
       out = model.decoder(Tensor([lst]), dat).realize()
       idx = int(out[0,-1].argmax().numpy().item())
       lst.append(idx)
       transcription = enc.decode(lst)
       print(transcription)
       if lst[-1] == enc._special_tokens["<|endoftext|>"]:
+        final_transcription += transcription
         if seek == log_spec.shape[-1]:
-          return  transcription
-        lst.pop()
+          return  final_transcription
+        lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
+        break
 
 
 if __name__ == "__main__":
@@ -244,7 +248,6 @@ if __name__ == "__main__":
     transcribe_file(model, enc, sys.argv[1])
   else:
     # online
-
     q = multiprocessing.Queue()
     p = multiprocessing.Process(target=listener, args=(q,))
     p.daemon = True
@@ -268,5 +271,4 @@ if __name__ == "__main__":
       dec = enc.decode(lst)
       print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
       if dec.endswith("<|endoftext|>"):
-        #total = total[:, 320*(len(lst)-1):]
-        lst.pop()
+        lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
