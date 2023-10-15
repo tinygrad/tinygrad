@@ -140,7 +140,7 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
 
 # *** images have weird indexing requirements ***
 
-from tinygrad.shape.symbolic import Node, AndNode, Variable, NumNode, ModNode, SumNode, LtNode
+from tinygrad.shape.symbolic import Node, AndNode, Variable, NumNode, SumNode, LtNode
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
 
