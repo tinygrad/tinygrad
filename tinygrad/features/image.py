@@ -159,23 +159,18 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       first, second = sorted(same_sym)[0], sorted(node_flat)[0]
       f_b = 1 if isinstance(first, Variable) else first.b
       s_b = 1 if isinstance(second, Variable) else second.b
-      katla = f_b//s_b
       sig = -1 if s_b < 0 else 1
       key_node = sig*node.a
-      val_dict[key_node] = val_dict.get(key_node, []) + [(sig*(node.b - 1), katla)]
+      if key_node not in val_dict: val_dict[key_node] = [key_node.min, key_node.max, abs(f_b//s_b)]
+      val_dict[key_node][(sig + 1)//2] = sig*(node.b - 1)
+
 
     fakes = {}
-    for cnt, (key_node, value) in enumerate(val_dict.items()):
-      katla = value[0][1]
-      ranges = [r[0] for r in value]
-      if len(ranges) == 1:
-        mnn, mxn = (ranges[0], key_node.max) if katla < 0 else (key_node.min, ranges[0])
-      else:
-        mnn, mxn = min(ranges), max(ranges)
+    for cnt, (key_node, (mnn, mxn, multip)) in enumerate(val_dict.items()):
       if mnn == mxn: continue
       fake_var = Variable("fake_" + str(cnt), mnn, mxn)
       fakes[fake_var] = key_node
-      idxy += abs(katla)*(fake_var - key_node)
+      idxy += multip*(fake_var - key_node)
 
     idx = (idxy // 4) % base_shape[1]
     idy = (idxy // (4 * base_shape[1]))
