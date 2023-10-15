@@ -30,7 +30,9 @@ def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
   t[0:1].cast(dtypes.int64).assign([len(j)])
   t[8:8+len(j)].assign(Tensor(list(j.encode('utf-8')), dtype=dtypes.uint8, device="cpu"))
-  for k,v in safe_load(t).items(): v.assign(tensors[k])
+  for k,v in safe_load(t).items(): 
+    tensors[k].numpy()
+    v.assign(tensors[k])
 
 # state dict
 
@@ -57,6 +59,7 @@ def load_state_dict(model, state_dict, strict=True):
       if k not in state_dict and not strict:
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
+    
       v.assign(state_dict[k].to(v.device)).realize()
 
 # torch support!

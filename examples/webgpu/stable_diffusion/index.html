@@ -29,6 +29,8 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
 <h1>WebGPU <a href="https://github.com/geohot/tinygrad">tinygrad</a> StableDiffusion!</h1>
 <div id="mybox">
 <input type="text" id="prompt" placeholder="write your prompt here" value="a horse sized cat eating a bagel" hidden>
+<input id="prompt_text" type="text" placeholder="Enter your prompt here">
+<input id="step_range" type="range" min="1" max="20" value="10" step="1">
 <input id="btnRunNet" class="bigg" type="button"  value="Run">
 </div>
 <br/>
@@ -139,7 +141,9 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
 		if (!navigator.gpu) error("WebGPU not supported.");
 		const adapter = await navigator.gpu.requestAdapter();
 		const requiredLimits = {};
-		requiredLimits.maxStorageBufferBindingSize = 268435456;
+		requiredLimits.maxStorageBufferBindingSize = 1073741824;
+
+		requiredLimits.maxBufferSize = 1073741824;
 		
 		return await adapter.requestDevice({
     	requiredLimits,
@@ -194,7 +198,7 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
             console.log("Got unconditional context: " + context.length);
 
             let timesteps = [];
-            let steps = 5;
+            let steps = 10;
 
             for (let i = 1; i < 1000; i += (1000/steps)) {
                 timesteps.push(i);
@@ -231,13 +235,14 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
 
             for (let i = 0; i < inpSize; i++) {
                 latent[i] = boxMullerRandom();
+                console.log(latent[i]);
             }
             
             for (let i = timesteps.length - 1; i >= 0; i--) {
                 let timestep = new Float32Array([timesteps[i]]);
                 let e_t = await timer(() => nets[1](latent, timestep, unconditional_context, context));
                 e_t = e_t.subarray(0, e_t.length/4);
-                x_prev = await timer(() => nets[2](latent, e_t, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]])));
+                let x_prev = await timer(() => nets[2](latent, e_t, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]])));
                 x_prev = x_prev.subarray(0, x_prev.length/4);
                 latent = x_prev;
             }
@@ -249,7 +254,7 @@ h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: norma
     document.getElementById("btnRunNet").addEventListener("click", function(e) {
             if (!nets || nets.length != 4) error("Net not loaded yet.");
 
-            runStableDiffusion("A large dog barking at a cat, photorealistic   ").then((image) => {
+            runStableDiffusion(document.getElementById("prompt_text").value).then((image) => {
 
                 let pixels = []
                 let pixelCounter = 0
