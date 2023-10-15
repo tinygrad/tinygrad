@@ -212,8 +212,7 @@ def init_whisper(model_name="tiny.en"):
   enc = get_encoding(state['dims']['n_vocab'])
   return model, enc
 
-def transcribe_file(model, enc, filename):
-  waveform, _ = librosa.load(filename, sr=RATE)
+def transcribe_waveform(waveform, model, enc):
   n_frames = 3000
   log_spec = prep_audio(waveform)
 
@@ -245,7 +244,8 @@ if __name__ == "__main__":
   model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en")
 
   if len(sys.argv) > 1:
-    transcribe_file(model, enc, sys.argv[1])
+    waveform, _ = librosa.load(sys.argv[1], sr=RATE)
+    transcribe_waveform(waveform, model, enc)
   else:
     # online
     q = multiprocessing.Queue()
