@@ -126,6 +126,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
     if uop == UOps.LOOP:
       kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
       depth += 1
+    elif uop == UOps.IF:
+      kk(f"if ({r[vin[0]]}) {{")
+      depth += 1
     elif uop == UOps.BARRIER:
       kk(lang.barrier)
     elif uop == UOps.END:

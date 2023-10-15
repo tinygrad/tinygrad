@@ -16,7 +16,7 @@ from tinygrad.features.image import to_image_idx
 
 # bottom ones are asm only
 class UOps(Enum):
-  LOOP = auto(); END = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
+  LOOP = auto(); IF = auto(); END = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
@@ -219,6 +219,7 @@ class Linearizer(OptimizedKernel):
     loaded_buffers = {}
     acc = []
     self.load_cache: Dict[str, UOp] = {}
+    if_gate: Optional[UOp] = None
 
     # reduce op
     fake_reduce_idxs = []
@@ -315,6 +316,9 @@ class Linearizer(OptimizedKernel):
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc)  # store accumulators
         self.uop(UOps.BARRIER, None, (), cachable=False)
         end_loop(loop_local_idxs)
+        if self.opts.has_local:
+          if_cond: UOp = Variable.ands([x<1 for x in loop_local_idxs]).render(self.render_ops, self)
+          if_gate = self.uop(UOps.IF, None, (if_cond,), cachable=False)
 
         # create new late reduce local loops and replace local_idxs that have been used
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce and i not in self.upcast_in_mid_reduce_axes else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
@@ -358,6 +362,7 @@ class Linearizer(OptimizedKernel):
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
     # end the global (and maybe local) loop
+    if if_gate: self.uop(UOps.END, None, (if_gate,))
     end_loop(loop_global_idxs+loop_local_idxs if not self.group_for_reduce else loop_global_idxs)
 
     # (recursively) remove childless uops
