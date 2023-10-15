@@ -160,23 +160,23 @@ if getenv('METAL'):
   backend_test.exclude('test_maxpool_2d_pads_cpu')
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
 
-# not too sure
-if getenv("CPU") or getenv("ARM64") or getenv("TORCH"):
+# Don't know how to treat TensorProto.FLOAT8E4M3FN
+if getenv("CPU") or getenv("TORCH"):
   backend_test.exclude('test_dequantizelinear_axis_cpu')
   backend_test.exclude('test_dequantizelinear_cpu')
 
 # compiled backends cannot reshape to and from 0
-if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or getenv('MPS') or getenv('CUDA'):
+if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or getenv('CUDA'):
   backend_test.exclude('test_slice_start_out_of_bounds_cpu')
   backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
 
-if getenv('GPU') or getenv('METAL') or getenv('MPS'):
+if getenv('GPU') or getenv('METAL'):
   backend_test.exclude('test_mish_cpu') # weird inaccuracy
   backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
-  backend_test.exclude('test_eyelike_with_dtype_cpu') # I'm not sure about this...
+  backend_test.exclude('test_eyelike_with_dtype_cpu') # not sure about this...
 
 # fast math messes with these
-if getenv('METAL') or getenv('MPS') or getenv('LLVM'):
+if getenv('METAL') or getenv('LLVM'):
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')

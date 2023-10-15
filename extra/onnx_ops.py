@@ -306,7 +306,7 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape=None, kernel_shape=None, pads=Non
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
   outlength = prod(out_sh)
   xI = xI.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
-  arange = Tensor.arange(outlength).reshape(1, outlength).expand(xI.shape)
+  arange = Tensor.arange(outlength, requires_grad=False).reshape(1, outlength).expand(xI.shape)
   xT = xT.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
   ret = ((xI == arange) * xT).sum(0).reshape([1, 1] + out_sh)
   if outshape is not None:
@@ -518,7 +518,6 @@ def CenterCropPad(input: Tensor, shape: Tensor, axes=None):
   for s, x in zip(shape, axes):
     if s < input.shape[x]: shrink_arg[x] = (input.shape[x]//2 - s//2, input.shape[x]//2 + s//2) if s%2 == 0 else (input.shape[x]//2 - s//2 - 1, input.shape[x]//2 + s//2)
     elif s > input.shape[x]: pad_arg[x] = ((s - input.shape[x])//2, (s - input.shape[x])//2)  if (s - input.shape[x])% 2 == 0 else ((s - input.shape[x])//2, (s - input.shape[x])//2 + 1)
-    else: pass
   return input.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
 def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
@@ -561,8 +560,8 @@ def IsInf(x,detect_negative=1,detect_positive=1):
 def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point=0, axis=1):
   axis = axis + x.ndim if axis < 0 else axis
   x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
-  x_zer = x_zero_point.reshape(*[1]*(axis), *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
-  return ((x - x_zer) * x_sc)
+  x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
+  return (x - x_zer) * x_sc
 
 # Needs work
 def IsNaN(x):
