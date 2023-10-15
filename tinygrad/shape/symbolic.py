@@ -293,12 +293,10 @@ class SumNode(RedNode):
       muls, others = partition(nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
       if muls:
         # NOTE: gcd in python 3.8 takes exactly 2 args
-        mul_gcd = muls[0].b
-        for x in muls[1:]: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell x.b is int here
-        if b%mul_gcd == 0:
-          all_others = Variable.sum(others)
-          if all_others.min >= 0 and all_others.max < mul_gcd:
-            lhs, b = Variable.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
+        mul_gcd = b
+        for x in muls: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell x.b is int here
+        if Variable.sum(others) // mul_gcd == 0:
+          lhs, b = Variable.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
 
     return Node.__lt__(lhs, b)
 
