@@ -320,7 +320,9 @@ class Linearizer(OptimizedKernel):
         self.uop(UOps.BARRIER, None, (), cachable=False)
         end_loop(loop_local_idxs)  # TODO: this is ending too much, should only end what's in the if?
         if self.opts.has_local:
-          if_cond: UOp = Variable.ands([x<1 for x in local_idxs[self.local_dims:]]).render(self.render_ops, self)
+          fake_idxs = [Variable.num(0)]*len(self.sts[-1].shape)
+          fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
+          if_cond: UOp = (self.sts[-1].expr_idxs(fake_idxs)[0]<1).render(self.render_ops, self)
           if_gate = self.uop(UOps.IF, None, (if_cond,), cachable=False)
 
         # create new late reduce local loops and replace local_idxs that have been used
