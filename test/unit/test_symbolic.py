@@ -139,6 +139,10 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_const_big(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*4, Variable.num(3)]) // 16, 0, 1, "(a//4)")
 
+  def test_sum_lt_fold(self):
+    self.helper_test_variable(Variable.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 3)]) < 16, 0, 1, "(a<4)")
+    self.helper_test_variable(Variable.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]) < 16, 0, 1, "(((a*4)+b)<16)")
+
   def test_mod_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)%9, 0, 5, "a")
 
