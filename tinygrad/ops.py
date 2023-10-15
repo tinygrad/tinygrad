@@ -187,7 +187,7 @@ class ASTRunner:
   def optimize_local_size(self, global_size, rawbufs) -> List[int]:
     assert self.global_size is not None, "needs a global size to optimize local size"
     MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
-    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz and sz%x == 0] for sz in global_size]
+    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
     local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
     def try_exec(local_size):
       try:
