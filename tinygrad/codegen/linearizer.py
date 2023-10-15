@@ -315,9 +315,9 @@ class Linearizer(OptimizedKernel):
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc)  # store accumulators
         self.uop(UOps.BARRIER, None, (), cachable=False)
-        end_loop(loop_local_idxs)
+        end_loop(loop_local_idxs)  # TODO: this is ending too much, should only end what's in the if?
         if self.opts.has_local:
-          if_cond: UOp = Variable.ands([x<1 for x in loop_local_idxs]).render(self.render_ops, self)
+          if_cond: UOp = Variable.ands([x<1 for x in local_idxs[self.local_dims:]]).render(self.render_ops, self)
           if_gate = self.uop(UOps.IF, None, (if_cond,), cachable=False)
 
         # create new late reduce local loops and replace local_idxs that have been used
