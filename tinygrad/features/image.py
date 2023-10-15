@@ -166,7 +166,6 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
 
     fakes = {}
     for cnt, (key_node, (mnn, mxn, multip)) in enumerate(val_dict.items()):
-      if mnn == mxn: continue
       fake_var = Variable("fake_" + str(cnt), mnn, mxn)
       fakes[fake_var] = key_node
       idxy += multip*(fake_var - key_node)
@@ -179,14 +178,13 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     idx = idx.substitute(fake_rep)
     idy = idy.substitute(fake_rep)
 
-    idy_vars = set(idy.vars())
-    if not isinstance(idx, ModNode):
-      ones = []
-      for node in nodes:
-        # NOTE: Why does only idy is problematic? and not the idx
-        if idy_vars == set(node.vars()) or idy_vars & set(node.vars()) == set():
-          ones.append(node)
-      valid = Variable.ands([i for i in nodes if i not in ones])
+    idy_vars, idx_vars, ones = set(idy.vars()), set(idx.vars()), []
+    for node in nodes:
+      node_vars = set(node.vars())
+      if not node_vars & (idx_vars | idy_vars): continue #There is simplified NumNode which can not go outside the bounds
+      # NOTE: Why does only idy is problematic? and not the idx
+      if idy_vars == node_vars or idy_vars & node_vars == set(): ones.append(node)
+    valid = Variable.ands([i for i in nodes if i not in ones])
 
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return (idx, idy), valid
