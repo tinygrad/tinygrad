@@ -82,6 +82,11 @@
     </label>
     
     <input id="btnRunNet" type="button" value="Run">
+     
+    <div style="display: flex; align-items: center; width: 100%; gap: 10px;">
+        <progress id="progressBar" value="0" max="100" style="flex-grow: 1;"></progress>
+        <span id="progressFraction"></span>
+    </div>
 </div>
 <canvas id="canvas" width="512" height="512"></canvas>
 <div>
@@ -93,7 +98,7 @@
     window.addEventListener('load', function() {
         const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
         const resultText = document.getElementById('result');
-        let labels, nets;
+        let labels, nets, inferenceInProgress = false;
 
         const error = (err) => {
             resultText.innerHTML = `Error: ${err}`;
@@ -190,6 +195,8 @@
                     let x_prev = await timer(() => nets[2](latent, e_t, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]])));
                     x_prev = x_prev.subarray(0, x_prev.length/4);
                     latent = x_prev;
+                    document.getElementById("progressBar").value = ((steps - i) / steps) * 100
+                    document.getElementById("progressFraction").innerHTML = (steps - i) + "/" + steps
                 }
                 
                 resolve(await timer(() => nets[3](latent)));
@@ -198,6 +205,8 @@
 
         document.getElementById("btnRunNet").addEventListener("click", function(e) {
             if (!nets || nets.length != 4) error("Net not loaded yet.");
+                e.target.disabled = true;
+
                 runStableDiffusion(document.getElementById("prompt_text").value, document.getElementById("step_range").value).then((image) => {
                     let pixels = []
                     let pixelCounter = 0
@@ -215,6 +224,7 @@
                     ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), 512, 512), 0, 0);
                     console.log(image);
                     console.log("Success");
+                    e.target.disabled = false;
                 });
             }, false);
 
