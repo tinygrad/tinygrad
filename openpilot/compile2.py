@@ -1,7 +1,11 @@
 import os
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
 if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
+if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
+if "OPT" not in os.environ: os.environ["OPT"] = "99"
 os.environ["PREREALIZE"] = "0"
+
+OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
 import sys
 import onnx
@@ -15,15 +19,6 @@ from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, DEBUG, 
 from tinygrad.realize import run_schedule
 from tinygrad.ops import LoadOps, Device, ScheduleItem
 Device.DEFAULT = "GPU"
-
-"""
-def get_random_input_tensors(input_shapes):
-  # this 8 is a random scale factor
-  inputs = {k:(Tensor.randn(*shp, requires_grad=False)*8).realize() for k,shp in input_shapes.items()}
-  np_inputs = {k:v.numpy() for k,v in inputs.items()}
-  return inputs, np_inputs
-#inputs, np_inputs = get_random_input_tensors(input_shapes)
-"""
 
 def get_schedule(fn:str) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   Tensor.no_grad = True
@@ -67,35 +62,9 @@ def lb_to_numbers(schedule):
   return nschedule
 
 if __name__ == "__main__":
-  schedule, schedule_independent = get_schedule(sys.argv[1])
-
+  schedule, schedule_independent = get_schedule(sys.argv[1] if len(sys.argv) > 1 else OPENPILOT_MODEL)
   run_schedule(schedule_independent)
 
-  if getenv("GREEDY"):
-    from tinygrad.codegen.linearizer import Linearizer
-    from tinygrad.codegen.search import bufs_from_lin, time_linearizer, get_linearizer_actions
-    kernel_num = 0
-    for si in schedule:
-      if si.ast.op in LoadOps: continue
-      linhc = Linearizer(si.ast)
-      rawbufs = bufs_from_lin(linhc)
-      linhc.hand_coded_optimizations()
-
-      lin = Linearizer(si.ast)
-      lin.required_optimizations()
-      while 1:
-        acted_lins = get_linearizer_actions(lin)
-        timed_lins = {k:time_linearizer(v, rawbufs) for k,v in acted_lins.items()}
-        opts = sorted(timed_lins.items(), key=lambda x: x[1])
-        if opts[0][0] == 0: break   # we are done
-        lin = acted_lins[opts[0][0]]
-        if DEBUG >= 1: print(f"{opts[0][1]*1e6:10.2f} us from {len(opts):3d} actions", lin.colored_shape())
-      tmhc = time_linearizer(linhc, rawbufs)
-      tm = time_linearizer(lin, rawbufs)
-      print(f"opt kernel {kernel_num:3d}: {tmhc*1e6:10.2f} -> {tm*1e6:10.2f} *** {linhc.colored_shape()} -> {lin.colored_shape()}")
-      kernel_num += 1
-
-  #schedule = schedule[0:72]  # first model should be 8.85 ms
   print("**** running real kernels ****")
   with Context(DEBUG=2):
     GlobalCounters.reset()
