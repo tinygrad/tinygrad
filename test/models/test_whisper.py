@@ -1,9 +1,10 @@
 import unittest
 import pathlib
+import numpy as np
 from tinygrad.ops import Device
-from examples.whisper import init_whisper, transcribe_file
+from examples.whisper import init_whisper, transcribe_file, prep_audio, RATE
 
-@unittest.skipUnless(Device.DEFAULT == "METAL", "Some non-metal backends spend too long trying to allocate a 20GB array")
+@unittest.skipUnless(Device.DEFAULT in ["METAL", "GPU"], "Some non-metal backends spend too long trying to allocate a 20GB array")
 class TestWhisper(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
@@ -15,6 +16,24 @@ class TestWhisper(unittest.TestCase):
   def tearDownClass(cls):
     del cls.model
     del cls.enc
+
+  def test_pad_less_thirty_sec(self):
+    sec, shp = 20, 3000
+    waveform = np.zeros((1, sec*RATE))
+    log_spec_len = prep_audio(waveform=waveform).shape[2]
+    self.assertEqual(shp, log_spec_len)
+
+  def test_pad_thirty_sec(self):
+    sec, shp = 30, 3000
+    waveform = np.zeros((1, sec*RATE))
+    log_spec_len = prep_audio(waveform=waveform).shape[2]
+    self.assertEqual(shp, log_spec_len)
+
+  def test_pad_more_than_thirty_sec(self):
+    sec, shp = 61, 9000
+    waveform = np.zeros((1, sec*RATE))
+    log_spec_len = prep_audio(waveform=waveform).shape[2]
+    self.assertEqual(shp, log_spec_len)
 
   def test_transcribe_file(self):
     # Audio generated with the command on MacOS:

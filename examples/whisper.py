@@ -226,7 +226,7 @@ def transcribe_file(model, enc, filename):
 
     dat = model.encoder(Tensor(log_spec_segment)).realize()
     #https://github.com/openai/whisper/blob/b38a1f20f4b23f3f3099af2c3e0ca95627276ddf/whisper/decoding.py#L524C70-L524C70
-    n_sample = model.decoder.positional_embedding.shape[0] // 2 # max number of tokens
+    n_sample = model.decoder.positional_embedding.shape[0] // 2
     for i in range(n_sample):
       out = model.decoder(Tensor([lst]), dat).realize()
       idx = int(out[0,-1].argmax().numpy().item())
