@@ -76,6 +76,9 @@ class CStyleLanguage(NamedTuple):
   def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str:
     return f"for (int {expr} = {_min}; {expr} < {_max}; ++{expr}) {{"
 
+  def render_if(self, cond: str):
+    return f"if ({cond}) {{"
+
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
 
@@ -125,6 +128,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
     uop,dtype,vin,args,_ = u
     if uop == UOps.LOOP:
       kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
+      depth += 1
+    elif uop == UOps.IF:
+      kk(lang.render_if(r[vin[0]]))
       depth += 1
     elif uop == UOps.BARRIER:
       kk(lang.barrier)
