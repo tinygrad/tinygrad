@@ -82,6 +82,7 @@ class TextDecoder:
     self.positional_embedding = Tensor.empty(n_text_ctx, n_text_state)
     self.blocks = [ResidualAttentionBlock(n_text_state, n_text_head, cross_attention=True) for _ in range(n_text_layer)]
     self.ln = nn.LayerNorm(n_text_state)
+    self.n_ctx = n_text_ctx
     #mask = torch.empty(n_ctx, n_ctx).fill_(-np.inf).triu_(1)
 
   def __call__(self, x, xa):
@@ -218,25 +219,29 @@ def transcribe_waveform(waveform, model, enc):
 
   seek = 0
   lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
-  final_transcription = ""
+  all_tokens = []
+  len_prev_lst = 0
   while seek < log_spec.shape[-1]:
     log_spec_segment = log_spec[:, :, seek:seek+n_frames]
     seek += n_frames
 
     dat = model.encoder(Tensor(log_spec_segment)).realize()
     #https://github.com/openai/whisper/blob/b38a1f20f4b23f3f3099af2c3e0ca95627276ddf/whisper/decoding.py#L524C70-L524C70
-    n_sample = model.decoder.positional_embedding.shape[0] // 2
+    n_sample = model.decoder.n_ctx // 2
     for i in range(n_sample):
       out = model.decoder(Tensor([lst]), dat).realize()
       idx = int(out[0,-1].argmax().numpy().item())
       lst.append(idx)
-      transcription = enc.decode(lst)
-      print(transcription)
+      print(enc.decode(lst))
       if lst[-1] == enc._special_tokens["<|endoftext|>"]:
-        final_transcription += transcription
+        all_tokens.extend(lst[len_prev_lst:])
         if seek == log_spec.shape[-1]:
-          return  final_transcription
-        lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
+          print(enc.decode(all_tokens))
+          return  enc.decode(all_tokens)
+        all_tokens.pop() # remove <|endoftext|>
+        lst.pop() # remove <|endoftext|>
+        lst = [enc._special_tokens["<|startofprev|>"]] + lst[-(n_sample//2-1):] + [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
+        len_prev_lst = len(lst)
         break
 
 

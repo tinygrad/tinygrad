@@ -54,4 +54,4 @@ class TestWhisper(unittest.TestCase):
     waveform = np.pad(waveform, (0, RATE*30)) # add 30 second black audio
     transcription = transcribe_waveform(waveform, self.model, self.enc)
     print(transcription)
-    self.assertEqual("<|startoftranscript|><|notimestamps|> Could you please let me out of the box?<|endoftext|><|startoftranscript|><|notimestamps|> [BLANK_AUDIO]<|endoftext|>",  transcription)
+    self.assertEqual("<|startoftranscript|><|notimestamps|> Could you please let me out of the box? [no audio]<|endoftext|>",  transcription)
