@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Tuple, List, cast, Optional
 from dataclasses import dataclass
 import itertools, math, os
-from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes
+from tinygrad.helpers import DEBUG, prod, getenv, ImageDType, dtypes, flatten
 from tinygrad.ops import ReduceOps, BinaryOps, UnaryOps, LazyOp, BufferOps
 from tinygrad.codegen.kernel import Kernel, LocalBuffer, LinearizerOptions
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
@@ -19,6 +19,8 @@ class Opt:
   axis: int
   amt: int
   def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, amt={self.amt})"
+
+from tinygrad.codegen.search import time_linearizer, get_linearizer_actions
 
 class OptimizedKernel(Kernel):
   def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
@@ -323,6 +325,20 @@ class OptimizedKernel(Kernel):
             self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
           else:
             self.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-self.first_reduce, 4))
+
+  def beam_search(self, rawbufs, amt):
+    best_tm = float('inf')
+    beam: List[OptimizedKernel] = [self]
+    while 1:
+      acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin in beam])
+      timed_lins = [(v,time_linearizer(v, rawbufs)) for v in acted_lins]
+      opts = sorted(timed_lins, key=lambda x: x[1])
+      if len(opts) == 0 or best_tm <= opts[0][1]: break  # we didn't get faster
+      best_tm = opts[0][1]
+      beam = [x[0] for x in opts[:getenv("BEAM")]]
+      if DEBUG >= 1: print(f"{opts[0][1]*1e3:10.2f} ms from {len(opts):3d} actions", beam[0].colored_shape())
+    for ao in beam[0].applied_opts:
+      self.apply_opt(ao)
 
   def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one

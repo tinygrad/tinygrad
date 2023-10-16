@@ -198,17 +198,20 @@ class ASTRunner:
     local_size = ([sym_infer(sz, var_vals) for sz in self.local_size] + [1]*(3-len(self.local_size))) if self.local_size is not None else self.local_size
     return global_size, local_size
 
-  def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False, quiet=False) -> Optional[float]:
     if var_vals is None: var_vals = {}
     global_size, local_size = self.launch_dims(var_vals)
-    if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
+    if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=1):
+      if not quiet:
+        GlobalCounters.time_sum_s += et
     op_estimate = sym_infer(self.op_estimate, var_vals)
-    if DEBUG >= 2:
+    if DEBUG >= 2 and not quiet:
       print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(37-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(global_size):18s} {str(local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {self.mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
-    GlobalCounters.kernel_count += 1
-    GlobalCounters.global_ops += op_estimate
-    GlobalCounters.global_mem += self.mem_estimate
+    if not quiet:
+      GlobalCounters.kernel_count += 1
+      GlobalCounters.global_ops += op_estimate
+      GlobalCounters.global_mem += self.mem_estimate
     return et
 
 class Compiled:
@@ -253,8 +256,10 @@ class Compiled:
       from tinygrad.codegen.linearizer import Linearizer
       k = Linearizer(ast, self.linearizer_opts)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
-      from tinygrad.features.kopt import kernel_optimize
-      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts), self.to_program, rawbuffers, ast)
+      #from tinygrad.features.kopt import kernel_optimize
+      #if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts), self.to_program, rawbuffers, ast)
+      if getenv("BEAM"):
+        k.beam_search(rawbuffers, getenv("BEAM"))
       elif not getenv("NOOPT"):
         if not k.apply_tensor_cores(getenv("TC", 1)): k.hand_coded_optimizations()
       return self.to_program(k)

@@ -87,6 +87,19 @@ class Kernel:
 
   def copy(self):
     return deepcopy(self)
+    ret = type(self)(self.ast, self.opts)
+    ret.bufs = self.bufs[:]
+    ret.sts = self.sts[:]
+    ret.group_for_reduce = self.group_for_reduce[:]
+    ret.upcasted = self.upcasted
+    ret.local_dims = self.local_dims
+    ret.local_alias = self.local_alias.copy()
+    ret.use_tensor_cores = self.use_tensor_cores
+    ret.exclude_local_upcast = self.exclude_local_upcast
+    ret.reverse_upcast_dir = self.reverse_upcast_dir
+    ret.applied_opts = self.applied_opts
+    return ret
+
 
   @property
   def membufs(self) -> List[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
