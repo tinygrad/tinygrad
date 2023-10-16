@@ -276,9 +276,9 @@ class Compiled:
           kb.dont_use_locals = bool(getenv("NOLOCALS"))
           from tinygrad.features.search import beam_search, time_linearizer
           kb = beam_search(kb, rawbuffers, BEAM.value)
-          baseline, beamtime = time_linearizer(k, rawbuffers, allow_test_size=False), time_linearizer(kb, rawbuffers, allow_test_size=False)
+          baseline, beamtime = time_linearizer(k, rawbuffers, allow_test_size=False, disable_cache=True), time_linearizer(kb, rawbuffers, allow_test_size=False, disable_cache=True)
           if beamtime < baseline:
-            if DEBUG >= 1: print(f"beam search beat baseline by {baseline/beamtime:.2f}x")
+            if DEBUG >= 1: print(f"beam search {beamtime*1e6:<12.2f} beat baseline {baseline*1e6:<12.2f} by {baseline/beamtime:.2f}x")
             k = kb
       return self.to_program(k)
 
