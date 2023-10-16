@@ -253,8 +253,9 @@ class Compiled:
       from tinygrad.codegen.linearizer import Linearizer
       k = Linearizer(ast, self.linearizer_opts)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
-      from tinygrad.codegen.search import beam_search
-      if getenv("BEAM"): k = beam_search(k, rawbuffers, getenv("BEAM"))
+      if getenv("BEAM"):
+        from tinygrad.features.search import beam_search
+        k = beam_search(k, rawbuffers, getenv("BEAM"))
       elif not getenv("NOOPT"):
         if not k.apply_tensor_cores(getenv("TC", 1)): k.hand_coded_optimizations()
       return self.to_program(k)
