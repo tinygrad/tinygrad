@@ -1,4 +1,3 @@
-import tinygrad as tg
 from tinygrad.tensor import Tensor
 from typing import List
 
