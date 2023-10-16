@@ -42,7 +42,9 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
       #print(real_global_size, test_global_size, factor)
     else:
       factor = 1
-    tms = [prg(rawbufs, var_vals, force_wait=True)*factor for _ in range(cnt)]
+    # TODO: this is super broken for var_vals
+    global_size, local_size = prg.launch_dims(var_vals)
+    tms = [prg.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=True)*factor for _ in range(cnt)]
     prg.global_size = real_global_size
   except Exception:
     #print("FAILED")
