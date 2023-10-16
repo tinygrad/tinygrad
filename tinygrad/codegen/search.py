@@ -1,9 +1,8 @@
-from typing import Dict, List, cast, DefaultDict, Optional, TYPE_CHECKING
+from typing import Dict, List, cast, DefaultDict, Optional
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
-from tinygrad.helpers import prod, getenv, flatten
-if TYPE_CHECKING:
-  from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.helpers import prod, getenv, flatten, DEBUG
+from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
 
@@ -22,7 +21,7 @@ actions += [
 # returns time in seconds
 import shelve
 logtm = shelve.open(getenv("LOGTM", "")) if getenv("LOGTM", "") else None
-def time_linearizer(lin:'Linearizer', rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, should_copy=True) -> float:
+def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, should_copy=True) -> float:
   key = str((lin.ast, lin.applied_opts))
   if should_copy and logtm is not None and key in logtm: return min(logtm[key])  # pylint: disable=E1135 # NOTE: we check should_copy since this may have side effects
   if should_copy: lin = lin.copy() # TODO: remove the need for this
@@ -43,7 +42,7 @@ def time_linearizer(lin:'Linearizer', rawbufs:List[RawBuffer], allow_test_size=T
       #print(real_global_size, test_global_size, factor)
     else:
       factor = 1
-    tms = [prg(rawbufs, var_vals, force_wait=True, quiet=True)*factor for _ in range(cnt)]
+    tms = [prg(rawbufs, var_vals, force_wait=True)*factor for _ in range(cnt)]
     prg.global_size = real_global_size
   except Exception:
     #print("FAILED")
@@ -54,7 +53,7 @@ def time_linearizer(lin:'Linearizer', rawbufs:List[RawBuffer], allow_test_size=T
   return min(tms)
 
 # get (scrap) buffers for timing the linearizer
-def bufs_from_lin(lin:'Linearizer') -> List[RawBuffer]:
+def bufs_from_lin(lin:Linearizer) -> List[RawBuffer]:
   bufsts:DefaultDict[int, List[MemBuffer]] = defaultdict(list)
   for x in lin.membufs: bufsts[x.idx].append(x)
   rawbufs:List[Optional[RawBuffer]] = [None]*len(bufsts)
@@ -64,7 +63,7 @@ def bufs_from_lin(lin:'Linearizer') -> List[RawBuffer]:
   return cast(List[RawBuffer], rawbufs)
 
 # get dictionary of all possible actions
-def get_linearizer_actions(lin:'Linearizer', include_0=True) -> Dict[int, 'Linearizer']:
+def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
   acted_lins = {0:lin.copy()} if include_0 else {}
   for i,a in enumerate(actions):
     if a.axis >= lin.shape_len: continue
@@ -81,3 +80,16 @@ def get_linearizer_actions(lin:'Linearizer', include_0=True) -> Dict[int, 'Linea
     except Exception:
       pass
   return acted_lins
+
+def beam_search(lin, rawbufs, amt):
+  best_tm = float('inf')
+  beam: List[Linearizer] = [lin]
+  while 1:
+    acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin in beam])
+    timed_lins = [(v,time_linearizer(v, rawbufs)) for v in acted_lins]
+    opts = sorted(timed_lins, key=lambda x: x[1])
+    if len(opts) == 0 or best_tm <= opts[0][1]: break  # we didn't get faster
+    best_tm = opts[0][1]
+    beam = [x[0] for x in opts[:amt]]
+    if DEBUG >= 1: print(f"{opts[0][1]*1e3:10.2f} ms from {len(opts):3d} actions", beam[0].colored_shape())
+  return beam[0]

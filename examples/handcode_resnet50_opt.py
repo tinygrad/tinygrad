@@ -3,8 +3,8 @@ from models.resnet import ResNet50
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.codegen.search import bufs_from_lin, time_linearizer, get_linearizer_actions
-from tinygrad.helpers import ansilen, DEBUG, getenv, flatten, dedup
+from tinygrad.codegen.search import time_linearizer, beam_search
+from tinygrad.helpers import ansilen, DEBUG, getenv
 from tinygrad.graph import print_tree
 from tinygrad.lazy import vars_from_ast
 from tinygrad.shape.symbolic import sym_infer
@@ -62,7 +62,7 @@ if __name__ == "__main__":
         for ao in global_db[str(lin.ast)]:
           lin.apply_opt(ao)
       else:
-        lin.beam_search(rawbufs, getenv("BEAM"))
+        beam_search(lin, rawbufs, getenv("BEAM"))
         global_db[str(lin.ast)] = lin.applied_opts
       lins.append(lin)
 
