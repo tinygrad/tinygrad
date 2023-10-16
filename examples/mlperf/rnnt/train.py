@@ -16,6 +16,18 @@ import matplotlib.pyplot as plt
 import librosa
 import soundfile
 
+"""
+The dataset has to be downloaded manually from https://www.openslr.org/12/ and put in `extra/datasets/librispeech`.
+For mlperf validation the dev-clean dataset is used.
+
+Then all the flacs have to be converted to wav using something like:
+```fish
+for file in $(find * | grep flac); do ffmpeg -i $file -ar 16k "$(dirname $file)/$(basename $file .flac).wav"; done
+```
+
+Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recognition/rnnt/dev-clean-wav.json) has to also be put in `extra/datasets/librispeech`.
+"""
+
 #%% data extract
 BASEDIR = pathlib.Path("../../../extra/datasets/librispeech")
 with open(BASEDIR / "dev-clean-wav.json") as f:
@@ -283,10 +295,6 @@ def autocompare(x,x2):
     print(err)
     return False
 
-# %% rnnt instance
-
-rnnt = RNNT()
-self = rnnt.encoder
 
  #%% check f32
 def check32(arg):assert arg.dtype == np.float32 or arg.dtype == dtypes.float32 , f'{arg.dtype}'
@@ -339,7 +347,6 @@ class RNNTLoss(Function):
       ab [t,u] *= beta [t,u]
       diasum = ab[t,u].sum()
       assert not(np.isnan(diasum) or diasum == 0), "invalid value {diasum}"
-      print (diasum)
       ab [t,u] /= diasum
 
       _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
@@ -380,12 +387,26 @@ def encode(X,X_lens,Y,Y_lens):
 #%% timer
 import time
 class Timer:
-  self.last_time = time.time()
+  last_time = time.time()
   def reset ():
-    self.last_time = time.time()
+    Timer.last_time = time.time()
   def stop(title = 'step'):
-    self.last_time += (delta:=time.time()-self.last_time)
+    Timer.last_time += (delta:=time.time()-Timer.last_time)
     print (f'{str(title).ljust(15)}: {delta:.5} s')
+
+
+progress_start = time.time()
+def progressbar(i = None):
+  global progress_start
+  if i == None : 
+    progress_start = time.time()
+    return
+  dur = time.time() - progress_start
+  sampled = (i+1) * batch_size
+  print ("\r" + f"{sampled}/{len(ci)} done. {dur:.5} s projected total: {(dur*len(ci)/sampled):.5}".ljust(50),end = "",flush=True)
+  
+
+#%% 
 
 #%% batch loss
 class RNNTBatchLoss(Function):
@@ -468,6 +489,8 @@ class RNNTBatchLoss(Function):
 
     return LazyBuffer.fromCPU(- np.array(dgrads)), None
 #%%
+# Device.DEFAULT = "GPU"
+
 Timer.reset()
 rnnt= RNNT()
 opt = LAMB(rnnt.params)
@@ -475,25 +498,21 @@ opt.zero_grad()
 Timer.stop("model init")
 # enc,distribution,distribution_tensor = encode(X,X_lens, Y,Y_lens)
 
-it = iterate(8)
-
-# for i in range(20):
-  # global X,X_lens, Y,Y_lens
+batch_size=2
+it = iterate(batch_size)
+progressbar()
 for i, (X,X_lens,Y,Y_lens ) in enumerate(it):
-  enc2,enc2lens,dis2 = encode(X,X_lens,Y,Y_lens)
+  opt.zero_grad()
+  try:
+    enc2,enc2lens,dis2 = encode(X,X_lens,Y,Y_lens)
+  except Exception as e:
+    print ("encoding error",e)
+    time.sleep(2)
+    enc2,enc2lens,dis2 = encode(X,X_lens,Y,Y_lens)
   loss = RNNTBatchLoss.apply(dis2,enc2lens, Y,Tensor(Y_lens,requires_grad=False))
   loss.backward()
   opt.step()
-  Timer.stop(f"step {i} loss: {loss.numpy():.5}")
-
-
-# %%
-# hist = []
-# def epoch ():
-#   for i,(X,X_lens,Y,Y_lens) in enumerate(iterate()):
-#     print(end=(f'{i}: ').rjust(5))
-#     Loss = train_step(X,X_lens,Y,Y_lens)
-#     hist.append(Loss)
-
-# epoch()
-
+  # Timer.stop(f"step {i} loss: {loss.numpy():.5}")
+  progressbar(i)
+  print (end=f"loss: {loss.numpy():.5}",flush=True)
+  # progressbar(i)
