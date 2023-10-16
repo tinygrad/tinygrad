@@ -3,7 +3,7 @@ import time, importlib, inspect, functools, pathlib, itertools, random
 import numpy as np
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer
 from dataclasses import dataclass
@@ -268,11 +268,18 @@ class Compiled:
       from tinygrad.codegen.linearizer import Linearizer
       k = Linearizer(ast, self.linearizer_opts)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
-      if getenv("BEAM"):
-        from tinygrad.features.search import beam_search
-        k = beam_search(k, rawbuffers, getenv("BEAM"))
-      elif not getenv("NOOPT"):
+      if not getenv("NOOPT"):
         if not k.apply_tensor_cores(getenv("TC", 1)): k.hand_coded_optimizations()
+        if BEAM:
+          kb = Linearizer(ast, self.linearizer_opts)
+          kb.required_optimizations()
+          kb.dont_use_locals = bool(getenv("NOLOCALS"))
+          from tinygrad.features.search import beam_search, time_linearizer
+          kb = beam_search(kb, rawbuffers, BEAM.value)
+          baseline, beamtime = time_linearizer(k, rawbuffers, allow_test_size=False, disable_cache=True), time_linearizer(kb, rawbuffers, allow_test_size=False, disable_cache=True)
+          if beamtime < baseline:
+            if DEBUG >= 1: print(f"beam search {beamtime*1e6:<12.2f} beat baseline {baseline*1e6:<12.2f} by {baseline/beamtime:.2f}x")
+            k = kb
       return self.to_program(k)
 
     if getenv("ENABLE_METHOD_CACHE", 1):
