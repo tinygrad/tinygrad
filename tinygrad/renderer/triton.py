@@ -71,7 +71,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   for u in uops:
     uop,dtype,vin,args,_ = u
     if uop == UOps.LOOP:
-      kk(f"for {ssa(u, 'ridx')} in range({vin[0].arg}, {r[vin[1]]}+{define_scalar([], 'tl.int32', 1)}):")
+      kk(f"for {ssa(u, 'ridx')} in range({vin[0].arg}, {r[vin[1]]}):")
       depth += 1
     elif uop == UOps.END: depth -= 1
     elif uop == UOps.ALU:
