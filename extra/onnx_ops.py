@@ -15,8 +15,7 @@ import math
 def Identity(input: Tensor): return input
 def Neg(input: Tensor): return -input
 def Add(input: Tensor, other: Tensor, broadcast=None): return input + other if input.dtype == dtypes.float else (input + other).cast(input.dtype)
-# def Sub(input: Union[Tensor, Any], other: Tensor): return input - other # some test has input as int
-def Sub(input: Union[Tensor, Any], other: Tensor): return Tensor(1)
+def Sub(input: Union[Tensor, Any], other: Tensor): return input - other # some test has input as int
 def Mul(input: Tensor, other: Tensor): return (input * other) if input.dtype == dtypes.float else (input * other).cast(input.dtype)
 # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
 def Div(input: Tensor, other: Tensor): return input / other if input.dtype == dtypes.float else input.div(other).floor()
