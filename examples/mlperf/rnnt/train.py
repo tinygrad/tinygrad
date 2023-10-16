@@ -1,4 +1,4 @@
-#%%
+
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import Adam, LAMB
 from tinygrad.nn import Embedding, Linear
@@ -7,6 +7,7 @@ from tinygrad.ops import Device
 from tinygrad.jit import TinyJit
 from tinygrad.mlops import Function
 from tinygrad.lazy import LazyBuffer
+from extra.utils import print_tree
 
 import itertools
 import pathlib
@@ -28,7 +29,6 @@ for file in $(find * | grep flac); do ffmpeg -i $file -ar 16k "$(dirname $file)/
 Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recognition/rnnt/dev-clean-wav.json) has to also be put in `extra/datasets/librispeech`.
 """
 
-#%% data extract
 BASEDIR = pathlib.Path("../../../extra/datasets/librispeech")
 with open(BASEDIR / "dev-clean-wav.json") as f:
   ci = json.load(f)
@@ -77,10 +77,6 @@ def iterate(bs=1, start=0):
       (np.array(X_lens)),
       *text_encode([v['transcript'] for v in ci[i:i+bs]]))
 
-# it = iterate(2)
-# for i in range(7):
-#   _=next(it)
-
 characters = [*" 'abcdefghijklmnopqrstuvwxyz","<skip>"]
 c2i= dict([(c,i) for i,c in enumerate(characters)])
 charn = len(characters)
@@ -98,7 +94,6 @@ def text_decode(toks:Tensor):
         ret.append("".join([characters[int(tok)] for tok in seq ]))
     return ret
 
-# %% model
 class RNNT:
   def __init__(self, input_features=240, vocab_size=29, enc_hidden_size=1024, pred_hidden_size=320, joint_hidden_size=512, pre_enc_layers=2, post_enc_layers=3, pred_layers=2, stack_time_factor=2, dropout=0.32):
     self.encoder = Encoder(input_features, enc_hidden_size, pre_enc_layers, post_enc_layers, stack_time_factor, dropout)
@@ -270,7 +265,6 @@ class Prediction:
     return x_.transpose(0, 1), hc
 
 rnnt = RNNT()
-# %% autocompare
 def autocompare(x,x2):
   if type(x) == Tensor: 
     x = x.numpy()
@@ -295,81 +289,6 @@ def autocompare(x,x2):
     print(err)
     return False
 
-
- #%% check f32
-def check32(arg):assert arg.dtype == np.float32 or arg.dtype == dtypes.float32 , f'{arg.dtype}'
-#%% Loss
-class RNNTLoss(Function):
-  def forward(self,distribution:LazyBuffer,labels:LazyBuffer):
-    self.device = distribution.device
-    self.distribution = distribution.toCPU()
-    self.labels=labels.toCPU()
-    self.T,self.U = distribution.shape[2],distribution.shape[1]
-    self.alpha = np.zeros((self.T,self.U),dtype=np.float32)
-    self.alpha [0,0] = 1
-
-    assert isinstance(self.distribution,np.ndarray)
-    assert self.labels.shape[0] == self.U-1, f"len labels shape:{labels.shape} doesnt match U-1: {self.U-1}"
-    alpha_norm_log = np.zeros((),np.float32)
-
-    for i in range(1,self.T+self.U-1):
-
-      offset= max(0,i-self.T+1)
-      u=np.arange(offset,min(i+1,self.U))
-      t=i-u
-
-      _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
-      self.alpha[_t,_u] += self.alpha[_t-1,_u] * self.distribution[0,_u,_t-1,-1]
-
-      _t,_u = t[np.where(u>0)], u[np.where(u>0)]
-      self.alpha[_t,_u] += self.alpha[_t,_u-1] * self.distribution[0,_u-1,_t,self.labels[_u-1]]
-
-      alpha_norm = self.alpha[t,u].sum()
-      self.alpha [t,u] /= alpha_norm
-      alpha_norm_log += np.log(alpha_norm,dtype=np.float32)
-    Loss= -alpha_norm_log - np.log(self.distribution[0,-1,-1,-1])
-    return LazyBuffer.fromCPU(Loss)
-
-  def backward(self,grad):
-    beta = np.zeros((self.T,self.U))
-    beta [-1,-1] = 1
-
-    ab = self.alpha
-    
-    for i in range(self.T+self.U-2,-1,-1):
-
-      offset= max(0,i-self.T+1)
-      u=np.arange(offset,min(i+1,self.U))
-      t=i-u
-
-      beta[t,u] /= beta[t,u].sum()
-
-      ab [t,u] *= beta [t,u]
-      diasum = ab[t,u].sum()
-      assert not(np.isnan(diasum) or diasum == 0), "invalid value {diasum}"
-      ab [t,u] /= diasum
-
-      _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
-      beta[_t-1,_u] += beta[_t,_u] * self.distribution[0,_u,_t-1,-1]
-
-      _t,_u = t[np.where(u>0)], u[np.where(u>0)]
-      beta[_t,_u-1] += beta[_t,_u] * self.distribution[0,_u-1,_t,self.labels[_u-1]]
-
-    dgrad = np.zeros_like(self.distribution)
-    t = np.arange(self.T-1)
-    u = np.arange(self.U-1)
-    dgrad[0,:-1,:-1,-1] = ab[:-1,:-1].T / (self.distribution[0,:-1,:-1,-1] + (beta[:-1,1:]/beta[1:,:-1]).T * self.distribution[0,u,:-1,self.labels[u]] )
-    # u=U
-    dgrad[0,-1,:,-1] = ab[:,-1].T / (self.distribution[0,-1,:,-1]  )
-
-    dgrad[0,u,:-1,self.labels[u]] = ab[:-1,:-1].T / (self.distribution[0,:-1,:-1,-1]* (beta[1:,:-1]/beta[:-1,1:]).T + self.distribution[0,u,:-1,self.labels[u]])
-    dgrad[0,u,-1,self.labels[u]] = ab[-1,:-1].T / ( self.distribution[0,u,-1,self.labels[u]])
-    print (dgrad[0,:3,:3,-1])
-    print (dgrad[0,-3:,-3:,-1])
-
-    return LazyBuffer.fromCPU(-dgrad), None
-
-#%% encode
 def encode(X,X_lens,Y,Y_lens):
 
   enc, enc_lens  = rnnt.encoder(Tensor(X),Tensor(X_lens))
@@ -378,23 +297,12 @@ def encode(X,X_lens,Y,Y_lens):
   distribution = rnnt.joint.__call__(preds, enc).softmax(3).realize()
   return enc,enc_lens,distribution
 
-# X,X_lens,Y,Y_lens = next(iterate())
-# enc,enclens,dis = encode(X,X_lens,Y,Y_lens)
-# X2,X2_lens,Y2,Y2_lens = next(iterate(2))
-# enc2,enc2lens,dis2 = encode(X2,X2_lens,Y2,Y2_lens)
-# autocompare(enc,enc2)
-
-#%% timer
+def timestring(s):
+  s = round(s)
+  m,s = s//60,s%60
+  h,m = m//60,m%60
+  return f"{str(h).rjust(3)}:{str(m).rjust(2,'0')}:{str(s).rjust(2,'0')}"
 import time
-class Timer:
-  last_time = time.time()
-  def reset ():
-    Timer.last_time = time.time()
-  def stop(title = 'step'):
-    Timer.last_time += (delta:=time.time()-Timer.last_time)
-    print (f'{str(title).ljust(15)}: {delta:.5} s')
-
-
 progress_start = time.time()
 def progressbar(i = None):
   global progress_start
@@ -403,12 +311,8 @@ def progressbar(i = None):
     return
   dur = time.time() - progress_start
   sampled = (i+1) * batch_size
-  print ("\r" + f"{sampled}/{len(ci)} done. {dur:.5} s projected total: {(dur*len(ci)/sampled):.5}".ljust(50),end = "",flush=True)
+  print (f"{sampled}/{len(ci)} done. {timestring(dur)} projected total: {timestring(dur*len(ci)/sampled)}".ljust(50),end = "",flush=True)
   
-
-#%% 
-
-#%% batch loss
 class RNNTBatchLoss(Function):
 
   def forward(self,distribution:LazyBuffer,X_lens:LazyBuffer,Y:LazyBuffer, Y_lens:LazyBuffer):
@@ -454,27 +358,31 @@ class RNNTBatchLoss(Function):
     dgrads=[]
 
     for bi in range(bn):
+
+      global alpha,beta
       alpha,dist = self.alphas[bi],self.dists[bi]
       T,U = self.Ts[bi], self.Us[bi]
       beta = np.zeros((T,U))
       beta [-1,-1] = 1
+      global ab
       ab = alpha # we store a * b normalized across diagonal dont use alpha after this.
 
       for i in range(T+U-2,-1,-1):
 
         offset= max(0,i-T+1)
+        global t,u
         u=np.arange(offset,min(i+1,U))
         t=i-u
 
         beta[t,u] /= beta[t,u].sum()
         ab [t,u] *= beta [t,u]
-        ab [t,u] /= ab[t,u].sum()
+        ab [t,u] /= ab[t,u].sum() + 1e-40 # numerical stability 
         _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
         beta[_t-1,_u] += beta[_t,_u] * dist[_u,_t-1,-1]
         _t,_u = t[np.where(u>0)], u[np.where(u>0)]
-        beta[_t,_u-1] += (
-          beta[_t,_u] * 
-          dist[_u-1,_t,self.labels[bi,_u-1]])
+        beta[_t,_u-1] += (beta[_t,_u] * dist[_u-1,_t,self.labels[bi,_u-1]])
+      
+      beta += 1e-40
       dgrad = np.zeros_like(dist)
       t = np.arange(T-1)
       u = np.arange(U-1)
@@ -484,35 +392,36 @@ class RNNTBatchLoss(Function):
       dgrad[u,:-1,self.labels[bi,u]] = ab[:-1,:-1].T / (dist[:-1,:-1,-1]* (beta[1:,:-1]/beta[:-1,1:]).T + dist[u,:-1,self.labels[bi,u]])
       dgrad[u,-1,self.labels[bi,u]] = ab[-1,:-1].T / ( dist[u,-1,self.labels[bi,u]])
 
+      if (np.isnan(dgrad).any()):
+        raise "Nan value encountered"
+
       dgrad = np.pad(dgrad, [[0,max(self.Us)-dgrad.shape[0]],[0,max(self.Ts)-dgrad.shape[1]],[0,0]],"constant")
       dgrads.append(dgrad)
 
     return LazyBuffer.fromCPU(- np.array(dgrads)), None
-#%%
-# Device.DEFAULT = "GPU"
 
-Timer.reset()
 rnnt= RNNT()
 opt = LAMB(rnnt.params)
 opt.zero_grad()
-Timer.stop("model init")
-# enc,distribution,distribution_tensor = encode(X,X_lens, Y,Y_lens)
-
 batch_size=2
-it = iterate(batch_size)
+it = enumerate(iterate(batch_size))
 progressbar()
-for i, (X,X_lens,Y,Y_lens ) in enumerate(it):
+
+for i, (X,X_lens,Y,Y_lens ) in it:
   opt.zero_grad()
-  try:
-    enc2,enc2lens,dis2 = encode(X,X_lens,Y,Y_lens)
-  except Exception as e:
-    print ("encoding error",e)
-    time.sleep(2)
-    enc2,enc2lens,dis2 = encode(X,X_lens,Y,Y_lens)
+  global enc2, enc2lens, dis2 
+  enc2,enc2lens,dis2 = encode(X,X_lens,Y,Y_lens)
   loss = RNNTBatchLoss.apply(dis2,enc2lens, Y,Tensor(Y_lens,requires_grad=False))
   loss.backward()
+  loss_normal = loss.numpy() / (sum(X_lens) + sum(Y_lens))
   opt.step()
-  # Timer.stop(f"step {i} loss: {loss.numpy():.5}")
+
   progressbar(i)
-  print (end=f"loss: {loss.numpy():.5}",flush=True)
-  # progressbar(i)
+  print (f" loss: {loss.numpy():.5} normalized: {loss_normal:.5}",flush=True)
+  if i %20==0:
+    print ("beta")
+    plt.imshow(beta)
+    plt.show()
+    print ("ab")
+    plt.imshow(ab)
+    plt.show()
