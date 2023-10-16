@@ -4,6 +4,7 @@ from tinygrad.helpers import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.shape.symbolic import Variable
+import re
 inf, nan = float('inf'), float('nan')
 
 # kernel unpacker
@@ -15,12 +16,13 @@ import gzip
 from pathlib import Path
 import random
 from tinygrad.helpers import dedup
-def load_worlds(filter_reduce=True, filter_noimage=True, filter_novariable=True):
+def load_worlds(filter_reduce=True, filter_noimage=True, filter_novariable=True, remove_offsets=True):
   fn = Path(__file__).parent.parent / "datasets/sops.gz"
   ast_strs = dedup(gzip.open(fn).read().decode('utf-8').strip().split("\n"))
   if filter_reduce: ast_strs = [x for x in ast_strs if "ReduceOps" in x]
   if filter_noimage: ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
   if filter_novariable: ast_strs = [x for x in ast_strs if "Variable" not in x]
+  if remove_offsets: ast_strs = [re.sub(r'offset=\d+','offset=0',x) for x in ast_strs]
   random.seed(1337)
   random.shuffle(ast_strs)
   return ast_strs
