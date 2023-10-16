@@ -227,7 +227,7 @@ class LazyBuffer:
       # remove the buffers from any (childless) BinaryOps that feed into this
       merged_srcs:Tuple[Union[LazyOp, LazyBuffer], ...] = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
       # NOTE: this is incompete, you can still fuse with reduce ops and exceed the limit
-      merged_srcs = merged_srcs if self.device != "METAL" or sum(len(x.buffers) for x in merged_srcs) < 30 else srcs
+      merged_srcs = merged_srcs if self.device != "METAL" or len(dedup([y.base for x in merged_srcs for y in x.buffers])) < 30 else srcs
     else:
       merged_srcs = srcs
 
