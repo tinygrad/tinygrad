@@ -11,12 +11,12 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, VariableOrNum, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 from tinygrad.codegen.optimizer import OptimizedKernel
 from tinygrad.codegen.kernel import LocalBuffer
-from tinygrad.lazy import var_vals_from_ast
+from tinygrad.lazy import vars_from_ast
 from tinygrad.features.image import to_image_idx
 
 # bottom ones are asm only
 class UOps(Enum):
-  LOOP = auto(); END = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
+  LOOP = auto(); IF = auto(); END = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
@@ -164,7 +164,7 @@ class Linearizer(OptimizedKernel):
       if isinstance(buf, MemBuffer):
         self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, PtrDType(buf.dtype) if not isinstance(buf.dtype, ImageDType) else buf.dtype, (), (f"data{buf.idx}", buf.dtype))
     # add var vals
-    for var in sorted(var_vals_from_ast(self.ast), key=lambda k: k.key):
+    for var in sorted(vars_from_ast(self.ast), key=lambda k: k.key):
       assert var.expr is not None
       self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), (var.expr, dtypes._arg_int32))
     # define local buffers
@@ -198,15 +198,18 @@ class Linearizer(OptimizedKernel):
     # global and local loops
     def render_loop(xx:List[Variable]):
       self.loop_uops.update({x.expr:self.uop(UOps.LOOP, dtypes.int32, (
-        self.const(x.min) if isinstance(x.min, int) else cast(Variable, x.min).render(self.render_ops, self),
-        self.const(x.max) if isinstance(x.max, int) else cast(Variable, x.max).render(self.render_ops, self)), cachable=False) for x in xx if not isinstance(x, NumNode) and x.expr is not None})
+        self.const(x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
+        self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), cachable=False) for x in xx if not isinstance(x, NumNode) and x.expr is not None})
     def end_loop(xx:List[Variable]):
       for x in xx[::-1]:
         if not isinstance(x, NumNode) and x.expr is not None:
           loop_uop = self.loop_uops[x.expr]
           if loop_uop.uop == UOps.LOOP: self.uop(UOps.END, None, (loop_uop,))
 
-    if self.opts.has_local:
+    if self.dont_use_locals:
+      self.global_size = [x.max+1 for x in loop_global_idxs][::-1]
+      self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr.replace("gidx", "idx"), x.max+1)) for i,x in enumerate(loop_global_idxs)})
+    elif self.opts.has_local:
       self.global_size, self.local_size = [x.max+1 for x in loop_global_idxs][::-1], [x.max+1 for x in loop_local_idxs][::-1]
       self.global_size += [1]*(3-len(self.global_size))
       self.local_size += [1]*(3-len(self.local_size))
@@ -219,6 +222,7 @@ class Linearizer(OptimizedKernel):
     loaded_buffers = {}
     acc = []
     self.load_cache: Dict[str, UOp] = {}
+    if_gate: Optional[UOp] = None
 
     # reduce op
     fake_reduce_idxs = []
@@ -314,7 +318,12 @@ class Linearizer(OptimizedKernel):
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc)  # store accumulators
         self.uop(UOps.BARRIER, None, (), cachable=False)
-        end_loop(loop_local_idxs)
+        end_loop(loop_local_idxs)  # TODO: this is ending too much, should only end what's in the if?
+        if self.opts.has_local:
+          fake_idxs = [Variable.num(0)]*len(self.sts[-1].shape)
+          fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
+          if_cond: UOp = (self.sts[-1].expr_idxs(fake_idxs)[0]<1).render(self.render_ops, self)
+          if_gate = self.uop(UOps.IF, None, (if_cond,), cachable=False)
 
         # create new late reduce local loops and replace local_idxs that have been used
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce and i not in self.upcast_in_mid_reduce_axes else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
@@ -358,6 +367,7 @@ class Linearizer(OptimizedKernel):
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
     # end the global (and maybe local) loop
+    if if_gate: self.uop(UOps.END, None, (if_gate,))
     end_loop(loop_global_idxs+loop_local_idxs if not self.group_for_reduce else loop_global_idxs)
 
     # (recursively) remove childless uops

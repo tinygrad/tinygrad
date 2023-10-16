@@ -350,6 +350,8 @@ class Tensor:
         ret = ret.permute(ret_dims[dim[0]:dim[0]+max_dim] + ret_dims[:dim[0]] + ret_dims[dim[0]+max_dim:])
     return ret
 
+  def __setitem__(self,s,v): return self.__getitem__(s).assign(v)
+
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
     arg_ = tuple([a if a is not None else (0,s) for s,a in zip(self.shape, arg)])
@@ -423,7 +425,7 @@ class Tensor:
 
   # ***** reduce ops *****
 
-  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False):
+  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
     axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if axis.__class__ is int else list(axis)) # type: ignore
     axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
     shape = [s for i,s in enumerate(self.shape) if i not in axis_]
@@ -437,11 +439,11 @@ class Tensor:
   def mean(self, axis=None, keepdim=False):
     assert all_int(self.shape), "does not support symbolic shape"
     out = self.sum(axis=axis, keepdim=keepdim)
-    return out * (prod(out.shape)/prod(self.shape))
+    return out.mul(prod(out.shape)/prod(self.shape))
   def std(self, axis=None, keepdim=False, correction=1):
     assert all_int(self.shape), "does not support symbolic shape"
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
-    return (square_sum / (prod(self.shape)/prod(square_sum.shape)-correction)).sqrt()
+    return square_sum.div(prod(self.shape)/prod(square_sum.shape)-correction).sqrt()
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()
@@ -731,6 +733,12 @@ class Tensor:
     if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False, device=self.device).tril(0).cast(dtypes.bool)
     if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), attn_mask)
     return (self @ key.transpose(-2,-1) / math.sqrt(self.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
+
+  def binary_crossentropy(self, y:Tensor) -> Tensor:
+    return (-y*self.log() - (1-y)*(1-self).log()).mean()
+
+  def binary_crossentropy_logits(self, y:Tensor) -> Tensor:
+    return (self.maximum(0) - y * self + (1 + self.abs().__neg__().exp()).log()).mean()
 
   def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
     loss_mask = Y != ignore_index

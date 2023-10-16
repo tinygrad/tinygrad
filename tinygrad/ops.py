@@ -1,5 +1,5 @@
 from __future__ import annotations
-import time, importlib, inspect, functools, pathlib
+import time, importlib, inspect, functools, pathlib, itertools, random
 import numpy as np
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
@@ -45,7 +45,7 @@ class ScheduleItem:
   ast: LazyOp
   out: LazyBuffer
   inputs: Tuple[LazyBuffer, ...]
-  # TODO: move var_vals here
+  var_vals: Dict[Variable, int]
 
 class LazyOp:
   __slots__ = "op", "src", "arg", "buffers", "__weakref__"
@@ -178,6 +178,24 @@ class ASTRunner:
     if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args or not runtime_args['binary']): print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
+  @staticmethod
+  def from_linearizer(k, src:str):
+    return ASTRunner(k.function_name, src, k.global_size, k.local_size,
+                     op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
+                     display_name=k.display_name, runtime_args={"binary": False})
+
+  def optimize_local_size(self, global_size, rawbufs) -> List[int]:
+    assert self.global_size is not None, "needs a global size to optimize local size"
+    MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
+    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
+    local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
+    def try_exec(local_size):
+      try:
+        return self.clprg([g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)], local_size, *rawbufs, wait=True)
+      except Exception:
+        return float('inf')
+    return min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
+
   def build(self, runtime, batch_exec=BasicBatchExecutor):
     self.clprg, self.batch_exec = runtime(self.name, self.prg, **self.runtime_args), batch_exec
     return self
@@ -195,6 +213,9 @@ class ASTRunner:
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
     if var_vals is None: var_vals = {}
     global_size, local_size = self.launch_dims(var_vals)
+    if global_size is not None and local_size is None:
+      local_size = self.local_size = self.optimize_local_size(global_size, rawbufs)
+      global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
     if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
     op_estimate = sym_infer(self.op_estimate, var_vals)
     if DEBUG >= 2:
@@ -208,7 +229,7 @@ class ASTRunner:
 class Compiled:
   def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, runtime, synchronize=lambda: None, batch_exec=BasicBatchExecutor):
     self.buffer, self.linearizer_opts, self.renderer, self.runtime, self.synchronize, self.batch_exec = buffer, linearizer_opts, renderer, runtime, synchronize, batch_exec
-    self.method_cache: Dict[Any, ASTRunner] = {}
+    self.method_cache: Dict[LazyOp, ASTRunner] = {}
 
   def to_program(self, k):
     k.linearize()
@@ -240,6 +261,11 @@ class Compiled:
     # all the rawbuffers
     rawbuffers = [output.realized] + [x.realized for x in inputs]
 
+    # extract real vars used in ast
+    from tinygrad.lazy import vars_from_ast
+    ast_vars = vars_from_ast(ast)
+    assert all(v.val is None for v in ast_vars), f"ast contains bound Variable {ast_vars}"
+
     # compilation time
     def get_program():
       from tinygrad.codegen.linearizer import Linearizer
@@ -247,7 +273,8 @@ class Compiled:
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
       from tinygrad.features.kopt import kernel_optimize
       if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts), self.to_program, rawbuffers, ast)
-      elif not getenv("NOOPT"): k.hand_coded_optimizations()
+      elif not getenv("NOOPT"):
+        if not k.apply_tensor_cores(getenv("TC", 1)): k.hand_coded_optimizations()
       return self.to_program(k)
 
     if getenv("ENABLE_METHOD_CACHE", 1):
@@ -258,8 +285,5 @@ class Compiled:
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
-    # extract real var vals
-    from tinygrad.lazy import var_vals_from_ast
-    real_var_vals = var_vals_from_ast(ast)
-    prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in real_var_vals})
+    prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in ast_vars})
     return output.realized
