@@ -202,9 +202,9 @@ class LazyBuffer:
 
   # *** elementwise ops ***
 
-  def e(self:LazyBuffer, op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
+  def e(self:LazyBuffer, op:Union[UnaryOps, BinaryOps, TernaryOps], *_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     # srcs includes self
-    srcs = (self,)+srcs
+    srcs:Tuple[LazyBuffer, ...] = (self,)+_srcs
 
     # if we are separated from other binary ops by movement ops, we push those movement ops above those binaryops
     if SHUFFLE_MOVEMENT_OPS: srcs = _push_movement_ops(srcs)
@@ -225,9 +225,13 @@ class LazyBuffer:
 
     if MERGE_ELEMENTWISE_OPS:
       # remove the buffers from any (childless) BinaryOps that feed into this
-      srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
+      merged_srcs:Tuple[Union[LazyOp, LazyBuffer], ...] = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
+      # NOTE: this is incompete, you can still fuse with reduce ops and exceed the limit
+      merged_srcs = merged_srcs if self.device != "METAL" or sum(len(x.buffers) for x in merged_srcs) < 30 else srcs
+    else:
+      merged_srcs = srcs
 
-    return create_lazybuffer(out_device, ShapeTracker.from_shape(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype)
+    return create_lazybuffer(out_device, ShapeTracker.from_shape(out_shape), BinaryOps, LazyOp(op, merged_srcs, arg), out_dtype)
 
   # *** reduce ops ***
 
