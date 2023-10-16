@@ -62,7 +62,7 @@ if __name__ == "__main__":
         for ao in global_db[str(lin.ast)]:
           lin.apply_opt(ao)
       else:
-        beam_search(lin, rawbufs, getenv("BEAM"))
+        lin = beam_search(lin, rawbufs, getenv("BEAM"))
         global_db[str(lin.ast)] = lin.applied_opts
       lins.append(lin)
 
