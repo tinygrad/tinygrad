@@ -1,12 +1,29 @@
-from train_retinanet import *
+#from train_retinanet import *
 import sys
 sys.path.insert(0, r'C:\Users\msoro\Desktop\mlperf\training\single_stage_detector\ssd') # modified for people who don't have 16 CPUs + Nvidia P100 
 from model import retinanet as mlp_retinanet 
 from pickle import load as loadp
 from model.transform import GeneralizedRCNNTransform as reference_transform
-
+from tinygrad.tensor import Tensor
+from tinygrad.state import get_state_dict
+import torch
+from torch import tensor as torch_tensor
+import numpy as np
+from models.retinanet import RetinaNet
+from models.resnet import ResNeXt50_32X4D
+from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv 
 input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
 input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
+IMAGE_SIZES = {"debug" : (200,200), "mlperf" : (800,800)}
+NUM = getenv("NUM", 18)
+BS = getenv("BS", 4)
+CNT = getenv("CNT", 10)
+BACKWARD = getenv("BACKWARD", 1)
+TRAINING = getenv("TRAINING", 1)
+CLCACHE = getenv("CLCACHE", 1)
+GRAPH = getenv("GRAPH", 1)
+
 class RetinaNetTrainingInitializer:
     def __init__(self):
         self.model = RetinaNet(ResNeXt50_32X4D(num_classes=None))
@@ -20,6 +37,7 @@ class RetinaNetTrainingInitializer:
         Tensor.training = TRAINING
         print("training mode ", Tensor.training)
         Tensor.no_grad = not BACKWARD
+        return self.model, self.reference
         
     
     def set_initial_weights(self, from_mlperf_model=True):
@@ -136,20 +154,17 @@ def tg_forward_debug_cls(self, x):
       
     return out[0].cat(*out[1:], dim=1).sigmoid()
 
+class RetinaNetMLPerfTrainer:
+    def __init__(self):
+        init = RetinaNetTrainingInitializer()
+        init.setup()
+        breakpoint()
+        pass
+
+    def train():
+        raise NotImplementedError
+
 if __name__=="__main__":
-    #init = RetinaNetTrainingInitializer()
-    #init.setup()
-    #trainable = [(k,p) for k,p in get_state_dict(init.model).items() if p.requires_grad]
-    RetinaNetWeightsChecker().check_weight_init()
-    RetinaNetWeightsChecker().check_weight_init_forward()
-    """rnic = RetinaNetInferenceChecker()
-    rf,nf = None,None
-    with open("random_image.pkl",'rb') as file: sample_image_list = loadp(file)
-    breakpoint()
-    sem = Semaphore(1)
-    r = rnic.reference_backbone_inference(sample_image_list)
-    m = rnic.model_backbone_inference(sample_image_list)
-    breakpoint()
-    assert(np.allclose(r.numpy()))
-    breakpoint()
-    i = 0"""
+    trainer = RetinaNetMLPerfTrainer()
+    #RetinaNetWeightsChecker().check_weight_init()
+    #RetinaNetWeightsChecker().check_weight_init_forward()

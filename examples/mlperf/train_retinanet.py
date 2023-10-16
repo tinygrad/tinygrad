@@ -1,8 +1,4 @@
-from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
 from typing import Any
-from models.retinanet import RetinaNet
-from models.resnet import ResNeXt50_32X4D
 from extra.datasets import openimages
 from PIL import Image, ImageDraw
 from extra.datasets.openimages import openimages, iterate
@@ -11,22 +7,12 @@ from pycocotools.cocoeval import COCOeval
 from tinygrad.nn import optim
 from tinygrad.state import get_parameters
 from tqdm import trange
-import numpy as np
 from typing import List, Tuple
 from extra.training import focal_loss, smooth_l1_loss
 from torch import tensor as torch_tensor
-from tinygrad.state import get_state_dict
 import torch
 from contextlib import redirect_stdout
-
-NUM = getenv("NUM", 18)
-BS = getenv("BS", 4)
-CNT = getenv("CNT", 10)
-BACKWARD = getenv("BACKWARD", 1)
-TRAINING = getenv("TRAINING", 1)
-CLCACHE = getenv("CLCACHE", 1)
-GRAPH = getenv("GRAPH", 1)
-IMAGE_SIZES = {"debug" : (200,200), "mlperf" : (800,800)}
+from train_retinanet_tests import *
 
 
 def resize_box_based_on_new_image_size(box: List[float], img_old_size: Tuple[int], img_new_size: Tuple[int]) -> List[float]:
@@ -98,7 +84,8 @@ def bbox_transform(proposals, reference_boxes):
 
 class RetinaNetTrainer:
     def __init__(self,  model : RetinaNet = RetinaNet(ResNeXt50_32X4D(num_classes=None)), debug = False):
-        self.model = model
+        
+        self.model, self.reference = RetinaNetTrainingInitializer().setup()
         Warning("TODO: at training, ResNet weights should be loaded and most of its layers should be frozen.")
         #self.model.backbone.load_from_pretrained()
         self.input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
@@ -156,26 +143,21 @@ class RetinaNetTrainer:
 
         retina, anchors_orig, anchors_flattened_levels, optimizer = self.tg_init_setup()
         checker = None
-        #if self.debug: 
-            #checker = RetinaNetMlPerfTrainingChecker(retina)
-            #checker.check_anchorgen() #already passes
-            #checker.check_weight_init()
-            #checker.check_anchors(anchors_orig, anchors_flattened_levels)
 
         for x, annotations in iterate(self.dataset, BS):
             targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
             resized = [Image.fromarray(image) for image in x]
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
             images = Tensor(resized, requires_grad=False)
-            breakpoint()
+
             head_outputs = retina(self.input_fixup(images))
-            if self.debug: checker.check_head_outputs(head_outputs)
+            #if self.debug: checker.check_head_outputs(head_outputs)
 
             #eltwise_loss = self._eltwise_compute_loss(BS, targets, head_outputs) 
             #imgwise_loss_np = self._imgwise_compute_loss_np(BS, targets, head_outputs)
             #batchwise_loss = self._batchwise_compute_loss(BS, targets, head_outputs)
             imgwise_loss = self._imgwise_compute_loss(BS, targets, head_outputs)
-            if self.debug: checker.check_losses(imgwise_loss)
+            #if self.debug: checker.check_losses(imgwise_loss)
             optimizer.zero_grad()
             imgwise_loss.backward()
             optimizer.step()
@@ -196,10 +178,8 @@ class RetinaNetTrainer:
 
     def tg_init_setup(self, mlperf_model = None):
         retina = self.model
-        self.mlperf_model = mlperf_model
-        breakpoint()
-        self.freeze_spec_backbone_layers()
-        self.set_initial_weights(from_mlperf_model=(self.mlperf_model is not None))
+        #self.freeze_spec_backbone_layers()
+        #self.set_initial_weights(from_mlperf_model=(self.reference is not None))
         
         anchors_orig = retina.anchor_gen(self.image_size) #TODO: get them just with reshape of flattened?
         anchors_flattened_levels = np.concatenate(anchors_orig)
@@ -213,7 +193,7 @@ class RetinaNetTrainer:
     def set_initial_weights(self, from_mlperf_model = False):
         if from_mlperf_model:
             sd = get_state_dict(self.model)
-            for k,p in self.mlperf_model.named_parameters().items():
+            for k,p in self.reference.named_parameters().items():
                 assert k in sd.keys()
                 sd[k] = Tensor(p.clone().numpy())
                 sd[k].requires_grad = p.requires_grad
@@ -415,38 +395,12 @@ class RetinaNetMlPerfTrainingChecker:
         sample_image_list = [torch_tensor(np.random.rand(3,200,200))]
         sample_image_list, _ = self.mlperf_model.transform(sample_image_list,None)
 
-        breakpoint()
         feature_maps = self.mlperf_model.backbone.double()(sample_image_list.tensors.double()) #TODO .double() bothers me. but default usage raises errors ("expected Double instead of Float" bc resnet bias is initialized w/ 32 bits)
         
         features = list(feature_maps.values())
         anchors_one_image = self.mlperf_model.anchor_generator(sample_image_list, features)
         self.mlperf_model.training = True
         assert torch.equal(torch_tensor(anchors_flattened_levels),anchors_one_image[0])
-    def check_weight_init(self):
-        #FIXME non-auxiliar weight init. reimplement looking tests.
-        Warning("Inference bug: tg model should have way less parameters!! (351 vs 89). plus reference has 301 weight keys")
-        model, anchors_orig, anchors_flattened_levels, optimizer = self.trainer.tg_init_setup(mlperf_model=self.mlperf_model)
-        mlp_params = {name:params for name,params in self.mlperf_model.named_parameters().items()}
-        model_params = get_parameters(model)
-        #TODO: the difference comes partly from the frozen layers in the mlperf model
-        _missing = [(item, t.requires_grad) for (item,t) in model_params.items() if item not in mlp_params.keys()] 
-        _trainable_mlperf = [item for (item,t) in mlp_params.items() if t.requires_grad]
-        _trainable_tg = [item for (item,t) in model_params.items() if t.requires_grad]
-
-        _freezed_mlperf = [item for (item,t) in mlp_params.items() if not t.requires_grad]
-        _freezed_mlperf.sort()
-        _freezed_tg = [item for (item,t) in model_params.items() if not t.requires_grad]
-        _freezed_tg.sort()
-        breakpoint()
-        assert(len(mlp_params.keys())==len(model_params.keys()))
-
-        model_weights = get_state_dict(model)
-        mlp_weights = self.mlperf_model.state_dict()
-        for item in mlp_weights.keys():
-            try:
-                assert(torch.allclose(torch_tensor(model_weights[item].numpy()),mlp_weights[item]))
-            except AssertionError: breakpoint()
-        breakpoint()
 
     def check_head_outputs(self):
         raise NotImplementedError
@@ -455,7 +409,7 @@ class RetinaNetMlPerfTrainingChecker:
     def check_losses(self):
         raise NotImplementedError
 
-    
+
 
 
 if __name__ == "__main__":
