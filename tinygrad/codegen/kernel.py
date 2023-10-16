@@ -79,6 +79,7 @@ class Kernel:
     self.use_tensor_cores: bool = False
     self.exclude_local_upcast: int = 0
     self.reverse_upcast_dir: bool = False
+    self.dont_use_locals: bool = False
 
     self.global_size: Optional[List[int]] = None
     self.local_size: Optional[List[int]] = None

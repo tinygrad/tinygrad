@@ -16,6 +16,7 @@ class CStyleLanguage(NamedTuple):
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = ""
   barrier: str = ""
+  xid: List[str] = []
   gid: List[str] = []
   lid: List[str] = []
   global_max: List[int] = []
@@ -173,7 +174,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       assert dtype is not None
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
-      xid = lang.gid if args[1].startswith("g") else lang.lid
+      xid = lang.gid if args[1].startswith("g") else (lang.xid if args[1].startswith("i") else lang.lid)
       kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
       if args[1].startswith("l"): local_size.append(args[2])
       r[u] = args[1]

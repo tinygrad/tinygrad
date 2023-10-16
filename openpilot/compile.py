@@ -79,7 +79,7 @@ def compile(dat, output_fn):
 
     global_size = prg.global_size + [1]*(3-len(prg.global_size))
     local_size = prg.local_size + [1]*(3-len(prg.local_size))
-    cl_cache.append((prg.clprg, [[g*l for g,l in zip(global_size, local_size)], local_size, *[x._buf for x in args]]))
+    cl_cache.append((prg.clprg, [[int(g*l) for g,l in zip(global_size, local_size)], local_size, *[x._buf for x in args]]))
     used_ops += prg.op_estimate
 
   from extra.thneed import Thneed
