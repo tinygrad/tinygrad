@@ -24,7 +24,7 @@ import shelve
 logtm = shelve.open(getenv("LOGTM", "")) if getenv("LOGTM", "") else None
 def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, should_copy=True) -> float:
   key = str((lin.ast, lin.applied_opts))
-  if should_copy and logtm is not None and key in logtm: return min(logtm[key])  # NOTE: we check should_copy since this may have side effects
+  if should_copy and logtm is not None and key in logtm: return min(logtm[key])  # pylint: disable=E1135 # NOTE: we check should_copy since this may have side effects
   if should_copy: lin = lin.copy() # TODO: remove the need for this
   var_vals = {k:k.min for k in vars_from_ast(lin.ast)}
   try:
