@@ -55,23 +55,19 @@ def load_wav(file):
 def iterate(bs=1, start=0):
   print(f"there are {len(ci)} samples in the dataset")
   for i in range(start, len(ci), bs):
-    print()
     samples, sample_lens = zip(*[load_wav(BASEDIR / v["files"][0]["fname"]) for v in ci[i : i + bs]])
     samples = list(samples)
     X,X_lens = list(zip(*[feature_extract(np.array(samples[i:i+1]),np.array(sample_lens[i:i+1])) for i in range(bs)]))
-
-
     max_len = max(X_lens)
-    print (max_len[0])
     X = [np.pad(X[j],((0,int(max_len[0]-X_lens[j][0])),(0,0),(0,0)),'constant') for j in range (len(X))]
     yield (
       np.concatenate(X,axis=1),
       (np.array(X_lens)),
       *text_encode([v['transcript'] for v in ci[i:i+bs]]))
 
-it = iterate(2)
-for i in range(7):
-  _=next(it)
+# it = iterate(2)
+# for i in range(7):
+#   _=next(it)
 
 characters = [*" 'abcdefghijklmnopqrstuvwxyz","<skip>"]
 c2i= dict([(c,i) for i,c in enumerate(characters)])
@@ -341,7 +337,10 @@ class RNNTLoss(Function):
       beta[t,u] /= beta[t,u].sum()
 
       ab [t,u] *= beta [t,u]
-      ab [t,u] /= ab[t,u].sum()
+      diasum = ab[t,u].sum()
+      assert not(np.isnan(diasum) or diasum == 0), "invalid value {diasum}"
+      print (diasum)
+      ab [t,u] /= diasum
 
       _t,_u = t[np.where(t>0)] , u[np.where(t>0)]
       beta[_t-1,_u] += beta[_t,_u] * self.distribution[0,_u,_t-1,-1]
@@ -362,8 +361,34 @@ class RNNTLoss(Function):
     print (dgrad[0,-3:,-3:,-1])
 
     return LazyBuffer.fromCPU(-dgrad), None
+
+#%% encode
+def encode(X,X_lens,Y,Y_lens):
+
+  enc, enc_lens  = rnnt.encoder(Tensor(X),Tensor(X_lens))
+  bs = X.shape[1]
+  preds,hc = rnnt.prediction(Tensor.zeros((bs,1)).cat(Y,dim=1),None,1)
+  distribution = rnnt.joint.__call__(preds, enc).softmax(3).realize()
+  return enc,enc_lens,distribution
+
+# X,X_lens,Y,Y_lens = next(iterate())
+# enc,enclens,dis = encode(X,X_lens,Y,Y_lens)
+# X2,X2_lens,Y2,Y2_lens = next(iterate(2))
+# enc2,enc2lens,dis2 = encode(X2,X2_lens,Y2,Y2_lens)
+# autocompare(enc,enc2)
+
+#%% timer
+import time
+class Timer:
+  self.last_time = time.time()
+  def reset ():
+    self.last_time = time.time()
+  def stop(title = 'step'):
+    self.last_time += (delta:=time.time()-self.last_time)
+    print (f'{str(title).ljust(15)}: {delta:.5} s')
+
 #%% batch loss
-class RNNTIterLoss(Function):
+class RNNTBatchLoss(Function):
 
   def forward(self,distribution:LazyBuffer,X_lens:LazyBuffer,Y:LazyBuffer, Y_lens:LazyBuffer):
     bs=Y.shape[0]
@@ -374,7 +399,7 @@ class RNNTIterLoss(Function):
     Loss = []
 
     for bi in range(bs):
-      T,U = round(X_lens.toCPU()[bi][0]), int(Y_lens.toCPU()[bi])+1
+      T, U = round(X_lens.toCPU()[bi][0] + .2), int(Y_lens.toCPU()[bi])+1
       self.Ts.append(T)
       self.Us.append(U)
 
@@ -440,38 +465,9 @@ class RNNTIterLoss(Function):
 
       dgrad = np.pad(dgrad, [[0,max(self.Us)-dgrad.shape[0]],[0,max(self.Ts)-dgrad.shape[1]],[0,0]],"constant")
       dgrads.append(dgrad)
-    
+
     return LazyBuffer.fromCPU(- np.array(dgrads)), None
-
-#%% encode
-def encode(X,X_lens,Y,Y_lens):
-
-  enc, enc_lens  = rnnt.encoder(Tensor(X),Tensor(X_lens))
-  bs = X.shape[1]
-  preds,hc = rnnt.prediction(Tensor.zeros((bs,1)).cat(Y,dim=1),None,1)
-  distribution = rnnt.joint.__call__(preds, enc).softmax(3).realize()
-  return enc,enc_lens,distribution
-
-X,X_lens,Y,Y_lens = next(iterate())
-enc,enclens,dis = encode(X,X_lens,Y,Y_lens)
-
-X2,X2_lens,Y2,Y2_lens = next(iterate(2))
-enc2,enc2lens,dis2 = encode(X2,X2_lens,Y2,Y2_lens)
-
-autocompare(enc,enc2)
-
-#%% timer
-import time
-class Timer:
-  self.last_time = time.time()
-  def reset ():
-    self.last_time = time.time()
-  def stop(title = 'step'):
-    self.last_time += (delta:=time.time()-self.last_time)
-    print (f'{str(title).ljust(15)}: {delta:.5} s')
-
-#%% rnnt instance 
-
+#%%
 Timer.reset()
 rnnt= RNNT()
 opt = LAMB(rnnt.params)
@@ -479,21 +475,16 @@ opt.zero_grad()
 Timer.stop("model init")
 # enc,distribution,distribution_tensor = encode(X,X_lens, Y,Y_lens)
 
-it = iterate(4)
-X2,X2_lens,Y2,Y2_lens = next(it)
-Timer.stop("getdata")
+it = iterate(8)
 
-for i in range(20):
-  enc2,enc2lens,dis2 = encode(X2,X2_lens,Y2,Y2_lens)
-  Timer.stop("encode")
-  loss = RNNTIterLoss.apply(dis2,enc2lens, Y2,Tensor(Y2_lens,requires_grad=False))
-  Timer.stop(f"loss:{loss.numpy():.5}")
+# for i in range(20):
+  # global X,X_lens, Y,Y_lens
+for i, (X,X_lens,Y,Y_lens ) in enumerate(it):
+  enc2,enc2lens,dis2 = encode(X,X_lens,Y,Y_lens)
+  loss = RNNTBatchLoss.apply(dis2,enc2lens, Y,Tensor(Y_lens,requires_grad=False))
   loss.backward()
-  Timer.stop("backward")
   opt.step()
-  Timer.stop("opt step")
-  print()
-
+  Timer.stop(f"step {i} loss: {loss.numpy():.5}")
 
 
 # %%
