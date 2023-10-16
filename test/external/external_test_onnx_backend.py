@@ -166,7 +166,7 @@ if getenv('METAL'):
   backend_test.exclude('test_maxpool_2d_pads_cpu')
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
 
-# Don't know how to treat TensorProto.FLOAT8E4M3FN
+# Don't know how to treat special TensorProto like TensorProto.FLOAT8E4M3FN
 if getenv("CPU") or getenv("TORCH"):
   backend_test.exclude('test_dequantizelinear_axis_cpu')
   backend_test.exclude('test_dequantizelinear_cpu')
