@@ -440,7 +440,7 @@ class RPNLossComputation:
     objectness_loss = binary_cross_entropy_with_logits(
         objectness[sampled_inds], labels[sampled_inds]
     )
-    del objectness, labels, regression_targets, sampled_pos_inds, sampled_neg_inds, anchors
+    del objectness, labels, regression_targets, sampled_pos_inds, sampled_neg_inds, anchors, box_regression
     if DEBUG > 0: print_gpu_memory("after_cleanup")
     return objectness_loss, box_loss
 
