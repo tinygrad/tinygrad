@@ -161,7 +161,7 @@ if getenv('METAL') or getenv('LLVM'):
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
 
-# issue 2067 https://github.com/tinygrad/tinygrad/issues/2067
+# issue 2067 potentially also a fastmath issue https://github.com/tinygrad/tinygrad/issues/2067
 if getenv('METAL'):
   backend_test.exclude('test_maxpool_2d_pads_cpu')
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')

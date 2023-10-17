@@ -1,7 +1,5 @@
-from tinygrad.nn import Conv2d
-from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod, dtypes, argfix
+from tinygrad.helpers import prod, dtypes
 from extra.onnx import safe_numpy
 from onnx.helper import tensor_dtype_to_np_dtype
 from onnx.onnx_pb import TensorProto
@@ -551,6 +549,20 @@ def Compress(inp: Tensor, condition: Tensor, axis=None):
   con = Tensor(np.arange(condition.shape[0])[con_np]) # no boolean indexing in Tensor
   return inp.__getitem__(tuple([slice(None) if i != axis else con for i in range(inp.ndim)]))
 
+type_map = {TensorProto.DOUBLE: dtypes.double, TensorProto.FLOAT: dtypes.float32}
+def EyeLike(x: Tensor, dtype=None, k=0):
+  if dtype is None: dtype = x.dtype
+  else: dtype = type_map[dtype]
+  shape = x.shape
+  dim = min(x.shape)
+  if shape[0] == shape[1]: return Tensor.eye(dim=dim, dtype=dtype)
+  else:
+    diff = (shape[0]-dim, shape[1]-dim)
+    padarg = tuple([(d, d) if d == 0 else (k, d-k) for d in diff])
+    return Tensor.eye(dim=dim, dtype=dtype).pad(padarg)
+
+def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
+
 # Needs work
 def IsInf(x,detect_negative=1,detect_positive=1):
   ret = (x == float("inf"))*detect_positive + (x == float("-inf"))*detect_negative + Tensor.zeros(*x.shape)
@@ -566,6 +578,17 @@ def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point=0, axis=1):
 # Needs work
 def IsNaN(x):
   return (x < float("-inf")).cast(dtypes.bool)
+
+# **************** com.microsoft Ops **************** 
+
+def SkipLayerNormalization(input:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=None):
+  if epsilon is None: epsilon=1e-12
+  x = input + skip + bias
+  return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
+
+def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
+  x = x + bias
+  return 0.5 * x * (1 + (x * 0.797885 + 0.035677 * x ** 3).tanh())
 
 def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None, segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
@@ -625,6 +648,8 @@ def Attention(input:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Opti
   out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
   return out, present
 
+# **************** ai.onnx.preview.training Ops **************** 
+
 # TODO not entirely sure these optimizers are correct
 def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
   groups = len(inputs) // 3
@@ -635,7 +660,7 @@ def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
   for input in grouped_inputs:
     X, G, H = input
     X.grad = norm_coefficient * X + G
-    X.grad.requires_grad, H.requires_grad = False, False # TODO manually turning off requires_grad, see onnx.py:127
+    X.grad.requires_grad, H.requires_grad = False, False # TODO manually turning off requires_grad, see TODO under (domain == "ai.onnx.preview.training") in onnx.py
     H.assign(H.detach() + X.grad * X.grad).realize()
     H_adaptive = H.sqrt() + epsilon
     X.assign(X.detach() - r * X.grad / H_adaptive)
@@ -678,26 +703,3 @@ def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0
     ret.extend([X, V, H])
   ret = ret[::3] + ret[1::3] + ret[2::3]
   return tuple(ret)
-
-def SkipLayerNormalization(input:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=None):
-  if epsilon is None: epsilon=1e-12
-  x = input + skip + bias
-  return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
-
-def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
-  x = x + bias
-  return 0.5 * x * (1 + (x * 0.797885 + 0.035677 * x ** 3).tanh())
-
-type_map = {TensorProto.DOUBLE: dtypes.double, TensorProto.FLOAT: dtypes.float32}
-def EyeLike(x: Tensor, dtype=None, k=0):
-  if dtype is None: dtype = x.dtype
-  else: dtype = type_map[dtype]
-  shape = x.shape
-  dim = min(x.shape)
-  if shape[0] == shape[1]: return Tensor.eye(dim=dim, dtype=dtype)
-  else:
-    diff = (shape[0]-dim, shape[1]-dim)
-    padarg = tuple([(d, d) if d == 0 else (k, d-k) for d in diff])
-    return Tensor.eye(dim=dim, dtype=dtype).pad(padarg)
-
-def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
