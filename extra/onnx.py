@@ -104,8 +104,8 @@ def get_run_onnx(onnx_model: ModelProto):
 
   onnx_model_version = onnx_model.opset_import[0].version
 
-  def run_onnx(inputs={}, debug=False):
-    if getenv("DEBUGONNX"): debug = True
+  def run_onnx(inputs={}, debug=0):
+    debug = getenv("DEBUGONNX") or debug
     input_tensors: Dict[str,Tensor] = {}
     intermediate_tensors: Dict[str,Tensor] = {}
     output_tensor_names = [x.name for x in onnx_model.graph.output]
@@ -137,10 +137,10 @@ def get_run_onnx(onnx_model: ModelProto):
 
     for num,n in enumerate(onnx_model.graph.node):
       inp: List[Tensor] = []
-      if debug: print("inputs:")
+      if debug >= 3: print("inputs:")
       for x in n.input:
         t = fetch_tensor(x)
-        if debug: print(f"\t{x} - {t}")
+        if debug >= 3: print(f"\t{x} - {t}")
         inp.append(t)
       opt: Dict = attribute_dict[num]
       if debug: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
@@ -195,10 +195,10 @@ def get_run_onnx(onnx_model: ModelProto):
         raise Exception(f"op_type {n.op_type} not supported")
       if not isinstance(ret, tuple): ret = (ret, )
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
-      if debug: print([x.shape if isinstance(x, Tensor) else None for x in ret])
-      if debug: print("outputs:")
+      if debug >= 2: print([x.shape if isinstance(x, Tensor) else None for x in ret])
+      if debug >= 2: print("outputs:")
       for i in range(len(n.output)):
-        if debug: print(f"\t{n.output[i]} - {ret[i]}")
+        if debug >= 2: print(f"\t{n.output[i]} - {ret[i]}")
         intermediate_tensors[n.output[i]] = ret[i]
       if num == ONNXLIMIT:
         output_tensor_names = n.output

@@ -66,6 +66,6 @@ if __name__ == "__main__":
   run_schedule(schedule_independent)
 
   print("**** running real kernels ****")
-  with Context(DEBUG=2):
+  with Context(DEBUG=2, BEAM=getenv("LATEBEAM")):
     GlobalCounters.reset()
     run_schedule(schedule)

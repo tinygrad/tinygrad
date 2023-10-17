@@ -3,7 +3,7 @@ import time, importlib, inspect, functools, pathlib, itertools, random
 import numpy as np
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer
 from dataclasses import dataclass
@@ -216,7 +216,7 @@ class ASTRunner:
     if global_size is not None and local_size is None:
       local_size = self.local_size = self.optimize_local_size(global_size, rawbufs)
       global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
-    if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
+    if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=2): GlobalCounters.time_sum_s += et
     op_estimate = sym_infer(self.op_estimate, var_vals)
     if DEBUG >= 2:
       print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(37-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(global_size):18s} {str(local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
@@ -268,11 +268,18 @@ class Compiled:
       from tinygrad.codegen.linearizer import Linearizer
       k = Linearizer(ast, self.linearizer_opts)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
-      if getenv("BEAM"):
-        from tinygrad.features.search import beam_search
-        k = beam_search(k, rawbuffers, getenv("BEAM"))
-      elif not getenv("NOOPT"):
+      if not getenv("NOOPT"):
         if not k.apply_tensor_cores(getenv("TC", 1)): k.hand_coded_optimizations()
+        if BEAM:
+          kb = Linearizer(ast, self.linearizer_opts)
+          kb.required_optimizations()
+          kb.dont_use_locals = bool(getenv("NOLOCALS"))
+          from tinygrad.features.search import beam_search, time_linearizer
+          kb = beam_search(kb, rawbuffers, BEAM.value)
+          baseline, beamtime = time_linearizer(k, rawbuffers, allow_test_size=False, disable_cache=True), time_linearizer(kb, rawbuffers, allow_test_size=False, disable_cache=True)
+          if beamtime < baseline:
+            if DEBUG >= 1: print(f"beam search {beamtime*1e6:<12.2f} beat baseline {baseline*1e6:<12.2f} by {baseline/beamtime:.2f}x")
+            k = kb
       return self.to_program(k)
 
     if getenv("ENABLE_METHOD_CACHE", 1):
