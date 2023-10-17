@@ -86,7 +86,7 @@ class OptimizedKernel(Kernel):
         special_strides: Tuple[int, ...] = tuple()
         for i,g in enumerate(shape_idx_groups):
           shape_piece = tuple(self.output_shape[x] for x in g)
-          assert prod(shape_piece) == base_shape[i], "get_contraction was wrong?"
+          assert prod(shape_piece) == base_shape[i], f"get_contraction was wrong? {shape_piece} != {base_shape[i]}"
           special_strides += strides_for_shape(shape_piece)
         # adding the fake image shape
         shapes.append(self.output_shape)

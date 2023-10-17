@@ -15,9 +15,10 @@ from extra.utils import fetch
 from extra.onnx import get_run_onnx
 from tinygrad.graph import print_tree
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, DEBUG, getenv
+from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, DEBUG, getenv, ImageDType
 from tinygrad.realize import run_schedule
 from tinygrad.ops import LoadOps, Device, ScheduleItem
+from tinygrad.features.image import fix_schedule_for_images
 Device.DEFAULT = "GPU"
 
 def get_schedule(fn:str) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
@@ -63,9 +64,16 @@ def lb_to_numbers(schedule):
 
 if __name__ == "__main__":
   schedule, schedule_independent = get_schedule(sys.argv[1] if len(sys.argv) > 1 else OPENPILOT_MODEL)
-  run_schedule(schedule_independent)
+  run_schedule(schedule_independent, disable_logging=True)
+  schedule = fix_schedule_for_images(schedule)
 
-  print("**** running real kernels ****")
-  with Context(DEBUG=2):
+  image_count = 0
+  for si in schedule:
+    if isinstance(si.out.dtype, ImageDType):
+      image_count += 1
+
+  print(f"**** running real kernels {image_count}/{len(schedule)} images ****")
+  with Context(DEBUG=2, BEAM=getenv("LATEBEAM")):
     GlobalCounters.reset()
     run_schedule(schedule)
+

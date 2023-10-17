@@ -1,6 +1,6 @@
 from tqdm import tqdm
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
-from tinygrad.codegen.search import actions
+from tinygrad.features.search import actions
 from tinygrad.codegen.linearizer import Linearizer
 
 tactions = set()
