@@ -66,8 +66,6 @@
         import ClipTokenizer from 'https://softwired.nyc3.cdn.digitaloceanspaces.com/sd/clip_tokenizer.js';
         window.clipTokenizer = new ClipTokenizer();
     </script>
-
-    <script src="./alphas_cumprod.js"></script>
     <script src="./net.js"></script>
 </head>
 
@@ -98,7 +96,7 @@
     window.addEventListener('load', function() {
         const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
         const resultText = document.getElementById('result');
-        let labels, nets, inferenceInProgress = false;
+        let labels, nets, safetensorParts;
 
         const error = (err) => {
             resultText.innerHTML = `Error: ${err}`;
@@ -137,7 +135,7 @@
 
         const loadNet = async () => {
             resultText.innerHTML = "loading..."
-            const safetensorParts = await getSafetensorParts();
+            safetensorParts = await getSafetensorParts();
             const device = await getDevice();
 
             nets = await timer(() => Promise.all([
@@ -168,7 +166,7 @@
 
                 console.log("Timesteps: " + timesteps);
 
-                let alphasCumprod = window.alphas_cumprod;
+                let alphasCumprod = getWeight(safetensorParts, "alphas_cumprod");
                 let alphas = [];
 
                 for (t of timesteps) {

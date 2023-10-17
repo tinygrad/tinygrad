@@ -50,7 +50,6 @@ if __name__ == "__main__":
   download_file('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', FILENAME)
   load_state_dict(model, torch_load(FILENAME)['state_dict'], strict=False)
 
-
   def text_model(model):
     def forward(prompt):
       return model.cond_stage_model.transformer.text_model(prompt).realize()
@@ -171,12 +170,12 @@ if __name__ == "__main__":
     run = step["run"]
     print(f'Executing step={run["name"]}')
     prg += compile_step(model, run, step["input"])
-  
 
-  state = get_state_dict(model)
-  safe_save(state, path.join(path.dirname(__file__), "net.safetensors"))
-  part_start_offsets = create_multipart_safetensor("./net.safetensors", 1073741824)
-  safetensor_parts = '\n    '.join([f"parts.push(new Uint8Array(await (await fetch('./net_part{i}.safetensors')).arrayBuffer()));" for i, _ in enumerate(part_start_offsets)])
+    if run["name"] == "diffusor":
+      state = get_state_dict(model)
+      safe_save(state, path.join(path.dirname(__file__), "net.safetensors"))
+      part_start_offsets = create_multipart_safetensor("./net.safetensors", 1073741824)
+      safetensor_parts = '\n    '.join([f"parts.push(new Uint8Array(await (await fetch('./net_part{i}.safetensors')).arrayBuffer()));" for i, _ in enumerate(part_start_offsets)])
 
   prekernel = f"""const getTensorMetadata = (safetensorBuffer) => {{
       const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
@@ -191,7 +190,6 @@ if __name__ == "__main__":
 
     return parts;
   }}
-
 
   const getTensorBuffer = (safetensorParts, tensorMetadata, key) => {{
     let selectedPart = 0;
@@ -228,7 +226,12 @@ if __name__ == "__main__":
 
     return safetensorParts[selectedPart].subarray(...correctedOffsets);
   }}
-    
+
+  const getWeight = (safetensors, key) => {{
+    let uint8Data = getTensorBuffer(safetensors, getTensorMetadata(safetensors[0])[key], key);
+    return new Float32Array(uint8Data.buffer, uint8Data.byteOffset, uint8Data.byteLength / Float32Array.BYTES_PER_ELEMENT);
+  }}
+
   const createEmptyBuf = (device, size) => {{
       return device.createBuffer({{size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }});
   }};

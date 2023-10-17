@@ -16,6 +16,9 @@ def safe_load_metadata(fn:Union[Tensor,str]):
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   t, json_len, metadata = safe_load_metadata(fn)
+  for k,v in metadata.items():
+    if "alphas" in k:
+      print("got alphas: " + k)
   return {k:t[8+json_len+v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']])[:prod(v['shape'])].reshape(v['shape']) for k,v in metadata.items() if k != "__metadata__"}
 
 def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
@@ -30,9 +33,7 @@ def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
   t[0:1].cast(dtypes.int64).assign([len(j)])
   t[8:8+len(j)].assign(Tensor(list(j.encode('utf-8')), dtype=dtypes.uint8, device="cpu"))
-  for k,v in safe_load(t).items(): 
-    tensors[k].numpy()
-    v.assign(tensors[k])
+  for k,v in safe_load(t).items(): v.assign(tensors[k])
 
 # state dict
 
