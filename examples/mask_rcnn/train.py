@@ -129,22 +129,6 @@ def main():
     else:
       print("&&&& MLPERF METRIC STATUS=ABORTED")
 
-
-
-import pycuda.driver as cuda
-import pycuda.autoinit  # This is needed to initialize CUDA driver
-def get_gpu_memory():
-  """Get the GPU memory usage."""
-  free = cuda.mem_get_info()[0]
-  total = cuda.mem_get_info()[1]
-  used = total - free
-
-  return {
-      "total": total,
-      "used": used,
-      "free": free
-  }
-
 def simple():
   from loss import make_match_fn,make_balanced_sampler_fn,generate_rpn_labels,RPNLossComputation
   from extra.datasets.coco import BASEDIR
@@ -209,10 +193,7 @@ def simple():
       continue
     optimizer.step()
     print(f"Epoch {epoch + 1}/{NUM_EPOCHS}, Loss: {total_loss.numpy()}")
-    mem_info = get_gpu_memory()
-    print(f"Total memory: {mem_info['total'] / (1024**2):.2f} MB")
-    print(f"Used memory: {mem_info['used'] / (1024**2):.2f} MB")
-    print(f"Free memory: {mem_info['free'] / (1024**2):.2f} MB")
+    mem_info = print_gpu_memory()
     del total_loss, images, img, features, objectness, rpn_box_regression, anchors, targets, objectness_loss, regression_loss, img_metadata
 
 if __name__ == "__main__":

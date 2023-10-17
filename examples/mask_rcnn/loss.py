@@ -16,6 +16,17 @@ import os
 # implementation from https://github.com/kuangliu/torchcv/blob/master/torchcv/utils/box.py
 # with slight modifications
 
+import pycuda.driver as cuda
+import pycuda.autoinit  # This is needed to initialize CUDA driver
+def print_gpu_memory():
+  """Get the GPU memory usage."""
+  free = cuda.mem_get_info()[0]
+  total = cuda.mem_get_info()[1]
+  used = total - free
+  print(f"Total memory: {total / (1024**2):.2f} MB")
+  print(f"Used memory: {used / (1024**2):.2f} MB")
+  print(f"Free memory: {free / (1024**2):.2f} MB")
+
 def test_boxlist_iou():
   a = boxlist_iou(BoxList(Tensor([[0, 0, 10, 10], [5, 5, 10, 10]]), image_size = (50, 50)), BoxList(Tensor([[0, 0, 5, 5], [0, 0, 10, 10], [4, 4, 8, 8]]), image_size = (50, 50)))
   assert np.allclose(a.numpy(), Tensor([[0.25, 1., 0.16], [0., 0.25, 0.28125]]).numpy())
@@ -347,7 +358,7 @@ class RPNLossComputation:
     match_quality_matrix = boxlist_iou(anchors, targets)
     if DEBUG > 0: print("match_quality_matrix", match_quality_matrix.numpy())
     matched_idxs = self.proposal_matcher(match_quality_matrix)
-    if DEBUG > 0: print("matched_idxs", matched_idxs.numpy())
+    if DEBUG > 0: print("matched_idxs", matc hed_idxs.numpy())
     matched_targets = targets[matched_idxs.maximum(0)] # drop negatives
     if DEBUG > 0: print("matched_targets", matched_targets.bbox.numpy())
     return matched_targets, matched_idxs
@@ -399,12 +410,21 @@ class RPNLossComputation:
         objectness_loss (Tensor)
         box_loss (Tensor
     """
-    if DEBUG > 0: print("anchors", anchors[0][0].bbox.numpy())
-    if DEBUG > 0: print("targets", targets[0].bbox.numpy())
+    if DEBUG > 0:
+      anchors[0][0].bbox.realize(), targets[0].bbox.realize()
+      print_gpu_memory("loss_start")
+      if DEBUG > 1:
+        print("anchors", anchors[0][0].bbox.numpy())
+        print("targets", targets[0].bbox.numpy())
     anchors = [cat_boxlist(anchors_per_image) for anchors_per_image in anchors]
     labels, regression_targets = self.prepare_targets(anchors, targets)
     sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
-    if DEBUG > 0: print("sampled_pos_inds", sampled_pos_inds, "sampled_neg_inds", sampled_neg_inds)
+    if DEBUG > 0:
+      sampled_pos_inds.realize(), sampled_neg_inds.realize(), labels.realize(), regression_targets.realize()
+      print_gpu_memory("after_sampling")
+      if DEBUG > 1:
+        print("sampled_pos_inds", sampled_pos_inds.numpy(), "sampled_neg_inds", sampled_neg_inds.numpy())
+        print("labels", labels.numpy(), "regression_targets", regression_targets.numpy())
     if len(sampled_pos_inds[0]) == 0: return None, None # todo negative mining
     sampled_pos_inds, sampled_neg_inds = Tensor(sampled_pos_inds).squeeze(0), Tensor(sampled_neg_inds).squeeze(0)
     sampled_inds = Tensor.cat(sampled_pos_inds, sampled_neg_inds, dim=0)
@@ -412,18 +432,27 @@ class RPNLossComputation:
             concat_box_prediction_layers(objectness, box_regression)
     objectness = objectness.squeeze() 
     labels, regression_targets = Tensor.cat(*labels, dim=0), Tensor.cat(*regression_targets, dim=0)
-    if DEBUG > 0: print("pos box_regression samples", box_regression[sampled_pos_inds].numpy(), "regression_targets", regression_targets[sampled_pos_inds].numpy())
+    if DEBUG > 0:
+      box_regression[sampled_pos_inds].realize(), regression_targets[sampled_pos_inds].realize()
+      print_gpu_memory("after_cats")
+      if DEBUG > 1:
+        print("box_reg", box_regression[sampled_pos_inds].numpy(), "reg_targets", regression_targets[sampled_pos_inds].numpy())
     box_loss = smooth_l1_loss(
         box_regression[sampled_pos_inds],
         regression_targets[sampled_pos_inds],
         beta=1.0 / 9,
         size_average=False,
     ) / sampled_inds.numel()
-    if DEBUG > 0: print("box_loss", box_loss.numpy(), "objectness", objectness[sampled_inds].numpy(), "objectness gt", labels[sampled_inds].numpy())
+    if DEBUG > 0:
+      box_loss.realize(), objectness[sampled_inds].realize(), labels[sampled_inds].realize()
+      print_gpu_memory("after_box_loss")
+      if DEBUG > 1:
+        print("box_loss", box_loss.numpy(), "objectness", objectness[sampled_inds].numpy(), "objectness gt", labels[sampled_inds].numpy())
     objectness_loss = binary_cross_entropy_with_logits(
         objectness[sampled_inds], labels[sampled_inds]
     )
-
+    del objectness, labels, regression_targets, sampled_pos_inds, sampled_neg_inds, anchors
+    if DEBUG > 0: print_gpu_memory("after_cleanup")
     return objectness_loss, box_loss
 
 if __name__ == "__main__":
