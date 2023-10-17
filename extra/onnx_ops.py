@@ -579,7 +579,7 @@ def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point=0, axis=1):
 def IsNaN(x):
   return (x < float("-inf")).cast(dtypes.bool)
 
-# **************** com.microsoft Ops **************** 
+# **************** com.microsoft Ops ****************
 
 def SkipLayerNormalization(input:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=None):
   if epsilon is None: epsilon=1e-12
@@ -648,7 +648,7 @@ def Attention(input:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Opti
   out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
   return out, present
 
-# **************** ai.onnx.preview.training Ops **************** 
+# **************** ai.onnx.preview.training Ops ****************
 
 # TODO not entirely sure these optimizers are correct
 def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
