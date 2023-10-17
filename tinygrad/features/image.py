@@ -134,7 +134,7 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
     if ast.op not in LoadOps:
       info = get_lazyop_info(ast)
       if info.dtype != si.out.dtype:
-        #if DEBUG >= 1: print(f"{i:3d}: info.dtype {info.dtype} != {si.out.dtype} -> {si.out.dtype}")
+        if DEBUG >= 3: print(f"{i:3d}: info.dtype {info.dtype} != {si.out.dtype} -> {si.out.dtype}")
         ast = LazyOp(UnaryOps.CAST, (ast,), (si.out.dtype, False))
 
     # put this in the fixed schedule
