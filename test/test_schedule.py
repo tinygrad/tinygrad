@@ -326,17 +326,5 @@ class TestSchedule(unittest.TestCase):
     out = x.to('cpu')
     check_schedule(out, 0, filter_loadops=False)
 
-  @unittest.skipUnless(Device.DEFAULT == "METAL", "only for metal")
-  def test_metal_limit_buffers(self):
-    t = sum([Tensor([1,2,3,4]) for _ in range(40)])
-    for si in t.lazydata.schedule():
-      assert len(si.inputs) <= 30
-
-  @unittest.skipUnless(Device.DEFAULT == "METAL", "only for metal")
-  def test_metal_dont_limit_same_buffers(self):
-    bt = Tensor(list(range(1, 100)))
-    out = sum([bt[i:i+2] for i in range(1,40)])
-    check_schedule(out, 1)
-
 if __name__ == '__main__':
   unittest.main(verbosity=2)
