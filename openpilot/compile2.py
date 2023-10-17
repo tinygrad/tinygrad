@@ -63,7 +63,7 @@ def lb_to_numbers(schedule):
 
 if __name__ == "__main__":
   schedule, schedule_independent = get_schedule(sys.argv[1] if len(sys.argv) > 1 else OPENPILOT_MODEL)
-  run_schedule(schedule_independent)
+  run_schedule(schedule_independent, disable_logging=True)
 
   print("**** running real kernels ****")
   with Context(DEBUG=2, BEAM=getenv("LATEBEAM")):
