@@ -1,10 +1,10 @@
-import subprocess, time, re, hashlib, tempfile, functools
+import subprocess, time, re, hashlib, tempfile, functools, collections, math
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple, Any
 import numpy as np
 from pycuda.compiler import compile as cuda_compile # type: ignore
 from tinygrad.helpers import DEBUG, getenv, colored, fromimport
-from tinygrad.ops import Compiled
+from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
@@ -40,7 +40,7 @@ class CUDAGraph(BasicBatchExecutor):
       cuda_args = [x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) if (isinstance(x, int) and not getenv("CUDACPU")) else x for x in [*pargs, *variables.values()]]
       graph_node = graph.add_kernel_node(*cuda_args, block=tuple(local_size), grid=tuple(global_size), func=prg.clprg.prg, dependencies=deps)
       capture_stream.update_capture_dependencies([graph_node], 1)
-      self.info.append((self.__get_batch(j), graph_node, params))
+      self.info.append((self.__get_batch(j), graph_node))
 
       # If the next batch is different or this is the last entry, finish the graph.
       if self.__get_batch(j) != self.__get_batch(j+1) or j==len(jit_cache)-1:
@@ -48,11 +48,11 @@ class CUDAGraph(BasicBatchExecutor):
         self.instances.append(self.graphs[-1].instantiate())
         if j!=len(jit_cache)-1: capture_stream.begin_capture()
   def __update(self, nodeid, inst, prg, pargs, variables, updated_args=None):
-    batchid, graph_node, params = self.info[nodeid]
+    batchid, graph_node = self.info[nodeid]
     global_size, local_size = prg.launch_dims(variables)
     cuda_args = [x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) if (isinstance(x, int) and not getenv("CUDACPU")) else x for x in [*pargs, *variables.values()]]
     inst.kernel_node_set_params(*cuda_args, block=tuple(local_size), grid=tuple(global_size), func=prg.clprg.prg, kernel_node=graph_node)
-    self.info[nodeid] = (batchid, graph_node, params)
+    self.info[nodeid] = (batchid, graph_node)
 
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
     if not self.instances: return super().exec(jit_cache, updatable_entries) # No graph is created switch to basic executor.
