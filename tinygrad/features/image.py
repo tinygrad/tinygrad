@@ -24,7 +24,7 @@ def image_dot(self, w):
   cx = self.permute(order=order).reshape(shape=(bs//groups, groups*cin, -1, 1))
   # groups*cout x cin x H, W
   cw = w.permute(order=worder).reshape(shape=(groups*cout, cin, 1, 1))
-  return cx.conv2d(cw, groups=groups).reshape(shape=out_shape_t).permute(order=order)
+  return image_conv2d(cx, cw, groups=groups).reshape(shape=out_shape_t).permute(order=order)
 
 def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
   base_image_type = dtypes.imageh if getenv("FLOAT16", 0) else dtypes.imagef
@@ -108,17 +108,19 @@ from tinygrad.ops import ScheduleItem, BufferOps, LazyOp, UnaryOps, LoadOps, Mem
 
 def fix_schedule_for_images(schedule:List[ScheduleItem]):
   # this is the fundamental fix, find unwritable or unreadable images and convert them to normal float32 (TODO: should it be float16?)
-  for si in schedule:
+  for i, si in enumerate(schedule):
     if isinstance(si.out.dtype, ImageDType) and (prod(si.out.shape) != prod(si.out.dtype.shape) or not any(si.out.shape[x]%4 == 0 for x in si.out.st.unit_stride_axes())):
+      if DEBUG >= 1: print(f"{i:3d}: rewrite output, output shape {prod(si.out.shape)}, image dtype {si.out.dtype} prod {prod(si.out.dtype.shape)}")
       si.out.dtype = dtypes.float32
     for b in si.ast.get_lazyops():
       if b.op != BufferOps.MEM: continue
       if isinstance(si.inputs[b.arg.idx-1].dtype, ImageDType) and (b.arg.st.real_offset() % 4 != 0 or not any(b.arg.st.shape[x]%4 == 0 for x in b.arg.st.unit_stride_axes())):
+        if DEBUG >= 1: print(f"{i:3d}: rewrite input, image dtype {si.inputs[b.arg.idx-1].dtype}")
         si.inputs[b.arg.idx-1].dtype = dtypes.float32
 
   # now fix up the schedule to reflect the new dtypes
   fixed_schedule:List[ScheduleItem] = []
-  for si in schedule:
+  for i,si in enumerate(schedule):
     ast = si.ast
     # fix input dtypes to match what they actually are
     replacements = {}
@@ -132,6 +134,7 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
     if ast.op not in LoadOps:
       info = get_lazyop_info(ast)
       if info.dtype != si.out.dtype:
+        #if DEBUG >= 1: print(f"{i:3d}: info.dtype {info.dtype} != {si.out.dtype} -> {si.out.dtype}")
         ast = LazyOp(UnaryOps.CAST, (ast,), (si.out.dtype, False))
 
     # put this in the fixed schedule
@@ -143,7 +146,6 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
 from tinygrad.shape.symbolic import Node, AndNode, Variable, NumNode, SumNode, LtNode
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
-
   idx = (idxy // 4) % base_shape[1]
   idy = (idxy // (4 * base_shape[1]))
 
