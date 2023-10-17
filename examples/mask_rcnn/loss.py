@@ -18,14 +18,14 @@ import os
 
 import pycuda.driver as cuda
 import pycuda.autoinit  # This is needed to initialize CUDA driver
-def print_gpu_memory():
+def print_gpu_memory(label):
   """Get the GPU memory usage."""
   free = cuda.mem_get_info()[0]
   total = cuda.mem_get_info()[1]
   used = total - free
-  print(f"Total memory: {total / (1024**2):.2f} MB")
-  print(f"Used memory: {used / (1024**2):.2f} MB")
-  print(f"Free memory: {free / (1024**2):.2f} MB")
+  print(f"Total memory at {label}: {total / (1024**2):.2f} MB")
+  print(f"Used memory at {label}: {used / (1024**2):.2f} MB")
+  print(f"Free memory at {label}: {free / (1024**2):.2f} MB")
 
 def test_boxlist_iou():
   a = boxlist_iou(BoxList(Tensor([[0, 0, 10, 10], [5, 5, 10, 10]]), image_size = (50, 50)), BoxList(Tensor([[0, 0, 5, 5], [0, 0, 10, 10], [4, 4, 8, 8]]), image_size = (50, 50)))

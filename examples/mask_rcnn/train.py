@@ -193,8 +193,8 @@ def simple():
       continue
     optimizer.step()
     print(f"Epoch {epoch + 1}/{NUM_EPOCHS}, Loss: {total_loss.numpy()}")
-    mem_info = print_gpu_memory()
-    del total_loss, images, img, features, objectness, rpn_box_regression, anchors, targets, objectness_loss, regression_loss, img_metadata
+    mem_info = print_gpu_memory("epoch")
+    del total_loss, images, img, features, objectness, rpn_box_regression, anchors, targets, objectness_loss, regression_loss, img_metadata, annotations
 
 if __name__ == "__main__":
   start = time.time()
