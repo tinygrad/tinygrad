@@ -179,7 +179,7 @@ def Expand(input: Tensor, shape):
 
 # **************** Complex Ops ****************
 
-def Gemm(A: Tensor, B: Tensor, C=None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=0):
+def Gemm(A: Tensor, B: Tensor, C: Tensor=None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=0):
   ret = alpha * (A.transpose(transA) @ B.transpose(transB))
   if C is not None: ret += beta * (C if broadcast == 0 else C.reshape([-1 if i <  len(C.shape) else 1 for i in range(len(ret.shape))][::-1]))
   return ret
@@ -300,7 +300,7 @@ def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1
   if storage_order: indices = indices.transpose(indices.ndim-2, indices.ndim-1)
   return ret, indices
 
-def MaxUnpool(xT: Tensor, xI: Tensor, outshape=None, kernel_shape=None, pads=None, strides=None):
+def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Tensor=None, kernel_shape=None, pads=None, strides=None):
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
   outlength = prod(out_sh)
   xI = xI.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
@@ -380,7 +380,7 @@ def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore
   elif reduction == "sum": loss = loss.sum()
   return loss, y
 
-def ArrayFeatureExtractor(input, indices): return input.__getitem__(tuple([slice(None) if i != (input.ndim-1) else indices for i in range(input.ndim)]))
+def ArrayFeatureExtractor(input: Tensor, indices: Tensor): return input.__getitem__(tuple([slice(None) if i != (input.ndim-1) else indices for i in range(input.ndim)]))
 def Gather(input: Tensor, indices: Tensor, axis=0):
   if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
     input_sh = list(input.shape)
