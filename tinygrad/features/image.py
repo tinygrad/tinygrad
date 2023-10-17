@@ -83,13 +83,13 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   w = w.permute(0,4,2,5,1,3)
   w = w.reshape((1, 1, 1, *cout_expand, rcin_hi, rcin_lo, H, W)).expand(x.shape)
 
-  # the conv! (+ the bias)
-  ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1))
+  # cast to the output type
+  if IMAGE >= 2:
+    x = x.cast(base_image_type((bs*oy, ox*cout//4, 4)))
+    w = w.cast(base_image_type((bs*oy, ox*cout//4, 4)))
 
-  # reshape to image and cast back to image
-  ret = ret.reshape(bs*oy, ox*cout//4, 4)
-  if IMAGE >= 2: ret = ret.cast(base_image_type(ret.shape))
-  if IMAGE >= 3: ret = ret.contiguous()
+  # the conv! (+ the bias)
+  ret = (x*w).sum((-4, -3, -2, -1))
 
   # undo hack for non multiples of 4 on C.rcout
   if added_output_channels != 0:
