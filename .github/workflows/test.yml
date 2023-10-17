@@ -68,7 +68,7 @@ jobs:
     - name: Run Pytest
       run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)"
     - name: Run ONNX
-      run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no
+      run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
@@ -110,7 +110,7 @@ jobs:
     - name: Run Pytest
       run: TORCH=1 python -m pytest -n=auto test/
     - name: Run ONNX
-      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings
+      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
 
   testopencl:
     strategy:
@@ -209,7 +209,7 @@ jobs:
     - name: Run symbolic shapetracker test
       run: METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py test/test_symbolic_ops.py test/test_symbolic_jit.py
     - name: Run ONNX
-      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no
+      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Run whisper test
       run: METAL=1 python -m pytest test/models/test_whisper.py
     - name: Check Device.DEFAULT
