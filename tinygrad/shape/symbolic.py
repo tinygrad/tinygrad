@@ -195,6 +195,10 @@ class LtNode(OpNode):
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) < (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class MulNode(OpNode):
+  def __lt__(self, b: Union[Node, int]):
+    if isinstance(b, Node) or isinstance(self.b, Node) or self.b == -1: return Node.__lt__(self, b)
+    sgn = 1 if self.b > 0 else -1
+    return Node.__lt__(self.a*sgn, (b + abs(self.b) - 1)//abs(self.b))
   def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=False): # NOTE: mod negative isn't handled right
     if self.b % b == 0: return self.a*(self.b//b)
