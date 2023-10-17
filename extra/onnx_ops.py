@@ -13,8 +13,7 @@ import math
 def Identity(input: Tensor): return input
 def Neg(input: Tensor): return -input
 def Add(input: Tensor, other: Tensor, broadcast=None): return input + other if input.dtype == dtypes.float else (input + other).cast(input.dtype)
-# def Sub(input: Union[Tensor, Any], other: Tensor): return input - other # some test has input as int
-def Sub(input: Union[Tensor, Any], other: Tensor): return Tensor(1)
+def Sub(input: Union[Tensor, Any], other: Tensor): return input - other # some test has input as int
 def Mul(input: Tensor, other: Tensor): return (input * other) if input.dtype == dtypes.float else (input * other).cast(input.dtype)
 # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
 def Div(input: Tensor, other: Tensor): return input / other if input.dtype == dtypes.float else input.div(other).floor()
@@ -97,7 +96,7 @@ def OptionalGetElement(x: Tensor=None): return x if x is not None else Tensor([]
 
 def Tile(input: Tensor, repeats): return input.repeat([int(x) for x in safe_numpy(repeats)])
 def Range(start, limit, delta): return Tensor.arange(start=int(safe_numpy(start)), stop=int(safe_numpy(limit)), step=int(safe_numpy(delta))).cast(dtype=start.dtype) # DeprecationWarning: Conversion of an array with ndim > 0 to a scalar is deprecated, and will error in future. Ensure you extract a single element from your array before performing this operation. (Deprecated NumPy 1.25.)
-def Shape(data: Tensor, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int64)
+def Shape(data: Tensor, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int32)
 def Size(data: Tensor): return prod(data if isinstance(data, list) else data.shape)
 def Flatten(input: Tensor, axis=1): return input.reshape(prod((1,) + input.shape[0:axis]), -1)
 def Reshape(data: Tensor, shape: Tensor, allowzero=None): return data.reshape([int(x) if x != 0 else data.shape[i] for i,x in enumerate(safe_numpy(shape))])

@@ -290,7 +290,7 @@ jobs:
         run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}'
       - name: Run ONNX (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
-        run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no
+        run: python -m pytest -n=auto test/external/external_test_onnx_backend.py
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
