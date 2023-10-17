@@ -145,21 +145,21 @@ def get_run_onnx(onnx_model: ModelProto):
       opt: Dict = attribute_dict[num]
       if debug >= 1: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
       # some ops live here because they require some local variables
-      if n.op_type == "Split":
-        if 'axis' not in opt: opt['axis'] = 0
-        if 'num_outputs' in opt or len(inp) == 1:
-          opt['split'] = [inp[0].shape[opt['axis']] // len(n.output)] * len(n.output)
-          for i in range(inp[0].shape[opt['axis']] % len(n.output)):
-            opt['split'][i] += 1
-        if 'split' not in opt: opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
-        i = 0
+      if n.op_type == "Split": # have to use n.output for cases when num_outputs is absent
+        axis = opt.get("axis", 0)
+        split = None if len(inp) == 1 else [int(x) for x in safe_numpy(inp[1])]
+        if split is None:
+          split = [inp[0].shape[axis] // len(n.output)] * len(n.output)
+          for i in range(inp[0].shape[axis] % len(n.output)):
+            split[i] += 1
+        i, ret = 0, []
         arg = [(0,x) for x in inp[0].shape]
-        for o,s in zip(n.output, opt['split']):
-          arg[opt['axis']] = (i,i+s)
-          intermediate_tensors[o] = inp[0].slice(arg=arg)
+        for s in split:
+          arg[axis] = (i,i+s)
+          ret.append(inp[0].shrink(arg=tuple(arg)))
           i = i+s
-        continue
-      elif n.op_type == "Slice":
+        ret = tuple(ret)
+      elif n.op_type == "Slice": # need to check onnx_model_version
         if onnx_model_version < 10:
           axes, ends, starts, steps = list(opt.get("axes", range(inp[0].ndim))), list(opt["ends"]), list(opt["starts"]), [1]*inp[0].ndim
         else:
@@ -177,7 +177,7 @@ def get_run_onnx(onnx_model: ModelProto):
         new_shape = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in arg)
         if any(s==e for s,e in new_shape): ret = inp[0].shrink(new_shape)
         else: ret = inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
-      elif n.op_type == "Gradient":
+      elif n.op_type == "Gradient": # need to call backward on intermediate_tensors
         assert len(opt["xs"]) == len(inp), f"len(opt['xs']):{len(opt['xs'])}, len(inp):{len(inp)} output and input has to match"
         y = opt["y"]
         intermediate_tensors[y].backward()
