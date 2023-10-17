@@ -415,11 +415,7 @@ class RPNLossComputation:
     labels, regression_targets = self.prepare_targets(anchors, targets)
     sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
     if DEBUG > 0:
-      sampled_pos_inds.realize(), sampled_neg_inds.realize(), labels.realize(), regression_targets.realize()
       print_gpu_memory("after_sampling")
-      if DEBUG > 1:
-        print("sampled_pos_inds", sampled_pos_inds.numpy(), "sampled_neg_inds", sampled_neg_inds.numpy())
-        print("labels", labels.numpy(), "regression_targets", regression_targets.numpy())
     if len(sampled_pos_inds[0]) == 0: return None, None # todo negative mining
     sampled_pos_inds, sampled_neg_inds = Tensor(sampled_pos_inds).squeeze(0), Tensor(sampled_neg_inds).squeeze(0)
     sampled_inds = Tensor.cat(sampled_pos_inds, sampled_neg_inds, dim=0)
