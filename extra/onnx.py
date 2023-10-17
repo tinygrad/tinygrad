@@ -143,7 +143,7 @@ def get_run_onnx(onnx_model: ModelProto):
         if debug >= 3: print(f"\t{x} - {t}")
         inp.append(t)
       opt: Dict = attribute_dict[num]
-      if debug: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
+      if debug >= 1: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
       # some ops live here because they require some local variables
       if n.op_type == "Split":
         if 'axis' not in opt: opt['axis'] = 0
