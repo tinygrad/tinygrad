@@ -35,6 +35,8 @@ from tinygrad.shape.symbolic import Node
 
 MAX_DIMS = 16
 def lin_to_feats(lin):
+  assert lin.shape_len < MAX_DIMS, "too many dims"
+
   all_colors = ["blue", "cyan", "white", "green", "red", "magenta", "yellow"]
   lc = [all_colors.index(x) for x in lin.colors()]
   #my_sts = dedup([(x.shape == lin.full_shape, x.real_strides()) for x in lin.sts[1:]])

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # setup for distributed
 from extra import dist
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, dtypes
 if __name__ == "__main__":
   if getenv("DIST"):
     dist.preinit()
@@ -24,6 +24,13 @@ from extra.dist import collectives
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
+if getenv("HALF", 0):
+  Tensor.default_type = dtypes.float16
+  np_dtype = np.float16
+else:
+  Tensor.default_type = dtypes.float32
+  np_dtype = np.float32
+
 class BatchNorm(nn.BatchNorm2d):
   def __init__(self, num_features):
     super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
@@ -41,11 +48,15 @@ class ConvGroup:
   def __call__(self, x):
     x = self.conv1(x)
     x = x.max_pool2d(2)
+    x = x.float()
     x = self.norm1(x)
+    x = x.cast(Tensor.default_type)
     x = x.gelu()
     residual = x
     x = self.conv2(x)
+    x = x.float()
     x = self.norm2(x)
+    x = x.cast(Tensor.default_type)
     x = x.gelu()
 
     return x + residual
@@ -63,8 +74,10 @@ class SpeedyResNet:
       nn.Linear(512, 10, bias=False),
       lambda x: x.mul(1./9)
     ]
+
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
+    # TODO: remove the pad but instead let the kernel optimizer itself
     forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
     return forward(x) if training else forward(x)*0.5 + forward(x[..., ::-1])*0.5
 
@@ -84,7 +97,7 @@ def train_cifar():
       'label_smoothing':    0.20,
       'momentum':           0.85,
       'percent_start':      0.23,
-      'loss_scale_scaler':  1./512,   # (range: ~1/512 - 16+, 1/128 w/ FP16)
+      'loss_scale_scaler':  1./128   # (range: ~1/512 - 16+, 1/128 w/ FP16)
     },
     'net': {
         'kernel_size': 2,             # kernel size for the whitening layer
@@ -105,6 +118,7 @@ def train_cifar():
     random.seed(getenv('SEED', seed))
 
   # ========== Model ==========
+  # NOTE: np.linalg.eigh only supports float32 so the whitening layer weights need to be converted to float16 manually
   def whitening(X, kernel_size=hyp['net']['kernel_size']):
     def _cov(X):
       X = X/np.sqrt(X.shape[0] - 1)
@@ -122,8 +136,9 @@ def train_cifar():
       return np.flip(Λ, 0), np.flip(V.T.reshape(c*h*w, c, h, w), 0)
 
     Λ, V = _eigens(_patches(X.numpy()))
+    W = V/np.sqrt(Λ+1e-2)[:,None,None,None]
 
-    return Tensor(V/np.sqrt(Λ+1e-2)[:,None,None,None], requires_grad=False)
+    return Tensor(W.astype(np_dtype), requires_grad=False)
 
   # ========== Loss ==========
   def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
@@ -208,8 +223,7 @@ def train_cifar():
 
   transform = [
     lambda x: x / 255.0,
-    lambda x: (x - Tensor(cifar_mean).repeat((1024,1)).T.reshape(1,-1))/ Tensor(cifar_std).repeat((1024,1)).T.reshape(1,-1),
-    lambda x: x.reshape((-1,3,32,32))
+    lambda x: (x.reshape((-1,3,32,32)) - Tensor(cifar_mean).reshape((1,3,1,1)))/Tensor(cifar_std).reshape((1,3,1,1))
   ]
 
   class modelEMA():
@@ -248,10 +262,14 @@ def train_cifar():
   # precompute whitening patches
   W = whitening(X_train)
 
+  # initialize model weights
+  model = SpeedyResNet(W)
+
   # padding is not timed in the original repo since it can be done all at once
   X_train = pad_reflect(X_train, size=hyp['net']['pad_amount'])
 
-  model = SpeedyResNet(W)
+  # Convert data and labels to the default dtype
+  X_train, Y_train, X_test, Y_test = X_train.cast(Tensor.default_type), Y_train.cast(Tensor.default_type), X_test.cast(Tensor.default_type), Y_test.cast(Tensor.default_type)
 
   # parse the training params into bias and non-bias
   params_dict = get_state_dict(model)
@@ -379,7 +397,6 @@ def train_cifar():
 
       if STEPS == 0 or i==STEPS: break
       X, Y = next(batcher)
-      # further split batch if distributed
       if getenv("DIST"):
         X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
       GlobalCounters.reset()

@@ -3,9 +3,11 @@ from models.resnet import ResNet50
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.codegen.search import bufs_from_lin, time_linearizer, get_linearizer_actions
+from tinygrad.features.search import time_linearizer, beam_search
 from tinygrad.helpers import ansilen, DEBUG, getenv
 from tinygrad.graph import print_tree
+from tinygrad.lazy import vars_from_ast
+from tinygrad.shape.symbolic import sym_infer
 
 import shelve
 global_db = shelve.open("/tmp/greedy_cache")
@@ -26,6 +28,9 @@ if __name__ == "__main__":
   out = mdl(x)
   sched = out.lazydata.schedule(seen)
   sched = [x for x in sched if x.ast.op not in LoadOps]
+
+  # focus on one kernel
+  if getenv("KERNEL", -1) >= 0: sched = sched[getenv("KERNEL", -1):getenv("KERNEL", -1)+1]
 
   # work with the schedule
   total_tm = 0
@@ -50,28 +55,22 @@ if __name__ == "__main__":
     if lin.apply_tensor_cores():
       lins.append(lin)
 
-    # try a greedy search
-    if getenv("GREEDY"):
+    # try a beam search
+    if getenv("BEAM"):
       lin = Linearizer(si.ast, device.linearizer_opts)
       if str(lin.ast) in global_db:
         for ao in global_db[str(lin.ast)]:
           lin.apply_opt(ao)
       else:
-        while 1:
-          acted_lins = get_linearizer_actions(lin)
-          tm, gflops = time_linearizer(lin, rawbufs)
-          timed_lins = {k:time_linearizer(v, rawbufs)[0] for k,v in acted_lins.items()}
-          opts = sorted(timed_lins.items(), key=lambda x: x[1])
-          if len(opts) == 0 or opts[0][1] >= tm: break   # we are done
-          lin = acted_lins[opts[0][0]]
-          if DEBUG >= 1: print(f"{opts[0][1]*1e3:10.2f} ms from {len(opts):3d} actions", lin.colored_shape())
+        lin = beam_search(lin, rawbufs, getenv("BEAM"))
         global_db[str(lin.ast)] = lin.applied_opts
       lins.append(lin)
 
     # benchmark the programs
     choices = []
     for lin in lins:
-      tm, gflops = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10, should_copy=False)
+      tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10, should_copy=False)
+      gflops = sym_infer(lin.info.flops, {k:k.min for k in vars_from_ast(lin.ast)})*1e-9/tm
       choices.append((tm, gflops, lin))
 
       # print all kernels
