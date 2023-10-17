@@ -57,7 +57,6 @@ def load_state_dict(model, state_dict, strict=True):
       if k not in state_dict and not strict:
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
-    
       v.assign(state_dict[k].to(v.device)).realize()
 
 # torch support!

@@ -1,18 +1,12 @@
-from os import path
+import os
 from extra.export_model import compile_net, jit_model
-from examples.stable_diffusion import StableDiffusion, ClipTokenizer
+from examples.stable_diffusion import StableDiffusion
 from tinygrad.nn.state import get_state_dict, safe_save, safe_load_metadata, torch_load, load_state_dict
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
 from extra.utils import download_file
-from tinygrad.helpers import prod
-import numpy as np
-import os
-import tempfile
+from typing import NamedTuple, Any, List
 from pathlib import Path
-import math
-from tqdm import tqdm
-from tinygrad.helpers import dtypes, GlobalCounters
 
 FILENAME = Path(__file__).parent.parent.parent.parent / "weights/sd-v1-4.ckpt"
 
@@ -50,85 +44,32 @@ if __name__ == "__main__":
   download_file('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', FILENAME)
   load_state_dict(model, torch_load(FILENAME)['state_dict'], strict=False)
 
-  def text_model(model):
-    def forward(prompt):
-      return model.cond_stage_model.transformer.text_model(prompt).realize()
-    
-    return {'forward': forward, 'name': 'text_model'}
-  
-  def diffusor(model):
-    def forward(latent, timestep, unconditional_context, context):
-      latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep, unconditional_context.cat(context, dim=0))
-      unconditional_latent, latent = latents[0:1], latents[1:2]
+  class Step(NamedTuple):
+    name: str = ""
+    input: List[Tensor] = []
+    forward: Any = None
 
-      unconditional_guidance_scale = 7.5
-      e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
-      return e_t
-
-    return {'forward': forward, 'name': 'diffusor'}
-  
-  def get_x_prev_and_pred_x0():
-    def forward(x, e_t, a_t, a_prev):
-      temperature = 1
-      sigma_t = 0
-      sqrt_one_minus_at = (1-a_t).sqrt()
-      #print(a_t, a_prev, sigma_t, sqrt_one_minus_at)
-
-      pred_x0 = (x - sqrt_one_minus_at * e_t) / a_t.sqrt()
-
-      # direction pointing to x_t
-      dir_xt = (1. - a_prev - sigma_t**2).sqrt() * e_t
-
-      x_prev = a_prev.sqrt() * pred_x0 + dir_xt
-      return x_prev
-    
-    return {'forward': forward, 'name': 'get_x_prev_and_pred_x0'}
-  
-  def decoder(model):
-    def forward(latent):
-      x = latent.reshape(1,4,64,64)
-      x = model.first_stage_model.post_quant_conv(1/0.18215 * x)
-      x = model.first_stage_model.decoder(x)
-
-      # make image correct size and scale
-      x = (x + 1.0) / 2.0
-      return (x.reshape(3,512,512).permute(1,2,0).clip(0,1)*255)
-
-    return {'forward': forward, 'name': 'decoder'}
-  
-  tokenizer = ClipTokenizer()
-  prompt = Tensor([tokenizer.encode("Test test test")]).expand(1, 77)
-  print(prompt)
   sub_steps = [
-    {"input": prompt, "run": text_model(model)}, 
-    {"input": [Tensor.randn(1,4,64,64), Tensor([800]), Tensor.randn(1, 77, 768), Tensor.randn(1, 77, 768)], "run": diffusor(model)}, 
-    {"input": [Tensor.randn(1,4,64,64), Tensor.randn(1,4,64,64), Tensor.randn(1), Tensor.randn(1)], "run": get_x_prev_and_pred_x0()}, 
-    {"input": Tensor.randn(1,4,64,64), "run": decoder(model)}
+    Step(name = "textModel", input = [Tensor.randn(1, 77)], forward = model.cond_stage_model.transformer.text_model), 
+    Step(name = "diffusor", input = [Tensor.randn(1, 77, 768), Tensor.randn(1, 77, 768), Tensor.randn(1,4,64,64), Tensor.rand(1), Tensor.randn(1), Tensor.randn(1), Tensor.randn(1)], forward = model),
+    Step(name = "decoder", input = [Tensor.randn(1,4,64,64)], forward = model.decode)
   ]
   
   prg = ""
 
-  def compile_step(model, step_data, input):
-    if hasattr(model, "forward"):
-      delattr(model, 'forward')
-
-    print(f'in compile step={input}')
-    setattr(model, 'forward', step_data["forward"])
-    run, special_names = jit_model(model, *input)
-    print(f'special_names={special_names}')
+  def compile_step(model, step: Step):
+    run, special_names = jit_model(step, *step.input)
     functions, statements, bufs, _ = compile_net(run, special_names)
-    # Common part used by all substeps
     state = get_state_dict(model)
     weights = {id(x.lazydata.realized): name for name, x in state.items()}
 
-
     kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
-    kernel_names = ', '.join([name for (name, _args, _global_size, _local_size) in statements])
+    kernel_names = ', '.join([name for (name, _, _, _) in statements])
     kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
     bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}'], '{weights[_key]}'))") + ";"  for name,(size,dtype,_key) in bufs.items()])
     gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate(special_names.items()) if value != "outputs"])
     input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new Float32Array(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,(_,value) in enumerate(special_names.items()) if value != "outputs"])
-    return f"""\n    var {step_data["name"]}Model = function() {{
+    return f"""\n    var {step.name} = function() {{
     
     {kernel_code}
 
@@ -137,7 +78,6 @@ if __name__ == "__main__":
         const metadata = getTensorMetadata(safetensor[0]);
 
         {bufs}
-
         
         {gpu_write_bufs}
         const gpuReadBuffer = device.createBuffer({{ size: outputs.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }});
@@ -156,7 +96,7 @@ if __name__ == "__main__":
             device.queue.submit([gpuCommands]);
 
             await gpuReadBuffer.mapAsync(GPUMapMode.READ);
-            const resultBuffer = new Float32Array(gpuReadBuffer.size);
+            const resultBuffer = new Float32Array(gpuReadBuffer.size/4);
             resultBuffer.set(new Float32Array(gpuReadBuffer.getMappedRange()));
             gpuReadBuffer.unmap();
             return resultBuffer;
@@ -167,14 +107,14 @@ if __name__ == "__main__":
   """
 
   for step in sub_steps:
-    run = step["run"]
-    print(f'Executing step={run["name"]}')
-    prg += compile_step(model, run, step["input"])
+    print(f'Executing step={step.name}')
+    prg += compile_step(model, step)
 
-    if run["name"] == "diffusor":
+    if step.name == "diffusor":
       state = get_state_dict(model)
-      safe_save(state, path.join(path.dirname(__file__), "net.safetensors"))
+      safe_save(state, os.path.join(os.path.dirname(__file__), "net.safetensors"))
       part_start_offsets = create_multipart_safetensor("./net.safetensors", 1073741824)
+      os.remove("net.safetensors") #don't need the original after splitting
       safetensor_parts = '\n    '.join([f"parts.push(new Uint8Array(await (await fetch('./net_part{i}.safetensors')).arrayBuffer()));" for i, _ in enumerate(part_start_offsets)])
 
   prekernel = f"""const getTensorMetadata = (safetensorBuffer) => {{
@@ -252,5 +192,5 @@ if __name__ == "__main__":
     passEncoder.end();
   }};"""
 
-  with open(path.join(path.dirname(__file__), "net.js"), "w") as text_file:
+  with open(os.path.join(os.path.dirname(__file__), "net.js"), "w") as text_file:
     text_file.write(prekernel + prg)
