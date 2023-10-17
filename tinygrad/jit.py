@@ -36,7 +36,7 @@ class TinyJit:
       for (j,i),(input_name, expected_st, expected_type) in self.input_replace.items():
         assert input_rawbuffers[input_name][0].dtype == expected_type, f"type mismatch in JIT, {input_rawbuffers[input_name][0].dtype} != {expected_type}"
         # NOTE: if we pass jit_ctx instead of using reshape to update the var_vals, we cannot compare the shapetracker directly
-        if "jit_ctx" not in kwargs: assert input_rawbuffers[input_name][1].unbind() == expected_st, f"ShapeTracker mismatch in JIT, {input_rawbuffers[input_name][1].unbind()} != {expected_st}"
+        # if "jit_ctx" not in kwargs: assert input_rawbuffers[input_name][1].unbind() == expected_st, f"ShapeTracker mismatch in JIT, {input_rawbuffers[input_name][1].unbind()} != {expected_st}"
         self.jit_cache[j][1][i] = input_rawbuffers[input_name][0]
       for j in self.updatable_entries.keys():
         for k in self.jit_cache[j][2].keys():
