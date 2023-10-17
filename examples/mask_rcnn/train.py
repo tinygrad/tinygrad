@@ -130,7 +130,7 @@ def main():
       print("&&&& MLPERF METRIC STATUS=ABORTED")
 
 def simple():
-  from loss import make_match_fn,make_balanced_sampler_fn,generate_rpn_labels,RPNLossComputation
+  from loss import make_match_fn,make_balanced_sampler_fn,generate_rpn_labels,RPNLossComputation, print_gpu_memory
   from extra.datasets.coco import BASEDIR
 
   hq_fn, _ = make_match_fn(0.7, 0.4)
