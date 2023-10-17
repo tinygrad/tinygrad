@@ -51,14 +51,14 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
     w = w.slice(tuple((0, rcout) if i == 1 else (0, s) for i,s in enumerate(w.shape)))
 
   # packed (note: flipping bs and iy would make the auto-padding work)
-  x = x.permute(0,2,3,1).reshape(bs * iy, ix * groups * cin//4, 4)
+  x = x.permute(0,2,3,1)
   cin_last = iy == 1 and ix == 1
-  if cin == 1: w = w.reshape(cout//4,4,H*W).permute(0,2,1)
-  elif cin_last: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,1,3).reshape(cout//4, H*cin//4*W*4, 4)
-  else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,3,1).reshape(cout//4, H*cin//4*W*4, 4)
+  if cin == 1: w = w.reshape(cout//4,4,H,W).permute(0,2,3,1)
+  elif cin_last: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,1,3)
+  else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,3,1)
 
   # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
-  if IMAGE >= 2: x,w = x.cast(base_image_type(x.shape)), w.cast(base_image_type(w.shape))
+  if IMAGE >= 2: x,w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))), w.cast(base_image_type((cout//4, H*W*cin, 4)))
   x, w = x.contiguous(), w.contiguous()
   if getenv("PREREALIZE", 1) and get_single_root(w.lazydata).realized: w.realize()
 
@@ -84,12 +84,9 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   w = w.reshape((1, 1, 1, *cout_expand, rcin_hi, rcin_lo, H, W)).expand(x.shape)
 
   # the conv! (+ the bias)
-  ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1))
-
-  # reshape to image and cast back to image
-  ret = ret.reshape(bs*oy, ox*cout//4, 4)
-  if IMAGE >= 2: ret = ret.cast(base_image_type(ret.shape))
-  if IMAGE >= 3: ret = ret.contiguous()
+  ret = x*w
+  if IMAGE >= 2: ret = ret.cast(base_image_type((bs*oy, ox*cout//4, 4)))
+  ret = ret.sum((-4, -3, -2, -1))
 
   # undo hack for non multiples of 4 on C.rcout
   if added_output_channels != 0:

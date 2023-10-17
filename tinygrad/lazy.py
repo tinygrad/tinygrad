@@ -18,6 +18,8 @@ sys.setrecursionlimit(10000)
 OPT = getenv("OPT", 2)
 LAZYCACHE = getenv("LAZYCACHE", 1)
 
+OPT = 0
+
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
 MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS = OPT>=2, OPT>=2
@@ -279,7 +281,7 @@ class LazyBuffer:
   def permute(self: LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
     if arg == tuple(range(len(self.shape))): return self
     if not self.realized and self.op.op == MovementOps.PERMUTE: return self.op.src[0].permute(tuple([self.op.arg[i] for i in arg]))
-    if not self.realized:
+    if SHUFFLE_MOVEMENT_OPS and not self.realized:
       if PUSH_PERMUTES and self.optype == ReduceOps:
         # reduceops have one buffer input, permute it
         narg = tuple([self.op.arg[a] for a in arg])

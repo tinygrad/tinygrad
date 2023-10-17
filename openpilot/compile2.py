@@ -13,9 +13,9 @@ import io
 from typing import Tuple, List
 from extra.utils import fetch
 from extra.onnx import get_run_onnx
-from tinygrad.graph import print_tree
+from tinygrad.graph import print_tree, log_schedule_item
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, DEBUG, getenv, ImageDType
+from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, DEBUG, getenv, ImageDType, GRAPH
 from tinygrad.realize import run_schedule
 from tinygrad.ops import LoadOps, Device, ScheduleItem
 from tinygrad.features.image import fix_schedule_for_images
@@ -64,15 +64,19 @@ def lb_to_numbers(schedule):
 
 if __name__ == "__main__":
   schedule, schedule_independent = get_schedule(sys.argv[1] if len(sys.argv) > 1 else OPENPILOT_MODEL)
-  run_schedule(schedule_independent, disable_logging=True)
-  schedule = fix_schedule_for_images(schedule)
-
-  image_count = 0
-  for si in schedule:
-    if isinstance(si.out.dtype, ImageDType):
-      image_count += 1
-
+  schedule, schedule_input = partition(schedule, lambda x: x.ast.op not in LoadOps)
+  print(f"{len(schedule_input)} inputs")
+  #schedule = fix_schedule_for_images(schedule)
+  image_count = sum(isinstance(si.out.dtype, ImageDType) for si in schedule)
   print(f"**** running real kernels {image_count}/{len(schedule)} images ****")
+
+  if GRAPH:
+    for si in schedule_input: log_schedule_item(si)
+    for si in schedule: log_schedule_item(si)
+
+  exit(0)
+
+  run_schedule(schedule_independent, disable_logging=True)
   with Context(DEBUG=2, BEAM=getenv("LATEBEAM")):
     GlobalCounters.reset()
     run_schedule(schedule)
