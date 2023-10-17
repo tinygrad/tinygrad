@@ -1,9 +1,9 @@
 from __future__ import annotations
-import time, importlib, inspect, functools, pathlib
+import time, importlib, inspect, functools, pathlib, itertools, random
 import numpy as np
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer
 from dataclasses import dataclass
@@ -184,6 +184,18 @@ class ASTRunner:
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                      display_name=k.display_name, runtime_args={"binary": False})
 
+  def optimize_local_size(self, global_size, rawbufs) -> List[int]:
+    assert self.global_size is not None, "needs a global size to optimize local size"
+    MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
+    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
+    local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
+    def try_exec(local_size):
+      try:
+        return self.clprg([g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)], local_size, *rawbufs, wait=True)
+      except Exception:
+        return float('inf')
+    return min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
+
   def build(self, runtime, batch_exec=BasicBatchExecutor):
     self.clprg, self.batch_exec = runtime(self.name, self.prg, **self.runtime_args), batch_exec
     return self
@@ -201,7 +213,10 @@ class ASTRunner:
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
     if var_vals is None: var_vals = {}
     global_size, local_size = self.launch_dims(var_vals)
-    if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
+    if global_size is not None and local_size is None:
+      local_size = self.local_size = self.optimize_local_size(global_size, rawbufs)
+      global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
+    if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=2): GlobalCounters.time_sum_s += et
     op_estimate = sym_infer(self.op_estimate, var_vals)
     if DEBUG >= 2:
       print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(37-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(global_size):18s} {str(local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
@@ -253,10 +268,18 @@ class Compiled:
       from tinygrad.codegen.linearizer import Linearizer
       k = Linearizer(ast, self.linearizer_opts)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
-      from tinygrad.features.kopt import kernel_optimize
-      if getenv("KOPT"): kernel_optimize(k, lambda: Linearizer(ast, self.linearizer_opts), self.to_program, rawbuffers, ast)
-      elif not getenv("NOOPT"):
+      if not getenv("NOOPT"):
         if not k.apply_tensor_cores(getenv("TC", 1)): k.hand_coded_optimizations()
+        if BEAM:
+          kb = Linearizer(ast, self.linearizer_opts)
+          kb.required_optimizations()
+          kb.dont_use_locals = bool(getenv("NOLOCALS"))
+          from tinygrad.features.search import beam_search, time_linearizer
+          kb = beam_search(kb, rawbuffers, BEAM.value)
+          baseline, beamtime = time_linearizer(k, rawbuffers, allow_test_size=False, disable_cache=True), time_linearizer(kb, rawbuffers, allow_test_size=False, disable_cache=True)
+          if beamtime < baseline:
+            if DEBUG >= 1: print(f"beam search {beamtime*1e6:<12.2f} beat baseline {baseline*1e6:<12.2f} by {baseline/beamtime:.2f}x")
+            k = kb
       return self.to_program(k)
 
     if getenv("ENABLE_METHOD_CACHE", 1):
