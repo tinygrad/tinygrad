@@ -20,6 +20,50 @@ def pretty_ptx(s):
   return s
 def arch(): return "sm_" + "".join([str(x) for x in pycuda.driver.Context.get_device().compute_capability()])
 
+# TODO: Unify with HIP graph. They are really the same.
+class CUDAGraph(BasicBatchExecutor):
+  def __init__(self, jit_cache: List[Tuple[Any, Any, Any]]):
+    self.info, self.graphs, self.instances = [], [], []
+
+    # Check if CUDAGraph could run the given jit_cache. If not, no hip graph is created and HIPGraph is a BasicBatchExecutor.
+    if DEBUG>0 or not all(isinstance(prg, ASTRunner) and isinstance(prg.clprg, CUDAProgram) for prg,_,_ in jit_cache): return # Only CUDAProgram can be captured.
+    if len(set([pargs[0]._device for _,pargs,_ in jit_cache])) != 1: return # Only one device is supported now.
+
+    # Splitting the JIT cache into batches to enable parallel execution (cpu+gpu). Batch sizes follow a logarithmic pattern: 4, 8, 16, 32, and so on.
+    # This helps push tasks to the GPU while the CPU updates the next graph.
+    capture_stream = cuda.Stream()
+    capture_stream.begin_capture()
+    for j,(prg, pargs, variables) in enumerate(jit_cache):
+      # Capture node
+      global_size, local_size = prg.launch_dims(variables)
+      _, _, graph, deps = capture_stream.get_capture_info_v2()
+      cuda_args = [x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) if (isinstance(x, int) and not getenv("CUDACPU")) else x for x in [*pargs, *variables.values()]]
+      graph_node = graph.add_kernel_node(*cuda_args, block=tuple(local_size), grid=tuple(global_size), func=prg.clprg.prg, dependencies=deps)
+      capture_stream.update_capture_dependencies([graph_node], 1)
+      self.info.append((self.__get_batch(j), graph_node, params))
+
+      # If the next batch is different or this is the last entry, finish the graph.
+      if self.__get_batch(j) != self.__get_batch(j+1) or j==len(jit_cache)-1:
+        self.graphs.append(capture_stream.end_capture())
+        self.instances.append(self.graphs[-1].instantiate())
+        if j!=len(jit_cache)-1: capture_stream.begin_capture()
+  def __update(self, nodeid, inst, prg, pargs, variables, updated_args=None):
+    batchid, graph_node, params = self.info[nodeid]
+    global_size, local_size = prg.launch_dims(variables)
+    cuda_args = [x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) if (isinstance(x, int) and not getenv("CUDACPU")) else x for x in [*pargs, *variables.values()]]
+    inst.kernel_node_set_params(*cuda_args, block=tuple(local_size), grid=tuple(global_size), func=prg.clprg.prg, kernel_node=graph_node)
+    self.info[nodeid] = (batchid, graph_node, params)
+
+  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
+    if not self.instances: return super().exec(jit_cache, updatable_entries) # No graph is created switch to basic executor.
+    update_keys_per_batch = collections.defaultdict(list)
+    for j in updatable_entries.keys(): update_keys_per_batch[self.info[j][0]].append(j)
+    for i,inst in enumerate(self.instances):
+      for j in update_keys_per_batch[i]: self.__update(j, inst, jit_cache[j][0], jit_cache[j][1], jit_cache[j][2], updated_args=updatable_entries[j])
+      inst.launch()
+    super().recalc_stat(jit_cache)
+  def __get_batch(self, j): return int(math.log(j+4,2)-2) # Batch sizes are logarithmic 4,8,16,32,...
+
 if getenv("CUDACPU", 0) == 1:
   import ctypes, ctypes.util
   lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
