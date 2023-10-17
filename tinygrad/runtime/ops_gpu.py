@@ -1,15 +1,15 @@
 from __future__ import annotations
-import pathlib, functools
+import pathlib
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
 from tinygrad.ops import Compiled
+from tinygrad.renderer.opencl import OpenCLRenderer
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
-OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
+OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
 ROCM_LLVM_PATH = pathlib.Path("/opt/rocm/llvm/bin")
@@ -94,7 +94,7 @@ class CLProgram:
         cl_bufs.append(x._buf)
         if hasattr(x, "event"): wait_for.append(x.event)
       else: cl_bufs.append(x)
-    e = self.clprgs[cl_bufs[0].device](CL.cl_queue[cl_bufs[0].device], [g*l for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *cl_bufs, wait_for=wait_for)
+    e = self.clprgs[cl_bufs[0].device](CL.cl_queue[cl_bufs[0].device], [int(g*l) for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *cl_bufs, wait_for=wait_for)
     if wait:
       e.wait()
       try:
@@ -103,9 +103,4 @@ class CLProgram:
         return None
     return None
 
-renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
-  kernel_prefix = "__kernel ", buffer_prefix = "__global ", smem_align = "__attribute__ ((aligned (16))) ", smem_prefix = "__local ", arg_int_prefix = "const int",
-  half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
-  barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
-  gid = [f'get_group_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True))
-GPUBuffer = Compiled(CLBuffer, LinearizerOptions(), renderer, CLProgram, CL.synchronize)
+GPUBuffer = Compiled(CLBuffer, LinearizerOptions(), OpenCLRenderer, CLProgram, CL.synchronize)

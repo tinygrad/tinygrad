@@ -1,24 +1,24 @@
 from tinygrad.runtime.ops_gpu import CLProgram, CL, CLBuffer
+from tinygrad.helpers import dtypes
 import time
 
 N = 1000000
-a = CLBuffer(N*4)
-b = CLBuffer(N*4)
-c = CLBuffer(N*4)
+a = CLBuffer(N, dtypes.float32)
+b = CLBuffer(N, dtypes.float32)
+c = CLBuffer(N, dtypes.float32)
 
 prg = CLProgram("test", """__kernel void test(__global float *a, __global float *b, __global float *c) {
   int idx = get_global_id(0);
   a[idx] = b[idx] + c[idx];
 }""")
-prg.clprg(CL.cl_queue[0], [N,], None, a._cl, b._cl, c._cl)
-
+prg.clprgs[0](CL.cl_queue[0], [N,], None, a._buf, b._buf, c._buf)
 t1 = time.monotonic_ns()
-e1 = prg.clprg(CL.cl_queue[0], [N,], None, a._cl, b._cl, c._cl)
+e1 = prg.clprgs[0](CL.cl_queue[0], [N,], None, a._buf, b._buf, c._buf)
 CL.synchronize()
 t2 = time.monotonic_ns()
 time.sleep(3)
 t3 = time.monotonic_ns()
-e2 = prg.clprg(CL.cl_queue[0], [N,], None, a._cl, b._cl, c._cl)
+e2 = prg.clprgs[0](CL.cl_queue[0], [N,], None, a._buf, b._buf, c._buf)
 CL.synchronize()
 t4 = time.monotonic_ns()
 

@@ -356,9 +356,8 @@ class RPNLossComputation:
 
   def match_targets_to_anchors(self, anchors: BoxList, targets: BoxList):
     match_quality_matrix = boxlist_iou(anchors, targets)
-    if DEBUG > 0: print("match_quality_matrix", match_quality_matrix.numpy())
     matched_idxs = self.proposal_matcher(match_quality_matrix)
-    if DEBUG > 0: print("matched_idxs", matc hed_idxs.numpy())
+    if DEBUG > 0: print("matched_idxs", matched_idxs.numpy())
     matched_targets = targets[matched_idxs.maximum(0)] # drop negatives
     if DEBUG > 0: print("matched_targets", matched_targets.bbox.numpy())
     return matched_targets, matched_idxs
@@ -367,17 +366,14 @@ class RPNLossComputation:
     labels = []
     regression_targets = []
     for anchors_per_image, targets_per_image in zip(anchors, targets):
-      if DEBUG > 0: print("anchors_per_image", anchors_per_image.bbox.numpy(), "targets_per_image", targets_per_image.bbox.numpy())
       matched_targets, matched_idxs = self.match_targets_to_anchors(
           anchors_per_image, targets_per_image
       )
-      if DEBUG > 0: print("matched_targets", matched_targets.bbox.numpy(), "matched_idxs", matched_idxs.numpy())
 
       # TODO this has fp errors
       regression_targets_per_image = self.box_coder.encode(
           matched_targets.bbox, anchors_per_image.bbox
       )
-      if DEBUG > 0: print("regression_targets_per_image", regression_targets_per_image.numpy())
       # all matches become 1 (roi head) (.7 and above amplified)
       labels_per_image = self.generate_labels_func(matched_idxs)
       labels_per_image = labels_per_image.cast(dtype=dtypes.float32)
@@ -390,7 +386,6 @@ class RPNLossComputation:
 
       # discards weak signals (when lq matches is False), -1 is ignored by fg_bg_sampler
       labels_per_image = (matched_idxs == -2).where(-1, labels_per_image)
-      if DEBUG > 0: print("labels_per_image", labels_per_image.numpy())
       labels.append(labels_per_image)
       regression_targets.append(regression_targets_per_image)
 

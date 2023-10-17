@@ -1,8 +1,8 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
-import functools
+import functools, operator
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, cast
+from typing import Tuple, List, Optional, Dict, cast
 from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG, dedup
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, sint
@@ -82,13 +82,18 @@ class ShapeTracker:
   # this is the real size (ish)
   def size(self): return self.views[-1].size()
 
-  def var_vals(self) -> List[Variable]:
-    ret = []
-    for v in self.views:
-      for x in v.shape+v.strides+(v.offset,):
-        if isinstance(x, Node):
-          ret += x.vars()
-    return dedup(ret)
+  def vars(self) -> List[Variable]: return dedup(functools.reduce(operator.add, [v.vars() for v in self.views], []))
+
+  @property
+  def var_vals(self) -> Dict[Variable, int]:
+    ret:Dict[Variable, int] = {}
+    for v in self.vars():
+      var, val = v.unbind()
+      assert var not in ret or ret[var] == val, f"{var} has conflicted values {val} and {ret[var]}"
+      ret[var] = val
+    return ret
+
+  def unbind(self) -> ShapeTracker: return ShapeTracker(tuple(v.unbind() for v in self.views))
 
   def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
     to_apply:List[Tuple[MovementOps, Tuple]] = []

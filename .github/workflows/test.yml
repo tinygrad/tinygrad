@@ -77,6 +77,14 @@ jobs:
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
       run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
+    - name: Use as an external pacakge
+      run: |
+        mkdir $HOME/test_external_dir
+        cd $HOME/test_external_dir
+        python -m venv venv
+        source venv/bin/activate
+        pip install $GITHUB_WORKSPACE
+        python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
 
   testtorch:
     name: Torch Tests
@@ -163,9 +171,6 @@ jobs:
           PYTHONPATH="." python test/external/dist/test_world.py
           PYTHONPATH="." python test/external/dist/test_collectives.py
       - if: ${{ matrix.task == 'realworld' }}
-        name: Test KOPT
-        run: PYTHONPATH="." KOPT=1 BUDGET=20 GPU=1 DEBUG=1 python -m pytest -rA -n=auto test/models/test_real_world.py
-      - if: ${{ matrix.task == 'realworld' }}
         name: Run GPT2
         run: |
           PYTHONPATH="." JIT=0 python examples/gpt2.py --model_size=gpt2 --prompt "Hello." --count 10 --temperature 0 --timing
@@ -201,6 +206,8 @@ jobs:
       run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_jit.py
     - name: Run symbolic shapetracker test
       run: METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py test/test_symbolic_ops.py test/test_symbolic_jit.py
+    - name: Run whisper test
+      run: METAL=1 python -m pytest test/models/test_whisper.py
     - name: Check Device.DEFAULT
       run: WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
     - name: Run linearizer and tensor core test
