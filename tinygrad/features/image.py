@@ -113,6 +113,7 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
       if b.op != BufferOps.MEM: continue
       # TODO: unit_stride axes will fail if there's a mask, even if the mask is divisble by four. this is too aggressive
       if isinstance(si.inputs[b.arg.idx-1].dtype, ImageDType) and (b.arg.st.real_offset() % 4 != 0 or not any(b.arg.st.shape[x]%4 == 0 for x in b.arg.st.unit_stride_axes())):
+        assert not si.inputs[b.arg.idx-1].realized, "can't fix this if it's been realized"
         if DEBUG >= 1: print(f"{i:3d}: rewrite input, image dtype {si.inputs[b.arg.idx-1].dtype}, {b.arg.st.views}")
         si.inputs[b.arg.idx-1].dtype = dtypes.float32
 
@@ -156,6 +157,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       assert isinstance(node, LtNode)
       node_flat, node_vars = node.a.flat_components if isinstance(node.a, SumNode) else [node.a], node.vars()
       same_sym = [i for (i, var) in idxy_flat_var if var in node_vars]
+      if len(same_sym) == 0: continue
       first, second = sorted(same_sym)[0], sorted(node_flat)[0]
       f_b = 1 if isinstance(first, Variable) else first.b
       s_b = 1 if isinstance(second, Variable) else second.b
@@ -186,5 +188,5 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       if idy_vars == node_vars or idy_vars & node_vars == set(): ones.append(node)
     valid = Variable.ands([i for i in nodes if i not in ones])
 
-  if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
+  if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy, valid)
   return (idx, idy), valid

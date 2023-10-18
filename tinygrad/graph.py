@@ -76,7 +76,7 @@ def log_schedule_item(si: ScheduleItem):
         else:
           inter_node = node_count
           node_count += 1
-          G.add_node(inter_node, style='filled', fillcolor="#80ff80", color="black", label=f"{st.shape}\n{st.real_strides()}")
+          G.add_node(inter_node, style='filled', fillcolor="#80ff8080", color="black", label=f"{st.shape}\n{st.real_strides()}" + (f"\n{st.real_offset()}" if st.real_offset() != 0 else ""))
           G.add_edge(nm(x), inter_node, color='#00000060')
           G.add_edge(inter_node, nm(si.out), label=get_sop(op), color='#00000060')
       if 'label' not in G.nodes[nm(x)]:
