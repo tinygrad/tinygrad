@@ -67,6 +67,8 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Run Pytest
       run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)"
+    - name: Run ONNX
+      run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
@@ -108,7 +110,7 @@ jobs:
     - name: Run Pytest
       run: TORCH=1 python -m pytest -n=auto test/
     - name: Run ONNX
-      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
+      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
 
   testopencl:
     strategy:
@@ -206,6 +208,8 @@ jobs:
       run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_jit.py
     - name: Run symbolic shapetracker test
       run: METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py test/test_symbolic_ops.py test/test_symbolic_jit.py
+    - name: Run ONNX
+      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Run whisper test
       run: METAL=1 python -m pytest test/models/test_whisper.py
     - name: Check Device.DEFAULT
@@ -223,7 +227,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda] #, triton] #, ptx]
+        backend: [llvm, clang, gpu, cuda,  triton] #, ptx]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
@@ -255,7 +259,7 @@ jobs:
           sudo apt update -y
           sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
       - name: Cache gpuocelot
-        if: matrix.backend == 'cuda' || matrix.backend == 'ptx'|| matrix.backend == 'triton'
+        if:  matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         id: cache-build
         uses: actions/cache@v3
         env:
@@ -284,6 +288,9 @@ jobs:
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
         run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}'
+      - name: Run ONNX (not cuda)
+        if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
+        run: python -m pytest -n=auto test/external/external_test_onnx_backend.py
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
@@ -292,7 +299,7 @@ jobs:
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
       - name: Run pytest (triton)
         if: matrix.backend=='triton'
-        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
+        run: python -m pytest -v -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models 
 
   testunicorn:
     name: ARM64 unicorn Test

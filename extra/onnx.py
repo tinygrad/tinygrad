@@ -142,57 +142,26 @@ def get_run_onnx(onnx_model: ModelProto):
         t = fetch_tensor(x)
         if debug >= 3: print(f"\t{x} - {t}")
         inp.append(t)
-      opt = attribute_dict[num]
+      opt: Dict = attribute_dict[num]
       if debug >= 1: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
-      # free ones
-      if n.op_type == "Relu": ret = inp[0].relu()
-      elif n.op_type == "Sigmoid": ret = inp[0].sigmoid()
-      elif n.op_type == "Tanh": ret = inp[0].tanh()
-      elif n.op_type == "MatMul": ret = inp[0].matmul(inp[1])
-      # one liners
-      elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt.get('alpha', 1.0))
-      elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
-      elif n.op_type == "Transpose": ret = inp[0].permute(order=opt.get('perm', list(range(len(inp[0].shape))[::-1])))
-      elif n.op_type == "Squeeze":
-        axes = opt['axes'] if 'axes' in opt else safe_numpy(inp[1])
-        axes = [int(x) if x >= 0 else int(x+inp[0].ndim) for x in axes]
-        ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in axes])
-      elif n.op_type == "Div":
-        # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
-        ret = inp[0].div(inp[1]) if inp[0].dtype == dtypes.float else inp[0].div(inp[1]).floor()
-      elif n.op_type == "Constant":
-        if 'value' in opt: ret = opt['value'] # tensor
-        elif 'value_float' in opt: ret = Tensor(np.array(opt['value_float'], dtype=np.float32), requires_grad=False)
-        elif 'value_int' in opt: ret = Tensor(np.array(opt['value_int'], dtype=np.int64), requires_grad=False)
-        elif 'value_floats' in opt: ret = Tensor(np.array(opt['value_floats'], dtype=np.float32), requires_grad=False)
-        elif 'value_ints' in opt: ret = Tensor(np.array(opt['value_ints'], dtype=np.int64), requires_grad=False)
-        else: raise NotImplementedError(f'Constant not implemented for {opt}')
-      elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
-      elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
-        if n.op_type == "Add": ret = inp[0] + inp[1] if inp[0].dtype == dtypes.float else (inp[0] + inp[1]).cast(inp[0].dtype)
-        if n.op_type == "Sub": ret = inp[0] - inp[1] # some tests have ints as inp
-        if n.op_type == "Mul": ret = inp[0] * inp[1] if inp[0].dtype == dtypes.float else (inp[0] * inp[1]).cast(inp[0].dtype)
-        if n.op_type == "Pow": ret = (inp[0].float() ** inp[1].float()).cast(inp[0].dtype)
-      elif n.op_type == "Split":
-        if 'axis' not in opt: opt['axis'] = 0
-        if 'num_outputs' in opt or len(inp) == 1:
-          opt['split'] = [inp[0].shape[opt['axis']] // len(n.output)] * len(n.output)
-          for i in range(inp[0].shape[opt['axis']] % len(n.output)):
-            opt['split'][i] += 1
-        if 'split' not in opt: opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
-        i = 0
+      # some ops live here because they require some local variables
+      if n.op_type == "Split": # have to use n.output for cases when num_outputs is absent
+        axis = opt.get("axis", 0)
+        split = None if len(inp) == 1 else [int(x) for x in safe_numpy(inp[1])]
+        if split is None:
+          split = [inp[0].shape[axis] // len(n.output)] * len(n.output)
+          for i in range(inp[0].shape[axis] % len(n.output)):
+            split[i] += 1
+        i, ret = 0, []
         arg = [(0,x) for x in inp[0].shape]
-        for o,s in zip(n.output, opt['split']):
-          arg[opt['axis']] = (i,i+s)
-          intermediate_tensors[o] = inp[0].slice(arg=arg)
+        for s in split:
+          arg[axis] = (i,i+s)
+          ret.append(inp[0].shrink(arg=tuple(arg)))
           i = i+s
-        continue
-      elif n.op_type == "Slice":
+        ret = tuple(ret)
+      elif n.op_type == "Slice": # need to check onnx_model_version
         if onnx_model_version < 10:
-          axes = list(opt.get("axes", range(inp[0].ndim)))
-          ends = list(opt["ends"])
-          starts = list(opt["starts"])
-          steps = [1]*inp[0].ndim
+          axes, ends, starts, steps = list(opt.get("axes", range(inp[0].ndim))), list(opt["ends"]), list(opt["starts"]), [1]*inp[0].ndim
         else:
           starts, ends = inp[1:3]
           axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3]).tolist()
@@ -208,10 +177,7 @@ def get_run_onnx(onnx_model: ModelProto):
         new_shape = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in arg)
         if any(s==e for s,e in new_shape): ret = inp[0].shrink(new_shape)
         else: ret = inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
-      elif n.op_type == "Shrink":
-        bias = opt['bias'] if 'bias' in opt else 0
-        ret = (inp[0] < -opt['lambd'])*(inp[0]+bias) + (inp[0] > opt['lambd'])*(inp[0]-bias)
-      elif n.op_type == "Gradient":
+      elif n.op_type == "Gradient": # need to call backward on intermediate_tensors
         assert len(opt["xs"]) == len(inp), f"len(opt['xs']):{len(opt['xs'])}, len(inp):{len(inp)} output and input has to match"
         y = opt["y"]
         intermediate_tensors[y].backward()
