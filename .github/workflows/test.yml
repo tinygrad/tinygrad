@@ -71,8 +71,6 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Run Pytest
       run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)"
-    - name: Run ONNX
-      run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
@@ -121,7 +119,7 @@ jobs:
       fail-fast: false
       matrix:
         task: [optimage, openpilot, onnx]
-    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'onnx Tests'}}}
+    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'onnx Tests' }}
     runs-on: ubuntu-20.04
     timeout-minutes: 20
 
@@ -177,6 +175,9 @@ jobs:
         run: |
           PYTHONPATH="." python test/external/dist/test_world.py
           PYTHONPATH="." python test/external/dist/test_collectives.py
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Test ONNX (CPU)
+        run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -302,7 +303,7 @@ jobs:
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
         run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}' --durations=20
-      - name: Run ONNX (only LLVM here)
+      - name: Run ONNX (only LLVM)
         if: matrix.backend == 'llvm'
         run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Run pytest (cuda)
