@@ -48,7 +48,7 @@ class CUDAGraph(BasicBatchExecutor):
         self.instances.append(self.graphs[-1].instantiate())
         if j!=len(jit_cache)-1: capture_stream.begin_capture()
 
-  def __update(self, nodeid, inst, prg, pargs, variables, updated_args=None):
+  def __update(self, nodeid, inst, prg, pargs, variables):
     batchid, graph_node = self.info[nodeid]
     global_size, local_size = prg.launch_dims(variables)
     cuda_args = [x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) if (isinstance(x, int) and not getenv("CUDACPU")) else x for x in [*pargs, *variables.values()]]
@@ -60,7 +60,7 @@ class CUDAGraph(BasicBatchExecutor):
     update_keys_per_batch = collections.defaultdict(list)
     for j in updatable_entries.keys(): update_keys_per_batch[self.info[j][0]].append(j)
     for i,inst in enumerate(self.instances):
-      for j in update_keys_per_batch[i]: self.__update(j, inst, jit_cache[j][0], jit_cache[j][1], jit_cache[j][2], updated_args=updatable_entries[j])
+      for j in update_keys_per_batch[i]: self.__update(j, inst, jit_cache[j][0], jit_cache[j][1], jit_cache[j][2])
       inst.launch()
     super().recalc_stat(jit_cache)
 
