@@ -359,6 +359,46 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (1, 1)
 
+class TestHandCodedOpts(unittest.TestCase):
+  def setUp(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Device does not use linearizer")
+
+  def test_masked_upcast(self):
+    layer_1 = Tensor.cat(*[Tensor.rand(5) for _ in range(4)])
+    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 20))
+
+    s = layer_2.lazydata.schedule()[-1]
+    k = Linearizer(s.ast)
+    k.hand_coded_optimizations()
+    assert len(k.bufs) == 6  # make sure all ops are done in one kernel
+    # masked upcast should upcast masked axis of size 7
+    # masked upcast should not upcast large (20) last axis
+    # float4/other hcopt shouldn't upcast last axis, since we already have 7 upcast, and the last axis is not very contiguous
+    assert k.upcasted == 1 and k.full_shape[-1] == 7
+
+  def test_masked_upcast_wino(self):
+    monster = Tensor.stack([Tensor.stack([Tensor.rand(16) for _ in range(6)]) for _ in range(6)])
+
+    s = monster.lazydata.schedule()[-1]
+    k = Linearizer(s.ast)
+    k.hand_coded_optimizations()
+    assert len(k.bufs) == 37  # make sure all ops are done in one kernel
+    # should upcast the two Tensor.stacks
+    assert k.upcasted >= 2 and k.full_shape[k.shape_len-k.upcasted:k.shape_len].count(6) == 2
+
+  def test_masked_upcast_many(self):
+    layer_1 = Tensor.cat(Tensor.rand(3, 4), Tensor.rand(4, 4))
+    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 7, 4))
+    layer_3 = Tensor.cat(layer_2.unsqueeze(0), Tensor.rand(6, 7, 7, 4))
+
+    s = layer_3.lazydata.schedule()[-1]
+    k = Linearizer(s.ast)
+    k.hand_coded_optimizations()
+    assert len(k.bufs) == 5  # make sure all ops are done in one kernel
+    # check that we don't do too many upcasts
+    assert prod(k.full_shape[k.shape_len-k.upcasted:k.shape_len]) <= 49
+
 
 if __name__ == '__main__':
   unittest.main()
