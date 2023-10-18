@@ -282,7 +282,7 @@ jobs:
         if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         run: |
           cd ${{ github.workspace }}/gpuocelot/ocelot/build
-          touch build.ninja  # fix the timestamp to not rebuild
+          find . -exec touch {} \;  # fix the timestamps of the cache to not rebuild
           sudo ninja install -d explain
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
