@@ -282,6 +282,24 @@ class TestHandCodedOpts(unittest.TestCase):
     # should upcast the two Tensor.stacks
     assert k.upcasted >= 2 and k.full_shape[k.shape_len-k.upcasted:k.shape_len].count(6) == 2
 
+  def test_masked_upcast_wino_real_world(self):
+    old_wino = Tensor.wino
+    Tensor.wino = True
+    x,w = Tensor.rand(1,4,9,9, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
+    out = Tensor.conv2d(x,w, padding=1)
+    upcasts = []
+    # collect upcasts of tile transform kernels
+    for i, si in enumerate(out.lazydata.schedule()):
+      k = Linearizer(si.ast)
+      k.hand_coded_optimizations()
+      if len(k.bufs) < 100: continue  # not a tile transform kernel (there's a permute kernel at the end)
+      if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel
+      upcasts.append(tuple(k.full_shape[k.shape_len - k.upcasted:k.shape_len]))
+    assert len(upcasts) == 3  # 3 transformation matrices
+    Tensor.wino = old_wino
+
+    assert upcasts.count((6, 6)) == 2 and upcasts.count((4, 4)) == 1
+
   def test_masked_upcast_many(self):
     layer_1 = Tensor.cat(Tensor.rand(3, 4), Tensor.rand(4, 4))
     layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 7, 4))
