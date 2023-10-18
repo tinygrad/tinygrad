@@ -309,7 +309,6 @@ class TestHandCodedOpts(unittest.TestCase):
 
     Tensor.wino = old_wino
 
-
   def test_masked_upcast_many(self):
     layer_1 = Tensor.cat(Tensor.rand(3, 4), Tensor.rand(4, 4))
     layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 7, 4))
