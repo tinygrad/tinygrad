@@ -11,6 +11,7 @@ if __name__ == "__main__":
 # https://siboehm.com/articles/22/CUDA-MMM
 import random, time
 import numpy as np
+from typing import Any, Dict, Optional, SupportsIndex, Type, Union
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from tinygrad import nn
 from tinygrad.nn.state import get_state_dict
@@ -18,6 +19,7 @@ from tinygrad.nn import optim
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters
+from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import OneCycleLR
 from extra.helpers import get_net_size
 from tinygrad.jit import TinyJit
@@ -27,7 +29,7 @@ BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 
 
 if getenv("HALF", 0):
   Tensor.default_type = dtypes.float16
-  np_dtype = np.float16
+  np_dtype: Type[Union[np.float16, np.float32]] = np.float16
 else:
   Tensor.default_type = dtypes.float32
   np_dtype = np.float32
@@ -86,7 +88,7 @@ def train_cifar():
 
   # hyper-parameters were exactly the same as the original repo
   bias_scaler = 58
-  hyp = {
+  hyp: Dict[str, Any] = {
     'seed' : 209,
     'opt': {
       'bias_lr':            1.76 * bias_scaler/512,
@@ -94,7 +96,7 @@ def train_cifar():
       'bias_decay':         1.08 * 6.45e-4 * BS/bias_scaler,
       'non_bias_decay':     1.08 * 6.45e-4 * BS,
       'final_lr_ratio':     0.025,
-      'initial_div_factor': 1e16, 
+      'initial_div_factor': 1e16,
       'label_smoothing':    0.20,
       'momentum':           0.85,
       'percent_start':      0.23,
@@ -103,7 +105,7 @@ def train_cifar():
     'net': {
         'kernel_size': 2,             # kernel size for the whitening layer
         'cutmix_size': 3,
-        'cutmix_steps': 499, 
+        'cutmix_steps': 499,
         'pad_amount': 2
     },
     'ema': {
@@ -128,7 +130,8 @@ def train_cifar():
     def _patches(data, patch_size=(kernel_size,kernel_size)):
       h, w = patch_size
       c = data.shape[1]
-      return np.lib.stride_tricks.sliding_window_view(data, window_shape=(h,w), axis=(2,3)).transpose((0,3,2,1,4,5)).reshape((-1,c,h,w))
+      axis: SupportsIndex = (2, 3) # type: ignore
+      return np.lib.stride_tricks.sliding_window_view(data, window_shape=(h,w), axis=axis).transpose((0,3,2,1,4,5)).reshape((-1,c,h,w))
 
     def _eigens(patches):
       n,c,h,w = patches.shape
@@ -143,7 +146,9 @@ def train_cifar():
 
   # ========== Loss ==========
   def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
-    y = (1 - label_smoothing)*y + label_smoothing / y.shape[1]
+    divisor = y.shape[1]
+    assert not isinstance(divisor, Node), "sint not supported as divisor"
+    y = (1 - label_smoothing)*y + label_smoothing / divisor
     if reduction=='none': return -x.log_softmax(axis=1).mul(y).sum(axis=1)
     if reduction=='sum': return -x.log_softmax(axis=1).mul(y).sum(axis=1).sum()
     return -x.log_softmax(axis=1).mul(y).sum(axis=1).mean()
@@ -188,7 +193,7 @@ def train_cifar():
 
     return X_cropped.reshape((-1, 3, crop_size, crop_size))
 
-  def cutmix(X, Y, mask_size=3):
+  def cutmix(X:Tensor, Y:Tensor, mask_size=3):
     # fill the square with randomly selected images from the same batch
     mask = make_square_mask(X.shape, mask_size)
     order = list(range(0, X.shape[0]))
@@ -201,9 +206,10 @@ def train_cifar():
     return X_cutmix, Y_cutmix
 
   # the operations that remain inside batch fetcher is the ones that involves random operations
-  def fetch_batches(X_in, Y_in, BS, is_train):
+  def fetch_batches(X_in:Tensor, Y_in:Tensor, BS:int, is_train:bool):
     step = 0
     while True:
+      st = time.monotonic()
       X, Y = X_in, Y_in
       order = list(range(0, X.shape[0]))
       random.shuffle(order)
@@ -212,6 +218,8 @@ def train_cifar():
         X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < 0.5, X[..., ::-1], X) # flip LR
         if step >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
       X, Y = X.numpy(), Y.numpy()
+      et = time.monotonic()
+      print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms")
       for i in range(0, X.shape[0], BS):
         # pad the last batch
         batch_end = min(i+BS, Y.shape[0])
@@ -249,6 +257,7 @@ def train_cifar():
 
   # this import needs to be done here because this is running in a subprocess
   from extra.dist import OOB
+  assert OOB is not None or not getenv("DIST"), "OOB should be initialized"
   rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
 
   X_train, Y_train, X_test, Y_test = fetch_cifar()
@@ -340,14 +349,15 @@ def train_cifar():
   # https://www.anandtech.com/show/16727/nvidia-announces-geforce-rtx-3080-ti-3070-ti-upgraded-cards-coming-in-june
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
 
-  model_ema = None
+  model_ema: Optional[modelEMA] = None
   projected_ema_decay_val = hyp['ema']['decay_base'] ** hyp['ema']['every_n_steps']
   best_eval = -1
   i = 0
   batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
   with Tensor.train():
+    st = time.monotonic()
     while i <= STEPS:
-      if i%100 == 0 and i > 1:
+      if i%getenv("EVAL_STEPS", 100) == 0 and i > 1:
         # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
         corrects = []
         corrects_ema = []
@@ -401,7 +411,6 @@ def train_cifar():
       if getenv("DIST"):
         X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
       GlobalCounters.reset()
-      st = time.monotonic()
       loss = train_step_jitted(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
       et = time.monotonic()
       loss_cpu = loss.numpy()
@@ -415,6 +424,7 @@ def train_cifar():
         print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
       else:
         print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {world_size*GlobalCounters.mem_used/1e9:.2f} GB used, {world_size*GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      st = cl
       i += 1
 
 if __name__ == "__main__":

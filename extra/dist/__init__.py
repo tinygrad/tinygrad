@@ -1,6 +1,6 @@
 # this file needs to be very careful with its imports as to not accidentally initialize the runtimes
 from multiprocessing.connection import Connection
-from typing import Any, Callable, List, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 from tinygrad.helpers import DEBUG, getenv
 import multiprocessing as mp
 import os
@@ -22,7 +22,7 @@ class _OOB:
   # receive some data from a target rank, blocks until data is received
   def recv(self, target_rank:int) -> Any:
     return self.pipes[target_rank * getenv("WORLD_SIZE") + getenv("RANK")][0].recv()
-OOB = None
+OOB: Optional[_OOB] = None
 
 def init_oob(world_size:int):
   os.environ["WORLD_SIZE"] = str(world_size)

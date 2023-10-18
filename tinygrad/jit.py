@@ -2,7 +2,7 @@ from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional, Set
 from weakref import ref
 from collections import defaultdict
 import functools, itertools
-from tinygrad.helpers import DEBUG, DType, merge_dicts, ImageDType
+from tinygrad.helpers import DEBUG, DType, merge_dicts, ImageDType, getenv
 from tinygrad.ops import RawBuffer, Device, BasicBatchExecutor, ASTRunner
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -109,6 +109,8 @@ class _CacheCollector:
     self.cache = None
     return cache_result
   def _no_intersect(self, start:int, end:int, usages:List[Tuple[int, int]]): return all(en < start or end < st for st, en in usages)
-  def _can_substitute(self, buf, with_buf): return buf._device==with_buf._device and (buf.size*buf.dtype.itemsize<=with_buf.size*with_buf.dtype.itemsize if not isinstance(buf.dtype, ImageDType) and not isinstance(with_buf.dtype, ImageDType) else buf.size==with_buf.size and buf.dtype==with_buf.dtype and buf.dtype.shape==with_buf.dtype.shape)
+  def _can_substitute(self, buf, with_buf):
+    if getenv("NO_BUFFER_REUSE"): return False
+    return buf._device==with_buf._device and (buf.size*buf.dtype.itemsize<=with_buf.size*with_buf.dtype.itemsize if not isinstance(buf.dtype, ImageDType) and not isinstance(with_buf.dtype, ImageDType) else buf.size==with_buf.size and buf.dtype==with_buf.dtype and buf.dtype.shape==with_buf.dtype.shape)
   def _mark_output_buffer(self, output_buffer): self.circular_signatures.add(ref(output_buffer))
 CacheCollector = _CacheCollector()
