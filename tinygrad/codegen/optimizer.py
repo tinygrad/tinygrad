@@ -400,7 +400,7 @@ class OptimizedKernel(Kernel):
 
     # TODO: doing extra upcasts with images doesn't work for some reason (maybe has to do with to_image_idx)
     # to trigger the above bug, remove prod(self.full_shape[self.shape_len - self.upcasted:]) from the below
-    # expression.
+    # expression and run test/test_ops.py with IMAGE=2
     # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
     # this can be made much smarter
     to_upcast: List[int] = []
