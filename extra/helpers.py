@@ -5,7 +5,7 @@ from tinygrad.nn.state import get_state_dict
 
 def get_net_size(model):
   total_params, total_bytes = 0, 0
-  for param_name, param in zip(get_state_dict(model), get_state_dict(model).values()):
+  for param_name, param in get_state_dict(model).items():
     if not ("num_batches_tracked" in param_name) and not ("running" in param_name):
       total_params += param.numpy().size
       total_bytes += param.numpy().nbytes
