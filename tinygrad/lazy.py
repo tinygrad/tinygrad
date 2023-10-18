@@ -201,6 +201,9 @@ class LazyBuffer:
   def fromCPU(x: np.ndarray) -> LazyBuffer:
     return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), RawNumpyBuffer.fromCPU(x))
 
+  def cast(self, dtype:DType, bitcast:bool=False):
+    return self.e(UnaryOps.CAST, arg=(dtype, bitcast))
+
   # *** elementwise ops ***
 
   def e(self:LazyBuffer, op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
@@ -279,7 +282,7 @@ class LazyBuffer:
   def permute(self: LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
     if arg == tuple(range(len(self.shape))): return self
     if not self.realized and self.op.op == MovementOps.PERMUTE: return self.op.src[0].permute(tuple([self.op.arg[i] for i in arg]))
-    if not self.realized:
+    if SHUFFLE_MOVEMENT_OPS and not self.realized:
       if PUSH_PERMUTES and self.optype == ReduceOps:
         # reduceops have one buffer input, permute it
         narg = tuple([self.op.arg[a] for a in arg])
