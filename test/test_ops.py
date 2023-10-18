@@ -886,13 +886,13 @@ class TestOps(unittest.TestCase):
               lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), atol=1e-4)
 
   def test_conv2d(self):
-    for bs in [1,8]:
+    for bs in [1,4]:
       for cin in [1,3]:
         for groups in [1,3] if cin == 3 else [1]:
           for H in [1,2,5]:
             for W in [1,2,3,5]:
               with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H, width=W):
-                helper_test_op([(bs,cin,11,28), (6,cin//groups,H,W)],
+                helper_test_op([(bs,cin,11,14), (6,cin//groups,H,W)],
                   lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
                   lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 

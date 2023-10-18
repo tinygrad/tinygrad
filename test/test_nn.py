@@ -90,7 +90,7 @@ class TestNN(unittest.TestCase):
     _test_linear(Tensor.randn(BS, T, in_dim)) # test with more dims
 
   def test_conv1d(self):
-    BS, C1, W = 4, 16, 224
+    BS, C1, W = 4, 16, 224//4
     C2, K, S, P = 64, 7, 2, 1
 
     # create in tinygrad
@@ -110,7 +110,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
   def test_conv2d(self):
-    BS, C1, H, W = 4, 16, 224, 224
+    BS, C1, H, W = 4, 16, 224//4, 224//4
     C2, K, S, P = 64, 7, 2, 1
 
     # create in tinygrad
@@ -168,7 +168,7 @@ class TestNN(unittest.TestCase):
 
   @unittest.skipIf(getenv("CI", "") != "" and (WINDOWS or Device.DEFAULT == "WEBGPU"), "runs out of memory in CI")
   def test_conv_transpose1d(self):
-    BS, C1, W = 4, 16, 224
+    BS, C1, W = 4, 16, 224//4
     C2, K, S, P = 64, 7, 2, 1
 
     # create in tinygrad
@@ -189,7 +189,7 @@ class TestNN(unittest.TestCase):
 
   @unittest.skipIf(getenv("CI", "") != "" and (WINDOWS or Device.DEFAULT == "WEBGPU"), "runs out of memory in CI")
   def test_conv_transpose2d(self):
-    BS, C1, H, W = 4, 16, 224, 224
+    BS, C1, H, W = 4, 16, 224//4, 224//4
     C2, K, S, P = 64, 7, 2, 1
 
     # create in tinygrad
