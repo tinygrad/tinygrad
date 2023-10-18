@@ -348,13 +348,13 @@ def train_cifar():
 
   model_ema: Optional[modelEMA] = None
   projected_ema_decay_val = hyp['ema']['decay_base'] ** hyp['ema']['every_n_steps']
-  best_eval = -1
   i = 0
   batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
   with Tensor.train():
     st = time.monotonic()
     while i <= STEPS:
       if i%getenv("EVAL_STEPS", STEPS) == 0 and i > 1:
+        st_eval = time.monotonic()
         # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
         corrects = []
         corrects_ema = []
@@ -398,10 +398,8 @@ def train_cifar():
         if rank == 0:
           acc = correct_sum/correct_len*100.0
           if model_ema: acc_ema = correct_sum_ema/correct_len_ema*100.0
-          if acc > best_eval:
-            best_eval = acc
-            print(f"eval     {correct_sum}/{correct_len} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
-            if model_ema: print(f"eval ema {correct_sum_ema}/{correct_len_ema} {acc_ema:.2f}%, {(sum(losses_ema)/len(losses_ema)):7.2f} val_loss STEP={i}")
+          print(f"eval     {correct_sum}/{correct_len} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
+          if model_ema: print(f"eval ema {correct_sum_ema}/{correct_len_ema} {acc_ema:.2f}%, {(sum(losses_ema)/len(losses_ema)):7.2f} val_loss STEP={i}")
 
       if STEPS == 0 or i==STEPS: break
       X, Y = next(batcher)
