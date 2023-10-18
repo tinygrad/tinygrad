@@ -42,10 +42,12 @@ class CStyleLanguage(NamedTuple):
   }
 
   # returns a str expression of the casted xs with the given type
-  def render_cast(self, x:List[str], var_dtype:DType) -> str:
+  def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
+    print("render_cast")
     if len(x) == 1: return f"({var_dtype.name})({x[0]})"
-    assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
+    # assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "cast is not supported on this platform"
+    print("float4", var_dtype)
     if var_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
     if var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
     if var_dtype == dtypes._int2: return f"{self.float4.replace('float4', 'int2')}({','.join(x)})"
@@ -60,6 +62,7 @@ class CStyleLanguage(NamedTuple):
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
+    print("render_load", output_dtype, buf_dtype)
     if isinstance(buf_dtype, ImageDType):
       assert output_dtype == dtypes._float4, "images must be float4"
       return f"read_imagef({buf_name}, smp, {idx})"
@@ -191,8 +194,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       elif len(vin) == 3:
         assert vin[0].dtype is not None and vin[2].dtype is not None
         kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
-    elif uop == UOps.CAST and dtype is not None and dtype.sz > 1:
-      val = lang.render_cast([r[x] for x in vin], dtype)
+    elif uop == UOps.CAST and dtype is not None:
+      val = lang.render_cast([r[x] for x in vin], dtype, args[1] if args is not None else False)
       if child_count[u] <= 1: r[u] = val
       else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
     elif uop == UOps.DEFINE_LOCAL:

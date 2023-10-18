@@ -362,6 +362,7 @@ class Linearizer(OptimizedKernel):
 
     # run late AST
     val = self.ast_parse(self.ast, acc, loaded_buffers)
+    for v in val: print("=====", v)
 
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
@@ -387,7 +388,7 @@ class Linearizer(OptimizedKernel):
   def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=True) -> UOp:
     key = (uop, dtype, vin, arg)
     if uop == UOps.STORE and len(vin) == 2 and vin[0] == vin[1]: return vin[0]   # self store is noop
-    if uop == UOps.CAST and all(x.uop == UOps.GEP for x in vin) and all_same([x.vin[0] for x in vin]) and all(x.arg == i for i,x in enumerate(vin)): return vin[0].vin[0]
+    if uop == UOps.CAST and all(x.uop == UOps.GEP for x in vin) and all_same([x.vin[0] for x in vin]) and all(x.arg == i for i,x in enumerate(vin)) and arg and not arg[1]: return vin[0].vin[0]
     if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype)
     if uop == UOps.ALU:
       # rewrites. NOTE: the rewritten NEG op is still around...
@@ -410,7 +411,11 @@ class Linearizer(OptimizedKernel):
   def ast_parse(self, x, acc, loaded_buffers, do_reduce=False) -> List[UOp]:
     if x.__class__ is not LazyOp: return loaded_buffers[x]    # for LOCAL_BUFFER
     if x.op in BufferOps: return loaded_buffers[x.arg]
-    if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers)  # cast isn't an ALU op
+    if x.op == UnaryOps.NOOP: return self.ast_parse(x.src[0], acc, loaded_buffers)  # cast isn't an ALU op
+    if x.op == UnaryOps.CAST:
+      val = self.ast_parse(x.src[0], acc, loaded_buffers)  # cast isn't an ALU op
+      if not x.arg[1]: return val
+      return [self.uop(UOps.CAST, x.arg[0], tuple(val), x.arg)]
     if x.op in ReduceOps and not do_reduce: return acc
     # MULACC fusion. TODO: this is copied from Interpreted
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
