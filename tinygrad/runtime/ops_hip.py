@@ -93,7 +93,7 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
     hip.hipMemcpy(x.ctypes.data, self._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToHost)
   def _transfer(self, x):
     hip.hipSetDevice(x._device)
-    hip.hipMemcpy(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice)
+    hip.hipMemcpyAsync(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice, 0)
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
