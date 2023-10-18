@@ -198,6 +198,10 @@ jobs:
     #- name: Run dtype test
     #  run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
     # dtype test has issues on test_half_to_int8
+    - name: Check Device.DEFAULT (METAL) and print some source
+      run: |
+        METAL=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
+        METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run metal ops test
       run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
     - name: Run JIT test
@@ -208,8 +212,10 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Run whisper test
       run: METAL=1 python -m pytest test/models/test_whisper.py
-    - name: Check Device.DEFAULT
-      run: WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
+    - name: Check Device.DEFAULT (WEBGPU) and print some source
+      run: |
+        WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
+        WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run linearizer and tensor core test
       run: METAL=1 python -m pytest -n=auto test/test_linearizer.py
     #- name: Run webgpu pytest
@@ -223,7 +229,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda,  triton] #, ptx]
+        backend: [llvm, clang, gpu, cuda, triton] #, ptx]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
@@ -255,7 +261,7 @@ jobs:
           sudo apt update -y
           sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
       - name: Cache gpuocelot
-        if:  matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
+        if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         id: cache-build
         uses: actions/cache@v3
         env:
