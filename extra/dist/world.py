@@ -27,7 +27,7 @@ def __send_rb(args, variables=None, jit=False, force_wait=False):
   if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}  rank {getenv('RANK')} sent {x} to rank {target_rank}")
 
 def __recv_rb(args, variables=None, jit=False, force_wait=False):
-  x, target_rank, y = args
+  x, target_rank, y = args[:3]
   extra = dist.OOB.recv(target_rank)
   if RawHIPBuffer and x.__class__ is RawHIPBuffer:
     hip.hipSetDevice(extra[1])
