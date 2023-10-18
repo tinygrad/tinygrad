@@ -32,7 +32,7 @@ jobs:
     - name: Lint with flake8
       run: python -m flake8 . --statistics -j4
     - name: Lint with ruff
-      run: ruff .
+      run: python3 -m ruff .
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
