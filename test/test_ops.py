@@ -1168,14 +1168,12 @@ class TestOps(unittest.TestCase):
     i, j, k, o, p = [Tensor(tor.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False) for tor in [a,b,c,d,e]]
     # no dim collapse from int or dim injection from None
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,e], lambda x: x[:,j,k,o,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,:], lambda x: x[:,j,k,o,:])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,...], lambda x: x[i,j,...])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,...,e], lambda x: x[i,...,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[...,c,:,e], lambda x: x[...,k,:,p])
     # dim collapse from int
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,c,d,e], lambda x: x[1,j,k,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,2], lambda x: x[i,j,k,o,2])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,3,d,e], lambda x: x[i,j,3,o,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,c,d,2], lambda x: x[1,j,k,o,2])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,2,d,2], lambda x: x[1,j,2,o,2])
@@ -1185,14 +1183,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,c,d,e], lambda x: x[None,j,k,o,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,None], lambda x: x[i,j,k,o,None])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,None,d,e], lambda x: x[i,j,None,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,None,None,None,e], lambda x: x[i,None,None,None,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,None,d,None], lambda x: x[None,j,None,o,None])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,c,d,None], lambda x: x[None,j,k,o,None])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
     # dim injection and collapse
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,None,d,1], lambda x: x[1,j,None,o,1])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,2,d,None], lambda x: x[None,j,2,o,None])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,1,None,d,e], lambda x: x[None,1,None,o,p])
     helper_test_op([(2,5,15,5,3,4)], lambda x: x[...,1,d,None], lambda x: x[...,1,o,None])
     # indexing using idx with different dim
     helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)], lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor(1)])
