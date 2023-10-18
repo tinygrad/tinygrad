@@ -1157,7 +1157,7 @@ class TestOps(unittest.TestCase):
     n = (x < 0).where(x, 1).numpy()
     assert np.all(n == 1.)
 
-  def test_slice_fancy_indexing(self):
+  def _get_index_randoms(self):
     # indices cannot have gradient
     # TODO currently does not support IndexError for out of bounds idx values
     a = torch.randint(low=-1, high=1, size=(2,1,1,1,1,1), dtype=torch.int64, requires_grad=False)
@@ -1166,24 +1166,37 @@ class TestOps(unittest.TestCase):
     d = torch.randint(high=4, size=(2,1,1,5,1,1), dtype=torch.int64, requires_grad=False)
     e = torch.randint(high=1, size=(1,1,1,1,6,1), dtype=torch.int64, requires_grad=False)
     i, j, k, o, p = [Tensor(tor.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False) for tor in [a,b,c,d,e]]
+    return a,b,c,d,e,i,j,k,o,p
+
+  def test_slice_fancy_indexing_no_dim_collapse(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     # no dim collapse from int or dim injection from None
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[:,b,c,d,:], lambda x: x[:,j,k,o,:])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,...], lambda x: x[i,j,...])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,...,e], lambda x: x[i,...,p])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[...,c,:,e], lambda x: x[...,k,:,p])
+
+  def test_slice_fancy_indexing_dim_collapse_int(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     # dim collapse from int
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,b,c,d,e], lambda x: x[1,j,k,o,p])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,3,d,e], lambda x: x[i,j,3,o,p])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,b,2,d,2], lambda x: x[1,j,2,o,2])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,2,2,2,e], lambda x: x[i,2,2,2,p])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,:,3:11:2,d,0:2], lambda x: x[1,:,3:11:2,o,0:2])
+
+  def test_slice_fancy_indexing_dim_inject_none(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     # dim injection from None
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,c,d,e], lambda x: x[None,j,k,o,p])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,d,None], lambda x: x[i,j,k,o,None])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,None,d,e], lambda x: x[i,j,None,o,p])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,c,d,None], lambda x: x[None,j,k,o,None])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
+
+  def test_slice_fancy_indexing_dim_inject_and_collapse(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     # dim injection and collapse
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,b,None,d,1], lambda x: x[1,j,None,o,1])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,2,d,None], lambda x: x[None,j,2,o,None])
