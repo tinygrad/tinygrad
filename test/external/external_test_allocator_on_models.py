@@ -2,16 +2,16 @@
 import unittest, gc
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.state import get_parameters, get_state_dict
+from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.ops import GlobalCounters, LazyOp, LoadOps
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, prod
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 
 from examples.llama import Transformer
 
 ALLOCATED_DEV_BUFS = 0
-class FakeDeviceBuffer():
+class FakeDeviceBuffer:
   def __init__(self, sz, dt, device):
     self.id = 1
     self.size = sz
@@ -25,6 +25,9 @@ class FakeAllocator(LRUAllocator):
   def _do_free(self, buf):
     buf.id -= 1
     assert buf.id == 0, f"Free should be called once, but {buf.id}"
+  def __del__(self): # Fake allocator should clear all buffers after each test.
+    for v in self.cached_buffers.values():
+      for buf, _ in v: self._free_buffer(buf)
 
 FAKE_GLOBAL_ALLOCATOR = None
 class FakeBuffer(RawBuffer):
@@ -87,7 +90,7 @@ def check_gc():
 def derandomize(x):
   if isinstance(x, LazyOp):
     if x.op == LoadOps.RAND: x.op = LoadOps.EMPTY
-    x.src = [derandomize(s) for s in x.src]
+    x.src = tuple([derandomize(s) for s in x.src])
   else:
     x.op = derandomize(x.op)
   return x

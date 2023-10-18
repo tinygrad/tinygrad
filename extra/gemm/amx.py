@@ -11,7 +11,7 @@ from llvmlite import ir  # type: ignore
 # https://github.com/corsix/amx/blob/main/Instructions.md
 # 12 lines for AMX support
 from functools import partialmethod
-class AMX():
+class AMX:
   @staticmethod
   def nop_op_imm5(op, imm5, builder): builder.asm(ir.FunctionType(ir.VoidType(), []), f".word (0x201000 + ({op} << 5) + {imm5}); amx op {op} imm {imm5}", "", tuple(), True)
   @staticmethod
@@ -56,7 +56,7 @@ bufs = [c,a,b]
 module = ir.Module(name=__file__)
 func = ir.Function(module, ir.FunctionType(ir.IntType(64), [ir.FloatType().as_pointer()]*3), name='exec')
 
-# load all 
+# load all
 entry = ir.IRBuilder(func.append_basic_block(name="entry"))
 zm, xm, ym = [entry.ptrtoint(func.args[i], ir.IntType(64)) for i in range(3)]
 

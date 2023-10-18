@@ -52,6 +52,15 @@ class TestJit(unittest.TestCase):
     with self.assertRaises(AssertionError):
       add(a, bad)
 
+  def test_jit_shape_views_mismatch(self):
+    @TinyJit
+    def add(a): return (a+1).realize()
+    with self.assertRaises(AssertionError):
+      for i in range(1,5):
+        # a has an offset that the kernel doesn't know about
+        a = Tensor.randn(10, 10).realize()[:, i:i+2]
+        add(a)
+
   def test_jit_duplicate_fail(self):
     # the jit doesn't support duplicate arguments
     @TinyJit
@@ -104,7 +113,7 @@ class TestJit(unittest.TestCase):
     def f(a, b): return (a+b).realize()
     a = Tensor([1, 2, 3])
     for i in range(5):
-      np.testing.assert_allclose(f(a, Tensor([i])).cpu().numpy(), (a+i).cpu().numpy(), atol=1e-4, rtol=1e-5)
+      np.testing.assert_allclose(f(a, Tensor([i])).numpy(), (a+i).numpy(), atol=1e-4, rtol=1e-5)
     assert len(f.jit_cache) == 1
 
   def test_jit_output_non_tensor_fail(self):
@@ -124,6 +133,40 @@ class TestJit(unittest.TestCase):
     # the jit only works with Tensor outputs
     assert output2 != expect2
     assert len(f.jit_cache) == 1
+
+  @unittest.skip("random isn't working in JIT")
+  def test_jit_random_regen(self):
+    def f(a, b):
+      rn = Tensor.randn(*a.shape)
+      return ((a+b)*rn).realize()
+    a = Tensor.randn(10, 10)
+    b = Tensor.randn(10, 10)
+
+    Tensor._seed = 1234
+    jf = TinyJit(f)
+    res = set()
+    for _ in range(5):
+      o1 = jf(a, b)
+      res.add(o1.numpy()[0][0])
+    assert len(res) == 5, "All values should be different, rand works in jit."
+
+    Tensor._seed = 1234
+    jf2 = TinyJit(f)
+    res2 = set()
+    for _ in range(5):
+      o1 = jf2(a, b)
+      res2.add(o1.numpy()[0][0])
+    assert len(res2) == 5, "All values should be different, rand works in jit."
+    assert res == res2, "Jit rand is not reproducible with the same seed"
+
+    Tensor._seed = 3421
+    jf3 = TinyJit(f)
+    res3 = set()
+    for _ in range(5):
+      o1 = jf3(a, b)
+      res3.add(o1.numpy()[0][0])
+    assert len(res3) == 5, "All values should be different, rand works in jit."
+    assert res3 != res2, "Jit rand is diff with diff seeds"
 
 if __name__ == '__main__':
   unittest.main()

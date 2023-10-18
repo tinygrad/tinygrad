@@ -13,9 +13,6 @@ OSX = platform.system() == "Darwin"
 
 def compile_and_test_ast(ast, local_size=None):
   k = CLCodegen(ast)
-  if getenv("KOPT", 0):
-    from extra.kernel_search import apply_optimization
-    apply_optimization(k, ast, 10, getenv("KCACHE", 0))
   prg = k.codegen().build(CLProgram)
   if local_size is not None: prg.local_size = local_size
   for i in range(5): prg(prg.lower(k.bufs))

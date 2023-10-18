@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import optim, BatchNorm2d
 from extra.training import train, evaluate

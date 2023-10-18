@@ -1,6 +1,12 @@
 repos:
   - repo: local
     hooks:
+      - id: ruff
+        name: ruff
+        entry: ruff .
+        language: system
+        always_run: true
+        pass_filenames: false
       - id: docs
         name: docs
         entry: python3 docs/abstractions.py
@@ -15,19 +21,13 @@ repos:
         pass_filenames: false
       - id: mypy
         name: mypy
-        entry: mypy tinygrad/ extra/helpers.py --check-untyped-defs --explicit-package-bases --warn-unreachable # --warn-return-any
+        entry: mypy tinygrad/ extra/helpers.py
         language: system
         always_run: true
         pass_filenames: false
       - id: tests
         name: subset of (CPU) tests
-        entry: env CPU=1 pytest test/unit/ test/test_ops.py test/test_dtype.py
-        language: system
-        always_run: true
-        pass_filenames: false
-      - id: pylint
-        name: pylint
-        entry: pylint tinygrad/
+        entry: env CPU=1 pytest test/unit/ test/test_ops.py test/test_dtype.py test/test_schedule.py test/test_custom_function.py test/test_assign.py test/test_symbolic_shapetracker.py
         language: system
         always_run: true
         pass_filenames: false

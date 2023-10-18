@@ -1,7 +1,7 @@
 import unittest
 import time
 import numpy as np
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.tensor import Device
 from tinygrad.helpers import getenv
@@ -13,7 +13,7 @@ from models.vit import ViT
 from models.resnet import ResNet18
 import pytest
 
-pytestmark = pytest.mark.exclude_gpu
+pytestmark = [pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
 
 BS = getenv("BS", 2)
 

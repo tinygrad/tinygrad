@@ -6,6 +6,7 @@ notebooks
 .*.swo
 *.pyc
 *.so
+*.txt
 build
 /dist
 *.egg-info
@@ -39,3 +40,4 @@ temp
 .coverage
 coverage.xml
 htmlcov
+outputs_yolov8

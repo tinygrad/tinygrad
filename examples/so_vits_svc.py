@@ -1,13 +1,13 @@
 # original implementation: https://github.com/svc-develop-team/so-vits-svc
 from __future__ import annotations
-import sys, os, logging, time, io, math, argparse, operator, numpy as np
+import sys, logging, time, io, math, argparse, operator, numpy as np
 from functools import partial, reduce
 from pathlib import Path
 from typing import Tuple, Optional, Type
 from tinygrad import nn
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, getenv
-from tinygrad.state import torch_load
+from tinygrad.nn.state import torch_load
 from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present, get_hparams_from_file, load_checkpoint, weight_norm, HParams
 from examples.sovits_helpers import preprocess
 import soundfile
@@ -210,7 +210,7 @@ class MultiHeadAttention:
     ret =  self.out_proj(wv).transpose(0,1)  # BxTxC -> TxBxC
     return ret
 
-class ConvFeatureExtractionModel():
+class ConvFeatureExtractionModel:
   def __init__(self, conv_layers, dropout=.0, mode="default", conv_bias=False):
     assert mode in {"default", "group_norm_masked", "layer_norm"}
     def block(n_in, n_out, k, stride, is_layer_norm=False, is_group_norm=False, conv_bias=False):
@@ -352,7 +352,7 @@ class Upsample:
     new_shape = (*x.shape[:-1], x.shape[-1] * self.scale)
     return x.unsqueeze(-1).repeat(repeats).reshape(new_shape)
 
-class SineGen():
+class SineGen:
   def __init__(self, samp_rate, harmonic_num=0, sine_amp=0.1, noise_std=0.003, voice_threshold=0, flag_for_pulse=False):
     self.sine_amp, self.noise_std, self.harmonic_num, self.sampling_rate, self.voiced_threshold, self.flag_for_pulse = sine_amp, noise_std, harmonic_num, samp_rate, voice_threshold, flag_for_pulse
     self.dim = self.harmonic_num + 1
@@ -468,14 +468,14 @@ def repeat_expand_2d_left(content, target_len): # content : [h, t]
   return Tensor.stack(cols).transpose(0, 1)
 
 def load_fairseq_cfg(checkpoint_path):
-  assert os.path.isfile(checkpoint_path)
+  assert Path(checkpoint_path).is_file()
   state = torch_load(checkpoint_path)
   cfg = state["cfg"] if ("cfg" in state and state["cfg"] is not None) else None
   if cfg is None: raise RuntimeError(f"No cfg exist in state keys = {state.keys()}")
   return HParams(**cfg)
 
 def load_checkpoint_enc(checkpoint_path, model: ContentVec, optimizer=None, skip_list=[]):
-  assert os.path.isfile(checkpoint_path)
+  assert Path(checkpoint_path).is_file()
   start_time = time.time()
   checkpoint_dict = torch_load(checkpoint_path)
   saved_state_dict = checkpoint_dict['model']
@@ -550,7 +550,7 @@ def get_encoder(ssl_dim) -> Type[SpeechEncoder]:
 # DEMO USAGE (uses audio sample from LJ-Speech):
 # python3 examples/so_vits_svc.py --model saul_goodman
 #########################################################################################
-SO_VITS_SVC_PATH = Path(__file__).parent.parent / "weights/So-VITS-SVC"
+SO_VITS_SVC_PATH = Path(__file__).parents[1] / "weights/So-VITS-SVC"
 VITS_MODELS = { # config_path, weights_path, config_url, weights_url
   "saul_goodman" : (SO_VITS_SVC_PATH / "config_saul_gman.json", SO_VITS_SVC_PATH / "pretrained_saul_gman.pth", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/G_80000.pth"),
   "drake" : (SO_VITS_SVC_PATH / "config_drake.json", SO_VITS_SVC_PATH / "pretrained_drake.pth", "https://huggingface.co/jaspa/so-vits-svc/resolve/main/aubrey/config_aubrey.json", "https://huggingface.co/jaspa/so-vits-svc/resolve/main/aubrey/pretrained_aubrey.pth"),
@@ -563,13 +563,13 @@ ENCODER_MODELS = { # weights_path, weights_url
   "contentvec": (SO_VITS_SVC_PATH / "contentvec_checkpoint.pt", "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/hubert_base.pt")
 }
 ENCODER_MODEL = "contentvec"
-DEMO_PATH, DEMO_URL = Path(__file__).parent.parent / "temp/LJ037-0171.wav", "https://keithito.com/LJ-Speech-Dataset/LJ037-0171.wav"
+DEMO_PATH, DEMO_URL = Path(__file__).parents[1] / "temp/LJ037-0171.wav", "https://keithito.com/LJ-Speech-Dataset/LJ037-0171.wav"
 if __name__=="__main__":
   logging.basicConfig(stream=sys.stdout, level=(logging.INFO if DEBUG < 1 else logging.DEBUG))
   parser = argparse.ArgumentParser()
   parser.add_argument("-m", "--model", default=None, help=f"Specify the model to use. All supported models: {VITS_MODELS.keys()}", required=True)
   parser.add_argument("-f", "--file", default=DEMO_PATH, help=f"Specify the path of the input file")
-  parser.add_argument("--out_dir", default=str(Path(__file__).parent.parent / "temp"), help="Specify the output path.")
+  parser.add_argument("--out_dir", default=str(Path(__file__).parents[1] / "temp"), help="Specify the output path.")
   parser.add_argument("--out_path", default=None, help="Specify the full output path. Overrides the --out_dir and --name parameter.")
   parser.add_argument("--base_name", default="test", help="Specify the base of the output file name. Default is 'test'.")
   parser.add_argument("--speaker", default=None, help="If not specified, the first available speaker is chosen. Usually there is only one speaker per model.")
@@ -600,7 +600,7 @@ if __name__=="__main__":
 
   ### Loading audio and slicing ###
   if audio_path == DEMO_PATH: download_if_not_present(DEMO_PATH, DEMO_URL)
-  assert os.path.isfile(audio_path) and Path(audio_path).suffix == ".wav"
+  assert Path(audio_path).is_file() and Path(audio_path).suffix == ".wav"
   chunks = preprocess.cut(audio_path, db_thresh=slice_db)
   audio_data, audio_sr = preprocess.chunks2audio(audio_path, chunks)
 
