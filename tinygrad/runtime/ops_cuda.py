@@ -47,6 +47,7 @@ class CUDAGraph(BasicBatchExecutor):
         self.graphs.append(capture_stream.end_capture())
         self.instances.append(self.graphs[-1].instantiate())
         if j!=len(jit_cache)-1: capture_stream.begin_capture()
+
   def __update(self, nodeid, inst, prg, pargs, variables, updated_args=None):
     batchid, graph_node = self.info[nodeid]
     global_size, local_size = prg.launch_dims(variables)
@@ -62,6 +63,7 @@ class CUDAGraph(BasicBatchExecutor):
       for j in update_keys_per_batch[i]: self.__update(j, inst, jit_cache[j][0], jit_cache[j][1], jit_cache[j][2], updated_args=updatable_entries[j])
       inst.launch()
     super().recalc_stat(jit_cache)
+
   def __get_batch(self, j): return int(math.log(j+4,2)-2) # Batch sizes are logarithmic 4,8,16,32,...
 
 if getenv("CUDACPU", 0) == 1:
