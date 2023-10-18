@@ -237,10 +237,9 @@ if __name__ == "__main__":
   parser.add_argument("--audio", default=None, type=str, help="audio file to transcribe")
   parser.add_argument("--model", default="tiny.en", choices=MODELS.keys(), help="name of the Whisper model to use")
 
-  args = parser.parse_args().__dict__
-  model_name: str = args["model"]
-  audio_file: str = args["audio"]
-
+  args = parser.parse_args()
+  model_name: str = args.model
+  audio_file: str = args.audio
   model, enc = init_whisper(model_name)
 
   if (audio_file is not None):
