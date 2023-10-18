@@ -2,6 +2,8 @@ name: Unit Tests
 
 on:
   push:
+    branches:
+      - master
   pull_request:
   workflow_dispatch:
 
@@ -43,6 +45,22 @@ jobs:
       run: sudo apt install sloccount
     - name: Check <5000 lines
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
+    - name: Test Docs
+      run: python docs/abstractions.py
+    - name: Test Quickstart
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
+    - name: Fuzz Test symbolic
+      run: python test/external/fuzz_symbolic.py
+    - name: Fuzz Test shapetracker
+      run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
+    - name: Use as an external package
+      run: |
+        mkdir $HOME/test_external_dir
+        cd $HOME/test_external_dir
+        python -m venv venv
+        source venv/bin/activate
+        pip install $GITHUB_WORKSPACE
+        python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
@@ -63,32 +81,14 @@ jobs:
         key: testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Test Docs
-      run: python docs/abstractions.py
-    - name: Test Quickstart
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Run Pytest
-      run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)"
-    - name: Run ONNX
-      run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
-    - name: Fuzz Test symbolic
-      run: python test/external/fuzz_symbolic.py
-    - name: Fuzz Test shapetracker
-      run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
+      run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)" --durations=20
     - name: Compile EfficientNet to C
       run: PYTHONPATH="." CLANG=1 python examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
       run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
-    - name: Use as an external package
-      run: |
-        mkdir $HOME/test_external_dir
-        cd $HOME/test_external_dir
-        python -m venv venv
-        source venv/bin/activate
-        pip install $GITHUB_WORKSPACE
-        python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
 
   testtorch:
     name: Torch Tests
@@ -110,7 +110,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: TORCH=1 python -m pytest -n=auto test/
+      run: TORCH=1 python -m pytest -n=auto test/ --durations=20
     - name: Run ONNX
       run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
 
@@ -118,8 +118,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [optimage, openpilot]
-    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'|| matrix.task=='openpilot'&&'openpilot (OpenCL) Tests'}}
+        task: [optimage, openpilot, onnx]
+    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'ONNX Tests' }}
     runs-on: ubuntu-20.04
     timeout-minutes: 20
 
@@ -175,6 +175,15 @@ jobs:
         run: |
           PYTHONPATH="." python test/external/dist/test_world.py
           PYTHONPATH="." python test/external/dist/test_collectives.py
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Test ONNX (CPU)
+        run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Test ONNX (GPU)
+        run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Test ONNX (CLANG)
+        run: CLANG=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests
@@ -293,42 +302,35 @@ jobs:
           DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
-        run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}'
-      - name: Run ONNX (not cuda)
-        if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend!='clang'
-        run: python -m pytest -n=auto test/external/external_test_onnx_backend.py
+        run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}' --durations=20
+      - name: Run ONNX (only LLVM)
+        if: matrix.backend == 'llvm'
+        run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Run pytest (cuda)
-        if: matrix.backend=='cuda'
-        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
-      - name: Run pytest (ptx)
-        if: matrix.backend=='ptx'
-        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
-      - name: Run pytest (triton)
-        if: matrix.backend=='triton'
-        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models
+        if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
+        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --durations=20
 
-  testunicorn:
-    name: ARM64 unicorn Test
-    runs-on: ubuntu-latest
-    if: ${{false}}
-    timeout-minutes: 20
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.11
-      - name: Cache python packages
-        uses: actions/cache@v3
-        with:
-          path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-          key: testing-arm-packages-${{ hashFiles('**/setup.py') }}
-      - name: Install cross-assembler
-        run: |
-          sudo apt update -y
-          sudo apt install -y --no-install-recommends gcc-aarch64-linux-gnu
-      - name: Install dependencies
-        run: pip install -e '.[testing,arm]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Test arm
-        run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=auto test/ -k 'not (test_nn.py and (test_conv_transpose2d or test_conv2d))' --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/test_specific_conv.py  --ignore=test/unit/test_disk_tensor.py
+  #testunicorn:
+  #  name: ARM64 unicorn Test
+  #  runs-on: ubuntu-latest
+  #  timeout-minutes: 20
+  #  steps:
+  #    - name: Checkout Code
+  #      uses: actions/checkout@v3
+  #    - name: Set up Python 3.11
+  #      uses: actions/setup-python@v4
+  #      with:
+  #        python-version: 3.11
+  #    - name: Cache python packages
+  #      uses: actions/cache@v3
+  #      with:
+  #        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+  #        key: testing-arm-packages-${{ hashFiles('**/setup.py') }}
+  #    - name: Install cross-assembler
+  #      run: |
+  #        sudo apt update -y
+  #        sudo apt install -y --no-install-recommends gcc-aarch64-linux-gnu
+  #    - name: Install dependencies
+  #      run: pip install -e '.[testing,arm]' --extra-index-url https://download.pytorch.org/whl/cpu
+  #    - name: Test arm
+  #      run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=auto test/ -k 'not (test_nn.py and (test_conv_transpose2d or test_conv2d))' --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/test_specific_conv.py  --ignore=test/unit/test_disk_tensor.py

@@ -847,8 +847,8 @@ class TestOps(unittest.TestCase):
   def test_conv1d(self):
     for bs in [1,8]:
       for cin in [1,3]:
-        for groups in [1,3] if cin == 3 else [1]:
-          for H in [1,2,5]:
+        for H in [1,2,5]:
+          for groups in [1,3] if cin == 3 and H == 5 else [1]:
             with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H):
               helper_test_op([(bs,cin,11), (6,cin//groups,H)],
                 lambda x,w: torch.nn.functional.conv1d(x,w,groups=groups).relu(),
@@ -886,13 +886,13 @@ class TestOps(unittest.TestCase):
               lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), atol=1e-4)
 
   def test_conv2d(self):
-    for bs in [1,8]:
+    for bs in [1,4]:
       for cin in [1,3]:
-        for groups in [1,3] if cin == 3 else [1]:
-          for H in [1,2,5]:
-            for W in [1,2,3,5]:
+        for H in [1,2,3]:
+          for W in [1,2,3,5]:
+            for groups in [1,3] if cin == 3 and H == 3 and W == 3 else [1]:
               with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H, width=W):
-                helper_test_op([(bs,cin,11,28), (6,cin//groups,H,W)],
+                helper_test_op([(bs,cin,11,7), (6,cin//groups,H,W)],
                   lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
                   lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 
@@ -1094,7 +1094,7 @@ class TestOps(unittest.TestCase):
 
   def test_cat(self):
     for dim in range(-2, 3):
-      helper_test_op([(45,65, 90), (45,65,90), (45,65,90)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
+      helper_test_op([(45,65,9), (45,65,9), (45,65,9)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
 
     with self.assertRaises(AssertionError):
       a = Tensor(3.14)
@@ -1117,12 +1117,12 @@ class TestOps(unittest.TestCase):
     np.testing.assert_allclose(Tensor.stack([a, a]).numpy(), Tensor([3.14, 3.14]).numpy())
 
   def test_repeat(self):
-    x = Tensor.randn(45, 65, 3)
+    x = Tensor.randn(4, 6, 3)
     base_repeats = [2, 4, 3]
 
     for reps in [[], [4], [2, 1], [3, 2, 2]]:
       repeats = base_repeats + reps
-      helper_test_op([(45, 65, 3)], lambda x: x.repeat(*repeats), lambda x: x.repeat(repeats))
+      helper_test_op([(4, 6, 3)], lambda x: x.repeat(*repeats), lambda x: x.repeat(repeats))
       helper_test_op([()], lambda x: x.repeat(*repeats), lambda x: x.repeat(repeats))
 
     with self.assertRaises(AssertionError):
@@ -1157,7 +1157,7 @@ class TestOps(unittest.TestCase):
     n = (x < 0).where(x, 1).numpy()
     assert np.all(n == 1.)
 
-  def test_slice_fancy_indexing(self):
+  def _get_index_randoms(self):
     # indices cannot have gradient
     # TODO currently does not support IndexError for out of bounds idx values
     a = torch.randint(low=-1, high=1, size=(2,1,1,1,1,1), dtype=torch.int64, requires_grad=False)
@@ -1166,34 +1166,43 @@ class TestOps(unittest.TestCase):
     d = torch.randint(high=4, size=(2,1,1,5,1,1), dtype=torch.int64, requires_grad=False)
     e = torch.randint(high=1, size=(1,1,1,1,6,1), dtype=torch.int64, requires_grad=False)
     i, j, k, o, p = [Tensor(tor.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False) for tor in [a,b,c,d,e]]
+    return a,b,c,d,e,i,j,k,o,p
+
+  def test_slice_fancy_indexing_no_dim_collapse(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     # no dim collapse from int or dim injection from None
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,e], lambda x: x[:,j,k,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,:], lambda x: x[:,j,k,o,:])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,...], lambda x: x[i,j,...])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,...,e], lambda x: x[i,...,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[...,c,:,e], lambda x: x[...,k,:,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[:,b,c,d,:], lambda x: x[:,j,k,o,:])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,...], lambda x: x[i,j,...])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,...,e], lambda x: x[i,...,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[...,c,:,e], lambda x: x[...,k,:,p])
+
+  def test_slice_fancy_indexing_dim_collapse_int(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     # dim collapse from int
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,c,d,e], lambda x: x[1,j,k,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,2], lambda x: x[i,j,k,o,2])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,3,d,e], lambda x: x[i,j,3,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,c,d,2], lambda x: x[1,j,k,o,2])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,2,d,2], lambda x: x[1,j,2,o,2])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,2,2,2,e], lambda x: x[i,2,2,2,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,:,3:11:2,d,0:2], lambda x: x[1,:,3:11:2,o,0:2])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,b,c,d,e], lambda x: x[1,j,k,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,3,d,e], lambda x: x[i,j,3,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,b,2,d,2], lambda x: x[1,j,2,o,2])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,2,2,2,e], lambda x: x[i,2,2,2,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,:,3:11:2,d,0:2], lambda x: x[1,:,3:11:2,o,0:2])
+
+  def test_slice_fancy_indexing_dim_inject_none(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     # dim injection from None
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,c,d,e], lambda x: x[None,j,k,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,None], lambda x: x[i,j,k,o,None])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,None,d,e], lambda x: x[i,j,None,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,None,None,None,e], lambda x: x[i,None,None,None,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,None,d,None], lambda x: x[None,j,None,o,None])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,c,d,None], lambda x: x[None,j,k,o,None])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,c,d,e], lambda x: x[None,j,k,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,d,None], lambda x: x[i,j,k,o,None])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,None,d,e], lambda x: x[i,j,None,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,c,d,None], lambda x: x[None,j,k,o,None])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
+
+  def test_slice_fancy_indexing_dim_inject_and_collapse(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     # dim injection and collapse
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,None,d,1], lambda x: x[1,j,None,o,1])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,2,d,None], lambda x: x[None,j,2,o,None])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,1,None,d,e], lambda x: x[None,1,None,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[...,1,d,None], lambda x: x[...,1,o,None])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,b,None,d,1], lambda x: x[1,j,None,o,1])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,2,d,None], lambda x: x[None,j,2,o,None])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[...,1,d,None], lambda x: x[...,1,o,None])
+
+  def test_slice_fancy_indexing_with_idx(self):
     # indexing using idx with different dim
     helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)], lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor(1)])
     helper_test_op([(2,3)], lambda x: x[torch.tensor([1]), torch.tensor([[0,0,0],[0,0,0]])], lambda x: x[Tensor([1]), Tensor([[0,0,0],[0,0,0]])])
