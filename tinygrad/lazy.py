@@ -201,6 +201,9 @@ class LazyBuffer:
   def fromCPU(x: np.ndarray) -> LazyBuffer:
     return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), RawNumpyBuffer.fromCPU(x))
 
+  def cast(self, dtype:DType, bitcast:bool=False):
+    return self.e(UnaryOps.CAST, arg=(dtype, bitcast))
+
   # *** elementwise ops ***
 
   def e(self:LazyBuffer, op:Union[UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:

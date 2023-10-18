@@ -1,5 +1,5 @@
 from typing import List, Tuple, Dict, Any
-from tinygrad.helpers import ImageDType, prod, IMAGE, getenv, dtypes, DEBUG
+from tinygrad.helpers import ImageDType, prod, IMAGE, getenv, dtypes, DEBUG, flatten
 
 # *** image Tensor function replacements ***
 
@@ -105,6 +105,7 @@ from tinygrad.ops import ScheduleItem, BufferOps, LazyOp, UnaryOps, LoadOps, Mem
 
 def fix_schedule_for_images(schedule:List[ScheduleItem]):
   # this is the fundamental fix, find unwritable or unreadable images and convert them to normal float32 (TODO: should it be float16?)
+  replace_inputs = {}
   for i, si in enumerate(schedule):
     if isinstance(si.out.dtype, ImageDType) and (prod(si.out.shape) != prod(si.out.dtype.shape) or not any(si.out.shape[x]%4 == 0 for x in si.out.st.unit_stride_axes())):
       if DEBUG >= 1: print(f"{i:3d}: rewrite output, output shape {prod(si.out.shape)}, image dtype {si.out.dtype} prod {prod(si.out.dtype.shape)}")
@@ -113,20 +114,31 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
       if b.op != BufferOps.MEM: continue
       # TODO: unit_stride axes will fail if there's a mask, even if the mask is divisble by four. this is too aggressive
       if isinstance(si.inputs[b.arg.idx-1].dtype, ImageDType) and (b.arg.st.real_offset() % 4 != 0 or not any(b.arg.st.shape[x]%4 == 0 for x in b.arg.st.unit_stride_axes())):
-        assert not si.inputs[b.arg.idx-1].realized, "can't fix this if it's been realized"
         if DEBUG >= 1: print(f"{i:3d}: rewrite input, image dtype {si.inputs[b.arg.idx-1].dtype}, {b.arg.st.views}")
-        si.inputs[b.arg.idx-1].dtype = dtypes.float32
+        if si.inputs[b.arg.idx-1].realized:
+          # have to copy it
+          replace_inputs[si.inputs[b.arg.idx-1]] = si.inputs[b.arg.idx-1].cast(dtypes.float32)
+        else:
+          # change it before it's created
+          si.inputs[b.arg.idx-1].dtype = dtypes.float32
 
   # now fix up the schedule to reflect the new dtypes
   fixed_schedule:List[ScheduleItem] = []
   for i,si in enumerate(schedule):
     ast = si.ast
+    inputs = si.inputs
+
+    # replace inputs with casted versions
+    if any(x in replace_inputs for x in inputs):
+      fixed_schedule += flatten([replace_inputs[x].schedule() for x in inputs if x in replace_inputs])
+      inputs = tuple(replace_inputs.get(x, x) for x in inputs)
+
     # fix input dtypes to match what they actually are
     replacements = {}
     for b in si.ast.get_lazyops():
       if b.op != BufferOps.MEM: continue
-      if b.arg.dtype != si.inputs[b.arg.idx-1].dtype:
-        replacements[b] = LazyOp(BufferOps.MEM, (), MemBuffer(b.arg.idx, si.inputs[b.arg.idx-1].dtype, b.arg.st))
+      if b.arg.dtype != inputs[b.arg.idx-1].dtype:
+        replacements[b] = LazyOp(BufferOps.MEM, (), MemBuffer(b.arg.idx, inputs[b.arg.idx-1].dtype, b.arg.st))
     if replacements: ast = ast.map_buffers(replacements)
 
     # fix the ops to create the output dtype
@@ -137,7 +149,7 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
         ast = LazyOp(UnaryOps.CAST, (ast,), (si.out.dtype, False))
 
     # put this in the fixed schedule
-    fixed_schedule.append(dataclasses.replace(si, ast=ast))
+    fixed_schedule.append(dataclasses.replace(si, ast=ast, inputs=inputs))
   return fixed_schedule
 
 # *** images have weird indexing requirements ***
