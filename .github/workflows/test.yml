@@ -22,7 +22,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
-        key: linting-packages-${{ hashFiles('*/setup.py') }}-3.8
+        key: linting-packages-${{ hashFiles('**/setup.py') }}-3.8
     - name: Install dependencies
       run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Repo line count
@@ -58,7 +58,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
-        key: testing-packages-${{ hashFiles('*/setup.py') }}
+        key: testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test Docs
@@ -190,7 +190,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-        key: metal-webgpu-testing-packages-${{ hashFiles('*/setup.py') }}
+        key: metal-webgpu-testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test LLaMA compile speed
@@ -268,7 +268,7 @@ jobs:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-szymonozog-tinygrad
+          key: ubuntu22.04-gpuocelot-szymonozog-tinygrad-norebuild
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
@@ -276,14 +276,12 @@ jobs:
           cd ${{ github.workspace }}/gpuocelot/ocelot
           mkdir build
           cd build
-          cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF
+          cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0
           ninja
       - name: Install gpuocelot
         if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         run: |
           cd ${{ github.workspace }}/gpuocelot/ocelot/build
-          find . -exec touch {} \;
-          touch build.ninja
           sudo ninja install -d explain
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
