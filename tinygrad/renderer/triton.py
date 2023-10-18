@@ -4,7 +4,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
 from tinygrad.helpers import dtypes, ImageDType, DEBUG, getenv
 from tinygrad.codegen.linearizer import  UOp, UOps
 from triton.compiler import compile as triton_compile  # type: ignore
-import hashlib
+import linecache
 import math
 import re
 def next_power_of_2(x):
@@ -112,11 +112,9 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   local_size = [acc_local_size] + [1] * (len(local_size) - 1)
 
   if DEBUG >=4: print(prg)
-  hsh = hashlib.md5(prg.encode('utf-8')).hexdigest()
-  fn = f"/tmp/{hsh}.py"
-  with open(fn, "w") as f: f.write(prg)
-  codeObject = compile(prg, fn, "exec")
-  exec(codeObject, globals()) # pylint: disable=W0122\
+  getlines = linecache.getlines
+  linecache.getlines = lambda filename, module_globals=None: prg.splitlines(keepends=True) if "<triton>" == filename else getlines(filename, module_globals)
+  exec(compile(prg, "<triton>", "exec"), globals()) # pylint: disable=W0122\
   compiled = triton_compile(globals()[function_name], signature=",".join(signatures), device_type="cuda", debug=False, cc=(35 if getenv("CUDACPU", 0) else None))
   prg = remove_single_scalar_curly_braces(compiled.asm["ptx"].split(".file")[0].split(".visible .func")[0])
   max_local_size =  [int(x) for x in prg.split(".maxntid ")[1].split("\n")[0].split(", ")]
