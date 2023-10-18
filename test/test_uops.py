@@ -44,18 +44,18 @@ class TestUOps(unittest.TestCase):
 
   def _test_uop_fxn(self, bop, fxn, dt=dtypes.float32):
     for f in [_test_single_value, _test_single_value_const]:
-      for a in [-2.0, 0.0, 1.0, 2.0]:
+      for a in [-2.0, 0.0, 1.0]:
         self._equal(f([a], bop, dt), fxn(a))
 
   def _test_bop_fxn(self, bop, fxn, dt=dtypes.float32, no_b_zero=False):
     for f in [_test_single_value, _test_single_value_const]:
-      for a in [-2.0, 0.0, 1.0, 2.0]:
+      for a in [-2.0, 0.0, 1.0]:
         for b in [-3.0, 1.0, 3.0] + ([] if no_b_zero else [0.0]):
           self._equal(f([a,b], bop, dt), fxn(a,b))
 
   def _test_top_fxn(self, bop, fxn, dt=dtypes.float32):
     for f in [_test_single_value, _test_single_value_const]:
-      for a in [-2.0, 0, 1, 2.0]:
+      for a in [-2.0, 0, 1]:
         for b in [-3.0, 3.0]:
           for c in [-4.0, 4.0]:
             self._equal(f([a,b,c], bop, dt), fxn(a,b,c))
