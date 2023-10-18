@@ -256,7 +256,7 @@ def train_cifar():
 
   # this import needs to be done here because this is running in a subprocess
   from extra.dist import OOB
-  assert OOB is not None, "OOB should be initialized"
+  assert OOB is not None or not getenv("DIST"), "OOB should be initialized"
   rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
 
   X_train, Y_train, X_test, Y_test = fetch_cifar()
