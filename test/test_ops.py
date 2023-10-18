@@ -1094,7 +1094,7 @@ class TestOps(unittest.TestCase):
 
   def test_cat(self):
     for dim in range(-2, 3):
-      helper_test_op([(45,65, 90), (45,65,90), (45,65,90)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
+      helper_test_op([(45,65,9), (45,65,9), (45,65,9)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
 
     with self.assertRaises(AssertionError):
       a = Tensor(3.14)
@@ -1117,12 +1117,12 @@ class TestOps(unittest.TestCase):
     np.testing.assert_allclose(Tensor.stack([a, a]).numpy(), Tensor([3.14, 3.14]).numpy())
 
   def test_repeat(self):
-    x = Tensor.randn(45, 65, 3)
+    x = Tensor.randn(4, 6, 3)
     base_repeats = [2, 4, 3]
 
     for reps in [[], [4], [2, 1], [3, 2, 2]]:
       repeats = base_repeats + reps
-      helper_test_op([(45, 65, 3)], lambda x: x.repeat(*repeats), lambda x: x.repeat(repeats))
+      helper_test_op([(4, 6, 3)], lambda x: x.repeat(*repeats), lambda x: x.repeat(repeats))
       helper_test_op([()], lambda x: x.repeat(*repeats), lambda x: x.repeat(repeats))
 
     with self.assertRaises(AssertionError):
