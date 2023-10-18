@@ -70,13 +70,12 @@ if __name__ == "__main__":
   image_count = sum(isinstance(si.out.dtype, ImageDType) for si in schedule)
   print(f"**** running real kernels {image_count}/{len(schedule)} images ****")
 
-  if GRAPH:
-    for si in schedule_input: log_schedule_item(si)
-    for si in schedule: log_schedule_item(si)
-
-  exit(0)
+  #if GRAPH:
+  #  for si in schedule_input: log_schedule_item(si)
+  #  for si in schedule: log_schedule_item(si)
 
   run_schedule(schedule_independent, disable_logging=True)
+  run_schedule(schedule_input)
   with Context(DEBUG=2, BEAM=getenv("LATEBEAM")):
     GlobalCounters.reset()
     run_schedule(schedule)

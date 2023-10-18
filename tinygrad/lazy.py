@@ -18,13 +18,10 @@ sys.setrecursionlimit(10000)
 OPT = getenv("OPT", 2)
 LAZYCACHE = getenv("LAZYCACHE", 1)
 
-OPT = 0
-
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
 MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS = OPT>=2, OPT>=2
 PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
-PUSH_RESHAPES = OPT>=4
 
 # **** ast fixing functions ****
 
@@ -251,7 +248,7 @@ class LazyBuffer:
 
   def _movement_op(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[sint, ...], Tuple[Tuple[sint, sint], ...]]) -> LazyBuffer:
     if SHUFFLE_MOVEMENT_OPS and not self.realized and self.optype == BinaryOps and not self.children:
-      if op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and (self.op.op in UnaryOps or PUSH_RESHAPES)):
+      if op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and self.op.op in UnaryOps):
         return self.op.replace_with_movement_ops([(op, arg)])
     if REMOVE_MOVEMENT_NOPS and not self.realized and st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
