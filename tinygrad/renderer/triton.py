@@ -71,7 +71,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   for u in uops:
     uop,dtype,vin,args,_ = u
     if uop == UOps.LOOP:
-      kk(f"for {ssa(u, 'ridx')} in range({vin[0].arg}, {r[vin[1]]}+{define_scalar([], 'tl.int32', 1)}):")
+      kk(f"for {ssa(u, 'ridx')} in range({vin[0].arg}, {r[vin[1]]}):")
       depth += 1
     elif uop == UOps.END: depth -= 1
     elif uop == UOps.ALU:
@@ -118,8 +118,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   codeObject = compile(prg, fn, "exec")
   exec(codeObject, globals()) # pylint: disable=W0122\
   compiled = triton_compile(globals()[function_name], signature=",".join(signatures), device_type="cuda", debug=False, cc=(35 if getenv("CUDACPU", 0) else None))
-  prg = compiled.asm["ptx"]
-  if getenv("CUDACPU"): prg = remove_single_scalar_curly_braces(prg.split(".file")[0].split(".visible .func")[0])
+  prg = remove_single_scalar_curly_braces(compiled.asm["ptx"].split(".file")[0].split(".visible .func")[0])
   max_local_size =  [int(x) for x in prg.split(".maxntid ")[1].split("\n")[0].split(", ")]
   for i in range(len(local_size)): local_size[i] = min(local_size[i], max_local_size[i])
-  return prg, local_size, {"binary":True, "shared":compiled.metadata["shared"]}
+  return prg, {"binary":True, "shared":compiled.metadata["shared"], "local_size_override":local_size +  [1]*(3-len(local_size))}

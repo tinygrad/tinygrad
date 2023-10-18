@@ -15,7 +15,7 @@ class Node:
   b: Union[Node, int]
   min: int
   max: int
-  def render(self, ops=None, ctx=None) -> str:
+  def render(self, ops=None, ctx=None) -> Any:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
@@ -195,6 +195,10 @@ class LtNode(OpNode):
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) < (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class MulNode(OpNode):
+  def __lt__(self, b: Union[Node, int]):
+    if isinstance(b, Node) or isinstance(self.b, Node) or self.b == -1: return Node.__lt__(self, b)
+    sgn = 1 if self.b > 0 else -1
+    return Node.__lt__(self.a*sgn, (b + abs(self.b) - 1)//abs(self.b))
   def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=False): # NOTE: mod negative isn't handled right
     if self.b % b == 0: return self.a*(self.b//b)
@@ -289,17 +293,15 @@ class SumNode(RedNode):
         if isinstance(x, NumNode): b -= x.b
         else: new_sum.append(x)
       lhs = Node.sum(new_sum)
-      if isinstance(lhs, SumNode):
-        muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
-        if muls:
-          # NOTE: gcd in python 3.8 takes exactly 2 args
-          mul_gcd = muls[0].b
-          for x in muls[1:]: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell x.b is int here
-          if b%mul_gcd == 0:
-            all_others = Variable.sum(others)
-            if all_others.min >= 0 and all_others.max < mul_gcd:
-              # TODO: should we divide both by mul_gcd here?
-              lhs = Variable.sum(muls)
+      nodes = lhs.nodes if isinstance(lhs, SumNode) else [lhs]
+      muls, others = partition(nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
+      if muls:
+        # NOTE: gcd in python 3.8 takes exactly 2 args
+        mul_gcd = b
+        for x in muls: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell x.b is int here
+        all_others = Variable.sum(others)
+        if all_others.min >= 0 and all_others.max < mul_gcd:
+          lhs, b = Variable.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
     return Node.__lt__(lhs, b)
 
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return Variable.sum([node.substitute(var_vals) for node in self.nodes])
@@ -329,7 +331,7 @@ def create_rednode(typ:Type[RedNode], nodes:List[Node]):
 def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
 def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
-  if isinstance(a, int): return a
+  if isinstance(a, (int, float)): return a
   ret = a.substitute({k:Variable.num(v) for k, v in var_vals.items()})
   assert isinstance(ret, NumNode), f"sym_infer didn't produce NumNode from {a} with {var_vals}"
   return ret.b

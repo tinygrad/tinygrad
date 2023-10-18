@@ -1,4 +1,6 @@
+from __future__ import annotations
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict
+from copy import deepcopy
 import itertools
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, ReduceOps, MemBuffer, BufferOps, Device, Compiled
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int, ansilen
@@ -79,9 +81,13 @@ class Kernel:
     self.use_tensor_cores: bool = False
     self.exclude_local_upcast: int = 0
     self.reverse_upcast_dir: bool = False
+    self.dont_use_locals: bool = False
 
     self.global_size: Optional[List[int]] = None
     self.local_size: Optional[List[int]] = None
+
+  def copy(self):
+    return deepcopy(self)
 
   @property
   def membufs(self) -> List[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
