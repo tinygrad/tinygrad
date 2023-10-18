@@ -2,6 +2,8 @@ name: Unit Tests
 
 on:
   push:
+    branches:
+      - master
   pull_request:
   workflow_dispatch:
 
@@ -118,8 +120,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [optimage, openpilot]
-    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'|| matrix.task=='openpilot'&&'openpilot (OpenCL) Tests'}}
+        task: [optimage, openpilot, onnx]
+    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'onnx Tests'}}}
     runs-on: ubuntu-20.04
     timeout-minutes: 20
 
@@ -175,6 +177,12 @@ jobs:
         run: |
           PYTHONPATH="." python test/external/dist/test_world.py
           PYTHONPATH="." python test/external/dist/test_collectives.py
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Test ONNX (GPU)
+        run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Test ONNX (CLANG)
+        run: CLANG=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests
@@ -294,8 +302,8 @@ jobs:
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
         run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}' --durations=20
-      - name: Run ONNX (not cuda)
-        if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend!='clang'
+      - name: Run ONNX (only LLVM here)
+        if: matrix.backend == 'llvm'
         run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
