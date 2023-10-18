@@ -616,6 +616,10 @@ class Tensor:
   def mish(self): return self * self.softplus().tanh()
   def softplus(self, beta=1): return (1/beta) * (1 + (self*beta).exp()).log()
   def softsign(self): return self / (1 + self.abs())
+  
+  # ***** Loss Function *****
+  def mse(self,y): ((self - y)**2).mean()
+  def mae(self,y): ((self - y).abs()).mean()
 
   # ***** broadcasted binary mlops *****
 
@@ -774,3 +778,5 @@ if IMAGE:
   from tinygrad.features.image import image_conv2d, image_dot
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
+
+
