@@ -2,6 +2,7 @@ import subprocess, time, re, hashlib, tempfile, functools
 from pathlib import Path
 from typing import Optional
 import numpy as np
+import os
 from tinygrad.helpers import DEBUG, getenv, colored, fromimport
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
